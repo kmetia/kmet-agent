@@ -420,7 +420,11 @@
    a separate extend-type form after the call. The expansion requires
    kmet.tui.protocols first, so component namespaces load standalone
    (their own ns need not require it — clj-kondo would flag that as
-   unused)."
+   unused); the symbol is inserted literally (`~'`) so a template bare
+   `kmet.tui.protocols` cannot be resolved by syntax-quote at
+   macro-definition time into `kmet.tui.macros/kmet.tui.protocols` when
+   this namespace is compiled before protocols is loaded (jolt's all-ns
+   exposes vendored namespaces before they are loaded)."
   [name _kind fields & body]
   (let [render (body-method body 'render)]
     (when-not render
@@ -445,7 +449,7 @@
                        track? (cache-clearing-invalidate)
                        :else '(invalidate [this] nil))]
       `(do
-         (clojure.core/require 'kmet.tui.protocols)
+         (clojure.core/require '~'kmet.tui.protocols)
          (defrecord ~name ~(vec (cons 'kind fields))
            kmet.tui.protocols/IComponent
            ~render

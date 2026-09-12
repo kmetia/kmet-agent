@@ -84,6 +84,93 @@ value with the two-arg static, `(BigDecimal/valueOf (Math/round (* n 1000000.0))
 (int 6))`, instead of `(.movePointLeft <bigdec> 6)` — same value, and jolt
 implements `valueOf`. No other instance members are needed by kmet.
 
+### [jolt#969](https://github.com/jolt-lang/jolt/issues/969) — `apply` ignores `IFn.applyTo` on deftype/record/reify callables, breaking >20-arg application
+
+**Area:** runtime / IFn dispatch
+
+`apply` funnels everything through `jolt-invoke`, which dispatches to a
+non-host-`AFn` IFn implementer's `invoke` by arg count and never consults
+`applyTo`; the 21-param varargs `invoke` is treated as a fixed arity. Host
+fns (the `jolt-register-variadic!` path) are unaffected. SCI compiles any
+call with ≥3 args to `(apply f args)`, and `sci.lang.Var` is such a value,
+so a core-fn call with **more than 21 arguments** throws
+`Wrong number of args (N+1) passed to: fn`. First hit: the mcp-adapter's
+config template built with `(str …35 args…)`.
+
+**Workaround:** avoid >21-arg direct calls — the extension's three large
+string-building `(str …)` forms became `(apply str […])` (the `apply` is a
+2-arg call, and host `apply` does reach the target's `applyTo`):
+
+- `extensions/mcp-adapter/src/extensions/mcp_adapter/config.clj:263` (`template-edn`)
+- `extensions/mcp-adapter/src/extensions/mcp_adapter/auth.clj:189` (`windows-cred-body`)
+- `extensions/mcp-adapter/src/extensions/mcp_adapter/script.clj:79` (`runtime-source`)
+
+The bug also hits **macro invocation**: SCI applies a macro to `&form`,
+`&env` and the call's arguments, so any macro call with **≥19 arguments**
+fails too (`cond` with ≥10 clauses, `case` with ≥10 pairs). Three such
+sites exist in the extension and are **not yet rewritten** — they are
+harmless until the protocol blockers (#970/#971) land, since the load dies
+earlier:
+
+- `extensions/mcp-adapter/src/extensions/mcp_adapter.clj` — `case` (14 pairs)
+- `extensions/mcp-adapter/src/extensions/mcp_adapter/panel.clj` — `cond` (15 clauses)
+- `extensions/mcp-adapter/src/extensions/mcp_adapter/tool_proxy.clj` — `cond` (10 clauses)
+
+Rewrite these split/nested (or via a helper) when the extension can load
+to completion on jolt.
+
+### [jolt#970](https://github.com/jolt-lang/jolt/issues/970) — `clojure.lang.MultiFn` has no JVM-compatible constructor
+
+**Area:** runtime / multimethods
+
+SCI's `defprotocol` expands to `defmulti`, which builds the multifn with
+`(new clojure.lang.MultiFn name dispatch default hierarchy)`. jolt models
+multimethods as the custom `jolt-multifn` record and registers no ctor for
+the class name, so `host-new` throws `No matching ctor found for class
+clojure.lang.MultiFn`. Every `defprotocol` under SCI on jolt therefore
+fails. Plain jolt `defprotocol`/`defmulti` (the compiler path) is fine.
+
+**Workaround:** none in kmet — blocked until jolt registers the ctor. The
+mcp-adapter (`defcomponent` → `defrecord` implementing a protocol) stays
+unloadable on jolt.
+
+### [jolt#971](https://github.com/jolt-lang/jolt/issues/971) — `extend-protocol` onto a deftype/record mutates the class
+
+**Area:** runtime / protocols
+
+jolt folds an `extend-protocol` implementation into the target type's class
+(the method plus `__jolt_extend__` shows up in `.getDeclaredMethods`), so
+`instance?` against the protocol interface is true for an extended-only
+type. The JVM leaves the class untouched (`satisfies?` true, `instance?`
+false). SCI's `eval-node?` is `(instance? sci.impl.types.Eval x)` and relies
+on the JVM rule, so it returns true for `sci.lang.Var` (which SCI only
+`extend-protocol`s onto `Eval`) and `eval-resolve` then discards every
+resolved value: `resolve`/`ns-resolve` return nil inside a jolt SCI context,
+and `defrecord`/`deftype` protocol lookup dies with `Protocol not found`.
+Blocks every component-defining extension (mcp-adapter's panel) even after
+#970 lands.
+
+**Workaround:** none in kmet — blocked until jolt stops mutating the class.
+
+### [jolt#972](https://github.com/jolt-lang/jolt/issues/972) — `clojure.core.async` is interned at startup with a partial var set (`all-ns` exposes an incomplete namespace)
+
+**Area:** runtime / namespaces (vendored stdlib)
+
+In a fresh process `clojure.core.async` is already in `all-ns` / `find-ns`
+with only 34 of its 130 vars; `require` interns the remaining ~96 into the
+same namespace object. Every other vendored built-in (`babashka.fs`,
+`babashka.process`, …) is absent from `find-ns` until required. Code that
+snapshots namespace contents from `all-ns` — kmet's loader injects the
+shared namespaces into each SCI context by reference (`sci/copy-var*`
+over `ns-interns`) — captured the 34-var namespace, shadowing the real one,
+so an extension's `(async/alts!! …)` failed with `Unable to resolve symbol:
+async/alts!!` even though the `:require` itself resolved.
+
+**Workaround** (`src/kmet/app/extensions.cljc:1652`): `host-requires!` does
+`(require 'clojure.core.async)` before building contexts, so the `all-ns`
+scan sees the complete namespace. Inert on bb/JVM, where it is already
+loaded.
+
 ## Closed — workarounds removed
 
 Re-verified 2026-09-11 on the locally built **`v0.8.6-98-g23296732`** (the

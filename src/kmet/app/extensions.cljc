@@ -1643,6 +1643,13 @@
    requiring them there get the actionable load-fn error."
   []
   (apply require (concat tui-library-namespaces libs-library-namespaces))
+  ;; jolt pre-registers its vendored built-ins in all-ns before they are
+  ;; loaded (clojure.core.async appears with ~34 stub vars); injecting that
+  ;; snapshot into an extension context shadows the real namespace, so a
+  ;; require there resolves but the missing fns (e.g. alts!!) don't. Force
+  ;; the load so the scan sees the complete namespace. Inert on bb/JVM,
+  ;; where core.async is already loaded.
+  (require 'clojure.core.async)
   (when-not (jolt?)
     (apply require (concat spec-port-namespaces bb-shared-namespaces)))
   nil)
