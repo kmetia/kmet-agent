@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-11T16:53:55Z"
+ :generated-at "2026-09-12T21:41:48Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -609,6 +609,17 @@
     :cost {:input 0.25 :output 2 :cache-read 0.05 :cache-write 0}
     :context-window 256000
     :max-tokens 64000}
+   "bytedance/seed-2.1-turbo"
+   {:id "bytedance/seed-2.1-turbo"
+    :name "Seed 2.1 Turbo"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.5 :output 2.5 :cache-read 0.1 :cache-write 0}
+    :context-window 262144
+    :max-tokens 262144}
    "cohere/command-a"
    {:id "cohere/command-a"
     :name "Command A"
@@ -991,6 +1002,28 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 256000
+    :max-tokens 32000}
+   "inclusionai/ling-3.0-flash-vl"
+   {:id "inclusionai/ling-3.0-flash-vl"
+    :name "Ling 3.0 Flash VL"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 256000
+    :max-tokens 32000}
+   "inclusionai/ling-3.0-flash-vl-free"
+   {:id "inclusionai/ling-3.0-flash-vl-free"
+    :name "Ling 3.0 Flash VL (Free)"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text :image]
     :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
     :context-window 256000
     :max-tokens 32000}

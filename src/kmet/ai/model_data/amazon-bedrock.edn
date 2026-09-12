@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-11T16:53:55Z"
+ :generated-at "2026-09-12T21:41:48Z"
  :provider {:id :amazon-bedrock
             :name "Amazon Bedrock"
             :env-vars []
@@ -975,7 +975,7 @@
     :input [:text :image]
     :cost {:input 0.24 :output 0.97 :cache-read 0 :cache-write 0}
     :context-window 1000000
-    :max-tokens 16384}
+    :max-tokens 8192}
    "meta.llama4-scout-17b-instruct-v1:0"
    {:id "meta.llama4-scout-17b-instruct-v1:0"
     :name "Llama 4 Scout 17B Instruct"
@@ -985,8 +985,8 @@
     :reasoning false
     :input [:text :image]
     :cost {:input 0.17 :output 0.66 :cache-read 0 :cache-write 0}
-    :context-window 3500000
-    :max-tokens 16384}
+    :context-window 10000000
+    :max-tokens 8192}
    "minimax.minimax-m2"
    {:id "minimax.minimax-m2"
     :name "MiniMax-M2"
@@ -1054,7 +1054,7 @@
     :api :bedrock-converse-stream
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning false
-    :input [:text]
+    :input [:text :image]
     :cost {:input 0.2 :output 0.2 :cache-read 0 :cache-write 0}
     :context-window 128000
     :max-tokens 4096
@@ -1078,7 +1078,7 @@
     :api :bedrock-converse-stream
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning false
-    :input [:text]
+    :input [:text :image]
     :cost {:input 0.15 :output 0.15 :cache-read 0 :cache-write 0}
     :context-window 128000
     :max-tokens 4096
@@ -1115,7 +1115,7 @@
     :reasoning false
     :input [:text]
     :cost {:input 0.04 :output 0.04 :cache-read 0 :cache-write 0}
-    :context-window 128000
+    :context-window 32768
     :max-tokens 4096
     :compat {:supports-strict-mode true}}
    "mistral.voxtral-small-24b-2507"
@@ -1126,8 +1126,8 @@
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning false
     :input [:text]
-    :cost {:input 0.15 :output 0.35 :cache-read 0 :cache-write 0}
-    :context-window 32000
+    :cost {:input 0.1 :output 0.3 :cache-read 0 :cache-write 0}
+    :context-window 32768
     :max-tokens 8192
     :compat {:supports-strict-mode true}}
    "moonshot.kimi-k2-thinking"
@@ -1719,7 +1719,7 @@
     :input [:text :image]
     :cost {:input 0.24 :output 0.97 :cache-read 0 :cache-write 0}
     :context-window 1000000
-    :max-tokens 16384}
+    :max-tokens 8192}
    "us.meta.llama4-scout-17b-instruct-v1:0"
    {:id "us.meta.llama4-scout-17b-instruct-v1:0"
     :name "Llama 4 Scout 17B Instruct (US)"
@@ -1729,8 +1729,8 @@
     :reasoning false
     :input [:text :image]
     :cost {:input 0.17 :output 0.66 :cache-read 0 :cache-write 0}
-    :context-window 3500000
-    :max-tokens 16384}
+    :context-window 10000000
+    :max-tokens 8192}
    "us.mistral.pixtral-large-2502-v1:0"
    {:id "us.mistral.pixtral-large-2502-v1:0"
     :name "Pixtral Large (25.02) (US)"

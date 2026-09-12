@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-11T16:53:55Z"
+ :generated-at "2026-09-12T21:41:48Z"
  :provider {:id :openrouter
             :name "OpenRouter"
             :env-vars ["OPENROUTER_API_KEY"]
@@ -808,7 +808,7 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.08596 :output 0.17192 :cache-read 0.017192 :cache-write 0}
+    :cost {:input 0.06566 :output 0.13132 :cache-read 0.013132 :cache-write 0}
     :context-window 1024000
     :max-tokens 384000
     :compat {:supports-developer-role false
@@ -829,7 +829,7 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.065 :output 0.18 :cache-read 0.016 :cache-write 0}
+    :cost {:input 0.04 :output 0.08 :cache-read 0.008 :cache-write 0}
     :context-window 1048576
     :max-tokens 943718
     :compat {:supports-developer-role false
@@ -913,9 +913,9 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.859908 :output 1.719816 :cache-read 0.071659 :cache-write 0}
-    :context-window 1024000
-    :max-tokens 384000
+    :cost {:input 1.6 :output 3.2 :cache-read 0.135 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 393216
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter}}
@@ -2358,9 +2358,9 @@
     :reasoning true
     :thinking-level-map {:off nil}
     :input [:text]
-    :cost {:input 0.6 :output 2.5 :cache-read 0.15 :cache-write 0}
+    :cost {:input 0.6 :output 2.5 :cache-read 0 :cache-write 0}
     :context-window 262144
-    :max-tokens 100352
+    :max-tokens 235929
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "moonshotai/kimi-k2.5"
    {:id "moonshotai/kimi-k2.5"
@@ -2414,7 +2414,10 @@
                          :off "none"
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 2.34 :output 11.7 :cache-read 0.261 :cache-write 0}
+    :cost {:input 2.648138
+           :output 13.282724
+           :cache-read 0.302644
+           :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-developer-role false :thinking-format :openrouter}}
@@ -4185,9 +4188,9 @@
     :base-url "https://openrouter.ai/api/v1"
     :reasoning false
     :input [:text]
-    :cost {:input 0.22 :output 0.88 :cache-read 0 :cache-write 0}
+    :cost {:input 0.0875 :output 0.35 :cache-read 0.0175 :cache-write 0}
     :context-window 262144
-    :max-tokens 16384
+    :max-tokens 235929
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "qwen/qwen3-235b-a22b-thinking-2507"
    {:id "qwen/qwen3-235b-a22b-thinking-2507"
@@ -4716,8 +4719,8 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 0.42 :output 3 :cache-read 0.085 :cache-write 0}
-    :context-window 1000000
+    :cost {:input 0.214 :output 2.55 :cache-read 0.15 :cache-write 0}
+    :context-window 262144
     :max-tokens 131072
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "qwen/qwen3.8-flash"
@@ -4980,8 +4983,8 @@
                          :xhigh nil}
     :input [:text :image]
     :cost {:input 1 :output 4.05 :cache-read 0.17 :cache-write 0}
-    :context-window 1048576
-    :max-tokens 32768
+    :context-window 524288
+    :max-tokens 471859
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "thinkingmachines/inkling-small"
    {:id "thinkingmachines/inkling-small"
@@ -5494,7 +5497,7 @@
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~anthropic/claude-haiku-latest"
    {:id "~anthropic/claude-haiku-latest"
-    :name "Anthropic Claude Haiku Latest"
+    :name "Anthropic: Claude Haiku Latest"
     :provider :openrouter
     :api :openai-completions
     :base-url "https://openrouter.ai/api/v1"
@@ -5525,7 +5528,7 @@
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~anthropic/claude-sonnet-latest"
    {:id "~anthropic/claude-sonnet-latest"
-    :name "Anthropic Claude Sonnet Latest"
+    :name "Anthropic: Claude Sonnet Latest"
     :provider :openrouter
     :api :openai-completions
     :base-url "https://openrouter.ai/api/v1"
@@ -5544,7 +5547,7 @@
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~deepseek/deepseek-v4-flash-latest"
    {:id "~deepseek/deepseek-v4-flash-latest"
-    :name "DeepSeek V4 Flash Latest"
+    :name "DeepSeek: DeepSeek V4 Flash Latest"
     :provider :openrouter
     :api :openai-completions
     :base-url "https://openrouter.ai/api/v1"
@@ -5557,7 +5560,7 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.05 :output 0.16 :cache-read 0.013 :cache-write 0}
+    :cost {:input 0.03 :output 0.07 :cache-read 0.003 :cache-write 0}
     :context-window 1048576
     :max-tokens 393216
     :compat {:supports-developer-role false
@@ -5565,7 +5568,7 @@
              :thinking-format :openrouter}}
    "~google/gemini-flash-latest"
    {:id "~google/gemini-flash-latest"
-    :name "Google Gemini Flash Latest"
+    :name "Google: Gemini Flash Latest"
     :provider :openrouter
     :api :openai-completions
     :base-url "https://openrouter.ai/api/v1"
@@ -5584,7 +5587,7 @@
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~google/gemini-pro-latest"
    {:id "~google/gemini-pro-latest"
-    :name "Google Gemini Pro Latest"
+    :name "Google: Gemini Pro Latest"
     :provider :openrouter
     :api :openai-completions
     :base-url "https://openrouter.ai/api/v1"
@@ -5603,7 +5606,7 @@
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~moonshotai/kimi-latest"
    {:id "~moonshotai/kimi-latest"
-    :name "MoonshotAI Kimi Latest"
+    :name "MoonshotAI: Kimi Latest"
     :provider :openrouter
     :api :openai-completions
     :base-url "https://openrouter.ai/api/v1"
@@ -5616,13 +5619,13 @@
                          :off "none"
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 2.34 :output 11.7 :cache-read 0.261 :cache-write 0}
+    :cost {:input 2.375 :output 13.3 :cache-read 0.2755 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~openai/gpt-astra-latest"
    {:id "~openai/gpt-astra-latest"
-    :name "OpenAI GPT Astra Latest"
+    :name "OpenAI: GPT Astra Latest"
     :provider :openrouter
     :api :openai-completions
     :base-url "https://openrouter.ai/api/v1"
@@ -5641,7 +5644,7 @@
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~openai/gpt-luna-latest"
    {:id "~openai/gpt-luna-latest"
-    :name "OpenAI GPT Luna Latest"
+    :name "OpenAI: GPT Luna Latest"
     :provider :openrouter
     :api :openai-completions
     :base-url "https://openrouter.ai/api/v1"
@@ -5660,7 +5663,7 @@
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~openai/gpt-mini-latest"
    {:id "~openai/gpt-mini-latest"
-    :name "OpenAI GPT Mini Latest"
+    :name "OpenAI: GPT Mini Latest"
     :provider :openrouter
     :api :openai-completions
     :base-url "https://openrouter.ai/api/v1"
@@ -5679,7 +5682,7 @@
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~openai/gpt-sol-latest"
    {:id "~openai/gpt-sol-latest"
-    :name "OpenAI GPT Sol Latest"
+    :name "OpenAI: GPT Sol Latest"
     :provider :openrouter
     :api :openai-completions
     :base-url "https://openrouter.ai/api/v1"
@@ -5698,7 +5701,7 @@
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~openai/gpt-terra-latest"
    {:id "~openai/gpt-terra-latest"
-    :name "OpenAI GPT Terra Latest"
+    :name "OpenAI: GPT Terra Latest"
     :provider :openrouter
     :api :openai-completions
     :base-url "https://openrouter.ai/api/v1"
