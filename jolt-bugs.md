@@ -39,6 +39,51 @@ for the member call.
 only (`test-shipped-extensions-load-from-src` is gated there), and the
 unified loader's core load/unload path is covered on both hosts.
 
+### [jolt#967](https://github.com/jolt-lang/jolt/issues/967) — bare sonames miss the Termux prefix: `:jolt/native` / `load-library` bind Android BoringSSL
+
+**Area:** ffi / native loading (Android)
+
+An Android jolt process runs under `/system/bin/linker64`, which searches
+`/system/lib64` and **not** `$PREFIX/lib`. A bare `libssl.so` therefore binds
+BoringSSL (`/system/lib64/libssl.so`, SONAME `libssl.so`) — it exports
+`SSL_new` but not `SSL_ctrl`, and its `SSL_CTX` layout disagrees with OpenSSL
+3's — while the wanted `libssl.so.3` / `libcrypto.so.3` exist only under the
+Termux prefix and so never load. jolt-crypto's `:jolt/native` specs (which
+http-client depends on for the OpenSSL declarations) name exactly those bare
+sonames, so the wrong library is bound at **startup**, before any project
+code: `jolt generate-models` died on its first TLS fetch with
+`foreign-procedure: no entry for "SSL_ctrl"`, and loading the real OpenSSL
+alongside it faults with `invalid memory reference` plus a duplicate-symbol
+report. `ffi-so-search-dirs` (behind `load-system-library`) misses the prefix
+the same way.
+
+**Workaround** (`deps.edn`): a project-level `:jolt/native` for `crypto` and
+`ssl` naming the Termux OpenSSL absolute-first
+(`/data/data/com.termux/files/usr/lib/lib{crypto,ssl}.so.3`). The `:name` keys
+match jolt-crypto's, so `dedup-by native-key` keeps the project entry — and
+because that entry **replaces** the spec rather than merging per-platform, the
+`:darwin` arm must mirror jolt-crypto's Homebrew paths. The paths are inert
+where the prefix does not exist. `LD_LIBRARY_PATH=$PREFIX/lib jolt …` is the
+out-of-process equivalent.
+
+### [jolt#968](https://github.com/jolt-lang/jolt/issues/968) — `java.math.BigDecimal` exposes no instance members
+
+**Area:** java.math / host classes
+
+BigDecimal's value model works (literals, ctor, `valueOf`/`ZERO`/`ONE`/`TEN`,
+clojure.core arithmetic, `compare`, `str`/`double`/`long`, `=`), but the class
+answers **no instance members** — no methods and no fields. Every
+`(.something bd …)` raises: `No matching method <m> found taking N args` for
+argument-taking members, `No matching field found: <m>` for zero-arg ones.
+`host/chez/java/bigdec.ss` registers the ctor and statics but no instance
+members. Hit while running `jolt generate-models`, whose cost renderer called
+`(.movePointLeft (BigDecimal. (Math/round (* n 1000000.0))) 6)`.
+
+**Workaround** (`src/kmet/libs/edn_writer.clj`): `num-str` builds the scale-6
+value with the two-arg static, `(BigDecimal/valueOf (Math/round (* n 1000000.0))
+(int 6))`, instead of `(.movePointLeft <bigdec> 6)` — same value, and jolt
+implements `valueOf`. No other instance members are needed by kmet.
+
 ## Closed — workarounds removed
 
 Re-verified 2026-09-11 on the locally built **`v0.8.6-98-g23296732`** (the
