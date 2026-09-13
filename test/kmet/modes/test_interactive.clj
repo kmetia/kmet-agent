@@ -490,3 +490,26 @@
         (is (true? (:block-images @(:cfg ag)))
             "block-images re-applied to the running agent")
         (finally (reset! subs/image-settings-atom prev-settings))))))
+
+(deftest heal-stale-scrollback-when-idle-gating
+  (testing "input heals a stale scrollback only at a streaming-free moment"
+    (let [make (fn [running bash compacting dirty]
+                 (inter/map->CoreState
+                  {:running-turn? (atom running)
+                   :bash-running? (atom bash)
+                   :agent-state (atom {:compacting? (atom compacting)})
+                   :tui {:scrollback-dirty? (atom dirty)
+                         :force-redraw? (atom false)
+                         :render-requested? (atom false)}}))
+          healed? (fn [cs] (true? @(get-in cs [:tui :force-redraw?])))]
+      (let [cs (make false false false true)]
+        ((var inter/heal-stale-scrollback-when-idle!) cs)
+        (is (healed? cs) "idle + dirty requests the heuristic full redraw"))
+      (doseq [[label cs] [["mid agent turn" (make true false false true)]
+                          ["mid bash command" (make false true false true)]
+                          ["mid compaction" (make false false true true)]]]
+        ((var inter/heal-stale-scrollback-when-idle!) cs)
+        (is (not (healed? cs)) (str label " must not emit the destructive 3J clear")))
+      (let [cs (make false false false false)]
+        ((var inter/heal-stale-scrollback-when-idle!) cs)
+        (is (not (healed? cs)) "a clean scrollback is a no-op")))))

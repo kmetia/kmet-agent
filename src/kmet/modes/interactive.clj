@@ -2580,6 +2580,22 @@
 
 ;; ─── Message submission (pi: session.prompt input event + agent run) ──────
 
+(defn- heal-stale-scrollback-when-idle!
+  "Heal a stale above-window scrollback on user input, but only at a
+   streaming-free moment — no agent turn, bash command, or compaction in
+   flight. The heal emits the destructive ESC[3J scrollback clear, which
+   must not land in a live render (it would yank the viewport mid-stream:
+   the scroll-to-top bug). start-agent-run! heals unconditionally at turn
+   start; this broadens the trigger to any idle input so input that never
+   starts a turn (slash/bash commands, text typed then cancelled) does not
+   leave stale lines until the next turn. No-op unless the scrollback is
+   dirty (kmet.tui.core/tui-heal-scrollback!)."
+  [cs]
+  (when (and (not @(:running-turn? cs))
+             (not @(:bash-running? cs))
+             (not @(:compacting? @(:agent-state cs))))
+    (tui/tui-heal-scrollback! (:tui cs))))
+
 (defn- start-agent-run!
   "Start an agent run: set turn state, show the working indicator + animation
    timer, wire the streaming callbacks. The user message and the assistant
@@ -3534,6 +3550,14 @@
       (tui/tui-add-child t dock-root)
       (tui/tui-add-child t widgets-below-root)
       (tui/tui-add-child t ftr)
+
+      ;; Heal a stale scrollback on the next keystroke when idle (see
+      ;; heal-stale-scrollback-when-idle!): short of a scroll event, input is
+      ;; the only signal that the user is back at the bottom, and any render
+      ;; already pulls the inline viewport there anyway.
+      (tui/tui-add-input-listener
+       t
+       (fn [_data] (heal-stale-scrollback-when-idle! cs) nil))
 
       ;; Wire editor submit
       (editor/editor-set-on-submit! ed
