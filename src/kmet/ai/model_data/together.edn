@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-02T23:43:15Z"
+ :generated-at "2026-09-13T13:59:11Z"
  :provider {:id :together
             :name "Together AI"
             :env-vars ["TOGETHER_API_KEY"]
@@ -169,6 +169,25 @@
     :thinking-level-map {:low nil :medium nil :minimal nil}
     :input [:text]
     :cost {:input 1.32 :output 3.96 :cache-read 0.13 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 384000
+    :compat {:supports-store false
+             :supports-developer-role false
+             :supports-reasoning-effort false
+             :thinking-format :together
+             :max-tokens-field :max-tokens
+             :supports-long-cache-retention false
+             :supports-strict-mode false}}
+   "deepseek-ai/DeepSeek-V4.1-Flash"
+   {:id "deepseek-ai/DeepSeek-V4.1-Flash"
+    :name "DeepSeek V4.1 Flash"
+    :provider :together
+    :api :openai-completions
+    :base-url "https://api.together.ai/v1"
+    :reasoning true
+    :thinking-level-map {:low nil :medium nil :minimal nil}
+    :input [:text :image]
+    :cost {:input 0.3 :output 1.2 :cache-read 0.006 :cache-write 0}
     :context-window 1048576
     :max-tokens 384000
     :compat {:supports-store false
