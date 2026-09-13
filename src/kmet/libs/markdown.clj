@@ -31,6 +31,23 @@
 (def ^:private bare-email-re
   #"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+")
 
+(def ^:private bare-email-start-chars
+  "First-char set gating the bare-email autolink regex in parse-inline.
+   The regex's local part ([A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+) must match at
+   position 0 for the match to succeed, so any other first char fails fast.
+   Perf gate only (jolt's irregex is ~25x bb on a miss) — the regex still
+   decides; a char outside this set can never start a match."
+  #{\A \B \C \D \E \F \G \H \I \J \K \L \M \N \O \P \Q \R \S \T \U \V \W \X \Y \Z
+    \a \b \c \d \e \f \g \h \i \j \k \l \m \n \o \p \q \r \s \t \u \v \w \x \y \z
+    \0 \1 \2 \3 \4 \5 \6 \7 \8 \9 \. \! \# \$ \% \& \' \* \+ \/ \= \? \^ \_ \` \{ \| \} \~ \-})
+
+(def ^:private bare-url-start-chars
+  "First-char set gating the bare-url autolink regex in parse-inline.
+   The regex is case-insensitive ((?i)) over the schemes http://, https://,
+   ftp:// and www. — every alternative starts with h/H, f/F or w/W, so any
+   other first char fails fast. Perf gate only — the regex still decides."
+  #{\h \H \f \F \w \W})
+
 (def ^:private markdown-escape-re
   #"[!\"#$%&'()*+,\-./:;<=>?@\[\\\]^_`{|}~]")
 
@@ -251,8 +268,17 @@
                  (recur (inc i) n (append-token result {:type :text :s c}))))
 
              (not in-link?)
-             (if-let [matched (or (re-find bare-email-re remaining)
-                                  (re-find bare-url-re remaining))]
+             ;; Perf gates (jolt irregex is ~25x bb on a miss): the email
+             ;; regex still decides, but only runs when the line holds @
+             ;; past here and the first char can start its local part; the
+             ;; url regex only runs on h/H/f/F/w/W (all its schemes' first
+             ;; chars, (?i)). Both gates fail only calls the regex would.
+             (if-let [matched (let [c0 (nth line i)]
+                                (or (when (and (str/index-of line "@" i)
+                                               (contains? bare-email-start-chars c0))
+                                      (re-find bare-email-re remaining))
+                                    (when (contains? bare-url-start-chars c0)
+                                      (re-find bare-url-re remaining))))]
                (let [raw (loop [s matched]
                            (if (or (re-find #"[!?.,:;*_~]$" s)
                                    (and (str/ends-with? s ")")

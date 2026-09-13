@@ -580,8 +580,13 @@
   (let [n (count word)
         ansi-re ANSI-CODE-RE]
     (if (not (re-find #"[^\u0020-\u007e]" word))
-      ;; ASCII fast path — no ANSI codes possible (ESC 0x1b is non-ASCII)
-      (let [pieces (vec (re-seq (re-pattern (str "(?s).{1," max-width "}")) word))]
+      ;; ASCII fast path — no ANSI codes possible (ESC 0x1b is non-ASCII).
+      ;; NOTE (jolt perf): was (re-seq (re-pattern "(?s).{1,N}") word) — a
+      ;; per-call re-pattern + regex chunk (~56 µs on jolt); plain subs
+      ;; slicing is ~4 µs there and ~2x faster on bb too.
+      (let [nchars (count word)
+            pieces (mapv (fn [i] (subs word i (min nchars (+ i max-width))))
+                         (range 0 nchars max-width))]
         (if (seq pieces)
           ;; every piece starts a fresh line after the buffer flush, so the
           ;; active state is re-emitted on each — including the first
@@ -631,7 +636,17 @@
     (let [clean (clojure.string/replace line ANSI-CODE-RE "")]
       (if (<= (visible-width-plain clean) max-width)
         [line]
-        (let [words (clojure.string/split line #"(?<=\s)" -1)
+        (let [words ;; NOTE (jolt perf): was (str/split line #"(?<=\s)" -1).
+              ;; jolt's irregex is pathological on lookbehind (~14 ms for a
+              ;; 540-char line vs 0.03 ms on bb — 500x); re-seq with
+              ;; #"\S*\s|\S+$" segments identically (pinned across a
+              ;; plain/styled/tab/newline/unicode-ws corpus on both hosts)
+              ;; at ~0.07 ms on jolt, and is also faster on bb. The only
+              ;; difference — split's trailing [""] — is a no-op in the
+              ;; loop below (a zero-width word either appends or flushes an
+              ;; empty sb that the final flush drops; brute-forced equal
+              ;; over widths 1..80, plain and ANSI-styled).
+              (or (re-seq #"\S*\s|\S+$" line) [line])
               st (atom (make-ansi-state))
               result (volatile! [])
               sb (StringBuilder.)

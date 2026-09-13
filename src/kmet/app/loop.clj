@@ -638,13 +638,40 @@ Be precise and concise in your responses."}}]
    reasoning pass. Mirrors ollama-loop-guard's repeat-span-min (24)."
   24)
 
-(def ^:private thinking-loop-delimiter-re
-  "Segment delimiters for thinking-loop detection: ASCII sentence/line ends
-   plus CJK full stops (。！？) — a multilingual reasoning loop (e.g. Chinese)
+(def ^:private thinking-loop-delimiters
+  "Chars that end a thinking-loop segment: ASCII sentence/line ends plus
+   CJK full stops (。！？) — a multilingual reasoning loop (e.g. Chinese)
    repeats with 。-terminated segments and would otherwise be invisible
    (ollama-loop-guard / llama.cpp use \".!?\\n\"; the CJK additions cover
    the other major script)."
-  #"(?<=[.!?\n。！？])\s*")
+  #{\. \! \? \newline \。 \！ \？})
+
+(def ^:private thinking-loop-ws
+  "Whitespace consumed after a segment delimiter (Java \\s, ASCII six)."
+  #{\space \tab \newline \u000B \formfeed \return})
+
+(defn- split-thinking-segments
+  "Split TAIL on thinking-loop delimiters without regex: jolt's irregex is
+   pathological on the lookbehind this replaces (~1 s for a 4000-char
+   buffer there vs ~1.5 ms here). Each segment keeps its delimiter plus
+   following whitespace; thinking-loop? trims anyway, so this is
+   downstream-identical to the old str/split (pinned across a 38-case
+   corpus incl. CJK, CRLF and blank runs on both hosts)."
+  [tail]
+  (let [n (count tail)]
+    (if (zero? n)
+      []
+      (loop [i 0 start 0 out []]
+        (if (>= i n)
+          (let [seg (subs tail start n)]
+            (if (and (seq out) (= "" seg)) out (conj out seg)))
+          (if (contains? thinking-loop-delimiters (nth tail i))
+            (let [j (loop [k (inc i)]
+                      (if (and (< k n) (contains? thinking-loop-ws (nth tail k)))
+                        (recur (inc k))
+                        k))]
+              (recur j j (conj out (subs tail start j))))
+            (recur (inc i) start out)))))))
 
 (defn thinking-loop?
   "True when the recent THINKING text contains a repeated segment: the same
@@ -656,7 +683,7 @@ Be precise and concise in your responses."}}]
   [thinking & {:keys [max-chars] :or {max-chars 4000}}]
   (when (string? thinking)
     (let [tail (subs thinking (max 0 (- (count thinking) max-chars)))
-          segments (->> (str/split tail thinking-loop-delimiter-re)
+          segments (->> (split-thinking-segments tail)
                         (map str/trim)
                         (remove #(or (empty? %) (< (count %) thinking-loop-min-span))))
           counts (frequencies segments)]
