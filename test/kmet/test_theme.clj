@@ -3,6 +3,7 @@
             [clojure.string :as str]
             [clojure.java.io :as io]
             [babashka.fs :as fs]
+            [kmet.libs.terminal-image :as timg]
             [kmet.tui.theme :as theme]))
 
 ;; ─── Theme record ──────────────────────────────────────────────────────────
@@ -119,16 +120,27 @@
     (t/is (.contains (get-in t [:fg-colors :accent]) "38;5;196"))))
 
 (t/deftest test-detect-color-mode
+  ;; The theme mode comes from the shared terminal-image capabilities
+  ;; (pi: getCapabilities().trueColor), which fold in COLORTERM and the known
+  ;; true-color terminal programs).
   (let [detect @#'theme/detect-color-mode]
-    (t/is (= :truecolor (detect {"COLORTERM" "truecolor"})))
-    (t/is (= :truecolor (detect {"COLORTERM" "24bit"})))
-    (t/is (= :truecolor (detect {"COLORTERM" "TRUECOLOR"})))
-    (t/is (= :256color (detect {"COLORTERM" "256color"})))
-    (t/is (= :256color (detect {"TERM" "xterm-256color"})))
-    (t/is (= :256color (detect {"COLORTERM" "" "TERM" "xterm"})))
-    (t/is (= :256color (detect {})) "no signal → safe 256-color default")
-    (t/is (= :truecolor (detect {"COLORTERM" "truecolor" "TERM" "xterm-256color"}))
-          "truecolor wins over a 256color TERM")))
+    (with-redefs [timg/get-capabilities
+                  (fn [] {:images nil :true-color true :hyperlinks false})]
+      (t/is (= :truecolor (detect)) "true-color capability → truecolor"))
+    (with-redefs [timg/get-capabilities
+                  (fn [] {:images nil :true-color false :hyperlinks false})]
+      (t/is (= :256color (detect)) "no true-color → safe 256-color default"))))
+
+(t/deftest test-make-theme-detects-capability
+  (with-redefs [timg/get-capabilities
+                (fn [] {:images nil :true-color true :hyperlinks false})]
+    (t/is (= :truecolor
+             (theme/get-color-mode (theme/make-theme {:name "auto" :text "#ff0000"})))
+          "make-theme with no explicit mode uses the detected capability"))
+  (with-redefs [timg/get-capabilities
+                (fn [] {:images nil :true-color false :hyperlinks false})]
+    (t/is (= :256color
+             (theme/get-color-mode (theme/make-theme {:name "auto" :text "#ff0000"}))))))
 
 (t/deftest test-make-theme-truecolor-vector
   (let [t (theme/make-theme

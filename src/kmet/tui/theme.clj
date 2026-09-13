@@ -5,7 +5,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [babashka.fs :as fs]
-            [kmet.libs.highlight :as hl]))
+            [kmet.libs.highlight :as hl]
+            [kmet.libs.terminal-image :as term-image]))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Color tokens — matching pi's ThemeColor / ThemeBg exactly
@@ -360,32 +361,16 @@
     {:fg-map fg-map :bg-map bg-map}))
 
 (defn- detect-color-mode
-  "Detect the terminal's color capability from the environment (pi:
-   getColorMode / getCapabilities().trueColor). COLORTERM=truecolor|24bit →
-   :truecolor; COLORTERM=256color or TERM matching *-256color → :256color;
-   otherwise :256color (safe default — truecolor codes silently degrade on
-   unsupported terminals, which is exactly the wrong behavior for light
-   themes where a dark fallback bg makes dark text unreadable). The one-arg
-   arity takes an env map so the rule is testable without mutating the
-   process environment (same shape as detect-terminal-background-from-env)."
-  ([] (detect-color-mode (System/getenv)))
-  ([env]
-   (let [colorterm (str/lower-case (or (get env "COLORTERM") ""))
-         term (str/lower-case (or (get env "TERM") ""))]
-     (cond
-       (or (str/includes? colorterm "truecolor")
-           (str/includes? colorterm "24bit"))
-       :truecolor
-
-       (or (str/includes? colorterm "256color")
-           (str/includes? term "256color"))
-       :256color
-
-       ;; No explicit signal — 256-color is the safe default. A terminal
-       ;; that does support truecolor almost always advertises it via
-       ;; COLORTERM; one that doesn't would render truecolor bg codes as
-       ;; the default bg (black), breaking light themes.
-       :else :256color))))
+  "The terminal's color capability as a theme :color-mode (pi: getColorMode /
+   getCapabilities().trueColor). True-color terminals get :truecolor;
+   everything else :256color — the safe default, since truecolor codes
+   degrade to the default bg on unsupported terminals, which breaks light
+   themes where dark text lands on a dark fallback. Capabilities come from
+   the shared kmet.libs.terminal-image detection (COLORTERM plus the known
+   terminal programs: kitty, wezterm, ghostty, iTerm, Warp, Windows
+   Terminal, VS Code, alacritty), cached once per process."
+  []
+  (if (:true-color (term-image/get-capabilities)) :truecolor :256color))
 
 (defn make-theme
   "Create a Theme from an EDN color map.

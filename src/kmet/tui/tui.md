@@ -882,10 +882,11 @@ switch invalidates exactly the subscribed subtrees. Construction-time
 snapshot reads (`get-current-theme`) remain valid.
 
 Theme definitions are EDN files (`examples/themes/` for format); the
-color mode (`:truecolor` / `:256color`) is detected from the environment at
-construction (`COLORTERM=truecolor|24bit` → truecolor, else 256-color — the
-safe default) and baked into the resolved ANSI strings, so a theme built on
-a non-truecolor terminal never emits truecolor codes that would degrade.
+color mode (`:truecolor` / `:256color`) comes from the shared
+`kmet.libs.terminal-image` capability detection at construction (`COLORTERM`
+plus the known true-color terminal programs; no true-color → 256-color, the
+safe default) and is baked into the resolved ANSI strings, so a theme built
+on a non-truecolor terminal never emits truecolor codes that would degrade.
 `make-theme`'s optional mode argument pins it (pi: `createTheme`'s mode);
 nil detects.
 
