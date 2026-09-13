@@ -73,17 +73,26 @@
         cache @cache-atom]
     (if (and cache
              (= (:width cache) width)
-             (every? (fn [[a v]]
-                       (let [cur (deref a)]
-                         ;; identical? first: O(1) positive filter — the
-                         ;; common case is an atom untouched since caching,
-                         ;; whose current value IS the recorded object.
-                         ;; Structural = only runs for atoms actually
-                         ;; written in between (persistent collections give
-                         ;; fresh roots on every update).
-                         (or (identical? cur v)
-                             (= cur v))))
-                     (:values cache)))
+             ;; reduce-kv, not every? over the entry seq: this hit check runs
+             ;; once per component per frame, and the per-entry MapEntry
+             ;; destructuring (plus the seq walk) measured ~2.4x the cost of
+             ;; reduce-kv on a multi-thousand-component transcript. reduce-kv
+             ;; hands key/value straight to the fn — same comparisons, same
+             ;; short-circuit, no per-entry allocation.
+             (reduce-kv (fn [_ a v]
+                          (let [cur (deref a)]
+                            ;; identical? first: O(1) positive filter — the
+                            ;; common case is an atom untouched since caching,
+                            ;; whose current value IS the recorded object.
+                            ;; Structural = only runs for atoms actually
+                            ;; written in between (persistent collections give
+                            ;; fresh roots on every update).
+                            (if (or (identical? cur v)
+                                    (= cur v))
+                              true
+                              (reduced false))))
+                        true
+                        (:values cache)))
       (:result cache)
       (let [tracked (atom {})]
         (binding [reakt/*tracking-scope* tracked]

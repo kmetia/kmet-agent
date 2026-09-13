@@ -137,13 +137,22 @@
    sequences. Tabs would otherwise render at the terminal's own tab stops,
    breaking the width math (pi expands to 3 spaces)."
   [s]
-  (let [s (-> s
-              (clojure.string/replace "\u0e33" "\u0e4d\u0e32")
-              (clojure.string/replace "\u0eb3" "\u0ecd\u0eb2"))]
-    (if (clojure.string/includes? s "\t")
-      (clojure.string/replace s ANSI-OR-TAB-RE
-                              (fn [m] (if (= m "\t") "   " m)))
-      s)))
+  ;; Early out: neither replacement can fire and the tab branch cannot run
+  ;; unless one of the three trigger characters is present. This runs once per
+  ;; line per frame over the whole transcript, so skipping the two no-op
+  ;; replaces for the common line (neither Thai/Lao AM nor a tab) is worth the
+  ;; extra scan.
+  (if (or (clojure.string/includes? s "\u0e33")
+          (clojure.string/includes? s "\u0eb3")
+          (clojure.string/includes? s "\t"))
+    (let [s (-> s
+                (clojure.string/replace "\u0e33" "\u0e4d\u0e32")
+                (clojure.string/replace "\u0eb3" "\u0ecd\u0eb2"))]
+      (if (clojure.string/includes? s "\t")
+        (clojure.string/replace s ANSI-OR-TAB-RE
+                                (fn [m] (if (= m "\t") "   " m)))
+        s))
+    s))
 
 ;; ─── Width calculation ─────────────────────────────────────────────────────
 
