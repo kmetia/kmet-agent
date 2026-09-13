@@ -75,7 +75,8 @@
          maybe-show-cache-miss-notice!
          make-widget-area-above make-widget-area-below
          send-message submit-message apply-hooks
-         queue-follow-up-text!)
+         queue-follow-up-text!
+         streaming-free? heal-stale-scrollback-when-idle!)
 
 ;; ─── Global config ref ────────────────────────────────────────────────────
 
@@ -2427,15 +2428,13 @@
     (ui/chat-history-finalize-streaming! (:chat-history cs))
     (ui/chat-history-finalize-thinking! (:chat-history cs))
     (reset! (:running-turn? cs) false)
-    ;; Heal stale above-window scrollback now that the turn has ended. The
-    ;; streaming is over — a streaming-free moment — and the turn itself is
-    ;; what produced the stale lines (tool output and streamed text that
-    ;; changed above the window). The document is bottom-pinned and the user
-    ;; was just watching its end, so the rebuild's ESC[3J viewport jump lands
-    ;; on the turn transition rather than mid-stream. No-op unless a change
-    ;; above the window left the scrollback dirty
-    ;; (kmet.tui.core/tui-heal-scrollback!).
-    (tui/tui-heal-scrollback! (:tui cs))
+    ;; Heal stale above-window scrollback now that the turn has ended: the turn
+    ;; itself produced the stale lines (tool output and streamed text that
+    ;; changed above the window), and the document is bottom-pinned with the
+    ;; user watching its end, so the rebuild's ESC[3J viewport jump lands on
+    ;; the turn transition. Gated on streaming-free — a user `!` bash command
+    ;; or a compaction may still be live — and a no-op unless dirty.
+    (heal-stale-scrollback-when-idle! cs)
     (update-footer! cs)
     (tui/tui-request-render (:tui cs))
     (debug/log "agent turn completed")
@@ -2465,8 +2464,8 @@
                                   {:role :assistant :content (th/fg th/dark-theme :error (str "Error: " error-msg))})
     (reset! (:running-turn? cs) false)
     ;; A failed turn still produced above-window changes while streaming, so
-    ;; heal here too (no-op unless the scrollback is dirty).
-    (tui/tui-heal-scrollback! (:tui cs))
+    ;; heal here too (gated on streaming-free; no-op unless dirty).
+    (heal-stale-scrollback-when-idle! cs)
     (update-footer! cs)
     (tui/tui-request-render (:tui cs))
     (debug/log "agent turn error: " error-msg)
@@ -2603,27 +2602,33 @@
        (not @(:compacting? @(:agent-state cs)))))
 
 (defn- heal-stale-scrollback-when-idle!
-  "Heal a stale above-window scrollback on user input, but only when
-   streaming-free (see streaming-free?). on-agent-done / on-agent-error heal
-   at the end of every turn; this broadens the trigger to any idle input so
-   input that never starts a turn (slash/bash commands, text typed then
-   cancelled) does not leave stale lines until the next turn. No-op unless
-   the scrollback is dirty (kmet.tui.core/tui-heal-scrollback!)."
+  "Heal a stale above-window scrollback when the app is streaming-free (see
+   streaming-free?) — at the end of a turn (on-agent-done / on-agent-error /
+   handle-cancel) and on idle user input. All bring the destructively-clearing
+   ESC[3J rebuild to a boundary where nothing is streaming, so its viewport
+   jump lands on a screen transition instead of mid-stream (the scroll-to-top
+   bug). The idle-input trigger also covers input that never starts a turn
+   (slash/bash commands, text typed then cancelled), which would otherwise
+   leave stale lines until the next turn. No-op unless the scrollback is
+   dirty (kmet.tui.core/tui-heal-scrollback!)."
   [cs]
   (when (streaming-free? cs)
     (tui/tui-heal-scrollback! (:tui cs))))
 
 (defn- request-global-reflow-render!
-  "Request a render after a global reflow — a toggle or setting that
+  "Request a render after a global reflow — a discrete toggle that
    re-renders many messages at once (tool expansion, thinking visibility,
-   theme, output padding). The first changed line is then an early message,
-   above the window, so the diff would clamp: the window repaints correctly
-   but the scrolled-off scrollback is left stale. When streaming-free, force
-   the clearing full redraw instead, so the reflow is rebuilt immediately —
-   what the *shrinking* direction of the same toggle already does via the
-   shrink-above-window fallback. Mid-stream, fall back to the ordinary
-   render (clamp + dirty; the next boundary heals it) rather than emit the
-   destructive 3J clear into a live render."
+   the extension set-tools-expanded API). The first changed line is then an
+   early message, above the window, so the diff would clamp: the window
+   repaints correctly but the scrolled-off scrollback is left stale. When
+   streaming-free, force the clearing full redraw instead, so the reflow is
+   rebuilt immediately — what the *shrinking* direction of the same toggle
+   already does via the shrink-above-window fallback. Mid-stream, fall back
+   to the ordinary render (clamp + dirty; the next boundary heals it) rather
+   than emit the destructive 3J clear into a live render.
+   Theme and output-pad changes deliberately stay on the ordinary path:
+   their selectors preview live, so forcing per keystroke would re-emit the
+   whole transcript on every step."
   [cs]
   (tui/tui-request-render (:tui cs) (streaming-free? cs)))
 
@@ -2928,6 +2933,10 @@
              (str "Restored " restored " queued message"
                   (when (> restored 1) "s") " to editor"))))
         (reset! (:running-turn? cs) false)
+        ;; A cancel is a turn end too: heal the stale scrollback it left (the
+        ;; Escape keypress itself could not — the input listener ran while the
+        ;; turn was still marked running). Gated + no-op unless dirty.
+        (heal-stale-scrollback-when-idle! cs)
         (update-footer! cs)))))
 
 ;; ─── External editor (pi: handleOpenExternalEditor) ────────────────────────

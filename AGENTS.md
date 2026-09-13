@@ -454,9 +454,10 @@ protocol — retired in DSL stage 2, see tui.md §8).
   TUI flags the resulting above-window staleness (`tui-scrollback-dirty?`)
   and rebuilds the scrollback with one clearing full redraw via
   `tui-heal-scrollback!` — the app calls it at the end of a turn
-  (`on-agent-done` / `on-agent-error`), a streaming-free boundary right
-  after the turn's last write, so the clear's jump lands on a screen
-  transition rather than mid-stream.
+  (`on-agent-done` / `on-agent-error`, gated on nothing else streaming) and
+  on idle input, a streaming-free boundary right after the turn's last
+  write, so the clear's jump lands on a screen transition rather than
+  mid-stream.
 
 ## Reference
 - **TUI package docs**: `src/kmet/tui/tui.md` is the usage reference for

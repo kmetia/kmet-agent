@@ -553,20 +553,27 @@
         (is (true? @(:running-turn? cs)) "the turn still starts")
         (is (false? @(get-in cs [:tui :force-redraw?]))
             "a dirty scrollback is left for the turn end, not cleared at the start"))
-      ;; Turn end (done and error): heal is now unconditional at this boundary.
+      ;; Turn end (done and error): heal, but only when streaming-free.
       (doseq [[label call] [["on-agent-done" #((var inter/on-agent-done) %)]
-                            ["on-agent-error" #((var inter/on-agent-error) % "boom")]]]
+                            ["on-agent-error" #((var inter/on-agent-error) % "boom")]]
+              [case-label bash? dirty? expected] [["streaming-free" false true true]
+                                                  ["mid bash command" true true false]
+                                                  ["clean scrollback" false false false]]]
         (let [cs (inter/map->CoreState
                   {:anim-timer (atom nil)
                    :running-turn? (atom true)
+                   :bash-running? (atom bash?)
+                   :agent-state (atom {:compacting? (atom false)})
                    :chat-history (ui/make-chat-history)
-                   :tui {:scrollback-dirty? (atom true)
+                   :tui {:scrollback-dirty? (atom dirty?)
                          :force-redraw? (atom false)
                          :render-requested? (atom false)}})]
           (with-redefs [inter/stop-anim-timer! noop
                         inter/clear-status-indicator! noop
                         inter/update-footer! noop]
             (call cs))
-          (is (true? @(get-in cs [:tui :force-redraw?]))
-              (str label " heals a dirty scrollback with the clearing redraw"))
+          (is (= expected @(get-in cs [:tui :force-redraw?]))
+              (str label " / " case-label
+                   (if expected " heals the dirty scrollback"
+                       " must not emit the clearing redraw")))
           (is (false? @(:running-turn? cs)) (str label " ends the turn")))))))

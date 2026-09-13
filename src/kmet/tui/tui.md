@@ -64,9 +64,11 @@ Terminal (microsoft/terminal#20370; pi #4506/#6502). Leaving those lines
 un-repainted means the scrollback above the window is stale, so the TUI
 *records* that (`tui-scrollback-dirty?`) and rebuilds it with one clearing
 full redraw at a streaming-free boundary — the app calls
-`tui-heal-scrollback!` at the end of a turn (right after the last streamed
-write), when the user is watching the document end, so the clear's viewport
-jump lands on a screen transition instead of mid-stream. Two consequences
+`tui-heal-scrollback!` at the end of a turn (`on-agent-done` /
+`on-agent-error`, gated on nothing else streaming: no turn, bash command or
+compaction) and on idle input. Both are moments where the user is expected
+to be at the document end, so the clear's viewport jump lands on a screen
+transition instead of mid-stream. Two consequences
 that shape the rest of this document: components above the viewport must
 not change gratuitously (§3.2's caching rules), and there is no viewport to
 hit-test — mouse support would need a different model.
