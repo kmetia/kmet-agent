@@ -93,6 +93,22 @@
     (t/is (= [[:theme "light"]] @changes))
     (t/is (= "light" (:value (first @(:items-atom s)))))))
 
+(t/deftest test-settings-list-cycle-seq-values
+  ;; Regression: the Theme row passes (sort ...) — an ArraySeq, not a
+  ;; vector. cycle-value! called .indexOf on it; babashka's native image
+  ;; refuses the reflective invocation of ArraySeq.indexOf
+  ;; (MissingReflectionRegistrationError), the input dispatch aborts and the
+  ;; value never changes — "switching theme doesn't change the UI".
+  (let [changes (atom [])
+        seq-items [{:id :theme :label "Theme" :value "light"
+                    :values (sort ["dark" "light"])}]
+        s (sl/make-settings-list seq-items
+                                 :on-change (fn [id val] (swap! changes conj [id val])))]
+    (core/handle-input s K-RIGHT)
+    (t/is (= [[:theme "dark"]] @changes)
+          "cycling a seq-valued row fires on-change")
+    (t/is (= "dark" (:value (first @(:items-atom s)))))))
+
 ;; ─── Filtering (pi: enableSearch opt-in) ───────────────────────────────────
 
 (t/deftest test-settings-list-filter

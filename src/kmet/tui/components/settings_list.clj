@@ -80,7 +80,11 @@
    value."
   [this display selected delta]
   (let [item (nth display selected)
-        possible (:values item)]
+        ;; .indexOf is a java.util.List method: on a lazy/array SEQUENCE
+        ;; (e.g. the Theme row's (sort ...) — an ArraySeq) babashka's native
+        ;; image refuses the reflective invocation, the dispatch aborts and
+        ;; the value never changes. Coerce to a real vector first.
+        possible (some-> (:values item) vec)]
     (when (and possible (seq possible))
       (let [current (or (:value item) "")
             cur-idx (.indexOf possible current)
