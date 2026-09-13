@@ -332,3 +332,23 @@
           "canonical image input must transfer")
     (t/is (= (:thinking-level-map canonical) (:thinking-level-map cc))
           "thinking levels must transfer from the canonical entry")))
+
+(t/deftest test-commandcode-deepseek-flash-aliases-clamp-to-deepseek
+  "Every CommandCode deepseek-v4 flash SKU is the same weights as DeepSeek's
+   canonical `deepseek-flash` (V4.1 Flash) — pi 12f59336a collapsed the
+   retired v4-flash/-vision-exp aliases into it. Each ref must resolve to
+   that canonical and the endpoint entry must carry thinking support."
+  (let [refs @#'mg/commandcode-canonical-refs
+        catalogs (#'mg/read-catalogs mg/data-dir)
+        flash (get-in catalogs [:deepseek :openai-completions "deepseek-flash"])]
+    (t/is (some? flash) "the canonical deepseek-flash entry must exist")
+    (doseq [cid ["deepseek/deepseek-v4-flash"
+                 "deepseek/deepseek-v4-flash-fast"
+                 "deepseek/deepseek-v4.1-flash"]]
+      (t/is (= [:deepseek "deepseek-flash"] (get refs cid))
+            (str cid " must clamp to DeepSeek's canonical flash id"))
+      (let [cc (get-in catalogs [:commandcode :openai-completions cid])]
+        (t/is (some? cc) (str cid " must be listed"))
+        (t/is (= true (:reasoning cc))
+              (str cid " must carry thinking support"))))))
+

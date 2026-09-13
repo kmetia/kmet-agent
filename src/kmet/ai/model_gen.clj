@@ -1935,6 +1935,7 @@
    "claude-sonnet-4-6"                 [:anthropic "claude-sonnet-4-6"]
    "claude-sonnet-5"                   [:anthropic "claude-sonnet-5"]
    "deepseek/deepseek-v4-flash"        [:deepseek "deepseek-flash"]
+   "deepseek/deepseek-v4-flash-fast"   [:deepseek "deepseek-flash"]
    "deepseek/deepseek-v4-flash-vision-exp" [:opencode-go "deepseek-v4-flash-vision-exp"]
    "deepseek/deepseek-v4-pro"          [:deepseek "deepseek-v4-pro"]
    ;; pi 12f59336a: the retired v4-flash aliases collapse into DeepSeek's
