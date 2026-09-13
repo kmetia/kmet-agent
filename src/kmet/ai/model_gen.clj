@@ -1980,11 +1980,8 @@
    "sakana/fugu-ultra"                 [:openrouter "sakana/fugu-ultra"]
    "stepfun/Step-3.5-Flash"            [:openrouter "stepfun/step-3.5-flash"]
    "stepfun/Step-3.7-Flash"            [:openrouter "stepfun/step-3.7-flash"]
-   "stealth/ox-alpha"                  [:openrouter "stealth/ox-alpha"]
    "thinkingmachines/inkling"          [:nvidia "thinkingmachines/inkling"]
    "thinkingmachines/inkling-small"    [:openrouter "thinkingmachines/inkling-small"]
-   "minimax/minimax-m2.7-free"         [:minimax "MiniMax-M2.7"]
-   "minimax/minimax-m3-free"           [:minimax "MiniMax-M3"]
    "xai/grok-4.5"                      [:xai "grok-4.5"]
    "xai/grok-4.6"                      [:xai "grok-4.6"]
    "xiaomi/mimo-v2.5"                  [:xiaomi "mimo-v2.5"]
@@ -2011,18 +2008,11 @@
   {"claude-haiku-4-5-20251001" "claude-haiku-4-5"})
 
 (def ^:private commandcode-overrides
-  "Explicit capability wins over refs. stealth/ox-alpha mirrors opencode's
-   x-preview-f-free treatment verbatim (free preview model, low/high/max
-   thinking levels, no store/developer-role)."
-  {"stealth/ox-alpha"
-   {:reasoning true
-    :input [:text :image]
-    :max-tokens 131072
-    :thinking-level-map (array-map :high "high" :low "low" :max "max"
-                                   :medium nil :minimal nil :off nil :xhigh nil)
-    :compat (array-map :supports-store false
-                       :supports-developer-role false
-                       :max-tokens-field :max-tokens)}})
+  "Explicit capability wins over refs. Empty today — stealth/ox-alpha, the
+   only entry, is no longer served by the CommandCode endpoint. Kept as the
+   hook for models whose capabilities are endpoint-bound rather than
+   model-bound."
+  {})
 
 (defn- warn-unresolved-commandcode-ref!
   "Warn when a LISTED canonical ref resolves to nil in this run's catalogs:
