@@ -20,30 +20,48 @@
 (def ^:private CYN "\u001b[36m")
 (def ^:private RST "\u001b[0m")
 
+(defn- raw-indicator
+  "SPINNER's current animation frame, unstyled — the clock and frames
+   without the color fn."
+  [spinner]
+  (let [elapsed (- (System/nanoTime) @(:start-atom spinner))
+        interval-ms @(:interval-ms-atom spinner)
+        frames @(:frames-atom spinner)]
+    (if (seq frames)
+      (nth frames (mod (long (/ elapsed (* interval-ms 1000000))) (count frames)))
+      "")))
+
+(defn spinner-rendered-indicator
+  "The current animation frame, styled by the spinner's color fn (pi:
+   Loader.getRenderedIndicator). Verbatim indicators (custom frames through
+   spinner-set-indicator!) return the raw frame; an empty frame returns \"\"."
+  [spinner]
+  (let [frame (raw-indicator spinner)]
+    (if @(:verbatim-atom spinner)
+      frame
+      ((or @(:spinner-color-fn-atom spinner) (fn [s] (str CYN s RST))) frame))))
+
+(defn spinner-render-line
+  "The spinner's animated line — frame, space, message — without the
+   leading blank; \"\" while inactive. The editor border embeds this line
+   directly (see the editor's top-border fn)."
+  [spinner]
+  (if-not @(:active-atom spinner)
+    ""
+    (let [frame (spinner-rendered-indicator spinner)
+          msg-fn (or @(:message-color-fn-atom spinner) identity)]
+      (str @(:prefix-atom spinner)
+           (when (seq frame) (str frame " "))
+           (msg-fn @(:text-atom spinner))))))
+
 (defcomponent Spinner nil [active-atom text-atom start-atom frames-atom interval-ms-atom
                            prefix-atom spinner-color-fn-atom message-color-fn-atom
                            verbatim-atom]
   (render [_this width]
     (if-not @active-atom
       []  ;; invisible when inactive
-      (let [elapsed (- (System/nanoTime) @start-atom)
-            interval-ms @interval-ms-atom
-            frame-idx (long (/ elapsed (* interval-ms 1000000)))
-            frames @frames-atom
-            frame (if (seq frames)
-                    (nth frames (mod frame-idx (count frames)))
-                    "")
-            ;; pi Loader: verbatim mode renders custom frames as-is (no color
-            ;; fn); empty frames hide the indicator and show the message only
-            spinner-fn (or @spinner-color-fn-atom (fn [s] (str CYN s RST)))
-            rendered-frame (if @verbatim-atom frame (spinner-fn frame))
-            msg-fn (or @message-color-fn-atom identity)
-            prefix @prefix-atom
-            line (str prefix
-                      (when (seq rendered-frame) (str rendered-frame " "))
-                      (msg-fn @text-atom))]
-        ;; pi Loader: leading blank line above the animated line
-        ["" (u/truncate-to-width line width)]))))
+      ;; pi Loader: leading blank line above the animated line
+      ["" (u/truncate-to-width (spinner-render-line _this) width)])))
 
 ;; ─── Construction ──────────────────────────────────────────────────────────
 

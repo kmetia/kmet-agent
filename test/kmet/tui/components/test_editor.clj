@@ -373,6 +373,70 @@
   (let [e (editor/make-editor :height 3 :border :ascii :border-fn (fn [s] (str "<" s ">")))]
     (t/is (str/starts-with? (first (core/render e 6)) "<->"))))
 
+(t/deftest test-editor-top-border-fn
+  ;; An installed top-border fn renders the first line (the app's
+  ;; status-in-border hook, pi: CustomEditor.renderTopBorder); returning
+  ;; nil falls back to the default rule.
+  (let [seen (atom nil)
+        e (editor/make-editor :height 3 :border-fn (fn [s] (str "<" s ">")))]
+    (editor/editor-set-top-border-fn!
+     e
+     (fn [props]
+       (reset! seen props)
+       (str "STATUS " (apply str (repeat (- (:width props) 7) (:rule props))))))
+    (t/is (= "STATUS ─────" (first (core/render e 12))))
+    (t/is (= 12 (:width @seen)))
+    (t/is (= 0 (:hidden-line-count @seen)))
+    (t/is (= "─" (:rule @seen)))
+    (t/is (fn? (:border-fn @seen)) "the editor's border color fn reaches the hook")
+    (t/testing "a declining hook falls back to the default rule"
+      (editor/editor-set-top-border-fn! e (fn [_] nil))
+      (t/is (str/starts-with? (first (core/render e 12)) "<─><─>")))
+    (t/testing "clearing the hook restores the default"
+      (editor/editor-set-top-border-fn! e nil)
+      (t/is (str/starts-with? (first (core/render e 12)) "<─><─>")))
+    (t/testing "the hook sees the scroll count and composes with the scrolled view"
+      (let [e (editor/make-editor :height 3)
+            lines (map #(str "line " %) (range 10))
+            props (atom nil)]
+        (core/handle-input e (str "\u001b[200~" (str/join "\n" lines) "\u001b[201~"))
+        (editor/editor-set-top-border-fn! e (fn [p] (reset! props p) nil))
+        (core/render e 40)
+        (t/is (pos? (:hidden-line-count @props)) "the hook learns about hidden lines")
+        (editor/editor-set-top-border-fn! e
+                                          (fn [p] (str "H" (:hidden-line-count p) " " (:width p))))
+        (t/is (= (str "H" (:hidden-line-count @props) " 40") (first (core/render e 40))))))))
+
+(t/deftest test-editor-scroll-border-centered
+  ;; pi: createScrollBorder — the ` ↑ N more ` label is centered on the line
+  (let [e (editor/make-editor :height 3)
+        lines (map #(str "line " %) (range 10))
+        props (atom nil)]
+    (core/handle-input e (str "\u001b[200~" (str/join "\n" lines) "\u001b[201~"))
+    (editor/editor-set-top-border-fn! e (fn [p] (reset! props p) nil))
+    (core/render e 46)
+    (let [hidden (:hidden-line-count @props)
+          label (str " ↑ " hidden " more ")
+          top (first (core/render e 46))]
+      (t/is (pos? hidden) "the view is scrolled")
+      (t/is (= (quot (- 46 (count label)) 2) (str/index-of top label))
+            "the scroll label is centered")
+      (t/is (= 46 (u/visible-width top))))))
+
+(t/deftest test-editor-bottom-scroll-border-centered
+  ;; the bottom border uses the same centered label for lines below the view
+  (let [e (editor/make-editor :height 3)
+        lines (map #(str "line " %) (range 10))]
+    (core/handle-input e (str "\u001b[200~" (str/join "\n" lines) "\u001b[201~"))
+    (dotimes [_ 8] (core/handle-input e K-UP))
+    (let [bottom (last (core/render e 46))
+          m (re-find #"↓ (\d+) more" bottom)]
+      (t/is (some? m) "content below the viewport shows the ↓ label")
+      (let [label (str " ↓ " (second m) " more ")]
+        (t/is (= (quot (- 46 (count label)) 2) (str/index-of bottom label))
+              "the bottom label is centered")
+        (t/is (= 46 (u/visible-width bottom)))))))
+
 ;; ─── Edge cases ──────────────────────────────────────────────────────────
 
 (t/deftest test-editor-backspace-at-start

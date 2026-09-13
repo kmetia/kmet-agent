@@ -71,7 +71,8 @@
 (declare clone-current-session! fork-at! restore-session! handle-new-session
          build-extension-ui-registry ask-branch-summary
          build-loaded-resource-sections start-agent-run!
-         show-status-indicator! clear-status-indicator! stop-anim-timer!
+         show-status-indicator! clear-status-indicator! release-background-status!
+         stop-anim-timer!
          maybe-show-cache-miss-notice!
          make-widget-area-above make-widget-area-below
          send-message submit-message apply-hooks
@@ -519,7 +520,7 @@
         (deliver done result)))
     (future
       (let [result (deref done 90000 :timeout)]
-        (clear-status-indicator! cs :share)
+        (release-background-status! cs :share indicator)
         (ui/chat-history-add-message!
          chat
          (cond
@@ -1842,7 +1843,7 @@
     (future
       (let [result (deref done 120000 :timeout)]
         (editor/editor-set-on-action! ed "app.interrupt" prev-interrupt)
-        (clear-status-indicator! cs :branch-summary)
+        (release-background-status! cs :branch-summary indicator)
         (cond
           (= result :timeout)
           (ui/chat-history-add-message! (:chat-history cs)
@@ -2144,15 +2145,27 @@
 ;; The status layer is a fn component (ui/make-status-area) mounted via
 ;; hiccup/root: it renders whichever indicator the :status-current atom
 ;; records ({:kind k :indicator c}), or the default working StatusIndicator
-;; when nil. A swap is a pure reset! on that atom — reconcile diffs the tree
-;; and swaps the child record; no container clear/add dance. The working
-;; indicator's start/stop stays imperative (spinner lifecycle, dsl.md §5).
-;; The kind rides in the recorded map so a stale end event can't stop an
-;; indicator that was already replaced (pi: clearStatusIndicator(kind)
-;; checks the active kind and no-ops on mismatch).
+;; when nil — except while the active editor embeds the status in its own
+;; top border (the default editor), when the layer renders nothing. A swap
+;; is a pure reset! on that atom — reconcile diffs the tree and swaps the
+;; child record; no container clear/add dance. The working indicator's
+;; start/stop stays imperative (spinner lifecycle, dsl.md §5). The kind
+;; rides in the recorded map so a stale end event can't stop an indicator
+;; that was already replaced (pi: clearStatusIndicator(kind) checks the
+;; active kind and no-ops on mismatch).
+
+(defn- current-status-indicator
+  "The indicator the session is showing right now: the transient swap
+   recorded in :status-current when one is up, else the default working
+   indicator while it is active, else nil (the editor border then draws its
+   plain rule). The editor's top-border hook resolves this per render."
+  [cs]
+  (or (:indicator @(:status-current cs))
+      (when (ui/status-indicator-active? (:status-indicator cs))
+        (:status-indicator cs))))
 
 (defn- show-status-indicator!
-  "Record INDICATOR as the active status child (pi: showStatusIndicator —
+  "Record INDICATOR as the active status (pi: showStatusIndicator —
    disposes the active indicator). KIND records which indicator is active
    for kind-gated clears. No manual render request for the SWAP itself —
    the tracked :status-current read schedules that frame (§3.4) — but the
@@ -2165,8 +2178,8 @@
   (start-indicator-timer! cs))
 
 (defn- activate-working-indicator!
-  "Restore the default working StatusIndicator as the status layer's child
-   and activate it (pi: agent_start → showStatusIndicator(new
+  "Restore the default working StatusIndicator as the current status and
+   activate it (pi: agent_start → showStatusIndicator(new
    WorkingStatusIndicator)). Used when a new LLM call starts after a retry
    backoff or compaction, which swapped in a transient indicator."
   [cs]
@@ -2178,20 +2191,59 @@
   ;; anim timer once the turn runs.
   (reset! (:status-current cs) nil)
   (stop-indicator-timer! cs)
-  (ui/status-indicator-start! (:status-indicator cs)))
+  (ui/status-indicator-start! (:status-indicator cs))
+  ;; A background thread (share/branch-summary completion, an extension's
+  ;; set-working-visible) can revive into a turn that just ended: teardown
+  ;; (on-agent-done/on-agent-error) drops running-turn? BEFORE clearing
+  ;; the status, so an activation interleaved with it can land after the
+  ;; clear. Never leave a spinner with no turn behind it.
+  (when-not @(:running-turn? cs)
+    (ui/status-indicator-stop! (:status-indicator cs))))
+
+(defn- release-background-status!
+  "Release a long-running background status indicator (share, branch
+   summarization) once its work finishes, and give the working spinner
+   back while the agent turn is still streaming — taking the status slot
+   stopped it, and the next :turn-start (the only other revival point) can
+   be arbitrarily far away.
+
+   IDENT is the indicator the flow installed: only it may be cleared, so a
+   later /share or a transient (retry/compaction) that claimed the slot
+   meanwhile is left alone. The working spinner returns only when the turn
+   is still running, nothing else claimed the slot in the meantime, and it
+   isn't already spinning (re-activation would reset its animation
+   clock). The activation itself re-checks the running-turn flag, so a
+   turn ending mid-revival cannot leave a spinner behind."
+  [cs kind ident]
+  (when (identical? ident (:indicator @(:status-current cs)))
+    (clear-status-indicator! cs kind)
+    (when (and @(:running-turn? cs)
+               (nil? @(:status-current cs))
+               (not (ui/status-indicator-active? (:status-indicator cs))))
+      (activate-working-indicator! cs))))
 
 (defn- clear-status-indicator!
-  "Restore the idle two-row status (pi: clearStatusIndicator → idleStatus).
+  "Clear the active status: the standalone layer falls back to the idle
+   two-row shape; with the status embedded in the editor border the border
+   returns to its plain rule (pi: clearStatusIndicator → idleStatus).
    With KIND, only clears when that indicator is currently active — a stale
    end event (e.g. auto-retry-end arriving after the working indicator was
-   revived) then no-ops instead of stopping the working spinner."
+   revived) then no-ops instead of stopping the working spinner. The
+   working indicator is the IMPLICIT status (no :status-current entry), so
+   a :working clear matches exactly when no transient is swapped in —
+   pi: the active indicator's kind is \"working\" during a turn, and
+   setWorkingVisible(false) clears it; a transient retry/compaction/share
+   indicator is left alone."
   [cs & [kind]]
-  (when (or (nil? kind) (= kind (:kind @(:status-current cs))))
-    ;; A real swap (transient → idle) schedules its own frame through the
-    ;; status-area root reaction; an already-idle clear needs no frame.
-    (reset! (:status-current cs) nil)
-    (ui/status-indicator-stop! (:status-indicator cs))
-    (stop-indicator-timer! cs)))
+  (let [current @(:status-current cs)]
+    (when (or (nil? kind)
+              (= kind (:kind current))
+              (and (= :working kind) (nil? current)))
+      ;; A real swap (transient → idle) schedules its own frame through the
+      ;; status-area root reaction; an already-idle clear needs no frame.
+      (reset! (:status-current cs) nil)
+      (ui/status-indicator-stop! (:status-indicator cs))
+      (stop-indicator-timer! cs))))
 
 ;; ─── Pending messages display (pi: updatePendingMessagesDisplay) ──────────
 
@@ -2419,15 +2471,20 @@
 
 (defn- on-agent-done
   "Called when the LLM turn completes.
-   Finalize streaming FIRST (captures thinking text), then clear thinking.
-   Session persistence is handled by the agent loop internally."
+   Drop the running-turn flag FIRST — a background status completion
+   (share, branch summary: release-background-status!) racing this teardown
+   must see the turn over before it may revive the working spinner; the
+   flag-first order plus its post-revival re-check makes a stuck spinner
+   impossible. Then finalize streaming FIRST (captures thinking text),
+   then clear thinking. Session persistence is handled by the agent loop
+   internally."
   [cs]
   (try
     (stop-anim-timer! cs)
+    (reset! (:running-turn? cs) false)
     (clear-status-indicator! cs)
     (ui/chat-history-finalize-streaming! (:chat-history cs))
     (ui/chat-history-finalize-thinking! (:chat-history cs))
-    (reset! (:running-turn? cs) false)
     ;; Heal stale above-window scrollback now that the turn has ended: the turn
     ;; itself produced the stale lines (tool output and streamed text that
     ;; changed above the window), and the document is bottom-pinned with the
@@ -2447,6 +2504,8 @@
   [cs error-msg]
   (try
     (stop-anim-timer! cs)
+    ;; flag before the status clear — see on-agent-done
+    (reset! (:running-turn? cs) false)
     (clear-status-indicator! cs)
     ;; If streaming placeholder is still empty, remove it
     ;; so we don't get a blank assistant entry before the error message.
@@ -2462,7 +2521,6 @@
             (ui/chat-history-finalize-thinking! ch))))
     (ui/chat-history-add-message! (:chat-history cs)
                                   {:role :assistant :content (th/fg th/dark-theme :error (str "Error: " error-msg))})
-    (reset! (:running-turn? cs) false)
     ;; A failed turn still produced above-window changes while streaming, so
     ;; heal here too (gated on streaming-free; no-op unless dirty).
     (heal-stale-scrollback-when-idle! cs)
@@ -2907,6 +2965,9 @@
         (update-footer! cs))
       (when @(:running-turn? cs)
         (debug/log "agent turn cancelled by user")
+        ;; flag before the status clear — see on-agent-done: a background
+        ;; revive racing this teardown must see the turn over
+        (reset! (:running-turn? cs) false)
         (stop-anim-timer! cs)
         (clear-status-indicator! cs)
     ;; pi: restoreQueuedMessagesToEditor({abort: true}) — queued steering/
@@ -2931,7 +2992,6 @@
              (:chat-history cs)
              (str "Restored " restored " queued message"
                   (when (> restored 1) "s") " to editor"))))
-        (reset! (:running-turn? cs) false)
         ;; A cancel is a turn end too: heal the stale scrollback it left (the
         ;; Escape keypress itself could not — the input listener ran while the
         ;; turn was still marked running). Gated + no-op unless dirty.
@@ -3091,7 +3151,7 @@
       ;; or compaction the status container holds a
       ;; transient indicator (or the stopped working
       ;; indicator); revive the working spinner so the
-      ;; call streams under "Working..." (pi: the session
+      ;; call streams under "Working" (pi: the session
       ;; emits a fresh agent_start after retry/compaction
       ;; via agent.continue(), re-showing the
       ;; WorkingStatusIndicator — kmet's loop recurs
@@ -3249,7 +3309,7 @@
       ;; themselves. Every event must still be consumed — a
       ;; case with no matching clause throws, and the
       ;; exception is swallowed by the run future, leaving
-      ;; the UI stuck on "Working..." forever.
+      ;; the UI stuck on "Working" forever.
 
       :agent-start
       ;; Pi: agent_start → setProgress(true) (showTerminalProgress gated)
@@ -3503,8 +3563,21 @@
                                                :base-path (System/getProperty "user.dir")))
     (editor/editor-set-autocomplete-theme! ed (th/get-select-list-theme (cfg/get-theme config)))
 
-    ;; Status indicator (Pi-style: separate layer between chat and editor)
-    (let [si (ui/make-status-indicator :theme (cfg/get-theme config))
+    ;; Status indicator: the default editor embeds the active status in its
+    ;; own top border (pi: embedWorkingStatus); the standalone layer above
+    ;; the editor only appears for a custom editor without a top-border fn.
+    (let [si (ui/make-status-indicator
+              :theme (cfg/get-theme config)
+              ;; Embedded color (pi: showWorkingStatusIndicator's colorFn):
+              ;; while the ACTIVE editor carries the status, the spinner and
+              ;; message take the editor border color — the thinking level —
+              ;; resolved per call, so a level change recolors without
+              ;; reinstalling; standalone keeps the accent/muted pair.
+              :border-color-fn
+              (fn []
+                (let [active @current-editor-atom]
+                  (when (ui/editor-embeds-status? active)
+                    (when-some [bf (:border-fn active)] @bf)))))
           ;; Theme controller (pi: InteractiveThemeController) — created in
           ;; the layout so CoreState carries it for all handlers (slash
           ;; commands, /reload, extension registry); applies the configured
@@ -3538,6 +3611,19 @@
                            current-theme (or @(:thinking ag) :off)))
                   (tui/tui-request-render t))))
           cs (assoc cs :status-indicator si :theme-controller tc)
+          ;; The default editor renders the session status in its first
+          ;; line — its top border (pi: CustomEditor renderTopBorder). The
+          ;; hook reads the live status per render, so swaps and spinner
+          ;; ticks repaint with the normal frame.
+          _ (editor/editor-set-top-border-fn!
+             ed
+             (fn [{:keys [width hidden-line-count rule border-fn]}]
+               (ui/editor-top-border
+                {:indicator (current-status-indicator cs)
+                 :width width
+                 :hidden-line-count hidden-line-count
+                 :rule rule
+                 :border-fn border-fn})))
           ;; Pi layout (interactive-mode.ts setupUiLayout): the TUI root is a
           ;; single flat document — the transcript (header, loaded resources,
           ;; chat) followed top-to-bottom by pending messages, status, widgets
@@ -3559,8 +3645,13 @@
           widgets-below-atom (atom {})
           ;; The status layer as a mounted DSL tree (dsl.md stage 4): the
           ;; root's reaction re-derives when :status-current swaps, and
-          ;; reconcile swaps the child record — no clear/add dance.
-          status-root (hiccup/root (ui/make-status-area (:status-current cs) si))
+          ;; reconcile swaps the child record — no clear/add dance. It
+          ;; renders nothing while the active editor embeds the status in
+          ;; its top border (the default editor), and the standalone
+          ;; indicator otherwise (custom editors).
+          status-root (hiccup/root (ui/make-status-area (:status-current cs)
+                                                        si
+                                                        (:current-editor-atom cs)))
           ;; Widget areas as mounted DSL trees (dsl.md stage 4, pi:
           ;; renderWidgets): the widget maps are read tracked, so a
           ;; :set-widget swap re-derives exactly once; the leading spacer is
@@ -4073,17 +4164,22 @@
                                   (tui/tui-request-render t))
          :set-working-message (fn [message]
                                 (ui/status-indicator-set-text! (:status-indicator cs)
-                                                               (or message "Working..."))
+                                                               (or message "Working"))
                                 (tui/tui-request-render t))
          :set-working-visible (fn [visible?]
                                 ;; Pi: setWorkingVisible — clearStatusIndicator("working")
                                 ;; when hiding (kind-gated: a transient retry/
-                                ;; compaction indicator stays), re-show the working
-                                ;; indicator when showing (only while the turn runs).
+                                ;; compaction/share indicator stays), re-show the
+                                ;; working indicator when showing (only while the
+                                ;; turn runs, and only when it isn't already the
+                                ;; active status — pi checks the active kind, so
+                                ;; re-showing never restarts a spinning clock).
                                 ;; both branches schedule through the
                                 ;; guarded :status-current swap when real
                                 (if visible?
-                                  (when @(:running-turn? cs)
+                                  (when (and @(:running-turn? cs)
+                                             (not (ui/status-indicator-active?
+                                                   (:status-indicator cs))))
                                     (activate-working-indicator! cs))
                                   (clear-status-indicator! cs :working)))
          :set-hidden-thinking-label (fn [label]
@@ -4406,7 +4502,7 @@
                   (doseq [key (keys @(:extension-statuses-atom ftr))]
                     (ui/footer-set-extension-status! ftr key nil))
                   (spinner/spinner-set-indicator! (:spinner (:status-indicator cs)) nil)
-                  (ui/status-indicator-set-text! (:status-indicator cs) "Working...")
+                  (ui/status-indicator-set-text! (:status-indicator cs) "Working")
                   (ui/chat-history-set-hidden-thinking-label! ch nil)
                   (reset! extension-autocomplete-factories [])
                   (rebuild-autocomplete-provider!)

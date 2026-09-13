@@ -438,6 +438,18 @@ Rules:
   `border/bottom-line`, `border/mid-line` (with an optional edge-styling fn
   so the sides can take a different colour than the content) and
   `border/rule-line` rather than inlining glyphs.
+- A scrolled editor's rule carries a **centered** ` ↑ N more ` / ` ↓ N more `
+  label (pi: createScrollBorder); when the centered label cannot fit, the
+  truncated `─── ↑ N more ` prefix form is used, and when even that cannot,
+  the arrow head plus `...`.
+- The editor's top border can be taken over at runtime with
+  `editor/editor-set-top-border-fn!` — the hook (pi:
+  `CustomEditor.renderTopBorder`, the embedWorkingStatus opt-in) receives
+  `{:width :hidden-line-count :rule :border-fn}` and returns the full line,
+  or nil to fall back to the default rule. kmet's app uses it to embed the
+  session status in the editor's first line
+  (`kmet.app.ui.status-indicator/editor-top-border`), which is why no
+  separate status row sits above the editor for the default editor.
 
 ## 3. Reactivity
 

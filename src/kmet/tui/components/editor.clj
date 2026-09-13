@@ -1134,6 +1134,49 @@
             (recur (next ids)))
           false)))))
 
+;; ─── Top border (pi: Editor.renderTopBorder / CustomEditor override) ───────
+;; The top border is one line, optionally delegated to an installed
+;; top-border fn — the app's status-in-border hook (pi:
+;; CustomEditor.renderTopBorder, the embedWorkingStatus opt-in). The fn
+;; receives {:width :hidden-line-count :rule :border-fn} and returns the
+;; line, or nil to fall back to the default (the plain rule, or the
+;; centered scroll label when the view is scrolled).
+
+(defn- rule-run
+  "N copies of the already-styled rule glyph BDR."
+  [bdr n]
+  (apply str (repeat (max 0 n) bdr)))
+
+(defn- scroll-border-line
+  "The rule line carrying a centered ` ↑ N more ` (or ↓) label for HIDDEN
+   lines, or a truncated prefix when the centered label does not fit (pi:
+   createScrollBorder). GLYPH is the unstyled rule char and STYLE its
+   border color fn."
+  [glyph style direction hidden width]
+  (let [bdr (style glyph)
+        label (str " " direction " " hidden " more ")
+        label-w (u/visible-width label)
+        width (max 0 width)]
+    (if (<= (+ label-w 2) width)
+      (let [left (quot (- width label-w) 2)]
+        (str (rule-run bdr left) (style label) (rule-run bdr (- width left label-w))))
+      (let [indicator (str glyph glyph glyph " " direction " " hidden " more ")
+            prefix-w (u/visible-width indicator)]
+        (if (<= prefix-w width)
+          (str (style indicator) (rule-run bdr (- width prefix-w)))
+          ;; not even the prefix fits: keep the arrow head, ellipsize the rest
+          (let [ellipsis (subs "..." 0 (max 0 (min width 3)))
+                head-w (max 0 (- width (count ellipsis)))]
+            (style (str (subs indicator 0 (min (count indicator) head-w)) ellipsis))))))))
+
+(defn- default-top-border
+  "The top border when no top-border fn is installed or it declined (pi:
+   Editor.renderTopBorder)."
+  [glyph style hidden-line-count width]
+  (if (pos? hidden-line-count)
+    (scroll-border-line glyph style "↑" hidden-line-count width)
+    (rule-run (style glyph) width)))
+
 ;; ─── Editor component ──────────────────────────────────────────────────────
 
 (defcomponent Editor nil [state-atom scroll-offset-atom preferred-col-atom
@@ -1149,7 +1192,7 @@
                           autocomplete-list autocomplete-prefix
                           autocomplete-max-visible autocomplete-theme
                           action-handlers keybindings
-                          priority-action-handlers]
+                          priority-action-handlers top-border-fn-atom]
 
   (render [this width]
     (let [state @state-atom
@@ -1179,19 +1222,21 @@
             ;; the rule glyph comes from the border set (tui.md §2.8);
             ;; :none has no rule glyph, so fall back to the default bar
             rule (or (border/rule @border-atom) "─")
-            bdr (if @border-fn (@border-fn rule) rule)
+            style (or @border-fn identity)
+            bdr (style rule)
             left-pad (apply str (repeat padding-x \space))
             right-pad left-pad
             result (volatile! [])]
-        ;; Top border
-        (if (pos? scroll-offset)
-          (let [prefix (str rule rule rule " ↑ " scroll-offset " more ")
-                prefix-w (u/visible-width prefix)]
-            (vswap! result conj
-                    (if (>= prefix-w width)
-                      (subs prefix 0 width)
-                      (str prefix (apply str (repeat (- width prefix-w) rule))))))
-          (vswap! result conj (apply str (repeat width bdr))))
+        ;; Top border — an installed top-border fn renders it (the app's
+        ;; status-in-border hook); when absent or declining, the default
+        ;; rule (with the scroll label when scrolled).
+        (vswap! result conj
+                (or (when-some [top-fn @top-border-fn-atom]
+                      (top-fn {:width width
+                               :hidden-line-count scroll-offset
+                               :rule rule
+                               :border-fn @border-fn}))
+                    (default-top-border rule style scroll-offset width)))
         ;; Render visible lines
         (doseq [[vi vl] (map-indexed vector visible)]
           (let [vl-has-cursor (= (+ vi scroll-offset) cursor-visual-idx)
@@ -1221,14 +1266,10 @@
                 (vswap! result conj (str left-pad display-text p right-pad))))))
         ;; Bottom border
         (let [remaining (- (count visual-lines) (+ scroll-offset (count visible)))]
-          (if (pos? remaining)
-            (let [prefix (str rule rule rule " ↓ " remaining " more ")
-                  prefix-w (u/visible-width prefix)]
-              (vswap! result conj
-                      (if (>= prefix-w width)
-                        (subs prefix 0 width)
-                        (str prefix (apply str (repeat (- width prefix-w) rule))))))
-            (vswap! result conj (apply str (repeat width bdr)))))
+          (vswap! result conj
+                  (if (pos? remaining)
+                    (scroll-border-line rule style "↓" remaining width)
+                    (rule-run bdr width))))
         ;; Autocomplete dropdown below the border (pi: SelectList in render)
         (when (and @(:autocomplete-state this) @(:autocomplete-list this))
           (doseq [line (protocols/render @(:autocomplete-list this) content-width)]
@@ -1523,7 +1564,9 @@
      :keybindings — KeybindingsManager used to match app action handlers
                     (default: the global keybindings manager)
      :terminal-rows — (fn [] int) returning terminal rows for dynamic height
-                      (30% of rows, min 5 lines; pi behavior)"
+                      (30% of rows, min 5 lines; pi behavior)
+     The top border can be taken over later with editor-set-top-border-fn!
+     (the app's status-in-border hook)."
   [& {:keys [height padding-x border-fn keybindings terminal-rows border]
       :or {height 12 padding-x 0}}]
   (map->Editor {:state-atom (atom (make-editor-state))
@@ -1559,6 +1602,7 @@
                 :autocomplete-theme (atom select-list/default-theme)
                 :action-handlers (atom {})
                 :priority-action-handlers (atom {})
+                :top-border-fn-atom (atom nil)
                 :keybindings (atom keybindings)}))
 
 (defn editor-set-text! [editor text]
@@ -1589,6 +1633,18 @@
   "Set the horizontal padding in columns (pi: EditorComponent.setPaddingX)."
   [editor n]
   (reset! (:padding-x editor) n))
+
+(defn editor-set-top-border-fn!
+  "Install F as the editor's top-border renderer, or nil to restore the
+   default rule. F is called on every render with
+   {:width :hidden-line-count :rule :border-fn} and returns the full top
+   border line, or nil to fall back to the default (a plain rule, or the
+   centered scroll label when scrolled). This is the app's status-in-border
+   hook (pi: CustomEditor.renderTopBorder — the embedWorkingStatus opt-in
+   that puts the session status in the editor's first line; the app's
+   kmet.app.ui.status-indicator/editor-embeds-status? reads it back)."
+  [editor f]
+  (reset! (:top-border-fn-atom editor) f))
 
 (defn editor-insert-text-at-cursor!
   "Insert text at the current cursor position (pi:

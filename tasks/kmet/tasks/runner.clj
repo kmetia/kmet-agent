@@ -154,6 +154,7 @@
     kmet.app.ui.test-footer
     kmet.app.ui.test-footer-data-provider
     kmet.app.ui.test-pending-messages
+    kmet.app.ui.test-status-indicator
     kmet.app.ui.test-loaded-resources
     kmet.app.ui.test-scoped-models-selector
     kmet.app.ui.test-model-selector

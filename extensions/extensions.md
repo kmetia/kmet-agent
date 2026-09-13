@@ -693,6 +693,10 @@ from the api.
 (ext/ui-set-working-visible api true)
 (ext/ui-set-hidden-thinking-label api "…")
 (ext/ui-set-editor-component api (fn [tui theme keybindings] comp))
+;; The default editor embeds the session status (working/retry/compaction/
+;; branch-summarization spinner) in its own first line — the top border.
+;; A custom editor is plain: it has no top-border hook, so the standalone
+;; status layer above the dock keeps rendering the status with it.
 (ext/ui-add-autocomplete-provider api (fn [base-provider] wrapped-or-nil))
 (ext/ui-on-terminal-input api (fn [data] nil-or-{:consume true :data d}))
 (ext/ui-set-tools-expanded api true)

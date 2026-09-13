@@ -6,6 +6,7 @@
             [clojure.test :as t :refer [deftest testing]]
             [kmet.tui.autocomplete :as ac]
             [kmet.tui.components.editor :as editor]
+            [kmet.tui.components.spinner :as spinner]
             [kmet.tui.hiccup :as hiccup]
             [kmet.tui.macros :as macros]
             [kmet.tui.theme :as theme]
@@ -412,14 +413,18 @@
 (defn- test-status-cs
   "A minimal CoreState-like map for the status swap helpers: the status
    layer is a hiccup/root-mounted fn component over a :status-current atom
-   (dsl.md stage 4), so renders go through the root's reaction + reconcile."
+   (dsl.md stage 4), so renders go through the root's reaction + reconcile.
+   The editor atom holds no editor — a custom editor that cannot embed the
+   status, so the standalone layer renders."
   []
-  (let [si (ui/make-status-indicator :text "Working...")
-        cur (atom nil)]
+  (let [si (ui/make-status-indicator :text "Working")
+        cur (atom nil)
+        ced (atom nil)]
     {:tui {:render-requested? (atom false)}
      :status-indicator si
      :status-current cur
-     :status-root (hiccup/root (ui/make-status-area cur si))
+     :current-editor-atom ced
+     :status-root (hiccup/root (ui/make-status-area cur si ced))
      :running-turn? (atom true)}))
 
 (defn- status-lines [cs]
@@ -488,6 +493,96 @@
         ((var inter/clear-status-indicator!) cs :retry)
         (t/is (blank-status? cs))
         (t/is (nil? @(:status-current cs)))))))
+
+(deftest test-current-status-indicator
+  (testing "the editor-border hook's status source: the transient swap when
+            one is up, else the active working indicator, else nil"
+    (let [cs (test-status-cs)]
+      (t/is (nil? ((var inter/current-status-indicator) cs)))
+      ((var inter/activate-working-indicator!) cs)
+      (t/is (identical? (:status-indicator cs)
+                        ((var inter/current-status-indicator) cs)))
+      (let [retry (ui/make-retry-status-indicator 1 3 2000)]
+        ((var inter/show-status-indicator!) cs :retry retry)
+        (t/is (identical? retry ((var inter/current-status-indicator) cs))))
+      ((var inter/clear-status-indicator!) cs)
+      (t/is (nil? ((var inter/current-status-indicator) cs))))))
+
+(deftest test-clear-working-status
+  (testing ":working clears the implicit working status — pi:
+            setWorkingVisible(false) → clearStatusIndicator('working')"
+    (let [cs (test-status-cs)]
+      ((var inter/activate-working-indicator!) cs)
+      (t/is (working-status? cs))
+      ((var inter/clear-status-indicator!) cs :working)
+      (t/is (blank-status? cs))
+      (t/is (nil? @(:status-current cs)))))
+  (testing "a transient indicator is not the working status — a :working
+            clear leaves it"
+    (let [cs (test-status-cs)]
+      ((var inter/show-status-indicator!) cs :compaction
+                                          (ui/make-compaction-status-indicator))
+      ((var inter/clear-status-indicator!) cs :working)
+      (t/is (= :compaction (:kind @(:status-current cs)))))))
+
+(deftest test-release-background-status
+  (testing "a background status (share/branch summary) releases its slot and
+            gives the working spinner back while the turn still streams"
+    (let [cs (test-status-cs)
+          share (spinner/make-spinner :text "Creating gist..." :active true)]
+      ((var inter/activate-working-indicator!) cs)
+      ((var inter/show-status-indicator!) cs :share share)
+      (t/is (not (working-status? cs)))
+      ((var inter/release-background-status!) cs :share share)
+      (t/is (nil? @(:status-current cs)))
+      (t/is (working-status? cs))))
+  (testing "no revive when the turn ended"
+    (let [cs (test-status-cs)
+          share (spinner/make-spinner :text "Creating gist..." :active true)]
+      (reset! (:running-turn? cs) false)
+      ((var inter/show-status-indicator!) cs :share share)
+      ((var inter/release-background-status!) cs :share share)
+      (t/is (blank-status? cs))))
+  (testing "a newer transient owns the slot — neither cleared nor displaced"
+    (let [cs (test-status-cs)
+          share (spinner/make-spinner :text "Creating gist..." :active true)]
+      ((var inter/show-status-indicator!) cs :share share)
+      ((var inter/show-status-indicator!) cs :retry
+                                          (ui/make-retry-status-indicator 1 3 2000))
+      ((var inter/release-background-status!) cs :share share)
+      (t/is (= :retry (:kind @(:status-current cs))))))
+  (testing "only the indicator the flow installed is released (a second
+            /share keeps its spinner)"
+    (let [cs (test-status-cs)
+          first-share (spinner/make-spinner :text "one" :active true)
+          second-share (spinner/make-spinner :text "two" :active true)]
+      ((var inter/show-status-indicator!) cs :share first-share)
+      ((var inter/show-status-indicator!) cs :share second-share)
+      ((var inter/release-background-status!) cs :share first-share)
+      (t/is (identical? second-share (:indicator @(:status-current cs))))))
+  (testing "an already-revived working spinner is not restarted (its
+            animation clock survives)"
+    (let [cs (test-status-cs)
+          share (spinner/make-spinner :text "Creating gist..." :active true)]
+      ((var inter/show-status-indicator!) cs :share share)
+      ;; a :turn-start revived the working spinner while the background op
+      ;; ran — the late release must not touch it
+      ((var inter/activate-working-indicator!) cs)
+      (let [start @(:start-atom (:spinner (:status-indicator cs)))]
+        (Thread/sleep 5)
+        ((var inter/release-background-status!) cs :share share)
+        (t/is (= start @(:start-atom (:spinner (:status-indicator cs))))))))
+  (testing "a turn ending mid-revival must not leave a spinner behind (the
+            post-revival re-check rolls it back)"
+    (let [cs (test-status-cs)
+          share (spinner/make-spinner :text "Creating gist..." :active true)
+          real (var-get (var inter/activate-working-indicator!))]
+      ((var inter/show-status-indicator!) cs :share share)
+      (with-redefs-fn {(var inter/activate-working-indicator!)
+                       (fn [c] (reset! (:running-turn? c) false) (real c))}
+        (fn [] ((var inter/release-background-status!) cs :share share)))
+      (t/is (not (ui/status-indicator-active? (:status-indicator cs)))
+            "the revived spinner is stopped again"))))
 
 ;; ─── /scoped-models + /settings (missing slash commands) ───────────────────
 
@@ -1014,20 +1109,23 @@
   (let [ag (agent/make-agent-state)
         ch (ui/make-chat-history)
         ed (editor/make-editor)
-        si (ui/make-status-indicator :text "Working...")
-        cur (atom nil)]
+        si (ui/make-status-indicator :text "Working")
+        cur (atom nil)
+        ;; a plain editor (no top-border fn) cannot embed the status, so
+        ;; the standalone layer renders for these tests
+        ced (atom ed)]
     {:tui {:render-requested? (atom false)}
      :agent-state (atom ag)
      :chat-history ch
      :editor ed
-     :current-editor-atom (atom ed)
+     :current-editor-atom ced
      :compaction-queued (atom [])
      :running-turn? (atom false)
      :bash-running? (atom false)
      :bash-signal (atom false)
      :status-indicator si
      :status-current cur
-     :status-root (hiccup/root (ui/make-status-area cur si))
+     :status-root (hiccup/root (ui/make-status-area cur si ced))
      :footer-comp nil
      :footer-provider nil
      :pending-messages-comp (ui/make-pending-messages)
