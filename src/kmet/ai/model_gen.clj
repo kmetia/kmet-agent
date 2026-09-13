@@ -223,22 +223,30 @@
     "claude-opus-5" "claude-sonnet-4.6" "claude-sonnet-5"
     "gpt-5.3-codex" "gpt-5.4" "gpt-5.5"})
 
-(def deepseek-v4-models
-  "Hardcoded V4 pair — models.dev lags the DeepSeek API, pi carries them as
-   deepseekV4Models (cost + 1M context). Ported verbatim; deepseek is the one
-   provider pi does not process from models.dev."
-  [(array-map :id "deepseek-v4-flash" :name "DeepSeek V4 Flash"
+(def deepseek-models
+  "Hardcoded DeepSeek catalog — models.dev lags the DeepSeek API, pi carries
+   these as deepseekModels. Ported verbatim; deepseek is the one provider pi
+   does not process from models.dev. `deepseek-flash` is the canonical V4.1
+   Flash id (pi 12f59336a replaced the retired deepseek-v4-flash /
+   deepseek-v4-flash-vision-exp aliases with it). Pricing is standard —
+   DeepSeek's time-based off-peak rates are not representable in the cost
+   schema."
+  [(array-map :id "deepseek-flash" :name "DeepSeek V4.1 Flash"
               :provider :deepseek :api :openai-completions
               :base-url "https://api.deepseek.com"
-              :reasoning true :input [:text]
-              :cost (array-map :input 0.14 :output 0.28 :cache-read 0.0028 :cache-write 0)
+              :reasoning true :input [:text :image]
+              ;; pi sets this explicitly: the metadata rule keys on ids
+              ;; containing "deepseek-v4", which "deepseek-flash" does not
+              :thinking-level-map (array-map :minimal nil :low "low" :medium nil
+                                             :high "high" :max "max")
+              :cost (array-map :input 0.3 :output 1.2 :cache-read 0.006 :cache-write 0)
               :context-window 1000000 :max-tokens 384000
               :compat deepseek-compat)
    (array-map :id "deepseek-v4-pro" :name "DeepSeek V4 Pro"
               :provider :deepseek :api :openai-completions
               :base-url "https://api.deepseek.com"
               :reasoning true :input [:text]
-              :cost (array-map :input 0.435 :output 0.87 :cache-read 0.003625 :cache-write 0)
+              :cost (array-map :input 1.32 :output 3.96 :cache-read 0.044 :cache-write 0)
               :context-window 1000000 :max-tokens 384000
               :compat deepseek-compat)])
 
@@ -1926,12 +1934,14 @@
    "claude-opus-5"                     [:anthropic "claude-opus-5"]
    "claude-sonnet-4-6"                 [:anthropic "claude-sonnet-4-6"]
    "claude-sonnet-5"                   [:anthropic "claude-sonnet-5"]
-   "deepseek/deepseek-v4-flash"        [:deepseek "deepseek-v4-flash"]
+   "deepseek/deepseek-v4-flash"        [:deepseek "deepseek-flash"]
    "deepseek/deepseek-v4-flash-vision-exp" [:opencode-go "deepseek-v4-flash-vision-exp"]
    "deepseek/deepseek-v4-pro"          [:deepseek "deepseek-v4-pro"]
-   ;; same weights as opencode-go's "DeepSeek V4.1 Flash" (deepseek.edn has
-   ;; no v4.1 entry); without a ref the endpoint entry kept :reasoning false
-   "deepseek/deepseek-v4.1-flash"      [:opencode-go "deepseek-flash"]
+   ;; pi 12f59336a: the retired v4-flash aliases collapse into DeepSeek's
+   ;; canonical `deepseek-flash` (V4.1 Flash, text+image); clamping to
+   ;; :deepseek keeps the ref off rename-prone aggregator ids (opencode-go
+   ;; renamed its copy to "deepseek-v4.1-flash" and broke the old ref).
+   "deepseek/deepseek-v4.1-flash"      [:deepseek "deepseek-flash"]
    "google/gemini-3.1-flash-lite"      [:google "gemini-3.1-flash-lite"]
    "google/gemini-3.5-flash"           [:google "gemini-3.5-flash"]
    "google/gemini-3.5-flash-lite"      [:google "gemini-3.5-flash-lite"]
@@ -2013,6 +2023,16 @@
                        :supports-developer-role false
                        :max-tokens-field :max-tokens)}})
 
+(defn- warn-unresolved-commandcode-ref!
+  "Warn when a LISTED canonical ref resolves to nil in this run's catalogs:
+   the endpoint entry then silently falls back to conservative defaults
+   (:reasoning false, text-only, 32768 max-tokens). The deepseek-v4.1-flash
+   regression shipped exactly this way — the opencode-go canonical id was
+   renamed and the ref kept pointing at the old one."
+  [cid rp rid]
+  (println (str "Warning: CommandCode canonical ref " cid " -> " rp " " rid
+                " did not resolve — falling back to conservative defaults.")))
+
 (defn- process-commandcode
   "Live CommandCode entries × the canonical groups built this run → kmet
    model maps. Capabilities resolve per id: explicit override > canonical
@@ -2024,6 +2044,8 @@
         :let [cid (get m "id")
               [rp rid] (get commandcode-canonical-refs cid)
               ref (when rp (get-in grouped [rp rid]))
+              _ (when (and rp (nil? ref))
+                  (warn-unresolved-commandcode-ref! cid rp rid))
               ov (get commandcode-overrides cid)
               api (if (str/starts-with? (or cid "") "claude")
                     :anthropic-messages
@@ -2131,7 +2153,7 @@
                          (map #(apply-thinking-maps % nil)
                               (process-vercel-ai-gateway ai-gateway-models))
                          (map #(apply-thinking-maps % nil) (process-ant-ling))
-                         (map #(apply-thinking-maps % nil) deepseek-v4-models)
+                         (map #(apply-thinking-maps % nil) deepseek-models)
                          (map #(apply-thinking-maps % nil) (process-codex)))
                  (remove nil?))
         ;; pi: mistral-medium-3.5 is hardcoded until models.dev includes it

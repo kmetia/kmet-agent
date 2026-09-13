@@ -1397,7 +1397,7 @@
   ;; models, absent elsewhere.
   (m/load-catalogs!)
   (t/is (true? (:requires-reasoning-content-on-assistant-messages
-                (:compat (m/get-model :deepseek "deepseek-v4-flash")))))
+                (:compat (m/get-model :deepseek "deepseek-flash")))))
   (t/is (true? (:requires-reasoning-content-on-assistant-messages
                 (:compat (m/get-model :opencode-go "deepseek-v4-flash")))))
   (t/is (nil? (:requires-reasoning-content-on-assistant-messages

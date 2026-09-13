@@ -1,25 +1,25 @@
 {:schema-version 1
- :generated-at "2026-09-02T23:43:15Z"
+ :generated-at "2026-09-13T13:43:23Z"
  :provider {:id :deepseek
             :name "DeepSeek"
             :env-vars ["DEEPSEEK_API_KEY"]
             :default-model "deepseek-v4-pro"}
  :models
  {:openai-completions
-  {"deepseek-v4-flash"
-   {:id "deepseek-v4-flash"
-    :name "DeepSeek V4 Flash"
+  {"deepseek-flash"
+   {:id "deepseek-flash"
+    :name "DeepSeek V4.1 Flash"
     :provider :deepseek
     :api :openai-completions
     :base-url "https://api.deepseek.com"
     :reasoning true
     :thinking-level-map {:high "high"
-                         :low nil
+                         :low "low"
                          :max "max"
                          :medium nil
                          :minimal nil}
-    :input [:text]
-    :cost {:input 0.14 :output 0.28 :cache-read 0.0028 :cache-write 0}
+    :input [:text :image]
+    :cost {:input 0.3 :output 1.2 :cache-read 0.006 :cache-write 0}
     :context-window 1000000
     :max-tokens 384000
     :compat {:supports-store false
@@ -40,7 +40,7 @@
                          :medium nil
                          :minimal nil}
     :input [:text]
-    :cost {:input 0.435 :output 0.87 :cache-read 0.003625 :cache-write 0}
+    :cost {:input 1.32 :output 3.96 :cache-read 0.044 :cache-write 0}
     :context-window 1000000
     :max-tokens 384000
     :compat {:supports-store false

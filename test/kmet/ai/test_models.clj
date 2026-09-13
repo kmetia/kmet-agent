@@ -363,7 +363,7 @@
         (t/is (some? (m/get-provider :my-custom)))
         (t/is (= "Custom Provider" (:name (m/get-provider :my-custom))))
         (t/is (= 555 (:context-window (m/get-model :deepseek "deepseek-v4-pro"))))
-        (t/is (= "https://proxy.example/v1" (:base-url (m/get-model :deepseek "deepseek-v4-flash"))))
+        (t/is (= "https://proxy.example/v1" (:base-url (m/get-model :deepseek "deepseek-flash"))))
         (t/is (= ["custom-1"] (mapv :id (m/get-models :my-custom))))
         (t/is (= :openai-completions (:api (m/get-model :my-custom "custom-1")))))
       (t/testing "auth hook: models.edn api-key resolves ahead of env (pi order)"
@@ -415,7 +415,7 @@
         (t/is (some? (m/get-model-config-error)))
         (t/is (nil? (m/get-provider :broken)) "config-only provider that fails to compose is dropped")
         (t/is (some? (m/get-provider :deepseek)))
-        (t/is (some? (m/get-model :deepseek "deepseek-v4-flash")) "builtin models kept"))
+        (t/is (some? (m/get-model :deepseek "deepseek-flash")) "builtin models kept"))
       (finally
         (fs/delete-tree tmp)
         (m/load-catalogs!)))))
@@ -524,10 +524,10 @@
       (t/is (nil? (m/get-registered-provider-config :ext-prov))))
     (t/testing "extension over a builtin: base-url override, builtin restored on unregister"
       (m/register-provider-config! :deepseek {:base-url "https://ext-proxy/v1"})
-      (t/is (= "https://ext-proxy/v1" (:base-url (m/get-model :deepseek "deepseek-v4-flash"))))
+      (t/is (= "https://ext-proxy/v1" (:base-url (m/get-model :deepseek "deepseek-flash"))))
       (t/is (some? (m/get-model :deepseek "deepseek-v4-pro")) "builtin models kept")
       (m/unregister-provider-config! :deepseek)
-      (t/is (= "https://api.deepseek.com" (:base-url (m/get-model :deepseek "deepseek-v4-flash")))
+      (t/is (= "https://api.deepseek.com" (:base-url (m/get-model :deepseek "deepseek-flash")))
             "builtin restored"))
     (finally
       (m/clear-extension-providers!)
@@ -610,7 +610,7 @@
                    (m/get-api-key-and-headers {:provider :no-such-provider :id "x"})))
           (t/testing "no key + no auth-header → ok without key (pi)"
             (t/is (= {:ok true :api-key nil :headers nil}
-                     (m/get-api-key-and-headers (m/get-model :deepseek "deepseek-v4-flash")))))
+                     (m/get-api-key-and-headers (m/get-model :deepseek "deepseek-flash")))))
           (t/testing "no key + auth-header → error naming the provider (pi)"
             (m/register-provider-config! :keyless
                                          {:base-url "https://k/v1" :api :openai-completions
@@ -629,7 +629,7 @@
         path (str tmp "/models.edn")]
     (fs/create-dirs tmp)
     (try
-      (let [orig-flash-cw (:context-window (m/get-model :deepseek "deepseek-v4-flash"))]
+      (let [orig-flash-cw (:context-window (m/get-model :deepseek "deepseek-flash"))]
         (spit path "{:providers {:deepseek {:model-overrides {\"deepseek-v4-pro\" {:context-window 444}}}}}\n")
         (let [agent-dir (str tmp "/agent")]
           (fs/create-dirs agent-dir)
@@ -637,11 +637,11 @@
           (with-redefs [fs/cwd (fn [] tmp)]
             (m/load-models-config! agent-dir))
           (m/register-provider-config! :deepseek {:base-url "https://ext-overlay/v1"})
-          (t/is (= "https://ext-overlay/v1" (:base-url (m/get-model :deepseek "deepseek-v4-flash")))
+          (t/is (= "https://ext-overlay/v1" (:base-url (m/get-model :deepseek "deepseek-flash")))
                 "extension base-url wins over builtin")
           (t/is (= 444 (:context-window (m/get-model :deepseek "deepseek-v4-pro")))
                 "models.edn override still applied underneath")
-          (t/is (= orig-flash-cw (:context-window (m/get-model :deepseek "deepseek-v4-flash")))
+          (t/is (= orig-flash-cw (:context-window (m/get-model :deepseek "deepseek-flash")))
                 "untouched model keeps catalog values")))
       (finally
         (fs/delete-tree tmp)

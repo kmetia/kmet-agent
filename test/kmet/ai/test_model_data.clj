@@ -98,7 +98,7 @@
    deepseek-v4/claude/gpt entries lost thinking support. Drive the same
    path generate-models-data uses: provider-model-index over the canonical
    models, then process-commandcode."
-  (let [canonical {:id "deepseek-v4-flash" :provider :deepseek
+  (let [canonical {:id "deepseek-flash" :provider :deepseek
                    :api :openai-completions :base-url "https://api.deepseek.com"
                    :reasoning true :input [:text]
                    :cost {:input 0.14 :output 0.28 :cache-read 0.0028 :cache-write 0}
@@ -302,3 +302,33 @@
               :off nil :xhigh "xhigh"}
              (:thinking-level-map out))
           "the 1.3 contributor keeps its full effort map")))
+
+(t/deftest test-commandcode-deepseek-v41-flash-ref-resolves
+  "Regression: the commandcode deepseek-v4.1-flash ref must resolve against
+   DeepSeek's own canonical catalog. It previously pointed at opencode-go's
+   then-deepseek-flash id, which that aggregator renamed to
+   deepseek-v4.1-flash (models bump 2026-09-11) — the ref resolved to nil
+   and the endpoint entry silently reverted to conservative defaults
+   (:reasoning false, text-only, 32768 max-tokens). pi 12f59336a carries the
+   canonical model as :deepseek/deepseek-flash (V4.1 Flash); clamp there
+   and guard both the ref value and the committed catalog entry."
+  (let [refs @#'mg/commandcode-canonical-refs
+        [rp rid] (get refs "deepseek/deepseek-v4.1-flash")
+        catalogs (#'mg/read-catalogs mg/data-dir)
+        canonical (get-in catalogs [rp :openai-completions rid])
+        cc (get-in catalogs [:commandcode :openai-completions
+                             "deepseek/deepseek-v4.1-flash"])]
+    (t/is (= [:deepseek "deepseek-flash"] [rp rid])
+          "the ref must clamp to DeepSeek's canonical v4.1 flash id")
+    (t/is (some? canonical)
+          (str "the referenced canonical model must exist in the committed "
+               "catalog (" rp " " rid ")"))
+    (t/is (some? cc) "the commandcode entry must exist")
+    (t/is (= true (:reasoning cc))
+          "the commandcode entry must carry thinking support")
+    (t/is (= 384000 (:max-tokens cc))
+          "canonical :max-tokens must transfer (not the 32768 fallback)")
+    (t/is (= [:text :image] (:input cc))
+          "canonical image input must transfer")
+    (t/is (= (:thinking-level-map canonical) (:thinking-level-map cc))
+          "thinking levels must transfer from the canonical entry")))
