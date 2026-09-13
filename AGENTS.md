@@ -27,13 +27,18 @@
   are handled via analysis hooks in `.clj-kondo/hooks/`; keep them in sync when the macro shapes change.
 - **Format**: `bb format` (fix) / `bb format-check` (verify) — cljfmt over `src`/`test`/`tasks`/`extensions`.
   The format tasks are one code path on both hosts (`kmet.tasks.format`):
-  cljfmt is declared for babashka (`bb.edn` `:deps`) and for jolt (`deps.edn`,
-  where `org.clojure/spec.alpha` must be declared too — jolt's resolver drops
-  cljfmt's `org.clojure/clojure` dep, and `cljfmt.config` requires spec).
-  Nothing wraps the library: failures propagate as themselves. jolt
-  presently fails inside rewrite-clj's reader on `java.lang.StringBuffer`'s
-  missing ctor (ticketed in `jolt-bugs.md`), so `jolt format*` errors out at
-  the library until the runtime provides it — use `bb format` there.
+  cljfmt is declared for babashka (`bb.edn` `:deps`) and for jolt (`deps.edn`).
+  On jolt two extra deps are load-bearing: `org.clojure/spec.alpha` (jolt's
+  resolver drops cljfmt's `org.clojure/clojure` dep and `cljfmt.config` needs
+  spec) and a `rewrite-clj` pin at the version babashka bundles (bb's
+  built-in beats cljfmt's transitive 1.2.50, and jolt cannot construct
+  `java.lang.StringBuffer`, which 1.2.50's reader still builds — jolt#978;
+  the pin keeps both hosts on the same parser and is the removal checklist
+  entry in `jolt-bugs.md`). Throughput is not symmetric: jolt formats at
+  ~1.6 s/file to babashka's ~0.12 s, so a full-tree `jolt format-check` runs
+  minutes — use the changed-file task (`jolt format-check-changed`) or
+  babashka for the whole tree. Nothing wraps the library: failures propagate
+  as themselves.
   The generated EDN provider catalogs (`src/kmet/ai/model_data/`,
   `src/kmet/ai/image_model_data/`) are excluded: their exact bytes are
   sha256-manifested (`manifest.edn`, checked by `bb check-model-data`) and are
@@ -68,8 +73,8 @@
   jolt vendors the same namespaces (built-in, resolving ahead of any classpath copy; public
   surfaces `jolt.fs` / `jolt.process` — `jolt.fs` excludes zip/gzip). A Maven copy would only
   risk shadowing the vendored one, so kmet relies on both hosts' built-ins.
-  Tooling deps (`cljfmt`, plus its `org.clojure/spec.alpha` need on jolt) in `bb.edn` `:deps` and
-  `deps.edn`; JLine **4.3.1** bundled with Babashka (see
+  Tooling deps (`cljfmt`, plus its `org.clojure/spec.alpha` and `rewrite-clj`
+  companions on jolt) in `bb.edn` `:deps` and `deps.edn`; JLine **4.3.1** bundled with Babashka (see
   babashka `deps.edn`: `org.jline/jline-terminal`, `org.jline/jline-reader`) as the
   bb/JVM terminal backend — the Jolt terminal backend uses no dependency: termios /
   kernel32 through `jolt.ffi`.

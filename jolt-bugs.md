@@ -211,11 +211,15 @@ mutable char buffer, plus `append(char)` / `append(String)` and `toString`
 Jolt's level for this use, so wrapping/aliasing StringBuilder's backing
 store would satisfy the callers.
 
-**Workaround:** none in kmet — the format tasks are one code path on both
-hosts and this library/runtime error is left to surface (upstream
-rewrite-clj 1.2.55 moved JVM-family readers to `StringBuilder`, but kmet
-does not carry a version override for it). Formatting runs on `bb` until the
-runtime provides the ctor.
+**Workaround** (`deps.edn`): `rewrite-clj/rewrite-clj {:mvn/version "1.2.57"}`
+is declared alongside cljfmt, so jolt parses with the version babashka
+already bundles (bb's built-in wins over cljfmt's transitive 1.2.50 there,
+and 1.2.55 moved the JVM-family reader onto `StringBuilder`; the pin also
+keeps both hosts on the same parser). Removal: when the runtime supplies the
+ctor the pin is no longer load-bearing — dropping it restores cljfmt's
+1.2.50 on jolt, while babashka keeps its bundled 1.2.57. Seeding: this host
+could not fetch the jar at all, so it was downloaded through babashka's
+resolver once (see the `mvn-http` entry below).
 
 ### `jolt.mvn-http` reads `ai_addr` at the glibc offset: on Android/bionic it gets NULL, `connect()` EFAULTs, fetching fails
 

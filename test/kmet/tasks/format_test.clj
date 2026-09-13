@@ -1,9 +1,8 @@
 (ns kmet.tasks.format-test
   "Tests for the format task wrapper: the managed-file enumeration excludes
    build output and the generated provider catalogs, and the cljfmt
-   invocation runs. The invocation is ^:bb-only while jolt's rewrite-clj
-   hits java.lang.StringBuffer's missing ctor (jolt-bugs.md ticket): the
-   library error is left to surface, so only babashka completes a format."
+   invocation runs — on both hosts (the rewrite-clj pin makes jolt's
+   parser complete; see jolt-bugs.md#978)."
   (:require [clojure.string :as str]
             [clojure.test :as t]
             [babashka.fs :as fs]
@@ -25,7 +24,7 @@
     (t/is (not-any? #(some #{"target"} (dir-segments %)) paths)
           "build output is excluded")))
 
-(t/deftest ^:bb-only test-cljfmt-runs-on-bb
+(t/deftest test-cljfmt-runs
   (t/testing "the wrapper resolves cljfmt.tool and checks a file"
     (let [dir (or (System/getenv "TMPDIR") (System/getProperty "java.io.tmpdir"))
           f (fs/create-temp-file {:prefix "kmet-fmt-" :suffix ".clj" :dir dir})]

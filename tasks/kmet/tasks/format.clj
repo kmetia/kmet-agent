@@ -2,10 +2,15 @@
   "Format tasks (bb format / bb format-check / the *-changed variants) over
    cljfmt — the same code path on both hosts. cljfmt is a tooling dep on
    both classpaths (bb.edn :deps for babashka, deps.edn for jolt, where
-   org.clojure/spec.alpha must be declared explicitly too). Nothing here
-   wraps the library: whatever cljfmt or the host's JDK surface under it
-   fails on propagates as itself — jolt presently fails inside rewrite-clj's
-   reader on java.lang.StringBuffer's missing ctor (jolt-bugs.md ticket)."
+   org.clojure/spec.alpha and the rewrite-clj pin are declared too: jolt's
+   resolver drops cljfmt's org.clojure/clojure dep, and the pin ties jolt to
+   the rewrite-clj babashka bundles — see deps.edn / jolt-bugs.md#978).
+   Nothing here wraps the library: failures propagate as themselves.
+
+   Throughput note: jolt formats at ~1.6 s/file to babashka's ~0.12 s (the
+   interpreter runs rewrite-clj), so a full-tree jolt run is minutes — the
+   changed-file task (`jolt format-check-changed`) and babashka remain the
+   practical gates for the whole tree."
   (:require [babashka.fs :as fs]
             [kmet.tasks.changed :as changed]))
 
