@@ -7,7 +7,14 @@
             [kmet.tui.macros :refer [defcomponent]]))
 
 (defcomponent Container nil [children]
-  (render [_this width] (into [] (mapcat #(protocols/render % width)) @children))
+  (render [_this width]
+    ;; Transient reduce instead of (into [] (mapcat …)): the flat document can
+    ;; be tens of thousands of lines and this runs every frame — the lazy
+    ;; seqs cost real allocation and GC.
+    (persistent!
+     (reduce (fn [acc c] (reduce conj! acc (protocols/render c width)))
+             (transient [])
+             @children)))
   ;; pi: no handleInput on containers — input routes via TUI focus
   (invalidate [_this] (doseq [c @children] (protocols/invalidate c)))
   (dispose [_this] (doseq [c @children] (protocols/dispose c))))

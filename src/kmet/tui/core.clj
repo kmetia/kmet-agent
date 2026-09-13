@@ -1726,13 +1726,12 @@
                     ;; pi: applyLineResets — every non-image line ends with a
                     ;; full SGR + OSC 8 reset (SEGMENT_RESET) so a truncated
                     ;; line can never leave active attributes or an open
-                    ;; hyperlink bleeding into the next line; the diff's
-                    ;; partial rewrites rely on each line being self-cleaning.
-                    lines (mapv (fn [line]
-                                  (if (img/is-image-line line)
-                                    line
-                                    (str line utils/SEGMENT-RESET)))
-                                lines)
+                    ;; hyperlink bleeding into the next line. It is applied at
+                    ;; emit time (emit-line!) rather than to the whole LINES
+                    ;; vector: rebuilding every line's string each frame would
+                    ;; defeat the diff scan's identical? fast path (unchanged
+                    ;; lines stay the same objects that the component caches
+                    ;; return).
                     prev @(:previous-lines tui)
                     prev-w @(:previous-width tui)
                     prev-h @(:previous-height tui)
@@ -1758,6 +1757,10 @@
                     ;; diff buffer is a local that fullRender replaces).
                     sb (atom (StringBuilder.))
                     emit! (fn [s] (.append @sb s))
+                    emit-line! (fn [line]
+                                 (emit! (if (img/is-image-line line)
+                                          line
+                                          (str line utils/SEGMENT-RESET))))
                     debug-redraw? @(:debug-redraw? tui)
                     log-redraw! (fn [reason]
                                   (when debug-redraw?
@@ -1813,10 +1816,10 @@
                                            (if (and (> rows 1) (<= rows h))
                                              (do (dotimes [_ (dec rows)] (emit! "\r\n"))
                                                  (emit! (str "\u001b[" (dec rows) "A"))
-                                                 (emit! (nth lines i))
+                                                 (emit-line! (nth lines i))
                                                  (emit! (str "\u001b[" (dec rows) "B"))
                                                  (recur (+ i rows)))
-                                             (do (emit! (nth lines i))
+                                             (do (emit-line! (nth lines i))
                                                  (recur (inc i)))))))
                                      (emit! CSI-2026-L)
                                      (reset! hardware-cursor-row (max 0 (dec new-count)))
@@ -1832,9 +1835,15 @@
                                         (if (< i max-lines)
                                           (let [old-line (if (< i prev-count) (nth prev i) "")
                                                 new-line (if (< i new-count) (nth lines i) "")]
-                                            (if (not= old-line new-line)
-                                              (recur (inc i) (if (neg? fc) i fc) i)
-                                              (recur (inc i) fc lc)))
+                                            ;; identical? first: unchanged lines are the
+                                            ;; same objects the component caches returned
+                                            ;; (nothing rewrites them per frame), so the
+                                            ;; common case is an O(1) pointer compare
+                                            ;; instead of a full string =
+                                            (if (or (identical? old-line new-line)
+                                                    (= old-line new-line))
+                                              (recur (inc i) fc lc)
+                                              (recur (inc i) (if (neg? fc) i fc) i)))
                                           [fc lc]))
                                       appended? (> new-count prev-count)
                                       [first-changed last-changed]
@@ -1987,7 +1996,7 @@
                                                     (do (emit! "\u001b[2K")
                                                         (dotimes [_ (dec rows)] (emit! "\r\n\u001b[2K"))
                                                         (emit! (str "\u001b[" (dec rows) "A"))
-                                                        (emit! line)
+                                                        (emit-line! line)
                                                         (emit! (str "\u001b[" (dec rows) "B"))
                                                         (recur (+ i rows)))))
                                                 (do (emit! "\u001b[2K")
@@ -1995,15 +2004,13 @@
                                                     ;; leaves a frozen frame on screen and a dead reader ("fully
                                                     ;; stuck, had to kill it from the OS"). Log it and truncate the
                                                     ;; line instead so the TUI keeps running; the ANSI-aware slice
-                                                    ;; drops the pending SGR/OSC reset, so re-append it to keep the
-                                                    ;; truncated line self-cleaning.
+                                                    ;; drops the pending SGR/OSC reset, so emit-line! re-appends it.
                                                     (let [line (if (and (not is-image)
                                                                         (> (utils/visible-width line) w))
                                                                  (do (write-crash-log! lines w i (utils/visible-width line))
-                                                                     (str (:text (utils/slice-with-width line 0 w :strict? true))
-                                                                          utils/SEGMENT-RESET))
+                                                                     (:text (utils/slice-with-width line 0 w :strict? true)))
                                                                  line)]
-                                                      (emit! line)
+                                                      (emit-line! line)
                                                       (recur (inc i))))))))
                                         (when (> prev-count new-count)
                                           (when (< render-end (dec new-count))

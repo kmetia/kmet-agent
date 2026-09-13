@@ -147,4 +147,10 @@
    lines — the document may exceed the terminal height; the render loop
    scrolls the overflow into the native terminal scrollback."
   [components width]
-  (vec (mapcat #(protocols/render % width) components)))
+  ;; Transient reduce instead of (vec (mapcat …)): this concatenates the whole
+  ;; document (tens of thousands of lines) every frame, so the lazy seqs were
+  ;; pure allocation/GC churn.
+  (persistent!
+   (reduce (fn [acc c] (reduce conj! acc (protocols/render c width)))
+           (transient [])
+           components)))

@@ -27,7 +27,8 @@
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [deftest testing]]
             [kmet.tui.core :as core]
-            [kmet.tui.terminal :as term]))
+            [kmet.tui.terminal :as term]
+            [kmet.tui.utils :as utils]))
 
 (def ^:private clear-seq
   "The clear sequence a clearing full redraw must emit: erase screen, home,
@@ -142,6 +143,34 @@
           (t/is (not (str/includes? frame "\u001b[3J")) "no scrollback clear on first render")
           (t/is (str/includes? frame "alpha") "transcript written")
           (t/is (str/includes? frame "beta") "transcript written"))
+        (finally
+          (stop-loop tui))))))
+
+(deftest ^:slow emitted-lines-carry-segment-reset
+  (testing "every emitted non-image content line ends with SEGMENT_RESET
+            (pi: applyLineResets) — applied at emit time, on both the full-redraw
+            and the diff-rewrite paths"
+    (let [lines (atom ["alpha" "beta" "gamma"])
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))
+          reset utils/SEGMENT-RESET]
+      (try
+        (core/tui-add-child tui (test-component lines))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 2000)
+        (let [frame (first (frame-writes (:writes vt)))]
+          (t/is (str/includes? frame (str "alpha" reset))
+                "full redraw: a content line carries the reset")
+          (t/is (str/includes? frame (str "gamma" reset))
+                "full redraw: the last line carries the reset"))
+        ;; a diff rewrite must carry it too (the reset was re-appended after
+        ;; the 2K clear that erased the old line)
+        (swap! lines assoc 1 "beta CHANGED")
+        (core/tui-request-render tui)
+        (wait-for-frames (:writes vt) 2 2000)
+        (let [redraw (second (frame-writes (:writes vt)))]
+          (t/is (str/includes? redraw (str "beta CHANGED" reset))
+                "diff rewrite: the rewritten line carries the reset"))
         (finally
           (stop-loop tui))))))
 

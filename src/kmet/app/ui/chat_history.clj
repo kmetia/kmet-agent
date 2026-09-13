@@ -54,13 +54,14 @@
    subsequent ones — the banner's box padding alone doesn't read as a
    visible gap between two boxed messages."
   [msgs width banner-present?]
-  (loop [msgs msgs, seen-any? banner-present?, acc []]
-    (if-let [m (first msgs)]
-      (let [lines (protocols/render (:component m) width)
-            sep? (and (= :user (:role m)) seen-any?)]
-        (recur (rest msgs) true
-               (into acc (concat (when sep? [""]) lines))))
-      acc)))
+  (persistent!
+   (loop [msgs msgs, seen-any? banner-present?, acc (transient [])]
+     (if-let [m (first msgs)]
+       (let [lines (protocols/render (:component m) width)
+             sep? (and (= :user (:role m)) seen-any?)
+             acc (if sep? (conj! acc "") acc)]
+         (recur (rest msgs) true (reduce conj! acc lines)))
+       acc))))
 
 ;; ─── ChatHistoryComponent record ───────────────────────────────────────────
 
@@ -77,7 +78,11 @@
     (let [msgs @messages-atom
           info-lines (when-let [i @info-comp-atom] (protocols/render i width))
           msg-lines (render-messages msgs width (some? @info-comp-atom))]
-      (into [] (concat info-lines msg-lines))))
+      ;; Without a banner (the common case) return the flat message vector
+      ;; directly — copying the whole transcript again here is pure waste.
+      (if (seq info-lines)
+        (into (vec info-lines) msg-lines)
+        msg-lines)))
 
   (invalidate [_this]
     (when-let [i @info-comp-atom] (protocols/invalidate i))
