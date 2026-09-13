@@ -163,7 +163,10 @@
 
 (defn preview
   "pi: preview — apply a theme setting/name without touching the auto-sync
-   state; invalidates and re-renders."
+   state; invalidates and re-renders. Deliberately NOT a forced render: a
+   live preview can fire per keystroke, and clearing the scrollback on every
+   step would re-emit the whole transcript. The committed change forces via
+   notify-changed!."
   [ctrl setting-or-name]
   (when-let [theme-name (theme/resolve-theme-setting setting-or-name
                                                      @(:terminal-theme-atom ctrl))]

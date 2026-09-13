@@ -76,7 +76,7 @@
          make-widget-area-above make-widget-area-below
          send-message submit-message apply-hooks
          queue-follow-up-text!
-         streaming-free? heal-stale-scrollback-when-idle!)
+         heal-stale-scrollback-when-idle!)
 
 ;; ─── Global config ref ────────────────────────────────────────────────────
 
