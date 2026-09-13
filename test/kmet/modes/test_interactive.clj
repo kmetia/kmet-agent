@@ -533,3 +533,40 @@
         (is (false? @(get-in cs [:tui :force-redraw?]))
             "mid-turn falls back to the ordinary render — never 3J mid-stream")
         (is (true? @(get-in cs [:tui :render-requested?])) "still requests a frame")))))
+
+(deftest turn-boundary-scrollback-heal
+  (testing "the scrollback heal runs at the turn END, not the turn start"
+    (let [noop (fn [& _] nil)]
+      ;; Turn start: the heal no longer runs here, so the dirt stays for the
+      ;; turn end (and a streaming turn cannot emit the clearing redraw).
+      (let [cs (inter/map->CoreState
+                {:running-turn? (atom false)
+                 :agent-state (atom {})
+                 :tui {:scrollback-dirty? (atom true)
+                       :force-redraw? (atom false)
+                       :render-requested? (atom false)}})]
+        (with-redefs [agent/run-agent-turn noop
+                      inter/activate-working-indicator! noop
+                      inter/start-anim-timer! noop
+                      inter/update-footer! noop]
+          ((var inter/start-agent-run!) cs))
+        (is (true? @(:running-turn? cs)) "the turn still starts")
+        (is (false? @(get-in cs [:tui :force-redraw?]))
+            "a dirty scrollback is left for the turn end, not cleared at the start"))
+      ;; Turn end (done and error): heal is now unconditional at this boundary.
+      (doseq [[label call] [["on-agent-done" #((var inter/on-agent-done) %)]
+                            ["on-agent-error" #((var inter/on-agent-error) % "boom")]]]
+        (let [cs (inter/map->CoreState
+                  {:anim-timer (atom nil)
+                   :running-turn? (atom true)
+                   :chat-history (ui/make-chat-history)
+                   :tui {:scrollback-dirty? (atom true)
+                         :force-redraw? (atom false)
+                         :render-requested? (atom false)}})]
+          (with-redefs [inter/stop-anim-timer! noop
+                        inter/clear-status-indicator! noop
+                        inter/update-footer! noop]
+            (call cs))
+          (is (true? @(get-in cs [:tui :force-redraw?]))
+              (str label " heals a dirty scrollback with the clearing redraw"))
+          (is (false? @(:running-turn? cs)) (str label " ends the turn")))))))

@@ -2427,6 +2427,15 @@
     (ui/chat-history-finalize-streaming! (:chat-history cs))
     (ui/chat-history-finalize-thinking! (:chat-history cs))
     (reset! (:running-turn? cs) false)
+    ;; Heal stale above-window scrollback now that the turn has ended. The
+    ;; streaming is over — a streaming-free moment — and the turn itself is
+    ;; what produced the stale lines (tool output and streamed text that
+    ;; changed above the window). The document is bottom-pinned and the user
+    ;; was just watching its end, so the rebuild's ESC[3J viewport jump lands
+    ;; on the turn transition rather than mid-stream. No-op unless a change
+    ;; above the window left the scrollback dirty
+    ;; (kmet.tui.core/tui-heal-scrollback!).
+    (tui/tui-heal-scrollback! (:tui cs))
     (update-footer! cs)
     (tui/tui-request-render (:tui cs))
     (debug/log "agent turn completed")
@@ -2455,6 +2464,9 @@
     (ui/chat-history-add-message! (:chat-history cs)
                                   {:role :assistant :content (th/fg th/dark-theme :error (str "Error: " error-msg))})
     (reset! (:running-turn? cs) false)
+    ;; A failed turn still produced above-window changes while streaming, so
+    ;; heal here too (no-op unless the scrollback is dirty).
+    (tui/tui-heal-scrollback! (:tui cs))
     (update-footer! cs)
     (tui/tui-request-render (:tui cs))
     (debug/log "agent turn error: " error-msg)
@@ -2592,9 +2604,9 @@
 
 (defn- heal-stale-scrollback-when-idle!
   "Heal a stale above-window scrollback on user input, but only when
-   streaming-free (see streaming-free?). start-agent-run! heals
-   unconditionally at turn start; this broadens the trigger to any idle input
-   so input that never starts a turn (slash/bash commands, text typed then
+   streaming-free (see streaming-free?). on-agent-done / on-agent-error heal
+   at the end of every turn; this broadens the trigger to any idle input so
+   input that never starts a turn (slash/bash commands, text typed then
    cancelled) does not leave stale lines until the next turn. No-op unless
    the scrollback is dirty (kmet.tui.core/tui-heal-scrollback!)."
   [cs]
@@ -2627,13 +2639,6 @@
    last entry is an unanswered user message or a dangling tool result the
    model must pick up)."
   [cs & [message]]
-  ;; Heal stale above-window scrollback before streaming starts. The user
-  ;; just acted on the editor at the document end, so the viewport is assumed
-  ;; to be at the bottom and the scrollback rebuild's ESC[3J viewport jump
-  ;; lands on this screen transition rather than mid-stream. No-op unless a
-  ;; change above the window left the scrollback dirty
-  ;; (kmet.tui.core/tui-heal-scrollback!).
-  (tui/tui-heal-scrollback! (:tui cs))
   (reset! (:running-turn? cs) true)
   (activate-working-indicator! cs)
   (start-anim-timer! cs)

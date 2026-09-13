@@ -453,9 +453,9 @@ protocol — retired in DSL stage 2, see tui.md §8).
   while the user was reading (microsoft/terminal#20370, pi #4506/#6502). The
   TUI flags the resulting above-window staleness (`tui-scrollback-dirty?`)
   and rebuilds the scrollback with one clearing full redraw via
-  `tui-heal-scrollback!` — the app calls it just before a turn starts
-  (`start-agent-run!`), a streaming-free boundary where the user has just
-  acted at the document end, so the clear's jump lands on a screen
+  `tui-heal-scrollback!` — the app calls it at the end of a turn
+  (`on-agent-done` / `on-agent-error`), a streaming-free boundary right
+  after the turn's last write, so the clear's jump lands on a screen
   transition rather than mid-stream.
 
 ## Reference

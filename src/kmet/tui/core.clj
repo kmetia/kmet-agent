@@ -1561,9 +1561,10 @@
   "Rebuild the scrollback when it is dirty (tui-scrollback-dirty?): request
    a clearing full redraw (ESC[3J + re-emit), which also clears the dirty
    flag. Call only at a boundary where nothing is streaming and the viewport
-   is assumed to be at the document end (in kmet: just before a turn starts,
-   `start-agent-run!`), so the scrollback clear's viewport jump lands on a
-   screen transition instead of mid-stream. No-op when clean. Returns nil."
+   is assumed to be at the document end (in kmet: at the end of a turn,
+   `on-agent-done` / `on-agent-error`, plus idle input), so the scrollback
+   clear's viewport jump lands on a screen transition instead of mid-stream.
+   No-op when clean. Returns nil."
   [tui]
   (when (tui-scrollback-dirty? tui)
     (tui-request-render tui true)))
