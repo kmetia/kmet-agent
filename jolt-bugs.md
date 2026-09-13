@@ -217,6 +217,57 @@ rewrite-clj 1.2.55 moved JVM-family readers to `StringBuilder`, but kmet
 does not carry a version override for it). Formatting runs on `bb` until the
 runtime provides the ctor.
 
+### `jolt.mvn-http` cannot connect: every `connect()` fails with EFAULT, reported as `connection refused`
+
+**Area:** dependency resolution / ffi sockets
+
+Dependency resolution dies for any artifact not already in the local Maven
+cache — the fetch never gets past TCP connect:
+
+```
+Error building classpath. The following artifacts could not be resolved:
+  rewrite-clj/rewrite-clj 1.2.57 — could not be fetched: https://repo.clojars.org
+  — connection refused: repo.clojars.org:443; https://repo1.maven.org/maven2
+  — connection refused: repo1.maven.org:443
+```
+
+Instrumenting `jolt.mvn-http`'s own socket path (`stdlib/jolt/mvn_http.clj`)
+on this host shows the transport dying before TLS, in `connect`, with a bad
+address — not a refusal:
+
+- `getaddrinfo` → `rc 0`, sane entries: AF_INET `family 2` / AF_INET6
+  `family 10`, SOCK_STREAM `socktype 1`, TCP `protocol 6`, `addrlen` 16/28
+- `socket(fam, sockt, proto)` → fd 3 (success), for every entry
+- `connect(fd, ai_addr, ai_addrlen)` → **-1, errno 14 = EFAULT ("Bad
+  address")** for *every* entry of every host — including a live listener
+  (`python3 -m http.server 8123` on 127.0.0.1)
+
+So it is not DNS, not the repos, not TLS, not this network: the `sockaddr *`
+the kernel is handed is unreadable. `connect`'s all-candidates-failed branch
+labels the exhaustion `connection refused: <host>:<port>`
+(`mvn_http.clj` ~line 167), which `jolt.deps` reports as "could not be
+fetched" — a misleading label for EFAULT (the ticket's second defect: the
+real errno is discarded).
+
+Environment-specific proof it is jolt's side: `curl` reaches both repos
+(HTTP 200, over both IPv4 and IPv6) and babashka's JVM-side resolution
+downloaded the same artifact without trouble. Once the jar is in
+`~/.m2/repository` (bb-seeded here), `jolt path` resolves it fine — only the
+HTTP fetch is broken. Host: jolt `v0.8.1-392-gbe356e59`, Termux/Android
+aarch64, glibc build from `~/jolt/target/release/jolt`.
+
+Suggested isolation (not yet run): connect with a locally built
+`sockaddr_in` written into an `ffi/alloc` block of its own — if that also
+EFAULTs, the defect is in marshalling the `(ffi/read ai :pointer O-ai-addr)`
+value into `connect` on this build/platform; if it succeeds, the `ai_addr`
+read/offset is at fault. `stdlib/jolt/socket.clj` (~line 178) carries the
+same `connect` pattern and may share it.
+
+**Workaround:** none in kmet — the one artifact this mattered for
+(rewrite-clj 1.2.57) was seeded into `~/.m2/repository` through babashka's
+resolver, and every already-cached artifact resolves offline. A new dep on
+this host needs the same seeding until the fetch works.
+
 ## Closed — workarounds removed
 
 Re-verified 2026-09-11 on the locally built **`v0.8.6-98-g23296732`** (the
