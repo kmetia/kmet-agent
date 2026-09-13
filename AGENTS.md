@@ -438,11 +438,25 @@ protocol — retired in DSL stage 2, see tui.md §8).
   `:invalidate`, or `set-state!` on tracked state) does not cache its stale
   result: track-render watches the cache atom, so the next render re-runs
   the body with the fresh state.
-- **Full redraws emit `\u001b[3J` (erase scrollback)**: the full redraw
+- **Full redraws emit `\u001b[3J` (erase scrollback)**: a true full redraw
   re-emits the whole transcript, so the scrollback must be cleared or the
-  history duplicates (pi issue #6050). Windows Terminal scrolls to the top
-  on 3J — a known WT bug (microsoft/terminal#20370) accepted over duplicated
-  output (see `do-full-redraw` in `kmet.tui.core`).
+  history duplicates (pi issue #6050). Windows Terminal (and Termux) scroll
+  to the top on 3J; they are only reached for events that genuinely need a
+  re-emit — resize, an explicit forced rebuild, and a shrink that starts
+  above the window (see `do-full-redraw` in `kmet.tui.core`). A change that
+  starts *above* the window no longer triggers one (same-height and growing
+  cases): the diff is clamped to the window top and only visible lines are
+  repainted in place (a terminal has no addressable scrollback, so the stale
+  lines above are left alone), and a same-height change entirely above the
+  window emits nothing at all. That keeps 3J out of the streaming path — otherwise every
+  reflow/edit-preview update above the window yanked the viewport to the top
+  while the user was reading (microsoft/terminal#20370, pi #4506/#6502). The
+  TUI flags the resulting above-window staleness (`tui-scrollback-dirty?`)
+  and rebuilds the scrollback with one clearing full redraw via
+  `tui-heal-scrollback!` — the app calls it just before a turn starts
+  (`start-agent-run!`), a streaming-free boundary where the user has just
+  acted at the document end, so the clear's jump lands on a screen
+  transition rather than mid-stream.
 
 ## Reference
 - **TUI package docs**: `src/kmet/tui/tui.md` is the usage reference for

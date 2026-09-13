@@ -50,9 +50,23 @@ inline ("main screen") TUI, not an alt-screen one. Output is never confined
 to an owned viewport: the stack renders every component at natural height
 and whatever exceeds the screen scrolls into the native scrollback, which
 the user can browse while streaming continues below. A *full redraw*
-(a shrink, a forced `Ctrl+L`, a mid-diff line changing above the viewport)
-re-emits the whole transcript, so it also clears the scrollback
-(`\u001b[3J`) or the re-emit would duplicate the history. Two consequences
+(a resize, an explicit rebuild — `tui-request-render` with force, i.e.
+`tui-resume!` or the scrollback heal — or a shrink that starts above the
+window) re-emits the whole transcript, so it also clears the scrollback
+(`\u001b[3J`) or the re-emit would duplicate the history. A change that
+starts *above* the window is otherwise handled without one: since the
+terminal has no addressable scrollback, the diff is clamped to the window
+top and only visible lines are repainted in place (a same-height or growing
+change entirely above the window emits nothing; a shrink keeps the full
+redraw) — this keeps the destructive clear out of the streaming path,
+where it otherwise yanked the viewport to the top on Termux and Windows
+Terminal (microsoft/terminal#20370; pi #4506/#6502). Leaving those lines
+un-repainted means the scrollback above the window is stale, so the TUI
+*records* that (`tui-scrollback-dirty?`) and rebuilds it with one clearing
+full redraw at a streaming-free boundary — the app calls
+`tui-heal-scrollback!` just before a turn starts, when the user has just
+acted on the editor at the document end, so the clear's viewport jump lands
+on a screen transition instead of mid-stream. Two consequences
 that shape the rest of this document: components above the viewport must
 not change gratuitously (§3.2's caching rules), and there is no viewport to
 hit-test — mouse support would need a different model.
@@ -962,10 +976,13 @@ stateful tag whose props never settle means fresh fn literals in its props
 
 - `KMET_TUI_DEBUG=1 bb run` — every frame dumps `newLines` vs
   `previousLines`, viewportTop, hardwareCursorRow and size into
-  `/tmp/tui/render-*.log` (pi: PI_TUI_DEBUG).
+  `$TMPDIR/tui/render-*.log` (or `java.io.tmpdir/tui/` when `TMPDIR` is
+  unset — this babashka hardcodes java.io.tmpdir to `/tmp`; pi: PI_TUI_DEBUG).
 - `KMET_DEBUG_REDRAW=1 bb run` — appends one line per FULL redraw with its
   trigger reason to `kmet-debug-render.log` (cwd); a steady stream during
-  normal streaming points at shrink/full-redraw churn.
+  normal streaming points at shrink/full-redraw churn. `firstChanged <
+  viewportTop, scrollback only` is NOT a full redraw — it is the benign
+  in-place/no-op path for a change above the window (§1).
 
 ### Crash + error logs
 

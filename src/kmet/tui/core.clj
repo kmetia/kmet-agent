@@ -90,14 +90,14 @@
 
 (defrecord TUI [terminal components focused-component
                 input-listeners previous-lines
-                previous-width render-requested?
+                previous-width render-requested? force-redraw?
                 running? stopped? overlays
                 render-loop input-reader current-reader
                 flashes focus-order-counter
                 show-hardware-cursor? keyboard-protocol-pushed?
                 negotiation-buffer negotiation-timer
                 previous-height max-lines-rendered clear-on-shrink?
-                full-redraw-count previous-kitty-image-ids
+                full-redraw-count scrollback-dirty? previous-kitty-image-ids
                 pending-osc-11? osc-11-queries
                 color-scheme-listeners terminal-response-buffer
                 terminal-response-timer color-scheme-notifications-enabled?
@@ -117,6 +117,7 @@
                        :previous-lines (atom [])
                        :previous-width (atom 0)
                        :render-requested? (atom false)
+                       :force-redraw? (atom false)
                        :running? (atom false)
                        :stopped? (atom false)
                        :overlays (atom [])
@@ -133,6 +134,7 @@
                        :max-lines-rendered (atom 0)
                        :clear-on-shrink? (atom (= (System/getenv "KMET_CLEAR_ON_SHRINK") "1"))
                        :full-redraw-count (atom 0)
+                       :scrollback-dirty? (atom false)
                        :previous-kitty-image-ids (atom #{})
                        :pending-osc-11? (atom false)
                        :osc-11-queries (atom [])
@@ -664,11 +666,14 @@
       (catch Exception _))))
 
 (defn- tui-debug-dump!
-  "Write a render frame dump to /tmp/tui/ when KMET_TUI_DEBUG=1
-   (pi: PI_TUI_DEBUG render dumps)."
+  "Write a render frame dump to $TMPDIR/tui/ (or java.io.tmpdir/tui/ when
+   TMPDIR is unset; /tmp/tui/ on hosts where java.io.tmpdir is /tmp) when
+   KMET_TUI_DEBUG=1 (pi: PI_TUI_DEBUG render dumps)."
   [prev lines buffer w h viewport-top hardware-cursor-row]
   (try
-    (let [dir "/tmp/tui"]
+    (let [dir (str (io/file (or (System/getenv "TMPDIR")
+                                (System/getProperty "java.io.tmpdir"))
+                            "tui"))]
       (.mkdirs (io/file dir))
       (let [path (str (io/file dir (str "render-" (System/nanoTime) "-"
                                         (rand-int 0x7fffffff) ".log")))]
@@ -1501,15 +1506,14 @@
 
 (defn tui-request-render
   "Request a render on the next frame. With FORCE (pi: requestRender(force)),
-   all previous frame state is cleared so the next frame is a clearing full
-   redraw regardless of diffing."
+   the next frame is a clearing full redraw regardless of diffing: the flag is
+   taken by the render loop, which clears its own previous-frame state. Doing
+   that reset here would race the loop's state reads (prev=[] with an old
+   width reads as a non-clearing first render), and a force arriving
+   mid-frame would be overwritten by the in-flight frame's state write."
   [tui & [force]]
   (when force
-    (reset! (:previous-lines tui) [])
-    (reset! (:previous-width tui) -1)
-    (reset! (:previous-height tui) -1)
-    (reset! (:max-lines-rendered tui) 0)
-    (reset! (:previous-kitty-image-ids tui) #{}))
+    (reset! (:force-redraw? tui) true))
   (reset! (:render-requested? tui) true))
 
 (defn tui-stop [tui]
@@ -1543,6 +1547,26 @@
   "Number of full redraws performed (pi: getFullRedrawCount)."
   [tui]
   @(:full-redraw-count tui))
+
+(defn tui-scrollback-dirty?
+  "True when a change above the visible window was left un-repainted since
+   the last clearing full redraw — the terminal scrollback holds stale (or
+   misaligned) lines above the window. Heal it at a streaming-free boundary
+   with tui-heal-scrollback!. A TUI without dirty tracking (test stubs) is
+   clean."
+  [tui]
+  (boolean (some-> (:scrollback-dirty? tui) deref)))
+
+(defn tui-heal-scrollback!
+  "Rebuild the scrollback when it is dirty (tui-scrollback-dirty?): request
+   a clearing full redraw (ESC[3J + re-emit), which also clears the dirty
+   flag. Call only at a boundary where nothing is streaming and the viewport
+   is assumed to be at the document end (in kmet: just before a turn starts,
+   `start-agent-run!`), so the scrollback clear's viewport jump lands on a
+   screen transition instead of mid-stream. No-op when clean. Returns nil."
+  [tui]
+  (when (tui-scrollback-dirty? tui)
+    (tui-request-render tui true)))
 
 (defn tui-query-terminal-background-color
   "Query the terminal's default background color via OSC 11; returns a
@@ -1667,6 +1691,16 @@
               (tui-request-render tui))
             (when @(:render-requested? tui)
               (reset! (:render-requested? tui) false)
+              ;; Forced render (tui-request-render with force: tui-resume!,
+              ;; the scrollback heal): clear the previous-frame state here, on
+              ;; the loop thread, so it cannot tear against this frame's reads.
+              (when @(:force-redraw? tui)
+                (reset! (:force-redraw? tui) false)
+                (reset! (:previous-lines tui) [])
+                (reset! (:previous-width tui) -1)
+                (reset! (:previous-height tui) -1)
+                (reset! (:max-lines-rendered tui) 0)
+                (reset! (:previous-kitty-image-ids tui) #{}))
               ;; Base content: the whole UI is one flat document — the stack
               ;; layout renders every component at natural height, so the total
               ;; may exceed the screen and the render loop scrolls the overflow
@@ -1755,6 +1789,7 @@
                                      (swap! (:full-redraw-count tui) inc)
                                      (emit! CSI-2026-H)
                                      (when clear?
+                                       (reset! (:scrollback-dirty? tui) false)
                                        (doseq [id @(:previous-kitty-image-ids tui)]
                                          (emit! (img/delete-kitty-image id)))
                                        ;; The full redraw re-emits the whole
@@ -1815,6 +1850,41 @@
                                       append-start? (and appended?
                                                          (= first-changed prev-count)
                                                          (pos? first-changed))
+                                      ;; A terminal has no addressable scrollback: a
+                                      ;; change that starts above the window can only be
+                                      ;; repainted from the window top, and the stale
+                                      ;; scrollback lines above it stay as they are. Doing
+                                      ;; that instead of the destructive full redraw keeps
+                                      ;; ESC[3J out of the streaming path — Termux and
+                                      ;; Windows Terminal yank the viewport to the top when
+                                      ;; it is scrolled up and a clear scrollback arrives
+                                      ;; (microsoft/terminal#20370; pi #4506/#6502). A
+                                      ;; change *entirely* above the window has nothing
+                                      ;; visible to repaint at all. Only the same-height
+                                      ;; and growing cases take this path; a shrink that
+                                      ;; starts above the window keeps the full-redraw
+                                      ;; fallback (the extra-line cleanup in the diff
+                                      ;; renderer assumes the change began inside the
+                                      ;; window).
+                                      scrollback-only-change? (and (not (neg? first-changed))
+                                                                   (= new-count prev-count)
+                                                                   (< first-changed @prev-viewport-top)
+                                                                   (< last-changed @prev-viewport-top)
+                                                                   (>= new-count @prev-viewport-top))
+                                      viewport-clamp? (and (not scrollback-only-change?)
+                                                           (not (neg? first-changed))
+                                                           (< first-changed @prev-viewport-top)
+                                                           (>= new-count prev-count)
+                                                           (>= new-count @prev-viewport-top))
+                                      first-changed (if viewport-clamp? @prev-viewport-top first-changed)
+                                      ;; Both paths below leave the changed lines above
+                                      ;; the window un-repainted (the terminal has no
+                                      ;; addressable scrollback), so the history is stale
+                                      ;; until a clearing full redraw. Record it; the app
+                                      ;; heals at a streaming-free boundary
+                                      ;; (tui-heal-scrollback!).
+                                      _ (when (or scrollback-only-change? viewport-clamp?)
+                                          (reset! (:scrollback-dirty? tui) true))
                                       mid-full-redraw! (fn [reason]
                                                          (log-redraw! reason)
                                                          (reset! sb (StringBuilder.))
@@ -1822,6 +1892,12 @@
                                   (cond
                                     (neg? first-changed)
                                     (do (position-hardware-cursor cursor new-count)
+                                        (reset! viewport-top @prev-viewport-top))
+
+                                    scrollback-only-change?
+                                    (do (log-redraw! (str "firstChanged < viewportTop, scrollback only ("
+                                                          last-changed " < " @prev-viewport-top
+                                                          "), no visible change"))
                                         (reset! viewport-top @prev-viewport-top))
 
                                     (>= first-changed new-count)
@@ -1860,6 +1936,11 @@
                                       (do (position-hardware-cursor cursor new-count)
                                           (reset! viewport-top @prev-viewport-top)))
 
+                                    ;; Reached by any shrink (new content shorter than the
+                                    ;; old) whose first change is above the window — the
+                                    ;; diff renderer's extra-line cleanup assumes the
+                                    ;; change began inside the window, so rebuild the screen
+                                    ;; (e.g. compaction replacing the transcript).
                                     (< first-changed @prev-viewport-top)
                                     (mid-full-redraw! (str "firstChanged < viewportTop ("
                                                            first-changed " < " @prev-viewport-top ")"))
@@ -2066,8 +2147,8 @@
    redraw: the external program that took over the terminal restores the
    pre-suspend frame on exit, so the re-emit must clear the stale screen and
    scrollback first or old and new content overlap (pi: requestRender(true)
-   after ui.start() — prev-width -1 routes the first frame through the
-   width-changed clearing path)."
+   after ui.start() — the forced flag routes the first frame through the
+   clearing full-redraw path)."
   [tui]
   (reset! (:terminal tui) (terminal/create-terminal))
   (reset! (:running? tui) true)

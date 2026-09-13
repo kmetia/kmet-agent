@@ -2592,6 +2592,13 @@
    last entry is an unanswered user message or a dangling tool result the
    model must pick up)."
   [cs & [message]]
+  ;; Heal stale above-window scrollback before streaming starts. The user
+  ;; just acted on the editor at the document end, so the viewport is assumed
+  ;; to be at the bottom and the scrollback rebuild's ESC[3J viewport jump
+  ;; lands on this screen transition rather than mid-stream. No-op unless a
+  ;; change above the window left the scrollback dirty
+  ;; (kmet.tui.core/tui-heal-scrollback!).
+  (tui/tui-heal-scrollback! (:tui cs))
   (reset! (:running-turn? cs) true)
   (activate-working-indicator! cs)
   (start-anim-timer! cs)

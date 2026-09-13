@@ -181,18 +181,18 @@
       (t/is (= "" @(:terminal-response-buffer tui))))))
 
 (deftest test-request-render-force
-  (testing "force clears previous frame state (pi: requestRender(force))"
+  (testing "force flags the next frame; the render loop clears the previous frame
+            state itself so the reset cannot race its own state reads"
     (let [tui (recording-tui)]
       (reset! (:previous-lines tui) ["a" "b"])
-      (reset! (:previous-width tui) 80)
-      (reset! (:previous-height tui) 24)
-      (reset! (:max-lines-rendered tui) 10)
       (core/tui-request-render tui true)
-      (t/is (= [] @(:previous-lines tui)))
-      (t/is (= -1 @(:previous-width tui)) "-1 forces the width-changed path")
-      (t/is (= -1 @(:previous-height tui)))
-      (t/is (= 0 @(:max-lines-rendered tui)))
-      (t/is (true? @(:render-requested? tui))))))
+      (t/is (true? @(:force-redraw? tui)) "force flag set for the loop")
+      (t/is (true? @(:render-requested? tui)))
+      (t/is (= ["a" "b"] @(:previous-lines tui))
+            "the caller does not touch previous state — the loop owns that reset"))
+    (let [tui (recording-tui)]
+      (core/tui-request-render tui)
+      (t/is (false? @(:force-redraw? tui)) "a plain request does not force"))))
 
 (deftest test-clear-on-shrink-accessors
   (testing "get/set with default off (pi parity — PI_CLEAR_ON_SHRINK=1)"

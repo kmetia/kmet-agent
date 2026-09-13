@@ -8,10 +8,19 @@
      history and duplicates it (pi issue #6050);
    - the first render writes without clearing, preserving prior terminal
      output above the TUI;
-   - forced renders — what tui-resume! (external editor) and Ctrl+L now
-     do — take the clearing full-redraw path;
-   - the mid-diff fallback (a line changing above the viewport) clears as
-     well.
+   - forced renders — what tui-resume! (external editor) and the
+     scrollback heal (tui-heal-scrollback!) do — take the clearing
+     full-redraw path;
+   - a change above the window does NOT clear or re-emit the transcript:
+     a same-height change entirely above it emits nothing, and one that also
+     touches visible lines is clamped to the window top and repainted in
+     place (so Termux / Windows Terminal no longer jump to the top on
+     ESC[3J). A shrink starting above the window keeps the clearing
+     full-redraw path (the diff renderer's extra-line cleanup assumes the
+     change began inside the window).
+   - leaving those lines un-repainted marks the scrollback dirty
+     (tui-scrollback-dirty?); tui-heal-scrollback! rebuilds it with one
+     clearing full redraw (the app calls it at the start of a turn).
 
    The render loop is driven headlessly through the private
    run-render-loop!, mirroring pi's VirtualTerminal-based render tests."
@@ -107,6 +116,16 @@
     (t/is (<= n (count (frame-writes writes)))
           (str "expected " n " rendered frame(s), saw " (count (frame-writes writes))))))
 
+(defn- wait-until
+  "Block until PRED is truthy or TIMEOUT-MS elapses; returns whether it became truthy."
+  [pred timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (loop []
+      (cond
+        (pred) true
+        (< (System/currentTimeMillis) deadline) (do (Thread/sleep 10) (recur))
+        :else false))))
+
 ;; ─── Tests ─────────────────────────────────────────────────────────────────
 
 (deftest ^:slow first-render-preserves-terminal-output
@@ -149,8 +168,10 @@
         (finally
           (stop-loop tui))))))
 
-(deftest ^:slow change-above-viewport-uses-clearing-redraw
-  (testing "a change above the viewport falls back to a clearing full redraw (firstChanged < viewportTop)"
+(deftest ^:slow scrollback-only-change-does-not-clear
+  (testing "a change entirely above the viewport updates state without emitting output —
+            no clearing full redraw, so Termux/Windows Terminal no longer yank the viewport to
+            the top (firstChanged < viewportTop, lastChanged < viewportTop)"
     (let [lines (atom (vec (map #(str "line " %) (range 30))))
           vt (make-virtual-terminal)
           tui (core/create-tui (:terminal vt))]
@@ -159,14 +180,124 @@
         (start-loop tui)
         (wait-for-frames (:writes vt) 1 2000)
         ;; 30 lines on a 24-row screen → viewport top at row 6; change row 2
+        (let [writes-before (count @(:writes vt))]
+          (swap! lines assoc 2 "line 2 CHANGED")
+          (core/tui-request-render tui)
+          ;; The skip path emits NOTHING, so there is no frame to wait for;
+          ;; poll the state the loop updates.
+          (t/is (wait-until #(str/includes? (nth @(:previous-lines tui) 2) "line 2 CHANGED") 2000)
+                "the frame processed and internal state updated")
+          (let [emitted (apply str (drop writes-before @(:writes vt)))]
+            (t/is (not (str/includes? emitted clear-seq))
+                  "no screen/scrollback clear for a scrollback-only change")
+            (t/is (not (str/includes? emitted "line 2 CHANGED"))
+                  "the stale scrollback line is not re-emitted (nothing visible changed)")
+            (t/is (not (str/includes? emitted "line 29"))
+                  "the visible window is not repainted (it did not change)"))
+          (t/is (true? (core/tui-scrollback-dirty? tui))
+                "a scrollback-only change marks the scrollback dirty for a later heal"))
+        (finally
+          (stop-loop tui))))))
+
+(deftest ^:slow change-spanning-viewport-repaints-without-clearing
+  (testing "when scrollback AND visible content change, the diff is clamped to the viewport top
+            and only visible lines are repainted — no clear (firstChanged < viewportTop ≤ lastChanged)"
+    (let [lines (atom (vec (map #(str "line " %) (range 30))))
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child tui (test-component lines))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 2000)
+        ;; change row 2 (scrollback) and row 29 (visible)
+        (swap! lines assoc 2 "line 2 CHANGED" 29 "line 29 CHANGED")
+        (core/tui-request-render tui)
+        (wait-for-frames (:writes vt) 2 2000)
+        (let [redraw (second (frame-writes (:writes vt)))]
+          (t/is (not (str/includes? redraw clear-seq))
+                "no screen/scrollback clear when clamping to the viewport")
+          (t/is (str/includes? redraw "line 29 CHANGED") "the visible change is repainted")
+          (t/is (str/includes? redraw "line 6") "repaint starts at the viewport top")
+          (t/is (not (str/includes? redraw "line 2 CHANGED"))
+                "nothing above the viewport top is repainted"))
+        (t/is (true? (core/tui-scrollback-dirty? tui))
+              "a clamped above-window change also marks the scrollback dirty")
+        (finally
+          (stop-loop tui))))))
+
+(deftest ^:slow scrollback-dirty-heals-on-demand
+  (testing "tui-heal-scrollback! rebuilds a dirty scrollback with ONE clearing full redraw,
+            re-emitting the current content and clearing the dirty flag — the app calls it at a
+            streaming-free turn boundary"
+    (let [lines (atom (vec (map #(str "line " %) (range 30))))
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child tui (test-component lines))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 2000)
+        (t/is (false? (core/tui-scrollback-dirty? tui)) "clean after the first render")
+        ;; dirty it with a scrollback-only change
         (swap! lines assoc 2 "line 2 CHANGED")
+        (core/tui-request-render tui)
+        (t/is (wait-until #(core/tui-scrollback-dirty? tui) 2000)
+              "the above-window change marks the scrollback dirty")
+        (let [frames-before (count (frame-writes (:writes vt)))]
+          (core/tui-heal-scrollback! tui)
+          (wait-for-frames (:writes vt) (inc frames-before) 2000)
+          (let [redraw (last (frame-writes (:writes vt)))]
+            (t/is (str/includes? redraw clear-seq)
+                  "the heal emits the clearing full redraw (2J H 3J)")
+            (t/is (str/includes? redraw "line 2 CHANGED")
+                  "the healed scrollback re-emits the current content")
+            (t/is (str/includes? redraw "line 29") "the whole transcript is re-emitted")))
+        (t/is (false? (core/tui-scrollback-dirty? tui)) "clean again after the heal")
+        (finally
+          (stop-loop tui))))))
+
+(deftest ^:slow scrollback-change-with-append-clamps-and-scrolls
+  (testing "a change above the window plus appended content repaints from the window top
+            and scrolls to keep the document end visible — no clear"
+    (let [lines (atom (vec (map #(str "line " %) (range 30))))
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child tui (test-component lines))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 2000)
+        ;; change row 2 (scrollback) and append rows 30..40
+        (swap! lines (fn [v]
+                       (into (assoc v 2 "line 2 CHANGED")
+                             (mapv #(str "line " %) (range 30 41)))))
+        (core/tui-request-render tui)
+        (wait-for-frames (:writes vt) 2 2000)
+        (let [redraw (second (frame-writes (:writes vt)))]
+          (t/is (not (str/includes? redraw clear-seq))
+                "no screen/scrollback clear when clamping to the viewport")
+          (t/is (str/includes? redraw "line 40") "the appended tail is rendered")
+          (t/is (not (str/includes? redraw "line 2 CHANGED"))
+                "nothing above the viewport top is repainted"))
+        (finally
+          (stop-loop tui))))))
+
+(deftest ^:slow shrink-starting-above-window-keeps-full-redraw
+  (testing "a shrink starting above the window keeps the clearing full-redraw path
+            (the diff renderer's extra-line cleanup assumes the change began inside the window)"
+    (let [lines (atom (vec (map #(str "line " %) (range 30))))
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child tui (test-component lines))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 2000)
+        ;; change row 2 (above the window) and truncate 30 → 10 lines
+        (swap! lines (fn [v] (assoc (subvec v 0 10) 2 "line 2 CHANGED")))
         (core/tui-request-render tui)
         (wait-for-frames (:writes vt) 2 2000)
         (let [redraw (second (frame-writes (:writes vt)))]
           (t/is (str/includes? redraw clear-seq)
-                "mid-diff fallback full redraw clears screen and scrollback")
-          (t/is (str/includes? redraw "line 2 CHANGED") "new content re-emitted")
-          (t/is (str/includes? redraw "line 29") "full transcript re-emitted"))
+                "a shrink above the window rebuilds the screen (clearing redraw)")
+          (t/is (str/includes? redraw "line 9") "the rebuilt screen re-emits the content"))
         (finally
           (stop-loop tui))))))
 
@@ -186,6 +317,8 @@
           (t/is (not (str/includes? diff "\u001b[2J")) "no screen clear on an ordinary diff")
           (t/is (not (str/includes? diff "\u001b[3J")) "no scrollback clear on an ordinary diff")
           (t/is (str/includes? diff "gamma") "new line written"))
+        (t/is (false? (core/tui-scrollback-dirty? tui))
+              "an in-window/append diff leaves the scrollback clean")
         (finally
           (stop-loop tui))))))
 

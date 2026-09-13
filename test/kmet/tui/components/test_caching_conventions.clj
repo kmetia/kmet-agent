@@ -4,14 +4,14 @@
    documented uncached allowlist.
 
    Rationale: an uncached component whose output changes while sitting above
-   the render viewport triggers destructive full redraws during streaming
-   (a mid-document line changing above the viewport — e.g. a time-animated
-   elapsed counter — forces `\\u001b[3J`-emitting full redraws every frame,
-   wiping the scrollback and re-emitting the whole transcript; on Windows
-   Terminal it also yanks a scrolled-up reader to the top). track! makes the
-   cache the default so volatile renders can only live in the two documented
-   places: at the document bottom (spinner/status) or cached so they tick
-   with real updates."
+   the render viewport forces needless work every frame — a mid-document line
+   changing above the viewport is no longer destructive (it is repainted in
+   place, or skipped when entirely above the window; see
+   kmet.tui.test-render-loop), but a volatile component that spans the window
+   still repaints its visible lines every frame and flickers. track! makes
+   the cache the default so volatile renders can only live in the two
+   documented places: at the document bottom (spinner/status) or cached so
+   they tick with real updates."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [babashka.fs :as fs]))
