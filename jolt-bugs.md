@@ -219,9 +219,9 @@ keeps both hosts on the same parser). Removal: when the runtime supplies the
 ctor the pin is no longer load-bearing — dropping it restores cljfmt's
 1.2.50 on jolt, while babashka keeps its bundled 1.2.57. Seeding: this host
 could not fetch the jar at all, so it was downloaded through babashka's
-resolver once (see the `mvn-http` entry below).
+resolver once (see jolt#979 below).
 
-### `jolt.mvn-http` reads `ai_addr` at the glibc offset: on Android/bionic it gets NULL, `connect()` EFAULTs, fetching fails
+### [jolt#979](https://github.com/jolt-lang/jolt/issues/979) — `jolt.mvn-http` reads `ai_addr` at the glibc offset: on Android/bionic it gets NULL, `connect()` EFAULTs, fetching fails
 
 **Area:** dependency resolution / ffi struct layout (Android/bionic)
 
