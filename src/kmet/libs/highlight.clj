@@ -281,13 +281,15 @@
       {:scope nil :n 1}))
 
 (defn- scan-generic
-  "Single-pass char scanner driven by CFG's rule matchers."
+  "Single-pass char scanner driven by CFG's rule matchers. Accumulates
+   into a transient (persistent conj per token costs ~2x on bb, ~1.2x on
+   jolt at these sizes)."
   [s cfg]
-  (loop [i 0, toks []]
+  (loop [i 0, toks (transient [])]
     (if (>= i (count s))
-      toks
+      (persistent! toks)
       (let [{:keys [scope n]} (match-at cfg s i)]
-        (recur (+ i n) (conj toks [scope (subs s i (+ i n))]))))))
+        (recur (+ i n) (conj! toks [scope (subs s i (+ i n))]))))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Custom scanners (markup, line-based: diff/dockerfile/markdown)
@@ -297,45 +299,45 @@
   "HTML/XML scanner: tags, attribute names/values, comments, entities."
   [s _cfg]
   (let [n (count s)]
-    (loop [i 0, toks [], in-tag? false, first-word? false]
+    (loop [i 0, toks (transient []), in-tag? false, first-word? false]
       (if (>= i n)
-        toks
+        (persistent! toks)
         (let [c (char-at s i)]
           (cond
             ;; comment
             (and (= c \<) (starts-with-at? s "<!--" i))
             (let [end (str/index-of s "-->" (+ i 4))
                   end (if end (+ end 3) n)]
-              (recur end (conj toks [:comment (subs s i end)]) false false))
+              (recur end (conj! toks [:comment (subs s i end)]) false false))
 
             ;; entity &name;
             (= c \&)
             (let [end (str/index-of s ";" (inc i))]
               (if (and end (< end (+ i 8)))
-                (recur (inc end) (conj toks [:name (subs s i (inc end))])
+                (recur (inc end) (conj! toks [:name (subs s i (inc end))])
                        in-tag? first-word?)
-                (recur (inc i) (conj toks [nil (subs s i (inc i))])
+                (recur (inc i) (conj! toks [nil (subs s i (inc i))])
                        in-tag? first-word?)))
 
             ;; inside a tag
             in-tag?
             (cond
-              (= c \>) (recur (inc i) (conj toks [:tag (subs s i (inc i))]) false false)
-              (= c \/) (recur (inc i) (conj toks [:tag (subs s i (inc i))]) true first-word?)
-              (= c \=) (recur (inc i) (conj toks [:operator (subs s i (inc i))]) true first-word?)
+              (= c \>) (recur (inc i) (conj! toks [:tag (subs s i (inc i))]) false false)
+              (= c \/) (recur (inc i) (conj! toks [:tag (subs s i (inc i))]) true first-word?)
+              (= c \=) (recur (inc i) (conj! toks [:operator (subs s i (inc i))]) true first-word?)
               (or (= c \") (= c \'))
               (let [end (or (str/index-of s (str c) (inc i)) n)]
-                (recur (inc end) (conj toks [:string (subs s i (inc end))])
+                (recur (inc end) (conj! toks [:string (subs s i (inc end))])
                        true first-word?))
               (contains? word-markup c)
               (let [end (scan-word-end s i word-markup)]
                 (recur end
-                       (conj toks [(if first-word? :tag :attr) (subs s i end)])
+                       (conj! toks [(if first-word? :tag :attr) (subs s i end)])
                        true false))
-              :else (recur (inc i) (conj toks [nil (subs s i (inc i))]) true first-word?))
+              :else (recur (inc i) (conj! toks [nil (subs s i (inc i))]) true first-word?))
 
             ;; tag open
-            (= c \<) (recur (inc i) (conj toks [:tag (subs s i (inc i))]) true true)
+            (= c \<) (recur (inc i) (conj! toks [:tag (subs s i (inc i))]) true true)
 
             ;; plain text run
             :else
@@ -343,7 +345,7 @@
                       (if (and (< k n) (not= (char-at s k) \<) (not= (char-at s k) \&))
                         (recur (inc k))
                         k))]
-              (recur j (conj toks [nil (subs s i j)]) in-tag? first-word?))))))))
+              (recur j (conj! toks [nil (subs s i j)]) in-tag? first-word?))))))))
 
 (defn- scan-lines
   "Line-based scanner: CLASSIFY maps each source line to a scope; each line is
