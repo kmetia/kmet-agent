@@ -217,12 +217,12 @@ rewrite-clj 1.2.55 moved JVM-family readers to `StringBuilder`, but kmet
 does not carry a version override for it). Formatting runs on `bb` until the
 runtime provides the ctor.
 
-### `jolt.mvn-http` cannot connect: every `connect()` fails with EFAULT, reported as `connection refused`
+### `jolt.mvn-http` reads `ai_addr` at the glibc offset: on Android/bionic it gets NULL, `connect()` EFAULTs, fetching fails
 
-**Area:** dependency resolution / ffi sockets
+**Area:** dependency resolution / ffi struct layout (Android/bionic)
 
-Dependency resolution dies for any artifact not already in the local Maven
-cache — the fetch never gets past TCP connect:
+Any artifact not already in the local Maven cache cannot be fetched; the
+fetch never gets past TCP connect:
 
 ```
 Error building classpath. The following artifacts could not be resolved:
@@ -231,42 +231,47 @@ Error building classpath. The following artifacts could not be resolved:
   — connection refused: repo1.maven.org:443
 ```
 
-Instrumenting `jolt.mvn-http`'s own socket path (`stdlib/jolt/mvn_http.clj`)
-on this host shows the transport dying before TLS, in `connect`, with a bad
-address — not a refusal:
+`jolt.mvn-http`'s `connect` (`stdlib/jolt/mvn_http.clj`) hardcodes the glibc
+layout — `O-ai-addr 24` on every non-macOS/non-Windows platform — but
+**bionic's `struct addrinfo` is BSD-ordered** (`ai_canonname` before
+`ai_addr`, confirmed by the device header `$PREFIX/include/netdb.h`):
 
-- `getaddrinfo` → `rc 0`, sane entries: AF_INET `family 2` / AF_INET6
-  `family 10`, SOCK_STREAM `socktype 1`, TCP `protocol 6`, `addrlen` 16/28
-- `socket(fam, sockt, proto)` → fd 3 (success), for every entry
-- `connect(fd, ai_addr, ai_addrlen)` → **-1, errno 14 = EFAULT ("Bad
-  address")** for *every* entry of every host — including a live listener
-  (`python3 -m http.server 8123` on 127.0.0.1)
+```c
+struct addrinfo {
+  int ai_flags; int ai_family; int ai_socktype; int ai_protocol;
+  socklen_t ai_addrlen;          /* off 16 — same in both layouts   */
+  char *ai_canonname;            /* off 24 — NULL without AI_CANONNAME      */
+  struct sockaddr *ai_addr;      /* off 32 — read from off 24 instead  */
+  struct addrinfo *ai_next;      /* off 40 — same in both layouts   */
+};
+```
 
-So it is not DNS, not the repos, not TLS, not this network: the `sockaddr *`
-the kernel is handed is unreadable. `connect`'s all-candidates-failed branch
-labels the exhaustion `connection refused: <host>:<port>`
-(`mvn_http.clj` ~line 167), which `jolt.deps` reports as "could not be
-fetched" — a misleading label for EFAULT (the ticket's second defect: the
-real errno is discarded).
+So on Android `(ffi/read ai :pointer 24)` yields NULL and
+`connect(fd, NULL, 16)` returns -1/errno 14 (**EFAULT, "Bad address"**). The
+all-candidates-failed branch then labels the exhaustion
+`connection refused: <host>:<port>` (`mvn_http.clj` ~line 167) and `jolt.deps`
+prints it as "could not be fetched" — two layers of misdiagnosis over a NULL
+pointer. The macOS offsets in the same file (`O-ai-addr 32`) are already the
+ones bionic needs; the platform classification just treats Android as Linux.
 
-Environment-specific proof it is jolt's side: `curl` reaches both repos
-(HTTP 200, over both IPv4 and IPv6) and babashka's JVM-side resolution
-downloaded the same artifact without trouble. Once the jar is in
-`~/.m2/repository` (bb-seeded here), `jolt path` resolves it fine — only the
-HTTP fetch is broken. Host: jolt `v0.8.1-392-gbe356e59`, Termux/Android
-aarch64, glibc build from `~/jolt/target/release/jolt`.
+Measured here (jolt `v0.8.1-392-gbe356e59`, Termux/Android aarch64, bionic from
+`/apex/com.android.runtime/lib64/bionic/libc.so`):
 
-Suggested isolation (not yet run): connect with a locally built
-`sockaddr_in` written into an `ffi/alloc` block of its own — if that also
-EFAULTs, the defect is in marshalling the `(ffi/read ai :pointer O-ai-addr)`
-value into `connect` on this build/platform; if it succeeds, the `ai_addr`
-read/offset is at fault. `stdlib/jolt/socket.clj` (~line 178) carries the
-same `connect` pattern and may share it.
+| probe | result |
+| --- | --- |
+| `getaddrinfo` repo.clojars.org:443 | rc 0 — AF_INET `family 2` / AF_INET6 `family 10`, `socktype 1`, `protocol 6`, `addrlen` 16/28 |
+| raw 48-byte node dump | off 24 = `00 00…` (NULL); off 32 = a pointer |
+| `connect` with `(ffi/read ai :pointer 24)` | -1, errno 14 EFAULT — every entry, every host, a live 127.0.0.1 listener included |
+| `connect` with `(ffi/read ai :pointer 32)` | 0 — success; sockaddr bytes `02 00 01 bb 97 65 01 80` = AF_INET, port 443, 151.101.1.128 |
 
-**Workaround:** none in kmet — the one artifact this mattered for
-(rewrite-clj 1.2.57) was seeded into `~/.m2/repository` through babashka's
-resolver, and every already-cached artifact resolves offline. A new dep on
-this host needs the same seeding until the fetch works.
+`stdlib/jolt/socket.clj` builds its own `sockaddr` (`make-sockaddr`) and is
+not affected — only the addrinfo-parsing code is. `curl` and babashka's JVM
+resolver reach the same repos fine, so nothing about the network is at fault.
+
+**Workaround:** none in kmet for the fetch — the one artifact this mattered
+for (rewrite-clj 1.2.57) was seeded into `~/.m2/repository` through
+babashka's resolver, and every cached artifact resolves offline. On bionic a
+new dep needs the same seeding until the offsets are fixed.
 
 ## Closed — workarounds removed
 
