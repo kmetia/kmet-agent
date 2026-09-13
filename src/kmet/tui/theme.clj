@@ -72,7 +72,7 @@
         spread (- maxc minc)
         gray (int (+ (* 0.299 r) (* 0.587 g) (* 0.114 b)))]
     (if (< spread 10)
-      (let [gray-idx (int (Math/round (/ (- gray 8) 10)))]
+      (let [gray-idx (int (Math/round (/ (double (- gray 8)) 10)))]
         (+ 232 (min 23 (max 0 gray-idx))))
       cube-idx)))
 
@@ -359,14 +359,45 @@
         bg-map (into {} (keep (fn [k] (when-let [v (get data k)] [k (bg-ansi v color-mode)])) BG-TOKENS))]
     {:fg-map fg-map :bg-map bg-map}))
 
+(defn- detect-color-mode
+  "Detect the terminal's color capability from the environment (pi:
+   getColorMode / getCapabilities().trueColor). COLORTERM=truecolor|24bit →
+   :truecolor; COLORTERM=256color or TERM matching *-256color → :256color;
+   otherwise :256color (safe default — truecolor codes silently degrade on
+   unsupported terminals, which is exactly the wrong behavior for light
+   themes where a dark fallback bg makes dark text unreadable). The one-arg
+   arity takes an env map so the rule is testable without mutating the
+   process environment (same shape as detect-terminal-background-from-env)."
+  ([] (detect-color-mode (System/getenv)))
+  ([env]
+   (let [colorterm (str/lower-case (or (get env "COLORTERM") ""))
+         term (str/lower-case (or (get env "TERM") ""))]
+     (cond
+       (or (str/includes? colorterm "truecolor")
+           (str/includes? colorterm "24bit"))
+       :truecolor
+
+       (or (str/includes? colorterm "256color")
+           (str/includes? term "256color"))
+       :256color
+
+       ;; No explicit signal — 256-color is the safe default. A terminal
+       ;; that does support truecolor almost always advertises it via
+       ;; COLORTERM; one that doesn't would render truecolor bg codes as
+       ;; the default bg (black), breaking light themes.
+       :else :256color))))
+
 (defn make-theme
   "Create a Theme from an EDN color map.
    Accepts pi-schema {:name \"...\" :vars {...} :colors {...}}
    or flat schema {:accent \"...\" :border \"...\" ...}.
-   Falls back to dark theme keys for missing colors."
-  ([data] (make-theme data nil))
-  ([data source-path]
-   (let [color-mode :truecolor  ;; always truecolor for modern terminals
+   Falls back to dark theme keys for missing colors. MODE pins the color
+   mode (:truecolor/:256color); nil detects it from the terminal env (pi:
+   createTheme's mode argument, defaulting to getCapabilities().trueColor)."
+  ([data] (make-theme data nil nil))
+  ([data source-path] (make-theme data source-path nil))
+  ([data source-path mode]
+   (let [color-mode (or mode (detect-color-mode))
          name (or (:name data) "unnamed")
          {:keys [fg-map bg-map]} (if (is-pi-schema? data)
                                    (resolve-colors-from-pi-schema data color-mode)

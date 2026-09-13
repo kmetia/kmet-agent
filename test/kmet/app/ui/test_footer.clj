@@ -65,7 +65,8 @@
           mark (str "К" (host/mark))]
       (is (str/starts-with? line1 (str mark " "))
           "line 1 starts with the К mark followed by the runtime letter")
-      (is (str/starts-with? (first raw) (str "\u001b[3m\u001b[38;2;138;190;183m" mark))
+      (is (str/starts-with? (first raw)
+                            (str "\u001b[3m" (theme/get-fg-ansi (theme/get-current-theme) :accent) mark))
           "mark is italic (cursive) and accent-colored, matching the info screen"))))
 
 (deftest test-git-branch

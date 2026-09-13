@@ -291,8 +291,8 @@
                                                :theme (theme/get-markdown-theme theme/dark-theme)
                                                :padding-x 0)
                              30)]
-    (t/is (some #(.contains % "\u001b[38;2;86;156;214mdefn\u001b[39m") known))
-    (t/is (some #(.contains % "\u001b[38;2;181;189;104m(defn f [] 1)\u001b[39m") unknown))))
+    (t/is (some #(.contains % (theme/fg theme/dark-theme :syntax-keyword "defn")) known))
+    (t/is (some #(.contains % (theme/fg theme/dark-theme :md-code-block "(defn f [] 1)")) unknown))))
 
 (t/deftest test-markdown-empty-code-block-no-lines
   ;; Empty fences render fence lines only — highlighted path matches the
@@ -417,7 +417,7 @@
                             :theme (theme/get-markdown-theme theme/dark-theme)
                             :padding-x 0)
         lines (core/render m 20)]
-    (t/is (some #(.contains % "\u001b[38;2;128;128;128m┌") lines))
+    (t/is (some #(.contains % (str (theme/get-fg-ansi theme/dark-theme :md-table-border) "┌")) lines))
     (t/is (some #(.contains % "\u001b[1ma\u001b[22m") lines))
     (t/is (some #(.contains % "│ 1") (map strip-ansi lines)))))
 

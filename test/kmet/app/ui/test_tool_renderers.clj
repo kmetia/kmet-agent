@@ -132,4 +132,4 @@
         raw (core/render comp 60)
         ansi (first raw)]
     (testing "pending bg while nothing rendered yet"
-      (is (str/includes? (or ansi "") "48;2;") "box paints an RGB background"))))
+      (is (re-find #"\u001b\[48;" (or ansi "")) "box paints a background"))))

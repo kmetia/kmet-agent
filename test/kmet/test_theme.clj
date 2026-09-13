@@ -30,7 +30,7 @@
   (let [t theme/dark-theme]
     (t/is (= (get-in t [:fg-colors :accent]) (theme/get-fg-ansi t :accent)))
     (t/is (= (get-in t [:bg-colors :selected-bg]) (theme/get-bg-ansi t :selected-bg)))
-    (t/is (= :truecolor (theme/get-color-mode t)))
+    (t/is (contains? #{:truecolor :256color} (theme/get-color-mode t)))
     (t/is (thrown-with-msg?
            clojure.lang.ExceptionInfo #"Unknown theme color"
            (theme/get-fg-ansi t :no-such-token)))
@@ -78,7 +78,7 @@
             :accent "#0000ff"
             :success "#00ff00"
             :error "#ff0000"
-            :border "#505050"})]
+            :border "#505050"} nil :truecolor)]
     (t/is (= "test" (:name t)))
     (t/is (.contains (get-in t [:fg-colors :text]) "38;2;255;0;0"))
     (t/is (.contains (get-in t [:fg-colors :accent]) "38;2;0;0;255"))
@@ -90,7 +90,7 @@
            {:name "hex"
             :text "#ff0000"
             :accent "#00ff00"
-            :border "#0000ff"})]
+            :border "#0000ff"} nil :truecolor)]
     (t/is (.contains (get-in t [:fg-colors :text]) "38;2;255;0;0"))
     (t/is (.contains (get-in t [:fg-colors :accent]) "38;2;0;255;0"))
     (t/is (.contains (get-in t [:fg-colors :border]) "38;2;0;0;255"))))
@@ -105,12 +105,37 @@
     (t/is (.contains (get-in t [:fg-colors :accent]) "38;5;46"))
     (t/is (.contains (get-in t [:fg-colors :border]) "38;5;21"))))
 
+(t/deftest test-make-theme-256-from-hex
+  ;; Hex colors under a 256-color mode resolve through rgb->256 — including
+  ;; the grayscale branch, where Math/round on the (long) quotient used to
+  ;; throw in babashka ("No matching method round").
+  (let [t (theme/make-theme
+           {:name "hex-256"
+            :text "#808080"          ;; grayscale → the 232+gray ramp
+            :accent "#ff0000"
+            :border "#000000"} nil :256color)]
+    (t/is (.contains (get-in t [:fg-colors :text]) "38;5;"))
+    (t/is (not (.contains (get-in t [:fg-colors :text]) "38;2;")))
+    (t/is (.contains (get-in t [:fg-colors :accent]) "38;5;196"))))
+
+(t/deftest test-detect-color-mode
+  (let [detect @#'theme/detect-color-mode]
+    (t/is (= :truecolor (detect {"COLORTERM" "truecolor"})))
+    (t/is (= :truecolor (detect {"COLORTERM" "24bit"})))
+    (t/is (= :truecolor (detect {"COLORTERM" "TRUECOLOR"})))
+    (t/is (= :256color (detect {"COLORTERM" "256color"})))
+    (t/is (= :256color (detect {"TERM" "xterm-256color"})))
+    (t/is (= :256color (detect {"COLORTERM" "" "TERM" "xterm"})))
+    (t/is (= :256color (detect {})) "no signal → safe 256-color default")
+    (t/is (= :truecolor (detect {"COLORTERM" "truecolor" "TERM" "xterm-256color"}))
+          "truecolor wins over a 256color TERM")))
+
 (t/deftest test-make-theme-truecolor-vector
   (let [t (theme/make-theme
            {:name "truecolor"
             :text "#ff0000"
             :accent "#00ff00"
-            :border "#0000ff"})]
+            :border "#0000ff"} nil :truecolor)]
     (t/is (.contains (get-in t [:fg-colors :text]) "38;2;255;0;0"))
     (t/is (.contains (get-in t [:fg-colors :accent]) "38;2;0;255;0"))
     (t/is (.contains (get-in t [:fg-colors :border]) "38;2;0;0;255"))))
@@ -119,7 +144,7 @@
   (let [t (theme/make-theme
            {:name "nil-test"
             :text nil
-            :accent nil})]
+            :accent nil} nil :truecolor)]
     ;; nil means "use default" — falls back to dark theme defaults
     (t/is (= "\u001b[38;2;212;212;212m" (get-in t [:fg-colors :text])))
     (t/is (= "\u001b[38;2;138;190;183m" (get-in t [:fg-colors :accent])))))
@@ -129,7 +154,7 @@
            {:name "bg-test"
             :user-message-bg "#505050"
             :custom-message-bg nil
-            :selected-bg "#00ffff"})]
+            :selected-bg "#00ffff"} nil :truecolor)]
     (t/is (.contains (get-in t [:bg-colors :user-message-bg]) "48;2;80;80;80"))
     ;; nil bg means "use default" — falls back to dark theme default
     (t/is (= "\u001b[48;2;45;40;56m" (get-in t [:bg-colors :custom-message-bg])))
@@ -165,7 +190,7 @@
     (t/is (= "dark" (:name t)))))
 
 (t/deftest test-register-theme
-  (let [t (theme/make-theme {:name "custom" :accent "#ff00ff"})]
+  (let [t (theme/make-theme {:name "custom" :accent "#ff00ff"} nil :truecolor)]
     (theme/register-theme! t)
     (let [loaded (theme/get-theme "custom")]
       (t/is (some? loaded))

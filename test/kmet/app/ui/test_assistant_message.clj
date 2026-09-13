@@ -2,6 +2,7 @@
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.tui.core :as core]
+            [kmet.tui.theme :as theme]
             [kmet.app.ui.assistant-message :as am]))
 
 (defn- strip-ansi [s]
@@ -22,7 +23,7 @@
   (testing "assistant text renders markdown with syntax-highlighted fences"
     (let [c (am/make-assistant-message :text "```clojure\n(defn f [] 1)\n```")
           lines (core/render c 40)]
-      (is (some #(.contains % "\u001b[38;2;86;156;214mdefn\u001b[39m") lines)
+      (is (some #(.contains % (theme/fg (theme/get-current-theme) :syntax-keyword "defn")) lines)
           "code fence keywords get syntax colors")
       (is (some #(re-find #"\(defn f \[\] 1\)" %) (mapv strip-ansi lines))
           "fence content renders as markdown, not raw backticks"))))
