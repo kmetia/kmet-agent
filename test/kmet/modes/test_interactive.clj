@@ -513,3 +513,23 @@
       (let [cs (make false false false false)]
         ((var inter/heal-stale-scrollback-when-idle!) cs)
         (is (not (healed? cs)) "a clean scrollback is a no-op")))))
+
+(deftest request-global-reflow-render-gating
+  (testing "a global reflow (toggle) forces the clearing redraw only when streaming-free"
+    (let [make (fn [running]
+                 (inter/map->CoreState
+                  {:running-turn? (atom running)
+                   :bash-running? (atom false)
+                   :agent-state (atom {:compacting? (atom false)})
+                   :tui {:force-redraw? (atom false)
+                         :render-requested? (atom false)}}))]
+      (let [cs (make false)]
+        ((var inter/request-global-reflow-render!) cs)
+        (is (true? @(get-in cs [:tui :force-redraw?]))
+            "idle forces the rebuild (matches the shrinking direction)")
+        (is (true? @(get-in cs [:tui :render-requested?])) "and requests a frame"))
+      (let [cs (make true)]
+        ((var inter/request-global-reflow-render!) cs)
+        (is (false? @(get-in cs [:tui :force-redraw?]))
+            "mid-turn falls back to the ordinary render — never 3J mid-stream")
+        (is (true? @(get-in cs [:tui :render-requested?])) "still requests a frame")))))

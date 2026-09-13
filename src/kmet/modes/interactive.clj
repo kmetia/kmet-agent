@@ -2580,21 +2580,40 @@
 
 ;; ─── Message submission (pi: session.prompt input event + agent run) ──────
 
-(defn- heal-stale-scrollback-when-idle!
-  "Heal a stale above-window scrollback on user input, but only at a
-   streaming-free moment — no agent turn, bash command, or compaction in
-   flight. The heal emits the destructive ESC[3J scrollback clear, which
-   must not land in a live render (it would yank the viewport mid-stream:
-   the scroll-to-top bug). start-agent-run! heals unconditionally at turn
-   start; this broadens the trigger to any idle input so input that never
-   starts a turn (slash/bash commands, text typed then cancelled) does not
-   leave stale lines until the next turn. No-op unless the scrollback is
-   dirty (kmet.tui.core/tui-heal-scrollback!)."
+(defn- streaming-free?
+  "True when nothing is streaming — no agent turn, bash command, or
+   compaction in flight. The only moments where the destructive clearing
+   full redraw (ESC[3J) may be emitted: landing one mid-stream yanks the
+   viewport, which is the scroll-to-top bug."
   [cs]
-  (when (and (not @(:running-turn? cs))
-             (not @(:bash-running? cs))
-             (not @(:compacting? @(:agent-state cs))))
+  (and (not @(:running-turn? cs))
+       (not @(:bash-running? cs))
+       (not @(:compacting? @(:agent-state cs)))))
+
+(defn- heal-stale-scrollback-when-idle!
+  "Heal a stale above-window scrollback on user input, but only when
+   streaming-free (see streaming-free?). start-agent-run! heals
+   unconditionally at turn start; this broadens the trigger to any idle input
+   so input that never starts a turn (slash/bash commands, text typed then
+   cancelled) does not leave stale lines until the next turn. No-op unless
+   the scrollback is dirty (kmet.tui.core/tui-heal-scrollback!)."
+  [cs]
+  (when (streaming-free? cs)
     (tui/tui-heal-scrollback! (:tui cs))))
+
+(defn- request-global-reflow-render!
+  "Request a render after a global reflow — a toggle or setting that
+   re-renders many messages at once (tool expansion, thinking visibility,
+   theme, output padding). The first changed line is then an early message,
+   above the window, so the diff would clamp: the window repaints correctly
+   but the scrolled-off scrollback is left stale. When streaming-free, force
+   the clearing full redraw instead, so the reflow is rebuilt immediately —
+   what the *shrinking* direction of the same toggle already does via the
+   shrink-above-window fallback. Mid-stream, fall back to the ordinary
+   render (clamp + dirty; the next boundary heals it) rather than emit the
+   destructive 3J clear into a live render."
+  [cs]
+  (tui/tui-request-render (:tui cs) (streaming-free? cs)))
 
 (defn- start-agent-run!
   "Start an agent run: set turn state, show the working indicator + animation
@@ -3575,6 +3594,11 @@
                                     (fn [] (handle-cancel cs)))
       (editor/editor-set-on-action! ed "app.exit"
                                     (fn [] (tui/tui-stop t)))
+      ;; Force a clearing full redraw on demand — the escape hatch for a
+      ;; corrupted or stale screen/scrollback, and the same heuristic rebuild
+      ;; the suspend/resume path uses (tui-request-render with force).
+      (editor/editor-set-on-action! ed "app.view.forceRedraw"
+                                    (fn [] (tui/tui-request-render t true)))
       ;; pi: handleCtrlC — single ctrl+c clears the editor, double within
       ;; 500ms quits
       (let [last-ctrl-c (atom 0)]
@@ -3595,7 +3619,7 @@
                                         (ui/loaded-resources-set-expanded! lr expanded?)
                                         (ui/chat-history-show-status! ch
                                                                       (str "Tool output: " (if expanded? "expanded" "collapsed")))
-                                        (tui/tui-request-render t))))
+                                        (request-global-reflow-render! cs))))
       (editor/editor-set-on-action! ed "app.thinking.toggle"
                                     (fn []
           ;; pi: showStatus feedback on toggle + persist hideThinkingBlock to
@@ -3607,7 +3631,7 @@
                                                (debug/log "Failed to persist hide-thinking-block: " e)))
                                         (ui/chat-history-show-status! ch
                                                                       (str "Thinking blocks: " (if hidden? "hidden" "visible")))
-                                        (tui/tui-request-render t))))
+                                        (request-global-reflow-render! cs))))
       ;; pi: cycleThinkingLevel — Shift+Tab cycles through available levels
       (editor/editor-set-on-action! ed "app.thinking.cycle"
                                     (fn []
@@ -4085,7 +4109,8 @@
                                ;; component's watch, which schedules the frame
                                (let [current? (ui/chat-history-get-tool-expanded ch)]
                                  (when (not= current? expanded?)
-                                   (ui/chat-history-toggle-tool-expanded! ch))))
+                                   (ui/chat-history-toggle-tool-expanded! ch)
+                                   (request-global-reflow-render! cs))))
          ;; pi: registerShortcut — a raw key-id bound as a priority editor
          ;; action, checked before every builtin app binding (escape
          ;; included). The keybinding definition is registered on the global
