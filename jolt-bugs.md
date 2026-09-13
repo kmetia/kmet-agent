@@ -84,6 +84,52 @@ value with the two-arg static, `(BigDecimal/valueOf (Math/round (* n 1000000.0))
 (int 6))`, instead of `(.movePointLeft <bigdec> 6)` — same value, and jolt
 implements `valueOf`. No other instance members are needed by kmet.
 
+### `java.lang.StringBuffer` exposes no constructor (`No matching ctor found for class StringBuffer`)
+
+**Area:** java.lang / host classes
+
+`StringBuffer` is a known class value on Jolt (`(println StringBuffer)` →
+`java.lang.StringBuffer`; its ancestors are `CharSequence`, `Appendable`,
+`Comparable` and `Object`), but **no constructor
+exists** — neither `(StringBuffer.)` nor `(StringBuffer. "x")` — so no
+instance can be made and the class is inert:
+
+```
+$ jolt -e '(StringBuffer.)'
+Unhandled exception (IllegalArgumentException): No matching ctor found for class StringBuffer
+```
+
+`StringBuilder` is fully modeled (ctor, `.append`, `str`), so the gap is
+StringBuffer-specific — the legacy synchronized builder was apparently never
+registered in the host class graph. Any library on the JVM-family reader
+path that still uses it fails; the first hit is rewrite-clj 1.2.50 (cljfmt
+0.16.5's parser): `rewrite_clj/reader.cljc`'s `read-while` does
+`(let [buf (StringBuffer.)] … (.append buf c) … (.toString buf))`, so
+`cljfmt.core/reformat-string` — and therefore every `cljfmt.tool` entry
+point, i.e. `jolt format` / `jolt format-check` — dies on the constructor.
+On babashka the identical code works (bb ships a port of this surface).
+
+Minimal repro (the two builders side by side):
+
+```sh
+jolt -e '(StringBuffer.)'
+# IllegalArgumentException: No matching ctor found for class StringBuffer
+jolt -e '(let [sb (StringBuilder.)] (.append sb "a") (println (str sb)))'
+# a
+```
+
+Semantics to supply: the 0-arg (and the `String`) constructor over a
+mutable char buffer, plus `append(char)` / `append(String)` and `toString`
+— the members `read-while` calls. Synchronization is not observable at
+Jolt's level for this use, so wrapping/aliasing StringBuilder's backing
+store would satisfy the callers.
+
+**Workaround:** none in kmet — the format tasks are one code path on both
+hosts and this library/runtime error is left to surface (upstream
+rewrite-clj 1.2.55 moved JVM-family readers to `StringBuilder`, but kmet
+does not carry a version override for it). Formatting runs on `bb` until the
+runtime provides the ctor.
+
 ### [jolt#969](https://github.com/jolt-lang/jolt/issues/969) — `apply` ignores `IFn.applyTo` on deftype/record/reify callables, breaking >20-arg application
 
 **Area:** runtime / IFn dispatch

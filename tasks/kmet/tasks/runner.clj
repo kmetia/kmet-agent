@@ -165,6 +165,7 @@
     kmet.test-core
     kmet.tasks.test-changed
     kmet.tasks.test-clean
+    kmet.tasks.format-test
     kmet.tasks.test-lint])
 
 (defn- try-require

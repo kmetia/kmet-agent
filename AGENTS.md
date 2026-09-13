@@ -26,6 +26,14 @@
   Custom macros (`defcomponent`/`with-let`)
   are handled via analysis hooks in `.clj-kondo/hooks/`; keep them in sync when the macro shapes change.
 - **Format**: `bb format` (fix) / `bb format-check` (verify) — cljfmt over `src`/`test`/`tasks`/`extensions`.
+  The format tasks are one code path on both hosts (`kmet.tasks.format`):
+  cljfmt is declared for babashka (`bb.edn` `:deps`) and for jolt (`deps.edn`,
+  where `org.clojure/spec.alpha` must be declared too — jolt's resolver drops
+  cljfmt's `org.clojure/clojure` dep, and `cljfmt.config` requires spec).
+  Nothing wraps the library: failures propagate as themselves. jolt
+  presently fails inside rewrite-clj's reader on `java.lang.StringBuffer`'s
+  missing ctor (ticketed in `jolt-bugs.md`), so `jolt format*` errors out at
+  the library until the runtime provides it — use `bb format` there.
   The generated EDN provider catalogs (`src/kmet/ai/model_data/`,
   `src/kmet/ai/image_model_data/`) are excluded: their exact bytes are
   sha256-manifested (`manifest.edn`, checked by `bb check-model-data`) and are
@@ -60,7 +68,8 @@
   jolt vendors the same namespaces (built-in, resolving ahead of any classpath copy; public
   surfaces `jolt.fs` / `jolt.process` — `jolt.fs` excludes zip/gzip). A Maven copy would only
   risk shadowing the vendored one, so kmet relies on both hosts' built-ins.
-  Tooling deps (`cljfmt`) in `bb.edn` `:deps`; JLine **4.3.1** bundled with Babashka (see
+  Tooling deps (`cljfmt`, plus its `org.clojure/spec.alpha` need on jolt) in `bb.edn` `:deps` and
+  `deps.edn`; JLine **4.3.1** bundled with Babashka (see
   babashka `deps.edn`: `org.jline/jline-terminal`, `org.jline/jline-reader`) as the
   bb/JVM terminal backend — the Jolt terminal backend uses no dependency: termios /
   kernel32 through `jolt.ffi`.
@@ -184,12 +193,14 @@ tasks/kmet/tasks/ — EVERY bb-task implementation (bb.edn `:requires`/entry
               entries over kmet.ai.model-gen), and the dev loop — changed.clj
               (bb changed + the *-changed tasks), runner.clj (bb test /
               bb test-ext), clean.clj (bb clean), lint.clj (bb lint /
-              bb lint-changed, over both reader views). tasks/ is a classpath
+              bb lint-changed, over both reader views), format.clj
+              (bb format / format-check + the *-changed variants — the same
+              cljfmt path on both hosts). tasks/ is a classpath
               root (`bb.edn`/`deps.edn` :paths) but NOT part of the app: the
               uberjar walks src/ only and jolt embeds its :embed roots, so
               neither artifact carries any of it. The task tests are the
               siblings in test/kmet/tasks/ (build_test.clj, test_changed.clj,
-              test_lint.clj, ...).
+              test_lint.clj, format_test.clj, ...).
 
 extensions/ — Shipped opt-in extensions (single .clj files or manifest dirs;
               pi: examples/extensions). Extension authoring guide (the full

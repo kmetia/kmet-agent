@@ -74,6 +74,16 @@
         ;; The shims behind babashka.http-client on Jolt (upstream main).
         io.github.jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
                                          :git/sha "b98833b8338b66d435cdbffa480ba2b59c005a2e"}
+        ;; cljfmt for the format tasks (kmet.tasks.format — one code path on
+        ;; both hosts; bb.edn carries the same version for babashka).
+        ;; org.clojure/spec.alpha is declared explicitly: jolt's resolver
+        ;; drops cljfmt's org.clojure/clojure dep (vendored core), and
+        ;; cljfmt.config requires clojure.spec.alpha. cljfmt's rewrite-clj
+        ;; 1.2.50 constructs a java.lang.StringBuffer, which jolt cannot (no
+        ;; ctor): `jolt format*` fails inside the library and is left to fail
+        ;; — the runtime gap is ticketed in jolt-bugs.md, not worked around.
+        dev.weavejester/cljfmt {:mvn/version "0.16.5"}
+        org.clojure/spec.alpha {:mvn/version "0.5.238"}
         ;; kmet's own RFC 0014 provider lib (jolt/ dir): the JDK classes the
         ;; jolt ecosystem lacks. Empty by design — v0.8.6-98 supplies every
         ;; gap it was built for, so :jolt/provides is {} and install! is a

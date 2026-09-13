@@ -47,7 +47,11 @@ External deps (`deps.edn` + `bb.edn`): `babashka.fs` / `babashka.process` are
 (built-in on both hosts; see §4). `borkdude/deps.clj` (Maven resolution),
 `org.clojure/data.json` (JSON engine behind `kmet.libs.json`),
 `io.github.jolt-lang/time` + `io.github.jolt-lang/crypto` (Jolt-only shims,
-inert on bb/JVM), `dev.weavejester/cljfmt` (tooling only), JLine 4.3.1 (bb-bundled). `bb.edn` also defines 22 tasks (`run` + 21: build/test/lint/format/nrepl/generate-models/…).
+inert on bb/JVM), `dev.weavejester/cljfmt` + `org.clojure/spec.alpha`
+(tooling for the format tasks on both hosts; jolt's resolver drops cljfmt's
+`org.clojure/clojure` dep, so spec is declared explicitly — jolt's rewrite-clj
+still fails on `java.lang.StringBuffer`'s missing ctor, `jolt-bugs.md`),
+JLine 4.3.1 (bb-bundled). `bb.edn` also defines 22 tasks (`run` + 21: build/test/lint/format/nrepl/generate-models/…).
 
 ---
 
