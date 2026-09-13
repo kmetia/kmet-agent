@@ -112,7 +112,8 @@
        (h/compile-tree
         [:container {}
          [:text {:padding-x 1 :padding-y 0}
-          (theme/fg th :warning "Review session active, return with /end-review")]]))
+          (theme/fg th :warning "Review session active, return with /end-review")]
+         [:spacer {:lines 1}]]))
      {:placement :above-editor})))
 
 ;; -- Settings persistence ------------------------------------------------
