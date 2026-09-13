@@ -450,7 +450,13 @@ protocol — retired in DSL stage 2, see tui.md §8).
   lines above are left alone), and a same-height change entirely above the
   window emits nothing at all. That keeps 3J out of the streaming path — otherwise every
   reflow/edit-preview update above the window yanked the viewport to the top
-  while the user was reading (microsoft/terminal#20370, pi #4506/#6502). The
+  while the user was reading (microsoft/terminal#20370, pi #4506/#6502). An
+  *explicit* global reflow (the tool-output / thinking toggles, the
+  set-tools-expanded extension API, a theme switch) is not that automatic
+  path: it is a discrete user action, so the app forces the clearing rebuild
+  immediately (`request-global-reflow-render!`,
+  `kmet.app.theme-controller/notify-changed!`) rather than leave the
+  scrollback showing pre-reflow content until the next heal. The
   TUI flags the resulting above-window staleness (`tui-scrollback-dirty?`)
   and rebuilds the scrollback with one clearing full redraw via
   `tui-heal-scrollback!` — the app calls it at the end of a turn

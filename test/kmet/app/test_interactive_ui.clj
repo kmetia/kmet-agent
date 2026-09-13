@@ -763,6 +763,10 @@
           tc-ctrl (atom nil)]
       (with-redefs [tui/tui-on-terminal-color-scheme-change (fn [_ _] nil)
                     tui/tui-invalidate (fn [_] nil)
+                    ;; the controller is built over a stub UI here (this test
+                    ;; covers the /theme argument handling); stub the forced
+                    ;; render notify-changed! now issues too
+                    tui/tui-request-render (fn [& _] nil)
                     ui/chat-history-add-message! (fn [_ m] (reset! msg m))
                     cfg/save-setting! (fn [path value] (reset! saved [path value]))]
         (reset! tc-ctrl (theme-ctrl/make-theme-controller {:theme "dark"} nil nil (fn [])))

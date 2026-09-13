@@ -58,9 +58,15 @@ starts *above* the window is otherwise handled without one: since the
 terminal has no addressable scrollback, the diff is clamped to the window
 top and only visible lines are repainted in place (a same-height or growing
 change entirely above the window emits nothing; a shrink keeps the full
-redraw) — this keeps the destructive clear out of the streaming path,
-where it otherwise yanked the viewport to the top on Termux and Windows
-Terminal (microsoft/terminal#20370; pi #4506/#6502). Leaving those lines
+redraw) — this keeps the destructive clear out of the *automatic* streaming
+path, where it otherwise yanked the viewport to the top on Termux and
+Windows
+Terminal (microsoft/terminal#20370; pi #4506/#6502). An explicit reflow is
+not that automatic path: the tool-output / thinking toggles (and the
+`set-tools-expanded` extension API) and a theme switch are discrete user
+actions, so the app forces the clearing rebuild for them instead of
+clamping (a theme switch would otherwise leave the whole scrollback in the
+old theme). Leaving those lines
 un-repainted means the scrollback above the window is stale, so the TUI
 *records* that (`tui-scrollback-dirty?`) and rebuilds it with one clearing
 full redraw at a streaming-free boundary — the app calls

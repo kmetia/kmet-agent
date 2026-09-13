@@ -58,12 +58,15 @@
 
 (t/deftest test-set-theme-name
   (t/testing "switching themes updates state and notifies"
-    (let [{:keys [ctrl changed]} (make-ctrl {:theme "dark"})]
+    (let [{:keys [ctrl changed tui]} (make-ctrl {:theme "dark"})]
       (reset! changed 0)
       (let [result (tc/set-theme-name! ctrl "light")]
         (t/is (true? (:success result)))
         (t/is (= "light" (:name (theme/get-current-theme))))
         (t/is (= "light" (tc/get-active-theme-name ctrl)))
+        (t/is (true? @(:force-redraw? tui))
+              "a theme switch forces the clearing rebuild — an ordinary diff
+              would clamp at the header and leave the scrollback themed dark")
         (t/is (= 2 @changed)
               "notified twice — pi parity: setTheme fires the onThemeChange
               callback and applyThemeName fires notifyChanged"))))
@@ -78,10 +81,11 @@
 
 (t/deftest test-set-theme-instance
   (t/testing "in-memory instances bypass the registry"
-    (let [{:keys [ctrl]} (make-ctrl {:theme "dark"})]
+    (let [{:keys [ctrl tui]} (make-ctrl {:theme "dark"})]
       (tc/set-theme-instance! ctrl theme/light-theme)
       (t/is (identical? theme/light-theme (theme/get-current-theme)))
-      (t/is (= "<in-memory>" (tc/get-active-theme-name ctrl))))))
+      (t/is (= "<in-memory>" (tc/get-active-theme-name ctrl)))
+      (t/is (true? @(:force-redraw? tui)) "an instance swap forces the rebuild too"))))
 
 (t/deftest test-get-terminal-theme
   (t/testing "the env-detected terminal theme is exposed"

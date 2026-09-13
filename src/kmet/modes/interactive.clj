@@ -2619,18 +2619,17 @@
   "Request a render after a global reflow — a discrete toggle that
    re-renders many messages at once (tool expansion, thinking visibility,
    the extension set-tools-expanded API). The first changed line is then an
-   early message, above the window, so the diff would clamp: the window
-   repaints correctly but the scrolled-off scrollback is left stale. When
-   streaming-free, force the clearing full redraw instead, so the reflow is
-   rebuilt immediately — what the *shrinking* direction of the same toggle
-   already does via the shrink-above-window fallback. Mid-stream, fall back
-   to the ordinary render (clamp + dirty; the next boundary heals it) rather
-   than emit the destructive 3J clear into a live render.
-   Theme and output-pad changes deliberately stay on the ordinary path:
-   their selectors preview live, so forcing per keystroke would re-emit the
-   whole transcript on every step."
+   early message, above the window, so an ordinary diff would clamp: the
+   window repaints correctly but the scrolled-off scrollback keeps the
+   pre-reflow content — stale for as long as the turn streams. These are
+   explicit user actions (the shrinking direction of the same toggle is
+   already rebuilt by the shrink-above-window fallback), so force the
+   clearing full redraw: the scrollback is rebuilt immediately.
+   Automatic above-window changes — streaming text, tool output updates —
+   still clamp and mark the scrollback dirty for a later heal; only an
+   explicit reflow asks for the clear."
   [cs]
-  (tui/tui-request-render (:tui cs) (streaming-free? cs)))
+  (tui/tui-request-render (:tui cs) true))
 
 (defn- start-agent-run!
   "Start an agent run: set turn state, show the working indicator + animation

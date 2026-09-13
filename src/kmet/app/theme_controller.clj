@@ -14,9 +14,17 @@
                             auto-sync-enabled-atom])
 
 (defn- notify-changed!
+  "Re-theme the app: invalidate every component, then tell the owner.
+   A theme change re-renders every message, so the first changed line is the
+   header — above the window — and an ordinary diff would clamp it: the
+   visible window repaints, but the scrolled-off scrollback keeps the OLD
+   theme until the next heal. Force the clearing full redraw so the rebuild
+   is immediate (this is an explicit change, not an automatic above-window
+   update, so it may emit the scrollback clear; see tui.md §1)."
   [ctrl]
   (tui/tui-invalidate (:ui ctrl))
-  ((:on-changed ctrl)))
+  ((:on-changed ctrl))
+  (tui/tui-request-render (:ui ctrl) true))
 
 (defn- apply-theme-name!
   "pi: applyThemeName — set the theme (with the file watcher), track the
