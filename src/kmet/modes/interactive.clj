@@ -276,12 +276,12 @@
 
 (defn- update-editor-border-color!
   "Update the editor border color to reflect the given thinking LEVEL.
-   Pi: updateEditorBorderColor — sets borderColor based on session.thinkingLevel."
+   Pi: updateEditorBorderColor — sets borderColor based on session.thinkingLevel.
+   Reads the ACTIVE theme (not the config :theme setting, which is a stale
+   startup snapshot after /theme), so a theme switch re-styles the border."
   [cs level]
-  (let [config (:config cs)
-        theme (cfg/get-theme config)]
-    (reset! (:border-fn (:editor cs))
-            (th/get-thinking-border-color theme level))))
+  (reset! (:border-fn (:editor cs))
+          (th/get-thinking-border-color (th/get-current-theme) level)))
 
 (defn- update-footer!
   "Sync the footer's session data source (cs → fdp bridge). No explicit
@@ -3530,6 +3530,12 @@
                   (expandable-text/expandable-text-rebuild! hdr)
                   (editor/editor-set-autocomplete-theme!
                    ed (th/get-select-list-theme current-theme))
+                  ;; the editor's dynamic border is a border-fn baked at
+                  ;; construction — re-style it from the active theme so the
+                  ;; most prominent themed element changes with the palette
+                  (reset! (:border-fn ed)
+                          (th/get-thinking-border-color
+                           current-theme (or @(:thinking ag) :off)))
                   (tui/tui-request-render t))))
           cs (assoc cs :status-indicator si :theme-controller tc)
           ;; Pi layout (interactive-mode.ts setupUiLayout): the TUI root is a

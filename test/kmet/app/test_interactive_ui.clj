@@ -783,6 +783,26 @@
             ((:handler (commands/find-command "theme")) cs "dark")
             (t/is (= "dark" (:name (theme/get-current-theme))))))))))
 
+(deftest test-update-editor-border-color-uses-active-theme
+  (testing "the editor's dynamic border follows the ACTIVE theme, not the
+            config :theme snapshot — a /theme switch re-styles it"
+    (let [bf (atom nil)
+          cs {:editor {:border-fn bf}}
+          rule (fn [theme-name]
+                 ((theme/get-thinking-border-color (theme/get-theme theme-name) :max) "─"))]
+      (reset! theme/theme-atom (theme/get-theme "dark"))
+      ((var inter/update-editor-border-color!) cs :max)
+      (t/is (= (rule "dark") ((deref bf) "─")))
+      (reset! theme/theme-atom (theme/get-theme "light"))
+      (try
+        ((var inter/update-editor-border-color!) cs :max)
+        (t/is (= (rule "light") ((deref bf) "─"))
+              "after a theme switch the border uses the new theme's color, not
+               the config snapshot it was constructed from")
+        (t/is (not= (rule "dark") ((deref bf) "─")))
+        (finally
+          (reset! theme/theme-atom (theme/get-theme "dark")))))))
+
 (deftest test-build-context-capability
   (testing "the interactive ui registry's :build-context captures live state"
     (let [ag (agent/make-agent-state :provider :opencode-go :model "deepseek-v4-flash")
