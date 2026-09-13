@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-12T21:41:48Z"
+ :generated-at "2026-09-13T19:36:49Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -749,9 +749,9 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.3 :output 1.2 :cache-read 0.03 :cache-write 0}
-    :context-window 1048576
-    :max-tokens 32768}
+    :cost {:input 0.15 :output 0.6 :cache-read 0.015 :cache-write 0}
+    :context-window 1000000
+    :max-tokens 384000}
    "google/gemini-2.5-flash"
    {:id "google/gemini-2.5-flash"
     :name "Gemini 2.5 Flash"

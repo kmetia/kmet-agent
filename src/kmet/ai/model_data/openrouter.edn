@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-13T13:59:11Z"
+ :generated-at "2026-09-13T19:36:49Z"
  :provider {:id :openrouter
             :name "OpenRouter"
             :env-vars ["OPENROUTER_API_KEY"]
@@ -808,7 +808,7 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.04872 :output 0.09744 :cache-read 0.009744 :cache-write 0}
+    :cost {:input 0.04732 :output 0.09464 :cache-read 0.009464 :cache-write 0}
     :context-window 1024000
     :max-tokens 384000
     :compat {:supports-developer-role false
@@ -934,9 +934,9 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.57816 :output 1.73448 :cache-read 0.018396 :cache-write 0}
-    :context-window 1048576
-    :max-tokens 393216
+    :cost {:input 0.57948 :output 1.73844 :cache-read 0.019316 :cache-write 0}
+    :context-window 1024000
+    :max-tokens 384000
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter}}
@@ -4913,7 +4913,7 @@
                          :off "none"
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.132 :output 0.528 :cache-read 0.033 :cache-write 0}
+    :cost {:input 0.0825 :output 0.33 :cache-read 0.020625 :cache-write 0}
     :context-window 262144
     :max-tokens 128000
     :compat {:supports-developer-role false :thinking-format :openrouter}}
@@ -5619,7 +5619,7 @@
                          :off "none"
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 2.1 :output 10.95 :cache-read 0 :cache-write 0}
+    :cost {:input 2.1 :output 10.95 :cache-read 0.23 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-developer-role false :thinking-format :openrouter}}
