@@ -1963,16 +1963,16 @@
    "MiniMaxAI/MiniMax-M2.5"            [:qwen-token-plan "MiniMax-M2.5"]
    "MiniMaxAI/MiniMax-M2.7"            [:minimax "MiniMax-M2.7"]
    "MiniMaxAI/MiniMax-M3"              [:minimax "MiniMax-M3"]
-   "moonshotai/Kimi-K2.5"              [:moonshotai "kimi-k2.5"]
+   "moonshotai/Kimi-K2.5"              [:baseten "moonshotai/Kimi-K2.5"]
    "moonshotai/Kimi-K2.6"              [:moonshotai "kimi-k2.6"]
    "moonshotai/Kimi-K2.7-Code"         [:moonshotai "kimi-k2.7-code"]
    "moonshotai/Kimi-K2.7-Code-Highspeed" [:moonshotai "kimi-k2.7-code-highspeed"]
    "moonshotai/Kimi-K3"                [:moonshotai "kimi-k3"]
    "nvidia/nemotron-3-ultra-550b-a55b" [:nvidia "nvidia/nemotron-3-ultra-550b-a55b"]
    "poolside/laguna-s-2.1-free"        [:openrouter "poolside/laguna-s-2.1:free"]
-   "Qwen/Qwen3.6-Max-Preview"          [:qwen-token-plan "qwen3.6-max-preview"]
+   "Qwen/Qwen3.6-Max-Preview"          [:openrouter "qwen/qwen3.6-max-preview"]
    "Qwen/Qwen3.6-Plus"                 [:qwen-token-plan "qwen3.6-plus"]
-   "Qwen/Qwen3.7-Flash"                [:qwen-token-plan "qwen3.7-flash"]
+   "Qwen/Qwen3.7-Flash"                [:openrouter "qwen/qwen3.7-flash"]
    "Qwen/Qwen3.7-Max"                  [:qwen-token-plan "qwen3.7-max"]
    "Qwen/Qwen3.7-Plus"                 [:qwen-token-plan "qwen3.7-plus"]
    "Qwen/Qwen3.8-27B"                  [:openrouter "qwen/qwen3.8-27b"]
@@ -1980,7 +1980,7 @@
    "sakana/fugu-ultra"                 [:openrouter "sakana/fugu-ultra"]
    "stepfun/Step-3.5-Flash"            [:openrouter "stepfun/step-3.5-flash"]
    "stepfun/Step-3.7-Flash"            [:openrouter "stepfun/step-3.7-flash"]
-   "thinkingmachines/inkling"          [:nvidia "thinkingmachines/inkling"]
+   "thinkingmachines/inkling"          [:baseten "thinkingmachines/inkling"]
    "thinkingmachines/inkling-small"    [:openrouter "thinkingmachines/inkling-small"]
    "xai/grok-4.5"                      [:xai "grok-4.5"]
    "xai/grok-4.6"                      [:xai "grok-4.6"]
@@ -1994,9 +1994,10 @@
 
 (def ^:private commandcode-no-compat-refs
   "Ref entries whose :thinking-format is endpoint-bound rather than
-   model-bound (baseten's GLM handling; the qwen-token-plan catalog hosts
+   model-bound (baseten's GLM/Kimi handling; the qwen-token-plan catalog hosts
    non-Qwen models whose qwen format does not follow the weights)."
   #{"MiniMaxAI/MiniMax-M2.5"
+    "moonshotai/Kimi-K2.5"
     "zai-org/GLM-5"
     "zai-org/GLM-5.1"
     "zai-org/GLM-5.2-Fast"})

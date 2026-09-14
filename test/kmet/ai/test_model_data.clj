@@ -352,3 +352,38 @@
         (t/is (= true (:reasoning cc))
               (str cid " must carry thinking support"))))))
 
+(t/deftest test-commandcode-retired-canonical-refs-repointed
+  "Regression: four CommandCode canonical refs pointed at catalog ids that
+   no longer exist — Moonshot retired kimi-k2.5 (Sep 2026 bump), the Qwen
+   token-plan catalog never carried qwen3.7-flash/qwen3.6-max-preview, and
+   NVIDIA NIM dropped thinkingmachines/inkling — so process-commandcode
+   warned and those entries shipped conservative defaults (:reasoning
+   false, text-only, 32768 max-tokens). Each ref now points at the same
+   weights in a catalog that lists them, and the committed endpoint entry
+   carries thinking support."
+  (let [refs @#'mg/commandcode-canonical-refs
+        catalogs (#'mg/read-catalogs mg/data-dir)
+        check (fn [cid rp rid]
+                (t/is (= [rp rid] (get refs cid))
+                      (str cid " must point at " rp " " rid))
+                (let [canonical (get-in catalogs [rp :openai-completions rid])
+                      cc (get-in catalogs [:commandcode :openai-completions cid])]
+                  (t/is (some? canonical)
+                        (str "the referenced canonical model must exist (" rp " " rid ")"))
+                  (t/is (some? cc) (str cid " must be listed"))
+                  (t/is (= true (:reasoning cc))
+                        (str cid " must carry thinking support"))
+                  (t/is (= (:max-tokens canonical) (:max-tokens cc))
+                        (str cid " must carry the canonical max-tokens"))
+                  (t/is (= (:input canonical) (:input cc))
+                        (str cid " must carry the canonical input modalities"))))]
+    ;; Moonshot retired kimi-k2.5: Baseten still serves the same weights
+    ;; (toggle thinking); its endpoint-bound :baseten format does not
+    ;; transfer (commandcode-no-compat-refs).
+    (check "moonshotai/Kimi-K2.5" :baseten "moonshotai/Kimi-K2.5")
+    ;; The token-plan catalog never carried these two Qwen SKUs: OpenRouter does.
+    (check "Qwen/Qwen3.6-Max-Preview" :openrouter "qwen/qwen3.6-max-preview")
+    (check "Qwen/Qwen3.7-Flash" :openrouter "qwen/qwen3.7-flash")
+    ;; NVIDIA NIM dropped inkling: Baseten still serves it.
+    (check "thinkingmachines/inkling" :baseten "thinkingmachines/inkling")))
+

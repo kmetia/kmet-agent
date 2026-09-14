@@ -146,11 +146,12 @@
     :provider :commandcode
     :api :openai-completions
     :base-url "https://api.commandcode.ai/provider/v1"
-    :reasoning false
+    :reasoning true
     :input [:text]
     :cost {:input 1.3 :output 7.8 :cache-read 0.26 :cache-write 1.63}
     :context-window 200000
-    :max-tokens 32768}
+    :max-tokens 65536
+    :compat {:thinking-format :openrouter}}
    "Qwen/Qwen3.6-Plus"
    {:id "Qwen/Qwen3.6-Plus"
     :name "Qwen 3.6 Plus"
@@ -169,11 +170,12 @@
     :provider :commandcode
     :api :openai-completions
     :base-url "https://api.commandcode.ai/provider/v1"
-    :reasoning false
-    :input [:text]
+    :reasoning true
+    :input [:text :image]
     :cost {:input 0.03 :output 0.13 :cache-read 0.006 :cache-write 0.038}
     :context-window 1000000
-    :max-tokens 32768}
+    :max-tokens 65536
+    :compat {:thinking-format :openrouter}}
    "Qwen/Qwen3.7-Max"
    {:id "Qwen/Qwen3.7-Max"
     :name "Qwen 3.7 Max"
@@ -667,11 +669,18 @@
     :provider :commandcode
     :api :openai-completions
     :base-url "https://api.commandcode.ai/provider/v1"
-    :reasoning false
-    :input [:text]
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low nil
+                         :max nil
+                         :medium nil
+                         :minimal nil
+                         :off "off"
+                         :xhigh nil}
+    :input [:text :image]
     :cost {:input 0.6 :output 3 :cache-read 0.1 :cache-write 0}
     :context-window 256000
-    :max-tokens 32768}
+    :max-tokens 262000}
    "moonshotai/Kimi-K2.6"
    {:id "moonshotai/Kimi-K2.6"
     :name "Kimi K2.6"
@@ -831,11 +840,19 @@
     :provider :commandcode
     :api :openai-completions
     :base-url "https://api.commandcode.ai/provider/v1"
-    :reasoning false
-    :input [:text]
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal "minimal"
+                         :off "none"
+                         :xhigh "xhigh"}
+    :input [:text :image]
     :cost {:input 1 :output 4.05 :cache-read 0.17 :cache-write 0}
     :context-window 256000
-    :max-tokens 32768}
+    :max-tokens 32768
+    :compat {:thinking-format :openai}}
    "thinkingmachines/inkling-small"
    {:id "thinkingmachines/inkling-small"
     :name "Inkling Small"
