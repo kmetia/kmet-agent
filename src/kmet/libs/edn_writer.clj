@@ -56,11 +56,7 @@
   (let [n (double v)]
     (if (== n (Math/floor n))
       (str (long n))
-      ;; BigDecimal/valueOf(unscaled, 6) is the same scale-6 value as
-      ;; .movePointLeft 6, and unlike the instance method it exists on Jolt,
-      ;; whose BigDecimal carries no instance methods — so this stays one
-      ;; implementation on both hosts. (int 6) picks the (long,int) overload.
-      (str/replace (str (BigDecimal/valueOf (Math/round (* n 1000000.0)) (int 6)))
+      (str/replace (str (.movePointLeft (BigDecimal. (Math/round (* n 1000000.0))) 6))
                    #"0+$" ""))))
 
 (defn- key-str

@@ -12,30 +12,6 @@
  ;; checkout. Without this the built binary only resolves them while a
  ;; JOLT_PWD-relative source root is there.
  :jolt/build {:embed ["src"]}
- ;; On Android the launch interpreter is /system/bin/linker64, whose default
- ;; search paths are /system/lib64 and friends — NOT the Termux prefix. A bare
- ;; soname like "libssl.so" therefore resolves to the platform's BoringSSL
- ;; (/system/lib64/libssl.so), which exports no SSL_ctrl and whose SSL_CTX
- ;; layout disagrees with the OpenSSL jolt-lang/crypto means to bind; the mix
- ;; faults with "invalid memory reference". Naming the Termux OpenSSL
- ;; absolute-first keeps BoringSSL out of the resolution. The :name keys match
- ;; the crypto lib's specs, so dedup-by native-key reconciles to one load — the
- ;; project's own entry, first in the concat, is the one kept — which is why
- ;; the :darwin arm mirrors crypto's (this entry REPLACES that spec, it does
- ;; not merge per-platform). Inert where the prefix path does not exist:
- ;; dlopen fails and the next candidate is tried.
- :jolt/native [{:name "crypto"
-                :darwin ["/opt/homebrew/opt/openssl@3/lib/libcrypto.dylib"
-                         "/usr/local/opt/openssl@3/lib/libcrypto.dylib"
-                         "/usr/lib/libcrypto.dylib" "libcrypto.dylib"]
-                :linux ["/data/data/com.termux/files/usr/lib/libcrypto.so.3"
-                        "libcrypto.so.3" "libcrypto.so.1.1" "libcrypto.so"]}
-               {:name "ssl"
-                :darwin ["/opt/homebrew/opt/openssl@3/lib/libssl.dylib"
-                         "/usr/local/opt/openssl@3/lib/libssl.dylib"
-                         "/usr/lib/libssl.dylib" "libssl.dylib"]
-                :linux ["/data/data/com.termux/files/usr/lib/libssl.so.3"
-                        "libssl.so.3" "libssl.so.1.1" "libssl.so"]}]
  :deps {        ;; babashka.fs / babashka.process are deliberately NOT deps: babashka
         ;; bundles them, and jolt vendors the same namespaces (built-in,
         ;; resolving ahead of any deps.edn copy). A Maven copy is redundant on
