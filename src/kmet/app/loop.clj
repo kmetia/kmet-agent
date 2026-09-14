@@ -1518,7 +1518,9 @@ Be precise and concise in your responses."}}]
    entries stay in the file, build-context excludes them), and rebuild the
    in-memory context to mirror it. Also the manual /compact path
    (pi: session.compact) — custom-instructions are appended to the
-   summarization prompt.
+   summarization prompt, and a manual compaction (reason :manual) starts
+   with a fresh abort state: Escape's run-cancel signal is cleared, so a
+   stale one cannot abort it.
 
    Emits :compaction-start/:compaction-end around the work (pi:
    compaction_start/compaction_end); the end event carries :aborted true
@@ -1534,6 +1536,13 @@ Be precise and concise in your responses."}}]
   (if @(:compacting? agent)
     false
     (let [reason (if custom-instructions :manual (or reason :auto))]
+      ;; A manual compaction is a fresh operation (pi: session.compact aborts
+      ;; the current operation, then creates a new AbortController): clear the
+      ;; run's cancel signal, which a previous Escape leaves set until the
+      ;; next run — a stale true would abort the compaction immediately. The
+      ;; auto paths keep it: an Escape at run start must still abort them.
+      (when (= :manual reason)
+        (reset! (:signal agent) false))
       (emit agent {:type :compaction-start :reason reason})
       (reset! (:compacting? agent) true)
       (try

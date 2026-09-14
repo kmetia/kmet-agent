@@ -1274,7 +1274,7 @@
                    ;; is async). The :compaction-end event reports an
                    ;; aborted compaction; only the result replies go here.
                    (future
-                     (let [result (agent/compact-context! agent-state instructions)]
+                     (let [result (agent/compact-context! agent-state instructions :manual)]
                        (when-not (or (= :aborted result) (= :failed result))
                          ;; pi: handleCompactCommand ignores the thrown
                          ;; compaction error — compaction_end surfaces it
@@ -4401,8 +4401,7 @@
                                                       on-complete on-error]}]]
                                         (future
                                           (try
-                                            (let [r (agent/compact-context!
-                                                     @ag-atom custom-instructions)]
+                                            (let [r (agent/compact-context! @ag-atom custom-instructions :manual)]
                                               (if (and (= :failed r) on-error)
                                                 ;; pi: compact() throws on
                                                 ;; summarization failure →

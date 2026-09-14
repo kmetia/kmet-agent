@@ -3158,6 +3158,42 @@
       (finally
         (fs/delete-tree dir)))))
 
+(t/deftest test-loop-manual-compaction-clears-stale-cancel-signal
+  ;; Regression (/compact after Escape): Escape leaves the run's cancel
+  ;; signal set until the next run starts, which made every manual compaction
+  ;; abort immediately with "compaction cancelled". A manual compaction is a
+  ;; fresh operation (pi: session.compact aborts the current operation, then
+  ;; creates a new AbortController), so it clears the stale signal — the auto
+  ;; paths keep it, an Escape at run start must still abort them.
+  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+        sess (session/create-session (str dir))
+        agent (loop/make-agent-state :session sess :keep-recent-tokens 40)]
+    (try
+      (doseq [i (range 6)]
+        (let [m {:role :user :content [{:type :text :text
+                                        (str "This is message body number " i
+                                             " with plenty of words so the estimated token count "
+                                             "easily exceeds the small test threshold.")}]}]
+          (swap! (:messages agent) conj m)
+          (session/append-entry sess m)))
+      ;; ESC on a running turn: the run settles, its cancel signal stays set
+      ;; (only the next run resets it) — the exact state /compact hits.
+      (loop/cancel-turn agent)
+      (t/is (true? @(:signal agent)) "precondition: Escape leaves the cancel signal set")
+      (with-summarization-stub
+        (fn []
+          (binding [*err* (java.io.StringWriter.)]
+            (t/is (= :aborted (loop/compact-context! agent nil :threshold))
+                  "the auto path still aborts on the cancel signal")
+            (t/is (true? @(:signal agent)) "the auto path keeps the signal")
+            (t/is (true? (loop/compact-context! agent nil :manual))
+                  "a manual compaction starts with a fresh abort state")
+            (t/is (false? @(:signal agent)) "the stale cancel signal is cleared"))))
+      (t/is (some #(= :compaction (:role %)) @(:entries sess))
+            "the manual compaction appended its compaction entry")
+      (finally
+        (fs/delete-tree dir)))))
+
 (t/deftest ^:slow test-loop-compaction-refuses-when-active
   (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
         sess (session/create-session (str dir))
