@@ -14,7 +14,7 @@ Historical labels from the deleted `bb-jolt.md` map as: `JOLT-12`→#947,
 
 ## Open
 
-### Type hints on JDK classes Jolt does not supply fail the extension load
+### [jolt#983](https://github.com/jolt-lang/jolt/issues/983) — hinted instance call reports "No dependency provides" for a supplied class
 
 **Area:** SCI interop / class graph
 
