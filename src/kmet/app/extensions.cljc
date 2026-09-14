@@ -16,7 +16,7 @@
    own isolated SCI context: internal namespaces are served from the
    extension artifact (dir or jar) by strict ns-path lookup,
    declared libraries from its deps.edn (resolved in-process via
-   borkdude.deps) — so
+   clojure.tools.deps, bundled with babashka) — so
    different extensions can use different versions of the same library, and
    unloading an extension releases everything it pulled in. Optional
    (defn shutdown [api]) runs on unload, which also unregisters everything
@@ -30,7 +30,6 @@
             [clojure.string :as str]
             [babashka.fs :as fs]
             [babashka.process :as proc]
-            #?@(:bb [[borkdude.deps :as bdeps]])
             [sci.core :as sci]
             [kmet.ai.models :as models]
             [kmet.ai.hooks :as ai-hooks]
@@ -714,7 +713,7 @@
 ;; Each extension evaluates inside its own sci context: a private namespace
 ;; registry plus a per-extension loader that serves (1) the extension's own
 ;; files, (2) the jars its deps.edn declares (the complete transitive
-;; closure, resolved in-process via borkdude.deps), and (3) anything else on
+;; closure, resolved in-process via clojure.tools.deps), and (3) anything else on
 ;; the classpath. Global namespaces the extension may touch — kmet.extension
 ;; (the contract), clojure.*, babashka.*, and the shared library layers
 ;; kmet.tui.* (pi: @earendil-works/pi-tui) and kmet.libs.* (generic
@@ -1435,20 +1434,20 @@
 
      (defn- closure-jars
        "The complete transitive jar set for DEPS-MAP, computed in-process via
-        borkdude.deps (the tools.deps port) — no subprocess, no global classpath
-        changes, nothing written outside ~/.m2. Resolution failures throw
-        (borkdude.deps' default *exit-fn* would kill the process)."
+        clojure.tools.deps (bundled with babashka; the native resolver — no
+        JVM) — no subprocess, no global classpath changes, nothing written
+        outside ~/.m2. Resolution failures throw."
        [deps-map]
-       (let [cp (with-out-str
-                  (binding [*print-namespace-maps* false
-                            bdeps/*exit-fn* (fn [{:keys [message]}]
-                                              (throw (ex-info (or message "deps resolution failed")
-                                                              {:deps deps-map})))]
-                    (bdeps/-main "-Srepro" "-Spath"
-                                 "-Sdeps" (pr-str {:deps deps-map
-                                                   :mvn/repos {"clojars" {:url "https://repo.clojars.org/"}}})
-                                 "-Sdeps-file" "__kmet_no_deps__.edn")))]
-         (->> (str/split (str/trim cp) (re-pattern (System/getProperty "path.separator")))
+       (let [create-basis (requiring-resolve 'clojure.tools.deps/create-basis)
+             ;; :root/:user/:project nil = no ambient deps.edn (the old
+             ;; -Srepro/-Sdeps-file pairing); the repos are explicit because
+             ;; nothing is inherited to supply the tools.deps defaults.
+             basis (create-basis {:root nil :user nil :project nil
+                                  :extra {:deps deps-map
+                                          :mvn/repos {"central" {:url "https://repo1.maven.org/maven2/"}
+                                                      "clojars" {:url "https://repo.clojars.org/"}}}})]
+         (->> (:classpath-roots basis)
+              (map str)
               (filter #(or (str/includes? % ".m2") (str/includes? % ".gitlibs")))
               (remove bundled-artifact?)
               vec)))))
@@ -1468,9 +1467,9 @@
 
 (defn- make-deps-resolver
   "Memoized per-extension closure resolver: resolves the extension's jar
-   set on first library require (via jars-for), records it on the record's
-   :jars (for introspection), reuses it after. nil when the extension has
-   no deps.edn."
+   set on the first call (load-extension! forces that call in host scope,
+   before the SCI eval — see there), records it on the record's :jars (for
+   introspection), reuses it after. nil when the extension has no deps.edn."
   [deps-map jars-atom]
   (when deps-map
     (let [resolved (volatile! nil)]
@@ -1655,8 +1654,8 @@
    short-name :imports, shared global namespaces (contract + builtins +
    the kmet.tui.* TUI library + the kmet.libs.* library layer, required
    first so they exist for the injection), and the per-extension load-fn
-   that checks deps — own artifact, declared deps (resolved lazily on
-   first library require), bb-bundled namespaces, with actionable errors
+   that checks deps — own artifact, declared deps (resolved by
+   load-extension! before the context evaluates), bb-bundled namespaces, with actionable errors
    for everything else. RESOURCE-FN replaces clojure.java.io/resource
    with an artifact-scoped lookup (nil keeps the host resource)."
   [ext-name artifact owns-ns? deps-resolver resource-fn]
@@ -1772,6 +1771,15 @@
                        (fn [ns-sym] (artifact-owns-ns? artifact jar-info ns-sym))
                        (constantly false))
             deps-resolver (make-deps-resolver deps (:jars ext))
+            ;; Force the closure resolution HERE, in host scope: during the
+            ;; context's SCI eval, require/requiring-resolve run through the
+            ;; extension load-fn (bb hosts the interpreter), and
+            ;; clojure.tools.deps internally loads its dep-extension
+            ;; namespaces via requiring-resolve — resolving lazily from
+            ;; inside the eval re-enters this resolver until the stack
+            ;; overflows. Resolved up front, the load-fn only reads the
+            ;; cache.
+            _ (when deps-resolver (deps-resolver))
             ctx (create-context name artifact owns-ns?
                                 deps-resolver
                                 (when artifact (extension-resource-fn artifact jar-info deps-resolver)))]

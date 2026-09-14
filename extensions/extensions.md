@@ -240,11 +240,11 @@ single proxy-aware boundary shared by reference with the host. Requiring
 - Transport failures throw `{:type :transport-error}`; errors carry stable
   retryable message tokens ("network error" for connect/DNS/timeout/RST).
 
-Dep resolution happens **in-process** (via `borkdude.deps`, the tools.deps
-port kmet depends on) — no subprocess, and nothing is written outside the
-normal Maven/Git caches (`~/.m2`, `~/.gitlibs`). A library an extension
-requires without declaring it in `deps.edn` fails with a clear error unless
-it is babashka-bundled.
+Dep resolution happens **in-process** (via `clojure.tools.deps`, bundled
+with babashka — no extra dependency, no JVM) — no subprocess, and nothing
+is written outside the normal Maven/Git caches (`~/.m2`, `~/.gitlibs`). A
+library an extension requires without declaring it in `deps.edn` fails with
+a clear error unless it is babashka-bundled.
 
 ### Background work (`kmet.libs.concurrent/spawn`)
 

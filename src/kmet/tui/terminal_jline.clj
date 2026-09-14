@@ -1,5 +1,5 @@
 (ns kmet.tui.terminal-jline
-  "JLine 4.x terminal backend (Babashka bundles JLine 4.3.1) — the only
+  "JLine 4.x terminal backend (Babashka bundles JLine 4.4.0) — the only
    namespace that imports org.jline.*. Port of @earendil-works/pi-tui
    ProcessTerminal's platform half as kmet runs it on bb/JVM: raw mode and
    timed reads from JLine, live width/height from the terminal, plus the

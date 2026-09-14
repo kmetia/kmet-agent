@@ -9,7 +9,7 @@
    derived here or in kmet.libs.terminal. Backends are resolved lazily by
    create-terminal, so neither host touches the other's platform deps:
 
-   - kmet.tui.terminal-jline  — Babashka/JVM: JLine 4.3.1 (bundled).
+   - kmet.tui.terminal-jline  — Babashka/JVM: JLine 4.4.0 (bundled).
    - kmet.tui.terminal-native — Jolt: termios (Unix) / kernel32 (Windows)
      raw mode, byte reads and live size over jolt.ffi.
 

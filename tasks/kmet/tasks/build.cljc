@@ -227,8 +227,9 @@
    tmux server included, killed by Android's low-memory killer). Layout:
    META-INF/MANIFEST.MF with Main-Class kmet.core, every src/ file (.clj,
    .cljc, .edn — catalogs are classpath resources), then the entries of each
-   dependency jar already on the classpath (only borkdude/deps.clj isn't
-   bb-builtin; keeping all jars is simpler than filtering). Dependency
+   dependency jar already on the classpath (the Maven jars — data.json for
+   the JSON seam, cljfmt for the format task — aren't bb-builtin; keeping all
+   jars is simpler than filtering). Dependency
    manifests and signatures are skipped so ours wins. Returns absolute path."
   []
   (bb-only! "kmet.tasks.build/uberjar*")
@@ -238,7 +239,7 @@
         ;; path.separator is ";" on Windows and ":" on Unix — the old
         ;; #"::?" split only worked on Unix and glued all Windows
         ;; classpath entries into one string, so no dep jar ever landed in
-        ;; the uberjar (borkdude/deps.clj etc. were missing)
+        ;; the uberjar (data.json etc. were missing)
         dep-jars (->> (str/split (bcp/get-classpath)
                                  (re-pattern (System/getProperty "path.separator")))
                       (filter #(and (str/ends-with? % ".jar")

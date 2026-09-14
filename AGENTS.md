@@ -74,7 +74,7 @@
   surfaces `jolt.fs` / `jolt.process` — `jolt.fs` excludes zip/gzip). A Maven copy would only
   risk shadowing the vendored one, so kmet relies on both hosts' built-ins.
   Tooling deps (`cljfmt`, plus its `org.clojure/spec.alpha` and `rewrite-clj`
-  companions on jolt) in `bb.edn` `:deps` and `deps.edn`; JLine **4.3.1** bundled with Babashka (see
+  companions on jolt) in `bb.edn` `:deps` and `deps.edn`; JLine **4.4.0** bundled with Babashka (see
   babashka `deps.edn`: `org.jline/jline-terminal`, `org.jline/jline-reader`) as the
   bb/JVM terminal backend — the Jolt terminal backend uses no dependency: termios /
   kernel32 through `jolt.ffi`.
@@ -84,8 +84,8 @@
   warning on every run or, with `:override-builtin`, makes a wrapper's own `jolt build` call
   re-enter itself forever).
   - babashka (`kmet.tasks.build`): `bb uberjar` → `target/kmet.jar` (the src/ tree
-    + resolved dep jars,
-    only `borkdude/deps.clj` isn't bb-builtin); `bb dist [targets|--all] [--force] [--no-smoke]`
+    + resolved dep jars — the non-bb-builtin Maven jars are `data.json` (JSON
+    seam) and `cljfmt` (format task)); `bb dist [targets|--all] [--force] [--no-smoke]`
     → self-contained executables in `dist/` (official bb release binary + appended uberjar,
     fresh uberjar always rebuilt first; artifacts `kmet-<ver>-bb<bb-ver>-<slug>`, version =
     git tag else `<YYYYMMDD>-<short-hash>` else "dev"). Termux: a `.sh` launcher next to the

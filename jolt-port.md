@@ -44,8 +44,7 @@ today.
 
 External deps (`deps.edn` + `bb.edn`): `babashka.fs` / `babashka.process` are
 **not** deps — babashka bundles them and jolt vendors the same namespaces
-(built-in on both hosts; see §4). `borkdude/deps.clj` (Maven resolution),
-`org.clojure/data.json` (JSON engine behind `kmet.libs.json`),
+(built-in on both hosts; see §4). `org.clojure/data.json` (JSON engine behind `kmet.libs.json`),
 `io.github.jolt-lang/time` + `io.github.jolt-lang/crypto` (Jolt-only shims,
 inert on bb/JVM), `dev.weavejester/cljfmt` + `org.clojure/spec.alpha` +
 `rewrite-clj/rewrite-clj` (tooling for the format tasks on both hosts — jolt's
@@ -142,7 +141,8 @@ pipe.
 
 Each extension evaluates in its own **SCI context** (`sci/init`,
 `sci/eval-form`): private ns registry + loader serving own files, declared
-Maven jars (resolved in-process via `borkdude/deps.clj`), and host
+Maven jars (resolved in-process via `clojure.tools.deps`, bundled with
+babashka), and host
 classpath; shared layers (`kmet.extension`, `clojure.*`, `babashka.*`,
 `kmet.tui.*`, `kmet.libs.*`) injected by reference. Plus bb-import tables,
 bundled-lib redirection (rewrite-clj, edamame, …), per-extension
@@ -165,8 +165,8 @@ with set` from `sci.lang/throw-root-binding`). Timings for a 2-file
 extension: ctx init 45 ms, eval 23 ms, init call 5 ms. Per-extension deps:
 `jolt.deps/resolve-deps` (public, AOT'd into the binary) returns the
 extracted source roots of an arbitrary deps map at runtime and
-`jolt.deps/add-deps` is the `babashka.deps/add-deps` twin — the
-`borkdude.deps/-main -Spath` replacement, verified from the built binary
+`jolt.deps/add-deps` is the `babashka.deps/add-deps` twin — the bb
+deps-resolution counterpart, verified from the built binary
 (roots: `sci` + `edamame` + `sci.impl.types` + `graal.locking` +
 `tools.reader`). **Version pin: 0.13.53** — the jolt-gated SCI; the latest
 release (0.15.58) does not load on jolt yet (`No such var: clojure.core/Inst`

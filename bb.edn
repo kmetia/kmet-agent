@@ -1,13 +1,10 @@
-{:min-bb-version "1.12.215"
+{:min-bb-version "1.13.222"
  ;; tasks/ is a second source root, not part of the app: every bb-task
  ;; implementation lives there (see AGENTS.md § File layout). Both hosts
  ;; resolve kmet.tasks.* from it, and neither artifact carries it — the
  ;; uberjar walks src/, jolt's :jolt/build :embed does too.
  :paths ["src" "test" "tasks"]
  :deps {dev.weavejester/cljfmt {:mvn/version "0.16.5"}
-        ;; in-process Maven closure resolution for extension deps.edn
-        ;; (0.0.21 = last version without the clojure-tools installer)
-        borkdude/deps.clj {:mvn/version "0.0.21"}
         ;; 2.4.0, NOT 2.5.x: data.json >= 2.5 uses definterface (json.clj
         ;; InternalPBR), which babashka SCI cannot analyze. The jolt/JVM
         ;; classpath (deps.edn) may pin 2.5.1.
@@ -72,8 +69,7 @@
           :task (do (require 'babashka.nrepl.server)
                     (println "Starting nREPL on port 1667...")
                     (babashka.nrepl.server/start-server! {:port 1667})
-                    (println "nREPL started on port 1667")
-                    (deref (promise)))} ;; block forever
+                    (println "nREPL started on port 1667"))}
   check   {:doc "Verify all code compiles"
            :requires ([kmet.core])
            :task (println "All source namespaces compile successfully.")

@@ -59,7 +59,7 @@ Windows, WSL, and Termux (Android).
 
 ## Prerequisites
 
-- [Babashka](https://babashka.org/) ≥ 1.12.215 (bundles JLine 4.3.1)
+- [Babashka](https://babashka.org/) ≥ 1.13.222 (bundles JLine 4.4.0)
 - API keys: `OPENCODE_API_KEY` (opencode-go/opencode), `DEEPSEEK_API_KEY`,
   `OPENAI_API_KEY` (openai), `XAI_API_KEY` (xai), `AZURE_OPENAI_API_KEY`
   (azure-openai-responses; base URL/deployment from `AZURE_OPENAI_BASE_URL` /

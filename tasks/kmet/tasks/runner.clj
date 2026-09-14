@@ -386,17 +386,6 @@
       (finally
         (restore-streams! streams)))))
 
-(defn- join-fixtures*
-  "Compose fixture fns. bb's join-fixtures only works with >= 2 fixtures:
-   with 0 it throws an arity error, with exactly 1 it tries to reduce over
-   the fn as a collection. Handle those cases directly."
-  [fixtures]
-  (let [fxs (or fixtures [])]
-    (case (count fxs)
-      0 (fn [f] (f))
-      1 (first fxs)
-      (apply t/join-fixtures fxs))))
-
 (defn- run-ns-vars
   "Run the selected vars of one namespace, applying its :once fixtures
    around the namespace and :each fixtures around every var, like
@@ -408,8 +397,8 @@
   (let [ns-obj (find-ns ns-sym)
         before @t/*report-counters*
         start-ms (System/currentTimeMillis)
-        once-fx (join-fixtures* (:clojure.test/once-fixtures (meta ns-obj)))
-        each-fx (join-fixtures* (:clojure.test/each-fixtures (meta ns-obj)))]
+        once-fx (t/join-fixtures (:clojure.test/once-fixtures (meta ns-obj)))
+        each-fx (t/join-fixtures (:clojure.test/each-fixtures (meta ns-obj)))]
     (println "\nTesting" (ns-name ns-obj))
     (binding [*ns* ns-obj]
       (once-fx

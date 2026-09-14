@@ -6,11 +6,7 @@
         ;; kmet.libs.json seam requires clojure.data.json — a Maven lib, not
         ;; bb-bundled, so it must be on this standalone test classpath.
         ;; 2.4.0: bb cannot analyze data.json >= 2.5 (definterface)
-        org.clojure/data.json {:mvn/version "2.4.0"}
-        ;; kmet.app.extensions requires babashka.classes, which needs deps.clj
-        ;; on the classpath (bb-jundled namespaces load it lazily; the root
-        ;; bb.edn pins the same version)
-        borkdude/deps.clj {:mvn/version "0.0.21"}}
+        org.clojure/data.json {:mvn/version "2.4.0"}}
  :tasks
  {test {:doc "Run clojure extension tests (args: test namespace names)"
         :task (let [nss (or (some->> *command-line-args* (map symbol))
