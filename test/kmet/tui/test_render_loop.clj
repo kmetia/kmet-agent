@@ -330,6 +330,40 @@
         (finally
           (stop-loop tui))))))
 
+(deftest ^:slow flash-during-shrink-stays-addressable
+  (testing "a flash composited while the document shrinks is clamped to the viewport top the
+            diff can address — no clearing full redraw (the /copy pattern: the command dropdown
+            closes, shrinking the document by a line, and the 'Copied!' flash would otherwise
+            land one row above the still-visible old window top and trip the shrink fallback)"
+    (let [lines (atom (vec (map #(str "line " %) (range 30))))
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child tui (test-component lines))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 2000)
+        ;; grow by one (the dropdown opens): the screen scrolls down, so the
+        ;; addressable window top moves from line 6 to line 7
+        (swap! lines conj "dropdown")
+        (core/tui-request-render tui)
+        (wait-for-frames (:writes vt) 2 2000)
+        ;; shrink back while the flash is up — the natural flash row (the new
+        ;; window top, line 6) is now above what the screen shows (line 7)
+        (swap! lines (fn [v] (subvec v 0 30)))
+        (core/tui-flash! tui "Copied!" :duration-ms 60000)
+        (core/tui-request-render tui)
+        (wait-for-frames (:writes vt) 3 2000)
+        (let [redraw (nth (frame-writes (:writes vt)) 2)
+              flash-line (some #(when (str/includes? % "Copied!") %)
+                               (str/split-lines redraw))]
+          (t/is (not (str/includes? redraw clear-seq))
+                "no screen/scrollback clear — the flash must not read as an above-window change")
+          (t/is (some? flash-line) "the flash is rendered")
+          (t/is (str/includes? (or flash-line "") "line 7")
+                "the flash is composited onto the addressable window top, not the row above it"))
+        (finally
+          (stop-loop tui))))))
+
 (deftest ^:slow ordinary-diff-does-not-clear
   (testing "an in-viewport change takes the diff path — no clear, no scrollback wipe"
     (let [lines (atom ["alpha" "beta"])

@@ -549,14 +549,26 @@
    window — the bottom HEIGHT content rows — right-aligned, one flash per
    row (pi: compositeFlashes). Takes the LAST HEIGHT flash lines so a flash
    flood stays on-screen (pi: .slice(-height)). Returns LINES unchanged
-   when nothing flashes."
-  [flashes lines width height]
+   when nothing flashes.
+
+   FLOOR-TOP is the topmost document row the frame's diff can address — the
+   previous frame's viewport top. The natural position is the new window's
+   top (`count - height`), but when the document shrank in this frame that
+   row sits above what the screen actually shows; compositing it there would
+   make the diff read the flash as an above-window change and fall back to a
+   clearing full redraw (the /copy case: the command dropdown closes and the
+   'Copied!' flash lands one row above the still-visible old window top).
+   Clamp the stack to the addressable rows instead: the flash is a screen
+   overlay, so it can only land where the screen is. A frame that grows the
+   document has its natural top below the floor already — unchanged."
+  [flashes lines width height floor-top]
   (let [flash-lines (protocols/render flashes width)
         flash-lines (if (> (count flash-lines) height)
                       (vec (take-last height flash-lines))
                       flash-lines)
         n (count flash-lines)
-        top (max 0 (- (count lines) height))]
+        natural-top (max 0 (- (count lines) height))
+        top (max natural-top (min floor-top (max 0 (- (count lines) n))))]
     (if (zero? n)
       lines
       (loop [row 0, lines lines]
@@ -1723,7 +1735,6 @@
                     ;; on raw unpadded lines (padded spaces terminated it
                     ;; immediately, collapsing every image block to one row).
                     lines (mapv utils/normalize-terminal-output lines)
-                    lines (composite-flashes @(:flashes tui) lines w h)
                     ;; pi: applyLineResets — every non-image line ends with a
                     ;; full SGR + OSC 8 reset (SEGMENT_RESET) so a truncated
                     ;; line can never leave active attributes or an open
@@ -1737,7 +1748,6 @@
                     prev-w @(:previous-width tui)
                     prev-h @(:previous-height tui)
                     prev-count (count prev)
-                    new-count (count lines)
                     width-changed (and (not (zero? prev-w)) (not= prev-w w))
                     height-changed (and (not (zero? prev-h)) (not= prev-h h))
                     termux? (boolean (System/getenv "TERMUX_VERSION"))
@@ -1752,6 +1762,11 @@
                     prev-viewport-top (atom (if height-changed
                                               (max 0 (- prev-buffer-length h))
                                               @previous-viewport-top))
+                    ;; Flash compositing needs the viewport top the diff below will
+                    ;; use as its screen reference — the addressable floor for the
+                    ;; overlay (see composite-flashes).
+                    lines (composite-flashes @(:flashes tui) lines w h @prev-viewport-top)
+                    new-count (count lines)
                     viewport-top (atom @prev-viewport-top)
                     ;; The frame buffer is an atom so a mid-diff full-redraw
                     ;; fallback can discard the partial diff output (pi: the
