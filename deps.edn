@@ -86,11 +86,8 @@
         ;; drops cljfmt's org.clojure/clojure dep (vendored core), and
         ;; cljfmt.config requires clojure.spec.alpha. rewrite-clj is pinned
         ;; to the version babashka bundles (bb's built-in wins over cljfmt's
-        ;; transitive 1.2.50 there, so bb formats with it): jolt cannot
-        ;; construct java.lang.StringBuffer, which 1.2.50 still builds in
-        ;; its JVM-family reader — 1.2.55 moved that branch to StringBuilder
-        ;; (jolt-lang/jolt#978; drop the pin when the runtime supplies the
-        ;; ctor).
+        ;; transitive 1.2.50 there, so bb formats with it) to keep both hosts
+        ;; on the same parser — no longer a workaround, just parity.
         dev.weavejester/cljfmt {:mvn/version "0.16.5"}
         org.clojure/spec.alpha {:mvn/version "0.5.238"}
         rewrite-clj/rewrite-clj {:mvn/version "1.2.57"}

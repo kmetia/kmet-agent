@@ -3,8 +3,9 @@
    cljfmt — the same code path on both hosts. cljfmt is a tooling dep on
    both classpaths (bb.edn :deps for babashka, deps.edn for jolt, where
    org.clojure/spec.alpha and the rewrite-clj pin are declared too: jolt's
-   resolver drops cljfmt's org.clojure/clojure dep, and the pin ties jolt to
-   the rewrite-clj babashka bundles — see deps.edn / jolt-bugs.md#978).
+   resolver drops cljfmt's org.clojure/clojure dep, and the pin matches the
+   rewrite-clj babashka bundles so both hosts parse identically — see
+   deps.edn).
    Nothing here wraps the library: failures propagate as themselves.
 
    Throughput note: jolt formats at ~1.6 s/file to babashka's ~0.12 s (the

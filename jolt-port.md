@@ -50,8 +50,7 @@ inert on bb/JVM), `dev.weavejester/cljfmt` + `org.clojure/spec.alpha` +
 `rewrite-clj/rewrite-clj` (tooling for the format tasks on both hosts — jolt's
 resolver drops cljfmt's `org.clojure/clojure` dep, so spec is declared
 explicitly, and the rewrite-clj pin matches the version babashka bundles so
-both hosts parse identically; it also sidesteps Jolt's missing
-`java.lang.StringBuffer` ctor, jolt-bugs.md),
+both hosts parse identically),
 JLine 4.3.1 (bb-bundled). `bb.edn` also defines 22 tasks (`run` + 21: build/test/lint/format/nrepl/generate-models/…).
 
 ---

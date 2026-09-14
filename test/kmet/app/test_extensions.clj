@@ -1057,13 +1057,13 @@
   ;; the repo's own extensions restructured to src/-as-artifact-root
   ;; (jar-ext.md §2): every shipped src/ dir loads through the real runtime.
   ;;
-  ;; bb-only: the shipped extensions need both
-  ;;   - deps.edn closures (clojure → cljfmt/rewrite-clj, M2) and
-  ;;   - JDK classes jolt's class graph does not supply (lsp's
-  ;;     ^StringBuilder type hint trips jolt's RFC 0014 "no dependency
-  ;;     provides java.lang.StringBuilder" path),
-  ;; tracked for the Jolt follow-up; the SCI loader itself runs on both
-  ;; hosts (see the file docstring).
+  ;; bb-only: on jolt the shipped extensions still hit gaps the loader
+  ;; cannot paper over — lsp's java.net.URLDecoder/decode, the
+  ;; clojure.tools.reader source rewrite-clj pulls in (its ^Matcher hints
+  ;; name a class absent from jolt's class graph), and defcomponent's
+  ;; defrecord over the injected kmet.tui.protocols/IComponent, which SCI
+  ;; cannot analyze from jolt's protocol representation. The SCI loader
+  ;; itself runs on both hosts (see the file docstring).
   (extensions/clear-extensions!)
   (doseq [path ["extensions/clojure/src"
                 "extensions/lsp-adapter/src"

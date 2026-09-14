@@ -1,8 +1,7 @@
 (ns kmet.tasks.format-test
   "Tests for the format task wrapper: the managed-file enumeration excludes
    build output and the generated provider catalogs, and the cljfmt
-   invocation runs — on both hosts (the rewrite-clj pin makes jolt's
-   parser complete; see jolt-bugs.md#978)."
+   invocation runs — on both hosts."
   (:require [clojure.string :as str]
             [clojure.test :as t]
             [babashka.fs :as fs]
