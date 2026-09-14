@@ -1642,6 +1642,7 @@
    and their namespaces stay absent from Jolt contexts — extensions
    requiring them there get the actionable load-fn error."
   []
+  (require 'clojure.core.async)
   (apply require (concat tui-library-namespaces libs-library-namespaces))
   (when-not (jolt?)
     (apply require (concat spec-port-namespaces bb-shared-namespaces)))
