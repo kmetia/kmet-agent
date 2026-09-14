@@ -1,37 +1,45 @@
 (ns kmet.tasks.build-jolt-test
   ;; The jolt packager's pure surface (kmet.tasks.build-jolt, the jolt branch of the
-  ;; `dist` task): slug/naming rules and the CLI parser. The compile itself is
+  ;; `dist` task): platform/naming rules and the CLI parser. The compile itself is
   ;; jolt's CLI in a subprocess and is not unit-tested here; only the host's
   ;; own artifact can smoke-test, which the packager does as part of the build.
   (:require [clojure.test :refer [deftest is testing]]
+            [kmet.tasks.build :as build]
             [kmet.tasks.build-jolt :as jbuild]))
 
-(deftest slug-for-names-os-and-arch
-  (is (= "linux-amd64" (jbuild/slug-for "Linux" "amd64")))
-  (is (= "linux-amd64" (jbuild/slug-for "Linux" "x86_64")))
-  (is (= "linux-aarch64" (jbuild/slug-for "Linux" "aarch64")))
-  (is (= "linux-aarch64" (jbuild/slug-for "Linux" "arm64")))
-  (is (= "macos-aarch64" (jbuild/slug-for "Mac OS X" "arm64")))
-  (is (= "macos-amd64" (jbuild/slug-for "Darwin" "x86_64")))
-  (is (= "windows-amd64" (jbuild/slug-for "Windows 11" "amd64")))
+(deftest platform-for-is-the-shared-host-vocabulary
+  ;; kmet.tasks.build/platform-for: the babashka packager stamps the same
+  ;; platform string on its artifacts, so one dist/ lines both hosts up
+  (is (= "linux-amd64" (build/platform-for "Linux" "amd64")))
+  (is (= "linux-amd64" (build/platform-for "Linux" "x86_64")))
+  (is (= "linux-aarch64" (build/platform-for "Linux" "aarch64")))
+  (is (= "linux-aarch64" (build/platform-for "Linux" "arm64")))
+  (is (= "macos-aarch64" (build/platform-for "Mac OS X" "arm64")))
+  (is (= "macos-amd64" (build/platform-for "Darwin" "x86_64")))
+  (is (= "windows-amd64" (build/platform-for "Windows 11" "amd64")))
   (testing "no -static variants: a jolt binary carries its own runtime"
-    (is (= "linux-amd64" (jbuild/slug-for "linux" "amd64"))))
-  (testing "unsupported pairs have no slug"
-    (is (nil? (jbuild/slug-for "SunOS" "sparc")))
-    (is (nil? (jbuild/slug-for "Linux" "riscv64")))))
+    (is (= "linux-amd64" (build/platform-for "linux" "amd64"))))
+  (testing "unsupported pairs have no platform"
+    (is (nil? (build/platform-for "SunOS" "sparc")))
+    (is (nil? (build/platform-for "Linux" "riscv64")))))
 
-(deftest target-slug-maps-chez-machines
+(deftest target-platform-maps-chez-machines
   (testing "the host when no cross target is given"
-    (is (= (jbuild/host-slug) (jbuild/target-slug nil)))
-    (is (= (jbuild/host-slug) (jbuild/target-slug ""))))
+    (is (= (jbuild/host-platform) (jbuild/target-platform nil)))
+    (is (= (jbuild/host-platform) (jbuild/target-platform ""))))
   (testing "Chez machine strings"
-    (is (= "linux-amd64" (jbuild/target-slug "ta6le")))
-    (is (= "linux-aarch64" (jbuild/target-slug "tarm64le")))
-    (is (= "macos-amd64" (jbuild/target-slug "ta6osx")))
-    (is (= "macos-aarch64" (jbuild/target-slug "tarm64osx")))
-    (is (= "windows-amd64" (jbuild/target-slug "ta6nt"))))
+    (is (= "linux-amd64" (jbuild/target-platform "ta6le")))
+    (is (= "linux-aarch64" (jbuild/target-platform "tarm64le")))
+    (is (= "macos-amd64" (jbuild/target-platform "ta6osx")))
+    (is (= "macos-aarch64" (jbuild/target-platform "tarm64osx")))
+    (is (= "windows-amd64" (jbuild/target-platform "ta6nt"))))
   (testing "an unmapped machine keeps its own name"
-    (is (= "tb3le" (jbuild/target-slug "tb3le")))))
+    (is (= "tb3le" (jbuild/target-platform "tb3le")))))
+
+(deftest windows-platform-drives-the-exe-suffix
+  (is (true? (jbuild/windows-platform? "windows-amd64")))
+  (is (true? (jbuild/windows-platform? "windows-aarch64")))
+  (is (false? (jbuild/windows-platform? "linux-amd64"))))
 
 (deftest artifact-base-mirrors-the-babashka-naming
   (is (= "kmet-1.2.3-jolt0.8.6-linux-amd64"

@@ -9,9 +9,12 @@
  ;; task) bakes every file under each :embed root into the binary, keyed by its
  ;; path below the root — so the model catalogs (io/resource
  ;; "kmet/ai/model_data/…") are embedded, not merely found next to the
- ;; checkout. Without this the built binary only resolves them while a
- ;; JOLT_PWD-relative source root is there.
- :jolt/build {:embed ["src"]}
+ ;; checkout. target/kmet-version is the packager's own root: `jolt dist`
+ ;; writes kmet/version.txt there before the build, so the binary reports the
+ ;; version it was built as (`kmet --version`) instead of describing whatever
+ ;; checkout it happens to run in; a missing root embeds nothing, which is what
+ ;; a direct `jolt build` gets (then the runtime falls back to git describe).
+ :jolt/build {:embed ["src" "target/kmet-version"]}
  :deps {        ;; babashka.fs / babashka.process are deliberately NOT deps: babashka
         ;; bundles them, and jolt vendors the same namespaces (built-in,
         ;; resolving ahead of any deps.edn copy). A Maven copy is redundant on

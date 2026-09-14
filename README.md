@@ -122,6 +122,7 @@ bb run --print "list files in current directory"
                         sources) into ~/.kmet/agent/models-cache and exit;
                         used at startup when newer than the built-in data
   -t, --thinking <level> Thinking level (off, minimal, low, medium, high, xhigh, max)
+  --version             Print the version and exit
   -h, --help            Show this help
 
 ### Package subcommands
@@ -375,8 +376,8 @@ Cross-builds work from any host because packaging is download + concat only.
 ```sh
 bb uberjar              # Build target/kmet.jar (also runnable: bb target/kmet.jar)
 bb dist                 # Executable for the current platform -> dist/
-bb dist --all           # Every published babashka platform
-bb dist macos-aarch64   # Explicit targets; --force re-downloads, --no-smoke skips the post-build run
+bb dist --all           # Every published platform
+bb dist macos-aarch64   # Explicit platforms; --force re-downloads, --no-smoke skips the post-build run
 ```
 
 On jolt the same task AOT-compiles the app through
@@ -389,27 +390,39 @@ jolt dist --dev         # Unoptimized build (--opt for optimized; release is the
 jolt dist --target tarm64le --target-pack /tmp/pack   # Cross-compile (tools/cross-compile)
 ```
 
-Babashka targets mirror babashka's release assets: `linux-aarch64-static`,
-`linux-amd64`, `linux-amd64-static`, `macos-aarch64`, `macos-amd64`,
-`windows-amd64`. Babashka binaries are cached in `target/build-cache/`
-(sha256-verified on download); artifacts land in `dist/` as
-`kmet-<version>-bb<bb-version>-<slug>` (plus `.exe` on Windows).
-`bb dist` always rebuilds a fresh `target/kmet.jar` first so artifacts
-never bundle stale sources. Downloads use `curl` (preinstalled on Termux,
-macOS, Linux and Windows 10+). Jolt artifacts are
-`kmet-<version>-jolt<jolt-version>-<os>-<arch>[-dev]` (plus `.exe` on
-Windows); the compile happens under `target/jolt/`, and the freshly built
-binary is smoke-tested (`--list-models`) before it is announced.
+Both hosts name artifacts by one scheme:
+`kmet-<version>-<host><host-version>-<platform>[-dev]` (plus `.exe` on
+Windows), so one `dist/` lines the hosts up per platform —
+`kmet-20260911-54f2842-bb1.13.222-linux-amd64` next to
+`kmet-20260911-54f2842-jolt0.8.6-86-g234f460b-linux-amd64`. The platform is the
+jolt-style `<os>-<arch>` name (`linux-amd64`, `linux-aarch64`, `macos-amd64`,
+`macos-aarch64`, `windows-amd64`, `windows-aarch64`), shared by both packagers:
+babashka targets are those platforms, with babashka's statically linked linux
+release assets behind `linux-amd64`/`linux-aarch64` (a release asset slug like
+`linux-amd64-static` is accepted too). Babashka binaries are cached in
+`target/build-cache/` (sha256-verified on download) and `bb dist` always
+rebuilds a fresh `target/kmet.jar` first so artifacts never bundle stale
+sources. Downloads use `curl` (preinstalled on Termux, macOS, Linux and
+Windows 10+). Jolt compiles under `target/jolt/<platform>/<mode>/` and
+smoke-tests the freshly built binary (`--list-models`) before it is announced.
 
-Versioning: the artifact version is the git tag pointing at HEAD (`v` prefix
-stripped), falling back to `<YYYYMMDD>-<short-hash>` from the HEAD commit
-date when no tag points at HEAD, then `dev` outside a repo.
+Versioning: artifacts are stamped with **jolt's checkout rule**
+(`kmet.libs.version`, jolt's `tools/version.sh`), so the base version reads
+like the compiler's — the nearest `v<digit>` release tag as
+`git describe --tags --dirty` reports it (`v0.8.0` on the tag,
+`v0.8.0-56-g63374117` past it, `-dirty` with uncommitted edits), `dev-g<sha>`
+when no release tag is reachable (a bare sha would read as version 0 to
+anything parsing leading digits), and `dev` outside a git checkout. Rolling
+tags such as `vnightly` never match. Artifact names carry the same string with
+the `v` stripped; `kmet --version` prints it, from the version baked at build
+time when running a packaged binary and from git in a source run (`bb run` /
+`jolt run`).
 
 **Termux/Android**: the glibc-linker problem applies to both hosts — a glibc
 binary must be exec'd through Termux's glibc dynamic linker, which also
 disables babashka's own appended-jar auto-detection. Building on a termux host
 therefore additionally emits a companion `.sh` launcher next to the artifact
-(e.g. `kmet-<version>-bb<bb-version>-<slug>.sh`) that unsets `LD_PRELOAD`, execs via
+(e.g. `kmet-<version>-bb<bb-version>-<platform>.sh`) that unsets `LD_PRELOAD`, execs via
 `$PREFIX/glibc/lib/ld-linux-*.so.1` (plus `--jar <self>` for the babashka
 binary). It requires the termux glibc package (`pkg install glibc-repo && pkg
 install glibc`).

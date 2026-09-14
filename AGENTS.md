@@ -85,21 +85,29 @@
   re-enter itself forever).
   - babashka (`kmet.tasks.build`): `bb uberjar` → `target/kmet.jar` (the src/ tree
     + resolved dep jars — the non-bb-builtin Maven jars are `data.json` (JSON
-    seam) and `cljfmt` (format task)); `bb dist [targets|--all] [--force] [--no-smoke]`
+    seam) and `cljfmt` (format task)); `bb dist [platforms|--all] [--force] [--no-smoke]`
     → self-contained executables in `dist/` (official bb release binary + appended uberjar,
-    fresh uberjar always rebuilt first; artifacts `kmet-<ver>-bb<bb-ver>-<slug>`, version =
-    git tag else `<YYYYMMDD>-<short-hash>` else "dev"). Termux: a `.sh` launcher next to the
+    fresh uberjar always rebuilt first; artifacts `kmet-<ver>-bb<bb-ver>-<platform>`,
+    version = jolt's checkout rule (`kmet.libs.version`: nearest `v<digit>` tag via
+    `git describe --tags --dirty`, `dev-g<sha>` without a release tag, `dev` outside
+    git; the uberjar bakes it as kmet/version.txt for `kmet --version`); platforms
+    linux-aarch64, linux-amd64, macos-aarch64, macos-amd64, windows-amd64 — the
+    linux ones from babashka's static release assets, the same platform
+    vocabulary the jolt packager stamps). Termux: a `.sh` launcher next to the
     binary (glibc linker exec + `--jar <self>`; auto-detection breaks because `/proc/self/exe`
     resolves to `ld-linux`). Downloads cached + sha256-checked in `target/build-cache/`.
   - jolt (`kmet.tasks.build-jolt`): AOT-compiles via a `jolt build -m kmet.core` subprocess (no jar
-    step, nothing to download) into `target/jolt/<slug>/<mode>/` — jolt's incremental build
+    step, nothing to download) into `target/jolt/<platform>/<mode>/` — jolt's incremental build
     and its `.build/` payload dir stay out of `dist/` — then copies to
-    `dist/kmet-<ver>-jolt<jv>-<os>-<arch>[-dev][.exe]` and smoke-tests it with `--list-models`
-    from an empty temp dir with `JOLT_PWD` pointed at it (io/resource falls back to
+    `dist/kmet-<ver>-jolt<jv>-<platform>[-dev][.exe]`, bakes kmet/version.txt into it
+    (from `target/kmet-version`, an embed root the packager writes; `kmet --version`
+    reports the built-as version rather than describing whatever repo it runs in)
+    and smoke-tests it with `--list-models` and `--version` from an empty temp dir
+    with `JOLT_PWD` pointed at it (io/resource falls back to
     JOLT_PWD-relative source roots, so a run from the checkout would pass without the
-    `deps.edn :jolt/build {:embed ["src"]}` that bakes the model catalogs in — the
-    embed root is src/ alone, so nothing under tasks/ rides in the binary even
-    though it is on the classpath). Termux gets a
+    `deps.edn :jolt/build {:embed ["src" "target/kmet-version"]}` that bakes the model
+    catalogs and the version in — neither root is tasks/, so nothing under tasks/
+    rides in the binary even though it is on the classpath). Termux gets a
     `.sh` launcher through the glibc linker, like the bb one minus `--jar`. Flags:
     `--dev|--opt`, `--closed-world`, `--dynamic`, `--boot fast|small|plain`,
     `--target MACHINE --target-pack DIR`, `-o PATH`, `--force`, `--no-smoke`, `--jolt PATH`.

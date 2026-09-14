@@ -14,8 +14,34 @@
             [kmet.ai.models :as models]
             [kmet.app.model-resolver :as resolver]
             [kmet.debug :as debug]
+            [kmet.libs.version :as version]
             [kmet.tui.fuzzy :as fuzzy]
+            [clojure.java.io :as io]
             [clojure.string :as str]))
+
+(defn- baked-version
+  "The version a packager baked in (kmet/version.txt in the uberjar/embedded
+   store), or nil — a source checkout has no such resource."
+  []
+  (some-> (io/resource "kmet/version.txt") slurp str/trim not-empty))
+
+(defn- source-run?
+  "True when kmet's own source files resolve off disk — a `bb run` / `jolt run`
+   from the checkout, as opposed to a packaged jar/embedded image."
+  []
+  (some-> (io/resource "kmet/core.clj") str (str/starts-with? "file:")))
+
+(defn- kmet-version
+  "The version this kmet is: the baked kmet/version.txt when one is packaged
+   (bb dist writes it into the uberjar, jolt dist embeds it), else the
+   checkout's describe (kmet.libs.version) — a source run answers the same
+   rule from git. A packaged binary missing its bake (a bare `jolt build`
+   without the packager) says `dev` rather than describe whatever repository
+   the process happens to sit in."
+  []
+  (or (baked-version)
+      (when (source-run?) (version/checkout-version))
+      "dev"))
 
 ;; ─── CLI argument parsing ──────────────────────────────────────────────────
 
@@ -105,6 +131,9 @@
           (#{"-h" "--help"} arg)
           (assoc opts :help true)
 
+          (#{"--version"} arg)
+          (assoc opts :version true)
+
           (str/starts-with? arg "@")
           (let [file-path (subs arg 1)]
             (if (seq file-path)
@@ -157,6 +186,7 @@
   (println "  --system-prompt <txt> Replace the system prompt (or path to a file)")
   (println "  --append-system-prompt <txt> Append to the system prompt (repeatable)")
   (println "  -t, --thinking <level> Thinking level (off, minimal, low, medium, high, xhigh, max)")
+  (println "  --version             Print the version and exit")
   (println "  -h, --help            Show this help")
   (println)
   (println "Package subcommands:")
@@ -268,6 +298,10 @@
 
     (when (:help opts)
       (print-usage)
+      (System/exit 0))
+
+    (when (:version opts)
+      (println (str "kmet " (kmet-version)))
       (System/exit 0))
 
     ;; --generate-models runs the bb generate-models pipeline into the

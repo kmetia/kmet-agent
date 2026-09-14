@@ -54,6 +54,7 @@
     kmet.ai.test-models
     kmet.app.test-model-resolver
     kmet.libs.test-dynamic-value
+    kmet.libs.test-version
     kmet.ai.test-model-config
     kmet.ai.test-provider-composer
     kmet.ai.test-auth

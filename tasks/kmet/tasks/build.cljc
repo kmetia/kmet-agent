@@ -4,7 +4,8 @@
    A binary is the official babashka release binary with target/kmet.jar (an
    uberjar of src + runtime deps) appended — babashka detects the appended zip
    at startup and runs the uberjar's -main (babashka wiki: Self-contained
-   executable). One artifact per babashka release asset slug; cross-builds work
+   executable). One artifact per dist platform, named by the same scheme the
+   jolt packager uses — kmet-<ver>-bb<bb-ver>-<platform>; cross-builds work
    from any host because packaging is just download + concat.
 
    Termux/Android: the glibc bb binary must be exec'd through the termux glibc
@@ -26,7 +27,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [kmet.libs.archive :as archive]
-            [kmet.libs.http :as http]))
+            [kmet.libs.http :as http]
+            [kmet.libs.version :as version-lib]))
 
 (def ^:private gh-api-url
   "https://api.github.com/repos/babashka/babashka/releases/latest")
@@ -49,23 +51,33 @@
 
 ;; ─── Target table ──────────────────────────────────────────────────────────
 ;;
-;; Slugs mirror the babashka release asset names:
-;;   babashka-<version>-<slug>.(tar.gz|zip) (+ .sha256 sibling)
+;; Keyed by dist platform — the os-arch name both packagers stamp on
+;; artifacts (kmet-<ver>-bb<bb-ver>-<platform> here,
+;; kmet-<ver>-jolt<jv>-<platform> in the jolt packager), so one dist/ holds
+;; both hosts' artifacts for a machine under one platform string.
+;; :asset    babashka release asset slug backing the platform
+;;           (babashka-<version>-<asset>.(tar.gz|zip) + .sha256 sibling). The
+;;           names differ for linux: every linux platform is built from the
+;;           statically linked release, which runs on glibc and musl alike —
+;;           babashka's glibc-dynamic linux-amd64 asset is not used.
 ;; :ext      archive kind to extract
 ;; :bin-name executable name inside the archive
 ;; :linker   glibc loader file name, for the termux launcher script
 
 (def ^:private target-table
-  {"linux-aarch64-static" {:ext :tar.gz :bin-name "bb" :linker "ld-linux-aarch64.so.1"}
-   "linux-amd64"          {:ext :tar.gz :bin-name "bb" :linker "ld-linux-x86-64.so.2"}
-   "linux-amd64-static"   {:ext :tar.gz :bin-name "bb" :linker "ld-linux-x86-64.so.2"}
-   "macos-aarch64"        {:ext :tar.gz :bin-name "bb"}
-   "macos-amd64"          {:ext :tar.gz :bin-name "bb"}
-   "windows-amd64"        {:ext :zip :bin-name "bb.exe"}})
+  {"linux-aarch64" {:asset "linux-aarch64-static"
+                    :ext :tar.gz :bin-name "bb" :linker "ld-linux-aarch64.so.1"}
+   "linux-amd64"   {:asset "linux-amd64-static"
+                    :ext :tar.gz :bin-name "bb" :linker "ld-linux-x86-64.so.2"}
+   "macos-aarch64" {:asset "macos-aarch64" :ext :tar.gz :bin-name "bb"}
+   "macos-amd64"   {:asset "macos-amd64" :ext :tar.gz :bin-name "bb"}
+   "windows-amd64" {:asset "windows-amd64" :ext :zip :bin-name "bb.exe"}})
 
-(defn slug-for
-  "Release asset slug for an OS/arch pair (os.name/os.arch style values,
-   case-insensitive), or nil when unsupported."
+(defn platform-for
+  "Dist platform name for an os.name/os.arch pair (case-insensitive), or nil
+   when the pair is not one we name. This is the platform vocabulary both
+   packagers share — the same machine yields the same string on babashka and
+   jolt, so their artifacts differ only by the host in the name."
   [os arch]
   (let [os (str/lower-case (str os))
         arch (str/lower-case (str arch))
@@ -78,29 +90,27 @@
                    (#{"amd64" "x86_64"} arch) "amd64"
                    :else nil)]
     (when (and os arch)
-      (get-in {"linux" {"aarch64" "linux-aarch64-static"
-                        "amd64" "linux-amd64-static"}
-               "macos" {"aarch64" "macos-aarch64"
-                        "amd64" "macos-amd64"}
-               "windows" {"amd64" "windows-amd64"}}
-              [os arch]))))
+      (str os "-" arch))))
 
-(defn normalize-slug
-  "Accept shorthand slugs (linux-aarch64 => linux-aarch64-static); nil when
-   unknown."
-  [slug]
+(defn normalize-target
+  "Accept a dist platform (linux-amd64) or the babashka release asset backing
+   it (linux-amd64-static) and return the platform; nil when unknown."
+  [target]
   (cond
-    (contains? target-table slug) slug
-    (= "linux-aarch64" slug) "linux-aarch64-static"
-    :else nil))
+    (contains? target-table target) target
+    :else (some (fn [[platform {:keys [asset]}]]
+                  (when (= asset target) platform))
+                target-table)))
 
-(defn host-slug
-  "Release asset slug for the machine we're running on (best effort), or
-   :unknown-platform when it can't be determined."
+(defn host-target
+  "Target-table platform for the machine we're running on, or :unknown-platform
+   when it is not a babashka platform we package."
   []
-  (if-some [slug (slug-for (System/getProperty "os.name") (System/getProperty "os.arch"))]
-    slug
-    :unknown-platform))
+  (let [platform (platform-for (System/getProperty "os.name")
+                               (System/getProperty "os.arch"))]
+    (if (contains? target-table platform)
+      platform
+      :unknown-platform)))
 
 (defn termux?
   "True when running under Termux (Android)."
@@ -109,37 +119,23 @@
 
 ;; ─── Version ───────────────────────────────────────────────────────────────
 
-(defn- git-out
-  "Output of a git command, trimmed; nil when git is missing or fails."
-  [& args]
-  (try
-    (let [{:keys [out exit]} (apply p/shell {:out :string :err :suppress} "git" args)]
-      (when (zero? exit) (str/trim out)))
-    (catch Exception _ nil)))
-
 (defn version
-  "Artifact version string: tag pointing at HEAD if any (`v` prefix
-   stripped), else <YYYYMMDD>-<short-hash> from the HEAD commit date,
-   else \"dev\" outside a git repo."
+  "Artifact version string: kmet.libs.version/artifact-version (jolt's
+   checkout rule, `v` stripped) — the base version artifact names carry."
   []
-  (or (some-> (git-out "describe" "--tags" "--exact-match" "HEAD")
-              (str/replace #"^v" ""))
-      (when-some [hash (git-out "rev-parse" "--short" "HEAD")]
-        (if-some [date (git-out "log" "-1" "--format=%cs" "HEAD")]
-          (str (str/replace date "-" "") "-" hash)
-          hash))
-      "dev"))
+  (version-lib/artifact-version))
 
 (defn artifact-base
-  "Dist artifact base name without extension: kmet-<ver>-bb<bb-ver>-<slug>."
-  [ver bb-ver slug]
-  (str "kmet-" ver "-bb" bb-ver "-" slug))
+  "Dist artifact base name without extension:
+   kmet-<ver>-bb<bb-ver>-<platform>."
+  [ver bb-ver platform]
+  (str "kmet-" ver "-bb" bb-ver "-" platform))
 
 ;; ─── Downloading & extraction ──────────────────────────────────────────────
 
-(defn- asset-url [version slug ext]
+(defn- asset-url [version asset ext]
   (format "https://github.com/babashka/babashka/releases/download/v%s/babashka-%s-%s.%s"
-          version version slug (name ext)))
+          version version asset (name ext)))
 
 (defn- latest-bb-version
   "Latest babashka release version from the GitHub API, e.g. \"1.13.219\"."
@@ -197,23 +193,24 @@
     bin))
 
 (defn- ensure-bb-binary!
-  "Path of the extracted bb binary for [bb-version slug], downloading and
-   sha256-verifying into the build cache when not already there."
-  [bb-version slug {:keys [ext] :as target}]
-  (let [asset (str "babashka-" bb-version "-" slug "." (name ext))
-        archive (fs/path cache-dir bb-version asset)
-        dir (fs/path cache-dir bb-version slug)
+  "Path of the extracted bb binary for [bb-version target], downloading and
+   sha256-verifying the target platform's babashka release asset into the build
+   cache when not already there."
+  [bb-version {:keys [asset ext] :as target}]
+  (let [asset-file (str "babashka-" bb-version "-" asset "." (name ext))
+        archive (fs/path cache-dir bb-version asset-file)
+        dir (fs/path cache-dir bb-version asset)
         bin (fs/path dir (get {:tar.gz "bb" :zip "bb.exe"} ext))]
     (if (fs/exists? bin)
-      (println "cached:" asset)
+      (println "cached:" asset-file)
       (do
-        (print "downloading" asset "...") (flush)
-        (download! (asset-url bb-version slug ext) archive)
-        (download! (str (asset-url bb-version slug ext) ".sha256") (str archive ".sha256"))
+        (print "downloading" asset-file "...") (flush)
+        (download! (asset-url bb-version asset ext) archive)
+        (download! (str (asset-url bb-version asset ext) ".sha256") (str archive ".sha256"))
         (let [actual (sha256 archive)
               expected (first (str/split (slurp (str archive ".sha256")) #"\s+"))]
           (when-not (= actual expected)
-            (throw (ex-info (str "sha256 mismatch for " asset)
+            (throw (ex-info (str "sha256 mismatch for " asset-file)
                             {:type ::checksum-mismatch :expected expected :actual actual}))))
         (extract-archive! target archive dir)
         (println "ok")))
@@ -225,7 +222,8 @@
   "Create target/kmet.jar in THIS process — no nested bb interpreter (a second
    ~200MB babashka under memory pressure is what gets the whole Termux app,
    tmux server included, killed by Android's low-memory killer). Layout:
-   META-INF/MANIFEST.MF with Main-Class kmet.core, every src/ file (.clj,
+   META-INF/MANIFEST.MF with Main-Class kmet.core, a baked kmet/version.txt
+   (what `kmet --version` reports out of a built artifact), every src/ file (.clj,
    .cljc, .edn — catalogs are classpath resources), then the entries of each
    dependency jar already on the classpath (the Maven jars — data.json for
    the JSON seam, cljfmt for the format task — aren't bb-builtin; keeping all
@@ -248,6 +246,11 @@
       (.putNextEntry zos (java.util.zip.ZipEntry. "META-INF/MANIFEST.MF"))
       (io/copy (.getBytes (str "Manifest-Version: 1.0\r\n"
                                "Main-Class: " main-class "\r\n\r\n")) zos)
+      (.closeEntry zos)
+      ;; the version this artifact is: kmet.core reads it back for
+      ;; `kmet --version` (a built binary has no checkout to describe)
+      (.putNextEntry zos (java.util.zip.ZipEntry. "kmet/version.txt"))
+      (io/copy (.getBytes (str (version-lib/checkout-version) "\n")) zos)
       (.closeEntry zos)
       (doseq [p (sort-by str (fs/glob "src" "**.{clj,cljc,edn}"))]
         ;; the walk is src/ and nothing else — the app, and only the app. The
@@ -306,14 +309,14 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" \"$@\"
           bin-name linker))
 
 (defn assemble-one!
-  "Produce dist/kmet-<ver>-bb<bb-ver>-<slug>[.exe]: the official babashka
-   binary for slug with kmet.jar appended. On a termux host, slugs that need
-   the glibc linker also get a matching .sh launcher script. Returns the
-   artifact path."
-  [ver slug {:keys [linker] :as target} bb-ver]
-  (let [bb-bin (ensure-bb-binary! bb-ver slug target)
-        base (artifact-base ver bb-ver slug)
-        windows? (str/starts-with? slug "windows")
+  "Produce dist/kmet-<ver>-bb<bb-ver>-<platform>[.exe]: the official babashka
+   binary for platform with kmet.jar appended. On a termux host, platforms
+   that need the glibc linker also get a matching .sh launcher script.
+   Returns the artifact path."
+  [ver platform {:keys [linker] :as target} bb-ver]
+  (let [bb-bin (ensure-bb-binary! bb-ver target)
+        base (artifact-base ver bb-ver platform)
+        windows? (str/starts-with? platform "windows")
         artifact (fs/path dist-dir (cond-> base windows? (str ".exe")))]
     (println "building" (str artifact))
     (concat-files! artifact [bb-bin (fs/path jar-path)])
@@ -327,21 +330,36 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" \"$@\"
     artifact))
 
 (defn- smoke-test!
-  "Run the freshly built current-host artifact with --list-models and require
-   exit code 0. Skipped for cross-built platforms."
-  [artifact slug]
-  (when (= (host-slug) slug)
-    (println "smoke test:" (str artifact) "--list-models")
+  "Run the freshly built current-host artifact: --list-models must list the
+   embedded catalogs (exit 0), and --version must report the version the
+   artifact was built as — the baked kmet/version.txt, not a checkout. Skipped
+   for cross-built platforms."
+  [artifact platform]
+  (when (= (host-target) platform)
     (let [launcher (fs/path (fs/parent artifact)
                             (str (fs/file-name artifact) ".sh"))
-          cmd (if (and (termux?) (fs/exists? launcher)) launcher artifact)
-          res (apply p/shell {:out :string :err :string :continue true}
-                     (str cmd) "--list-models")]
-      (if (zero? (:exit res))
-        (println "smoke test passed:" (count (str/split-lines (:out res))) "models listed")
-        (do (println (:err res))
-            (throw (ex-info (str "smoke test failed for " artifact)
-                            {:type ::smoke-failed :exit (:exit res)})))))))
+          cmd (str (if (and (termux?) (fs/exists? launcher)) launcher artifact))
+          run (fn [& args]
+                (apply p/shell {:out :string :err :string :continue true} cmd args))]
+      (println "smoke test:" cmd "--list-models")
+      (let [res (run "--list-models")]
+        (if (zero? (:exit res))
+          (println "smoke test passed:" (count (str/split-lines (:out res))) "models listed")
+          (do (println (:err res))
+              (throw (ex-info (str "smoke test failed for " artifact)
+                              {:type ::smoke-failed :exit (:exit res)})))))
+      (println "smoke test:" cmd "--version")
+      (let [res (run "--version")
+            reported (str/trim (:out res))
+            expected (str "kmet " (version-lib/checkout-version))]
+        (if (and (zero? (:exit res)) (= reported expected))
+          (println "smoke test passed:" reported)
+          (do (println (:err res))
+              (throw (ex-info (str "smoke test failed for " artifact
+                                   " — --version said " (pr-str reported)
+                                   ", expected " (pr-str expected))
+                              {:type ::smoke-failed :exit (:exit res)
+                               :version reported :expected expected}))))))))
 
 ;; ─── Extension packaging (jar-ext.md §6) ────────────────────────────────────
 
@@ -425,7 +443,7 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" \"$@\"
 
 (defn parse-args
   "CLI args => {:targets [...] :all? :force? :no-smoke? :help?}. Unknown
-   slugs/options throw ex-info with :type ::usage."
+   targets/options throw ex-info with :type ::usage."
   [args]
   (loop [args args
          opts {:targets [] :all? false :force? false :no-smoke? false :help? false}]
@@ -437,8 +455,8 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" \"$@\"
         (= "--help" arg) (recur (rest args) (assoc opts :help? true))
         (str/starts-with? arg "--") (throw (ex-info (str "unknown option: " arg)
                                                     {:type ::usage}))
-        :else (if-some [slug (normalize-slug arg)]
-                (recur (rest args) (update opts :targets conj slug))
+        :else (if-some [platform (normalize-target arg)]
+                (recur (rest args) (update opts :targets conj platform))
                 (throw (ex-info (str "unknown target: " arg)
                                 {:type ::usage :known (vec (sort (keys target-table)))}))))
       opts)))
@@ -448,13 +466,16 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" \"$@\"
    babashka branch; the jolt branch runs kmet.tasks.build-jolt/-main)
 
    Build self-contained kmet executable(s) in dist/: the official babashka
-   release binary with the kmet uberjar appended. Targets are release asset
-   slugs (linux-aarch64-static, linux-amd64[-static], macos-aarch64, macos-amd64,
-   windows-amd64); they default to the current platform. --all builds every
-   published platform, --force re-downloads cached babashka binaries, and
-   --no-smoke skips running the current-host artifact after building (saves
-   memory on constrained devices). A fresh uberjar (target/kmet.jar) is
-   always rebuilt first so artifacts never bundle stale sources."
+   release binary with the kmet uberjar appended, named
+   kmet-<ver>-bb<bb-ver>-<platform> — the jolt packager's scheme with babashka
+   in its slot. Targets are dist platforms (linux-aarch64, linux-amd64,
+   macos-aarch64, macos-amd64, windows-amd64; a release asset slug like
+   linux-amd64-static is accepted too); they default to the current platform.
+   --all builds every published platform, --force re-downloads cached babashka
+   binaries, and --no-smoke skips running the current-host artifact after
+   building (saves memory on constrained devices). A fresh uberjar
+   (target/kmet.jar) is always rebuilt first so artifacts never bundle stale
+   sources."
   [& args]
   (bb-only! "kmet.tasks.build/-main (the bb half of the dist task)")
   (let [{:keys [targets all? force? no-smoke? help?]} (parse-args args)]
@@ -471,14 +492,14 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" \"$@\"
           targets (cond
                     all? (sort (keys target-table))
                     (seq targets) targets
-                    :else (let [h (host-slug)]
-                            (when-not (string? h)
+                    :else (let [platform (host-target)]
+                            (when-not (string? platform)
                               (throw (ex-info "cannot determine host platform; pass explicit targets"
-                                              {:type ::usage :reason h})))
-                            [h]))]
+                                              {:type ::usage :reason platform})))
+                            [platform]))]
       (println (format "kmet %s | babashka %s | targets: %s" ver bb-ver (str/join ", " targets)))
-      (doseq [slug targets]
-        (let [artifact (assemble-one! ver slug (get target-table slug) bb-ver)]
+      (doseq [platform targets]
+        (let [artifact (assemble-one! ver platform (get target-table platform) bb-ver)]
           (when-not no-smoke?
-            (smoke-test! artifact slug))))
+            (smoke-test! artifact platform))))
       (println "done:" dist-dir))))

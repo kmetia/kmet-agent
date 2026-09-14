@@ -1,10 +1,11 @@
 (ns kmet.test-core
-  "CLI surface tests — --list-models output (pi cli/list-models.ts) and its
-   token-count formatting."
+  "CLI surface tests — --list-models output (pi cli/list-models.ts), the
+   --version flag, and its token-count formatting."
   (:require [clojure.string :as str]
             [clojure.test :as t]
             [kmet.core :as core]
-            [kmet.ai.models :as models]))
+            [kmet.ai.models :as models]
+            [kmet.libs.version :as version]))
 
 (t/deftest test-format-token-count
   (t/is (= "200K" (@#'core/format-token-count 200000)))
@@ -69,3 +70,25 @@
     (t/is (= "v1" (get-in opts [:ext-flags "ext-string"])))
     (t/is (true? (get-in opts [:ext-flags "ext-bool"])))
     (t/is (= "eq" (get-in (core/parse-args ["--ext-eq=eq"]) [:ext-flags "ext-eq"])))))
+
+(t/deftest test-parse-args-version-flag
+  ;; --version is not an extension flag: it stops parsing like --help
+  (t/is (true? (:version (core/parse-args ["--version"]))))
+  (t/is (nil? (:version (core/parse-args ["hello"]))))
+  (t/is (nil? (get-in (core/parse-args ["--version"]) [:ext-flags "version"]))))
+
+(t/deftest test-kmet-version
+  (t/testing "a packaged kmet reports the version it was built as"
+    (with-redefs [core/baked-version (constantly "v1.2.3-4-gabc1234")
+                  core/source-run? (constantly false)]
+      (t/is (= "v1.2.3-4-gabc1234" (@#'core/kmet-version)))))
+  (t/testing "a source run (no baked resource) falls back to the checkout"
+    (with-redefs [core/baked-version (constantly nil)
+                  core/source-run? (constantly true)
+                  version/checkout-version (constantly "dev-g0a1b2c3")]
+      (t/is (= "dev-g0a1b2c3" (@#'core/kmet-version)))))
+  (t/testing "a packaged kmet without a bake says dev, not the cwd's repo"
+    (with-redefs [core/baked-version (constantly nil)
+                  core/source-run? (constantly false)
+                  version/checkout-version (constantly "v9.9.9")]
+      (t/is (= "dev" (@#'core/kmet-version))))))
