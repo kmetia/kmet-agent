@@ -100,6 +100,49 @@
       (t/is (false? @(:auto-sync-enabled-atom ctrl))
             "explicit setting disables auto-sync"))))
 
+(t/deftest test-apply-from-settings-noop-does-not-force
+  (t/testing "re-applying the already-active theme is a no-op — no forced
+            clearing redraw (every startup runs apply-from-settings!, which
+            resolves the theme the constructor already applied; forcing here
+            repainted the resumed transcript a second time and cleared the
+            scrollback for a theme that never changed)"
+    (let [{:keys [ctrl tui changed]} (make-ctrl {:theme "dark"})]
+      (reset! changed 0)
+      (reset! (:force-redraw? tui) false)
+      (tc/apply-from-settings! ctrl)
+      (t/is (= "dark" (:name (theme/get-current-theme))))
+      (t/is (= "dark" (tc/get-active-theme-name ctrl))
+            "the active-name atom is synced even on the no-op path")
+      (t/is (false? @(:force-redraw? tui)) "no forced redraw")
+      (t/is (zero? @changed) "no on-changed notification"))))
+
+(t/deftest ^:slow test-apply-from-settings-detected-noop-does-not-force
+  (t/testing "the no-setting detection path is a no-op when the detected theme
+            matches the env-detected theme the constructor applied"
+    (let [{:keys [ctrl tui changed]} (make-ctrl {})]
+      (reset! changed 0)
+      (reset! (:force-redraw? tui) false)
+      (tc/apply-from-settings! ctrl)
+      (t/is (contains? #{"light" "dark"} (tc/get-active-theme-name ctrl)))
+      (t/is (false? @(:force-redraw? tui))
+            "the second startup paint (the session-load double redraw) is gone")
+      (t/is (zero? @changed) "no on-changed notification"))))
+
+(t/deftest test-apply-theme-name-keyword-detection
+  (t/testing "the detection path yields :light/:dark keywords — they must resolve to the
+            bare theme name: set-theme! looks up (str name), and (str :light) is \":light\",
+            a registry miss that silently fell back to dark"
+    (let [{:keys [ctrl changed]} (make-ctrl {:theme "dark"})]
+      (reset! changed 0)
+      (let [result (#'tc/apply-theme-name! ctrl :light false)]
+        (t/is (true? (:success result)) "the keyword resolves to the registered theme")
+        (t/is (= "light" (:name (theme/get-current-theme))))
+        (t/is (= "light" (tc/get-active-theme-name ctrl))
+              "the stored active name is the bare string")
+        (t/is (= 2 @changed)
+              "a real switch notifies twice — pi parity: setTheme fires the
+              onThemeChange callback and applyThemeName fires notifyChanged")))))
+
 (t/deftest ^:slow test-apply-from-settings-auto
   (t/testing "an auto setting enables auto-sync and applies one side; the
             notification sequence is written (CSI ? 2031 h)"

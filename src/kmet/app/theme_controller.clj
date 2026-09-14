@@ -29,16 +29,33 @@
 (defn- apply-theme-name!
   "pi: applyThemeName — set the theme (with the file watcher), track the
    active name, notify. SHOW-ERROR? reports failures through the error
-   callback."
+   callback.
+
+   A re-application of the theme that is already current is a no-op: the
+   notify forces a clearing full redraw (notify-changed!), and every startup
+   runs apply-from-settings!, which resolves the same theme the constructor
+   already applied — without this guard the resumed transcript is painted
+   once and then thrown away and re-emitted (plus a scrollback clear) by a
+   theme that never changed. A same-name call still syncs the active-name
+   atom: auto-sync's scheme-report guard compares against it."
   [ctrl theme-name show-error?]
-  (let [result (theme/set-theme! theme-name true)]
-    (reset! (:active-theme-name-atom ctrl) (if (:success result) theme-name "dark"))
-    (notify-changed! ctrl)
-    (when (and (not (:success result)) show-error?)
-      ((:show-error ctrl)
-       (str "Failed to load theme \"" theme-name "\": " (:error result)
-            "\nFell back to dark theme.")))
-    result))
+  ;; the detection path passes :dark/:light keywords; elsewhere the name is
+  ;; already a string — normalize so the comparison and the stored active
+  ;; name are both the bare theme name (:dark would str to ":dark")
+  (let [theme-name (if (keyword? theme-name) (name theme-name) (str theme-name))]
+    (if (= theme-name (theme/get-current-theme-name))
+      (do (reset! (:active-theme-name-atom ctrl) theme-name)
+          {:success true})
+      (let [result (theme/set-theme! theme-name true)]
+        (reset! (:active-theme-name-atom ctrl) (if (:success result)
+                                                 theme-name
+                                                 "dark"))
+        (notify-changed! ctrl)
+        (when (and (not (:success result)) show-error?)
+          ((:show-error ctrl)
+           (str "Failed to load theme \"" theme-name "\": " (:error result)
+                "\nFell back to dark theme.")))
+        result))))
 
 (defn- set-auto-sync!
   "pi: setAutoSync — enable/disable unsolicited terminal color scheme
@@ -165,8 +182,11 @@
   "pi: preview — apply a theme setting/name without touching the auto-sync
    state; invalidates and re-renders. Deliberately NOT a forced render: a
    live preview can fire per keystroke, and clearing the scrollback on every
-   step would re-emit the whole transcript. The committed change forces via
-   notify-changed!."
+   step would re-emit the whole transcript. A commit that actually switches
+   the theme forces via notify-changed!; committing the already-previewed
+   (current) theme is a no-op in apply-theme-name! — the preview's partial
+   repaint already marked the scrollback dirty and the app's heal rebuilds
+   it at the next streaming-free boundary."
   [ctrl setting-or-name]
   (when-let [theme-name (theme/resolve-theme-setting setting-or-name
                                                      @(:terminal-theme-atom ctrl))]
