@@ -9,8 +9,9 @@
    namespaces are excluded.
 
    A deftest marked ^:bb-only exercises bb-only behavior (kmet.tasks.build's
-   packaging, kmet.libs.archive's zip extraction — babashka.classpath and
-   java.util.zip are bb/JVM-only): it runs under `bb test` and is skipped on
+   packaging, kmet.libs.archive's zip extraction, bb-bundled SCI ports, Maven
+   deps resolution, jar-extension mechanics, curl --compressed — babashka.classpath
+   and java.util.zip are bb/JVM-only): it runs under `bb test` and is skipped on
    the jolt host. The namespace still loads there (a load gap would report it
    unloaded), so calling a bb-only entry point under jolt surfaces as a fast
    ::bb-only ex-info from the guarded function, not a crash.
@@ -568,7 +569,8 @@
    filtered run: only the requested ones) with the load failure reason.
    A full run without filters records the changed-files baseline after a
    green result, so `bb test-changed` sees a clean slate.
-   ^:bb-only vars (bb-only behavior — kmet.tasks.build / kmet.libs.archive) run
+   ^:bb-only vars (bb-only behavior — kmet.tasks.build / kmet.libs.archive,
+   bb-bundled SCI ports, Maven deps, jar-extension mechanics, curl --compressed) run
    under bb and are dropped from whole-namespace selection on jolt; var
    filters ignore bb-only too, so an explicit request runs and reports the
    underlying ::bb-only error."

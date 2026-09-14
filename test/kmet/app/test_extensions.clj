@@ -1053,38 +1053,37 @@
         (t/is (nil? (prompts/get-prompt-template "selfreg-tpl")) "unload removes the template")
         (fs/delete-tree dir)))))
 
-(t/deftest test-shipped-extensions-load-from-src
+(t/deftest ^:bb-only test-shipped-extensions-load-from-src
   ;; the repo's own extensions restructured to src/-as-artifact-root
   ;; (jar-ext.md §2): every shipped src/ dir loads through the real runtime.
   ;;
-  ;; bb-only: the shipped extensions need d
+  ;; bb-only: the shipped extensions need both
   ;;   - deps.edn closures (clojure → cljfmt/rewrite-clj, M2) and
   ;;   - JDK classes jolt's class graph does not supply (lsp's
   ;;     ^StringBuilder type hint trips jolt's RFC 0014 "no dependency
   ;;     provides java.lang.StringBuilder" path),
   ;; tracked for the Jolt follow-up; the SCI loader itself runs on both
   ;; hosts (see the file docstring).
-  (when-not (boolean (find-var 'clojure.core/*jolt-version*))
-    (extensions/clear-extensions!)
-    (doseq [path ["extensions/clojure/src"
-                  "extensions/lsp-adapter/src"
-                  "extensions/mcp-adapter/src"
-                  "extensions/review/src"
-                  "extensions/tree-sitter/src"]]
-      (let [result (extensions/load-extension! path)]
-        (t/is (nil? (:error result)) (str path " loaded: " (:error result)))))
-    (testing "tools + skills from the shipped extensions are live"
-      (t/is (some? (tools/get-tool "clojure_edit")))
-      (t/is (some? (tools/get-tool "lsp")))
-      (t/is (some? (tools/get-tool "mcp")))
-      (t/is (some? (skills/get-skill "clojure-edit")))
-      (t/is (some? (skills/get-skill "mcp"))))
-    (testing "extension skills disclose from memory"
-      (t/is (str/includes? (skills/expand-skill-command "/skill:clojure-edit")
-                           "clojure_edit")))
-    (extensions/unload-all-extensions!)
-    (skills/clear-skills!)
-    (prompts/clear-prompt-templates!)))
+  (extensions/clear-extensions!)
+  (doseq [path ["extensions/clojure/src"
+                "extensions/lsp-adapter/src"
+                "extensions/mcp-adapter/src"
+                "extensions/review/src"
+                "extensions/tree-sitter/src"]]
+    (let [result (extensions/load-extension! path)]
+      (t/is (nil? (:error result)) (str path " loaded: " (:error result)))))
+  (testing "tools + skills from the shipped extensions are live"
+    (t/is (some? (tools/get-tool "clojure_edit")))
+    (t/is (some? (tools/get-tool "lsp")))
+    (t/is (some? (tools/get-tool "mcp")))
+    (t/is (some? (skills/get-skill "clojure-edit")))
+    (t/is (some? (skills/get-skill "mcp"))))
+  (testing "extension skills disclose from memory"
+    (t/is (str/includes? (skills/expand-skill-command "/skill:clojure-edit")
+                         "clojure_edit")))
+  (extensions/unload-all-extensions!)
+  (skills/clear-skills!)
+  (prompts/clear-prompt-templates!))
 
 (t/deftest ^:slow ^:bb-only test-packed-clojure-jar-roundtrip
   ;; end-to-end jar distribution for a real shipped extension: pack
