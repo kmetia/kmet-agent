@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-02T23:43:15Z"
+ :generated-at "2026-09-14T19:46:27Z"
  :provider {:id :kimi-coding
             :name "Kimi For Coding"
             :env-vars ["KIMI_API_KEY"]
@@ -34,14 +34,14 @@
     :compat {:force-adaptive-thinking true}}
    "kimi-for-coding"
    {:id "kimi-for-coding"
-    :name "Kimi K2.7 Code"
+    :name "kimi-for-coding"
     :provider :kimi-coding
     :api :anthropic-messages
     :base-url "https://api.kimi.com/coding"
     :reasoning true
     :input [:text :image]
     :cost {:input 0.95 :output 4 :cache-read 0.19 :cache-write 0}
-    :context-window 262144
+    :context-window 1048576
     :max-tokens 32768
     :headers {"User-Agent" "KimiCLI/1.5"}
     :compat {:force-adaptive-thinking true :allow-empty-signature true}}

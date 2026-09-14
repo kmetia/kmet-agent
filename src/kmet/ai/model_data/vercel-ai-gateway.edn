@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-13T19:36:49Z"
+ :generated-at "2026-09-14T19:46:27Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -1519,7 +1519,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text]
-    :cost {:input 0.05 :output 0.24 :cache-read 0 :cache-write 0}
+    :cost {:input 0.05 :output 0.2 :cache-read 0.025 :cache-write 0}
     :context-window 262144
     :max-tokens 262144}
    "nvidia/nemotron-3-super-120b-a12b"

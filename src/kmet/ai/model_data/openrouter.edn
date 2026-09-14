@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-13T19:36:49Z"
+ :generated-at "2026-09-14T19:46:27Z"
  :provider {:id :openrouter
             :name "OpenRouter"
             :env-vars ["OPENROUTER_API_KEY"]
@@ -808,7 +808,7 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.04732 :output 0.09464 :cache-read 0.009464 :cache-write 0}
+    :cost {:input 0.07938 :output 0.15876 :cache-read 0.015876 :cache-write 0}
     :context-window 1024000
     :max-tokens 384000
     :compat {:supports-developer-role false
@@ -829,7 +829,7 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.04 :output 0.08 :cache-read 0.008 :cache-write 0}
+    :cost {:input 0.06 :output 0.12 :cache-read 0.012 :cache-write 0}
     :context-window 1048576
     :max-tokens 943718
     :compat {:supports-developer-role false
@@ -934,9 +934,9 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.57948 :output 1.73844 :cache-read 0.019316 :cache-write 0}
-    :context-window 1024000
-    :max-tokens 384000
+    :cost {:input 0.57948 :output 1.73844 :cache-read 0.018438 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 393216
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter}}
@@ -1784,9 +1784,9 @@
     :base-url "https://openrouter.ai/api/v1"
     :reasoning false
     :input [:text :image]
-    :cost {:input 0.2 :output 0.696 :cache-read 0 :cache-write 0}
+    :cost {:input 0.1875 :output 0.6525 :cache-read 0 :cache-write 0}
     :context-window 128000
-    :max-tokens 115200
+    :max-tokens 16384
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "meta-llama/llama-4-scout"
    {:id "meta-llama/llama-4-scout"
@@ -2517,9 +2517,9 @@
                          :off "none"
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.085 :output 0.4 :cache-read 0 :cache-write 0}
+    :cost {:input 0.08 :output 0.45 :cache-read 0 :cache-write 0}
     :context-window 262144
-    :max-tokens 16384
+    :max-tokens 235929
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "nvidia/nemotron-3-super-120b-a12b:free"
    {:id "nvidia/nemotron-3-super-120b-a12b:free"
@@ -2555,9 +2555,9 @@
                          :off "none"
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.625 :output 3.125 :cache-read 0.1875 :cache-write 0}
-    :context-window 256000
-    :max-tokens 32768
+    :cost {:input 0.6 :output 2.4 :cache-read 0.12 :cache-write 0}
+    :context-window 202800
+    :max-tokens 182520
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "nvidia/nemotron-3-ultra-550b-a55b:free"
    {:id "nvidia/nemotron-3-ultra-550b-a55b:free"
@@ -4164,9 +4164,9 @@
     :base-url "https://openrouter.ai/api/v1"
     :reasoning true
     :input [:text]
-    :cost {:input 0.2275 :output 0.91 :cache-read 0 :cache-write 0}
-    :context-window 131072
-    :max-tokens 8192
+    :cost {:input 0.12 :output 0.24 :cache-read 0 :cache-write 0}
+    :context-window 40960
+    :max-tokens 16384
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "qwen/qwen3-235b-a22b"
    {:id "qwen/qwen3-235b-a22b"
@@ -5365,9 +5365,9 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.6 :output 2 :cache-read 0.15 :cache-write 0}
-    :context-window 202752
-    :max-tokens 182476
+    :cost {:input 0.6832 :output 2.1472 :cache-read 0.12688 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "z-ai/glm-5.2:batch"
    {:id "z-ai/glm-5.2:batch"
@@ -5403,9 +5403,9 @@
                          :off nil
                          :xhigh nil}
     :input [:text]
-    :cost {:input 1.092 :output 3.432 :cache-read 0.2028 :cache-write 0}
-    :context-window 1048576
-    :max-tokens 131072
+    :cost {:input 1.4 :output 4.4 :cache-read 0.26 :cache-write 0}
+    :context-window 1048575
+    :max-tokens 943717
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "z-ai/glm-5.3-flash"
    {:id "z-ai/glm-5.3-flash"
@@ -5545,6 +5545,44 @@
     :context-window 1000000
     :max-tokens 128000
     :compat {:supports-developer-role false :thinking-format :openrouter}}
+   "~deepseek/deepseek-flash-latest"
+   {:id "~deepseek/deepseek-flash-latest"
+    :name "DeepSeek: DeepSeek Flash Latest"
+    :provider :openrouter
+    :api :openai-completions
+    :base-url "https://openrouter.ai/api/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium nil
+                         :minimal nil
+                         :off "none"
+                         :xhigh nil}
+    :input [:text :image]
+    :cost {:input 0.15 :output 0.6 :cache-read 0.003 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 943718
+    :compat {:supports-developer-role false :thinking-format :openrouter}}
+   "~deepseek/deepseek-pro-latest"
+   {:id "~deepseek/deepseek-pro-latest"
+    :name "DeepSeek: DeepSeek Pro Latest"
+    :provider :openrouter
+    :api :openai-completions
+    :base-url "https://openrouter.ai/api/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium nil
+                         :minimal nil
+                         :off "none"
+                         :xhigh nil}
+    :input [:text]
+    :cost {:input 0.57948 :output 1.73844 :cache-read 0.018438 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 393216
+    :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~deepseek/deepseek-v4-flash-latest"
    {:id "~deepseek/deepseek-v4-flash-latest"
     :name "DeepSeek: DeepSeek V4 Flash Latest"
@@ -5560,9 +5598,9 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.0352 :output 0.1056 :cache-read 0.00112 :cache-write 0}
+    :cost {:input 0.04 :output 0.1 :cache-read 0.01 :cache-write 0}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 393216
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter}}
@@ -5619,7 +5657,7 @@
                          :off "none"
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 2.1 :output 10.95 :cache-read 0.23 :cache-write 0}
+    :cost {:input 1.975 :output 11.06 :cache-read 0.2291 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-developer-role false :thinking-format :openrouter}}
@@ -5771,7 +5809,7 @@
                          :off nil
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.936 :output 3.168 :cache-read 0.1872 :cache-write 0}
-    :context-window 262144
-    :max-tokens 235929
+    :cost {:input 0.9 :output 3.069 :cache-read 0.18 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 943718
     :compat {:supports-developer-role false :thinking-format :openrouter}}}}}
