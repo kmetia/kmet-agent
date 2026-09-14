@@ -8,6 +8,7 @@
    memoization/idle invariant."
   (:require [clojure.string :as str]
             [clojure.test :as t]
+            [kmet.tui.components.alt-screen-flash :as asf]
             [kmet.tui.components.cancellable-loader :as cancellable-loader]
             [kmet.tui.components.editor :as editor]
             [kmet.tui.components.expandable-text :as expandable-text]
@@ -310,6 +311,24 @@
   ;; default spinner is active and shows :text; a :spinner prop wins
   (let [lines (h/render-lines [:cancellable-loader {:text "Loading"}] 20)]
     (t/is (str/includes? (str/join "\n" lines) "Loading"))))
+
+(t/deftest alt-screen-flash-tag
+  ;; :request-render patches through the apply path (tui.md §2.2) — a fresh
+  ;; closure per pass keeps the instance and its pending entries
+  (let [r (h/ref)
+        cb (atom (fn []))
+        root (h/root (fn [_] [:alt-screen-flash {:request-render @cb :ref r}]))]
+    (core/render root 30)
+    (let [inst (deref r)]
+      (t/is (some? inst) ":ref points at the container")
+      (asf/alt-screen-flash! inst "Saved!" :duration-ms 60000)
+      (t/is (str/includes? (str/join "\n" (core/render root 30)) "Saved!")
+            "entries render inline")
+      (reset! cb (fn []))
+      (t/is (str/includes? (str/join "\n" (core/render root 30)) "Saved!")
+            "a fresh callback closure patches — the pending entry survives")
+      (t/is (identical? inst (deref r))
+            "instance kept across the prop change"))))
 
 (t/deftest scroll-view-tag
   ;; single child rendered inside the viewport

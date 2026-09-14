@@ -43,6 +43,7 @@
    gives the headless surface: pure data in, lines out, no terminal."
   (:refer-clojure :exclude [ref])
   (:require
+   [kmet.tui.components.alt-screen-flash :as alt-screen-flash]
    [kmet.tui.components.box :as box]
    [kmet.tui.components.cancellable-loader :as cancellable-loader]
    [kmet.tui.components.container :as container]
@@ -463,6 +464,19 @@
                                        (cancellable-loader/cancellable-loader-set-on-abort!
                                         cl (:on-abort props)))
                                      true)))}
+   :alt-screen-flash
+   {:ctor (fn [{:keys [request-render]}]
+            (alt-screen-flash/make-alt-screen-flash request-render))
+    :primary :request-render
+    :apply (fn [fl prev props]
+             ;; the callback is configuration, not state: patch it through
+             ;; the setter so the pending entries (and their expiry timers)
+             ;; survive — a fresh closure per pass is the norm, and a
+             ;; rebuild would dispose the container and clear the entries
+             (when (not= (:request-render props) (:request-render prev))
+               (alt-screen-flash/alt-screen-flash-set-request-render!
+                fl (:request-render props)))
+             true)}
    :box       {:ctor (fn [{:keys [padding-x padding-y bg-fn]}]
                        (box/make-box
                         (or padding-x 1) (or padding-y 1) bg-fn))

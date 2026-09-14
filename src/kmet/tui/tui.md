@@ -189,6 +189,7 @@ extensions never add host elements. Tags and props:
 | `:settings-list` | `:items` (primary), `:theme`, `:on-change`, `:on-escape`, `:enable-search`, `:max-visible` (default 10) | none (leaf) |
 | `:editor` | `:text` (primary), `:height` (default 12), `:padding-x`, `:border-fn`, `:border` (§2.8), `:keybindings`, `:terminal-rows`, `:on-submit`, `:on-change` | none (leaf) |
 | `:cancellable-loader` | `:spinner` (defaults to a fresh active Spinner), `:on-abort`, `:text` (message for the default spinner) | none (leaf) |
+| `:alt-screen-flash` | `:request-render` (primary; nil = no callback) | none (leaf) |
 | `:box` | `:padding-x` `:padding-y` (default 1), `:bg-fn` | yes |
 | `:container` | — | yes |
 | `:v-stack` | `:gap` | yes (entry maps allowed: `{:component c}`) |
@@ -199,9 +200,10 @@ extensions never add host elements. Tags and props:
 `{:text "hi"}` merged over defaults.
 
 **Stateful leaves** (`:input` `:select-list` `:settings-list` `:editor`
-`:spinner` `:cancellable-loader` `:expandable-text`): while their props
-stay `=`-equal the instance (and its state) is kept. A CHANGED prop takes
-the tag's **apply path** (§2.3) — every stateful tag declares one, so the
+`:spinner` `:cancellable-loader` `:expandable-text` `:alt-screen-flash`):
+while their props stay `=`-equal the instance (and its state) is kept. A
+CHANGED prop takes the tag's **apply path** (§2.3) — every stateful tag
+declares one, so the
 live instance is patched through its setters instead of rebuilt: text,
 cursor, selection, focus, undo history, the spinner's animation clock and
 a loader's abort signal all survive a prop change. What declines the patch
@@ -215,9 +217,13 @@ component's setters (e.g. `(input/input-set-value! (deref r) "x")`), the
 same contract the spliced-record pattern always used. Focus is a host
 concern — mount the component, then `tui-set-focus` on the ref'd instance.
 
-**Host-internal components without a tag**: `alt_screen_flash` — it needs
-the TUI's own request-render callback (`kmet.tui.core/tui-flash!` owns its
-single instance), so it cannot be constructed from a tree.
+**Host-owned instance**: `kmet.tui.core` still constructs its flash
+container directly — the render loop composites that single instance's
+lines over the screen window (`tui-flash!` / `tui-flash-dispose!`), so it is
+not tree-mounted. The `:alt-screen-flash` tag mounts the same component in
+the document instead: its entries render inline (one inverse-video line
+each), and `:request-render` patches through the apply path (§2.3) — a
+fresh callback closure per pass keeps the instance and its pending entries.
 
 Fn heads are fn **values**, never symbols — trees are built at runtime and
 symbol resolution would couple the DSL to caller namespaces.
@@ -927,7 +933,7 @@ DSL tags of §2.2):
 | `cancellable_loader` | loader with abort signal |
 | `expandable_text` | collapsed/expanded long text (deref-aware caching) |
 | `image` | inline image protocol rendering (kitty/iTerm style) |
-| `alt_screen_flash` | alternate-screen takeover + restore |
+| `alt_screen_flash` | transient flash messages — host-composited over the screen bottom, inline lines when tree-mounted |
 
 Frame glyphs come from `kmet.tui.border` (§2.8), not from the components:
 `dynamic_border` and `editor` draw a rule, `markdown` its table, and the

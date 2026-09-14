@@ -64,3 +64,19 @@
       (Thread/sleep 30)
       (timers/pump!)
       (t/is (> @renders n) "expiry triggers another render request"))))
+
+(t/deftest test-set-request-render
+  ;; the callback swaps in place — entries and timers survive (the hiccup
+  ;; :apply path patches a changed :request-render through this)
+  (let [a (atom 0)
+        b (atom 0)
+        c (asf/make-alt-screen-flash #(swap! a inc))]
+    (asf/alt-screen-flash-set-request-render! c #(swap! b inc))
+    (asf/alt-screen-flash! c "x" :duration-ms 60000)
+    (t/is (zero? @a) "the replaced callback is no longer called")
+    (t/is (pos? @b) "the new callback is called")
+    (t/is (= 1 (count (core/render c 20))))
+    ;; nil is a legal callback — a flash with nowhere to repaint still records
+    (asf/alt-screen-flash-set-request-render! c nil)
+    (asf/alt-screen-flash! c "y" :duration-ms 60000)
+    (t/is (= 2 (count (core/render c 20))))))

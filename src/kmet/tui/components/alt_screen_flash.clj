@@ -16,7 +16,7 @@
 
 (declare alt-screen-flash-dispose!)
 
-(defcomponent AltScreenFlashContainer nil [request-render-fn entries-atom next-id-atom]
+(defcomponent AltScreenFlashContainer nil [request-render-fn-atom entries-atom next-id-atom]
   (render [_this width]
     (mapv (fn [entry]
             (let [message (u/truncate-to-width (str " " (:message entry) " ") width "")]
@@ -27,18 +27,26 @@
 (defn- request-render!
   "Call the host's re-render callback when present."
   [this]
-  (when-let [f (:request-render-fn this)]
+  (when-let [f @(:request-render-fn-atom this)]
     (f)))
 
 ;; ─── Construction & API ────────────────────────────────────────────────────
 
 (defn make-alt-screen-flash
-  "Create an AltScreenFlashContainer. REQUEST-RENDER is called whenever a
-   flash appears or expires so the host can repaint."
+  "Create an AltScreenFlashContainer. REQUEST-RENDER (nil = none) is called
+   whenever a flash appears or expires so the host can repaint."
   [request-render]
-  (map->AltScreenFlashContainer {:request-render-fn request-render
+  (map->AltScreenFlashContainer {:request-render-fn-atom (atom request-render)
                                  :entries-atom (atom [])
                                  :next-id-atom (atom 0)}))
+
+(defn alt-screen-flash-set-request-render!
+  "Replace the host's re-render callback (nil = none). The callback is
+   configuration, not state — pending entries and their expiry timers
+   survive, which is what the hiccup :apply path patches through (tui.md
+   §2.2) instead of rebuilding the container over a changed :request-render."
+  [this f]
+  (reset! (:request-render-fn-atom this) f))
 
 (defn alt-screen-flash!
   "Show a transient inverse-video message for DURATION-MS (default 1000),

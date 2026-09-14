@@ -2360,6 +2360,8 @@
 (def make-alt-screen-flash alt-screen-flash/make-alt-screen-flash)
 (def alt-screen-flash! alt-screen-flash/alt-screen-flash!)
 (def alt-screen-flash-dispose! alt-screen-flash/alt-screen-flash-dispose!)
+(def alt-screen-flash-set-request-render!
+  alt-screen-flash/alt-screen-flash-set-request-render!)
 
 ;; CancellableLoader — Loader cancellable with Escape (pi: BorderedLoader)
 (def make-cancellable-loader cancellable-loader/make-cancellable-loader)
