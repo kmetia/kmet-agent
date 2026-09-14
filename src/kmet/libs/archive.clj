@@ -13,7 +13,8 @@
    directories via unzip (jolt's own mvn-jar model) instead of this path."
   (:require [babashka.fs :as fs]
             [clojure.java.io :as io]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [kmet.libs.host :as host]))
 
 (defn- entry-target
   "Canonicalized extraction target for zip entry RAW under DEST, or throws
@@ -39,7 +40,7 @@
    preservation — callers chmod as needed). bb-only: throws ::bb-only on
    the jolt host (java.util.zip; no jolt callers)."
   [zip-path dest-dir]
-  (when (boolean (find-var 'clojure.core/*jolt-version*))
+  (when (host/jolt?)
     (throw (ex-info "kmet.libs.archive/extract-zip! is bb-only — the jolt host has no java.util.zip"
                     {:type ::bb-only})))
   (let [dest (fs/canonicalize dest-dir {:nofollow-links true})]

@@ -41,6 +41,7 @@
             [kmet.app.tools.core :as tools]
             [kmet.config :as cfg]
             [kmet.tui.theme :as theme]
+            [kmet.libs.host :as host]
             [kmet.extension]))
 
 ;; ─── Provider-event bridges (pi: context / before_provider_request /
@@ -827,12 +828,6 @@
      edamame.core
      clojure.data.xml})
 
-(defn- jolt?
-  "True on the Jolt host (runtime check, not a reader conditional — the
-   SCI context options below are identical on both hosts except :features)."
-  []
-  (boolean (find-var 'clojure.core/*jolt-version*)))
-
 (def ^:private missing-classname-re
   "Matches SCI's analysis error for an unregistered class:
    `Unable to resolve classname: fq.Name`."
@@ -1234,7 +1229,7 @@
   (let [f (io/file path)]
     (cond
       (jar-archive? f path)
-      (let [unexpanded? (not (jolt?))
+      (let [unexpanded? (not (host/jolt?))
             entries (when unexpanded? (jar-entry-names (str f)))]
         ;; jolt materializes the archive to a directory (no java.util.zip) and
         ;; continues as a :dir artifact; bb keeps the per-call ZipFile path.
@@ -1643,7 +1638,7 @@
   []
   (require 'clojure.core.async)
   (apply require (concat tui-library-namespaces libs-library-namespaces))
-  (when-not (jolt?)
+  (when-not (host/jolt?)
     (apply require (concat spec-port-namespaces bb-shared-namespaces)))
   nil)
 
@@ -1666,7 +1661,7 @@
   (let [ctx-holder (atom nil)
         ctx (sci/init {:classes {:allow :all}
                        :imports bb-imports
-                       :features (if (jolt?) #{:jolt :clj} #{:bb :clj})
+                       :features (if (host/jolt?) #{:jolt :clj} #{:bb :clj})
                        :namespaces (build-context-namespaces resource-fn)
                        :load-fn (make-load-fn ext-name artifact owns-ns?
                                               deps-resolver
