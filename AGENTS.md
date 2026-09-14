@@ -421,6 +421,29 @@ Type dispatch is kind-as-data: `defcomponent` stamps KIND as the record's
 first field; dispatch reads `(:kind component)` (no IComponentKind
 protocol — retired in DSL stage 2, see tui.md §8).
 
+### UI style — hiccup preferred
+- **New UI is hiccup, not `make-*`**: new screens, dialogs, selectors and
+  chrome in `kmet.app.ui.*` are hiccup trees (`hiccup/root` for mounted
+  reactive roots, `h/compile-tree` for static frames) over the closed tag
+  set in `kmet.tui.hiccup` (`:box` / `:container` / `:text` /
+  `:truncated-text` / `:spacer` / `:dynamic-border`, ...). Imperative
+  `make-*` + `container-add-child` / `container-replace-children!` is
+  legacy — do not extend it; migrate the touched rows/frame when you are
+  already editing a hybrid file.
+- **Hybrid rule**: DSL-owned chrome with stateful children spliced foreign
+  (focused `Input`, `SelectList` / `SettingsList`, long-lived `Spinner` —
+  reconcile preserves their identity and disposes nothing foreign). Rows
+  are data-derived `[:text ...]` / `[:truncated-text ...]` seqs
+  re-derived from a state atom (the `session_selector` pattern), never a
+  rebuilt `Container` of `make-text`. Focus/input/dispose stay imperative
+  (`tui-set-focus` on the foreign child, `handle-input` forwarding,
+  `dispose` unwinding the root).
+- **Do NOT rewrite for its own sake**: the transcript records
+  (`chat_history`, message / tool-execution components) and string-direct
+  `track!` leaves (`footer`, `pending_messages`, `loaded_resources`, list
+  / row builders) stay as they are — see `hiccup.md` for the tiered plan
+  and non-goals.
+
 ### Reactive render cache (track!)
 - **Default**: wrap a component's render body with `(track! this width ...)`
   and give the record a `:cache-atom` field. Every `@atom` read is recorded;
@@ -495,4 +518,7 @@ protocol — retired in DSL stage 2, see tui.md §8).
   lifecycle, scheduling, input boundary). It must be kept up to date: a
   change to TUI behavior described there updates the doc in the same
   change.
+- **Hiccup migration inventory**: `hiccup.md` — which `app/ui` files are
+  still imperative, which pattern replaces each case, and what stays
+  imperative. Read it before migrating a selector/dialog/renderer.
 - Consult `~/src/cvstree/pi/` for implementation patterns before building new features — e.g., study its TUI component model before adding new components, or its diff rendering approach before implementing a diff view.
