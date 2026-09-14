@@ -1,6 +1,7 @@
 # jolt-bugs — open upstream tickets
 
-Every **open** jolt-side ticket whose fix requires a change in kmet. Closed and
+Every **open** jolt-side ticket whose fix requires a change in kmet or the
+removal of a kmet workaround. Closed and
 unfiled findings are not tracked here. `jolt-port.md` / `jolt-tui.md` describe
 port state without ticket IDs.
 
@@ -127,3 +128,50 @@ jolt#989 — one block, one removal step. Removal: bump the
 revisions carrying the `:windows` keys, delete the `:jolt/native` block, and
 re-run `jolt -e '(println :ok)'` on Windows with the DLLs present. If only
 jolt#989 has landed by then, the block still has to stay for `z`.
+
+### [jolt#998](https://github.com/jolt-lang/jolt/issues/998) — `java.util.regex.Matcher` is not a class value — SCI cannot analyze imports/hints of it
+
+**Area:** regex shim / class graph
+
+The matcher behavior is complete (`re-matcher`, `.matches`, `.group`, `.find`,
+`.region`) but the type carries no class identity — `Class/forName` misses it,
+`(class (re-matcher …))` is `:object`, `instance?` is false. SCI resolves every
+classname in `ns` imports and type hints, so `clojure.tools.reader` — which does
+`(:import (java.util.regex Pattern Matcher))` and hints `^Matcher` in
+`clojure/tools/reader/impl/commons.clj` — cannot be analyzed, taking rewrite-clj
+(its JVM-family reader), edamame and cljfmt with it. Plain jolt loads
+`tools.reader` fine; only SCI's analyzer resolves the hints.
+
+### [jolt#999](https://github.com/jolt-lang/jolt/issues/999) — `java.net.URLEncoder` / `URLDecoder` are statics without class tokens
+
+**Area:** java.net shims / class graph
+
+Both statics work from compiled code, but only the simple names are registered
+(`host/chez/java/host-static-classes.ss`), so neither is a class value:
+`Class/forName` misses both and SCI cannot analyze `java.net.URLDecoder/decode`
+("Unable to resolve symbol"). kmet's lsp-adapter extension decodes `file://`
+URIs with exactly that call
+(`extensions/lsp-adapter/src/extensions/lsp_adapter/lsp.clj`).
+
+### [jolt#1000](https://github.com/jolt-lang/jolt/issues/1000) — SCI cannot implement an injected (host) protocol from `defrecord`/`extend-type`
+
+**Area:** SCI interop / `defprotocol` representation
+
+jolt's `defprotocol` value has no `:ns` (SCI names the `defmethod`s it generates
+for a record's protocol implementations from it, so the method symbol loses its
+namespace), and even with `:ns` patched the registration path calls
+`.addMethod` on the protocol method value, which jolt's `p$m` objects do not
+answer. `(defrecord R [] p/P (m …))` fails under SCI on jolt and works on
+bb/JVM; `extend-type` to such a protocol fails separately
+(`No method getName in sci.impl.types/HasName`). SCI-defined protocols are fine.
+This is the `defcomponent` blocker: `kmet.tui.protocols/IComponent` is injected
+by reference and every extension component is a `defrecord` over it.
+
+**Workaround** (all three, `test/kmet/app/test_extensions.clj:1056`): the
+`^:bb-only` gate on `test-shipped-extensions-load-from-src`. On jolt the shipped
+extensions hit exactly these gaps — `extensions/clojure/src` needs #998 (its
+rewrite-clj/cljfmt closure analyzes `tools.reader.impl.commons`), `lsp-adapter`
+needs #999, and `mcp-adapter` / `review` (whose components are `defcomponent`s)
+need #1000. Removal: when all three land, drop `^:bb-only`, run
+`jolt test kmet.app.test-extensions/test-shipped-extensions-load-from-src`, and
+delete this block.
