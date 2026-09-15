@@ -82,9 +82,9 @@ Verified with the pty scripts (`scripts/pty_capture.py`):
 
 Follow-ups: re-verify on Termux/bionic (this run was glibc/WSL2;
 `cfmakeraw` exists in bionic but confirm on device), Windows (§6), and a
-Jolt-host variant of the pty app smoke (the existing
-`modes.test-overlay-input-smoke` spawns `bb run`, and its ~20 s of stages
-exceed the Jolt runner's 15 s per-namespace timeout — `kmet.tasks.runner`).
+Jolt-host variant of the pty app smoke — the existing
+`modes.test-overlay-input-smoke` spawns `bb run` (testing bb's TUI even under
+the Jolt runner), so it is `^:bb-only`.
 Known divergences from the JLine backend: it uses stdin/stdout directly
 (pi does the same — JLine instead opens the system terminal, so a
 redirected stdout would still reach `/dev/tty` there), and it registers
@@ -94,10 +94,10 @@ terminal stopped; bounded by user actions).
 **`jolt test-ext` red-set correction (this doc had it wrong).**
 `kmet.modes.test-overlay-input-smoke` is *not* blocked by the adapter: the
 test spawns a hardcoded `bb run` through a pty, so on the Jolt host it
-exercises bb's TUI, not Jolt's. It fails because its stages need ~20s while
-the Jolt runner kills each namespace after 15s (`kmet.tasks.runner`: `deref f
-15000`). Not a terminal gap. `kmet.tui.test-render-loop` is green on
-`jolt test-ext`.
+exercises bb's TUI, not Jolt's. It is now `^:bb-only` (its ~20 s of stages
+were over the runner's then-15 s per-namespace cap), so `jolt test-ext`
+skips it while bb `test-ext` still runs it. Not
+a terminal gap. `kmet.tui.test-render-loop` is green on `jolt test-ext`.
 
 ### The portable core (verified 2026-09-10, unchanged)
 

@@ -80,7 +80,9 @@ sys.exit(status)
                                                   (str delay "|" bytes))))]
     exit))
 
-(deftest ^:slow test-overlay-close-keeps-editor-alive
+;; ^:bb-only: the driver spawns `bb run`, so under jolt it would exercise
+;; bb's TUI, not jolt's (jolt-tui.md lists a jolt-host variant as a follow-up)
+(deftest ^:slow ^:bb-only test-overlay-close-keeps-editor-alive
   (testing "the /lsp incident end to end: ESC-closing the dialog must not
            swallow subsequent typing"
     (if-not (python3-available?)

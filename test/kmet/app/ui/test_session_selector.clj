@@ -14,21 +14,22 @@
             [kmet.tui.protocols :as protocols]
             [kmet.tui.utils :as u]))
 
-(def ^:private now (System/currentTimeMillis))
+(defn- now-ms [] (System/currentTimeMillis))
 
 (defn- info
   "A session-info map like kmet.app.session/build-session-info returns."
   [path & {:keys [name first-message modified count cwd parent]}]
-  {:path path
-   :id (str "id-" (hash path))
-   :cwd (or cwd "/data/data/com.termux/files/home/proj")
-   :name name
-   :parent-session-path parent
-   :created now
-   :modified (or modified (- now 3600000))
-   :message-count (or count 3)
-   :first-message (or first-message "hello world")
-   :all-messages-text (or first-message "hello world")})
+  (let [now (now-ms)]
+    {:path path
+     :id (str "id-" (hash path))
+     :cwd (or cwd "/data/data/com.termux/files/home/proj")
+     :name name
+     :parent-session-path parent
+     :created now
+     :modified (or modified (- now 3600000))
+     :message-count (or count 3)
+     :first-message (or first-message "hello world")
+     :all-messages-text (or first-message "hello world")}))
 
 (defn- new-sel
   "Build a selector over canned listings; loads are fed synchronously via
@@ -97,7 +98,8 @@
 ;; ─── Layout ─────────────────────────────────────────────────────────────────
 
 (t/deftest layout-border-header-input-rows
-  (let [a (info "/tmp/s/a.ednl" :first-message "fix models config" :count 33
+  (let [now (now-ms)
+        a (info "/tmp/s/a.ednl" :first-message "fix models config" :count 33
                 :modified (- now (* 8 3600000)))
         b (info "/tmp/s/b.ednl" :first-message "ls" :count 6
                 :modified (- now (* 18 3600000)))
@@ -298,7 +300,8 @@
     (t/is (str/includes? (nth (render-text sel 100) 3) "Sort: Threaded"))))
 
 (t/deftest threaded-mode-builds-tree-prefixes
-  (let [parent (info "/tmp/s/root.ednl" :first-message "root session"
+  (let [now (now-ms)
+        parent (info "/tmp/s/root.ednl" :first-message "root session"
                      :modified (- now (* 5 3600000)))
         child (info "/tmp/s/kid.ednl" :first-message "forked work"
                     :parent "/tmp/s/root.ednl" :modified (- now 60000))
@@ -470,7 +473,8 @@
     (doseq [line ls] (t/is (<= (count line) 60)))))
 
 (t/deftest age-formatting-buckets
-  (let [mk #(info (str "/tmp/s/age" % ".ednl") :modified %2)
+  (let [now (now-ms)
+        mk #(info (str "/tmp/s/age" % ".ednl") :modified %2)
         sel (new-sel :current [(mk 1 (- now 30000))            ; now
                                (mk 2 (- now (* 5 60000)))       ; 5m
                                (mk 3 (- now (* 3 3600000)))     ; 3h

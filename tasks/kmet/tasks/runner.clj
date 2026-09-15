@@ -416,6 +416,13 @@
       (println (str "  " (fmt-summary n-test n-pass n-fail n-error)
                     " (" (fmt-duration elapsed-ms) ")")))))
 
+(def ^:private jolt-ns-timeout-ms
+  "Per-namespace cap for the Jolt engine. Jolt runs are slower and burstier
+   than babashka's (a loaded device has pushed real namespaces past 20 s), so
+   the cap absorbs the real work while still reporting and moving past a hung
+   namespace."
+  60000)
+
 (defn- run-ns-vars-jolt
   "Run the selected vars of one namespace on jolt. Jolt's clojure.test port
    has no per-var ref counters and no host output capture; clojure.test/
@@ -441,7 +448,7 @@
               (t/test-vars vars)
               ::ok
               (catch Throwable e e)))
-        deref-result (deref f 15000 ::timeout)]
+        deref-result (deref f jolt-ns-timeout-ms ::timeout)]
     (when (= ::timeout deref-result)
       (future-cancel f))
     (println "\nTesting" (ns-name (find-ns ns-sym)))
@@ -453,7 +460,7 @@
           elapsed-ms (- (System/currentTimeMillis) start-ms)]
       (cond
         (= ::timeout deref-result)
-        (println (str "  TIMED OUT after " (fmt-duration 15000)
+        (println (str "  TIMED OUT after " (fmt-duration jolt-ns-timeout-ms)
                       " — test infrastructure hung (likely a JDK class gap on Jolt)"))
         (instance? Throwable deref-result)
         (println (str "  ERROR: " (.getMessage deref-result)))

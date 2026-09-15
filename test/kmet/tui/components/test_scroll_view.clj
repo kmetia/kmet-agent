@@ -7,6 +7,10 @@
             [kmet.tui.timers :as timers]
             [kmet.tui.components.scroll-view :as sv]))
 
+;; the timer registry is process-global: isolate each case so an armed
+;; timer another namespace left behind can't make pump! report true here
+(t/use-fixtures :each (fn [f] (timers/cancel-all!) (f) (timers/cancel-all!)))
+
 (defn- fake-child
   "A component whose render returns LINES at width."
   [lines]
