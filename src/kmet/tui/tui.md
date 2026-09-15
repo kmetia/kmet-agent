@@ -186,7 +186,7 @@ extensions never add host elements. Tags and props:
 | `:dynamic-border` | `:color-fn` (primary; default: theme `:border` color), `:border` (§2.8) | none (leaf) |
 | `:truncated-text` | `:text` (primary), `:padding-x` `:padding-y` (default 0) | none (leaf) |
 | `:spinner` | `:text` (primary), `:active`, `:prefix`, `:frames`, `:interval-ms`, `:spinner-color-fn`, `:message-color-fn` | none (leaf) |
-| `:input` | `:value` (primary), `:on-submit`, `:on-escape`, `:on-change` | none (leaf) |
+| `:input` | `:value` (primary), `:cursor`, `:on-submit`, `:on-escape`, `:on-change` | none (leaf) |
 | `:expandable-text` | `:collapsed-fn`, `:expanded-fn` (both required), `:expanded?`, `:padding-x` `:padding-y` | none (leaf) |
 | `:image` | `:base64-data`, `:mime-type` (both required), `:theme`, `:max-width-cells` (default 60), `:max-height-cells`, `:filename`, `:image-id` | none (leaf) |
 | `:select-list` | `:items` (primary), `:height` (default 10), `:theme`, `:header`, `:no-match-text`, `:min-primary-column-width` `:max-primary-column-width`, `:truncate-primary`, `:on-select`, `:on-escape`, `:on-selection-change`, `:on-key` | none (leaf) |
@@ -268,16 +268,17 @@ counters) and the instance is kept; only a falsy return rebuilds. Two
 rules govern the patch. First, the tag's STRUCTURAL props (§2.2 lists
 which) are checked in their constructed form — a nil prop and its default
 are the same component — and decline the patch when they differ. Second, a
-STATE-CARRYING prop (`:value`, `:text`, `:items`, `:expanded?`) is written
-through only when it changed from the previous pass's props AND differs
-from the live value, coerced the way construction coerces it (nil ⇒ the
-default); an unchanged prop never overwrites live state, so a keystroke or
-a ref-driven toggle survives an unrelated prop change, while a prop that
-did change wins. Callbacks (`:on-change`,
+STATE-CARRYING prop (`:value`, `:cursor`, `:text`, `:items`, `:expanded?`)
+is written through only when it changed from the previous pass's props AND
+differs from the live value, coerced the way construction coerces it
+(nil ⇒ the default; a nil `:cursor` is unmanaged and never written, at
+construction or on a patch); an unchanged prop never overwrites live
+state, so a keystroke or a ref-driven toggle survives an unrelated prop
+change, while a prop that did change wins. Callbacks (`:on-change`,
 `:on-submit`, `:on-escape`, ...) are configuration, not state — they are
-re-applied on every patch. An `:items` change is a REFRESH of the same list, not a
-wholesale replacement: the typed filter/query and the selection position
-survive it (the resetting `select-list-set-items!` /
+re-applied on every patch. An `:items` change is a REFRESH of the same
+list, not a wholesale replacement: the typed filter/query and the
+selection position survive it (the resetting `select-list-set-items!` /
 `settings-list-set-items!` default is the imperative variant, for a
 genuinely new list). The stamp's recorded props are re-pointed at the
 applied map, so the next equal pass is the plain reuse fast path again.

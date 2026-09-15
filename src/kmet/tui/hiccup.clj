@@ -258,9 +258,10 @@
                                  (spinner/spinner-set-message-color-fn!
                                   s (:message-color-fn props)))
                                true)))}
-   :input        {:ctor (fn [{:keys [value on-submit on-escape on-change]}]
+   :input        {:ctor (fn [{:keys [value cursor on-submit on-escape on-change]}]
                           (let [i (input/make-input)]
                             (when value (input/input-set-value! i value))
+                            (when (some? cursor) (input/input-set-cursor! i cursor))
                             (when on-submit (input/input-set-on-submit! i on-submit))
                             (when on-escape (input/input-set-on-escape! i on-escape))
                             (when on-change (input/input-set-on-change! i on-change))
@@ -269,14 +270,18 @@
                   :apply (fn [i prev props]
                            ;; a state-carrying prop is written through only
                            ;; when IT changed, and then coerced like
-                           ;; construction (nil ⇒ empty): an unchanged
-                           ;; :value never overwrites live state, so typing
+                           ;; construction (nil ⇒ empty for :value; nil
+                           ;; :cursor is unmanaged): an unchanged :value or
+                           ;; :cursor never overwrites live state, so typing
                            ;; survives an unrelated prop change. Callbacks
                            ;; always apply — configuration, not state.
                            (when (not= (:value props) (:value prev))
                              (let [v (or (:value props) "")]
                                (when (not= v (input/input-get-value i))
                                  (input/input-set-value! i v))))
+                           (when (and (not= (:cursor props) (:cursor prev))
+                                      (some? (:cursor props)))
+                             (input/input-set-cursor! i (:cursor props)))
                            (input/input-set-on-submit! i (:on-submit props))
                            (input/input-set-on-escape! i (:on-escape props))
                            (input/input-set-on-change! i (:on-change props))

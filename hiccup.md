@@ -209,10 +209,11 @@ The former blockers were artifacts of avoiding refs: `dialogs` prefill is
 `(input/input-set-cursor! @inp-ref (count prefill))` immediately after
 `compile-tree` (refs fill synchronously during construction), and
 `session_selector`'s rename submit is
-`(input/input-set-on-submit! @rename-ref f)` post-mount. Phase 0 gave
-`[:input]` `:on-change` (parity with `[:editor]`, fired on value-changing
-edits), which covers the simple cases ref-free; the ref path stays the
-general mechanism.
+`(input/input-set-on-submit! @rename-ref f)` post-mount. Both gaps landed
+in Phase 0: `[:input]` takes `:on-change` (parity with `[:editor]`,
+fired on value-changing edits) and `:cursor` (state-carrying like
+`:value`, nil = unmanaged) — ref-free conversions work for the simple
+cases; the ref path stays the general mechanism.
 
 Each Tier 2 file is one commit with its interaction test
 (type-then-rerender keeps text / selection / focus).
@@ -317,7 +318,7 @@ property — render twice with one irrelevant state change between passes,
 then identical lines and `hiccup/counters` `:constructs 0 :disposals 0`
 on the second render — and a flat `bodies-run` on an idle frame.
 
-### Phase 0 — reconciler + tag ergonomics (independent; land any time)
+### Phase 0 — reconciler + tag ergonomics (independent; land any time) — DONE
 
 1. **DONE — `split-bucket` O(1)** (`kmet.tui.hiccup`): a per-bucket index
    cursor instead of `(vec (rest bucket))` per pop. Removes the
@@ -326,11 +327,13 @@ on the second render — and a flat `bodies-run` on an idle frame.
    32 → 19 ms/pass).
    Keys stay the rule for reuse under reordering; after this they are no
    longer about matching cost.
-2. **DONE — `:on-change` on `:input`**: parity with `:editor` (component
-   + tag + `:apply` patch); fires on value-changing edits, silent for
-   cursor moves and programmatic `input-set-value!`. Interaction test:
-   typing fires the callback; an unrelated prop pass does not clobber
-   the typed text.
+2. **DONE — ref-free inputs**: `:input` gained `:on-change` (parity with
+   `:editor`; component + tag + `:apply` patch; fires on value-changing
+   edits, silent for cursor moves and programmatic `input-set-value!`)
+   and `:cursor` (state-carrying like `:value`, nil = unmanaged) for
+   dialog prefills. The ref path (§3.2) stays the general mechanism.
+   Interaction tests: typing fires the callback; an unrelated prop pass
+   neither clobbers typed text nor moves a live cursor.
 
 ### Phase 1 — Tier 1 (the measurable win)
 
