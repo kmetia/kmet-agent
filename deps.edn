@@ -67,7 +67,7 @@
         ;; Signature/KeyPairGenerator/KeyFactory — RFC 0014; inert on bb/JVM).
         ;; RSA (keygen + SHA*withRSA + RSA KeyFactory) comes from the library.
         io.github.jolt-lang/crypto {:git/url "https://github.com/jolt-lang/crypto.git"
-                                    :git/sha "79ecb3da8c26c76d8934691bc79a0c030104a9f8"}
+                                    :git/sha "83472ee2a08df16e5d7a2a99882cb20a729b9a33"}
         ;; babashka.http-client on Jolt: the jolt-lang/http-client library's
         ;; java.net.http shims (RFC 0014 :jolt/provides over BSD sockets +
         ;; OpenSSL + libz via jolt.ffi) run the real org.babashka/http-client
@@ -76,7 +76,7 @@
         ;; kmet.libs.http routes direct/http-proxy traffic through it on
         ;; Jolt — curl stays only for SOCKS/https-scheme proxies and live
         ;; :as :stream feeds (jolt-port.md B1).
-        org.babashka/http-client {:mvn/version "0.4.24"}
+        org.babashka/http-client {:mvn/version "0.4.25"}
         ;; The shims behind babashka.http-client on Jolt (upstream main).
         io.github.jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
                                          :git/sha "b98833b8338b66d435cdbffa480ba2b59c005a2e"}
