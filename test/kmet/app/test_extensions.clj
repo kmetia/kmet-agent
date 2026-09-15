@@ -1058,12 +1058,15 @@
   ;; (jar-ext.md §2): every shipped src/ dir loads through the real runtime.
   ;;
   ;; bb-only: on jolt the shipped extensions still hit gaps the loader
-  ;; cannot paper over — lsp's java.net.URLDecoder/decode, the
-  ;; clojure.tools.reader source rewrite-clj pulls in (its ^Matcher hints
-  ;; name a class absent from jolt's class graph), and defcomponent's
-  ;; defrecord over the injected kmet.tui.protocols/IComponent, which SCI
-  ;; cannot analyze from jolt's protocol representation. The SCI loader
-  ;; itself runs on both hosts (see the file docstring).
+  ;; cannot paper over — defcomponent's defrecord over the injected
+  ;; kmet.tui.protocols/IComponent, which SCI cannot analyze from jolt's
+  ;; protocol representation (jolt#1000, closed upstream as recipe-only;
+  ;; jolt-bugs.md), plus the clojure extension's unfiled Maven-chain gaps
+  ;; (raw rewrite-clj/tools.reader sources: IMeta/ChunkedSeq misses plus
+  ;; Closeable-in-deftype, which SCI rejects on both hosts; jolt-bugs.md).
+  ;; (#998/#999 class tokens are fixed and verified — neither blocks
+  ;; anything anymore.) The SCI loader itself runs on both hosts
+  ;; (see the file docstring).
   (extensions/clear-extensions!)
   (doseq [path ["extensions/clojure/src"
                 "extensions/lsp-adapter/src"

@@ -129,49 +129,75 @@ revisions carrying the `:windows` keys, delete the `:jolt/native` block, and
 re-run `jolt -e '(println :ok)'` on Windows with the DLLs present. If only
 jolt#989 has landed by then, the block still has to stay for `z`.
 
-### [jolt#998](https://github.com/jolt-lang/jolt/issues/998) — `java.util.regex.Matcher` is not a class value — SCI cannot analyze imports/hints of it
-
-**Area:** regex shim / class graph
-
-The matcher behavior is complete (`re-matcher`, `.matches`, `.group`, `.find`,
-`.region`) but the type carries no class identity — `Class/forName` misses it,
-`(class (re-matcher …))` is `:object`, `instance?` is false. SCI resolves every
-classname in `ns` imports and type hints, so `clojure.tools.reader` — which does
-`(:import (java.util.regex Pattern Matcher))` and hints `^Matcher` in
-`clojure/tools/reader/impl/commons.clj` — cannot be analyzed, taking rewrite-clj
-(its JVM-family reader), edamame and cljfmt with it. Plain jolt loads
-`tools.reader` fine; only SCI's analyzer resolves the hints.
-
-### [jolt#999](https://github.com/jolt-lang/jolt/issues/999) — `java.net.URLEncoder` / `URLDecoder` are statics without class tokens
-
-**Area:** java.net shims / class graph
-
-Both statics work from compiled code, but only the simple names are registered
-(`host/chez/java/host-static-classes.ss`), so neither is a class value:
-`Class/forName` misses both and SCI cannot analyze `java.net.URLDecoder/decode`
-("Unable to resolve symbol"). kmet's lsp-adapter extension decodes `file://`
-URIs with exactly that call
-(`extensions/lsp-adapter/src/extensions/lsp_adapter/lsp.clj`).
-
-### [jolt#1000](https://github.com/jolt-lang/jolt/issues/1000) — SCI cannot implement an injected (host) protocol from `defrecord`/`extend-type`
+### [jolt#1000](https://github.com/jolt-lang/jolt/issues/1000) — SCI cannot implement an injected (host) protocol from `defrecord`/`extend-type` (upstream closed as recipe-only; the transparent case still blocks kmet)
 
 **Area:** SCI interop / `defprotocol` representation
 
-jolt's `defprotocol` value has no `:ns` (SCI names the `defmethod`s it generates
-for a record's protocol implementations from it, so the method symbol loses its
-namespace), and even with `:ns` patched the registration path calls
-`.addMethod` on the protocol method value, which jolt's `p$m` objects do not
-answer. `(defrecord R [] p/P (m …))` fails under SCI on jolt and works on
-bb/JVM; `extend-type` to such a protocol fails separately
-(`No method getName in sci.impl.types/HasName`). SCI-defined protocols are fine.
-This is the `defcomponent` blocker: `kmet.tui.protocols/IComponent` is injected
-by reference and every extension component is a `defrecord` over it.
+Upstream closed #1000 with merge #1003 (`6e76671b`: `~@` lazy past the first
+splice + `:sigs` on protocol values — in the built `v0.8.1-443-gd55ec029`,
+verified on-device). What landed: SCI's `deftype` analysis ordering is fixed and
+the babashka recipe (multimethods on `sci.impl.types/type-impl` + a SCI-side
+protocol map + the host protocol extended to `SciRecord`/`SciType`, pinned by
+jolt's `sci-functional-test` gate) runs end to end. What did NOT land: the
+transparent flow — `(defrecord R [] p/P (m …))` over a `copy-var*`-injected host
+protocol — still fails under SCI on jolt with `Unable to resolve symbol:
+<method>` (phase `analysis`) and works on bb/JVM. Minimal repro on the built
+binary: inject `kmet.tui.protocols` by reference (`copy-var*` per var, as
+`shared-var-map` does) and eval
+`(defrecord R [x] kmet.tui.protocols/IComponent (render …) …)` →
+`FAIL: Unable to resolve symbol: render`. Upstream's own commit message declares
+this flow unsupported ("fails on the JVM too"); the recipe is the supported
+path. SCI-defined protocols are fine on jolt (verified: `defprotocol` +
+`deftype`/`defrecord` in one context, cross-namespace via load-fn, and aliased
+method calls all evaluate).
 
-**Workaround** (all three, `test/kmet/app/test_extensions.clj:1056`): the
-`^:bb-only` gate on `test-shipped-extensions-load-from-src`. On jolt the shipped
-extensions hit exactly these gaps — `extensions/clojure/src` needs #998 (its
-rewrite-clj/cljfmt closure analyzes `tools.reader.impl.commons`), `lsp-adapter`
-needs #999, and `mcp-adapter` / `review` (whose components are `defcomponent`s)
-need #1000. Removal: when all three land, drop `^:bb-only`, run
+This is the `defcomponent` blocker: `defcomponent` expands to exactly that
+`defrecord` over the injected `kmet.tui.protocols/IComponent`, so every
+extension component fails. Deep probe of the real loader context (`eval-source!`
+chain): `extensions/mcp-adapter/src` fails at
+`extensions/mcp_adapter/panel.clj:450` (`(defcomponent McpPanel …)`) with
+`Unable to resolve symbol: render`. `lsp-adapter` (`panel.clj:61` `LspPanel`)
+and `review` (`dialogs.clj:93,108` plus `extend-type … IFocusable` at `:101,116`)
+fail with the same surface. NOTE: `lsp-adapter` is no longer blocked by #999 —
+`(java.net.URLDecoder/decode …)` resolves in SCI on the built binary (verified
+directly, via the loader's retry path); it dies earlier in its panel.
+`tree-sitter` (no components) loads fine, which corroborates.
+
+(#998 `Matcher` and #999 `URLEncoder`/`URLDecoder` class tokens landed with
+merge #1002 and are verified fixed on-device — `Class/forName`, `instance?`,
+`class`, and the SCI shapes all answer — so their sections are pruned; neither
+blocks any shipped extension anymore.)
+
+**Workaround** (`test/kmet/app/test_extensions.clj:1056`): the `^:bb-only` gate
+on `test-shipped-extensions-load-from-src` stays for #1000 (`mcp-adapter` /
+`review` / `lsp-adapter` panels) plus the clojure extension's unfiled
+Maven-chain gaps below — none of the three former tickets covers clojure
+anymore. Error-attribution pitfall: `load-extension!` names the ENTRY file in
+the error string (`…/core.clj`, `…/mcp_adapter.clj`); the real failure is the
+deepest `ex-data :file` in the cause chain. — `extensions/clojure/src`
+(unfiled, needs triage — not a jolt runtime ticket yet): its `deps.edn` closure
+pulls the raw Maven sources (`rewrite-clj 1.2.57`, `tools.reader 1.5.2`, `cljfmt
+0.16.5`) because jolt has no bundled ports for them (`bundled-port-namespaces` /
+`bb-shared-namespaces` are bb-only by design; `host-requires!` skips them on
+jolt). Requiring the closure in the real context gives: `reader-types` OK,
+`edamame.core` OK, `rewrite-clj.reader` FAIL at `tools.reader
+impl/inspect.clj:49` (`defmethod inspect* clojure.lang.PersistentVector$ChunkedSeq`
+— the `$ArrayMap$Seq` / `$NodeSeq` methods below it are the same shape),
+`rewrite-clj.node` / `cljfmt.core` FAIL at `rewrite-clj interop.cljc:42`
+(`(instance? clojure.lang.IMeta data)`). All three classes exist on jolt
+(`Class/forName` OK) and answer once `sci/add-class!`-registered (verified
+individually) — but dep-closure sources bypass both seed paths
+(`register-source-classes!` runs only for own-artifact sources in `make-load-fn`;
+`eval-source-with-retry!` covers only the entry source), so each miss is fatal
+single-attempt. Behind those sits a harder wall: `tools.reader
+reader_types.clj:14-15` imports `java.io InputStream/BufferedReader/Closeable`
+and implements `Closeable` in `deftype` positions (`:75,100,166`) — SCI rejects
+host interfaces in `deftype` on BOTH hosts (`defrecord/deftype currently only
+support protocol implementations`, verified on bb too), which bb never hits
+because it injects its port. Fix directions: kmet-side (extend seeding/retry to
+dep-closure sources; covers `IMeta`/`ChunkedSeq`) and upstream-or-port for the
+`Closeable`-in-`deftype` wall. Removal: when #1000's transparent case lands (or
+kmet reworks `defcomponent`/injection to the recipe) AND the clojure chain
+loads, drop `^:bb-only`, run
 `jolt test kmet.app.test-extensions/test-shipped-extensions-load-from-src`, and
 delete this block.
