@@ -36,6 +36,14 @@
         (swap! (:stack us) pop)
         snapshot))))
 
+(defn- notify-input-change!
+  "Fire the :on-change callback with the input's current value (parity
+   with the editor's per-edit notification). Called by every helper that
+   changes the text; cursor-only moves stay silent. A no-op with no
+   callback installed."
+  [input]
+  (when-let [cb @(:on-change input)] (cb @(:value-atom input))))
+
 ;; ─── Word navigation helpers ────────────────────────────────────────────────
 ;; Imported from kmet.tui.components.editing
 
@@ -52,7 +60,8 @@
     (let [new-val (str (subs value 0 cursor) char (subs value cursor))
           new-cursor (+ cursor (count char))]
       (reset! (:value-atom input) new-val)
-      (reset! (:cursor-atom input) new-cursor))))
+      (reset! (:cursor-atom input) new-cursor)
+      (notify-input-change! input))))
 
 (defn- handle-backspace [input]
   (let [value @(:value-atom input)
@@ -63,7 +72,8 @@
       (let [glen (edit/grapheme-left value cursor)]
         (reset! (:value-atom input)
                 (str (subs value 0 glen) (subs value cursor)))
-        (reset! (:cursor-atom input) glen)))))
+        (reset! (:cursor-atom input) glen)
+        (notify-input-change! input)))))
 
 (defn- handle-forward-delete [input]
   (let [value @(:value-atom input)
@@ -73,7 +83,8 @@
       (undo-push (:undo-stack input) {:value value :cursor cursor})
       (let [nxt (edit/grapheme-right value cursor)]
         (reset! (:value-atom input)
-                (str (subs value 0 cursor) (subs value nxt)))))))
+                (str (subs value 0 cursor) (subs value nxt)))
+        (notify-input-change! input)))))
 
 (defn- delete-to-line-start [input]
   (let [value @(:value-atom input)
@@ -85,7 +96,8 @@
                              :accumulate (= @(:last-action input) :kill))
         (reset! (:last-action input) :kill)
         (reset! (:value-atom input) (subs value cursor))
-        (reset! (:cursor-atom input) 0)))))
+        (reset! (:cursor-atom input) 0)
+        (notify-input-change! input)))))
 
 (defn- delete-to-line-end [input]
   (let [value @(:value-atom input)
@@ -96,7 +108,8 @@
         (edit/kill-ring-push (:kill-ring input) deleted :prepend false
                              :accumulate (= @(:last-action input) :kill))
         (reset! (:last-action input) :kill)
-        (reset! (:value-atom input) (subs value 0 cursor))))))
+        (reset! (:value-atom input) (subs value 0 cursor))
+        (notify-input-change! input)))))
 
 (defn- delete-word-backwards [input]
   (let [value @(:value-atom input)
@@ -112,7 +125,8 @@
           (reset! (:last-action input) :kill)
           (reset! (:value-atom input)
                   (str (subs value 0 new-cursor) (subs value old-cursor)))
-          (reset! (:cursor-atom input) new-cursor))))))
+          (reset! (:cursor-atom input) new-cursor)
+          (notify-input-change! input))))))
 
 (defn- delete-word-forward [input]
   (let [value @(:value-atom input)
@@ -127,7 +141,8 @@
                                :accumulate was-kill)
           (reset! (:last-action input) :kill)
           (reset! (:value-atom input)
-                  (str (subs value 0 old-cursor) (subs value new-cursor))))))))
+                  (str (subs value 0 old-cursor) (subs value new-cursor)))
+          (notify-input-change! input))))))
 
 (defn- yank-action [input]
   (let [value @(:value-atom input)
@@ -138,7 +153,8 @@
       (let [new-val (str (subs value 0 cursor) text (subs value cursor))]
         (reset! (:value-atom input) new-val)
         (reset! (:cursor-atom input) (+ cursor (count text)))
-        (reset! (:last-action input) :yank)))))
+        (reset! (:last-action input) :yank)
+        (notify-input-change! input)))))
 
 (defn- yank-pop-action [input]
   (let [value @(:value-atom input)
@@ -156,7 +172,8 @@
               new-val (str stripped text after-remove)]
           (reset! (:value-atom input) new-val)
           (reset! (:cursor-atom input) (+ new-cursor (count text)))
-          (reset! (:last-action input) :yank))))))
+          (reset! (:last-action input) :yank)
+          (notify-input-change! input))))))
 
 ;; ─── Render helper ──────────────────────────────────────────────────────────
 
@@ -176,7 +193,7 @@
 
 ;; ─── Input component ────────────────────────────────────────────────────────
 
-(defcomponent Input nil [value-atom cursor-atom on-submit on-escape focused?
+(defcomponent Input nil [value-atom cursor-atom on-submit on-escape on-change focused?
                          paste-buffer paste-state kill-ring last-action undo-stack]
 
   (render [_this width]
@@ -249,6 +266,7 @@
                   (reset! last-action nil)
                   (reset! value-atom (str (subs value 0 cursor) clean (subs value cursor)))
                   (reset! cursor-atom (+ cursor (count clean)))
+                  (notify-input-change! this)
                   ;; Only leave buffering once the end marker arrives
                   (reset! paste-state :idle)
                   (reset! paste-buffer "")
@@ -265,7 +283,8 @@
         (do (when-let [snapshot (undo-pop undo-stack)]
               (reset! value-atom (:value snapshot))
               (reset! cursor-atom (:cursor snapshot))
-              (reset! last-action nil))
+              (reset! last-action nil)
+              (notify-input-change! this))
             nil)
 
         ;; Submit
@@ -358,6 +377,7 @@
                :cursor-atom (atom 0)
                :on-submit (atom nil)
                :on-escape (atom nil)
+               :on-change (atom nil)
                :focused? (atom false)
                :paste-buffer (atom "")
                :paste-state (atom :idle)
@@ -380,6 +400,13 @@
 
 (defn input-set-on-escape! [input f]
   (reset! (:on-escape input) f))
+
+(defn input-set-on-change!
+  "Install F as the change callback (parity with the editor's setter). F
+   receives the current value after every edit that changes the text;
+   programmatic value/cursor setters never fire it."
+  [input f]
+  (reset! (:on-change input) f))
 
 ;; ─── IFocusable ─────────────────────────────────────────────────────────────
 
