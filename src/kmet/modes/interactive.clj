@@ -1394,8 +1394,15 @@
           ;; and the tool display mode from settings to existing chat messages
           (ui/chat-history-set-thinking-hidden! chat-history
                                                 (cfg/get-hide-thinking-block config))
-          (ui/chat-history-set-tool-display-mode! chat-history
-                                                  (cfg/get-tool-display-mode config))
+          ;; the header and loaded resources follow the same mode as the chat
+          ;; (the ctrl+o handler and the extension setter both keep them in
+          ;; sync; reload must not leave them on a stale expansion)
+          (let [mode (cfg/get-tool-display-mode config)]
+            (ui/chat-history-set-tool-display-mode! chat-history mode)
+            (when-let [hdr (:header-comp cs)]
+              (expandable-text/expandable-text-set-expanded! hdr (= :expanded mode)))
+            (when-let [lr (:loaded-resources-comp cs)]
+              (ui/loaded-resources-set-expanded! lr (= :expanded mode))))
           (reset! (:system agent-state) system-prompt)
           (reset! (:system-prompt-opts agent-state) system-prompt-opts)
           (ui/loaded-resources-set-sections!

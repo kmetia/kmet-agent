@@ -57,10 +57,10 @@
    reverse-engineering)."
   [m]
   (and (= :user (:role m))
-       (boolean (try (let [block (skills/parse-skill-block
-                                  (content->user-text (:content m "")))]
-                       (when (and block (empty? (:user-message block))) block))
-                     (catch Exception _ nil)))))
+       (boolean
+        (when-let [block (skills/parse-skill-block
+                          (content->user-text (:content m "")))]
+          (empty? (:user-message block))))))
 
 (defn- silent-tool-call-assistant?
   "True when an :assistant message carries tool calls but no text/thinking
@@ -104,7 +104,7 @@
              run-open? (and run-member? (not in-quiet-run?))
              sep? (or (and (= :user (:role m)) seen-any? (not run-member?))
                       run-open?)
-             acc (if (and sep? (not invisible?)) (conj! acc "") acc)]
+             acc (if sep? (conj! acc "") acc)]
          (recur (rest msgs) true
                 (if invisible? in-quiet-run? run-member?)
                 (reduce conj! acc lines)))
@@ -481,13 +481,18 @@
   [ch]
   (when-let [msg @(:streaming-atom ch)]
     (am/assistant-message-set-tool-calls! (:component msg) true)
-    (swap! (:messages-atom ch)
-           (fn [msgs]
-             (mapv (fn [m]
-                     (if (identical? m msg)
-                       (assoc m :tool-calls? true)
-                       m))
-                   msgs)))))
+    ;; keep :streaming-atom in lockstep with the assoc'd entry: finalize
+    ;; finds the streaming message by identity, so the map stored in
+    ;; messages-atom must be the one the atom points at
+    (let [updated (assoc msg :tool-calls? true)]
+      (reset! (:streaming-atom ch) updated)
+      (swap! (:messages-atom ch)
+             (fn [msgs]
+               (mapv (fn [m]
+                       (if (identical? m msg)
+                         updated
+                         m))
+                     msgs))))))
 
 (defn chat-history-finalize-streaming!
   "Finalize the current streaming message: materialize the live content
