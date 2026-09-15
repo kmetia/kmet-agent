@@ -453,6 +453,35 @@
       (t/is (= ["a" "ab" "acb"] @seen)
             "the next edit fires with the value at the live cursor"))))
 
+(t/deftest input-tag-cursor-prop-prefills-and-patches
+  ;; :cursor is a state-carrying prop like :value: it positions the cursor
+  ;; at construction (dialog prefills), a changed value patches the live
+  ;; instance, and an unchanged one never clobbers a user-moved cursor
+  ;; (nil = unmanaged, as at construction)
+  (let [iref (h/ref)
+        cur (atom 3)
+        cb (atom (fn [_]))
+        root (h/root (fn [_] [:input {:ref iref
+                                      :value "abcdef"
+                                      :cursor (rag/tracked-deref cur)
+                                      :on-change (rag/tracked-deref cb)}]))]
+    (core/render root 40)
+    (let [i1 (deref iref)]
+      (t/is (= 3 @(:cursor-atom i1)) "constructed at the :cursor")
+      (protocols/handle-input i1 "\u001b[H")
+      (t/is (zero? @(:cursor-atom i1)) "home moved the live cursor")
+      (reset! cb (fn [_] :other))
+      (core/render root 40)
+      (t/is (identical? i1 (deref iref)) "a cursor prop patches, no rebuild")
+      (t/is (zero? @(:cursor-atom i1))
+            "the unchanged :cursor prop did not write the live cursor")
+      (reset! cur 6)
+      (core/render root 40)
+      (t/is (= 6 @(:cursor-atom i1)) "a changed :cursor prop patches")
+      (reset! cur nil)
+      (core/render root 40)
+      (t/is (= 6 @(:cursor-atom i1)) "nil :cursor is unmanaged — no write"))))
+
 (t/deftest editor-tag-unchanged-text-never-clobbers-typing
   ;; the same gate on :text: an unrelated prop change (:height) patches the
   ;; live editor without resetting what the user typed
