@@ -9,7 +9,14 @@
             [clojure.java.io :as io]
             [babashka.fs :as fs]
             [kmet.libs.json :as json]
-            [kmet.libs.edit-diff :as edit-diff]))
+            [kmet.libs.edit-diff :as edit-diff]
+            [kmet.app.tools.util :as tool-util]))
+
+(defn title
+  "Quiet one-liner body for the edit tool: verb + `~`-shortened path — pure data, or nil when the path is missing/empty (the quiet branch falls back to the tool name). Nil-safe over partial streaming args."
+  [args]
+  (when-let [raw-path (tool-util/title-path-arg args)]
+    (str "edit " (tool-util/shorten-title-path raw-path))))
 
 (defn- normalize-edits
   "Pi: prepareEditArguments — normalize the args into {:edits [...]}.

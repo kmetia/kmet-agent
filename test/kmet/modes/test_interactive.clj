@@ -302,7 +302,7 @@
             (let [lines (protocols/render (:component t1) 100)]
               (is (some #(str/includes? % "$ ls -la") lines)
                   "call line shows the restored command")
-              (is (some #(str/includes? % "to expand") lines)
+              (is (some #(str/includes? % "to toggle") lines)
                   "collapsed preview shows the expand hint")
               (is (< (count lines) 30)
                   "collapsed output is truncated, not the full 20 lines")

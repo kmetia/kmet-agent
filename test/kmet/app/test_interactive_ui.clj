@@ -782,11 +782,11 @@
         (t/is (= 3 (:max-retries @(:cfg ag))) "default retry wired at startup")
         ((:handler (commands/find-command "settings")) cs "")
         (let [sl @sl-ref]
-          ;; rows 0..16: auto-compact block-images steering follow-up
+          ;; rows 0..17: auto-compact block-images steering follow-up
           ;; http-idle http-total http-transport cache-miss tree-filter
-          ;; thinking hide-thinking editor-pad output-pad autocomplete
-          ;; auto-retry max-retries base-delay
-          (dotimes [_ 14]
+          ;; thinking hide-thinking tool-display editor-pad output-pad
+          ;; autocomplete auto-retry max-retries base-delay
+          (dotimes [_ 15]
             (protocols/handle-input sl "\u001b[B")) ;; down → auto-retry
           (protocols/handle-input sl "\r") ;; enter — auto-retry true -> false
           (t/is (= 0 (:max-retries @(:cfg ag))) "disabled retry gates max-retries to 0")

@@ -264,7 +264,7 @@
                    (fmt-key-hint "app.thinking.cycle" "to cycle thinking level")
                    (fmt-key-hint "app.model.cycleForward" "to cycle models")
                    (fmt-key-hint "app.model.select" "to select model")
-                   (fmt-key-hint "app.tools.expand" "to expand tools")
+                   (fmt-key-hint "app.tools.expand" "to cycle tool display")
                    (fmt-key-hint "app.thinking.toggle" "to expand thinking")
                    (fmt-key-hint "app.editor.external" "for external editor")
                    (fmt-raw-hint "/" "for commands")
@@ -380,7 +380,7 @@
          "  Ctrl+C     — Clear editor (press twice to quit)\n"
          "  Ctrl+D     — Quit (when editor is empty)\n"
          "  Ctrl+G     — Open external editor\n"
-         "  Ctrl+O     — Toggle tool output\n"
+         "  Ctrl+O     — Cycle tool display (collapsed/expanded/quiet)\n"
          "  Ctrl+T     — Toggle thinking blocks\n"
          "  Ctrl+L     — Select model
 "
@@ -1390,10 +1390,12 @@
                                    (mapcat identity system-prompt-opts))]
           (reset! global-config config)
           (theme-ctrl/set-config! (:theme-controller cs) config)
-          ;; pi: restoreChatBeforeSessionStart — re-apply hideThinkingBlock
-          ;; from settings to existing chat messages
+;; pi: restoreChatBeforeSessionStart — re-apply hideThinkingBlock
+          ;; and the tool display mode from settings to existing chat messages
           (ui/chat-history-set-thinking-hidden! chat-history
                                                 (cfg/get-hide-thinking-block config))
+          (ui/chat-history-set-tool-display-mode! chat-history
+                                                  (cfg/get-tool-display-mode config))
           (reset! (:system agent-state) system-prompt)
           (reset! (:system-prompt-opts agent-state) system-prompt-opts)
           (ui/loaded-resources-set-sections!
@@ -3373,6 +3375,7 @@
         ;; themselves (Stage 5)
         ch (ui/make-chat-history
             :thinking-hidden (cfg/get-hide-thinking-block config)
+            :tool-display-mode (cfg/get-tool-display-mode config)
             :output-pad (cfg/get-output-pad config))
         pending-tool-comps (atom {})  ;; Pi: pendingTools Map (tool-call-id → comp)
         cs-ref (atom nil)             ;; CoreState, filled after layout (for :status events)
@@ -3467,11 +3470,13 @@
         _ (agent/init-scoped-models! ag config)
         ;; B.1: welcome header — ExpandableText with compact/full variants
         ;; (pi: builtInHeader), toggled by app.tools.expand
-        hdr (expandable-text/make-expandable-text
-             fmt-header-compact fmt-header-full
-             :expanded? false :padding-x 1 :padding-y 0)
+        hdr (let [mode (cfg/get-tool-display-mode config)]
+              (expandable-text/make-expandable-text
+               fmt-header-compact fmt-header-full
+               :expanded? (= :expanded mode) :padding-x 1 :padding-y 0))
         ;; B.2: loaded resources between header and chat (pi: showLoadedResources)
-        lr (ui/make-loaded-resources :theme (cfg/get-theme config))
+        lr (ui/make-loaded-resources :theme (cfg/get-theme config)
+                                     :expanded? (= :expanded (cfg/get-tool-display-mode config)))
         ;; B.3: queued steering/follow-up display (pi: updatePendingMessagesDisplay)
         pm (ui/make-pending-messages
             :hint (fmt-key-display (app-kb/key-text "app.message.dequeue")))
@@ -3723,12 +3728,18 @@
       (editor/editor-set-on-action! ed "app.tools.expand"
                                     (fn []
           ;; pi: the same toggle drives tool expansion, the builtInHeader, and
-          ;; the loaded-resources sections (getStartupExpansionState)
-                                      (let [expanded? (ui/chat-history-toggle-tool-expanded! ch)]
+          ;; the loaded-resources sections (getStartupExpansionState) —
+          ;; extended: ctrl+o cycles collapsed → expanded → quiet. Header,
+          ;; resources and the info banner treat quiet as collapsed.
+                                      (let [mode (ui/chat-history-cycle-tool-display! ch)
+                                            expanded? (= :expanded mode)]
+                                        (try (cfg/set-tool-display-mode! mode)
+                                             (catch Exception e
+                                               (debug/log "Failed to persist tool-display-mode: " e)))
                                         (expandable-text/expandable-text-set-expanded! hdr expanded?)
                                         (ui/loaded-resources-set-expanded! lr expanded?)
                                         (ui/chat-history-show-status! ch
-                                                                      (str "Tool output: " (if expanded? "expanded" "collapsed")))
+                                                                      (str "Tool display: " (name mode)))
                                         (request-global-reflow-render! cs))))
       (editor/editor-set-on-action! ed "app.thinking.toggle"
                                     (fn []
@@ -4226,6 +4237,18 @@
                                  (when (not= current? expanded?)
                                    (ui/chat-history-toggle-tool-expanded! ch)
                                    (request-global-reflow-render! cs))))
+         :get-tool-display-mode (fn [] (ui/chat-history-get-tool-display-mode ch))
+         :set-tool-display-mode (fn [mode]
+                                  (when (not= mode (ui/chat-history-get-tool-display-mode ch))
+                                    (ui/chat-history-set-tool-display-mode! ch mode)
+                                    (try (cfg/set-tool-display-mode! mode)
+                                         (catch Exception e
+                                           (debug/log "Failed to persist tool-display-mode: " e)))
+                                    (expandable-text/expandable-text-set-expanded!
+                                     (:header-comp cs) (= :expanded mode))
+                                    (ui/loaded-resources-set-expanded!
+                                     (:loaded-resources-comp cs) (= :expanded mode))
+                                    (request-global-reflow-render! cs)))
          ;; pi: registerShortcut — a raw key-id bound as a priority editor
          ;; action, checked before every builtin app binding (escape
          ;; included). The keybinding definition is registered on the global

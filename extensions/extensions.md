@@ -379,8 +379,12 @@ signal+ctx unconditionally). Extension tools may also declare
 they replace the builtin transcript rendering for that tool's calls/results
 and receive the same `ToolRenderContext` map the builtin renderers get
 (args, tool-call-id, invalidate, state/set-state!, cwd, is-partial,
-expanded, is-error, show-images — whether images render: the
-`:terminal :show-images` setting AND terminal image support). `:render-shell :self` lets the renderer own its outer
+expanded, display-mode (the resolved mode: :collapsed | :expanded | :quiet),
+is-error, show-images — whether images render: the
+`:terminal :show-images` setting AND terminal image support). A tool may also declare
+`:title (fn [args])` — pure plain-text data for that quiet line (nil-safe over
+partial streaming args; nil/blank falls back to the tool name).
+`:render-shell :self` lets the renderer own its outer
 box, padding, and status background. A renderer's returned component is
 disposed when a later pass replaces it — to keep an instance across passes,
 return the same one back (read it from `:last-component` and return it
@@ -699,8 +703,10 @@ from the api.
 ;; status layer above the dock keeps rendering the status with it.
 (ext/ui-add-autocomplete-provider api (fn [base-provider] wrapped-or-nil))
 (ext/ui-on-terminal-input api (fn [data] nil-or-{:consume true :data d}))
-(ext/ui-set-tools-expanded api true)
+(ext/ui-set-tools-expanded api true)   ; boolean shim: expanded? <=> mode :expanded
 (ext/ui-get-tools-expanded api)
+(ext/ui-set-tool-display-mode api :quiet)  ; :collapsed | :expanded | :quiet (ctrl+o cycles)
+(ext/ui-get-tool-display-mode api)
 
 ;; mount your own component — THE way to show any dialog/panel. The factory
 ;; receives (tui theme keybindings close); close delivers its result to the

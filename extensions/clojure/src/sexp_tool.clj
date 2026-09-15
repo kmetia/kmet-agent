@@ -221,6 +221,10 @@
 ;; Main execute
 ;; ═══════════════════════════════════════════════════════════════════════════════
 
+(defn title
+  [args]
+  (edit-util/title-sexp "clojure_edit_replace_sexp" args))
+
 (defn execute
   "Tool entry point.  Returns {:content str :is-error bool}."
   [{:keys [file_path match_form new_form replace_all operation]}]
@@ -336,4 +340,4 @@
       "operation"   {:type        "string"
                      :enum        ["replace" "insert_before" "insert_after"]
                      :description "The editing operation to perform (default: replace)"}}}
-    :execute execute}))
+    :execute execute :title title}))

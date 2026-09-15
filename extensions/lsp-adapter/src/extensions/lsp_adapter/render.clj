@@ -45,11 +45,11 @@
       (fold-home r))))
 
 (defn- expand-hint
-  "The standard collapsed-preview footer: '(N more lines, <key> to expand)'."
+  "The standard collapsed-preview footer: '(N more lines, <key> to toggle)'."
   [more theme width]
   (utils/truncate-to-width
    (str (theme/fg theme :muted (str "... (" more " more lines,"))
-        " " (app-kb/key-hint "app.tools.expand" "to expand")
+        " " (app-kb/key-hint "app.tools.expand" "to toggle")
         (theme/fg theme :muted ")"))
    width "..."))
 
@@ -75,6 +75,25 @@
                             coords))
         line (str title (when (and target (seq (str target))) " ") target)]
     (txt (utils/truncate-to-width line width "..."))))
+
+(defn- title-nonblank
+  [v]
+  (when (and (string? v) (seq v)) v))
+
+(defn title-lsp
+  [args]
+  (when-let [op (title-nonblank (arg args :operation))]
+    (let [fp (arg args :filePath)
+          q (arg args :query)
+          l (arg args :line)
+          c (arg args :character)]
+      (str "lsp " op
+           (cond
+             (title-nonblank q) (str " \"" q "\"")
+             (title-nonblank fp)
+             (str " " (fold-home fp)
+                  (when (and (number? l) (number? c)) (str ":" l ":" c)))
+             :else "")))))
 
 ;; ─── Row builders (kind → styled strings) ─────────────────────────────────
 

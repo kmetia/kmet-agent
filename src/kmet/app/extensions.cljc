@@ -403,6 +403,8 @@
 (defn ui-set-theme [theme-or-name] (ui-call :set-theme theme-or-name))
 (defn ui-get-tools-expanded [] (ui-call :get-tools-expanded))
 (defn ui-set-tools-expanded [expanded?] (ui-call :set-tools-expanded expanded?))
+(defn ui-get-tool-display-mode [] (ui-call :get-tool-display-mode))
+(defn ui-set-tool-display-mode [mode] (ui-call :set-tool-display-mode mode))
 (defn ui-reset! [] (ui-call :reset))
 
 ;; ─── Agent control (dispatches through the ui registry; extension api) ───
@@ -570,7 +572,9 @@
    :add-autocomplete-provider ui-add-autocomplete-provider
    :set-theme ui-set-theme
    :get-tools-expanded ui-get-tools-expanded
-   :set-tools-expanded ui-set-tools-expanded})
+   :set-tools-expanded ui-set-tools-expanded
+   :get-tool-display-mode ui-get-tool-display-mode
+   :set-tool-display-mode ui-set-tool-display-mode})
 
 (defn- api-models
   "The :models capability map — ctx.models facades. TRACK records deregister

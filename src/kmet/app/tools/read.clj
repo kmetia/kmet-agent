@@ -6,7 +6,8 @@
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
             [babashka.fs :as fs]
-            [kmet.app.bash-executor :as bash-exec])
+            [kmet.app.bash-executor :as bash-exec]
+            [kmet.app.tools.util :as tool-util])
   (:import [java.util Base64]
            [java.text Normalizer Normalizer$Form]
            [java.nio.charset StandardCharsets]))
@@ -230,6 +231,22 @@
   [raw-path]
   (when-let [f @skill-content-resolver]
     (try (f raw-path) (catch Exception _ nil))))
+
+(defn title
+  "Quiet one-liner body for the read tool: verb + `~`-shortened path +
+   plain `:start-end` range suffix — pure data (no styling, no cwd), or
+   nil when the path carries no argument (the quiet branch falls back to
+   the tool name). Nil-safe over partial streaming args."
+  [args]
+  (when-let [raw-path (tool-util/title-path-arg args)]
+    (let [offset (when (map? args) (:offset args))
+          limit (when (map? args) (:limit args))]
+      (str "read " (tool-util/shorten-title-path raw-path)
+           (when (or offset limit)
+             (let [start (or offset 1)
+                   end (when (and (number? limit) (pos? limit))
+                         (+ start limit -1))]
+               (str ":" start (when end (str "-" end)))))))))
 
 (defn execute
   "Read file contents with optional offset/limit (1-indexed, pi: read.ts).

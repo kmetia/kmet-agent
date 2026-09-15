@@ -2,7 +2,14 @@
   "Write tool implementation — create or overwrite files.
    Pi: write.ts — success message matches pi's wording."
   (:require [clojure.java.io :as io]
-            [babashka.fs :as fs]))
+            [babashka.fs :as fs]
+            [kmet.app.tools.util :as tool-util]))
+
+(defn title
+  "Quiet one-liner body for the write tool: verb + `~`-shortened path — pure data, or nil when the path is missing/empty (the quiet branch falls back to the tool name). Nil-safe over partial streaming args."
+  [args]
+  (when-let [raw-path (tool-util/title-path-arg args)]
+    (str "write " (tool-util/shorten-title-path raw-path))))
 
 (defn execute
   "Write content to a file (create or overwrite)."

@@ -620,3 +620,22 @@
       (is (str/includes? content "shape/area :circle"))
       (is (< (.indexOf content ":square")
              (.indexOf content ":circle"))))))
+
+;; ─── Quiet titles ───────────────────────────────────────────────────────────
+
+(deftest test-title
+  (testing "full args"
+    (is (= "clojure_edit replace defn foo in /a/b.clj"
+           (edit-tool/title {:file_path "/a/b.clj" :form_type "defn"
+                             :form_identifier "foo" :operation "replace"}))))
+  (testing "string keys and home folding"
+    (let [home (System/getProperty "user.home" "")]
+      (is (= (str "clojure_edit replace defn foo in ~" "/b.clj")
+             (edit-tool/title {"file_path" (str home "/b.clj") "form_type" "defn"
+                               "form_identifier" "foo" "operation" "replace"})))))
+  (testing "defaults"
+    (is (= "clojure_edit replace in /a/b.clj"
+           (edit-tool/title {:file_path "/a/b.clj"}))))
+  (testing "missing path degrades to nil"
+    (is (nil? (edit-tool/title {})))
+    (is (nil? (edit-tool/title nil)))))

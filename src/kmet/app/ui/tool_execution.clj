@@ -3,13 +3,20 @@
    Uses a Box (with status background) wrapping a Container that holds
    the call-render and result-render children.
    Matching Pi architecture: Box handles padding/background/caching.
-   Timing is managed internally (started-at on first content, ended-at on error/finalize)."
-  (:require [kmet.app.ui.subs :as s]
+   Timing is managed internally (started-at on first content, ended-at on error/finalize).
+   Quiet mode (:quiet display) short-circuits before any renderer runs:
+   one dimmed title line (like hidden thinking), styled once and
+   reading only name/args/is-error — custom renderers never run, so quiet
+   can never be overridden and stays immutable."
+  (:require [clojure.string :as str]
+            [kmet.app.ui.subs :as s]
+            [kmet.libs.reakt :as reakt]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.theme :as theme]
             [kmet.tui.timers :as timers]
             [kmet.tui.components.box :as box]
             [kmet.tui.components.container :as container]
+            [kmet.tui.utils :as utils]
             [kmet.app.ui.tool-renderers :as renderers]
             [kmet.app.ui.custom-dialog-adapter :as cda]
             [kmet.app.ui.image-block :as image-block]
@@ -87,7 +94,8 @@
    every other component in the tree (tui.md §5.1) — so a renderer holding
    a dropped component across passes must not expect it to stay live."
   [comp last-comp show-images]
-  {:args @(:args-atom comp)
+  {:display-mode (or (some-> (:tools-expanded-atom comp) deref) :collapsed)
+   :args @(:args-atom comp)
    :tool-call-id @(:tool-call-id-atom comp)
    ;; invalidation schedules the frame itself (§3.4 hook) — extension
                  ;; renderers need no injected render callback
@@ -101,8 +109,11 @@
    :args-complete @(:args-complete-atom comp)
    :details @(:details-atom comp)
    :is-partial (nil? @(:ended-at-atom comp))
-   :expanded (or @(:expanded-atom comp)
-                 (when-some [shared (:tools-expanded-atom comp)] @shared))
+   ;; quiet projects to collapsed for renderers (quiet never reaches them
+   ;; — the branch below returns first — but a mid-pass mode flip must
+   ;; not leak a truthy keyword into a boolean test either)
+   :expanded (boolean (or @(:expanded-atom comp)
+                          (= :expanded (some-> (:tools-expanded-atom comp) deref))))
    :show-images show-images
    :is-error @(:is-error-atom comp)})
 
@@ -111,11 +122,33 @@
 ;; started-at is set on first set-content! call (execution start).
 ;; ended-at is set on set-error! or on final full-content set-content!.
 
+(defn- quiet-one-line
+  "Collapse a quiet title to a single visual line: newlines (with
+   surrounding horizontal whitespace) become one space, remaining tabs
+   expand to 3 spaces (like the renderers). truncate-to-width counts
+   columns, not lines — an embedded newline (e.g. a multiline bash
+   command) would wrap the quiet line into two."
+  [s]
+  (-> s
+      (str/replace #"[ \t]*[\r\n]+[ \t\r\n]*" " ")
+      (str/replace "\t" "   ")))
+
+(defn- quiet-title-for
+  "Resolve the quiet title body for NAME/ARGS: the tool's :title fn (pure
+   plain-text data, nil-safe over partial streaming args), or the tool
+   name when the tool defines none or it returns blank. The result is
+   collapsed to one line (see quiet-one-line). Never throws — a
+   throwing title degrades to the name (a broken title must not take the
+   frame down)."
+  [title-fn name args]
+  (let [t (try (when (fn? title-fn) (title-fn args)) (catch Exception _ nil))]
+    (if (and (string? t) (seq (str/trim t))) (quiet-one-line t) (quiet-one-line name))))
+
 (defcomponent ToolExecutionComponent :tool
               [name-atom args-atom content-atom is-error-atom
                output-pad-atom expanded-atom
-               tools-expanded-atom ;; chat-history-wide toggle atom, or nil (unlinked)
-               custom-render-call-atom custom-render-result-atom
+               tools-expanded-atom ;; chat-history-wide display-mode atom (:collapsed | :expanded | :quiet), or nil (unlinked)
+               custom-render-call-atom custom-render-result-atom title-fn-atom
                started-at-atom ended-at-atom
                truncation-atom tool-call-id-atom
                details-atom        ;; result :details map (pi: result.details), e.g. edit diff
@@ -132,83 +165,117 @@
                cache-atom]     ;; render cache (track!)
   (render [this width]
     (track! this width
-      (let [;; tracked read of the shared palette sub: a theme switch
+      (let [mode (or (some-> tools-expanded-atom reakt/tracked-deref) :collapsed)
+            quiet? (= :quiet mode)
+            ;; tracked read of the shared palette sub: a theme switch
             ;; re-derives this cache exactly once (Stage 5, dsl.md §3.2)
             theme (deref s/theme-sub)
-            ;; tracked read of the shared image settings: a /settings change
-            ;; (show-images / image-width-cells) re-renders every tool box
-            image-settings (deref s/image-settings-sub)
-            show-images? (image-block/images-enabled? image-settings)
             is-error @is-error-atom
             output-pad @output-pad-atom
             name @name-atom
             args @args-atom
-            content @content-atom
-            expanded? (or @expanded-atom
-                          ;; chat-history-wide toggle — read lexically so
-                          ;; track! records it (tui.md §4 track-deps rule)
-                          (when tools-expanded-atom @tools-expanded-atom))
-            started-at @started-at-atom
-            ended-at @ended-at-atom
+            title-fn @title-fn-atom]
+      ;; Quiet short-circuit — BEFORE any renderer runs (custom renderers
+      ;; never execute in quiet: it cannot be overridden). Reads only
+      ;; name/args/is-error/output-pad/theme/mode — no content, details,
+      ;; truncation, images, timing, cwd or renderer state — so a quiet
+      ;; line never re-invalidates and stays immutable in scrollback.
+        (if quiet?
+          (do (doseq [c (distinct (remove nil? [(last-call-component this)
+                                                (last-result-component this)]))]
+                (cda/dispose-component! c))
+              (doseq [c (last-image-children this)]
+                (cda/dispose-component! c))
+              (reset! (:last-call-component-atom this) nil)
+              (reset! (:last-result-component-atom this) nil)
+              (reset! (:image-children-atom this) [])
+              (container/container-clear @(:inner-container this))
+              ;; the bash Elapsed ticker is cancelled without a tracked read,
+              ;; so quiet never resubscribes to renderer state
+              (let [[state] (swap-vals! (:renderer-state-atom this) dissoc :timer-id)]
+                (when-let [id (:timer-id state)]
+                  (timers/cancel! id)))
+              (let [content-width (max 1 (- width (* 2 output-pad)))
+                    raw (str (when is-error "(error) ") (quiet-title-for title-fn name args))
+                    line (str (apply str (repeat output-pad \space))
+                              (theme/italic (theme/fg theme :thinking-text
+                                                      ;; plain text first, then style once:
+                                                      ;; styling survives truncation, but
+                                                      ;; plain-first keeps width math simple
+                                                      (utils/truncate-to-width raw content-width "..."))))]
+                ["" line]))
+          (let [container @inner-container
+                last-call-component-atom (:last-call-component-atom this)
+                last-result-component-atom (:last-result-component-atom this)
+                image-children-atom (:image-children-atom this)
+            ;; tracked non-quiet inputs: everything the collapsed/expanded
+            ;; forms read (the quiet branch above reads none of these)
+                content @content-atom
+                expanded? (boolean (or @expanded-atom (= :expanded mode)))
+                started-at @started-at-atom
+                ended-at @ended-at-atom
+            ;; tracked read of the shared image settings: a /settings change
+            ;; (show-images / image-width-cells) re-renders every tool box
+                image-settings (deref s/image-settings-sub)
+                show-images? (image-block/images-enabled? image-settings)
       ;; Re-check empty — only when no call component rendered and no result
-            builtin (get builtin-renderers name)
-            render-call-fn (or @custom-render-call-atom
-                               (:call builtin)
-                               renderers/render-default-call)
-            render-result-fn (or @custom-render-result-atom
-                                 (:result builtin)
-                                 renderers/render-default-result)
-            render-shell (or @render-shell-atom (:shell builtin) :default)
-            container @inner-container
-            content-width (max 1 (- width (* 2 output-pad)))
+                builtin (get builtin-renderers name)
+                render-call-fn (or @custom-render-call-atom
+                                   (:call builtin)
+                                   renderers/render-default-call)
+                render-result-fn (or @custom-render-result-atom
+                                     (:result builtin)
+                                     renderers/render-default-result)
+                render-shell (or @render-shell-atom (:shell builtin) :default)
+                content-width (max 1 (- width (* 2 output-pad)))
             ;; Previous pass's renderer outputs: passed to the renderers as
             ;; :last-component so an extension renderer may reuse its own
             ;; instance, and disposed below unless the renderer returned the
             ;; same one back (renderers may return IComponent or nil).
-            prev-call (last-call-component this)
-            call-context (tool-execution-context this prev-call show-images?)
-            call-comp (as-component (render-call-fn name args theme content-width call-context))
-            _ (reset! last-call-component-atom call-comp)
-            truncation @truncation-atom
-            prev-result (last-result-component this)
-            result-context (tool-execution-context this prev-result show-images?)
-            result-comp (as-component (render-result-fn content is-error theme content-width expanded? started-at ended-at truncation result-context))
-            _ (reset! last-result-component-atom result-comp)
-            image-data @image-data-atom
-            prev-image-children (last-image-children this)
+                prev-call (last-call-component this)
+                call-context (tool-execution-context this prev-call show-images?)
+                call-comp (as-component (render-call-fn name args theme content-width call-context))
+                _ (reset! last-call-component-atom call-comp)
+                truncation @truncation-atom
+                prev-result (last-result-component this)
+                result-context (tool-execution-context this prev-result show-images?)
+                result-comp (as-component (render-result-fn content is-error theme content-width expanded? started-at ended-at truncation result-context))
+                _ (reset! last-result-component-atom result-comp)
+                image-data @image-data-atom
+                prev-image-children (last-image-children this)
             ;; identity-deduped: a renderer returning one instance for both
             ;; slots must not be disposed twice
-            obsolete (reduce (fn [acc prev]
-                               (if (or (nil? prev)
-                                       (identical? prev call-comp)
-                                       (identical? prev result-comp)
-                                       (some #(identical? % prev) acc))
-                                 acc
-                                 (conj acc prev)))
-                             []
-                             [prev-call prev-result])]
+                obsolete (reduce (fn [acc prev]
+                                   (if (or (nil? prev)
+                                           (identical? prev call-comp)
+                                           (identical? prev result-comp)
+                                           (some #(identical? % prev) acc))
+                                     acc
+                                     (conj acc prev)))
+                                 []
+                                 [prev-call prev-result])]
       ;; Pi: hide component when no call/render content and no images
-        (if (and (nil? call-comp) (nil? result-comp) (not (seq image-data)))
-          (do
+            (if (and (nil? call-comp) (nil? result-comp) (not (seq image-data)))
+              (do
             ;; nothing renders — drop the dropped children (a stale child
             ;; would keep its track! watches alive; the renderers may return
             ;; duck-typed maps, so disposal goes through dispose-component!)
-            (doseq [c obsolete]
-              (cda/dispose-component! c))
-            (doseq [c prev-image-children]
-              (cda/dispose-component! c))
-            (reset! image-children-atom [])
-            (container/container-clear container)
-            [])
-          (do
+                (doseq [c obsolete]
+                  (cda/dispose-component! c))
+                (doseq [c prev-image-children]
+                  (cda/dispose-component! c))
+                (reset! image-children-atom [])
+                (container/container-clear container)
+                [])
+              (do
           ;; Build inner container
-            (container/container-clear container)
-            (doseq [c obsolete]
-              (cda/dispose-component! c))
-            (when call-comp
-              (container/container-add-child container call-comp))
-            (when result-comp
-              (container/container-add-child container result-comp))
+                (container/container-clear container)
+                (doseq [c obsolete]
+                  (cda/dispose-component! c))
+                (when call-comp
+                  (container/container-add-child container call-comp))
+                (when result-comp
+                  (container/container-add-child container result-comp))
           ;; Build image components from raw data (Pi: spacer + ImageComponent).
           ;; image-block renders the terminal image or, when display is off /
           ;; unsupported, the styled text indicator (pi: getTextOutput).
@@ -216,35 +283,35 @@
           ;; dropped children: an ImageBlock subscribes to the
           ;; image-settings/theme subs, so a dropped instance would keep its
           ;; track! watches alive forever (zombie watchers, tui.md §5.1).
-            (let [children (into []
-                                 (mapcat (fn [img]
-                                           [(spacer/make-spacer 1)
-                                            (image-block/make-image-block
-                                             (:data img) (:mime-type img)
-                                             :fallback-style (fn [thm s]
-                                                               (theme/fg thm :tool-output s)))]))
-                                 image-data)]
-              (doseq [c prev-image-children]
-                (cda/dispose-component! c))
-              (reset! image-children-atom children)
-              (doseq [c children]
-                (container/container-add-child container c)))
+                (let [children (into []
+                                     (mapcat (fn [img]
+                                               [(spacer/make-spacer 1)
+                                                (image-block/make-image-block
+                                                 (:data img) (:mime-type img)
+                                                 :fallback-style (fn [thm s]
+                                                                   (theme/fg thm :tool-output s)))]))
+                                     image-data)]
+                  (doseq [c prev-image-children]
+                    (cda/dispose-component! c))
+                  (reset! image-children-atom children)
+                  (doseq [c children]
+                    (container/container-add-child container c)))
           ;; Pi: render-shell :self skips outer Box (tool renders its own framing)
-            (if (= :self render-shell)
-              (let [content-lines (protocols/render container width)]
-                (if (seq content-lines)
-                  (into [""] content-lines)
-                  []))
-              (let [bg-key (cond
+                (if (= :self render-shell)
+                  (let [content-lines (protocols/render container width)]
+                    (if (seq content-lines)
+                      (into [""] content-lines)
+                      []))
+                  (let [bg-key (cond
                            ;; Pi: isPartial=true until result arrives; ended-at=nil = pending
-                             (nil? ended-at) :tool-pending-bg
-                             is-error :tool-error-bg
-                             :else :tool-success-bg)
-                    _ (box/box-set-bg-fn @box #(theme/bg theme bg-key %))
-                    box-lines (protocols/render @box width)]
-                (if (seq box-lines)
-                  (into [""] box-lines)
-                  []))))))))
+                                 (nil? ended-at) :tool-pending-bg
+                                 is-error :tool-error-bg
+                                 :else :tool-success-bg)
+                        _ (box/box-set-bg-fn @box #(theme/bg theme bg-key %))
+                        box-lines (protocols/render @box width)]
+                    (if (seq box-lines)
+                      (into [""] box-lines)
+                      []))))))))))
   (invalidate [_this]
     (protocols/invalidate @box))
   (dispose [_this]
@@ -270,7 +337,7 @@
 (defn make-tool-execution
   "THEME is no longer taken: the box background subscribes to
    ui.subs/theme-sub and follows palette changes live (Stage 5)."
-  [& {:keys [name args content is-error output-pad expanded? tools-expanded-atom render-call-fn render-result-fn truncation details cwd render-shell]
+  [& {:keys [name args content is-error output-pad expanded? tools-expanded-atom render-call-fn render-result-fn title-fn truncation details cwd render-shell]
       :or {name "" args {} content "" is-error false
            output-pad 1 expanded? false truncation nil details nil
            cwd (or (System/getProperty "user.dir") ".")}}]
@@ -295,6 +362,7 @@
                                   :render-shell-atom (atom render-shell)
                                   :custom-render-call-atom (atom render-call-fn)
                                   :custom-render-result-atom (atom render-result-fn)
+                                  :title-fn-atom (atom title-fn)
                                   :image-data-atom (atom [])
                                   :image-children-atom (atom [])
                                   :last-call-component-atom (atom nil)

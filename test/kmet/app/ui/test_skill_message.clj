@@ -25,7 +25,7 @@
   (str/join "\n" (plain-lines component width)))
 
 ;; The hint text comes from the keybindings manager; install one so the
-;; collapsed line reads "ctrl+o to expand" rather than the empty fallback.
+;; collapsed line reads "ctrl+o to toggle" rather than the empty fallback.
 (defn- with-keybindings [f]
   (let [prev (kb/get-global-keybindings)]
     (try
@@ -91,21 +91,21 @@
 ;; ─── The component ────────────────────────────────────────────────────────
 
 (deftest test-collapsed-is-one-line-with-the-expand-hint
-  (let [toggle (atom false)
+  (let [toggle (atom :collapsed)
         c (sm/make-skill-invocation-message
            :skill-block (skills/parse-skill-block block)
            :tools-expanded-atom toggle)
         lines (plain-lines c 60)]
     (is (= 3 (count lines)) "box padding-y 1 above and below")
     (is (some #(str/includes? % "[skill] demo-skill") lines))
-    (is (some #(str/includes? % "(ctrl+o to expand)") lines))
+    (is (some #(str/includes? % "(ctrl+o to toggle)") lines))
     (testing "the skill body is NOT dumped into the transcript"
       (is (not-any? #(str/includes? % "do a thing") lines)))
     (testing "the XML wrapper is not shown either"
       (is (not-any? #(str/includes? % "<skill") lines)))))
 
 (deftest test-expanded-shows-name-and-body
-  (let [toggle (atom true)
+  (let [toggle (atom :expanded)
         c (sm/make-skill-invocation-message
            :skill-block (skills/parse-skill-block block)
            :tools-expanded-atom toggle)
@@ -114,12 +114,12 @@
     (is (str/includes? text "demo-skill") "the name heads the body")
     (is (str/includes? text "do a thing") "the body renders when expanded")
     (is (str/includes? text "do another"))
-    (is (not (str/includes? text "(ctrl+o to expand)"))
+    (is (not (str/includes? text "(ctrl+o to toggle)"))
         "the hint belongs to the collapsed form")))
 
 (deftest test-the-shared-toggle-drives-it
   ;; pi: setExpanded(toolOutputExpanded) — one atom flips every skill message
-  (let [toggle (atom false)
+  (let [toggle (atom :collapsed)
         a (sm/make-skill-invocation-message
            :skill-block (skills/parse-skill-block block)
            :tools-expanded-atom toggle)
@@ -128,23 +128,23 @@
            :tools-expanded-atom toggle)]
     (is (not (str/includes? (joined a 60) "do a thing")))
     (is (not (str/includes? (joined b 60) "do a thing")))
-    (reset! toggle true)
+    (reset! toggle :expanded)
     (is (str/includes? (joined a 60) "do a thing") "flipped by the shared toggle")
     (is (str/includes? (joined b 60) "do a thing") "both messages flip together")
-    (reset! toggle false)
+    (reset! toggle :collapsed)
     (is (not (str/includes? (joined a 60) "do a thing")) "and back")))
 
 (deftest test-the-shared-toggle-is-authoritative
   ;; pi: toolOutputExpanded is the single source of truth — there is no
   ;; local expansion state a caller could set behind its back
-  (let [toggle (atom false)
+  (let [toggle (atom :collapsed)
         c (sm/make-skill-invocation-message
            :skill-block (skills/parse-skill-block block)
            :tools-expanded-atom toggle)]
     (is (not (str/includes? (joined c 60) "do a thing")))
-    (reset! toggle true)
+    (reset! toggle :expanded)
     (is (str/includes? (joined c 60) "do a thing"))
-    (reset! toggle false)
+    (reset! toggle :collapsed)
     (is (not (str/includes? (joined c 60) "do a thing"))
         "collapsing again rebuilds the one-line form")))
 
@@ -153,7 +153,7 @@
   ;; switch must re-apply them (apply-once on theme-sub)
   (let [c (sm/make-skill-invocation-message
            :skill-block (skills/parse-skill-block block)
-           :tools-expanded-atom (atom false))
+           :tools-expanded-atom (atom :collapsed))
         before (core/render c 60)]
     (is (some #(str/includes? % "\u001b[") before) "themed output carries ANSI")
     (reset! theme/theme-atom (theme/get-theme "light"))
@@ -170,12 +170,20 @@
     (ch/chat-history-add-message! ch {:role :user :content block})
     (let [text (str/join "\n" (plain-lines ch 60))]
       (is (str/includes? text "[skill] demo-skill"))
-      (is (str/includes? text "(ctrl+o to expand)"))
+      (is (str/includes? text "(ctrl+o to toggle)"))
       (is (not (str/includes? text "do a thing")) "body hidden while collapsed")
       (testing "the shared ctrl+o toggle expands it"
         (is (true? (ch/chat-history-toggle-tool-expanded! ch)))
         (let [expanded (str/join "\n" (plain-lines ch 60))]
-          (is (str/includes? expanded "do a thing")))))))
+          (is (str/includes? expanded "do a thing")))))
+    (testing "quiet is one dimmed line with no hint or body"
+      (let [ch2 (ch/make-chat-history)]
+        (ch/chat-history-add-message! ch2 {:role :user :content block})
+        (ch/chat-history-set-tool-display-mode! ch2 :quiet)
+        (let [text (str/join "\n" (plain-lines ch2 60))]
+          (is (str/includes? text "[skill] demo-skill"))
+          (is (not (str/includes? text "do a thing")) "body hidden in quiet")
+          (is (not (str/includes? text "ctrl+o")) "no hint in quiet"))))))
 
 (deftest test-chat-history-renders-the-trailing-message-separately
   (let [ch (ch/make-chat-history)]
@@ -213,7 +221,7 @@
   ;; invocation and the agent's later SKILL.md read cannot drift
   (let [thm (deref subs/theme-sub)]
     (is (str/includes? (strip-ansi (sm/label thm)) "[skill]"))
-    (is (str/includes? (strip-ansi (sm/expand-hint thm)) "ctrl+o to expand"))
+    (is (str/includes? (strip-ansi (sm/expand-hint thm)) "ctrl+o to toggle"))
     (testing "the collapsed line is exactly label + name + hint"
       (is (= (str (sm/label thm) (theme/fg thm :custom-message-text "demo")
                   (sm/expand-hint thm))
@@ -230,7 +238,7 @@
                   (core/render comp 60))
         comp (sm/make-skill-invocation-message
               :skill-block {:name "demo" :location "/x" :content "body text"}
-              :tools-expanded-atom (atom false))]
+              :tools-expanded-atom (atom :collapsed))]
     (core/render comp 60)
     (let [baseline (watchers)]
       (dotimes [i 6] (expand! comp (odd? i)))

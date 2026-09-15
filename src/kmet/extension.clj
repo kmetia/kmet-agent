@@ -198,6 +198,8 @@
 (defn ui-set-theme [api theme-or-name] ((:set-theme (ui api)) theme-or-name))
 (defn ui-get-tools-expanded [api] ((:get-tools-expanded (ui api))))
 (defn ui-set-tools-expanded [api expanded?] ((:set-tools-expanded (ui api)) expanded?))
+(defn ui-get-tool-display-mode [api] ((:get-tool-display-mode (ui api))))
+(defn ui-set-tool-display-mode [api mode] ((:set-tool-display-mode (ui api)) mode))
 (defn ui-on-terminal-input [api handler] ((:on-terminal-input (ui api)) handler))
 
 (defn models
@@ -333,7 +335,9 @@
                                         :set-theme 1 :set-working-indicator 1
                                         :set-working-message 1 :set-working-visible 1
                                         :on-terminal-input 1 :set-tools-expanded 1
-                                        :get-tools-expanded 1}]
+                                        :get-tools-expanded 1
+                                        :set-tool-display-mode 1
+                                        :get-tool-display-mode 1}]
                              [k (fn [& args] (swap! state update :ui-calls conj (into [k] args)))]))
               :models {:get-all (fn [] (swap! state update :model-calls conj [:get-all]) [])
                        :get-available (fn [] [])

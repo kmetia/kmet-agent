@@ -24,16 +24,60 @@
   [args k]
   (or (get args k) (get args (name k))))
 
+(defn- title-path
+  [p]
+  (let [home (System/getProperty "user.home" "")]
+    (if (and (string? p) (seq home)
+             (or (= p home) (str/starts-with? p (str home "/"))))
+      (str "~" (subs p (count home)))
+      p)))
+
+(defn- title-str
+  [v]
+  (when (and (string? v) (seq v)) v))
+
+(defn title-list-symbols
+  [args]
+  (when-let [p (title-str (arg args :path))]
+    (str "list_symbols " (title-path p))))
+
+(defn- title-in-root
+  [tool-name s r]
+  (str tool-name " " s
+       (when (and r (not= r ".")) (str " in " (title-path r)))))
+
+(defn title-find-definition
+  [args]
+  (when-let [s (title-str (arg args :symbol))]
+    (title-in-root "find_definition" s (title-str (arg args :root)))))
+
+(defn title-get-symbol-body
+  [args]
+  (when-let [s (title-str (arg args :symbol))]
+    (when-let [p (title-str (arg args :path))]
+      (str "get_symbol_body " s " in " (title-path p)))))
+
+(defn title-find-callers
+  [args]
+  (when-let [s (title-str (arg args :symbol))]
+    (title-in-root "find_callers" s (title-str (arg args :root)))))
+
+(defn title-find-callees
+  [args]
+  (when-let [s (title-str (arg args :symbol))]
+    (when-let [p (title-str (arg args :path))]
+      (str "find_callees " s " in " (title-path p)))))
+
 (defn- txt [s] (text/make-text s 0 0))
 
 (def ^:private preview-lines 6)
 
 (defn- expand-hint
-  "The standard collapsed-preview footer: '(N more lines, <key> to expand)'."
+  "The standard collapsed-preview footer: '(N more lines, <key> to toggle)'."
   [more theme width]
   (utils/truncate-to-width
    (str (theme/fg theme :muted (str "... (" more " more lines,"))
-        " " (app-kb/key-hint "app.tools.expand" "to expand")
+        " " (app-kb/key-hint "app.tools.expand" "to toggle")
         (theme/fg theme :muted ")"))
    width "..."))
 

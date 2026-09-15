@@ -518,7 +518,7 @@
                    (when (pos? more)
                      [(tool-text
                        (str (theme/fg theme :muted (str "... (" more " more lines,"))
-                            " " (app-kb/key-hint "app.tools.expand" "to expand")
+                            " " (app-kb/key-hint "app.tools.expand" "to toggle")
                             (theme/fg theme :muted ")")))])
                    (when truncation-warn
                      [[:spacer {:lines 1}]
@@ -565,7 +565,7 @@
                             [(tool-text
                               (str (theme/fg theme :muted
                                              (str "... (" remaining " more lines, " total " total,"))
-                                   " " (app-kb/key-hint "app.tools.expand" "to expand")
+                                   " " (app-kb/key-hint "app.tools.expand" "to toggle")
                                    (theme/fg theme :muted ")")))]))))))]
     (h/compile-tree (into [:container {}] kids))))
 
@@ -858,7 +858,7 @@
                    :muted
                    (str "... (" skipped-count " earlier lines,"))
                   " "
-                  (app-kb/key-hint "app.tools.expand" "to expand")
+                  (app-kb/key-hint "app.tools.expand" "to toggle")
                   (theme/fg theme :muted ")"))
                  width
                  "...")
@@ -965,6 +965,6 @@
                  (when (and (not expanded?) (pos? more))
                    [(tool-text
                      (str (theme/fg theme :muted (str "... (" more " more lines,"))
-                          " " (app-kb/key-hint "app.tools.expand" "to expand")
+                          " " (app-kb/key-hint "app.tools.expand" "to toggle")
                           (theme/fg theme :muted ")")))]))))]
     (h/compile-tree (into [:container {} [:spacer {:lines 1}]] kids))))

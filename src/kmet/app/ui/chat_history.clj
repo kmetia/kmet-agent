@@ -70,7 +70,8 @@
                info-comp-atom  ;; atom of CustomMessageComponent or nil
                output-pad-atom
                streaming-atom  ;; atom of streaming message map or nil
-               tools-expanded-atom   ;; flag: tool output expanded (pi: toolOutputExpanded)
+               tools-expanded-atom   ;; tool display mode: :collapsed | :expanded | :quiet
+                                      ;; (pi: toolOutputExpanded, extended with quiet)
                thinking-hidden-atom  ;; flag: thinking blocks hidden (pi: hideThinkingBlock)
                hidden-label-atom]    ;; label shown in place of hidden thinking (pi: hiddenThinkingLabel)
 
@@ -90,20 +91,24 @@
 
 ;; ─── Construction ──────────────────────────────────────────────────────────
 
+(declare normalize-tool-display-mode)
+
 (defn make-chat-history
   "Create a ChatHistoryComponent. Message components subscribe to
    ui.subs/theme-sub themselves — no theme is threaded through (Stage 5).
    Options:
      :output-pad       — horizontal padding for boxed messages (default 1)
      :thinking-hidden  — initial thinking-blocks hidden flag (default false;
-                         pi: hideThinkingBlock loaded from settings at startup)"
-  [& {:keys [output-pad thinking-hidden]
-      :or {output-pad 1 thinking-hidden false}}]
+                         pi: hideThinkingBlock loaded from settings at startup)
+     :tool-display-mode — initial tool display mode (default :collapsed;
+                         loaded from settings at startup)"
+  [& {:keys [output-pad thinking-hidden tool-display-mode]
+      :or {output-pad 1 thinking-hidden false tool-display-mode :collapsed}}]
   (map->ChatHistoryComponent {:messages-atom (atom [])
                               :info-comp-atom (atom nil)
                               :output-pad-atom (atom output-pad)
                               :streaming-atom (atom nil)
-                              :tools-expanded-atom (atom false)
+                              :tools-expanded-atom (atom (normalize-tool-display-mode tool-display-mode))
                               :thinking-hidden-atom (atom (boolean thinking-hidden))
                               :hidden-label-atom (atom "Thinking...")}))
 
@@ -265,10 +270,12 @@
                         ;; pi: ToolDefinition.renderCall/renderResult — the
                         ;; record's fns (extension tools) win over the
                         ;; builtin renderers; both get the ToolRenderContext
-                        ;; map (tool-execution-context)
+                        ;; map (tool-execution-context). :title feeds the
+                        ;; quiet one-liner (nil → the tool name).
                           :render-call-fn (:render-call tool)
                           :render-result-fn (:render-result tool)
-                          :render-shell (:render-shell tool))]
+                          :render-shell (:render-shell tool)
+                          :title-fn (:title tool))]
             ;; Pi: replayed/persisted tool results are final — mark ended so
             ;; they render with success/error bg, footer strip, and Took.
             ;; Live pending messages (content "" + is-error false) are skipped.
@@ -496,24 +503,72 @@
   [child]
   (:kind child))
 
-(defn chat-history-toggle-tool-expanded!
-  "Toggle tool output expansion (pi: toolOutputExpanded). One reset! on the
-   shared toggle atom — tool and bash components read it lexically inside
-   their track! bodies, so existing children re-derive and new ones inherit
-   with no per-child push. The collapsible info banner keeps its own
-   expanded state and is updated directly. Returns the new expansion state."
+(def valid-tool-display-modes
+  "The tool display modes ctrl+o cycles (pi: toolOutputExpanded, extended
+   with quiet): :collapsed (5-line preview + hint), :expanded (full
+   output), :quiet (one dimmed title line, no box/hint — and
+   `[skill] name` for skill invocations; !/!! bash executions keep the
+   collapsed preview since they are user-invoked)."
+  #{:collapsed :expanded :quiet})
+
+(defn normalize-tool-display-mode
+  "Missing and invalid values fall back to :collapsed."
+  [v]
+  (if (contains? valid-tool-display-modes v) v :collapsed))
+
+(defn chat-history-get-tool-display-mode
+  "The tracked tool display mode (:collapsed | :expanded | :quiet)."
   [ch]
-  (let [expanded? (swap! (:tools-expanded-atom ch) not)]
-    ;; pi: startup info banner is expandable with ctrl+o
-    (when-let [info @(:info-comp-atom ch)]
-      (when (cm/custom-message-collapsible? info)
-        (cm/custom-message-set-expanded! info expanded?)))
+  (normalize-tool-display-mode @(:tools-expanded-atom ch)))
+
+(defn chat-history-set-tool-display-mode!
+  "Set the tool display mode directly (settings row, extension API).
+   Throws on an unknown mode. The collapsible info banner is not quiet —
+   it follows the expanded/collapsed projection, like loaded resources.
+   Returns the mode set."
+  [ch mode]
+  (when-not (contains? valid-tool-display-modes mode)
+    (throw (ex-info (str "Unknown tool display mode: " (pr-str mode)
+                         " (expected one of :collapsed :expanded :quiet)")
+                    {:mode mode})))
+  (reset! (:tools-expanded-atom ch) mode)
+  (when-let [info @(:info-comp-atom ch)]
+    (when (cm/custom-message-collapsible? info)
+      (cm/custom-message-set-expanded! info (= mode :expanded))))
+  mode)
+
+(defn chat-history-cycle-tool-display!
+  "Cycle the tool display mode (:collapsed → :quiet → :expanded → …).
+   One reset! on the shared mode atom — tool and skill components read it
+   lexically inside their track! bodies, so existing children re-derive
+   and new ones inherit with no per-child push. Bash executions (!/!!)
+   and the collapsible info banner treat :quiet as :collapsed. Returns
+   the new mode."
+  [ch]
+  (let [next (case (chat-history-get-tool-display-mode ch)
+               :collapsed :quiet
+               :quiet :expanded
+               :expanded :collapsed
+               :collapsed)]
+    (chat-history-set-tool-display-mode! ch next)))
+
+(defn chat-history-toggle-tool-expanded!
+  "Toggle tool output expansion (pi: toolOutputExpanded) — kept for the
+   boolean extension API and old call sites: :expanded stays, anything
+   else becomes :expanded and back to :collapsed. Prefer
+   chat-history-cycle-tool-display! for the 3-state ctrl+o cycle. Returns
+   the new expansion state (boolean)."
+  [ch]
+  (let [expanded? (not (= :expanded (chat-history-get-tool-display-mode ch)))]
+    (chat-history-set-tool-display-mode! ch (if expanded? :expanded :collapsed))
     expanded?))
 
 (defn chat-history-get-tool-expanded
-  "Check if tool output is expanded (the tracked expansion flag)."
+  "Check if tool output is expanded (the tracked expansion flag) — :quiet
+   reads as not expanded, like collapsed. Kept for the boolean extension
+   API; new code reads chat-history-get-tool-display-mode."
   [ch]
-  @(:tools-expanded-atom ch))
+  (= :expanded (chat-history-get-tool-display-mode ch)))
 
 (defn chat-history-set-thinking-hidden!
   "Set thinking block visibility on all assistant messages — one reset! on

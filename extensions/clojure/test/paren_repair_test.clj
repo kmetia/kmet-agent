@@ -2,7 +2,7 @@
   "Tests for the clojure_paren_repair tool (paren-repair namespace).
    Each test writes a temp file, calls paren-repair/execute, and asserts
    on the result map and the written file content."
-  (:require [clojure.test :as t :refer [deftest is]]
+  (:require [clojure.test :as t :refer [deftest testing is]]
             [clojure.string :as str]
             [babashka.fs :as fs]
             [paren-repair]))
@@ -280,3 +280,16 @@
                  :result {:content "edited"}
                  :is-error false})]
     (is (nil? result))))
+
+;; ─── Quiet titles ───────────────────────────────────────────────────────────
+
+(deftest test-title
+  (is (= "clojure_paren_repair /a/b.clj"
+         (paren-repair/title {:file_path "/a/b.clj"})))
+  (testing "string keys and home folding"
+    (let [home (System/getProperty "user.home" "")]
+      (is (= (str "clojure_paren_repair ~" "/b.clj")
+             (paren-repair/title {"file_path" (str home "/b.clj")})))))
+  (testing "missing path degrades to nil"
+    (is (nil? (paren-repair/title {})))
+    (is (nil? (paren-repair/title nil)))))

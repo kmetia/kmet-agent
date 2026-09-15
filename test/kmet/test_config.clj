@@ -246,6 +246,14 @@
   (t/is (false? (cfg/get-hide-thinking-block {:hide-thinking-block false})))
   (t/is (true? (cfg/get-hide-thinking-block {:hide-thinking-block true}))))
 
+(t/deftest test-get-tool-display-mode
+  (t/is (= :collapsed (cfg/get-tool-display-mode {})) "missing → default")
+  (t/is (= :collapsed (cfg/get-tool-display-mode {:tool-display-mode :collapsed})))
+  (t/is (= :expanded (cfg/get-tool-display-mode {:tool-display-mode :expanded})))
+  (t/is (= :quiet (cfg/get-tool-display-mode {:tool-display-mode :quiet})))
+  (t/is (= :collapsed (cfg/get-tool-display-mode {:tool-display-mode :bogus})) "invalid → default")
+  (t/is (= :collapsed (cfg/get-tool-display-mode {:tool-display-mode "quiet"})) "string → default"))
+
 (t/deftest test-get-enabled-models
   (t/is (nil? (cfg/get-enabled-models {})))
   (t/is (= ["a" "b"] (cfg/get-enabled-models {:enabled-models ["a" "b"]}))))

@@ -43,6 +43,20 @@
     (t/is (= "Read file" (:label t)))
     (t/is (= 3 (count (keys (:parameters t)))))))
 
+(t/deftest test-tool-quiet-titles
+  (t/testing "built-in tools carry a :title fn for the quiet one-liner"
+    (doseq [[tool-name args expected] [["read" {:path "src/a.clj" :offset 5 :limit 3} "read src/a.clj:5-7"]
+                                       ["read" {:path "src/a.clj"} "read src/a.clj"]
+                                       ["write" {:path "src/a.clj"} "write src/a.clj"]
+                                       ["edit" {:path "src/a.clj"} "edit src/a.clj"]
+                                       ["bash" {:command "ls -la"} "bash $ ls -la"]]]
+      (let [title (:title (tools/get-tool tool-name))]
+        (t/is (fn? title) (str tool-name " defines :title"))
+        (t/is (= expected (title args)))))
+    (t/is (nil? ((:title (tools/get-tool "read")) nil)) "nil args → nil (quiet falls back to the name)")
+    (t/is (nil? ((:title (tools/get-tool "read")) {})) "missing arg → nil")
+    (t/is (nil? ((:title (tools/get-tool "bash")) {:command ""})) "empty command → nil")))
+
 ;; ─── Tool read ────────────────────────────────────────────────────────────
 
 (t/deftest test-tool-read-file
