@@ -201,3 +201,60 @@ kmet reworks `defcomponent`/injection to the recipe) AND the clojure chain
 loads, drop `^:bb-only`, run
 `jolt test kmet.app.test-extensions/test-shipped-extensions-load-from-src`, and
 delete this block.
+
+### [jolt#1007](https://github.com/jolt-lang/jolt/issues/1007) — `:as :stream` never returns on a body that does not end: the `java.net.http` shim reads every response to EOF before handing back the `HttpResponse`
+
+**Area:** `io.github.jolt-lang/http-client` — `src/jolt/http/core.clj`
+(`read-response`, `read-chunked`, `read-sized`), `src/jolt/http/jdk.clj`
+(`net-http-send` → `core/make-bais`)
+
+The shim buffers: `core/read-response` returns a COMPLETE body (Content-Length
+via `read-sized`, chunked via `read-chunked` to the terminal chunk,
+read-to-close when unframed), and `net-http-send` maps
+`:jolt.http/handler-inputstream` — `BodyHandlers/ofInputStream`, which is what
+`babashka.http-client`'s `:as :stream` builds — to a `ByteArrayInputStream` over
+those bytes. So a response that never ends never returns: the call blocks
+inside the shim until the socket closes or the deadline fires. bb/JVM with the
+same `org.babashka/http-client` returns as soon as the headers are in and
+streams incrementally. Verified on jolt v0.8.8 + http-client @ `b98833b8`
+(upstream `main`) + `org.babashka/http-client` 0.4.25:
+
+```
+bb:    call returned 200, then "data: tick N" every 250ms
+jolt:  SocketTimeoutException: Response exceeded the total time limit of the
+       request timeoutms — at core/read-response (core.clj:653),
+       jdk/net-http-send (jdk.clj:610), babashka.http-client.internal/request
+```
+
+(no `:timeout` → blocks forever). Upstream documents the buffering in its
+README ("Response bodies are read in full before the response is returned…"),
+so #1007 is a parity/feature request, not a regression. Condensed repro — one
+server command, one client file run under both hosts:
+
+```sh
+bb -e '(let [s (java.net.ServerSocket. 8765) c (.accept s) w (java.io.PrintWriter. (.getOutputStream c) true)] (.print w "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n") (.flush w) (dotimes [i 10] (.print w (str "data: tick " i "\n\n")) (.flush w) (Thread/sleep 250)))' &
+
+;; client.clj
+(require '[babashka.http-client :as http])
+(let [r (http/get "http://127.0.0.1:8765/" {:as :stream :timeout 2000})]
+  (println "call returned" (:status r))
+  (println (line-seq (clojure.java.io/reader (:body r)))))
+```
+
+**Workaround** (`src/kmet/libs/http.cljc:740`): the host carve-out in `request`
+— `#?(:jolt (= :stream (:as opts)) :default false)` folded into the `curl?`
+decision, so every `:as :stream` request on jolt goes through `curl-request`
+(SOCKS/https-scheme proxies keep their own, unchanged curl fallback).
+Consequence: on jolt every LLM provider SSE stream (the `kmet.ai.api/*` hot
+path) runs on a curl subprocess — no pooled connections, no native proxy
+routing, one child process per request. Removal: delete the conditional (the
+`if` becomes plain `(if curl? …)`), drop the "live `:as :stream` feeds on Jolt"
+caveats from the three docstrings in the same file (ns docstring ~31,
+`set-transport!` ~675, the `request` body comment ~732-739), update the
+transport-mode comment in `test/kmet/libs/test_http.clj` (~111: "curl only for
+the fallback cases: SOCKS/https-scheme proxies, and live `:as :stream` feeds on
+Jolt") — `deftest-transports test-stream` then exercises the native path under
+`:platform` on jolt — and re-run the repro above under jolt plus
+`jolt test` over `kmet.libs.test-http`. `jolt-port.md` §B1 records the same
+decision and wants its "What still keeps curl on Jolt: live streams" text
+removed with it.
