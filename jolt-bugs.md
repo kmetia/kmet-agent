@@ -129,7 +129,7 @@ revisions carrying the `:windows` keys, delete the `:jolt/native` block, and
 re-run `jolt -e '(println :ok)'` on Windows with the DLLs present. If only
 jolt#989 has landed by then, the block still has to stay for `z`.
 
-### [jolt#1000](https://github.com/jolt-lang/jolt/issues/1000) — SCI cannot implement an injected (host) protocol from `defrecord`/`extend-type` (upstream closed as recipe-only; the transparent case still blocks kmet)
+### [jolt#1006](https://github.com/jolt-lang/jolt/issues/1006) — SCI cannot implement a `copy-var*`-injected host protocol from `defrecord`/`extend-type` (follow-up to #1000, which closed as recipe-only)
 
 **Area:** SCI interop / `defprotocol` representation
 
@@ -169,7 +169,7 @@ merge #1002 and are verified fixed on-device — `Class/forName`, `instance?`,
 blocks any shipped extension anymore.)
 
 **Workaround** (`test/kmet/app/test_extensions.clj:1056`): the `^:bb-only` gate
-on `test-shipped-extensions-load-from-src` stays for #1000 (`mcp-adapter` /
+on `test-shipped-extensions-load-from-src` stays for #1006 (`mcp-adapter` /
 `review` / `lsp-adapter` panels) plus the clojure extension's unfiled
 Maven-chain gaps below — none of the three former tickets covers clojure
 anymore. Error-attribution pitfall: `load-extension!` names the ENTRY file in
@@ -196,7 +196,7 @@ host interfaces in `deftype` on BOTH hosts (`defrecord/deftype currently only
 support protocol implementations`, verified on bb too), which bb never hits
 because it injects its port. Fix directions: kmet-side (extend seeding/retry to
 dep-closure sources; covers `IMeta`/`ChunkedSeq`) and upstream-or-port for the
-`Closeable`-in-`deftype` wall. Removal: when #1000's transparent case lands (or
+`Closeable`-in-`deftype` wall. Removal: when #1006 lands (or
 kmet reworks `defcomponent`/injection to the recipe) AND the clojure chain
 loads, drop `^:bb-only`, run
 `jolt test kmet.app.test-extensions/test-shipped-extensions-load-from-src`, and
