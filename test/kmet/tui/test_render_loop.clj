@@ -309,6 +309,61 @@
         (finally
           (stop-loop tui))))))
 
+(deftest ^:slow shrink-above-window-with-unchanged-tail-does-not-repaint
+  (testing "a shrink whose removed lines are all above the window and whose visible tail is
+            unchanged paints nothing: the screen already shows the right rows, so the diff
+            emits no output — no clearing full redraw mid-stream — and the stale scrollback
+            above is marked dirty for the app's streaming-free heal"
+    (let [lines (atom (vec (map #(str "line " %) (range 40))))
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child tui (test-component lines))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 2000)
+        ;; 40 lines on a 24-row screen → viewport top at row 16; drop lines
+        ;; 2-5 (all above the window), keeping the visible tail identical
+        (let [writes-before (count @(:writes vt))]
+          (swap! lines (fn [v] (into (subvec v 0 2) (subvec v 6))))
+          (core/tui-request-render tui)
+          ;; the no-repaint path emits nothing, so there is no frame to wait
+          ;; for; poll the state the loop updates
+          (t/is (wait-until #(= 36 (count @(:previous-lines tui))) 2000)
+                "the frame processed and internal state updated")
+          (let [emitted (apply str (drop writes-before @(:writes vt)))]
+            (t/is (not (str/includes? emitted clear-seq))
+                  "no clearing full redraw for an above-window shrink")
+            (t/is (not (str/includes? emitted "line 39"))
+                  "the visible rows are not repainted (their content did not change)")
+            (t/is (not (str/includes? emitted "line 2"))
+                  "the stale scrollback line is not re-emitted"))
+          (t/is (true? (core/tui-scrollback-dirty? tui))
+                "the above-window shrink marks the scrollback dirty for the turn-end heal"))
+        (finally
+          (stop-loop tui)))))
+  (testing "a shrink with a changed visible line keeps the full-redraw fallback: the freed
+            rows are on screen then, and the diff renderer's extra-line cleanup assumes the
+            change began inside the window"
+    (let [lines (atom (vec (map #(str "line " %) (range 40))))
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child tui (test-component lines))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 2000)
+        (swap! lines (fn [v]
+                       (-> (into (subvec v 0 2) (subvec v 6))
+                           (assoc 35 "line 39 CHANGED"))))
+        (core/tui-request-render tui)
+        (wait-for-frames (:writes vt) 2 2000)
+        (let [redraw (second (frame-writes (:writes vt)))]
+          (t/is (str/includes? redraw clear-seq)
+                "a shrink with a visible change still rebuilds the screen")
+          (t/is (str/includes? redraw "line 39 CHANGED")
+                "the visible change is re-emitted by the rebuild"))
+        (finally
+          (stop-loop tui))))))
+
 (deftest ^:slow shrink-starting-above-window-keeps-full-redraw
   (testing "a shrink starting above the window keeps the clearing full-redraw path
             (the diff renderer's extra-line cleanup assumes the change began inside the window)"
