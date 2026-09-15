@@ -1,6 +1,7 @@
 (ns kmet.tui.test-core
   (:require [clojure.test :as t :refer [testing]]
             [kmet.tui.core :as core]
+            [kmet.libs.reakt :as reakt]
             [kmet.tui.keys :as keys]
             [kmet.tui.components.editor :as editor]
             [kmet.tui.components.input :as input]))
@@ -18,6 +19,28 @@
              (focused [_] @focused?)
              (set-focused! [_ v] (reset! focused? v)))
      :focused? focused?}))
+
+(t/deftest test-work-pending-sees-render-and-batch-work
+  (testing "a requested render pends"
+    (reakt/flush!)  ; isolate from anything a previous test left queued
+    (let [tui (core/create-tui nil)]
+      (t/is (false? ((var core/work-pending?) tui)) "idle: nothing pending")
+      (core/tui-request-render tui)
+      (t/is (true? ((var core/work-pending?) tui)) "a requested render pends")))
+  (testing "a queued reaction pends even with no render requested"
+    ;; the race the recheck closes: a reaction enqueued between the loop's
+    ;; flush and its wait must keep the loop off the wait (a monitor wakeup
+    ;; with nobody waiting is dropped)
+    (let [tui (core/create-tui nil)
+          a (atom 0)
+          d (reakt/derive [a] identity)]
+      @d
+      (swap! a inc)
+      (t/is (false? @(:render-requested? tui)) "no render was requested")
+      (t/is (true? ((var core/work-pending?) tui)) "the queued reaction pends")
+      (reakt/flush!)
+      (t/is (false? ((var core/work-pending?) tui)) "flushed clean")
+      (reakt/dispose! d))))
 
 (t/deftest test-overlay-focus-restores-previous
   (testing "hiding an overlay returns input to the focus home"

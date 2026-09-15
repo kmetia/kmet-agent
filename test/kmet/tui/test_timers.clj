@@ -98,3 +98,17 @@
       (timers/pump!)
       (t/is (= 1 @frames) "schedule-frame! was wired to the hook from a thunk")
       (finally (macros/set-frame-hook! nil)))))
+
+(t/deftest next-due-ms-tracks-the-earliest-armed-timer
+  ;; the render loop caps its idle park by this, so a parked loop fires
+  ;; timers on time (kmet.tui.core/idle-park-ms)
+  (t/is (nil? (timers/next-due-ms)) "nothing armed")
+  (timers/after! 500 identity)
+  (timers/every! 50 identity)
+  (let [due (timers/next-due-ms)]
+    (t/is (integer? due))
+    (t/is (<= 0 due 50) "the earliest due time wins"))
+  (timers/after! 0 identity)
+  (t/is (zero? (timers/next-due-ms)) "a timer due now reports 0")
+  (timers/cancel-all!)
+  (t/is (nil? (timers/next-due-ms)) "cancel-all clears it"))

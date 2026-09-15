@@ -176,3 +176,38 @@
       (reset! fail? false)
       (r/force-run! rx)
       (is (= :ok @rx) "run! retries through sticky failure"))))
+
+(deftest test-enqueue-hook-fires-per-new-invalidation
+  ;; an event-driven host (kmet.tui.core) wakes its parked loop from this:
+  ;; a derived ref dirtied with no frame requested yet must not wait for a
+  ;; polling cadence to re-derive
+  (let [a (atom 1)
+        wakes (atom 0)
+        d (r/derive [a] identity)]
+    @d
+    (r/set-enqueue-hook! #(swap! wakes inc))
+    (try
+      (swap! a inc)
+      (is (= 1 @wakes) "a newly queued reaction wakes the host once")
+      (swap! a inc)
+      (is (= 1 @wakes) "a reaction already queued needs no second wake")
+      (r/flush!)
+      (swap! a inc)
+      (is (= 2 @wakes) "settled again, the next invalidation wakes")
+      (finally
+        (r/set-enqueue-hook! nil)
+        (r/dispose! d)))))
+
+(deftest test-enqueue-hook-failure-is-isolated
+  ;; the hook runs inside a dep watch on the MUTATOR's thread: a throwing
+  ;; hook must not reach the write that dirtied the dep
+  (let [a (atom 1)
+        d (r/derive [a] identity)]
+    @d
+    (r/set-enqueue-hook! (fn [] (throw (ex-info "hook boom" {}))))
+    (try
+      (swap! a inc)
+      (is (= 2 @a) "the mutating write survives a throwing hook")
+      (finally
+        (r/set-enqueue-hook! nil)
+        (r/dispose! d)))))

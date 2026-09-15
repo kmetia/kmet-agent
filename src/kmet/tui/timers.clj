@@ -3,9 +3,10 @@
    UI work is scheduled, instead of every component parking its own
    `future` + `Thread/sleep` loop and re-inventing the zombie defense.
 
-   The frame loop (~16ms) calls `pump!` once a tick and fires whatever is
-   due, so a timer thunk runs on the LOOP THREAD — the same thread that
-   renders — and may touch widgets and component state directly. A thunk
+   The frame loop calls `pump!` on every wake (a render request, the next
+   timer due, or the idle heartbeat) and fires whatever is due, so a timer
+   thunk runs on the LOOP THREAD — the same thread that renders — and may
+   touch widgets and component state directly. A thunk
    that wants a repaint either mutates tracked state (the reactive chain
    schedules the frame) or calls `kmet.tui.macros/schedule-frame!`.
 
@@ -36,8 +37,10 @@
 
 (defn after!
   "Run F on the loop thread once, about MS milliseconds from now. Returns
-   the id for cancel!. Resolution is the loop's tick (~16ms), so a 1ms
-   timer is really a next-tick timer."
+   the id for cancel!. Resolution: the loop parks until the earlier of the
+   next timer due and its idle heartbeat, so a timer armed on the loop
+   thread fires on time; one armed from another thread while the loop is
+   parked waits for the next wake — at most the heartbeat (100ms)."
   [ms f]
   (add! (max 0 ms) nil f))
 
@@ -84,6 +87,14 @@
           (binding [*out* *err*]
             (println "kmet.tui.timers: timer thunk error:" (ex-message t))))))
     (boolean (seq due))))
+
+(defn next-due-ms
+  "Milliseconds until the earliest armed timer is due, 0 when one is due
+   now, nil when no timer is armed — what the render loop caps its idle
+   park by, so a parked loop still fires timers on time."
+  []
+  (when-let [entries (seq (:entries @registry))]
+    (max 0 (- (reduce min (map :due (vals entries))) (now-ms)))))
 
 (defn scheduled
   "The live timers as {id {:due :every}} — for tests and --debug
