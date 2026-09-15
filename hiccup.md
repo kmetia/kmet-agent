@@ -157,9 +157,9 @@ row changing (babashka, this tree):
 
 A wash at selector sizes, 3–5× on list-sized content — and it also
 deletes the manual refresh wiring. Keyed rows stay the rule: keys keep
-reuse position-independent under reordering (unkeyed siblings share one
-match bucket, which the reconciler currently walks superlinearly — §6
-Phase 0).
+reuse position-independent under reordering. Unkeyed siblings share one
+match bucket consumed in order (an O(1) bucket cursor since Phase 0), so
+without keys a prepend rebuilds every sibling after it.
 
 ### 3.2 Stateful leaves: foreign record → tag (`:apply` keeps state)
 
@@ -319,10 +319,11 @@ on the second render — and a flat `bodies-run` on an idle frame.
 
 ### Phase 0 — reconciler + tag ergonomics (independent; land any time)
 
-1. **`split-bucket` O(1)** (`kmet.tui.hiccup`): a per-bucket index
+1. **DONE — `split-bucket` O(1)** (`kmet.tui.hiccup`): a per-bucket index
    cursor instead of `(vec (rest bucket))` per pop. Removes the
    superlinear walk for long unkeyed lists (forced re-derive with no
-   content change, n=4000: 122 ms/pass unkeyed vs 62 ms/pass keyed).
+   content change, measured n=4000: 295 → 80 ms/pass unkeyed; n=1000:
+   32 → 19 ms/pass).
    Keys stay the rule for reuse under reordering; after this they are no
    longer about matching cost.
 2. **Optional, unblocks ref-free conversions**: `:input` gains
