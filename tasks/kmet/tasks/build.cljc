@@ -446,11 +446,12 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" \"$@\"
    targets/options throw ex-info with :type ::usage."
   [args]
   (loop [args args
-         opts {:targets [] :all? false :force? false :no-smoke? false :help? false}]
+         opts {:targets [] :all? false :force? false :no-smoke? true :help? false}]
     (if-some [arg (first args)]
       (cond
         (= "--all" arg) (recur (rest args) (assoc opts :all? true))
         (= "--force" arg) (recur (rest args) (assoc opts :force? true))
+        (= "--smoke" arg) (recur (rest args) (assoc opts :no-smoke? false))
         (= "--no-smoke" arg) (recur (rest args) (assoc opts :no-smoke? true))
         (= "--help" arg) (recur (rest args) (assoc opts :help? true))
         (str/starts-with? arg "--") (throw (ex-info (str "unknown option: " arg)
@@ -462,7 +463,7 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" \"$@\"
       opts)))
 
 (defn -main
-  "bb dist [target ...|--all] [--force] [--no-smoke]   (the bb.edn task's
+  "bb dist [target ...|--all] [--force] [--smoke]   (the bb.edn task's
    babashka branch; the jolt branch runs kmet.tasks.build-jolt/-main)
 
    Build self-contained kmet executable(s) in dist/: the official babashka
@@ -472,8 +473,9 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" \"$@\"
    macos-aarch64, macos-amd64, windows-amd64; a release asset slug like
    linux-amd64-static is accepted too); they default to the current platform.
    --all builds every published platform, --force re-downloads cached babashka
-   binaries, and --no-smoke skips running the current-host artifact after
-   building (saves memory on constrained devices). A fresh uberjar
+   binaries, and --smoke runs the current-host artifact after building
+   (--list-models plus --version; skipped by default to keep local dist
+   builds fast and side-effect free). A fresh uberjar
    (target/kmet.jar) is always rebuilt first so artifacts never bundle stale
    sources."
   [& args]

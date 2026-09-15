@@ -56,7 +56,7 @@
 
 (deftest parse-args-defaults-to-a-release-host-build
   (is (= {:mode "release" :flags [] :boot nil :target nil :target-pack nil
-          :out nil :jolt nil :force? false :no-smoke? false :help? false}
+          :out nil :jolt nil :force? false :no-smoke? true :help? false}
          (jbuild/parse-args []))))
 
 (deftest parse-args-reads-modes-and-passthrough-flags
@@ -69,7 +69,9 @@
   (testing "an option's value is not read as a positional argument"
     (is (= "small" (:boot (jbuild/parse-args ["--boot" "small" "--no-smoke"])))))
   (is (true? (:force? (jbuild/parse-args ["--force"]))))
-  (is (true? (:no-smoke? (jbuild/parse-args ["--no-smoke"]))))
+  (testing "the smoke test is opt-in"
+    (is (false? (:no-smoke? (jbuild/parse-args ["--smoke"]))))
+    (is (true? (:no-smoke? (jbuild/parse-args ["--no-smoke"])))))
   (is (true? (:help? (jbuild/parse-args ["-h"]))))
   (is (= "/tmp/kmet" (:out (jbuild/parse-args ["-o" "/tmp/kmet"]))))
   (is (= "/tmp/kmet" (:out (jbuild/parse-args ["--out" "/tmp/kmet"]))))

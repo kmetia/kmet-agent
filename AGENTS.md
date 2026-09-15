@@ -83,7 +83,7 @@
   re-enter itself forever).
   - babashka (`kmet.tasks.build`): `bb uberjar` → `target/kmet.jar` (the src/ tree
     + resolved dep jars — the non-bb-builtin Maven jars are `data.json` (JSON
-    seam) and `cljfmt` (format task)); `bb dist [platforms|--all] [--force] [--no-smoke]`
+    seam) and `cljfmt` (format task)); `bb dist [platforms|--all] [--force] [--smoke]`
     → self-contained executables in `dist/` (official bb release binary + appended uberjar,
     fresh uberjar always rebuilt first; artifacts `kmet-<ver>-bb<bb-ver>-<platform>`,
     version = jolt's checkout rule (`kmet.libs.version`: nearest `v<digit>` tag via
@@ -100,7 +100,7 @@
     `dist/kmet-<ver>-jolt<jv>-<platform>[-dev][.exe]`, bakes kmet/version.txt into it
     (from `target/kmet-version`, an embed root the packager writes; `kmet --version`
     reports the built-as version rather than describing whatever repo it runs in)
-    and smoke-tests it with `--list-models` and `--version` from an empty temp dir
+    and, with `--smoke`, runs it with `--list-models` and `--version` from an empty temp dir
     with `JOLT_PWD` pointed at it (io/resource falls back to
     JOLT_PWD-relative source roots, so a run from the checkout would pass without the
     `deps.edn :jolt/build {:embed ["src" "target/kmet-version"]}` that bakes the model
@@ -108,7 +108,7 @@
     rides in the binary even though it is on the classpath). Termux gets a
     `.sh` launcher through the glibc linker, like the bb one minus `--jar`. Flags:
     `--dev|--opt`, `--closed-world`, `--dynamic`, `--boot fast|small|plain`,
-    `--target MACHINE --target-pack DIR`, `-o PATH`, `--force`, `--no-smoke`, `--jolt PATH`.
+    `--target MACHINE --target-pack DIR`, `-o PATH`, `--force`, `--smoke`, `--jolt PATH`.
 
 ### API Preferences (avoid Java interop)
 - **`babashka.fs`** over `java.io.File` for all file operations

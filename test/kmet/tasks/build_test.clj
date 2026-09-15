@@ -40,16 +40,19 @@
       (is (string? (:asset (get targets platform)))))))
 
 (deftest ^:bb-only parse-args-collects-targets-and-flags
-  (is (= {:targets [] :all? false :force? false :no-smoke? false :help? false}
+  (is (= {:targets [] :all? false :force? false :no-smoke? true :help? false}
          (build/parse-args [])))
-  (is (= {:targets ["linux-aarch64"] :all? true :force? true :no-smoke? false :help? false}
+  (is (= {:targets ["linux-aarch64"] :all? true :force? true :no-smoke? true :help? false}
          (build/parse-args ["linux-aarch64" "--all" "--force"])))
   (is (= {:targets ["macos-aarch64" "windows-amd64"]
-          :all? false :force? false :no-smoke? false :help? true}
+          :all? false :force? false :no-smoke? true :help? true}
          (build/parse-args ["macos-aarch64" "--help" "windows-amd64"])))
   (testing "a babashka release asset slug is accepted as its platform"
-    (is (= {:targets ["linux-amd64"] :all? false :force? false :no-smoke? false :help? false}
-           (build/parse-args ["linux-amd64-static"])))))
+    (is (= {:targets ["linux-amd64"] :all? false :force? false :no-smoke? true :help? false}
+           (build/parse-args ["linux-amd64-static"]))))
+  (testing "the smoke test is opt-in"
+    (is (false? (:no-smoke? (build/parse-args ["--smoke"]))))
+    (is (true? (:no-smoke? (build/parse-args ["--no-smoke"]))))))
 
 (deftest ^:bb-only parse-args-rejects-bad-input
   (is (thrown-with-msg? Exception #"unknown target"
