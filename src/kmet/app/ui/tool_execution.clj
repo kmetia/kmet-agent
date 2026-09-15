@@ -6,7 +6,7 @@
    Timing is managed internally (started-at on first content, ended-at on error/finalize).
    Quiet mode (:quiet display) short-circuits before any renderer runs:
    one dimmed title line (like hidden thinking), styled once and
-   reading only name/args/is-error — custom renderers never run, so quiet
+   reading only name/args/is-error/ended-ness — custom renderers never run, so quiet
    can never be overridden and stays immutable."
   (:require [clojure.string :as str]
             [kmet.app.ui.subs :as s]
@@ -171,14 +171,18 @@
             ;; re-derives this cache exactly once (Stage 5, dsl.md §3.2)
             theme (deref s/theme-sub)
             is-error @is-error-atom
+            ;; tracked ended-ness only (never the timestamp): one re-render
+            ;; on completion flips ... to done/(!), then immutable again
+            running? (nil? @ended-at-atom)
             output-pad @output-pad-atom
             name @name-atom
             args @args-atom
             title-fn @title-fn-atom]
       ;; Quiet short-circuit — BEFORE any renderer runs (custom renderers
       ;; never execute in quiet: it cannot be overridden). Reads only
-      ;; name/args/is-error/output-pad/theme/mode — no content, details,
-      ;; truncation, images, timing, cwd or renderer state — so a quiet
+      ;; name/args/is-error/ended-ness/output-pad/theme/mode — no content,
+      ;; details, truncation, images, timing, cwd or renderer state — so a
+      ;; quiet
       ;; line never re-invalidates and stays immutable in scrollback.
         (if quiet?
           (do (doseq [c (distinct (remove nil? [(last-call-component this)
@@ -196,7 +200,7 @@
                 (when-let [id (:timer-id state)]
                   (timers/cancel! id)))
               (let [content-width (max 1 (- width (* 2 output-pad)))
-                    raw (str (when is-error "(error) ") (quiet-title-for title-fn name args))
+                    raw (str (cond is-error "(!) " running? "... ") (quiet-title-for title-fn name args))
                     line (str (apply str (repeat output-pad \space))
                               (theme/italic (theme/fg theme :thinking-text
                                                       ;; plain text first, then style once:

@@ -848,6 +848,8 @@
                                   :is-error (boolean is-error)
                                   :tools-expanded-atom shared
                                   :title-fn title-fn)]
+    ;; settled (ended) by default — the pending ... state has its own test
+    (te/tool-execution-set-error! c (boolean is-error))
     (mapv strip-ansi (core/render c 60))))
 
 (deftest test-quiet-renders-dimmed-title-line
@@ -867,7 +869,7 @@
     (let [lines (render-quiet :name "bash" :args {:command "ls"} :content "boom"
                               :is-error true :title-fn (fn [a] (str "bash $ " (:command a))))]
       (is (= 2 (count lines)))
-      (is (re-find #"\(error\) bash \$ ls" (second lines)))))
+      (is (re-find #"\(\!\) bash \$ ls" (second lines)))))
   (testing "missing title falls back to the tool name"
     (let [lines (render-quiet :name "myext" :args {} :content "x")]
       (is (re-find #"^ myext" (second lines)) "bare tool name, no prefix")))
@@ -909,6 +911,24 @@
       (let [lines (mapv strip-ansi (core/render c 60))]
         (is (= 2 (count lines)))
         (is (not-any? #(re-find #"Image" %) lines))))))
+
+(deftest test-quiet-running-and-error-prefixes
+  (testing "ended-ness drives the quiet prefix: ... while pending, bare when done, (!) on error"
+    (let [shared (atom :quiet)
+          title-fn (fn [a] (str "bash $ " (:command a)))
+          c (te/make-tool-execution :name "bash" :args {:command "ls"}
+                                    :tools-expanded-atom shared :title-fn title-fn)]
+      (is (re-find #"^ \.\.\. bash \$ ls"
+                   (second (mapv strip-ansi (core/render c 60))))
+          "fresh (ended-at nil) shows ...")
+      (te/tool-execution-set-error! c false)
+      (is (re-find #"^ bash \$ ls"
+                   (second (mapv strip-ansi (core/render c 60))))
+          "ended ok carries no prefix")
+      (te/tool-execution-set-error! c true)
+      (is (re-find #"\(\!\) bash \$ ls"
+                   (second (mapv strip-ansi (core/render c 60))))
+          "error shows (!), implying done"))))
 
 (deftest test-quiet-cancels-elapsed-ticker
   (testing "entering quiet cancels the running-tool repaint timer"
