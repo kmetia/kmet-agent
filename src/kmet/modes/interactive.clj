@@ -2570,16 +2570,18 @@
             ;; ── Build session env (pi: resolveSpawnContext) ─────────────
             ag @(:agent-state cs)
             session-env
-            (let [tl @(:thinking ag)]
-              (cond-> {"KMET_PROVIDER" (name @(:provider ag))
-                       "KMET_MODEL" @(:model ag)}
-                (:session-atom cs) (assoc "KMET_SESSION_ID" (:id @(:session-atom cs)))
-                (and tl (not= tl :off)) (assoc "KMET_REASONING_LEVEL" (name tl))))
+            (bash-tool/session-env {:session @(:session-atom cs)
+                                    :provider @(:provider ag)
+                                    :model @(:model ag)
+                                    :thinking-level @(:thinking ag)})
 
             ;; ── Emit user-bash event for extensions (pi: emitUserBash) ──
             ;; Bind the ! cancel signal so extension handlers reacting to
-            ;; user-bash can run cancellable bash via execute-tool.
-            _ (binding [bash-tool/*cancel-signal* (:bash-signal cs)]
+            ;; user-bash can run cancellable bash via execute-tool, and the
+            ;; session-env thunk so their bash tools see the same KMET_*
+            ;; metadata as the ! command itself (pi: the execute ctx).
+            _ (binding [bash-tool/*cancel-signal* (:bash-signal cs)
+                        bash-tool/*session-env-fn* (constantly session-env)]
                 (event-bus/emit-event!
                  {:type :user-bash
                   :command command

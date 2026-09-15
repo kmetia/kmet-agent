@@ -39,6 +39,7 @@
             [kmet.app.session :as session]
             [kmet.app.skills :as skills]
             [kmet.app.tools.core :as tools]
+            [kmet.app.tools.bash :as bash-tool]
             [kmet.config :as cfg]
             [kmet.tui.theme :as theme]
             [kmet.libs.host :as host]
@@ -647,6 +648,11 @@
                        (tools/register-tool! tool)
                        (track (fn [] (tools/unregister-tool! (:name tool)))))
      :unregister-tool! tools/unregister-tool!
+     ;; pi: createBashTool — the bash tool constructor with its options
+     ;; (spawnHook / exposeSessionEnvironment / commandPrefix / shellPath /
+     ;; operations). The built-in bash tool is the same constructor with
+     ;; default options; registering the result under a name replaces it.
+     :create-bash-tool bash-tool/create-tool
      :get-all-tools #(vals (tools/get-all-tools))
      :get-active-tools get-active-tools
      :set-active-tools set-active-tools

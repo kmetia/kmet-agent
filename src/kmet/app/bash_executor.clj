@@ -13,6 +13,38 @@
 (def TEMP-FILE-PREFIX "kmet-bash-")
 (def TEMP-FILE-SUFFIX ".log")
 
+(def session-env-keys
+  "Session metadata env vars injected per execution (see
+   kmet.app.tools.bash/session-env). Stripped from the inherited environment
+   before the current session's values are merged (pi: resolveSpawnContext
+   deletes PI_SESSION_ID/PI_SESSION_FILE/PI_PROVIDER/PI_MODEL/
+   PI_REASONING_LEVEL first), so a nested kmet's parent values never leak
+   into a child command."
+  ["KMET_SESSION_ID" "KMET_SESSION_FILE" "KMET_PROVIDER" "KMET_MODEL"
+   "KMET_REASONING_LEVEL"])
+
+(defonce ^:private shell-options
+  ;; pi: SettingsManager getShellPath/getShellCommandPrefix — pi reads them
+  ;; when the tool is created and in executeBash; kmet's built-in tool is a
+  ;; static def, so the merged settings live here and execute-bash applies
+  ;; them as defaults (explicit call-site options win).
+  (atom {:shell-path nil :command-prefix nil}))
+
+(defn set-shell-options!
+  "Apply the shell settings to bash execution: :shell-path (pi: shellPath,
+   a custom shell binary) and :command-prefix (pi: shellCommandPrefix, a line
+   prepended to every command). Called by kmet.config/load-config — the
+   single choke point every entry mode passes through."
+  [{:keys [shell-path command-prefix]}]
+  (reset! shell-options {:shell-path shell-path :command-prefix command-prefix}))
+
+(defn- strip-session-env
+  "Drop the session metadata vars from an inherited environment (pi:
+   resolveSpawnContext's deletes before the current session's values are
+   merged)."
+  [env]
+  (apply dissoc env session-env-keys))
+
 ;; ─── Format utilities (pi: formatSize) ──────────────────────────────────────
 
 (defn format-size
@@ -334,7 +366,14 @@
     :or {cwd (System/getProperty "user.dir")
          max-lines DEFAULT-MAX-LINES
          max-bytes DEFAULT-MAX-BYTES}}]
-  (let [;; Resolve command with prefix (pi: commandPrefix)
+  (let [;; Shell settings applied as defaults (pi: shellPath /
+        ;; shellCommandPrefix read at tool creation and in executeBash) —
+        ;; explicit call-site options win.
+        {default-shell-path :shell-path default-command-prefix :command-prefix}
+        @shell-options
+        shell-path (or shell-path default-shell-path)
+        command-prefix (or command-prefix default-command-prefix)
+        ;; Resolve command with prefix (pi: commandPrefix)
         resolved-command (if command-prefix
                            (str command-prefix "\n" command)
                            command)
@@ -489,7 +528,7 @@
              :full-output-path @temp-file-path}))]
 
     (try
-      (let [base-env (into {} (System/getenv))
+      (let [base-env (strip-session-env (into {} (System/getenv)))
             merged-env (if env (merge base-env env) base-env)
             {:keys [command cwd env]}
             (if spawn-hook

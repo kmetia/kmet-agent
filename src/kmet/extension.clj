@@ -57,7 +57,7 @@
 ;;     (KMET_CODING_AGENT_DIR-aware; pi: getAgentDir) — extension state
 ;;     (configs, caches) belongs under it
 ;;   :register-command! :unregister-command! :get-commands
-;;   :register-tool! :unregister-tool! :get-all-tools
+;;   :register-tool! :unregister-tool! :get-all-tools :create-bash-tool
 ;;   :get-active-tools :set-active-tools
 ;;   :on-event :emit-event!                             — event bus
 ;;   :on-input :on-before-agent-start                   — hooks
@@ -94,6 +94,35 @@
 (defn get-all-tools [api] ((:get-all-tools api)))
 (defn get-active-tools [api] ((:get-active-tools api)))
 (defn set-active-tools [api names] ((:set-active-tools api) names))
+
+(defn create-bash-tool
+  "Build a bash tool (a plain tool map for register-tool!) with spawn options
+   — pi: createBashTool/createShellToolDefinition. The built-in bash tool is
+   this constructor with default options; registering the result under a name
+   replaces that tool, so a custom bash tool keeps the built-in rendering.
+   OPTS:
+     :spawn-hook          — (fn [{:keys [command cwd env]}] → same map) run
+                            before spawn, after the KMET_* session env is
+                            injected (pi: BashSpawnHook) — rewrite the command
+                            (source a profile, wrap with a sandbox), the cwd,
+                            or the env
+     :expose-session-env? — inject the run's KMET_* session env
+                            (KMET_SESSION_ID/SESSION_FILE/PROVIDER/MODEL/
+                            REASONING_LEVEL) and the matching prompt guideline
+                            (default true; false disables both — pi:
+                            exposeSessionEnvironment)
+     :command-prefix      — line prepended to every command (pi:
+                            commandPrefix; default: the :shell-command-prefix
+                            setting)
+     :shell-path          — custom shell binary (pi: shellPath; default: the
+                            :shell-path setting)
+     :operations          — custom executor, {:command :cwd :on-data :signal
+                            :timeout :env} → {:exit-code :cleanup} (pi:
+                            BashOperations — delegate to a remote host)
+     :name :label :description — tool-facing overrides (defaults: 'bash',
+                            'Execute command', pi's bash description)"
+  [api opts]
+  ((:create-bash-tool api) opts))
 
 (defn on-event
   "Register a handler for an event type (e.g. :session-start, :agent-end,
@@ -246,7 +275,8 @@
       :skills [{:content opts}] :prompts [prompt]
       :tool-call-hooks [...] :tool-result-hooks [...]
       :input-hooks [...] :before-agent-start-hooks [...]
-      :ui-calls [args...] :emitted [events...] :model-calls [...]}
+      :bash-tool-opts [opts...]
+      :ui-calls [args...] :emitted [events...] :model-calls [...]}}
    Deregister fns remove the corresponding registrations (unload replay).
    OPTS: :agent-dir — the value (get-agent-dir api) returns (default nil;
    pass a temp dir in tests that exercise agent-dir state)."
@@ -257,6 +287,7 @@
                       :skills [] :prompts []
                       :tool-call-hooks [] :tool-result-hooks []
                       :input-hooks [] :before-agent-start-hooks []
+                      :bash-tool-opts []
                       :ui-calls [] :emitted [] :model-calls []})
          api {:extension-name "nullable" :extension-path "test" :extension-dir "test"
               :agent-dir agent-dir
@@ -272,6 +303,19 @@
               :get-all-tools (fn [] (vals (:tools @state)))
               :get-active-tools (fn [] (keys (:tools @state)))
               :set-active-tools (fn [names] (swap! state assoc :active-tools names))
+              ;; pi: createBashTool — the fixture records the options and
+              ;; returns an inert tool map (extension init code can register it)
+              :create-bash-tool (fn [opts]
+                                  (swap! state update :bash-tool-opts conj opts)
+                                  {:name (or (:name opts) "bash")
+                                   :label "Execute command"
+                                   :description "bash (nullable)"
+                                   :parameters {:type "object"
+                                                :properties {"command" {:type "string"
+                                                                        :description "Shell command to execute"}}
+                                                :required ["command"]}
+                                   :execute (fn [args & _] {:content (str (:command args)) :is-error false})
+                                   :streams? true})
               :on-event (fn [event-type handler]
                           (swap! state update-in [:handlers event-type] (fnil conj []) handler)
                           (fn [] (swap! state update-in [:handlers event-type]

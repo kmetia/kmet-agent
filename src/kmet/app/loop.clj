@@ -2012,7 +2012,15 @@ Be precise and concise in your responses."}}]
       ;; tool futures AND into synchronous extension code (custom tool
       ;; executes, event handlers) that calls tools/execute-tool, so Escape
       ;; cancels bash everywhere, not just in the loop's own tool futures.
-      (binding [bash-tool/*cancel-signal* (:signal agent)]
+      ;; The session-env thunk resolves per bash execution (pi: the execute
+      ;; ctx), so a mid-run model/thinking change is reflected.
+      (binding [bash-tool/*cancel-signal* (:signal agent)
+                bash-tool/*session-env-fn*
+                (fn []
+                  (bash-tool/session-env {:session (:session agent)
+                                          :provider @(:provider agent)
+                                          :model @(:model agent)
+                                          :thinking-level @(:thinking agent)}))]
         (future
           (try
             (let [msg-count-before (count @(:messages agent))

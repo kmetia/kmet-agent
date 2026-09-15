@@ -5,6 +5,7 @@
             [clojure.java.io :as io]
             [babashka.fs :as fs]
             [kmet.config :as cfg]
+            [kmet.app.bash-executor :as bash-exec]
             [kmet.libs.http :as http]
             [kmet.ai.auth :as auth]))
 
@@ -60,6 +61,46 @@
         dir (cfg/get-session-dir c)]
     (t/is (str/starts-with? dir home))
     (t/is (str/ends-with? dir "/.kmet/sessions"))))
+
+;; ─── Shell settings (pi: shellPath / shellCommandPrefix) ──────────────────
+
+(defn- shell-options []
+  ;; the executor's private settings atom (pi: SettingsManager getShellPath /
+  ;; getShellCommandPrefix)
+  @@#'bash-exec/shell-options)
+
+(t/deftest test-get-shell-path
+  (t/is (nil? (cfg/get-shell-path cfg/default-config)))
+  (t/is (= "/custom/bash" (cfg/get-shell-path (assoc cfg/default-config :shell-path "/custom/bash"))))
+  (t/testing "a leading ~ expands (pi: normalizePath on getShellPath)"
+    (let [home (System/getProperty "user.home")]
+      (t/is (= (str home "/bin/bash")
+               (cfg/get-shell-path (assoc cfg/default-config :shell-path "~/bin/bash")))))))
+
+(t/deftest test-get-shell-command-prefix
+  (t/is (nil? (cfg/get-shell-command-prefix cfg/default-config)))
+  (t/is (= "shopt -s expand_aliases"
+           (cfg/get-shell-command-prefix
+            (assoc cfg/default-config :shell-command-prefix "shopt -s expand_aliases")))))
+
+(t/deftest test-load-config-applies-shell-settings
+  (t/testing "load-config applies the shell settings to bash execution (pi: getShellPath/getShellCommandPrefix)"
+    (let [tmp (str (fs/create-temp-dir {:dir "target" :prefix "shell-settings-test-"}))
+          saved (shell-options)]
+      (try
+        (spit (str (fs/path tmp "settings.edn"))
+              (pr-str {:shell-path "~/bin/bash"
+                       :shell-command-prefix "shopt -s expand_aliases"}))
+        (cfg/load-config :no-env? true :agent-dir tmp)
+        (t/is (= (str (System/getProperty "user.home") "/bin/bash")
+                 (:shell-path (shell-options))))
+        (t/is (= "shopt -s expand_aliases" (:command-prefix (shell-options))))
+        (t/testing "the defaults clear the knobs"
+          (cfg/load-config :no-env? true :no-settings? true)
+          (t/is (= {:shell-path nil :command-prefix nil} (shell-options))))
+        (finally
+          (bash-exec/set-shell-options! saved)
+          (fs/delete-tree tmp))))))
 
 (t/deftest test-get-theme-name
   (let [c (assoc cfg/default-config :theme "light")]

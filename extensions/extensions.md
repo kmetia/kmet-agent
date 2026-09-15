@@ -419,6 +419,51 @@ Other pi tool fields:
    :execute (fn [args] {:content "..."})})
 ```
 
+#### Custom bash tools (`create-bash-tool`)
+
+`ext/create-bash-tool` builds a bash tool with the spawn options pi exposes
+through `createBashTool` — the built-in bash tool is the same constructor with
+default options, so a tool registered under the name `bash` **replaces** it
+and keeps the built-in rendering:
+
+```clojure
+;; pi: examples/extensions/bash-spawn-hook.ts — adjust command/cwd/env before
+;; every spawn. The KMET_* session env is injected first, so the hook receives
+;; it in :env (spread the map to preserve it).
+(ext/register-tool! api
+  (ext/create-bash-tool api
+    {:spawn-hook (fn [{:keys [command cwd env]}]
+                   {:command (str "source ~/.profile\n" command)
+                    :cwd cwd
+                    :env (assoc env "MY_HOOK" "1")})}))
+
+;; A dedicated name + description gets default rendering (attach
+;; kmet.app.ui.tool-renderers' render-bash-call/render-bash-result for the
+;; built-in look — that namespace is shared with extensions).
+(ext/register-tool! api
+  (ext/create-bash-tool api
+    {:name "sandbox-bash" :description "Run a command inside the sandbox"
+     :operations my-remote-ops              ; pi: BashOperations
+     :shell-path "/bin/ash"                ; pi: shellPath
+     :command-prefix "export SANDBOX=1"     ; pi: commandPrefix
+     :expose-session-env? false}))           ; pi: exposeSessionEnvironment
+```
+
+Options (all optional): `:spawn-hook` `(fn [{:keys [command cwd env]}] → same
+map)` run before spawn, after the `KMET_*` session env is injected (pi:
+`BashSpawnHook`); `:expose-session-env?` (default true) injects
+`KMET_SESSION_ID`/`KMET_SESSION_FILE`/`KMET_PROVIDER`/`KMET_MODEL`/
+`KMET_REASONING_LEVEL` into every command — and adds the matching prompt
+guideline; `:command-prefix`/`:shell-path` default to the
+`:shell-command-prefix`/`:shell-path` settings; `:operations` replaces the
+local spawn (a remote/SSH executor receiving
+`{:command :cwd :on-data :signal :timeout :env}` and returning
+`{:exit-code :cleanup}`); `:name` `:label` `:description` override the
+tool-facing fields. The `:shell-command-prefix`/`:shell-path` settings are
+applied to every bash execution — the built-in tool, `!` commands, and
+factory-built tools alike — so `:command-prefix`/`:shell-path` only need to
+be passed for a per-tool override.
+
 ### Events
 
 ```clojure

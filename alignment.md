@@ -162,7 +162,9 @@ http-idle-timeout-ms/system-prompt/append-system-prompt/retry
 (enabled/max-retries/base-delay-ms)/enabled-models/hide-thinking-block/
 extensions/skills/prompts/themes dirs, compaction thresholds, terminal image
 display (`:terminal` — show-images/image-width-cells), provider image
-blocking (`:images` — block-images), `.kmet/SYSTEM.md` +
+blocking (`:images` — block-images), shell customization (`:shell-path` /
+`:shell-command-prefix` — applied to every bash execution: tool, `!`
+commands, and factory-built tools), `.kmet/SYSTEM.md` +
 `APPEND_SYSTEM.md` discovery, `KMET_PROVIDER`/`KMET_MODEL` env vars.
 
 Missing (pi `docs/settings.md`):
@@ -184,7 +186,6 @@ Missing (pi `docs/settings.md`):
 | `transport`, `websocketConnectTimeoutMs` | provider transport selection |
 | `terminal.clearOnShrink` | terminal display (the `terminal.showImages` / `terminal.imageWidthCells` rows are done — see §2) |
 | `images.autoResize` | image resize before sending (needs a resizer backend — babashka has no ImageIO/AWT; `images.blockImages` is done — see §2) |
-| `shellPath`, `shellCommandPrefix` | shell customization |
 | `markdown.codeBlockIndent`, `markdown.mermaid` | markdown rendering |
 | `enableSkillCommands` | register skills as `/skill:name` commands |
 | `thinkingBudgets` | per-level thinking token budgets |

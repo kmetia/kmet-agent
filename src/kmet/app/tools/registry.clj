@@ -57,17 +57,8 @@
                          :required ["path" "edits"]}
             :execute edit/execute
             :title edit/title)
-   "bash"  (tool/make-tool
-            :name "bash"
-            :label "Execute command"
-            :description "Execute a bash command with a timeout. For long-running commands, keep the timeout reasonable. Standard streams (stdout/stderr) are captured and returned."
-            :prompt-snippet "Execute bash commands (ls, grep, find, etc.)"
-            :prompt-guidelines []
-            :params {:command {:type :string :description "Bash command to execute"}
-                     :timeout {:type :number :description "Timeout in seconds (optional)" :optional? true}}
-            :execute bash/execute
-            :streams? true
-            :title bash/title)}
+   ;; Pi: createBashTool(cwd) with default options
+   "bash"  (bash/create-tool)}
    ;; grep, find, ls — disabled
   )
 

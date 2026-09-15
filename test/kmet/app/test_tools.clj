@@ -1,5 +1,6 @@
 (ns kmet.app.test-tools
-  (:require [clojure.string :as str]
+  (:require [clojure.set :as set]
+            [clojure.string :as str]
             [clojure.test :as t]
             [babashka.fs :as fs]
             [kmet.app.tools.core :as tools]
@@ -258,6 +259,127 @@
         (t/is (not= ::timeout result) "cancelled bash must return promptly")
         (t/is (:is-error result))
         (t/is (str/includes? (:content result) "aborted"))))))
+
+;; ─── Tool bash: pi parity (session env, spawn options, shell settings) ─────
+
+(t/deftest test-bash-strip-session-env
+  (t/testing "stale KMET_* session vars are dropped from the inherited env (pi resolveSpawnContext deletes them)"
+    (let [strip @#'bash-exec/strip-session-env]
+      (t/is (= {"PATH" "/bin"}
+               (strip {"PATH" "/bin"
+                       "KMET_SESSION_ID" "old" "KMET_SESSION_FILE" "old"
+                       "KMET_PROVIDER" "old" "KMET_MODEL" "old"
+                       "KMET_REASONING_LEVEL" "old"})))
+      (t/is (= {} (strip {}))))))
+
+(t/deftest test-bash-session-env
+  (t/testing "session-env builds the KMET_* map (pi resolveSpawnContext)"
+    (t/is (= {"KMET_SESSION_ID" "s1" "KMET_SESSION_FILE" "/tmp/s.ednl"
+              "KMET_PROVIDER" "deepseek" "KMET_MODEL" "m1"
+              "KMET_REASONING_LEVEL" "off"}
+             (bash-tool/session-env {:session {:id "s1" :file "/tmp/s.ednl"}
+                                     :provider :deepseek :model "m1" :thinking-level :off})))
+    (t/testing "absent values are omitted (pi: session file only when persisted)"
+      (t/is (= {} (bash-tool/session-env {})))
+      (t/is (= {} (bash-tool/session-env nil)))
+      (t/is (= {"KMET_MODEL" "m1"} (bash-tool/session-env {:model "m1"}))))))
+
+(t/deftest test-bash-session-env-keys-in-sync
+  (t/testing "every variable session-env can emit is stripped from the inherited env (no nested-kmet leak)"
+    (t/is (set/subset? (set (keys (bash-tool/session-env
+                                   {:session {:id "s" :file "f"}
+                                    :provider :p :model "m" :thinking-level :off})))
+                       (set bash-exec/session-env-keys)))))
+
+(t/deftest ^:slow test-tool-bash-session-env
+  (t/testing "pi: exposeSessionEnvironment — the run's KMET_* session env reaches the command"
+    (let [env-fn (fn [] (bash-tool/session-env {:session {:id "sess-1" :file "/tmp/tool-s.ednl"}
+                                                :provider :deepseek
+                                                :model "m-9"
+                                                :thinking-level :off}))
+          result (binding [bash-tool/*session-env-fn* env-fn]
+                   (tools/execute-tool
+                    "bash"
+                    {:command (str "echo id=$KMET_SESSION_ID file=$KMET_SESSION_FILE"
+                                   " p=$KMET_PROVIDER m=$KMET_MODEL t=$KMET_REASONING_LEVEL")}))]
+      (t/is (not (:is-error result)))
+      (t/is (str/includes? (:content result) "id=sess-1"))
+      (t/is (str/includes? (:content result) "file=/tmp/tool-s.ednl"))
+      (t/is (str/includes? (:content result) "p=deepseek"))
+      (t/is (str/includes? (:content result) "m=m-9"))
+      (t/is (str/includes? (:content result) "t=off")))))
+
+(t/deftest ^:slow test-tool-bash-session-env-not-exposed
+  (t/testing "a tool built with :expose-session-env? false injects nothing (pi exposeSessionEnvironment: false)"
+    (let [tool (bash-tool/create-tool {:expose-session-env? false})
+          result (binding [bash-tool/*session-env-fn* (fn [] {"KMET_SESSION_ID" "sess-1"})]
+                   ((:execute tool) {:command "echo id=[$KMET_SESSION_ID]"}))]
+      (t/is (not (:is-error result)))
+      (t/is (str/includes? (:content result) "id=[]"))
+      (t/is (nil? (:prompt-guidelines tool))
+            "the guideline is gated on exposure (pi: exposeSessionEnvironment)"))))
+
+(t/deftest test-tool-bash-create-tool-defaults
+  (t/testing "create-tool is pi's createBashTool — the built-in tool with defaults"
+    (let [tool (bash-tool/create-tool)
+          builtin (tools/get-tool "bash")]
+      (t/is (= "bash" (:name tool)))
+      (t/is (= "Execute command" (:label tool)))
+      (t/is (= (:description builtin) (:description tool)))
+      (t/is (= (:parameters tool) (:parameters builtin)))
+      (t/is (= ["You can inspect KMET_* environment variables for current model and session details."]
+               (:prompt-guidelines tool)))
+      (t/is (:streams? tool)))))
+
+(t/deftest ^:slow test-tool-bash-create-tool-spawn-hook
+  (t/testing "pi: BashSpawnHook — command/cwd/env are rewritten before spawn, after the KMET_* injection"
+    (let [seen (atom nil)
+          tool (bash-tool/create-tool {:spawn-hook (fn [ctx]
+                                                     (reset! seen ctx)
+                                                     (assoc ctx :command "echo HOOKED"))})
+          result (binding [bash-tool/*session-env-fn* (fn [] {"KMET_SESSION_ID" "sess-1"})]
+                   ((:execute tool) {:command "echo unreachable"}))]
+      (t/is (not (:is-error result)))
+      (t/is (str/includes? (:content result) "HOOKED"))
+      (t/is (not (str/includes? (:content result) "unreachable")))
+      (t/is (= "echo unreachable" (:command @seen)))
+      (t/is (= (System/getProperty "user.dir") (:cwd @seen)))
+      (t/is (= "sess-1" (get (:env @seen) "KMET_SESSION_ID"))
+            "the hook receives the injected session env (pi: injection happens before spawnHook)"))))
+
+(t/deftest ^:slow test-tool-bash-shell-command-prefix
+  (t/testing "pi: shellCommandPrefix — a settings line is prepended to every command"
+    (bash-exec/set-shell-options! {:command-prefix "echo PREFIX-LINE"})
+    (try
+      (let [result (tools/execute-tool "bash" {:command "echo body"})]
+        (t/is (not (:is-error result)))
+        (t/is (str/starts-with? (:content result) "PREFIX-LINE"))
+        (t/is (str/includes? (:content result) "body")))
+      (t/testing "an explicit tool option wins (pi: options baked into the tool)"
+        (let [tool (bash-tool/create-tool {:command-prefix "echo TOOL-PREFIX"})
+              result ((:execute tool) {:command "echo body"})]
+          (t/is (str/starts-with? (:content result) "TOOL-PREFIX"))
+          (t/is (not (str/includes? (:content result) "PREFIX-LINE")))))
+      (finally
+        (bash-exec/set-shell-options! {:shell-path nil :command-prefix nil})))))
+
+(t/deftest ^:slow test-tool-bash-shell-path
+  (t/testing "pi: shellPath — a custom shell binary runs the command"
+    (when-let [sh (first (filter #(fs/exists? %) ["/bin/sh" "/usr/bin/sh" "/bin/bash" "/usr/bin/bash"]))]
+      (bash-exec/set-shell-options! {:shell-path sh})
+      (try
+        (let [result (tools/execute-tool "bash" {:command "echo shell-ok"})]
+          (t/is (not (:is-error result)))
+          (t/is (str/includes? (:content result) "shell-ok")))
+        (finally
+          (bash-exec/set-shell-options! {:shell-path nil :command-prefix nil}))))))
+
+(t/deftest test-tool-bash-shell-path-not-found
+  (t/testing "a missing custom shell errors out (pi: Custom shell path not found)"
+    (let [tool (bash-tool/create-tool {:shell-path "/nonexistent/kmet-shell"})
+          result ((:execute tool) {:command "echo x"})]
+      (t/is (:is-error result))
+      (t/is (str/includes? (:content result) "Custom shell path not found")))))
 
 ;; ─── Unknown tool ─────────────────────────────────────────────────────────
 
