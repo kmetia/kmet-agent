@@ -207,7 +207,7 @@
                                                       ;; styling survives truncation, but
                                                       ;; plain-first keeps width math simple
                                                       (utils/truncate-to-width raw content-width "..."))))]
-                ["" line]))
+                [line]))
           (let [container @inner-container
                 last-call-component-atom (:last-call-component-atom this)
                 last-result-component-atom (:last-result-component-atom this)

@@ -19,6 +19,36 @@
     (mapv utils/strip-ansi-codes
           (core/render comp width))))
 
+(deftest test-bash-call
+  (testing "short command renders as one line, timeout suffix intact"
+    (let [lines (plain (r/render-bash-call "bash" {:command "ls -la" :timeout 60}
+                                           th 60 {:expanded false}) 60)]
+      (is (= 1 (count lines)))
+      (is (str/includes? (first lines) "$ ls -la (timeout 60s)"))))
+  (testing "collapsed caps a multiline command at the head + hint"
+    (let [cmd (str "python3 - <<'EOF'\n"
+                   (str/join "\n" (mapv #(str "body " %) (range 10)))
+                   "\nEOF")
+          lines (plain (r/render-bash-call "bash" {:command cmd} th 60 {:expanded false}) 60)]
+      (is (< (count lines) 10) "the payload does not render in full")
+      (is (str/starts-with? (first lines) "$ python3 - <<'EOF'"))
+      (is (str/includes? (peek lines) "more lines,"))
+      (is (not-any? #(str/includes? % "body 9") lines) "tail is cut")))
+  (testing "collapsed caps a long single-line command at the wrapped head"
+    (let [cmd (str "echo " (str/join " " (repeat 60 "word")))
+          lines (plain (r/render-bash-call "bash" {:command cmd} th 60 {:expanded false}) 60)]
+      (is (= 4 (count lines)) "3 visual lines + hint")
+      (is (str/includes? (peek lines) "more lines,"))))
+  (testing "expanded renders the command verbatim (pi parity)"
+    (let [cmd (str/join "\n" (mapv #(str "line " %) (range 12)))
+          lines (plain (r/render-bash-call "bash" {:command cmd} th 60 {:expanded true}) 60)]
+      (is (= 12 (count lines)))
+      (is (str/includes? (peek lines) "line 11"))))
+  (testing "missing command keeps the `$ ...` placeholder"
+    (let [lines (plain (r/render-bash-call "bash" {} th 60 {:expanded false}) 60)]
+      (is (= 1 (count lines)))
+      (is (str/includes? (first lines) "$ ...")))))
+
 (deftest test-read-call
   (testing "full call shows name + path"
     (let [lines (plain (r/render-read-call "read" {:file_path "a/b.txt"} th 40 {}) 40)]

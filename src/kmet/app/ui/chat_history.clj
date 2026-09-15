@@ -46,21 +46,68 @@
 
 ;; ─── Render helpers (defined before the record) ────────────────────────────
 
+(declare content->user-text)
+
+(defn- full-skill-block-role?
+  "True when a :user message renders as a BARE skill invocation (its
+   content parses as a skill block with no trailing user message) — in
+   quiet mode it joins the tool run instead of breaking it. A block with
+   trailing args also renders a user box below the skill line, so the run
+   must break there. Plain data check on the message map (no component
+   reverse-engineering)."
+  [m]
+  (and (= :user (:role m))
+       (boolean (try (let [block (skills/parse-skill-block
+                                  (content->user-text (:content m "")))]
+                       (when (and block (empty? (:user-message block))) block))
+                     (catch Exception _ nil)))))
+
+(defn- silent-tool-call-assistant?
+  "True when an :assistant message carries tool calls but no text/thinking
+   of its own — it renders nothing (its ToolExecutionComponents are the
+   visuals, pi: hasToolCalls), so in quiet mode it must neither open nor
+   break the tool run. Plain data check (the finalized shape carries plain
+   strings; the live shape carries content atoms)."
+  [m]
+  (and (= :assistant (:role m))
+       (or (seq (:tool-calls m)) (:tool-calls? m))
+       (let [text (if-let [a (:text-atom m)] @a (:content m ""))
+             thinking (if-let [a (:thinking-atom m)] @a (:thinking m ""))]
+         (and (empty? (str/trim (str text)))
+              (empty? (str/trim (str thinking)))))))
+
 (defn- render-messages
   "Render message components. A user message that follows any earlier
    content gets a leading blank line (the Spacer(1) the old container
    model stored explicitly). The info banner counts as earlier content,
    so the first user message after the banner gets the same separator as
    subsequent ones — the banner's box padding alone doesn't read as a
-   visible gap between two boxed messages."
-  [msgs width banner-present?]
+   visible gap between two boxed messages. In quiet mode a tool run
+   renders as bare grouped lines (no per-entry separator of its own),
+   so the separator moves here: a quiet run-opening entry gets the blank
+   line, while continuation lines inside the run render with no separator.
+   A :user message that renders as a bare skill invocation joins the run."
+  [msgs width banner-present? quiet?]
   (persistent!
-   (loop [msgs msgs, seen-any? banner-present?, acc (transient [])]
+   (loop [msgs msgs, seen-any? banner-present?, in-quiet-run? false, acc (transient [])]
      (if-let [m (first msgs)]
        (let [lines (protocols/render (:component m) width)
-             sep? (and (= :user (:role m)) seen-any?)
-             acc (if sep? (conj! acc "") acc)]
-         (recur (rest msgs) true (reduce conj! acc lines)))
+             run-member? (and quiet?
+                              (or (#{:tool :skill} (:role m))
+                                  (full-skill-block-role? m)))
+             ;; a tool-call-only assistant message renders nothing (its
+             ;; tools are the visuals) — invisible, so it neither opens
+             ;; nor breaks the run (data check, not a render-emptiness
+             ;; probe: a mid-stream orchestration artifact must not depend
+             ;; on what this width happens to render)
+             invisible? (silent-tool-call-assistant? m)
+             run-open? (and run-member? (not in-quiet-run?))
+             sep? (or (and (= :user (:role m)) seen-any? (not run-member?))
+                      run-open?)
+             acc (if (and sep? (not invisible?)) (conj! acc "") acc)]
+         (recur (rest msgs) true
+                (if invisible? in-quiet-run? run-member?)
+                (reduce conj! acc lines)))
        acc))))
 
 ;; ─── ChatHistoryComponent record ───────────────────────────────────────────
@@ -78,7 +125,7 @@
   (render [_this width]
     (let [msgs @messages-atom
           info-lines (when-let [i @info-comp-atom] (protocols/render i width))
-          msg-lines (render-messages msgs width (some? @info-comp-atom))]
+          msg-lines (render-messages msgs width (some? @info-comp-atom) (= :quiet @tools-expanded-atom))]
       ;; Without a banner (the common case) return the flat message vector
       ;; directly — copying the whole transcript again here is pure waste.
       (if (seq info-lines)
@@ -427,10 +474,20 @@
    (pi: hasToolCalls). Call BEFORE chat-history-finalize-streaming! when the
    message's first tool starts executing: a tool-call-only assistant message
    must not settle into the '(no response)' placeholder — its tool components
-   are the visuals. No-op without a streaming message."
+   are the visuals. The flag lives on the message map too (the component
+   alone is not data): the quiet run-grouping reads it to keep silent
+   assistant entries from breaking a tool run. No-op without a streaming
+   message."
   [ch]
   (when-let [msg @(:streaming-atom ch)]
-    (am/assistant-message-set-tool-calls! (:component msg) true)))
+    (am/assistant-message-set-tool-calls! (:component msg) true)
+    (swap! (:messages-atom ch)
+           (fn [msgs]
+             (mapv (fn [m]
+                     (if (identical? m msg)
+                       (assoc m :tool-calls? true)
+                       m))
+                   msgs)))))
 
 (defn chat-history-finalize-streaming!
   "Finalize the current streaming message: materialize the live content

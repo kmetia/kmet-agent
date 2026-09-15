@@ -981,3 +981,19 @@
         {:visual-lines visual-lines :skipped-count 0}
         {:visual-lines (vec (take-last max-lines visual-lines))
          :skipped-count (- n max-lines)}))))
+
+(defn truncate-head-to-visual-lines
+  "Truncate text to the FIRST max-lines visual lines at the given width —
+   the head-keeping sibling of truncate-to-visual-lines, for content whose
+   informative part is at the top (a shell command: the invocation, not the
+   heredoc payload chained after it). Width-aware, same return shape:
+   {:visual-lines [...] :skipped-count n}."
+  [text max-lines width]
+  (if (or (empty? text) (<= max-lines 0) (<= width 0))
+    {:visual-lines [] :skipped-count 0}
+    (let [visual-lines (wrap-text-with-ansi text width)
+          n (count visual-lines)]
+      (if (<= n max-lines)
+        {:visual-lines visual-lines :skipped-count 0}
+        {:visual-lines (vec (take max-lines visual-lines))
+         :skipped-count (- n max-lines)}))))
