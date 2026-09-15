@@ -8,6 +8,7 @@
             [babashka.fs :as fs]
             [kmet.tui.theme :as theme]
             [kmet.ai.auth :as auth]
+            [kmet.app.bash-executor :as bash-exec]
             [kmet.libs.http :as http]
             [kmet.libs.edn-store :as eds]))
 
@@ -37,6 +38,10 @@
    ;; outbound HTTP transport: :platform (default — babashka.http-client
    ;; where possible, curl fallback) or :curl (everything through curl)
    :http-transport :platform
+   ;; pi: shellPath / shellCommandPrefix — a custom shell binary for bash
+   ;; execution and a line prepended to every bash command (settings.edn)
+   :shell-path nil
+   :shell-command-prefix nil
    :show-cache-miss-notices false
    ;; pi: queue drain modes (:all | :one-at-a-time)
    :steering-mode :all
@@ -94,9 +99,9 @@
 
 (def deep-merge eds/deep-merge)
 
-;; load-config (above) applies the merged :http-transport to the runtime
-;; knob; the validated accessor lives with the other accessors below.
-(declare get-http-transport)
+;; load-config (above) applies the merged :http-transport and the shell
+;; settings to their runtime knobs; the accessors live with the others below.
+(declare get-http-transport get-shell-path get-shell-command-prefix)
 
 (defn- resolve-path
   "Resolve a path value relative to its scope dir. ~ and absolute paths pass
@@ -227,6 +232,11 @@
     ;; passes through, so the transport setting applies in interactive
     ;; and print mode alike).
     (http/set-transport! (get-http-transport with-env))
+    ;; pi: shellPath/shellCommandPrefix — read by the bash tool and by
+    ;; executeBash in pi; applied here so both paths (and extension-built
+    ;; bash tools) pick the settings up without per-call config reads.
+    (bash-exec/set-shell-options! {:shell-path (get-shell-path with-env)
+                                   :command-prefix (get-shell-command-prefix with-env)})
     with-env))
 
 ;; ─── Config accessors ──────────────────────────────────────────────────────
@@ -320,6 +330,19 @@
   [config]
   (let [v (get config :http-transport :platform)]
     (if (contains? #{:platform :curl} v) v :platform)))
+
+(defn get-shell-path
+  "Custom shell binary for bash execution (pi: getShellPath — a Cygwin/
+   Git-Bash override on Windows). A leading ~ expands; nil = the platform
+   default (pi: getShellConfig — bash, /bin/bash, PATH, then sh)."
+  [config]
+  (some-> (:shell-path config) str expand-path))
+
+(defn get-shell-command-prefix
+  "Line prepended to every bash command (pi: getShellCommandPrefix, e.g.
+   \"shopt -s expand_aliases\" for alias support); nil = none."
+  [config]
+  (:shell-command-prefix config))
 
 (defn get-hide-thinking-block
   "Pi: getHideThinkingBlock — whether thinking blocks are hidden by default."

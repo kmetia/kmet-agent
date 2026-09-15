@@ -255,6 +255,8 @@ Example `~/.kmet/agent/settings.edn`:
  :session-dir "~/.kmet/sessions"
  :http-idle-timeout-ms 300000   ; LLM stream idle + total deadline in ms; 0 disables
  :http-transport :platform      ; :platform (default) = babashka.http-client with curl fallback (SOCKS proxies, live streams on Jolt); :curl = everything through curl
+ :shell-command-prefix nil      ; line prepended to every bash command, e.g. "shopt -s expand_aliases"; nil = none
+ :shell-path nil                ; custom shell binary for bash execution (e.g. Cygwin/Git Bash on Windows); a leading ~ expands
  :system-prompt "You are a helpful assistant."   ; replaces the default system prompt
  :append-system-prompt "Follow the project conventions." ; appended after it}
 ```

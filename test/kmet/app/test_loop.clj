@@ -743,6 +743,47 @@
               "agent-end :messages includes the user message")
         (t/is (= :idle @(:status agent)) "Agent status should be idle after tool turn")))))
 
+(t/deftest ^:slow test-loop-bash-session-env
+  (t/testing "bash tool calls run with the run's KMET_* session env (pi: resolveSpawnContext)"
+    (let [events (atom [])
+          call-count (atom 0)
+          dir (str (fs/create-temp-dir {:dir "target" :prefix "loop-bash-env-"}))
+          sess (session/create-session dir)
+          agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e))
+                                       :session sess
+                                       :provider :deepseek
+                                       :model "m-9"
+                                       :thinking :off)]
+      (try
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [opts]
+                        (future
+                          (if (= 1 (swap! call-count inc))
+                            (do (when-let [on-tc (:on-tool-call opts)]
+                                  (on-tc {:id "tc1" :name "bash"
+                                          :arguments (str "{\"command\":\"echo id=$KMET_SESSION_ID"
+                                                          " m=$KMET_MODEL t=$KMET_REASONING_LEVEL\"}")
+                                          :index 0}))
+                                (when-let [on-done (:on-done opts)]
+                                  (on-done :tool-calls)))
+                            (do (when-let [on-text (:on-text opts)]
+                                  (on-text "done"))
+                                (when-let [on-done (:on-done opts)]
+                                  (on-done :stop))))
+                          :done))]
+          @(loop/run-agent-turn agent
+                                {:message "run tool"
+                                 :on-done (fn [_])
+                                 :on-error (fn [_])}))
+        (let [end (first (filter #(= :tool-execution-end (:type %)) @events))
+              content (:content (:result end))]
+          (t/is (str/includes? content (str "id=" (:id sess))))
+          (t/is (str/includes? content "m=m-9"))
+          (t/is (str/includes? content "t=off")))
+        (finally
+          (fs/delete-tree dir))))))
+
 (t/deftest test-loop-malformed-tool-args-degrade-to-map
   ;; Malformed tool-call arguments (raw JSON string that fails to parse) must
   ;; degrade to a map before reaching the tool (pi: parseStreamingJson) — the

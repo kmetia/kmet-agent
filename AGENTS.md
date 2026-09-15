@@ -359,7 +359,9 @@ for a full gate. The default validation loop is the changed-file tasks above.
   to one defn with `#_{:clj-kondo/ignore [:redefined-var]}` on the line before
   the form; only add it for deliberate API-name collisions, not to silence
   code smells.
-- **Shell resolution** (`kmet.app.bash-executor`): `/bin/bash` → `which bash` → `sh`.
+- **Shell resolution** (`kmet.app.bash-executor`): the `:shell-path` setting
+  (pi: `shellPath`, a leading `~` expands) overrides, else
+  `/bin/bash` → `which bash` → `sh`.
   On Windows this resolves through Git Bash; under WSL the WSL shell is used.
 
 ## Error handling

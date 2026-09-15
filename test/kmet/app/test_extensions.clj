@@ -64,7 +64,18 @@
       (ext/models-unregister-provider! api :ext-prov)
       (t/is (some #(= [:register-provider! :ext-prov {:models [{:id "m"}]}] %)
                   (:model-calls @state)))
-      (t/is (some #(= [:unregister-provider! :ext-prov] %) (:model-calls @state))))))
+      (t/is (some #(= [:unregister-provider! :ext-prov] %) (:model-calls @state))))
+    (testing "create-bash-tool returns a registrable tool and captures the options (pi: createBashTool)"
+      (let [spawn-hook (fn [ctx] ctx)
+            tool (ext/create-bash-tool api {:spawn-hook spawn-hook
+                                            :expose-session-env? false})]
+        (t/is (= "bash" (:name tool)))
+        (t/is (fn? (:execute tool)))
+        (ext/register-tool! api tool)
+        (t/is (contains? (:tools @state) "bash"))
+        (t/is (some #(and (identical? spawn-hook (:spawn-hook %))
+                          (false? (:expose-session-env? %)))
+                    (:bash-tool-opts @state)))))))
 
 (t/deftest test-theme-lookup-shared-directly
   (testing "theme lookups come from the shared kmet.tui.theme layer, not the
