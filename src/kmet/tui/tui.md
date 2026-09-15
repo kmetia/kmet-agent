@@ -313,6 +313,22 @@ Rules:
 - one ref per element instance — sharing across two elements means
   last-mount wins.
 
+The second canonical use, beside focus: a wrapper forwarding input to a
+DSL-owned leaf. Input is delivered to the focused leaf only (§7 — no
+bubbling), so a selector keeps focus itself and pushes keystrokes into
+its search field — when that field is a tag-owned `[:input]`, the ref is
+how the wrapper reaches it:
+
+```clojure
+(def search-ref (hiccup/ref))
+
+(hiccup/root (fn [_] [:container {} ... [:input {:ref search-ref}] ...]))
+
+;; handle-input / set-focused! — outside render bodies:
+(protocols/handle-input @search-ref data)
+(input/input-get-value @search-ref)
+```
+
 ### 2.5 Fn components — ComponentFn
 
 A plain fn used as a tag head is wrapped in a ComponentFn record whose body
@@ -613,9 +629,14 @@ cursor (§3.1) — the same pure-data story with a setter instead of a
 (reakt/cursor-reset! transport :babashka)    ;; write back, =-gated
 ```
 
-**Hot-path carve-out**: the transcript is NOT a fn component re-deriving
-from a message seq — that would be O(transcript) rebuild per token. It
-stays records with instance storage; screens reference it as a splice/tag.
+**Hot-path carve-out**: message *content* is never re-derived as DSL data
+inside a body — a token append would re-run the body and rebuild
+O(transcript) elements per token (superlinear; hiccup.md §4 has the
+numbers). The transcript stays records with instance storage; screens
+reference it as a splice/tag. A DSL container that only splices those
+records and tracks the messages vector is a different animal — its body
+re-runs on add/remove, not per token, and it measures perf-neutral — but
+not a required migration.
 
 ---
 
@@ -989,7 +1010,8 @@ Notes:
 
 ### Per-frame counters
 
-Under `--debug`, hiccup exposes process-wide counters:
+Hiccup keeps process-wide counters, collected always and readable any
+time (tests assert on them):
 
 ```clojure
 (hiccup/counters)
@@ -1108,9 +1130,11 @@ rendering-shaped ones are postponed below.
 
 ### Plan
 
-Nothing tracked. The two glimmer borrows that were pending here — R3b
-(focus-derived help line) and R7 (declarative `:overlay`) — were
-re-evaluated and declined 2026-09-11; the analysis is recorded under
+Nothing tracked. The `kmet.app.ui` hiccup migration is inventoried and
+planned in `hiccup.md` (§6) — outside this roadmap. The two glimmer
+borrows that were pending here — R3b (focus-derived help line) and R7
+(declarative `:overlay`) — were re-evaluated and declined 2026-09-11;
+the analysis is recorded under
 "Deliberately not borrowing" so it is not redone.
 
 ### Postponed indefinitely
