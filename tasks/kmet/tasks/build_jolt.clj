@@ -151,7 +151,7 @@
   [args]
   (loop [args args
          opts {:mode "release" :flags [] :boot nil :target nil :target-pack nil
-               :out nil :jolt nil :force? false :no-smoke? false :help? false}]
+               :out nil :jolt nil :force? false :no-smoke? true :help? false}]
     (if-some [arg (first args)]
       (let [more (rest args)]
         (case arg
@@ -172,6 +172,7 @@
           "--out" (recur (rest more) (assoc opts :out (opt-value arg more)))
           "--jolt" (recur (rest more) (assoc opts :jolt (opt-value arg more)))
           "--force" (recur more (assoc opts :force? true))
+          "--smoke" (recur more (assoc opts :no-smoke? false))
           "--no-smoke" (recur more (assoc opts :no-smoke? true))
           ("-h" "--help") (recur more (assoc opts :help? true))
           (if (str/starts-with? arg "-")
@@ -345,7 +346,8 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
      --target-pack DIR        the target's pack for --target (or $JOLT_TARGET_PACK)
      -o, --out PATH           artifact path (default: dist/kmet-<ver>-jolt<jv>-<platform>)
      --force                  clear the scratch build dir first (a full re-emit)
-     --no-smoke               skip running the artifact after the build
+     --smoke                  run the artifact after the build (--list-models plus --version;
+                              skipped by default to keep local dist builds fast and side-effect free)
      --jolt PATH              the jolt executable that compiles (default: jolt on PATH)
      -h, --help               this text
 

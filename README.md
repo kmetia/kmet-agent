@@ -379,7 +379,7 @@ Cross-builds work from any host because packaging is download + concat only.
 bb uberjar              # Build target/kmet.jar (also runnable: bb target/kmet.jar)
 bb dist                 # Executable for the current platform -> dist/
 bb dist --all           # Every published platform
-bb dist macos-aarch64   # Explicit platforms; --force re-downloads, --no-smoke skips the post-build run
+bb dist macos-aarch64   # Explicit platforms; --force re-downloads, --smoke runs the post-build check
 ```
 
 On jolt the same task AOT-compiles the app through
@@ -405,8 +405,8 @@ release assets behind `linux-amd64`/`linux-aarch64` (a release asset slug like
 `target/build-cache/` (sha256-verified on download) and `bb dist` always
 rebuilds a fresh `target/kmet.jar` first so artifacts never bundle stale
 sources. Downloads use `curl` (preinstalled on Termux, macOS, Linux and
-Windows 10+). Jolt compiles under `target/jolt/<platform>/<mode>/` and
-smoke-tests the freshly built binary (`--list-models`) before it is announced.
+Windows 10+). Jolt compiles under `target/jolt/<platform>/<mode>/`; `--smoke` runs the freshly
+built binary (`--list-models` plus `--version`) before it is announced.
 
 Versioning: artifacts are stamped with **jolt's checkout rule**
 (`kmet.libs.version`, jolt's `tools/version.sh`), so the base version reads
