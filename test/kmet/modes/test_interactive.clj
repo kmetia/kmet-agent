@@ -27,6 +27,7 @@
             [kmet.config :as cfg]
             [kmet.tui.components.container :as container]
             [kmet.tui.components.editor :as editor]
+            [kmet.tui.components.expandable-text :as expandable-text]
             [kmet.libs.terminal-image :as timg]
             [kmet.tui.protocols :as protocols]
             [babashka.fs :as fs]
@@ -490,6 +491,54 @@
         (is (true? (:block-images @(:cfg ag)))
             "block-images re-applied to the running agent")
         (finally (reset! subs/image-settings-atom prev-settings))))))
+
+(deftest reload-reseeds-tool-display-mode-into-header-and-resources
+  (testing "/reload applies the reloaded tool display mode to the chat, the
+            header and the loaded resources — the ctrl+o handler and the
+            extension setter keep all three in sync, reload must too"
+    (let [ch (ui/make-chat-history :tool-display-mode :collapsed)
+          hdr (expandable-text/make-expandable-text (constantly "compact")
+                                                    (constantly "full"))
+          lr (ui/make-loaded-resources)
+          cs {:agent-state (atom (agent/make-agent-state))
+              :chat-history ch
+              :header-comp hdr
+              :loaded-resources-comp lr
+              :theme-controller nil
+              :footer-comp nil
+              :config cfg/default-config
+              :tui nil
+              :system-prompt-opts (atom nil)}
+          prev-settings @subs/image-settings-atom
+          reload (fn [mode]
+                   (with-redefs [cfg/init! (fn [] (assoc cfg/default-config
+                                                         :tool-display-mode mode))
+                                 theme-ctrl/set-config! (fn [_ _] nil)
+                                 app-kb/reload-agent-keybindings! (fn [] nil)
+                                 packages/load-extensions! (fn [] [])
+                                 packages/load-themes! (fn [] nil)
+                                 models/load-models-config! (fn [] nil)
+                                 skills/clear-skills! (fn [] nil)
+                                 prompts/clear-prompt-templates! (fn [] nil)
+                                 packages/load-skills! (fn [] nil)
+                                 packages/load-prompts! (fn [] nil)
+                                 context/load-project-context-files (fn [_ _] [])
+                                 extensions/ui-reset! (fn [] nil)
+                                 extensions/clear-extensions! (fn [] nil)
+                                 extensions/discover-resources! (fn [_ _] nil)
+                                 event-bus/emit-event! (fn [_] nil)]
+                     ((var inter/handle-reload) cs nil)))]
+      (try
+        (reload :expanded)
+        (is (= :expanded (ui/chat-history-get-tool-display-mode ch)))
+        (is (true? @(:expanded?-atom hdr)) "header follows the reloaded mode")
+        (is (true? @(:expanded?-atom lr)) "resources follow the reloaded mode")
+        (reload :quiet)
+        (is (= :quiet (ui/chat-history-get-tool-display-mode ch)))
+        (is (false? @(:expanded?-atom hdr)) "quiet projects to collapsed")
+        (is (false? @(:expanded?-atom lr)) "quiet projects to collapsed")
+        (finally
+          (reset! subs/image-settings-atom prev-settings))))))
 
 (deftest heal-stale-scrollback-when-idle-gating
   (testing "input heals a stale scrollback only at a streaming-free moment"

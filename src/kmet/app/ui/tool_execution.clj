@@ -185,9 +185,17 @@
       ;; quiet
       ;; line never re-invalidates and stays immutable in scrollback.
         (if quiet?
-          (do (doseq [c (distinct (remove nil? [(last-call-component this)
-                                                (last-result-component this)]))]
-                (cda/dispose-component! c))
+          (do (let [prev-call (last-call-component this)
+                    prev-result (last-result-component this)
+                    ;; identity-deduped (records compare field-wise): a
+                    ;; renderer returning one instance for both slots must
+                    ;; not be disposed twice
+                    obsolete (if (and prev-call prev-result
+                                      (identical? prev-call prev-result))
+                               [prev-call]
+                               (remove nil? [prev-call prev-result]))]
+                (doseq [c obsolete]
+                  (cda/dispose-component! c)))
               (doseq [c (last-image-children this)]
                 (cda/dispose-component! c))
               (reset! (:last-call-component-atom this) nil)

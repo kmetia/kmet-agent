@@ -132,6 +132,20 @@
           (is (= :assistant (:role (first msgs))))
           (is (= "Final message" (:content (first msgs)))))))))
 
+(deftest test-mark-streaming-tool-calls-then-finalize
+  (testing "marking the streaming message tool-call-bearing does not break
+            finalize's identity match, so the entry still materializes"
+    (let [ch (ch/make-chat-history)]
+      (ch/chat-history-start-streaming! ch)
+      (ch/chat-history-append-streaming-text! ch "Final message ")
+      (ch/chat-history-mark-streaming-tool-calls! ch)
+      (ch/chat-history-finalize-streaming! ch)
+      (let [entry (peek @(:messages-atom ch))]
+        (is (false? (:streaming? entry)) "finalize found the marked entry")
+        (is (nil? (:text-atom entry)) "content atoms materialized and stripped")
+        (is (= "Final message " (:content entry)))
+        (is (true? (:tool-calls? entry)) "the tool-call flag survives finalization")))))
+
 (deftest test-finalize-empty
   (testing "finalize empty streaming returns nil"
     (let [ch (ch/make-chat-history)]
