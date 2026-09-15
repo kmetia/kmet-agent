@@ -2343,6 +2343,7 @@
 (def input-get-value input/input-get-value)
 (def input-set-on-submit! input/input-set-on-submit!)
 (def input-set-on-escape! input/input-set-on-escape!)
+(def input-set-on-change! input/input-set-on-change!)
 (def make-editor editor/make-editor)
 ;; IEditorComponent members dispatch through the protocol when the target
 ;; implements it (custom editors from extensions), else the field-based fn

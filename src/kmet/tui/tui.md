@@ -186,7 +186,7 @@ extensions never add host elements. Tags and props:
 | `:dynamic-border` | `:color-fn` (primary; default: theme `:border` color), `:border` (§2.8) | none (leaf) |
 | `:truncated-text` | `:text` (primary), `:padding-x` `:padding-y` (default 0) | none (leaf) |
 | `:spinner` | `:text` (primary), `:active`, `:prefix`, `:frames`, `:interval-ms`, `:spinner-color-fn`, `:message-color-fn` | none (leaf) |
-| `:input` | `:value` (primary), `:on-submit`, `:on-escape` | none (leaf) |
+| `:input` | `:value` (primary), `:on-submit`, `:on-escape`, `:on-change` | none (leaf) |
 | `:expandable-text` | `:collapsed-fn`, `:expanded-fn` (both required), `:expanded?`, `:padding-x` `:padding-y` | none (leaf) |
 | `:image` | `:base64-data`, `:mime-type` (both required), `:theme`, `:max-width-cells` (default 60), `:max-height-cells`, `:filename`, `:image-id` | none (leaf) |
 | `:select-list` | `:items` (primary), `:height` (default 10), `:theme`, `:header`, `:no-match-text`, `:min-primary-column-width` `:max-primary-column-width`, `:truncate-primary`, `:on-select`, `:on-escape`, `:on-selection-change`, `:on-key` | none (leaf) |
@@ -218,8 +218,12 @@ settings list's `:enable-search`, a spinner's `:frames`/`:interval-ms`
 rendering), a cancellable-loader's `:spinner` child (a swap, with nothing
 owning the replacement). Live updates can still go through `:ref` plus the
 component's setters (e.g. `(input/input-set-value! (deref r) "x")`), the
-same contract the spliced-record pattern always used. Focus is a host
-concern — mount the component, then `tui-set-focus` on the ref'd instance.
+same contract the spliced-record pattern always used. A setter write is
+programmatic, not an edit: it does not fire the `:on-change` callback
+(which reports user edits — value-changing keystrokes, deletes, paste,
+undo — and stays silent on cursor-only moves), so an `on-change` →
+write-back cycle cannot loop. Focus is a host concern — mount the
+component, then `tui-set-focus` on the ref'd instance.
 
 **Host-owned instance**: `kmet.tui.core` still constructs its flash
 container directly — the render loop composites that single instance's
@@ -269,7 +273,9 @@ through only when it changed from the previous pass's props AND differs
 from the live value, coerced the way construction coerces it (nil ⇒ the
 default); an unchanged prop never overwrites live state, so a keystroke or
 a ref-driven toggle survives an unrelated prop change, while a prop that
-did change wins. An `:items` change is a REFRESH of the same list, not a
+did change wins. Callbacks (`:on-change`,
+`:on-submit`, `:on-escape`, ...) are configuration, not state — they are
+re-applied on every patch. An `:items` change is a REFRESH of the same list, not a
 wholesale replacement: the typed filter/query and the selection position
 survive it (the resetting `select-list-set-items!` /
 `settings-list-set-items!` default is the imperative variant, for a

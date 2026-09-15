@@ -275,3 +275,27 @@
       (core/handle-input inp "\u001b[104;5u")
       (t/is (= "a" (input/input-get-value inp)) "ctrl+h deletes backward"))))
 
+(t/deftest test-input-on-change-fires-on-value-edits
+  ;; editor parity: value-changing edits fire the callback with the value,
+  ;; cursor-only moves do not, and a programmatic set-value! is not an edit
+  (let [inp (input/make-input)
+        seen (atom [])]
+    (input/input-set-on-change! inp (fn [v] (swap! seen conj v)))
+    (doseq [c "ab"] (core/handle-input inp (str c)))
+    (core/handle-input inp "\u001b[D")
+    (core/handle-input inp "\u007f")
+    (t/is (= ["a" "ab" "b"] @seen)
+          "typing/delete fire; a cursor move does not")
+    (input/input-set-value! inp "prog")
+    (t/is (= ["a" "ab" "b"] @seen) "set-value! stays silent")))
+
+(t/deftest test-input-on-change-fires-on-undo-and-paste
+  (let [inp (input/make-input)
+        seen (atom [])]
+    (input/input-set-on-change! inp (fn [v] (swap! seen conj v)))
+    (doseq [c "ab"] (core/handle-input inp (str c)))
+    (core/handle-input inp (str (char 31)))  ;; ctrl+- undo
+    (core/handle-input inp (str "\u001b[200~" "X" "\u001b[201~"))
+    (t/is (= ["a" "ab" "" "X"] @seen)
+          "undo and paste both report the resulting value")))
+

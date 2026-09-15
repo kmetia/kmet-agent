@@ -209,10 +209,10 @@ The former blockers were artifacts of avoiding refs: `dialogs` prefill is
 `(input/input-set-cursor! @inp-ref (count prefill))` immediately after
 `compile-tree` (refs fill synchronously during construction), and
 `session_selector`'s rename submit is
-`(input/input-set-on-submit! @rename-ref f)` post-mount. An `:on-change`
-prop on `:input` (parity with `:editor`) and a `:cursor` prop would make
-ref-free conversions possible for the simple cases — ergonomics, not
-prerequisites (§6 Phase 0).
+`(input/input-set-on-submit! @rename-ref f)` post-mount. Phase 0 gave
+`[:input]` `:on-change` (parity with `[:editor]`, fired on value-changing
+edits), which covers the simple cases ref-free; the ref path stays the
+general mechanism.
 
 Each Tier 2 file is one commit with its interaction test
 (type-then-rerender keeps text / selection / focus).
@@ -326,13 +326,11 @@ on the second render — and a flat `bodies-run` on an idle frame.
    32 → 19 ms/pass).
    Keys stay the rule for reuse under reordering; after this they are no
    longer about matching cost.
-2. **Optional, unblocks ref-free conversions**: `:input` gains
-   `:on-change` (parity with `:editor`; component + tag + `:apply`
-   patch) and/or a `:cursor` prop (written only when it changed, like
-   `:value`) for dialog prefills. Neither is required — the ref path
-   (§3.2) needs no component change. One commit each, with an
-   interaction test: typing fires the callback; an unrelated prop pass
-   does not clobber typed text.
+2. **DONE — `:on-change` on `:input`**: parity with `:editor` (component
+   + tag + `:apply` patch); fires on value-changing edits, silent for
+   cursor moves and programmatic `input-set-value!`. Interaction test:
+   typing fires the callback; an unrelated prop pass does not clobber
+   the typed text.
 
 ### Phase 1 — Tier 1 (the measurable win)
 

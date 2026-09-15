@@ -258,11 +258,12 @@
                                  (spinner/spinner-set-message-color-fn!
                                   s (:message-color-fn props)))
                                true)))}
-   :input        {:ctor (fn [{:keys [value on-submit on-escape]}]
+   :input        {:ctor (fn [{:keys [value on-submit on-escape on-change]}]
                           (let [i (input/make-input)]
                             (when value (input/input-set-value! i value))
                             (when on-submit (input/input-set-on-submit! i on-submit))
                             (when on-escape (input/input-set-on-escape! i on-escape))
+                            (when on-change (input/input-set-on-change! i on-change))
                             i))
                   :primary :value
                   :apply (fn [i prev props]
@@ -278,6 +279,7 @@
                                  (input/input-set-value! i v))))
                            (input/input-set-on-submit! i (:on-submit props))
                            (input/input-set-on-escape! i (:on-escape props))
+                           (input/input-set-on-change! i (:on-change props))
                            true)}
    :expandable-text {:ctor (fn [{:keys [collapsed-fn expanded-fn
                                         expanded? padding-x padding-y]}]

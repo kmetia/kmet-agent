@@ -427,6 +427,32 @@
       (t/is (= "" (input/input-get-value i1))
             "nil ⇒ the construct default, like make-input with no value"))))
 
+(t/deftest input-tag-on-change-fires-on-typing
+  ;; :on-change has editor parity: a value-changing edit fires it with the
+  ;; current value, a cursor-only move does not, and an unrelated prop pass
+  ;; neither fires it nor clobbers the typed text
+  (let [iref (h/ref)
+        submit (atom (fn [_]))
+        seen (atom [])
+        on-change (fn [v] (swap! seen conj v))
+        root (h/root (fn [_] [:input {:ref iref
+                                      :on-change on-change
+                                      :on-submit (rag/tracked-deref submit)}]))]
+    (core/render root 40)
+    (let [i1 (deref iref)]
+      (protocols/handle-input i1 "a")
+      (protocols/handle-input i1 "b")
+      (t/is (= ["a" "ab"] @seen) "typing fires :on-change with the value")
+      (protocols/handle-input i1 "\u001b[D")
+      (t/is (= ["a" "ab"] @seen) "a cursor-only move is not a change")
+      (reset! submit (fn [_] :other))
+      (core/render root 40)
+      (t/is (= ["a" "ab"] @seen) "an unrelated prop pass fires nothing")
+      (t/is (= "ab" (input/input-get-value i1)) "typed text survived")
+      (protocols/handle-input i1 "c")
+      (t/is (= ["a" "ab" "acb"] @seen)
+            "the next edit fires with the value at the live cursor"))))
+
 (t/deftest editor-tag-unchanged-text-never-clobbers-typing
   ;; the same gate on :text: an unrelated prop change (:height) patches the
   ;; live editor without resetting what the user typed
