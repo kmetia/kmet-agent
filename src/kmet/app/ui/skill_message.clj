@@ -122,7 +122,7 @@
                 line (str (apply str (repeat output-pad \space))
                           (theme/italic (theme/fg thm :thinking-text
                                                   (utils/truncate-to-width raw content-width "..."))))]
-            (into ["" line]
+            (into [line]
                   (concat (when-let [sp @user-spacer-atom]
                             (protocols/render sp width))
                           (when-let [um @user-message-atom]

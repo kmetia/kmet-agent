@@ -212,6 +212,71 @@
       (is (= :collapsed (ch/chat-history-get-tool-display-mode ch))
           "invalid init degrades to collapsed"))))
 
+(deftest test-quiet-run-groups-without-inner-separators
+  (testing "consecutive quiet :tool entries share one run separator; other roles keep theirs"
+    (let [ch (ch/make-chat-history :tool-display-mode :quiet)]
+      (ch/chat-history-add-message! ch {:role :user :content "hello"})
+      (ch/chat-history-add-message! ch {:role :tool :name "first-tool" :content "a"})
+      (ch/chat-history-add-message! ch {:role :tool :name "second-tool" :content "b"})
+      (ch/chat-history-add-message! ch {:role :assistant :content "reply"})
+      (ch/chat-history-add-message! ch {:role :tool :name "third-tool" :content "c"})
+      (let [lines (plain-lines ch 40)
+            idx (fn [re] (first (keep-indexed #(when (re-find re %2) %1) lines)))]
+        (is (= ["hello" "first-tool" "second-tool" "reply" "third-tool"]
+               (filterv seq (map str/trim lines)))
+            "no blank line inside a quiet run, separators elsewhere")
+        (is (= "" (nth lines (dec (idx #"first-tool")))) "one separator opens the run")
+        (is (= "" (nth lines (dec (idx #"third-tool")))) "a new run re-opens after other roles")
+        (is (not= "" (nth lines (dec (idx #"second-tool")))) "no separator inside the run"))))
+  (testing "a quiet run includes :skill entries (user blocks split into :skill)"
+    (let [ch (ch/make-chat-history :tool-display-mode :quiet)
+          block "<skill name=\"demo\" location=\"/x/SKILL.md\">\nbody here\n</skill>"]
+      (ch/chat-history-add-message! ch {:role :tool :name "first-tool" :content "a"})
+      (ch/chat-history-add-message! ch {:role :user :content block})
+      (ch/chat-history-add-message! ch {:role :tool :name "second-tool" :content "b"})
+      (let [lines (plain-lines ch 40)
+            idx (fn [re] (first (keep-indexed #(when (re-find re %2) %1) lines)))]
+        (is (= ["first-tool" "[skill] demo" "second-tool"]
+               (filterv seq (map str/trim lines))))
+        (is (not= "" (nth lines (dec (idx #"\[skill\]")))) "skill continues the run"))))
+  (testing "collapsed mode keeps each tool box's own separator"
+    (let [ch (ch/make-chat-history)]
+      (ch/chat-history-add-message! ch {:role :user :content "hello"})
+      (ch/chat-history-add-message! ch {:role :tool :name "first-tool" :content "a"})
+      (ch/chat-history-add-message! ch {:role :tool :name "second-tool" :content "b"})
+      (let [lines (plain-lines ch 40)
+            idx (fn [re] (first (keep-indexed #(when (re-find re %2) %1) lines)))
+            blank? #(= "" (str/trim %))]
+        (is (blank? (nth lines (dec (idx #"first-tool")))))
+        (is (blank? (nth lines (dec (idx #"second-tool"))))
+            "each box keeps its own separator outside quiet")))))
+
+(deftest test-quiet-run-survives-silent-tool-call-assistant
+  (testing "a finalized tool-call-only assistant message renders nothing and keeps the run"
+    (let [ch (ch/make-chat-history :tool-display-mode :quiet)]
+      (ch/chat-history-add-message! ch {:role :user :content "hello"})
+      (ch/chat-history-add-message! ch {:role :tool :name "first-tool" :content "a"})
+      (ch/chat-history-start-streaming! ch)
+      (ch/chat-history-mark-streaming-tool-calls! ch)
+      (ch/chat-history-finalize-streaming! ch)
+      (ch/chat-history-add-message! ch {:role :tool :name "second-tool" :content "b"})
+      (let [lines (plain-lines ch 40)
+            idx (fn [re] (first (keep-indexed #(when (re-find re %2) %1) lines)))]
+        (is (= ["hello" "first-tool" "second-tool"]
+               (filterv seq (map str/trim lines)))
+            "the silent assistant contributes no lines")
+        (is (= "" (nth lines (dec (idx #"first-tool")))) "one separator opens the run")
+        (is (not= "" (nth lines (dec (idx #"second-tool")))) "no separator inside the run"))))
+  (testing "an assistant message with real text still breaks the run"
+    (let [ch (ch/make-chat-history :tool-display-mode :quiet)]
+      (ch/chat-history-add-message! ch {:role :tool :name "first-tool" :content "a"})
+      (ch/chat-history-add-message! ch {:role :assistant :content "Thinking..." :tool-calls? true})
+      (ch/chat-history-add-message! ch {:role :tool :name "second-tool" :content "b"})
+      (let [lines (plain-lines ch 40)
+            idx (fn [re] (first (keep-indexed #(when (re-find re %2) %1) lines)))]
+        (is (= "" (nth lines (dec (idx #"second-tool"))))
+            "visible thinking re-opens the run with a separator")))))
+
 (deftest test-thinking-hidden-toggle
   (testing "toggle thinking hidden state"
     (let [ch (ch/make-chat-history)]

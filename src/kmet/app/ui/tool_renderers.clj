@@ -740,35 +740,50 @@
           (when-let [invalidate (:invalidate context)]
             (invalidate)))
         nil))))
-(defn
-  render-bash-call
-  [_name args theme _width _context]
-  (let
-   [cmd
-    (:command args)
-    timeout
-    (:timeout args)
-    cmd-str
-    (if (string? cmd) cmd (if (nil? cmd) "" nil))
-    cmd-display
-    (cond
-      (nil? cmd-str)
-      (theme/fg theme :error "[invalid arg]")
-      (empty? cmd-str)
-      (theme/fg theme :tool-output "...")
-      :else
-      cmd-str)
-    timeout-suffix
-    (if
-     (and (number? timeout) (pos? timeout))
-      (theme/fg theme :muted (str " (timeout " timeout "s)"))
-      "")]
-    (text/make-text
-     (str
-      (theme/fg theme :tool-title (theme/bold (str "$ " cmd-display)))
-      timeout-suffix)
-     0
-     0)))
+(def ^:private bash-call-preview-lines
+  "Collapsed cap on the rendered command, in visual lines. A multiline
+   command — a heredoc, a chained script — otherwise dominates the
+   transcript for every later message; the expanded form renders it in
+   full (pi always renders the raw command)."
+  3)
+
+(defn render-bash-call
+  "Call line for the shell tool: `$ <command>` (+ timeout suffix). The
+   collapsed form keeps the head of a long command and hints at the rest;
+   the expanded form renders the command verbatim."
+  [_name args theme width context]
+  (let [cmd (:command args)
+        timeout (:timeout args)
+        cmd-str (if (string? cmd) cmd (if (nil? cmd) "" nil))
+        cmd-display (cond
+                      (nil? cmd-str) (theme/fg theme :error "[invalid arg]")
+                      (empty? cmd-str) (theme/fg theme :tool-output "...")
+                      :else cmd-str)
+        cmd-line (theme/fg theme :tool-title (theme/bold (str "$ " cmd-display)))
+        timeout-suffix (if (and (number? timeout) (pos? timeout))
+                         (theme/fg theme :muted (str " (timeout " timeout "s)"))
+                         "")]
+    (if (:expanded context)
+      (text/make-text (str cmd-line timeout-suffix) 0 0)
+      (let [{:keys [visual-lines skipped-count]}
+            (utils/truncate-head-to-visual-lines cmd-line bash-call-preview-lines width)]
+        (if (zero? skipped-count)
+          (text/make-text (str cmd-line timeout-suffix) 0 0)
+          (text/make-text
+           (str (str/join "\n" visual-lines)
+                "\n"
+                ;; one line, never a wrap: the marker plus the timeout suffix
+                ;; can outrun a narrow terminal
+                (utils/truncate-to-width
+                 (str (theme/fg theme :muted (str "... (" skipped-count " more lines,"))
+                      " "
+                      (app-kb/key-hint "app.tools.expand" "to toggle")
+                      (theme/fg theme :muted ")")
+                      timeout-suffix)
+                 width
+                 "..."))
+           0
+           0))))))
 (defn
   render-bash-result
   [content

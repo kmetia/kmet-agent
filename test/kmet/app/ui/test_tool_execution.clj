@@ -853,14 +853,13 @@
     (mapv strip-ansi (core/render c 60))))
 
 (deftest test-quiet-renders-dimmed-title-line
-  (testing "quiet is one title line plus the leading separator"
+  (testing "quiet is one bare title line (the run separator lives in chat-history)"
     (let [lines (render-quiet :name "read" :args {:path "src/a.clj"}
                               :content "line1\nline2"
                               :title-fn (fn [a] (str "read " (:path a))))]
-      (is (= 2 (count lines)))
-      (is (= "" (first lines)))
-      (is (re-find #"read src/a\.clj" (second lines)))
-      (is (not (re-find #"\[tool\]" (second lines))) "no [tool] prefix")
+      (is (= 1 (count lines)))
+      (is (re-find #"read src/a\.clj" (first lines)))
+      (is (not (re-find #"\[tool\]" (first lines))) "no [tool] prefix")
       (is (not-any? #(re-find #"line1|line2" %) lines)
           "result content never reaches the quiet line")
       (is (not-any? #(re-find #"ctrl\+o|toggle" %) lines)
@@ -868,22 +867,22 @@
   (testing "error prefix is text, still the one dimmed line"
     (let [lines (render-quiet :name "bash" :args {:command "ls"} :content "boom"
                               :is-error true :title-fn (fn [a] (str "bash $ " (:command a))))]
-      (is (= 2 (count lines)))
-      (is (re-find #"\(\!\) bash \$ ls" (second lines)))))
+      (is (= 1 (count lines)))
+      (is (re-find #"\(\!\) bash \$ ls" (first lines)))))
   (testing "missing title falls back to the tool name"
     (let [lines (render-quiet :name "myext" :args {} :content "x")]
-      (is (re-find #"^ myext" (second lines)) "bare tool name, no prefix")))
+      (is (re-find #"myext" (first lines)) "bare tool name, no prefix")))
   (testing "a multiline title collapses to one visual line"
     (let [lines (render-quiet :name "bash" :args {:command "cd /x && python3 - <<'EOF'\nprint(1)\nprint(2)"}
                               :title-fn (fn [a] (str "bash $ " (:command a))))]
-      (is (= 2 (count lines)))
-      (is (<= (utils/visible-width (second lines)) 60))
-      (is (re-find #"print\(1\) print\(2\)" (second lines))
+      (is (= 1 (count lines)))
+      (is (<= (utils/visible-width (first lines)) 60))
+      (is (re-find #"print\(1\) print\(2\)" (first lines))
           "newline became a space instead of wrapping")))
   (testing "a throwing title degrades to the name"
     (let [lines (render-quiet :name "myext" :args {} :content "x"
                               :title-fn (fn [_] (throw (ex-info "boom" {}))))]
-      (is (re-find #"^ myext" (second lines)) "bare tool name, no prefix"))))
+      (is (re-find #"myext" (first lines)) "bare tool name, no prefix"))))
 
 (deftest test-quiet-ignores-content-and-renderers
   (testing "content swaps never touch the quiet line (scrollback-immutable)"
@@ -909,7 +908,7 @@
                                     :tools-expanded-atom shared)]
       (te/tool-execution-set-images! c [{:data "AA" :mime-type "image/png"}])
       (let [lines (mapv strip-ansi (core/render c 60))]
-        (is (= 2 (count lines)))
+        (is (= 1 (count lines)))
         (is (not-any? #(re-find #"Image" %) lines))))))
 
 (deftest test-quiet-running-and-error-prefixes
@@ -918,16 +917,16 @@
           title-fn (fn [a] (str "bash $ " (:command a)))
           c (te/make-tool-execution :name "bash" :args {:command "ls"}
                                     :tools-expanded-atom shared :title-fn title-fn)]
-      (is (re-find #"^ \.\.\. bash \$ ls"
-                   (second (mapv strip-ansi (core/render c 60))))
+      (is (re-find #"\.\.\. bash \$ ls"
+                   (first (mapv strip-ansi (core/render c 60))))
           "fresh (ended-at nil) shows ...")
       (te/tool-execution-set-error! c false)
-      (is (re-find #"^ bash \$ ls"
-                   (second (mapv strip-ansi (core/render c 60))))
+      (is (re-find #"bash \$ ls"
+                   (first (mapv strip-ansi (core/render c 60))))
           "ended ok carries no prefix")
       (te/tool-execution-set-error! c true)
       (is (re-find #"\(\!\) bash \$ ls"
-                   (second (mapv strip-ansi (core/render c 60))))
+                   (first (mapv strip-ansi (core/render c 60))))
           "error shows (!), implying done"))))
 
 (deftest test-quiet-cancels-elapsed-ticker
@@ -948,9 +947,9 @@
     (let [long-path (apply str (repeat 100 "x"))
           lines (render-quiet :name "read" :args {:path long-path}
                               :title-fn (fn [a] (str "read " (:path a))))]
-      (is (= 2 (count lines)))
-      (is (re-find #"\.\.\." (second lines)) "ellipsis marks the cut")
-      (is (<= (utils/visible-width (second lines)) 60)))))
+      (is (= 1 (count lines)))
+      (is (re-find #"\.\.\." (first lines)) "ellipsis marks the cut")
+      (is (<= (utils/visible-width (first lines)) 60)))))
 
 (deftest test-quiet-disposes-shared-instance-once
   (testing "entering quiet disposes a renderer instance shared by both
