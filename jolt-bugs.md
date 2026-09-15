@@ -15,6 +15,65 @@ Historical labels from the deleted `bb-jolt.md` map as: `JOLT-12`→#947,
 
 ## Open
 
+### [jolt#1011](https://github.com/jolt-lang/jolt/issues/1011) — `Object.wait` / `.notify` / `.notifyAll` missing on every object
+
+**Area:** host method tables — `java.lang.Object`. `locking`/monitor-enter is
+real (per-object, reentrant, fiber-aware) and deliberately uninterruptible like
+the JVM, but the wait/notify family is absent on every object.
+`monitor-wait!` in `host/chez/java/concurrency.ss` is the monitor-ENTER
+contention wait, not `Object.wait`. Recorded upstream as a deliberate gap ("NOT
+a divergence, and recorded so it does not read as an oversight") in
+`test/conformance/known-divergences.edn` and `test/chez/unit.edn`. Verified on
+`v0.8.8-4-g2039710e` (2026-09-15):
+
+```clojure
+;; succeeds on bb/JVM, fails on jolt:
+(let [o (Object.)]
+  (locking o (.wait o 10)))
+;; jolt: IllegalArgumentException: No matching method wait found taking 1 args
+;;       for class java.lang.Object  (the no-arg/notify forms report a field)
+```
+
+**Workaround:** `src/kmet/tui/wake.cljc` — the render loop's park/wake
+primitive (tui.md §6). Each function is `#?(:jolt … :default …)`: the object
+monitor on bb/JVM, a capacity-1 `LinkedBlockingQueue` binary semaphore on jolt.
+
+| API | bb/JVM (`:default`) | jolt |
+|---|---|---|
+| `make-waker` | `(Object.)` | `(java.util.concurrent.LinkedBlockingQueue. 1)` |
+| `wake!` | `(locking w (.notifyAll w))` | `(.offer w :wake)` |
+| `park!` | `(locking w (.wait w timeout-ms))` | `(.poll w timeout-ms TimeUnit/MILLISECONDS)` |
+
+Both hosts keep one contract because `park!` re-runs the caller's recheck before
+blocking (under the monitor): the request flag / batch-queue state is read
+there, so a wakeup racing the park is consumed, never lost — a monitor
+`notifyAll` with nobody waiting is dropped, the queue would remember it, and the
+recheck makes the two behave identically. Consumers: `kmet.tui.core`
+(create-tui's waker; `tui-request-render` sets the flag then wakes; the loop's
+`work-pending?` recheck and `idle-park-ms` timeout) and
+`test/kmet/tui/test_wake.clj`.
+
+No RFC 0014 provider shim: `java.lang.Object` is runtime-implemented, so the
+claim is refused, and the member cannot be backed by a registration — jolt's
+object monitors (`object-monitor`, `monitor-enter!`/`monitor-exit!`, the waiter
+list, the condition variable) are internal Scheme in
+`host/chez/java/concurrency.ss`, and the only exposed piece
+(`jolt.host/with-monitor`) is enter/exit with no wait/notify to call. A
+registration that cannot release and reacquire the monitor would have wrong
+semantics (a naive `.wait` = `Thread/sleep` inside the monitor would hold it and
+block the notifier), so the host-conditional workaround is the honest fix.
+
+**Removal:** replace each `#?(:jolt X :default Y)` in `src/kmet/tui/wake.cljc`
+with just `Y` (the monitor body) and drop the ns docstring's workaround
+sentence — the API and its callers do not change; then delete this entry and
+the now-false pointers to the gap in `jolt-port.md` §9, `jolt/README.md`,
+`tui.md` (§1 table and §6) and the `test/kmet/tui/test_wake.clj` docstring.
+Verify on jolt: the repro above prints; `jolt test` (`kmet.tui.test-wake`
+covers wake, timeout and the recheck contract on whichever branch compiles); a
+pty smoke of `jolt run -m kmet.core` (a key echoes immediately, an idle
+terminal repaints only on input/timers, a resize reflows within the
+heartbeat). `bb` behavior must not change (it already used the monitor branch).
+
 ### [jolt#992](https://github.com/jolt-lang/jolt/issues/992) — Windows: `jolt C:/…/file.clj` is read as project-relative — `open-input-file` fails for `./C:/…`
 
 **Area:** `jolt-core/jolt/main.clj` (`file-arg`)

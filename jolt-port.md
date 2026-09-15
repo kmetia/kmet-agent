@@ -369,7 +369,7 @@ Estimate honesty: B1 transport is **decided** (babashka.http-client on both host
 ## 7. Risks & open questions
 
 1. **Jolt maturity**: the Chez backend is the only production target (Gambit is demo-grade); the `--library` entry + cross-`--target` flow are young — fine for a CLI, but verify each on the checkout before relying on it.
-2. **Performance**: TUI frame loop (16ms, line diffs, grapheme widths) + token-streaming rates on Chez-interpreted-vs-compiled code — `jolt build` compiles; measure early with a streaming fixture. SCI-for-extensions perf unproven.
+2. **Performance**: TUI frame loop (16ms frame pace, line diffs, grapheme widths) + token-streaming rates on Chez-interpreted-vs-compiled code — `jolt build` compiles; measure early with a streaming fixture. SCI-for-extensions perf unproven.
 3. **Regex engine**: irregex vs Java — `keys.clj`, response parsers, `utils.cljc` wrapping all need their test suites re-run (common patterns fine, edge features differ). One host difference is now deliberate: `utils.cljc` carves the ANSI-strip scanner out for Jolt (`#?(:jolt … :default …)`) because irregex loses badly on that per-line hot path — see `perf.md` §5.4. The two engine gaps that sat on kmet paths are closed: the 50-alternative `re-find` stall on `kmet.app.loop/retryable-error?` (first match ~5 s on x86_64, hang on Termux/aarch64) and the UNIX_LINES terminator set for `.`/`^`/`$` (`parse-dump-header`). Both are fixed on the current builds; `retryable-error-regex` and `parse-dump-header` are back to their plain forms.
 4. **Vendored libs, not pins**: `babashka.fs` / `babashka.process` come from the host — bb bundles them, jolt vendors the same namespaces (built-in; jolt's public surfaces are `jolt.fs` / `jolt.process`, the latter excluding zip/gzip). deps.edn carries no version to diff, so the pins are gone by design: re-verify the *surface kmet uses* on any Jolt upgrade (a `jolt test` run covers it; the vendored sources carry no version constants).
 5. **Windows**: kmet supports it (Git Bash resolution, `\` zip entries, `fs` separators); Jolt's Windows FFI surface has known gaps (`process.ss`) — Windows is the last platform to light up, after Unix parity.
@@ -480,7 +480,14 @@ What that means for kmet's load-order payloads:
    member of a class the runtime IMPLEMENTS but does not fully supply: such
    a member cannot be claimed, so the guard is the only install path. The
    lib used one for `java.util.Base64/getMimeDecoder` while the runtime
-   lacked it.
+   lacked it;
+4. a member gap a registration cannot back gets a **reader-conditional
+   workaround** in the consumer instead — the live case is
+   `Object.wait`/`notify`/`notifyAll`, which jolt lacks on every object and
+   exposes no monitor API to register against: `kmet.tui.wake` parks on the
+   object monitor on bb/JVM and on a capacity-1 `LinkedBlockingQueue` on
+   jolt (`#?(:jolt … :default …)`), with the ticket and removal checklist in
+   `jolt-bugs.md` (jolt#1011).
 
 This pattern is the AGENTS.md convention for any future consumer — a claim
 on a class the runtime implements is still refused.

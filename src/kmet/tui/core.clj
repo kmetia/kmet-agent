@@ -9,6 +9,7 @@
             [kmet.libs.reakt :as reakt]
             [kmet.tui.terminal :as terminal]
             [kmet.tui.timers :as timers]
+            [kmet.tui.wake :as wake]
             [kmet.tui.keys :as keys]
             [kmet.tui.utils :as utils]
             [kmet.libs.terminal-image :as img]
@@ -41,10 +42,10 @@
 (def IEditorComponent protocols/IEditorComponent)
 (defn render
   "One headless frame: drain the reaction batch queue, then render C at
-   WIDTH. Mirrors the live loop (flush! runs at the tick before the render
-   gate reads the caches), so queued recomputes — computes and reactions
-   dirtied since the last frame — are always current in what gets drawn.
-   The flush is a no-op while nothing is queued."
+   WIDTH. Mirrors the live loop (flush! runs on the loop's wake, before the
+   render gate reads the caches), so queued recomputes — computes and
+   reactions dirtied since the last frame — are always current in what gets
+   drawn. The flush is a no-op while nothing is queued."
   [c width]
   (reakt/flush!)
   (protocols/render c width))
@@ -90,7 +91,7 @@
 
 (defrecord TUI [terminal components focused-component
                 input-listeners previous-lines
-                previous-width render-requested? force-redraw?
+                previous-width render-requested? force-redraw? waker
                 running? stopped? overlays
                 render-loop input-reader current-reader
                 flashes focus-order-counter
@@ -118,6 +119,7 @@
                        :previous-width (atom 0)
                        :render-requested? (atom false)
                        :force-redraw? (atom false)
+                       :waker (wake/make-waker)
                        :running? (atom false)
                        :stopped? (atom false)
                        :overlays (atom [])
@@ -1522,18 +1524,25 @@
    taken by the render loop, which clears its own previous-frame state. Doing
    that reset here would race the loop's state reads (prev=[] with an old
    width reads as a non-clearing first render), and a force arriving
-   mid-frame would be overwritten by the in-flight frame's state write."
+   mid-frame would be overwritten by the in-flight frame's state write.
+   The flag is set BEFORE the wake: a loop woken by a stale wakeup must see
+   the request, never park again ahead of it. Callable from any thread."
   [tui & [force]]
   (when force
     (reset! (:force-redraw? tui) true))
-  (reset! (:render-requested? tui) true))
+  (reset! (:render-requested? tui) true)
+  (when-let [w (:waker tui)]
+    (wake/wake! w)))
 
 (defn tui-stop [tui]
   (reset! (:stopped? tui) true)
   (reset! (:running? tui) false)
   ;; Detach the §3.4 scheduler hook before anything else unwinds: disposed
-  ;; components' reactions may still fire watches during teardown.
+  ;; components' reactions may still fire watches during teardown. The reakt
+  ;; enqueue hook is detached with it — a late dep change must not poke a
+  ;; dead loop.
   (macros/set-frame-hook! nil)
+  (reakt/set-enqueue-hook! nil)
   ;; §6.1: no timer outlives the session it was armed in. Components may
   ;; still cancel their own ids afterwards — cancel! is idempotent.
   (timers/cancel-all!)
@@ -1634,6 +1643,36 @@
     (when-let [term @(:terminal tui)]
       (terminal/set-color-scheme-notifications! term enabled?))))
 
+;; ═══════════════════════════════════════════════════════════════════════════
+;; Render loop
+;; ═══════════════════════════════════════════════════════════════════════════
+
+(def ^:private IDLE-HEARTBEAT-MS
+  "Longest the idle render loop may park (kmet.tui.wake/park!). Also the
+   terminal resize poll interval while idle: JLine's WINCH callback never
+   fires under babashka's native image, so the loop polls the size. 100ms
+   is imperceptible for a resize reflow, and the loop is back on the 16ms
+   frame pace whenever frames are actually being requested."
+  100)
+
+(defn- idle-park-ms
+  "The idle park's timeout: the next timer due (so a parked loop fires
+   timers on time), capped by IDLE-HEARTBEAT-MS. At least 1ms so a timer
+   that came due between the pump and the park cannot spin the park."
+  []
+  (min IDLE-HEARTBEAT-MS (max 1 (or (timers/next-due-ms) IDLE-HEARTBEAT-MS))))
+
+(defn- work-pending?
+  "True when the loop must not park: a render is requested, or a reaction is
+   waiting in the reakt batch queue. The queue is part of the recheck because
+   a reaction can be enqueued in the window between the loop's flush and its
+   wait — on the monitor host that wakeup finds nobody waiting and is dropped,
+   so the queue itself has to keep the loop awake (the jolt queue wake is
+   remembered; the recheck just makes both hosts one contract)."
+  [tui]
+  (or (boolean @(:render-requested? tui))
+      (pos? (reakt/queued-count))))
+
 (defn- run-render-loop!
   "Start the terminal (raw mode) and run the render loop until the TUI is
    suspended (tui-suspend!) or stopped (tui-stop). Restores and closes the
@@ -1679,15 +1718,18 @@
                 h (terminal/rows started)]
             ;; Loop-owned timers (tui.md §6.1): fire whatever is due
             ;; BEFORE the flush, so an atom a thunk just mutated is brought
-            ;; current in this same tick. Thunks run here, on the loop
+            ;; current in this same iteration. Thunks run here, on the loop
             ;; thread — the only thread allowed to touch widgets.
             (timers/pump!)
             ;; Frame flush: drain the reaction batch queue (kmet.libs.reakt)
-            ;; at the loop's ~16ms cadence — Reagent's animation-frame
-            ;; batching. A no-op while nothing is queued (headless tests, no
-            ;; reactions in use yet); dirty reactions brought current here
-            ;; invalidate their subscribers' caches before the render gate
-            ;; below reads them.
+            ;; on every wake — a render request, an enqueued reaction (the
+            ;; reakt wake hook), a timer, or the idle heartbeat — so queued
+            ;; reactions are current before the render gate below reads them
+            ;; (Reagent's animation-frame batching: N invalidations between
+            ;; wakeups collapse into one pass). A no-op while nothing is
+            ;; queued (headless tests, no reactions in use yet); dirty
+            ;; reactions brought current here invalidate their subscribers'
+            ;; caches before the render gate below reads them.
             (reakt/flush!)
             ;; Terminal resize detection. The JLine backend's native WINCH
             ;; handling does not work under babashka's GraalVM native image
@@ -1695,9 +1737,11 @@
             ;; callback is never invoked and nothing re-renders on resize —
             ;; the editor keeps wrapping at the pre-resize width until the
             ;; next input event (pi: terminal.on("resize") → requestRender).
-            ;; columns/rows are live backend queries, so polling them here
-            ;; (16ms cadence) catches the change reliably; the existing
-            ;; width-changed/height-changed logic then does the full redraw.
+            ;; columns/rows are live backend queries, so polling them on
+            ;; every loop iteration catches the change reliably: every ~16ms
+            ;; while frames are being requested, at most IDLE-HEARTBEAT-MS
+            ;; apart while parked; the existing width-changed/height-changed
+            ;; logic then does the full redraw.
             (when (and (pos? @(:previous-width tui)) (not= @(:previous-width tui) w))
               (tui-request-render tui))
             (when (and (pos? @(:previous-height tui)) (not= @(:previous-height tui) h))
@@ -2107,7 +2151,21 @@
                           (collect-kitty-image-ids lines)
                           #{})))))
 
-          (Thread/sleep 16)
+          ;; Tickless park: after a rendered frame, sleep the 16ms frame
+          ;; pace so a streaming producer cannot outrun the terminal; with
+          ;; nothing requested, park until a wakeup (tui-request-render or
+          ;; the reakt enqueue hook), the next timer due, or
+          ;; IDLE-HEARTBEAT-MS — the resize poll and the safety net for any
+          ;; wakeup path that bypasses tui-request-render. The park recheck
+          ;; reads BOTH the request flag and the batch queue, so a wakeup
+          ;; racing the park is consumed, never lost (kmet.tui.wake).
+          (if @(:render-requested? tui)
+            (Thread/sleep 16)
+            (if-let [w (:waker tui)]
+              (wake/park! w #(work-pending? tui) (idle-park-ms))
+              ;; a hand-built TUI without a waker (test stubs): keep the old
+              ;; fixed cadence
+              (Thread/sleep 16)))
           (recur)))
       (finally
         (reset! (:running? tui) false)
@@ -2149,8 +2207,11 @@
   (reset! (:stopped? tui) false)
   ;; §3.4 scheduler hook: dependency changes request a frame through here
   ;; (ComponentFn's auto-run callback); cleared on stop so late watchers
-  ;; can't poke a dead loop.
+  ;; can't poke a dead loop. The reakt enqueue hook is the same idea one
+  ;; level down: a reaction dirtied with no frame requested yet wakes the
+  ;; parked loop to flush (its watchers then schedule the frame).
   (macros/set-frame-hook! #(tui-request-render tui))
+  (reakt/set-enqueue-hook! #(when-let [w (:waker tui)] (wake/wake! w)))
   (start-input-reader tui)
   (reset! (:render-loop tui) (future
                                (try (run-render-loop! tui)

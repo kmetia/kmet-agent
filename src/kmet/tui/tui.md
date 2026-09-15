@@ -108,6 +108,7 @@ atom change → reaction dirty → queued → frame flush runs it →
 | `kmet.tui.utils` | text wrapping, visible width, truncation helpers |
 | `kmet.tui.border` | box-drawing glyph sets (frames, rules, table junctions) |
 | `kmet.tui.timers` | loop-owned timer registry (§6.1) |
+| `kmet.tui.wake` | cross-host park/wake primitive for the idle render loop (§6; jolt has no `Object.wait` — see `jolt-bugs.md`, jolt#1011) |
 
 ---
 
@@ -514,7 +515,7 @@ whose ancestor was disposed returns nil instead of claiming success.
 
 Scheduling: a reaction whose deps change (by `=`) is marked dirty and
 **enqueued**; `flush!` runs each dirty reaction once per pass — drained
-from the render loop's ~16ms tick. Deref outside any reaction settles the
+by the render loop on every wake. Deref outside any reaction settles the
 queue first and always answers the CURRENT value. Watchers fire only on
 real output changes; sticky errors rethrow without re-execution until the
 next dep change clears them.
@@ -711,8 +712,18 @@ reactive loop:
   track!'s watches, generated invalidate methods and subscription teardown
   all reach it, and it fires the frame hook (installed by `tui.core` on
   start, cleared on stop; a no-op default keeps headless tests pure).
-- Coalescing is free: `tui-request-render` sets an idempotent flag polled by
-  the ~16ms loop; N invalidations between frames collapse into one.
+- The reakt batch queue wakes the loop too: `tui.core` installs
+  `reakt/set-enqueue-hook!` on start (cleared on stop), so a derived or
+  computed ref dirtied with no frame requested yet wakes the parked loop to
+  flush — its watchers then schedule the frame. The park's recheck also
+  reads the batch queue itself, so a reaction enqueued in the window between
+  the loop's flush and its wait stays awake as well (a monitor wakeup with
+  nobody waiting is dropped; jolt's queue remembers). Without either a
+  reaction-only invalidation would wait for the idle heartbeat (up to
+  100ms).
+- Coalescing is free: `tui-request-render` sets an idempotent flag and
+  wakes the parked loop (`kmet.tui.wake`); N invalidations between frames
+  collapse into one.
 - Equal-value no-ops stay no-ops end to end: a compute recomputing to the
   same value requests no frame.
 - Manual `tui-request-render` stays valid forever (idempotent); keep it next
@@ -721,9 +732,22 @@ reactive loop:
 - The hook runs inside a watch on the mutating thread and must not throw.
 - **Time-driven work uses the timer registry (§6.1)** — not its own thread.
 
+**The loop parks when idle.** Frames are painted only when the request flag
+is set, so an idle TUI does no rendering work at all. After a rendered frame
+the loop sleeps 16ms (the frame pace, so a streaming producer cannot outrun
+the terminal); with nothing requested it parks on `kmet.tui.wake` until the
+next request, the next timer due (§6.1), or a 100ms heartbeat — the
+heartbeat drives the terminal resize poll (JLine's WINCH callback never
+fires under babashka's native image) and is the safety net for any wakeup
+path that bypasses `tui-request-render`. `tui-request-render` sets the flag
+before it wakes the loop, and the loop re-checks the flag inside the park:
+a request is consumed, never lost to the park (on jolt the host has no
+`Object.wait` — tracked in `jolt-bugs.md`, jolt#1011).
+
 ### 6.1 Timers — `kmet.tui.timers`
 
-The one place UI timing lives. The frame loop calls `pump!` once a tick and
+The one place UI timing lives. The frame loop calls `pump!` on every wake
+(a render request, the next timer due, or the idle heartbeat — §6) and
 fires whatever is due, so a thunk runs on the **loop thread** — the thread
 that renders — and may touch widgets and component state directly:
 

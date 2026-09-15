@@ -163,9 +163,11 @@ surface the bb backend takes from JLine:
   read plus a `1ms` drain batch (`core.clj:1435,1452`), `.ready`/`.read` in
   `drain-input!` (`terminal.clj:180-181`). A blocking read deadlocks close on
   aarch64 Linux (comment at `core.clj:1432-1434`, jline3 #1909).
-- **size**: live `.getWidth`/`.getHeight` polled every 16ms (`core.clj:1638-1639`)
-  because WINCH signal handlers don't register under bb's GraalVM image
-  (`core.clj:1647-1654`) — resize arrives via poll, not via callback.
+- **size**: live `.getWidth`/`.getHeight` polled by the render loop — every
+  ~16ms while frames are being requested, at most 100ms apart while parked
+  (`core.clj` `IDLE-HEARTBEAT-MS`) — because WINCH signal handlers don't
+  register under bb's GraalVM image; resize arrives via poll, not via
+  callback.
 - **portability**: `TerminalBuilder/terminal` opens `/dev/tty`, detects the
   terminal type, and handles the Windows console. Babashka bundles JLine
   4.3.1, so this costs zero extra deps.
@@ -180,8 +182,8 @@ Replacing JLine therefore means reimplementing, per platform:
 1. raw on/off with save/restore on every exit path (normal, exception,
    shutdown hook — JLine's `.close` currently owns this);
 2. timed/batched reads (else the close deadlock returns);
-3. live size queries (subprocess `stty size` every 16ms is too heavy; want
-   `ioctl(TIOCGWINSZ)` or a slower poll);
+3. live size queries (subprocess `stty size` per poll is too heavy; want
+   `ioctl(TIOCGWINSZ)` or a slow cadence);
 4. the Windows console (`GetConsoleMode`/`SetConsoleMode` + VT-input flag) —
    the hard part JLine currently gives you for free.
 
@@ -466,7 +468,7 @@ send a signal/wakeup byte from `stop!` instead (`future-cancel` cannot
 substitute here: a thread blocked in a `__collect_safe` foreign call only
 sees the interrupt when it returns to Scheme — `concurrency.ss:1205-1206` — §9).
 
-Size: cache and poll; `stty size` as a subprocess per 16ms frame is too
+Size: cache and poll; `stty size` as a subprocess per poll is too
 heavy. Preferred is `ioctl(TIOCGWINSZ)` via FFI (bare-`:&` form, since the
 third arg is an out-pointer — `ffi.clj:1337-1360`), falling back to `stty
 size` at a slow cadence:
@@ -831,7 +833,7 @@ the `babashka/ffi` guide):
   `__error` macOS / `_errno` Windows) — fine for startup checks, fiddly for
   per-read `EAGAIN`/`EINTR` classification.
 - Variadic `ioctl`/`fcntl` via `:&` always go through libffi (~1µs —
-  irrelevant at 16ms poll); plain ≤6-arg signatures hit the trampoline set
+  irrelevant at the loop's poll rates); plain ≤6-arg signatures hit the trampoline set
   (~30ns). `stop!` still needs a wakeup-byte/fd-close: `future-cancel`
   cannot unblock a parked native `read`, same caveat as §9, undocumented here.
 - Windows type traps: `:long`/`:ulong` are always 64-bit but C `long` /

@@ -3,8 +3,9 @@
    — auto-dependency-discovering reactions, cursors, batching — with plain
    clojure.lang.Atoms as first-class inputs. Generic by design: no terminal,
    rendering, or component concepts (the TUI render-cache layer that rides
-   on it lives in kmet.tui.macros/track!; kmet.tui.core drives flush! from
-   its ~16ms tick).
+   on it lives in kmet.tui.macros/track!; kmet.tui.core drains flush! on
+   every render-loop wake and installs set-enqueue-hook! so a dirty reaction
+   wakes the parked loop instead of waiting for its idle heartbeat).
 
    There is no custom atom type: Babashka seals IWatchable/IReset/IRef away
    from pure-source implementations, so a drop-in RAtom cannot exist.
@@ -37,7 +38,7 @@
    scheduling (:auto-run? fn → ComponentFn's invalidate hook), manual-track
    value caching, last-watcher auto-dispose for manual reactions, and force-run!
    flushing the queue first. One deliberate deviation from current Reagent:
-   plain reactions re-run QUEUED at the frame tick, not synchronously in the
+   plain reactions re-run QUEUED at the loop's flush, not synchronously in the
    watch handler — coalescing matters at streaming write rates.
 
    Writable cursors (writable-cursor) are read-only cursors plus a write
@@ -157,15 +158,47 @@
 
 (defonce ^:private flushing? (atom false))
 
+(defonce ^:private enqueue-hook (atom nil))
+
+(defn set-enqueue-hook!
+  "Install F as the batch-queue wake hook: called (on the mutating thread)
+   when a reaction is newly ENQUEUED, so an event-driven host can wake its
+   frame loop and drain the batch — without it, a derived ref's re-run waits
+   for the host's own flush cadence. nil restores the no-op default. Runs
+   inside a dep watch: a failure is logged and swallowed, never thrown into
+   the write that dirtied the dep (the macros/set-frame-hook! policy).
+   Process-global and host-owned: the TUI installs and clears its own hook
+   (kmet.tui.core), so other consumers must not replace it."
+  [f]
+  (reset! enqueue-hook f)
+  nil)
+
+(defn- notify-enqueued!
+  "Run the enqueue hook, isolated: it fires on the MUTATOR's thread, inside
+   a watch, and must not disturb the write that dirtied a dep."
+  []
+  (when-some [f @enqueue-hook]
+    (try
+      (f)
+      (catch Throwable e
+        (binding [*out* *err*]
+          (println "kmet.libs.reakt enqueue hook error:" (ex-message e))))))
+  nil)
+
 (defn- enqueue!
   "Add R to the batch queue unless already present (N invalidations between
-   frames collapse into one run)."
+   frames collapse into one run) and wake the host once per newly queued
+   reaction — a reaction already waiting needs no second wake."
   [r]
-  (let [add (fn [q]
+  (let [added? (volatile! false)
+        add (fn [q]
               (if (some (fn [x] (identical? x r)) q)
                 q
-                (conj q r)))]
-    (swap! queue add))
+                (do (vreset! added? true)
+                    (conj q r))))]
+    (swap! queue add)
+    (when @added?
+      (notify-enqueued!)))
   nil)
 
 (defn- take-batch!
