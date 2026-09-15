@@ -777,6 +777,35 @@
       (t/is (nil? (deref ref1)) "removed element cleared its ref")
       (t/is (some? (deref ref0)) "survivor's ref still filled"))))
 
+(t/deftest unkeyed-siblings-match-in-order-and-reuse
+  ;; one bucket per match-kind is consumed in order (i-th desired ↔ i-th
+  ;; previous, the bucket-cursor contract): an unchanged re-derive reuses
+  ;; every instance without constructing, and a shrink keeps the head while
+  ;; the removed tail clears its ref
+  (let [refs (mapv (fn [_] (h/ref)) (range 4))
+        n (atom 4)
+        r (h/root (fn [_]
+                    [:container
+                     (map-indexed (fn [i _]
+                                    [:text {:padding-x 0 :padding-y 0
+                                            :ref (refs i)}
+                                     (str "row" i)])
+                                  (range @n))]))]
+    (core/render r 20)
+    (let [live (mapv deref refs)]
+      (t/is (every? some? live) "all four rows mounted")
+      (h/reset-counters!)
+      (core/render r 20)
+      (t/is (zero? (:constructs (h/counters)))
+            "an unchanged pass constructs nothing (every sibling reused)")
+      (t/is (zero? (:disposals (h/counters))))
+      (reset! n 2)
+      (core/render r 20)
+      (t/is (identical? (nth live 0) (deref (refs 0)))
+            "the surviving head kept its instance")
+      (t/is (identical? (nth live 1) (deref (refs 1))))
+      (t/is (nil? (deref (refs 2))) "the removed tail cleared its ref"))))
+
 (t/deftest metadata-key-behaves-as-a-key
   ;; reagent-style ^{:key k} on the element vector, as an alternative to the
   ;; :key prop — same reuse contract, same duplicate detection

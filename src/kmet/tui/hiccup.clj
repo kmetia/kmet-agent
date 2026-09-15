@@ -1114,10 +1114,14 @@
 
 (defn- split-bucket
   "Pop the oldest previous item off MKEY's bucket (order-stable matching
-   within a match-kind: i-th desired ↔ i-th previous)."
+   within a match-kind: i-th desired ↔ i-th previous). Buckets carry a
+   consumption cursor, so popping is O(1) — the previous `(vec (rest ...))`
+   copy made long unkeyed lists superlinear."
   [buckets mkey]
-  (if-some [bucket (get buckets mkey)]
-    [(first bucket) (assoc buckets mkey (vec (rest bucket)))]
+  (if-some [{:keys [v i]} (get buckets mkey)]
+    (if (< i (count v))
+      [(nth v i) (assoc buckets mkey {:v v :i (inc i)})]
+      [nil buckets])
     [nil buckets]))
 
 (defn- diff-items
@@ -1127,7 +1131,12 @@
    order."
   [prev-items desired]
   (let [buckets (volatile!
-                 (reduce (fn [m it] (update m (:mkey it) (fnil conj []) it))
+                 (reduce (fn [m it]
+                           (update m (:mkey it)
+                                   (fn [b]
+                                     (if b
+                                       (update b :v conj it)
+                                       {:v [it] :i 0}))))
                          {} prev-items))
         out (volatile! [])]
     (doseq [d desired]
@@ -1138,7 +1147,8 @@
             (when retire (retire-item! retire))
             (vswap! out conj item))
           (vswap! out conj (construct-item d)))))
-    (doseq [bucket (vals @buckets), prev bucket]
+    (doseq [{:keys [v i]} (vals @buckets)
+            prev (subvec v i)]
       (retire-item! prev))
     (vec @out)))
 

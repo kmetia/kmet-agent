@@ -243,10 +243,12 @@ reconciler per component, not global**:
 ```
 
 Matching: the `:key` prop wins; fallback is match-kind (tag / fn value /
-record payload / string). Reorder by key = reuse (like React), so stateful
-subtrees (editors, `with-let` state, caches) survive reorders. Keys may also
-come from element metadata (§2.1). Matched
-children get their props re-applied wholesale — `(reset! (:props c) props)`
+record payload / string). Within a match-kind, unkeyed siblings are
+consumed in order (i-th desired ↔ i-th previous, through an O(1) bucket
+cursor) — so reuse is position-stable only by key. Reorder by key = reuse
+(like React), so stateful subtrees (editors, `with-let` state, caches)
+survive reorders. Keys may also come from element metadata (§2.1).
+Matched children get their props re-applied wholesale — `(reset! (:props c) props)`
 — so **every prop is live**: equal values no-op (memoized children for
 free), changed values re-apply. Unmatched previous children are **disposed**
 (children-first contract, §5.1).
