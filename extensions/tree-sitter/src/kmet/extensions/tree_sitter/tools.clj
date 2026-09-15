@@ -279,7 +279,8 @@
     :params {"path" param-file}
     :render-call render/render-call
     :render-result render/render-result
-    :execute (safe list-symbols*)}
+    :execute (safe list-symbols*)
+    :title render/title-list-symbols}
    {:name "find_definition"
     :description "Find where a named function/class/var is defined across the project. Prefer over grep: matches definitions structurally, not text occurrences."
     :prompt-snippet "Find where a named function/class/var is defined across the project"
@@ -288,7 +289,8 @@
              "root" param-root}
     :render-call render/render-call
     :render-result render/render-result
-    :execute (safe find-definition*)}
+    :execute (safe find-definition*)
+    :title render/title-find-definition}
    {:name "get_symbol_body"
     :description "Read the complete source body of one definition identified by file path and exact symbol name. Prefer over re-reading whole files."
     :prompt-snippet "Read the complete source body of one definition (path + symbol)"
@@ -297,7 +299,8 @@
              "symbol" param-symbol}
     :render-call render/render-call
     :render-result render/render-result
-    :execute (safe get-symbol-body*)}
+    :execute (safe get-symbol-body*)
+    :title render/title-get-symbol-body}
    {:name "find_callers"
     :description "List every call site of a named function/method across the project, shown as caller(file:line). Prefer over grep for 'who uses X' questions."
     :prompt-snippet "List every call site of a named function/method across the project"
@@ -306,7 +309,8 @@
              "root" param-root}
     :render-call render/render-call
     :render-result render/render-result
-    :execute (safe find-callers*)}
+    :execute (safe find-callers*)
+    :title render/title-find-callers}
    {:name "find_callees"
     :description "List what one function calls (unique callees with first call site), scoped to that function's body in the given file."
     :prompt-snippet "List what one function calls — unique callees with first call site"
@@ -315,4 +319,5 @@
              "symbol" param-symbol}
     :render-call render/render-call
     :render-result render/render-result
-    :execute (safe find-callees*)}])
+    :execute (safe find-callees*)
+    :title render/title-find-callees}])

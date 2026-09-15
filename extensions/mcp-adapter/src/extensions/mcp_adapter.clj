@@ -281,6 +281,68 @@
                                  (:uri resource)))))))))))
     @specs))
 
+(defn- title-str
+  [v]
+  (when (and (string? v) (seq v)) v))
+
+(defn- title-arg
+  [args k]
+  (when (map? args)
+    (or (get args k) (get args (name k)))))
+
+(defn- title-mcp
+  [args]
+  (cond
+    (title-str (title-arg args :search))
+    (str "mcp search \"" (title-arg args :search) "\""
+         (when-let [s (title-str (title-arg args :server))] (str " in " s)))
+    (title-str (title-arg args :describe))
+    (str "mcp describe " (title-arg args :describe))
+    (title-str (title-arg args :tool))
+    (str "mcp " (title-arg args :tool)
+         (when-let [s (title-str (title-arg args :server))] (str " on " s)))
+    (title-str (title-arg args :connect))
+    (str "mcp connect " (title-arg args :connect))
+    (title-str (title-arg args :disconnect))
+    (str "mcp disconnect " (title-arg args :disconnect))
+    (title-str (title-arg args :list))
+    (str "mcp list " (title-arg args :list))
+    (title-str (title-arg args :server))
+    (str "mcp list " (title-arg args :server))
+    :else "mcp status"))
+
+(defn- title-preview
+  [s n]
+  (let [pv (when (string? s)
+             (first (remove str/blank? (map str/trim (str/split-lines s)))))]
+    (when (seq pv)
+      (if (> (count pv) n) (str (subs pv 0 n) "…") pv))))
+
+(defn- title-mcpscript
+  [args]
+  (if-let [pv (title-preview (title-arg args :code) 80)]
+    (str "mcpScript " pv)
+    "mcpScript"))
+
+(defn- title-direct-tool
+  [prefixed]
+  (fn [args]
+    (let [pv (when (map? args)
+               (some (fn [[_ v]]
+                       (cond (title-str v) v
+                             ;; numbers stringify (limits, counts); other
+                             ;; types (maps, vectors, booleans) carry no
+                             ;; one-line summary
+                             (number? v) (str v)))
+                     args))
+          one (when (string? pv)
+                (let [one (str/replace (str/trim pv) #"\s+" " ")]
+                  (when (seq one)
+                    (if (> (count one) 80) (str (subs one 0 80) "…") one))))]
+      (if one
+        (str prefixed " " one)
+        prefixed))))
+
 (defn- truncate
   "Truncate S to N chars with an ellipsis."
   [s n]
@@ -382,7 +444,8 @@
                                :prompt-snippet (truncate (:description spec) 100)
                                :parameters (normalize-direct-schema (:input-schema spec))
                                :streams? true
-                               :execute (make-execute spec)})
+                               :execute (make-execute spec)
+                               :title (title-direct-tool (:prefixed spec))})
           (swap! (:registered-direct @state) assoc (:prefixed spec) fp))))
     (doseq [name (remove next-names (keys registered))]
       (ext/unregister-tool! (:api @state) name)
@@ -451,7 +514,8 @@
                                     :required []}
                        :streams? true
                        :execute (fn [params & [on-update]]
-                                  (proxy/execute state params on-update))}))
+                                  (proxy/execute state params on-update))
+                       :title title-mcp}))
 
 ;; ─── /mcp command (§10.6) ─────────────────────────────────────────────────
 
@@ -1037,7 +1101,8 @@
                                                      (:timeoutMs params))]
                                     (script/run-script state code
                                                        {:timeout-ms timeout-ms
-                                                        :on-update on-update})))}))
+                                                        :on-update on-update})))
+                       :title title-mcpscript}))
 
 (defn init
   "Extension init (required by the loader)."

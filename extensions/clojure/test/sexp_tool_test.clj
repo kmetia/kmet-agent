@@ -627,3 +627,18 @@
                 (sexp-opts path "\"Привет\"" "\"你好\""))]
     (is (not (:is-error result)))
     (is (str/includes? (read-test-file path) "你好"))))
+
+;; ─── Quiet titles ───────────────────────────────────────────────────────────
+
+(deftest test-title
+  (testing "match preview"
+    (is (= "clojure_edit_replace_sexp replace (+ x 1) in /a.clj"
+           (sexp-tool/title {:file_path "/a.clj" :match_form "(+ x 1)\n(+ y 2)"
+                             :operation "replace"}))))
+  (testing "long match capped at 60 chars"
+    (let [long-match (apply str (repeat 100 "x"))
+          t (sexp-tool/title {:file_path "/a.clj" :match_form long-match})]
+      (is (str/includes? t (str (apply str (repeat 60 "x")) "…")))))
+  (testing "missing path degrades to nil"
+    (is (nil? (sexp-tool/title {})))
+    (is (nil? (sexp-tool/title nil)))))

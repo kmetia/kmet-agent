@@ -8,14 +8,17 @@
    into the transcript, so the block is parsed back
    (kmet.app.skills/parse-skill-block) and shown as a dedicated message:
 
-     collapsed   [skill] <name> (ctrl+o to expand)
+     collapsed   [skill] <name> (ctrl+o to toggle)
      expanded    [skill]
                  **<name>**
 
                  <skill body, as Markdown>
+     quiet       [skill] <name> — one dimmed line, no box/hint (like hidden
+                 thinking); !/!! bash keeps the collapsed preview instead
 
-   Expansion follows the shared ctrl+o tool-output toggle (pi:
-   toolOutputExpanded) — one atom, so every skill message flips together.
+   Expansion follows the shared ctrl+o tool-display mode atom (pi:
+   toolOutputExpanded, extended with quiet) — one atom, so every skill
+   message flips together.
    The trailing user message (the args after the block) renders below as a
    normal user message, exactly as pi splits the two.
 
@@ -23,7 +26,9 @@
    call an agent's later SKILL.md read renders as
    (`tool-renderers/format-compact-read-call`), so the two spellings cannot
    drift."
-  (:require [kmet.app.keybindings :as app-kb]
+  (:require [clojure.string :as str]
+            [kmet.app.keybindings :as app-kb]
+            [kmet.libs.reakt :as reakt]
             [kmet.app.ui.subs :as s]
             [kmet.app.ui.user-message :as um]
             [kmet.tui.components.box :as box]
@@ -31,6 +36,7 @@
             [kmet.tui.components.markdown :as md]
             [kmet.tui.components.spacer :as spacer]
             [kmet.tui.components.text :as text]
+            [kmet.tui.utils :as utils]
             [kmet.tui.macros :refer [track! defcomponent]]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.theme :as theme]))
@@ -49,12 +55,12 @@
   (str (bracket thm) " "))
 
 (defn expand-hint
-  "` (ctrl+o to expand)` in dim — pi: keyText('app.tools.expand')."
+  "` (ctrl+o to toggle)` in dim — pi: keyText('app.tools.expand')."
   [thm]
-  (theme/fg thm :dim (str " (" (app-kb/key-text "app.tools.expand") " to expand)")))
+  (theme/fg thm :dim (str " (" (app-kb/key-text "app.tools.expand") " to toggle)")))
 
 (defn collapsed-line
-  "The one-line collapsed form: `[skill] <name> (ctrl+o to expand)`."
+  "The one-line collapsed form: `[skill] <name> (ctrl+o to toggle)`."
   [thm name]
   (str (label thm)
        (theme/fg thm :custom-message-text name)
@@ -72,7 +78,7 @@
   @(:expanded-atom comp))
 
 (defcomponent SkillInvocationMessage :skill
-              [tools-expanded-atom   ;; shared ctrl+o toggle (pi: toolOutputExpanded)
+              [tools-expanded-atom   ;; shared ctrl+o display-mode atom (:collapsed | :expanded | :quiet)
                box                   ;; Box with the custom-message background
                inner-container       ;; label/line + body children
                skill-name-atom
@@ -85,28 +91,47 @@
                cache-atom]
   (render [this width]
     (track! this width
-      (let [b @box
-            ;; tracked reads: the shared toggle flips every skill message at
+      (let [mode (or (some-> tools-expanded-atom reakt/tracked-deref) :collapsed)
+            quiet? (= :quiet mode)
+            expanded (= :expanded mode)
+            ;; tracked reads: the shared mode flips every skill message at
             ;; once, and a palette switch re-applies the box background
-            shared @tools-expanded-atom
             thm (deref s/theme-sub)
             _ (when-not (identical? thm @applied-theme-atom)
                 (reset! applied-theme-atom thm)
                 (apply-theme! this thm))
-            ;; the shared toggle is the single source of truth (pi:
-            ;; toolOutputExpanded): sync only when it moved, so the children
-            ;; are rebuilt at most once per flip
-            _ (when (not= shared (expanded-state this))
-                (rebuild-content! this shared))
+            ;; the shared mode is the single source of truth (pi:
+            ;; toolOutputExpanded, extended): sync only when it moved, so
+            ;; the children are rebuilt at most once per flip
+            _ (when (not= expanded (expanded-state this))
+                (rebuild-content! this expanded))
             ;; tracked: the sync above invalidates this cache mid-body, which
             ;; track! answers by not caching the frame (one extra body run
             ;; per flip — the same shape as the theme apply-once above)
-            _ @expanded-atom]
-        (into [] (concat (protocols/render b width)
-                         (when-let [sp @user-spacer-atom]
-                           (protocols/render sp width))
-                         (when-let [um @user-message-atom]
-                           (protocols/render um width)))))))
+            _ @expanded-atom
+            output-pad @output-pad-atom]
+        ;; Quiet short-circuit — one dimmed `[skill] name` line, no
+        ;; box/hint/body (like hidden thinking). The trailing user message
+        ;; (the invocation args) still renders: it is user content, not
+        ;; tool output. Reads only mode/theme/name/pad. The name is
+        ;; one-lined like tool titles (truncate counts columns, not lines).
+        (if quiet?
+          (let [content-width (max 1 (- width (* 2 output-pad)))
+                raw (str "[skill] " (str/replace (or @(:skill-name-atom this) "")
+                                                 #"[ \t]*[\r\n]+[ \t\r\n]*" " "))
+                line (str (apply str (repeat output-pad \space))
+                          (theme/italic (theme/fg thm :thinking-text
+                                                  (utils/truncate-to-width raw content-width "..."))))]
+            (into ["" line]
+                  (concat (when-let [sp @user-spacer-atom]
+                            (protocols/render sp width))
+                          (when-let [um @user-message-atom]
+                            (protocols/render um width)))))
+          (into [] (concat (protocols/render @box width)
+                           (when-let [sp @user-spacer-atom]
+                             (protocols/render sp width))
+                           (when-let [um @user-message-atom]
+                             (protocols/render um width))))))))
   (invalidate [_this]
     (protocols/invalidate @box)
     (when-let [sp @user-spacer-atom] (protocols/invalidate sp))
@@ -164,7 +189,7 @@
 
    Options:
      :skill-block           — {:name :location :content :user-message}
-     :tools-expanded-atom   — the shared ctrl+o toggle (pi: toolOutputExpanded)
+     :tools-expanded-atom   — the shared ctrl+o display-mode atom (:collapsed | :expanded | :quiet)
      :user-message          — a UserMessageComponent for the trailing args,
                               or nil; separated from the box by a Spacer(1)
                               (pi adds the pair to the chat container)
@@ -177,7 +202,7 @@
     (box/box-add-child b inner-container)
     (let [comp (map->SkillInvocationMessage
                 {:kind :skill
-                 :tools-expanded-atom (or tools-expanded-atom (atom false))
+                 :tools-expanded-atom (or tools-expanded-atom (atom :collapsed))
                  :box (atom b)
                  :inner-container (atom inner-container)
                  :skill-name-atom (atom (:name skill-block))

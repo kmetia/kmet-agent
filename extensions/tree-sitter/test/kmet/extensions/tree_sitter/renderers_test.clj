@@ -92,3 +92,29 @@
                                   nil nil nil {})
           lines (plain c 60)]
       (is (some #(str/includes? % "plain text result") lines)))))
+
+(deftest quiet-titles-test
+  (testing "list_symbols"
+    (is (= "list_symbols /a/b.clj" (render/title-list-symbols {:path "/a/b.clj"})))
+    (is (nil? (render/title-list-symbols {})))
+    (is (nil? (render/title-list-symbols nil))))
+  (testing "find_definition — root shown only when non-default"
+    (is (= "find_definition foo" (render/title-find-definition {:symbol "foo"})))
+    (is (= "find_definition foo" (render/title-find-definition {:symbol "foo" :root "."})))
+    (is (= "find_definition foo in /sub" (render/title-find-definition {:symbol "foo" :root "/sub"})))
+    (is (= "find_definition foo" (render/title-find-definition {"symbol" "foo"})) "string keys")
+    (is (nil? (render/title-find-definition {}))))
+  (testing "get_symbol_body"
+    (is (= "get_symbol_body foo in /a.clj"
+           (render/title-get-symbol-body {:symbol "foo" :path "/a.clj"})))
+    (is (nil? (render/title-get-symbol-body {:symbol "foo"}))))
+  (testing "find_callers"
+    (is (= "find_callers foo" (render/title-find-callers {:symbol "foo"})))
+    (is (= "find_callers foo in /sub" (render/title-find-callers {:symbol "foo" :root "/sub"})))
+    (is (nil? (render/title-find-callers {}))))
+  (testing "find_callees"
+    (is (= "find_callees f in /a.clj" (render/title-find-callees {:symbol "f" :path "/a.clj"})))
+    (is (nil? (render/title-find-callees {:symbol "f"}))))
+  (testing "home folded to ~"
+    (let [home (System/getProperty "user.home" "")]
+      (is (= "list_symbols ~/b.clj" (render/title-list-symbols {:path (str home "/b.clj")}))))))

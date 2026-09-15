@@ -456,3 +456,41 @@
     (catch Exception e
       {:content (str "Error editing " file-path ": " (ex-message e))
        :is-error true})))
+
+(defn- title-home-path
+  [p]
+  (let [home (System/getProperty "user.home" "")]
+    (if (and (seq home)
+             (or (= p home) (str/starts-with? p (str home "/"))))
+      (str "~" (subs p (count home)))
+      p)))
+
+(defn- title-nonblank
+  [v]
+  (when (and (string? v) (seq v)) v))
+
+(defn title-arg
+  [args k]
+  (when (map? args)
+    (or (get args k) (get args (name k)))))
+
+(defn title
+  [tool-name args]
+  (when-let [p (title-nonblank (title-arg args :file_path))]
+    (str tool-name
+         " " (or (title-nonblank (title-arg args :operation)) "replace")
+         (when-let [ft (title-nonblank (title-arg args :form_type))] (str " " ft))
+         (when-let [fi (title-nonblank (title-arg args :form_identifier))] (str " " fi))
+         " in " (title-home-path p))))
+
+(defn title-sexp
+  [tool-name args]
+  (when-let [p (title-nonblank (title-arg args :file_path))]
+    (let [m (title-arg args :match_form)
+          pv (when (string? m)
+               (first (remove str/blank? (map str/trim (str/split-lines m)))))]
+      (str tool-name
+           " " (or (title-nonblank (title-arg args :operation)) "replace")
+           (when (title-nonblank pv)
+             (str " " (if (> (count pv) 60) (str (subs pv 0 60) "…") pv)))
+           " in " (title-home-path p)))))

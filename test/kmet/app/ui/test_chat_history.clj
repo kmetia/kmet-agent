@@ -180,6 +180,38 @@
       (ch/chat-history-toggle-tool-expanded! ch)
       (is (false? (ch/chat-history-get-tool-expanded ch))))))
 
+(deftest test-tool-display-mode-cycle
+  (testing "ctrl+o cycles collapsed → quiet → expanded → collapsed"
+    (let [ch (ch/make-chat-history)]
+      (is (= :collapsed (ch/chat-history-get-tool-display-mode ch)))
+      (is (= :quiet (ch/chat-history-cycle-tool-display! ch)))
+      (is (= :expanded (ch/chat-history-cycle-tool-display! ch)))
+      (is (= :collapsed (ch/chat-history-cycle-tool-display! ch)))))
+  (testing "set rejects unknown modes"
+    (let [ch (ch/make-chat-history)]
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (ch/chat-history-set-tool-display-mode! ch :loud)))
+      (is (= :collapsed (ch/chat-history-get-tool-display-mode ch))
+          "rejected set leaves the mode untouched")))
+  (testing "quiet reads as not-expanded through the boolean shim"
+    (let [ch (ch/make-chat-history)]
+      (ch/chat-history-set-tool-display-mode! ch :quiet)
+      (is (false? (ch/chat-history-get-tool-expanded ch)))
+      ;; the toggle shim leaves quiet via expanded
+      (is (true? (ch/chat-history-toggle-tool-expanded! ch)))
+      (is (= :expanded (ch/chat-history-get-tool-display-mode ch))))))
+
+(deftest test-tool-display-mode-init
+  (testing "make-chat-history seeds the mode; default stays collapsed"
+    (let [ch (ch/make-chat-history)]
+      (is (= :collapsed (ch/chat-history-get-tool-display-mode ch))))
+    (doseq [mode [:collapsed :quiet :expanded]]
+      (let [ch (ch/make-chat-history :tool-display-mode mode)]
+        (is (= mode (ch/chat-history-get-tool-display-mode ch)))))
+    (let [ch (ch/make-chat-history :tool-display-mode :bogus)]
+      (is (= :collapsed (ch/chat-history-get-tool-display-mode ch))
+          "invalid init degrades to collapsed"))))
+
 (deftest test-thinking-hidden-toggle
   (testing "toggle thinking hidden state"
     (let [ch (ch/make-chat-history)]

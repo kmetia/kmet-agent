@@ -87,6 +87,7 @@
 
 ;; ChatHistoryComponent
 (def make-chat-history chat-history/make-chat-history)
+(def valid-tool-display-modes chat-history/valid-tool-display-modes)
 (def chat-history-add-message! chat-history/chat-history-add-message!)
 (def chat-history-remove-streaming-placeholder! chat-history/chat-history-remove-streaming-placeholder!)
 (def chat-history-insert-before-streaming! chat-history/chat-history-insert-before-streaming!)
@@ -102,6 +103,9 @@
 (def chat-history-rebuild! chat-history/chat-history-rebuild!)
 (def chat-history-get-messages chat-history/chat-history-get-messages)
 (def chat-history-set-info-msg! chat-history/chat-history-set-info-msg!)
+(def chat-history-cycle-tool-display! chat-history/chat-history-cycle-tool-display!)
+(def chat-history-set-tool-display-mode! chat-history/chat-history-set-tool-display-mode!)
+(def chat-history-get-tool-display-mode chat-history/chat-history-get-tool-display-mode)
 (def chat-history-toggle-tool-expanded! chat-history/chat-history-toggle-tool-expanded!)
 (def chat-history-toggle-thinking-hidden! chat-history/chat-history-toggle-thinking-hidden!)
 (def chat-history-set-thinking-hidden! chat-history/chat-history-set-thinking-hidden!)

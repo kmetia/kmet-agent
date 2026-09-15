@@ -20,7 +20,8 @@
             :params {:path   {:type :string :description "Path to the file to read (relative or absolute)"}
                      :offset {:type :number :description "Line number to start reading from (1-indexed)" :optional? true}
                      :limit  {:type :number :description "Maximum number of lines to read" :optional? true}}
-            :execute read/execute)
+            :execute read/execute
+            :title read/title)
    "write" (tool/make-tool
             :name "write"
             :label "Write file"
@@ -29,7 +30,8 @@
             :prompt-guidelines ["Use write only for new files or complete rewrites."]
             :params {:path    {:type :string :description "File path to write to (relative or absolute)"}
                      :content {:type :string :description "Content to write to the file"}}
-            :execute write/execute)
+            :execute write/execute
+            :title write/title)
    "edit"  (tool/make-tool
             :name "edit"
             :label "Edit file"
@@ -53,7 +55,8 @@
                                                        :required ["oldText" "newText"]}
                                                :description "One or more targeted replacements. Each edit is matched against the original file, not incrementally. Do not include overlapping or nested edits. If two changes touch the same block or nearby lines, merge them into one edit instead."}}
                          :required ["path" "edits"]}
-            :execute edit/execute)
+            :execute edit/execute
+            :title edit/title)
    "bash"  (tool/make-tool
             :name "bash"
             :label "Execute command"
@@ -63,7 +66,8 @@
             :params {:command {:type :string :description "Bash command to execute"}
                      :timeout {:type :number :description "Timeout in seconds (optional)" :optional? true}}
             :execute bash/execute
-            :streams? true)}
+            :streams? true
+            :title bash/title)}
    ;; grep, find, ls — disabled
   )
 

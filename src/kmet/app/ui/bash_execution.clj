@@ -68,11 +68,11 @@
     (let [hint (when (pos? hidden-line-count)
                  (if expanded?
                    (str (theme/fg t :muted "(")
-                        (app-kb/key-hint "app.tools.expand" "to collapse")
+                        (app-kb/key-hint "app.tools.expand" "to toggle")
                         (theme/fg t :muted ")"))
                    (str (theme/fg t :muted
                                   (str "... " hidden-line-count " more lines ("))
-                        (app-kb/key-hint "app.tools.expand" "to expand")
+                        (app-kb/key-hint "app.tools.expand" "to toggle")
                         (theme/fg t :muted ")"))))
           exit-part (case status
                       :cancelled (theme/fg t :warning "(cancelled)")
@@ -138,9 +138,12 @@
           ended-at (:ended-at st)
           exclude? (:exclude? st)
           now-ms (r/tracked-deref now-atom)
-          expanded? (or (r/tracked-deref expanded-atom)
-                        (when tools-expanded-atom
-                          (r/tracked-deref tools-expanded-atom)))
+          ;; user-invoked (!/!!) executions are exempt from quiet —
+          ;; it projects to collapsed here, like the info banner and
+          ;; loaded resources
+          expanded? (boolean (or (r/tracked-deref expanded-atom)
+                                 (= :expanded (when tools-expanded-atom
+                                                (r/tracked-deref tools-expanded-atom)))))
           t (r/tracked-deref s/theme-sub)
           color-key (if exclude? :dim :bash-mode)
           full-output (str/join "\n" output-lines)

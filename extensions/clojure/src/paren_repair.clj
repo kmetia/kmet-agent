@@ -93,6 +93,17 @@
 ;; Tool execute
 ;; ═══════════════════════════════════════════════════════════════════════════════
 
+(defn title
+  [args]
+  (let [p (edit-util/title-arg args :file_path)]
+    (when (and (string? p) (seq p))
+      (let [home (System/getProperty "user.home" "")]
+        (str "clojure_paren_repair "
+             (if (and (seq home)
+                      (or (= p home) (clojure.string/starts-with? p (str home "/"))))
+               (str "~" (subs p (count home)))
+               p))))))
+
 (defn execute
   "Tool entry point.  Returns {:content str :is-error bool}."
   [{:keys [file_path format]}]
@@ -201,6 +212,6 @@
                    :description "Path to the Clojure file to repair (.clj, .cljs, .cljc, .cljd, .bb, .edn, .lpy)"}
       "format"    {:type        "boolean"
                    :description "Format the file with cljfmt after repairing delimiters (default: true)"}}}
-    :execute execute})
+    :execute execute :title title})
   (ext/on-tool-call api on-tool-call)
   (ext/on-tool-result api on-tool-result))

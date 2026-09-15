@@ -430,7 +430,7 @@
     (let [plain (render-tool :name "read"
                              :args {:path "/home/user/.pi/skills/demo-skill/SKILL.md"})]
       (is (some #(re-find #"\[skill\] demo-skill" %) plain))
-      (is (some #(re-find #"to expand" %) plain)))))
+      (is (some #(re-find #"to toggle" %) plain)))))
 
 (deftest test-read-compact-resource
   (testing "AGENTS.md reads render as 'read resource' label (pi)"
@@ -839,6 +839,117 @@
       (is (= 0 @disposed) "a reused duck output is not disposed")
       (protocols/dispose c)
       (is (= 1 @disposed) "component dispose releases the duck output once"))))
+
+;; ─── Quiet mode (:quiet display) ────────────────────────────────────────────
+
+(defn- render-quiet [& {:keys [name args content is-error title-fn]}]
+  (let [shared (atom :quiet)
+        c (te/make-tool-execution :name name :args args :content (or content "")
+                                  :is-error (boolean is-error)
+                                  :tools-expanded-atom shared
+                                  :title-fn title-fn)]
+    (mapv strip-ansi (core/render c 60))))
+
+(deftest test-quiet-renders-dimmed-title-line
+  (testing "quiet is one title line plus the leading separator"
+    (let [lines (render-quiet :name "read" :args {:path "src/a.clj"}
+                              :content "line1\nline2"
+                              :title-fn (fn [a] (str "read " (:path a))))]
+      (is (= 2 (count lines)))
+      (is (= "" (first lines)))
+      (is (re-find #"read src/a\.clj" (second lines)))
+      (is (not (re-find #"\[tool\]" (second lines))) "no [tool] prefix")
+      (is (not-any? #(re-find #"line1|line2" %) lines)
+          "result content never reaches the quiet line")
+      (is (not-any? #(re-find #"ctrl\+o|toggle" %) lines)
+          "no hint in quiet")))
+  (testing "error prefix is text, still the one dimmed line"
+    (let [lines (render-quiet :name "bash" :args {:command "ls"} :content "boom"
+                              :is-error true :title-fn (fn [a] (str "bash $ " (:command a))))]
+      (is (= 2 (count lines)))
+      (is (re-find #"\(error\) bash \$ ls" (second lines)))))
+  (testing "missing title falls back to the tool name"
+    (let [lines (render-quiet :name "myext" :args {} :content "x")]
+      (is (re-find #"^ myext" (second lines)) "bare tool name, no prefix")))
+  (testing "a multiline title collapses to one visual line"
+    (let [lines (render-quiet :name "bash" :args {:command "cd /x && python3 - <<'EOF'\nprint(1)\nprint(2)"}
+                              :title-fn (fn [a] (str "bash $ " (:command a))))]
+      (is (= 2 (count lines)))
+      (is (<= (utils/visible-width (second lines)) 60))
+      (is (re-find #"print\(1\) print\(2\)" (second lines))
+          "newline became a space instead of wrapping")))
+  (testing "a throwing title degrades to the name"
+    (let [lines (render-quiet :name "myext" :args {} :content "x"
+                              :title-fn (fn [_] (throw (ex-info "boom" {}))))]
+      (is (re-find #"^ myext" (second lines)) "bare tool name, no prefix"))))
+
+(deftest test-quiet-ignores-content-and-renderers
+  (testing "content swaps never touch the quiet line (scrollback-immutable)"
+    (let [shared (atom :quiet)
+          c (te/make-tool-execution :name "bash" :args {:command "ls"} :content "out1"
+                                    :tools-expanded-atom shared
+                                    :title-fn (fn [a] (str "bash $ " (:command a))))
+          before (mapv strip-ansi (core/render c 60))]
+      (reset! (:content-atom c) "out2-changed")
+      (is (= before (mapv strip-ansi (core/render c 60))))))
+  (testing "custom renderers never run in quiet"
+    (let [shared (atom :quiet)
+          called (atom 0)
+          c (te/make-tool-execution :name "custom" :args {} :content "out"
+                                    :tools-expanded-atom shared
+                                    :render-call-fn (fn [& _] (swap! called inc) nil)
+                                    :render-result-fn (fn [& _] (swap! called inc) nil))]
+      (core/render c 60)
+      (is (zero? @called))))
+  (testing "images are hidden in quiet"
+    (let [shared (atom :quiet)
+          c (te/make-tool-execution :name "read" :args {:path "x.png"} :content "ok"
+                                    :tools-expanded-atom shared)]
+      (te/tool-execution-set-images! c [{:data "AA" :mime-type "image/png"}])
+      (let [lines (mapv strip-ansi (core/render c 60))]
+        (is (= 2 (count lines)))
+        (is (not-any? #(re-find #"Image" %) lines))))))
+
+(deftest test-quiet-cancels-elapsed-ticker
+  (testing "entering quiet cancels the running-tool repaint timer"
+    (let [shared (atom :collapsed)
+          c (te/make-tool-execution :name "bash" :args {:command "sleep 5"}
+                                    :tools-expanded-atom shared)]
+      (te/tool-execution-mark-execution-started! c)
+      (core/render c 60)
+      (is (some? (:timer-id @(:renderer-state-atom c))) "ticker armed while collapsed")
+      (reset! shared :quiet)
+      (core/render c 60)
+      (is (nil? (:timer-id @(:renderer-state-atom c))) "quiet cancelled it")
+      (is (not (contains? (timers/scheduled) (:timer-id @(:renderer-state-atom c))))))))
+
+(deftest test-quiet-long-title-truncates-to-one-line
+  (testing "a long title truncates with an ellipsis to a single visual line"
+    (let [long-path (apply str (repeat 100 "x"))
+          lines (render-quiet :name "read" :args {:path long-path}
+                              :title-fn (fn [a] (str "read " (:path a))))]
+      (is (= 2 (count lines)))
+      (is (re-find #"\.\.\." (second lines)) "ellipsis marks the cut")
+      (is (<= (utils/visible-width (second lines)) 60)))))
+
+(deftest test-quiet-disposes-shared-instance-once
+  (testing "entering quiet disposes a renderer instance shared by both
+            slots exactly once"
+    (let [disposed (atom 0)
+          current (atom nil)
+          renderer (fn [& _] @current)
+          shared (atom :collapsed)
+          c (te/make-tool-execution
+             :name "custom" :content "out" :tools-expanded-atom shared
+             :render-call-fn renderer
+             :render-result-fn renderer)]
+      (reset! current (spy-component disposed))
+      (core/render c 60)
+      (is (= 0 @disposed))
+      (reset! shared :quiet)
+      (core/render c 60)
+      (is (= 1 @disposed)
+          "the shared instance is disposed once, not twice"))))
 
 (deftest test-same-instance-both-slots-disposed-once
   (testing "a renderer returning one instance for BOTH slots (call and

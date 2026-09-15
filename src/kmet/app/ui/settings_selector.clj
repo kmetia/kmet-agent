@@ -21,6 +21,7 @@
             [kmet.config :as cfg]
             [kmet.libs.http :as http]
             [kmet.libs.terminal-image :as timg]
+            [kmet.tui.components.expandable-text :as expandable-text]
             [kmet.tui.hiccup :as h]
             [kmet.tui.core :as tui]
             [kmet.tui.protocols :as protocols]
@@ -169,6 +170,14 @@
                      ;; snapshot — Ctrl+T toggles it at runtime
                                    :value (if (ui/chat-history-get-thinking-hidden (:chat-history cs)) "on" "off")
                                    :values ["off" "on"]}
+                                  {:id :tool-display-mode
+                                   :label "Tool display"
+                     ;; the live chat-history mode, not a startup snapshot
+                     ;; — ctrl+o cycles it at runtime
+                                   :value (name (or (when (:chat-history cs)
+                                                      (ui/chat-history-get-tool-display-mode (:chat-history cs)))
+                                                    :collapsed))
+                                   :values ["collapsed" "expanded" "quiet"]}
                                   {:id :editor-padding
                                    :label "Editor padding"
                                    :value (cfg/get-editor-padding-x config)
@@ -287,6 +296,19 @@
                              (ui/chat-history-set-thinking-hidden!
                               (:chat-history cs) hidden?)
                              (cfg/set-hide-thinking-block! hidden?))
+                           :tool-display-mode
+                           (let [mode (keyword value)]
+                             (ui/chat-history-set-tool-display-mode!
+                              (:chat-history cs) mode)
+                             (cfg/set-tool-display-mode! mode)
+                             (when-let [hdr (:header-comp cs)]
+                               (expandable-text/expandable-text-set-expanded!
+                                hdr (= :expanded mode)))
+                             (when-let [lr (:loaded-resources-comp cs)]
+                               (ui/loaded-resources-set-expanded!
+                                lr (= :expanded mode)))
+                             (when (:tui cs)
+                               (tui/tui-request-render (:tui cs) true)))
                            :editor-padding
                            (do (set-editor-setting! cs #(protocols/editor-set-padding-x! % value))
                                (cfg/save-setting! [:editor-padding-x] value))

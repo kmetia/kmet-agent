@@ -29,7 +29,7 @@
    "app.models.toggleProvider"  {:default-keys ["ctrl+p"]                 :description "Toggle all models of the provider"}
    "app.models.reorderUp"       {:default-keys ["alt+up"]                 :description "Move model up in the cycle"}
    "app.models.reorderDown"     {:default-keys ["alt+down"]               :description "Move model down in the cycle"}
-   "app.tools.expand"           {:default-keys ["ctrl+o"]                 :description "Toggle tool output"}
+   "app.tools.expand"           {:default-keys ["ctrl+o"]                 :description "Cycle tool display"}
    "app.thinking.toggle"        {:default-keys ["ctrl+t"]                 :description "Toggle thinking blocks"}
    "app.view.forceRedraw"       {:default-keys ["alt+r" "f5"]             :description "Force full redraw"}
    "app.session.toggleNamedFilter" {:default-keys ["ctrl+n"]              :description "Toggle named session filter"}

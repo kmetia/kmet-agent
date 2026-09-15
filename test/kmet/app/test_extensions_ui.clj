@@ -35,6 +35,8 @@
       :set-theme (fn [theme-or-name] (swap! calls conj [:set-theme theme-or-name]))
       :get-tools-expanded (fn [] (swap! calls conj [:get-tools-expanded]) false)
       :set-tools-expanded (fn [v] (swap! calls conj [:set-tools-expanded v]))
+      :get-tool-display-mode (fn [] (swap! calls conj [:get-tool-display-mode]) :collapsed)
+      :set-tool-display-mode (fn [v] (swap! calls conj [:set-tool-display-mode v]))
       :reset (fn [] (swap! calls conj [:reset]))})
     calls))
 
@@ -60,6 +62,8 @@
       (ex/ui-set-theme "dark")
       (t/is (= false (ex/ui-get-tools-expanded)))
       (ex/ui-set-tools-expanded true)
+      (t/is (= :collapsed (ex/ui-get-tool-display-mode)))
+      (ex/ui-set-tool-display-mode :quiet)
       (ex/ui-reset!)
       (t/is (= [:notify
                 :set-status :set-widget :set-footer :set-header :set-title
@@ -68,7 +72,8 @@
                 :set-working-visible :set-hidden-thinking-label
                 :set-editor-component :add-autocomplete-provider
                 :set-theme :get-tools-expanded
-                :set-tools-expanded :reset]
+                :set-tools-expanded :get-tool-display-mode
+                :set-tool-display-mode :reset]
                (mapv first @calls)))
       (t/is (= "● active" (-> (nth @calls 1) (nth 2))))
       (t/is (= {:placement :below-editor} (-> (nth @calls 2) (nth 3))))

@@ -123,6 +123,7 @@ errors.")
                        ;; :details, plain preview fallback without them.
                        :render-call render/render-lsp-call
                        :render-result render/render-lsp-result
+                       :title render/title-lsp
                        :execute (fn [args _on-update signal _ctx]
            ;; Tool contract (kmet.app.tools.registry): execute returns
            ;; {:content ...}; :details rides along for the renderer. A bare

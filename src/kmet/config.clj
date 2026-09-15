@@ -332,6 +332,20 @@
   [hidden?]
   (save-setting! [:hide-thinking-block] (boolean hidden?)))
 
+(defn get-tool-display-mode
+  "Tool display mode (kmet deviation — pi has only the boolean
+   toolOutputExpanded): :collapsed (default) | :expanded | :quiet.
+   Missing and invalid values fall back to :collapsed."
+  [config]
+  (let [v (:tool-display-mode config :collapsed)]
+    (if (contains? #{:collapsed :expanded :quiet} v) v :collapsed)))
+
+(defn set-tool-display-mode!
+  "Persist the tool display mode to the global settings file
+   (applied by Ctrl+O / app.tools.expand and the /settings row)."
+  [mode]
+  (save-setting! [:tool-display-mode] mode))
+
 (defn get-enabled-models
   "Enabled model patterns for Ctrl+P cycling (pi: settingsManager
    enabledModels — same format as the --models flag). nil = all enabled."

@@ -142,6 +142,10 @@
 ;; Similar-match formatting
 ;; ═══════════════════════════════════════════════════════════════════════════════
 
+(defn title
+  [args]
+  (edit-util/title "clojure_edit" args))
+
 (defn execute
   "Tool entry point.  Returns {:content str :is-error bool}."
   [{:keys [file_path form_type form_identifier content operation]
@@ -265,4 +269,4 @@
                          :description "The editing operation to perform"}
       "content"         {:type        "string"
                          :description "New content to use for the operation"}}}
-    :execute execute}))
+    :execute execute :title title}))
