@@ -317,3 +317,108 @@ Jolt") — `deftest-transports test-stream` then exercises the native path under
 `jolt test` over `kmet.libs.test-http`. `jolt-port.md` §B1 records the same
 decision and wants its "What still keeps curl on Jolt: live streams" text
 removed with it.
+
+### [jolt#1015](https://github.com/jolt-lang/jolt/issues/1015) — `StringBuilder` / `StringBuffer` `append(char[])` and `append(char[], offset, len)` append the array's rendering instead of its characters
+
+**Area:** host method tables — `java.lang.StringBuilder` / `java.lang.StringBuffer`
+(`host/chez/java/host-static-classes.ss`, `string-builder-methods`). The single
+`append` arm funnels every argument through `append-text` (`render-piece` +
+CharSequence start/end substring), so a `char[]` renders as `"#object[[C]"`;
+the 3-arg form then substrings that rendering — silently appending the wrong
+characters, or throwing `StringIndexOutOfBoundsException` once the requested
+length exceeds it. The JVM dispatches those calls to the distinct
+`append(char[], int offset, int len)` overload (offset/len, not start/end).
+Verified on `v0.8.8-4-g2039710e` (2026-09-15):
+
+```clojure
+;; succeeds on bb/JVM, fails on jolt:
+(let [b (char-array [\a \b \c])]
+  [(str (doto (java.lang.StringBuilder.) (.append b)))
+   (str (doto (java.lang.StringBuilder.) (.append b 0 2)))])
+;; bb/JVM: ["abc" "ab"]
+;; jolt:   ["#object[[C]" "#o"]
+```
+
+The `String(char[], offset, count)` path already handles char arrays
+(`char-array-arg?` / `char-array->string` in the same file, used by
+`writer-piece`); only `append` lacks the dispatch. The same `append-text`
+helper also backs `insert` (jolt#1016 — same fix, shared workaround).
+
+**Workaround:** the nine mock-server body readers in `test/kmet/ai/test_llm.clj`
+build the request body with `(.append sb (String. buf 0 m))` instead of the
+native `(.append sb buf 0 m)` — without it the server thread died with the
+`StringIndexOutOfBoundsException` above and every mock-server e2e hung until
+the runner's per-namespace timeout. Removal: drop the `(String. …)` wrapping at
+the nine sites (grep `(String. buf 0 m)` in that test file) — and this block —
+when the overloads land.
+
+### [jolt#1016](https://github.com/jolt-lang/jolt/issues/1016) — `StringBuilder` / `StringBuffer` `insert(int, char[])` / `insert(int, char[], int offset, int len)` insert the array's rendering instead of its characters
+
+**Area:** host method tables — same `string-builder-methods` in
+`host/chez/java/host-static-classes.ss`; the `insert` arm passes its value
+argument through the same `append-text` helper as #1015, so a `char[]` is
+rendered and the 4-arg form substrings the rendering. Verified on
+`v0.8.8-4-g2039710e` (2026-09-15):
+
+```clojure
+;; succeeds on bb/JVM, fails on jolt:
+(let [b (char-array [\a \b \c])]
+  [(str (doto (java.lang.StringBuilder. "x") (.insert 0 b)))
+   (str (doto (java.lang.StringBuilder. "x") (.insert 0 b 0 2)))])
+;; bb/JVM: ["abcx" "abx"]
+;; jolt:   ["#object[[C]x" "#ox"]
+```
+
+**Workaround:** none of its own — the nine-site `(.append sb (String. buf 0 m))`
+workaround and its removal checklist live with #1015 (the `char-array-arg?`
+dispatch fix there covers `insert` too), so both entries come out together when
+the fix lands.
+
+### [jolt#1017](https://github.com/jolt-lang/jolt/issues/1017) — on the curl path (`:as :stream` on Jolt, #1007) a stream is cut at `:timeout`/`--max-time`, a total deadline, even while data flows
+
+**Area:** kmet-side consequence of #1007: `kmet.libs.http` routes `:as :stream`
+through curl on Jolt, and `curl-argv` maps `:timeout` to `--max-time` (total
+transfer deadline). Providers set `:timeout (or total-timeout idle-timeout)`
+(default `:http-idle-timeout-ms` 300000), so every provider stream is
+hard-capped at 5 min wall-clock on Jolt, while bb's `java.net.http` timeout
+never cuts an in-progress body. Verified on `v0.8.8-4-g2039710e`
+(2026-09-15): server streams a chunk every 200 ms, client
+`{:as :stream :timeout 1000}` — Jolt delivers 5 of 40 ticks and cuts at ~1.2 s
+(server sees a broken pipe); bb delivers all 40 over ~8.1 s.
+
+**Workaround / relation:** none of its own — the divergence exists only because
+of #1007's stream carve-out, so the #1007 removal checklist retires it when the
+shim can stream. If fixed kmet-side instead, the change is in
+`src/kmet/libs/http.cljc` (`curl-argv`'s `:max-time`): don't apply an
+idle-derived `:timeout` to `:as :stream` (let the SSE reader's idle timeout +
+`abort!` govern), or plumb an explicit total deadline separately.
+`test-llm-body-stall-idle-timeout-completes` is `^:bb-only` for this.
+
+### [jolt#1020](https://github.com/jolt-lang/jolt/issues/1020) — host method tables silently ignore extra trailing arguments; `String/valueOf(char[], offset, count)` ignores offset/count
+
+**Area:** host method dispatch (`host/chez/java/natives-str.ss`'s
+`jolt-string-method` and other `rest`-taking tables): extra args are dropped
+instead of raising the JVM's arity error, so
+`(String/valueOf (char-array [\a \b \c]) 1 2)` returns `"abc"` instead of
+`"bc"`. Found while sweeping the char[] API family around #1015/#1016.
+
+**Workaround:** none in kmet — no call sites; tracked because the
+silent-result class can mask user errors.
+
+### [jolt#1021](https://github.com/jolt-lang/jolt/issues/1021) — `String/copyValueOf` missing (both arities)
+
+**Area:** `java.lang.String` static table — `(String/copyValueOf (char-array …))`
+and the 3-arg form throw `No matching field or method: String/copyValueOf`;
+they are identical to the matching `String/valueOf` overloads on the JVM (and
+pair with #1020).
+
+**Workaround:** none in kmet — no call sites.
+
+### [jolt#1022](https://github.com/jolt-lang/jolt/issues/1022) — `StringBuilder`/`StringBuffer` `getChars(int, int, char[], int)` missing
+
+**Area:** `string-builder-methods` (`host/chez/java/host-static-classes.ss`) has
+no `getChars`, so `(.getChars (StringBuilder. "abc") 0 3 dst 0)` throws
+`No matching method getChars found`; `String.getChars` works. The char[] family
+companion to #1015/#1016.
+
+**Workaround:** none in kmet — no call sites.
