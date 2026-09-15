@@ -5,6 +5,10 @@
             [kmet.tui.utils :as u]
             [kmet.tui.components.alt-screen-flash :as asf]))
 
+;; the timer registry is process-global: isolate each case so an armed
+;; timer another namespace left behind can't make pump! report true here
+(t/use-fixtures :each (fn [f] (timers/cancel-all!) (f) (timers/cancel-all!)))
+
 (defn- plain [lines]
   (mapv #(u/strip-ansi-codes %) lines))
 

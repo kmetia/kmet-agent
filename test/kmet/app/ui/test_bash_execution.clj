@@ -69,7 +69,9 @@
     (reset! (:expanded-atom c) true)
     (let [lines (protocols/render c 40)]
       (t/is (seq lines))
-      (t/is (>= (count lines) 30) "expanded output renders all lines"))))
+      (t/is (>= (count lines) 30) "expanded output renders all lines"))
+    (be/bash-execution-set-complete! c 0 false)
+    (protocols/dispose c)))
 
 (t/deftest test-bash-execution-render-cancelled
   (let [c (be/make-bash-execution :command "sleep 5" :exclude-from-context? false)]
@@ -146,7 +148,9 @@
           (t/is (= 40 (u/visible-width (first lines))) "borders stay flush")
           (t/is (not= before lines) "styling changed with the theme"))
         (finally
-          (reset! theme/theme-atom (theme/get-theme "dark")))))))
+          (reset! theme/theme-atom (theme/get-theme "dark"))
+          (be/bash-execution-set-complete! c 0 false)
+          (protocols/dispose c))))))
 
 (t/deftest test-dispose-stops-frame-driver
   ;; A component dropped from the chat (e.g. /new while a run is in

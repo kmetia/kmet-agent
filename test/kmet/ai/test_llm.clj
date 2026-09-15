@@ -1508,7 +1508,10 @@
       (finally
         (.close ss)))))
 
-(t/deftest ^:slow test-llm-body-stall-idle-timeout-completes
+;; guards the java.net.http body-stream deadlock — ^:bb-only: jolt's
+;; provider streams ride curl (jolt-port.md B1), where the total timeout
+;; reports its own transport error instead of the SSE idle message
+(t/deftest ^:slow ^:bb-only test-llm-body-stall-idle-timeout-completes
   (m/load-catalogs!)
   ;; A server that sends response headers then stalls the body: the SSE idle
   ;; timeout must fire and the request future must complete promptly. Before
@@ -1705,7 +1708,7 @@
                                  (let [buf (char-array (- @clen n))
                                        m (.read rdr buf)]
                                    (when (pos? m)
-                                     (.append body-sb buf 0 m)
+                                     (.append body-sb (String. buf 0 m))
                                      (recur (+ n m))))
                                  nil))
                            _ (reset! request-body (str body-sb))
@@ -1809,7 +1812,7 @@
                                  (let [buf (char-array (- @clen n))
                                        m (.read rdr buf)]
                                    (when (pos? m)
-                                     (.append body-sb buf 0 m)
+                                     (.append body-sb (String. buf 0 m))
                                      (recur (+ n m))))
                                  nil))
                            _ (reset! request-body (str body-sb))
@@ -2041,7 +2044,7 @@
                                  (let [buf (char-array (- @clen n))
                                        m (.read rdr buf)]
                                    (when (pos? m)
-                                     (.append body-sb buf 0 m)
+                                     (.append body-sb (String. buf 0 m))
                                      (recur (+ n m))))
                                  nil))
                            _ (reset! request-body (str body-sb))
@@ -2132,7 +2135,7 @@
                                  (let [buf (char-array (- @clen n))
                                        m (.read rdr buf)]
                                    (when (pos? m)
-                                     (.append body-sb buf 0 m)
+                                     (.append body-sb (String. buf 0 m))
                                      (recur (+ n m))))
                                  nil))
                            _ (reset! request-body (str body-sb))
@@ -2220,7 +2223,7 @@
                                  (let [buf (char-array (- @clen n))
                                        m (.read rdr buf)]
                                    (when (pos? m)
-                                     (.append body-sb buf 0 m)
+                                     (.append body-sb (String. buf 0 m))
                                      (recur (+ n m))))
                                  nil))
                            _ (reset! request-body (str body-sb))
@@ -2301,7 +2304,7 @@
                            _ (loop [n 0]
                                (if (< n @clen)
                                  (let [buf (char-array (- @clen n)) m (.read rdr buf)]
-                                   (when (pos? m) (.append sb buf 0 m) (recur (+ n m))))
+                                   (when (pos? m) (.append sb (String. buf 0 m)) (recur (+ n m))))
                                  nil))
                            _ (reset! request-body (str sb))
                            out (.getOutputStream s)
@@ -2698,7 +2701,7 @@
                                    (let [buf (char-array (- @clen n))
                                          m (.read rdr buf)]
                                      (when (pos? m)
-                                       (.append body-sb buf 0 m)
+                                       (.append body-sb (String. buf 0 m))
                                        (recur (+ n m))))
                                    nil))
                              _ (reset! request-body (str body-sb))
@@ -2798,7 +2801,7 @@
                            _ (loop [n 0]
                                (if (< n @clen)
                                  (let [buf (char-array (- @clen n)) m (.read rdr buf)]
-                                   (when (pos? m) (.append sb buf 0 m) (recur (+ n m))))
+                                   (when (pos? m) (.append sb (String. buf 0 m)) (recur (+ n m))))
                                  nil))
                            _ (reset! request-body (str sb))
                            out (.getOutputStream s)
@@ -2890,7 +2893,7 @@
                            _ (loop [n 0]
                                (if (< n @clen)
                                  (let [buf (char-array (- @clen n)) m (.read rdr buf)]
-                                   (when (pos? m) (.append sb buf 0 m) (recur (+ n m))))
+                                   (when (pos? m) (.append sb (String. buf 0 m)) (recur (+ n m))))
                                  nil))
                            _ (reset! request-url first-line)
                            _ (reset! request-body (str sb))

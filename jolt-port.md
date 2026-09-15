@@ -395,22 +395,35 @@ namespaces. The earlier main build (`v0.8.6-72-g0f7d1a11`, built locally)
 was red for one reason only: `kmet.app.loop/retryable-error?` stalled
 jolt's regex engine on its 50-alternative `retryable-error-regex` (first
 match ~5 s here, never returns on Termux/aarch64), so `kmet.ai.test-llm`
-hit the runner's 15 s per-namespace timeout and the cancellation cascaded
+hit the runner's per-namespace timeout (15 s then; 60 s now — `kmet.tasks.runner`:
+`jolt-ns-timeout-ms`) and the cancellation cascaded
 into later namespaces. That stall is fixed upstream (the DFA conversion is
 budgeted), as is the UNIX_LINES terminator set; every affected namespace is
 green standalone: `libs.test-http` 25/90 plus the slow platform-transport
 test, `ai.test-oauth` 53/223, `app.ui.test-session-selector` 31/130,
 `libs.test-edn-store` 17/40.
 
-**Slow set (`jolt test-ext`):** `kmet.app.test-tools` green 2026-09-11
-(`bash-executor`'s stdin workaround — §B2) and `kmet.tui.test-render-loop` green
-via the M2 protocol-stub adapter; TUI-attributable reds: 0 (Unix). The
-remaining reds are runner/network artifacts, not terminal gaps:
+**Slow set (`jolt test-ext`):** green 2026-09-15 on `v0.8.8-4-g2039710e`
+(73 tests / 362 assertions): `kmet.app.test-tools` (`bash-executor`'s stdin
+workaround — §B2), `kmet.tui.test-render-loop` via the M2 protocol-stub
+adapter, and `kmet.ai.test-llm`'s mock-server e2e set; TUI-attributable
+reds: 0 (Unix). The two previously reported reds were host/transport
+artifacts, not terminal gaps, and are now handled:
 
-| namespace | reds | cause |
-|---|---|---|
-| `kmet.modes.test-overlay-input-smoke` | 2 F + 1 E | the test spawns a hardcoded `bb run` through a pty, so on Jolt it exercises bb's TUI; its stages need ~20 s while the Jolt runner kills each namespace after 15 s (`kmet.tasks.runner`: `deref f 15000`) |
-| `kmet.ai.test-llm` | 1 E | `test-llm-codex-responses-end-to-end` — network e2e, interrupted by the ns timeout |
+- **`kmet.ai.test-llm`** — the mock-server e2e readers assembled request
+  bodies with `StringBuilder.append(char[], int, int)`. Jolt resolves that
+  call to the String overload (`char[]` → `toString`, substring semantics)
+  and throws in the server thread, so every e2e hung until the runner's
+  per-namespace timeout. The servers now use the portable
+  `(.append sb (String. buf 0 m))`; the slow set runs in ~10 s.
+  `test-llm-body-stall-idle-timeout-completes` is `^:bb-only`: it guards the
+  `java.net.http` body-stream deadlock on close, while Jolt provider streams
+  ride curl (B1) and the total timeout surfaces curl's own transport error.
+- **`kmet.modes.test-overlay-input-smoke`** — the driver spawns a hardcoded
+  `bb run` through a pty, so on Jolt it exercises bb's TUI, not Jolt's; its
+  ~20 s of stages were over the runner's then-15 s per-namespace cap. The
+  test is now `^:bb-only` (a Jolt-host pty variant is a follow-up); bb
+  `test-ext` still runs it.
 
 **Flaky (not in the deterministic set):** the frame-hook counting tests
 `tui.test-compute/compute-change-invalidates-subscriber-and-schedules-frame`
@@ -422,6 +435,11 @@ poke-site/drain instrumentation (5 instrumented full runs clean); bb is
 stable over 5 full runs. Mechanism unpinned — rare timing/state interaction
 (~10% per full run), possibly a leaked reaction from an earlier namespace
 firing `schedule-frame!` into the test's hook.
+
+Also observed once (2026-09-15, one in three full `jolt test-ext` runs):
+`libs.test-http/test-curl-redirect-slow-second-hop` — curl (97) "Connection
+reset by peer" through the test SOCKS proxy while the full run was loaded;
+green standalone 3/3.
 
 ---
 
