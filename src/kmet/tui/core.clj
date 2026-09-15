@@ -1886,17 +1886,38 @@
                                       ;; (microsoft/terminal#20370; pi #4506/#6502). A
                                       ;; change *entirely* above the window has nothing
                                       ;; visible to repaint at all. Only the same-height
-                                      ;; and growing cases take this path; a shrink that
-                                      ;; starts above the window keeps the full-redraw
-                                      ;; fallback (the extra-line cleanup in the diff
-                                      ;; renderer assumes the change began inside the
-                                      ;; window).
+                                      ;; and growing cases take this path; a shrink whose
+                                      ;; visible tail is unchanged takes
+                                      ;; shrink-above-window? below (the extra-line
+                                      ;; cleanup in the diff renderer needs the change to
+                                      ;; have begun inside the window, so a shrink with a
+                                      ;; changed tail keeps the full-redraw fallback).
                                       scrollback-only-change? (and (not (neg? first-changed))
                                                                    (= new-count prev-count)
                                                                    (< first-changed @prev-viewport-top)
                                                                    (< last-changed @prev-viewport-top)
                                                                    (>= new-count @prev-viewport-top))
+                                      ;; A shrink whose removed lines are all above the
+                                      ;; window paints nothing when the visible tail is
+                                      ;; unchanged: the screen already shows exactly those
+                                      ;; rows (the same content, the removed count higher
+                                      ;; in the document), and a terminal has no
+                                      ;; addressable scrollback to clean up. The history
+                                      ;; above is stale — mark it dirty like the paths
+                                      ;; above and let the app heal at a streaming-free
+                                      ;; boundary, instead of a clearing full redraw in
+                                      ;; the middle of a stream. The tails are compared
+                                      ;; by content: a shrink that also changed what is
+                                      ;; visible must still repaint.
+                                      shrink-above-window? (and (not (neg? first-changed))
+                                                                (< new-count prev-count)
+                                                                (< first-changed @prev-viewport-top)
+                                                                (>= new-count h)
+                                                                (>= prev-count h)
+                                                                (= (subvec lines (- new-count h) new-count)
+                                                                   (subvec prev (- prev-count h) prev-count)))
                                       viewport-clamp? (and (not scrollback-only-change?)
+                                                           (not shrink-above-window?)
                                                            (not (neg? first-changed))
                                                            (< first-changed @prev-viewport-top)
                                                            (>= new-count prev-count)
@@ -1908,7 +1929,9 @@
                                       ;; until a clearing full redraw. Record it; the app
                                       ;; heals at a streaming-free boundary
                                       ;; (tui-heal-scrollback!).
-                                      _ (when (or scrollback-only-change? viewport-clamp?)
+                                      _ (when (or scrollback-only-change?
+                                                  shrink-above-window?
+                                                  viewport-clamp?)
                                           (reset! (:scrollback-dirty? tui) true))
                                       mid-full-redraw! (fn [reason]
                                                          (log-redraw! reason)
@@ -1924,6 +1947,16 @@
                                                           last-changed " < " @prev-viewport-top
                                                           "), no visible change"))
                                         (reset! viewport-top @prev-viewport-top))
+
+                                    shrink-above-window?
+                                    ;; the window's top moved up with the document;
+                                    ;; the visible content (and the cursor's screen
+                                    ;; row) did not, so only the index model shifts
+                                    (let [removed (- prev-count new-count)]
+                                      (swap! prev-viewport-top - removed)
+                                      (swap! hardware-cursor-row - removed)
+                                      (reset! viewport-top @prev-viewport-top)
+                                      (position-hardware-cursor cursor new-count))
 
                                     (>= first-changed new-count)
                                     (if (> prev-count new-count)

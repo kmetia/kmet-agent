@@ -52,17 +52,20 @@ and whatever exceeds the screen scrolls into the native scrollback, which
 the user can browse while streaming continues below. A *full redraw*
 (a resize, an explicit rebuild — `tui-request-render` with force, i.e.
 `tui-resume!` or the scrollback heal — or a shrink that starts above the
-window) re-emits the whole transcript, so it also clears the scrollback
-(`\u001b[3J`) or the re-emit would duplicate the history. A change that
-starts *above* the window is otherwise handled without one: since the
-terminal has no addressable scrollback, the diff is clamped to the window
-top and only visible lines are repainted in place (a same-height or growing
-change entirely above the window emits nothing; a shrink keeps the full
-redraw) — this keeps the destructive clear out of the *automatic* streaming
-path, where it otherwise yanked the viewport to the top on Termux and
-Windows Terminal (microsoft/terminal#20370; pi #4506/#6502). What clamping
-leaves behind is a stale scrollback: those lines were written with the old
-content and the terminal cannot rewrite them, so the TUI *records* that
+window *and* changes what is visible) re-emits the whole transcript, so it
+also clears the scrollback (`\u001b[3J`) or the re-emit would duplicate the
+history. A change that starts *above* the window is otherwise handled
+without one: since the terminal has no addressable scrollback, the diff is
+clamped to the window top and only visible lines are repainted in place (a
+same-height or growing change entirely above the window emits nothing; so
+does a shrink whose visible tail is unchanged — the screen already shows
+those rows, only the removed count higher in the document, so not one byte
+is emitted and just the index model moves up) — this keeps the destructive
+clear out of the *automatic* streaming path, where it otherwise yanked the
+viewport to the top on Termux and Windows Terminal
+(microsoft/terminal#20370; pi #4506/#6502). What clamping leaves behind is a
+stale scrollback: those lines were written with the old content and the
+terminal cannot rewrite them, so the TUI *records* that
 (`tui-scrollback-dirty?`) and rebuilds it with one clearing full redraw at a
 streaming-free boundary — the app calls `tui-heal-scrollback!` at the end of
 a turn (`on-agent-done` / `on-agent-error`, gated on nothing else streaming:
