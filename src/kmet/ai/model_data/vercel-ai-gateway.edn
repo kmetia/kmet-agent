@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-14T19:46:27Z"
+ :generated-at "2026-09-15T14:39:46Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -58,7 +58,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text]
-    :cost {:input 1.3 :output 7.8 :cache-read 0.26 :cache-write 1.625}
+    :cost {:input 1.3 :output 7.8 :cache-read 0.13 :cache-write 1.625}
     :context-window 240000
     :max-tokens 64000}
    "alibaba/qwen3-235b-a22b-thinking"
@@ -212,7 +212,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.1 :output 0.4 :cache-read 0.001 :cache-write 0.125}
+    :cost {:input 0.1 :output 0.4 :cache-read 0.01 :cache-write 0.125}
     :context-window 1000000
     :max-tokens 64000}
    "alibaba/qwen3.5-plus"
@@ -223,7 +223,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.4 :output 2.4 :cache-read 0.04 :cache-write 0.5}
+    :cost {:input 0.4 :output 2.5 :cache-read 0.04 :cache-write 0.5}
     :context-window 1000000
     :max-tokens 64000}
    "alibaba/qwen3.6-27b"
@@ -245,7 +245,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.5 :output 3 :cache-read 0.1 :cache-write 0.625}
+    :cost {:input 0.5 :output 3 :cache-read 0.05 :cache-write 0.625}
     :context-window 1000000
     :max-tokens 64000}
    "alibaba/qwen3.7-flash"
@@ -311,7 +311,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.16 :output 0.47 :cache-read 0.016 :cache-write 0.2}
+    :cost {:input 0.15 :output 0.47 :cache-read 0.016 :cache-write 0.2}
     :context-window 991000
     :max-tokens 128000}
    "alibaba/qwen3.8-max"
@@ -958,7 +958,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text]
-    :cost {:input 0.06 :output 0.18 :cache-read 0.012 :cache-write 0}
+    :cost {:input 0.021 :output 0.063 :cache-read 0.0042 :cache-write 0}
     :context-window 256000
     :max-tokens 32000}
    "inclusionai/ling-3.0-flash-fin"
@@ -1299,31 +1299,9 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning false
     :input [:text]
-    :cost {:input 0.3 :output 0.9 :cache-read 0 :cache-write 0}
+    :cost {:input 0.3 :output 0.9 :cache-read 0.03 :cache-write 0}
     :context-window 128000
     :max-tokens 4000}
-   "mistral/devstral-2"
-   {:id "mistral/devstral-2"
-    :name "Devstral 2"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning false
-    :input [:text]
-    :cost {:input 0.4 :output 2 :cache-read 0 :cache-write 0}
-    :context-window 256000
-    :max-tokens 256000}
-   "mistral/devstral-small-2"
-   {:id "mistral/devstral-small-2"
-    :name "Devstral Small 2"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning false
-    :input [:text :image]
-    :cost {:input 0.1 :output 0.3 :cache-read 0 :cache-write 0}
-    :context-window 256000
-    :max-tokens 256000}
    "mistral/ministral-14b"
    {:id "mistral/ministral-14b"
     :name "Ministral 14B"
@@ -1332,8 +1310,8 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning false
     :input [:text :image]
-    :cost {:input 0.2 :output 0.2 :cache-read 0 :cache-write 0}
-    :context-window 256000
+    :cost {:input 0.2 :output 0.2 :cache-read 0.02 :cache-write 0}
+    :context-window 262144
     :max-tokens 256000}
    "mistral/ministral-3b"
    {:id "mistral/ministral-3b"
@@ -1343,8 +1321,8 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning false
     :input [:text :image]
-    :cost {:input 0.1 :output 0.1 :cache-read 0 :cache-write 0}
-    :context-window 128000
+    :cost {:input 0.1 :output 0.1 :cache-read 0.01 :cache-write 0}
+    :context-window 131072
     :max-tokens 4000}
    "mistral/ministral-8b"
    {:id "mistral/ministral-8b"
@@ -1354,8 +1332,8 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning false
     :input [:text :image]
-    :cost {:input 0.15 :output 0.15 :cache-read 0 :cache-write 0}
-    :context-window 128000
+    :cost {:input 0.15 :output 0.15 :cache-read 0.015 :cache-write 0}
+    :context-window 262144
     :max-tokens 4000}
    "mistral/mistral-large-3"
    {:id "mistral/mistral-large-3"
@@ -1365,20 +1343,9 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning false
     :input [:text :image]
-    :cost {:input 0.5 :output 1.5 :cache-read 0 :cache-write 0}
-    :context-window 256000
+    :cost {:input 0.5 :output 1.5 :cache-read 0.05 :cache-write 0}
+    :context-window 262144
     :max-tokens 256000}
-   "mistral/mistral-medium"
-   {:id "mistral/mistral-medium"
-    :name "Mistral Medium 3.1"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning false
-    :input [:text :image]
-    :cost {:input 0.4 :output 2 :cache-read 0 :cache-write 0}
-    :context-window 128000
-    :max-tokens 64000}
    "mistral/mistral-medium-3.5"
    {:id "mistral/mistral-medium-3.5"
     :name "Mistral Medium Latest"
@@ -1387,8 +1354,8 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 1.5 :output 7.5 :cache-read 0 :cache-write 0}
-    :context-window 256000
+    :cost {:input 1.5 :output 7.5 :cache-read 0.15 :cache-write 0}
+    :context-window 262144
     :max-tokens 256000}
    "mistral/mistral-nemo"
    {:id "mistral/mistral-nemo"
@@ -1397,10 +1364,10 @@
     :api :anthropic-messages
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning false
-    :input [:text :image]
-    :cost {:input 0.15 :output 0.15 :cache-read 0 :cache-write 0}
-    :context-window 128000
-    :max-tokens 128000}
+    :input [:text]
+    :cost {:input 0.04 :output 0.17 :cache-read 0 :cache-write 0}
+    :context-window 60288
+    :max-tokens 16000}
    "mistral/mistral-small"
    {:id "mistral/mistral-small"
     :name "Mistral Small"
@@ -1409,19 +1376,8 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning false
     :input [:text :image]
-    :cost {:input 0.1 :output 0.3 :cache-read 0 :cache-write 0}
-    :context-window 32000
-    :max-tokens 4000}
-   "mistral/pixtral-12b"
-   {:id "mistral/pixtral-12b"
-    :name "Pixtral 12B 2409"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning false
-    :input [:text :image]
-    :cost {:input 0.15 :output 0.15 :cache-read 0 :cache-write 0}
-    :context-window 128000
+    :cost {:input 0.15 :output 0.6 :cache-read 0.015 :cache-write 0}
+    :context-window 262144
     :max-tokens 4000}
    "moonshotai/kimi-k2"
    {:id "moonshotai/kimi-k2"
