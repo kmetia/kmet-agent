@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-15T14:39:46Z"
+ :generated-at "2026-09-16T09:25:53Z"
  :provider {:id :openrouter
             :name "OpenRouter"
             :env-vars ["OPENROUTER_API_KEY"]
@@ -393,7 +393,7 @@
     :compat {:thinking-format :openrouter}}
    "anthropic/claude-opus-5"
    {:id "anthropic/claude-opus-5"
-    :name "Claude Opus 5"
+    :name "Anthropic: Claude Opus 5"
     :provider :openrouter
     :api :openai-completions
     :base-url "https://openrouter.ai/api/v1"
@@ -412,7 +412,7 @@
     :compat {:thinking-format :openrouter}}
    "anthropic/claude-opus-5:batch"
    {:id "anthropic/claude-opus-5:batch"
-    :name "Claude Opus 5 (batch)"
+    :name "Anthropic: Claude Opus 5 (batch)"
     :provider :openrouter
     :api :openai-completions
     :base-url "https://openrouter.ai/api/v1"
@@ -808,7 +808,7 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.08708 :output 0.17416 :cache-read 0.017416 :cache-write 0}
+    :cost {:input 0.088606 :output 0.177212 :cache-read 0.017721 :cache-write 0}
     :context-window 1024000
     :max-tokens 384000
     :compat {:supports-developer-role false
@@ -934,9 +934,9 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.65868 :output 1.97604 :cache-read 0.020958 :cache-write 0}
-    :context-window 1048576
-    :max-tokens 393216
+    :cost {:input 0.9834 :output 2.9502 :cache-read 0.03278 :cache-write 0}
+    :context-window 1024000
+    :max-tokens 384000
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter}}
@@ -976,7 +976,7 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 0.15 :output 0.6 :cache-read 0.003 :cache-write 0}
+    :cost {:input 0.3 :output 1.2 :cache-read 0.006 :cache-write 0}
     :context-window 1048576
     :max-tokens 384000
     :compat {:supports-developer-role false
@@ -1515,23 +1515,6 @@
     :context-window 262144
     :max-tokens 16384
     :compat {:supports-developer-role false :thinking-format :openrouter}}
-   "google/gemma-4-31b-it:batch"
-   {:id "google/gemma-4-31b-it:batch"
-    :name "Google: Gemma 4 31B (batch)"
-    :provider :openrouter
-    :api :openai-completions
-    :base-url "https://openrouter.ai/api/v1"
-    :reasoning true
-    :thinking-level-map {:high "HIGH"
-                         :low nil
-                         :medium nil
-                         :minimal "MINIMAL"
-                         :off nil}
-    :input [:text :image]
-    :cost {:input 0.39 :output 0.97 :cache-read 0 :cache-write 0}
-    :context-window 262144
-    :max-tokens 235929
-    :compat {:supports-developer-role false :thinking-format :openrouter}}
    "google/gemma-4-31b-it:free"
    {:id "google/gemma-4-31b-it:free"
     :name "Google: Gemma 4 31B (free)"
@@ -1928,7 +1911,7 @@
     :base-url "https://openrouter.ai/api/v1"
     :reasoning true
     :input [:text]
-    :cost {:input 0.55 :output 2.2 :cache-read 0 :cache-write 0}
+    :cost {:input 0.4 :output 2.2 :cache-read 0 :cache-write 0}
     :context-window 1000000
     :max-tokens 40000
     :compat {:supports-developer-role false :thinking-format :openrouter}}
@@ -2284,8 +2267,8 @@
     :base-url "https://openrouter.ai/api/v1"
     :reasoning false
     :input [:text :image]
-    :cost {:input 0.075 :output 0.2 :cache-read 0 :cache-write 0}
-    :context-window 128000
+    :cost {:input 0.09375 :output 0.25 :cache-read 0 :cache-write 0}
+    :context-window 256000
     :max-tokens 16384
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "mistralai/mixtral-8x22b-instruct"
@@ -2382,7 +2365,7 @@
     :reasoning true
     :thinking-level-map {:off nil}
     :input [:text :image]
-    :cost {:input 0.71 :output 3.5 :cache-read 0.15 :cache-write 0}
+    :cost {:input 0.7062 :output 3.21 :cache-read 0.18 :cache-write 0}
     :context-window 262144
     :max-tokens 235929
     :compat {:supports-developer-role false :thinking-format :openrouter}}
@@ -2542,9 +2525,9 @@
                          :off "none"
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.6 :output 2.4 :cache-read 0.12 :cache-write 0}
-    :context-window 202800
-    :max-tokens 182520
+    :cost {:input 0.625 :output 3.125 :cache-read 0.1875 :cache-write 0}
+    :context-window 256000
+    :max-tokens 32768
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "nvidia/nemotron-3-ultra-550b-a55b:free"
    {:id "nvidia/nemotron-3-ultra-550b-a55b:free"
@@ -4980,25 +4963,6 @@
     :context-window 524288
     :max-tokens 262144
     :compat {:supports-developer-role false :thinking-format :openrouter}}
-   "thinkingmachines/inkling-small:batch"
-   {:id "thinkingmachines/inkling-small:batch"
-    :name "Thinking Machines: Inkling Small (batch)"
-    :provider :openrouter
-    :api :openai-completions
-    :base-url "https://openrouter.ai/api/v1"
-    :reasoning true
-    :thinking-level-map {:high "high"
-                         :low "low"
-                         :max "max"
-                         :medium "medium"
-                         :minimal "minimal"
-                         :off "none"
-                         :xhigh nil}
-    :input [:text :image]
-    :cost {:input 0.5 :output 1.2 :cache-read 0.1 :cache-write 0}
-    :context-window 524288
-    :max-tokens 471859
-    :compat {:supports-developer-role false :thinking-format :openrouter}}
    "thinkingmachines/inkling-small:free"
    {:id "thinkingmachines/inkling-small:free"
     :name "Thinking Machines: Inkling Small (free)"
@@ -5397,7 +5361,7 @@
                          :off nil
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 0.075 :output 0.25 :cache-read 0.015 :cache-write 0}
+    :cost {:input 0.1 :output 0.3333 :cache-read 0.02 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-developer-role false :thinking-format :openrouter}}
@@ -5536,8 +5500,8 @@
                          :xhigh nil}
     :input [:text :image]
     :cost {:input 0.15 :output 0.6 :cache-read 0.015 :cache-write 0}
-    :context-window 1000000
-    :max-tokens 393216
+    :context-window 1048576
+    :max-tokens 943718
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~deepseek/deepseek-pro-latest"
    {:id "~deepseek/deepseek-pro-latest"
@@ -5554,9 +5518,9 @@
                          :off "none"
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.5808 :output 1.7424 :cache-read 0.05808 :cache-write 0}
-    :context-window 1000000
-    :max-tokens 393216
+    :cost {:input 0.96 :output 2.88 :cache-read 0.088 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 943718
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~deepseek/deepseek-v4-flash-latest"
    {:id "~deepseek/deepseek-v4-flash-latest"
@@ -5632,7 +5596,7 @@
                          :off "none"
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 2.1 :output 10.95 :cache-read 0.23 :cache-write 0}
+    :cost {:input 1.775 :output 9.94 :cache-read 0.2059 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-developer-role false :thinking-format :openrouter}}

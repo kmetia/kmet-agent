@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-04T07:41:13Z"
+ :generated-at "2026-09-16T09:25:53Z"
  :provider {:id :qwen-token-plan
             :name "Qwen Token Plan"
             :env-vars ["QWEN_TOKEN_PLAN_API_KEY"]
@@ -113,6 +113,27 @@
                          :minimal nil
                          :xhigh nil}
     :input [:text]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1000000
+    :max-tokens 384000
+    :compat {:supports-store false
+             :supports-developer-role false
+             :supports-reasoning-effort true
+             :thinking-format :qwen}}
+   "deepseek-v4.1-flash"
+   {:id "deepseek-v4.1-flash"
+    :name "DeepSeek V4.1 Flash"
+    :provider :qwen-token-plan
+    :api :openai-completions
+    :base-url "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low nil
+                         :max "max"
+                         :medium nil
+                         :minimal nil
+                         :xhigh nil}
+    :input [:text :image]
     :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
     :context-window 1000000
     :max-tokens 384000

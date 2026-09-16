@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-15T14:39:46Z"
+ :generated-at "2026-09-16T09:25:53Z"
  :provider {:id :fireworks
             :name "Fireworks AI"
             :env-vars ["FIREWORKS_API_KEY"]
@@ -30,6 +30,21 @@
     :reasoning true
     :input [:text :image]
     :cost {:input 0.22 :output 0.66 :cache-read 0.007 :cache-write 0}
+    :context-window 1000000
+    :max-tokens 384000
+    :compat {:supports-long-cache-retention false
+             :send-session-affinity-headers true
+             :supports-cache-control-on-tools false
+             :supports-eager-tool-input-streaming false}}
+   "accounts/fireworks/models/deepseek-v4-pro"
+   {:id "accounts/fireworks/models/deepseek-v4-pro"
+    :name "DeepSeek V4 Pro"
+    :provider :fireworks
+    :api :anthropic-messages
+    :base-url "https://api.fireworks.ai/inference"
+    :reasoning true
+    :input [:text]
+    :cost {:input 1.2 :output 1.2 :cache-read 0.6 :cache-write 0}
     :context-window 1000000
     :max-tokens 384000
     :compat {:supports-long-cache-retention false
@@ -156,6 +171,21 @@
              :send-session-affinity-headers true
              :supports-cache-control-on-tools false
              :supports-eager-tool-input-streaming false}}
+   "accounts/fireworks/models/minimax-m2p7"
+   {:id "accounts/fireworks/models/minimax-m2p7"
+    :name "MiniMax-M2.7"
+    :provider :fireworks
+    :api :anthropic-messages
+    :base-url "https://api.fireworks.ai/inference"
+    :reasoning true
+    :input [:text]
+    :cost {:input 1.2 :output 1.2 :cache-read 0.6 :cache-write 0}
+    :context-window 196608
+    :max-tokens 131072
+    :compat {:supports-long-cache-retention false
+             :send-session-affinity-headers true
+             :supports-cache-control-on-tools false
+             :supports-eager-tool-input-streaming false}}
    "accounts/fireworks/models/minimax-m3"
    {:id "accounts/fireworks/models/minimax-m3"
     :name "MiniMax-M3"
@@ -276,6 +306,36 @@
              :send-session-affinity-headers true
              :supports-cache-control-on-tools false
              :supports-eager-tool-input-streaming false}}
+   "accounts/fireworks/routers/deepseek-flash-latest"
+   {:id "accounts/fireworks/routers/deepseek-flash-latest"
+    :name "DeepSeek Flash Latest"
+    :provider :fireworks
+    :api :anthropic-messages
+    :base-url "https://api.fireworks.ai/inference"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.22 :output 0.66 :cache-read 0.007 :cache-write 0}
+    :context-window 1000000
+    :max-tokens 384000
+    :compat {:supports-long-cache-retention false
+             :send-session-affinity-headers true
+             :supports-cache-control-on-tools false
+             :supports-eager-tool-input-streaming false}}
+   "accounts/fireworks/routers/deepseek-pro-latest"
+   {:id "accounts/fireworks/routers/deepseek-pro-latest"
+    :name "DeepSeek Pro Latest"
+    :provider :fireworks
+    :api :anthropic-messages
+    :base-url "https://api.fireworks.ai/inference"
+    :reasoning true
+    :input [:text]
+    :cost {:input 1.32 :output 3.96 :cache-read 0.044 :cache-write 0}
+    :context-window 1000000
+    :max-tokens 384000
+    :compat {:supports-long-cache-retention false
+             :send-session-affinity-headers true
+             :supports-cache-control-on-tools false
+             :supports-eager-tool-input-streaming false}}
    "accounts/fireworks/routers/glm-5p3-fast"
    {:id "accounts/fireworks/routers/glm-5p3-fast"
     :name "GLM 5.3 Fast"
@@ -287,6 +347,111 @@
     :cost {:input 2.1 :output 6.6 :cache-read 0.39 :cache-write 0}
     :context-window 1048572
     :max-tokens 262144
+    :compat {:supports-long-cache-retention false
+             :send-session-affinity-headers true
+             :supports-cache-control-on-tools false
+             :supports-eager-tool-input-streaming false}}
+   "accounts/fireworks/routers/glm-fast-latest"
+   {:id "accounts/fireworks/routers/glm-fast-latest"
+    :name "GLM 5.3 Fast (Latest)"
+    :provider :fireworks
+    :api :anthropic-messages
+    :base-url "https://api.fireworks.ai/inference"
+    :reasoning true
+    :input [:text]
+    :cost {:input 2.1 :output 6.6 :cache-read 0.39 :cache-write 0}
+    :context-window 1048572
+    :max-tokens 262144
+    :compat {:supports-long-cache-retention false
+             :send-session-affinity-headers true
+             :supports-cache-control-on-tools false
+             :supports-eager-tool-input-streaming false}}
+   "accounts/fireworks/routers/glm-flash-latest"
+   {:id "accounts/fireworks/routers/glm-flash-latest"
+    :name "GLM Flash Latest (GLM 5.3 Flash)"
+    :provider :fireworks
+    :api :anthropic-messages
+    :base-url "https://api.fireworks.ai/inference"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.15 :output 0.5 :cache-read 0.03 :cache-write 0}
+    :context-window 1048573
+    :max-tokens 131072
+    :compat {:supports-long-cache-retention false
+             :send-session-affinity-headers true
+             :supports-cache-control-on-tools false
+             :supports-eager-tool-input-streaming false}}
+   "accounts/fireworks/routers/glm-latest"
+   {:id "accounts/fireworks/routers/glm-latest"
+    :name "GLM Latest"
+    :provider :fireworks
+    :api :anthropic-messages
+    :base-url "https://api.fireworks.ai/inference"
+    :reasoning true
+    :input [:text]
+    :cost {:input 1.4 :output 4.4 :cache-read 0.26 :cache-write 0}
+    :context-window 1048573
+    :max-tokens 262144
+    :compat {:supports-long-cache-retention false
+             :send-session-affinity-headers true
+             :supports-cache-control-on-tools false
+             :supports-eager-tool-input-streaming false}}
+   "accounts/fireworks/routers/kimi-fast-latest"
+   {:id "accounts/fireworks/routers/kimi-fast-latest"
+    :name "Kimi Fast Latest"
+    :provider :fireworks
+    :api :anthropic-messages
+    :base-url "https://api.fireworks.ai/inference"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 4.5 :output 22.5 :cache-read 0.45 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
+    :compat {:supports-long-cache-retention false
+             :send-session-affinity-headers true
+             :supports-cache-control-on-tools false
+             :supports-eager-tool-input-streaming false}}
+   "accounts/fireworks/routers/kimi-latest"
+   {:id "accounts/fireworks/routers/kimi-latest"
+    :name "Kimi Latest"
+    :provider :fireworks
+    :api :anthropic-messages
+    :base-url "https://api.fireworks.ai/inference"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
+    :compat {:supports-long-cache-retention false
+             :send-session-affinity-headers true
+             :supports-cache-control-on-tools false
+             :supports-eager-tool-input-streaming false}}
+   "accounts/fireworks/routers/minimax-latest"
+   {:id "accounts/fireworks/routers/minimax-latest"
+    :name "MiniMax Latest"
+    :provider :fireworks
+    :api :anthropic-messages
+    :base-url "https://api.fireworks.ai/inference"
+    :reasoning true
+    :input [:text]
+    :cost {:input 0.3 :output 1.2 :cache-read 0.06 :cache-write 0}
+    :context-window 512000
+    :max-tokens 512000
+    :compat {:supports-long-cache-retention false
+             :send-session-affinity-headers true
+             :supports-cache-control-on-tools false
+             :supports-eager-tool-input-streaming false}}
+   "accounts/fireworks/routers/qwen-max-latest"
+   {:id "accounts/fireworks/routers/qwen-max-latest"
+    :name "Qwen Max Latest (Qwen3.8 Max)"
+    :provider :fireworks
+    :api :anthropic-messages
+    :base-url "https://api.fireworks.ai/inference"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 2 :output 6 :cache-read 0.25 :cache-write 0}
+    :context-window 262144
+    :max-tokens 131072
     :compat {:supports-long-cache-retention false
              :send-session-affinity-headers true
              :supports-cache-control-on-tools false

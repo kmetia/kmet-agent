@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-12T21:41:48Z"
+ :generated-at "2026-09-16T09:25:53Z"
  :provider {:id :amazon-bedrock
             :name "Amazon Bedrock"
             :env-vars []
@@ -118,7 +118,7 @@
     :reasoning true
     :thinking-level-map {:max "max"}
     :input [:text :image]
-    :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
+    :cost {:input 5.5 :output 27.5 :cache-read 0.55 :cache-write 6.875}
     :context-window 1000000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}
@@ -167,9 +167,9 @@
     :reasoning true
     :thinking-level-map {:max "max"}
     :input [:text :image]
-    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
+    :cost {:input 3.3 :output 16.5 :cache-read 0.33 :cache-write 4.125}
     :context-window 1000000
-    :max-tokens 64000
+    :max-tokens 128000
     :compat {:supports-strict-mode true}}
    "anthropic.claude-sonnet-5"
    {:id "anthropic.claude-sonnet-5"
@@ -182,8 +182,7 @@
     :input [:text :image]
     :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
     :context-window 1000000
-    :max-tokens 128000
-    :compat {:supports-strict-mode true}}
+    :max-tokens 128000}
    "apac.amazon.nova-lite-v1:0"
    {:id "apac.amazon.nova-lite-v1:0"
     :name "Nova Lite (APAC)"
@@ -217,6 +216,17 @@
     :cost {:input 0.84 :output 3.36 :cache-read 0.21 :cache-write 0.84}
     :context-window 300000
     :max-tokens 10000}
+   "apac.anthropic.claude-sonnet-4-20250514-v1:0"
+   {:id "apac.anthropic.claude-sonnet-4-20250514-v1:0"
+    :name "Claude Sonnet 4 (APAC)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
+    :context-window 200000
+    :max-tokens 64000}
    "au.anthropic.claude-haiku-4-5-20251001-v1:0"
    {:id "au.anthropic.claude-haiku-4-5-20251001-v1:0"
     :name "Claude Haiku 4.5 (AU)"
@@ -225,7 +235,7 @@
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning true
     :input [:text :image]
-    :cost {:input 1 :output 5 :cache-read 0.1 :cache-write 1.25}
+    :cost {:input 1.1 :output 5.5 :cache-read 0.11 :cache-write 1.375}
     :context-window 200000
     :max-tokens 64000
     :compat {:supports-strict-mode true}}
@@ -238,7 +248,7 @@
     :reasoning true
     :thinking-level-map {:max "max"}
     :input [:text :image]
-    :cost {:input 16.5 :output 82.5 :cache-read 1.65 :cache-write 20.625}
+    :cost {:input 5.5 :output 27.5 :cache-read 0.55 :cache-write 6.875}
     :context-window 1000000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}
@@ -263,7 +273,7 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
+    :cost {:input 5.5 :output 27.5 :cache-read 0.55 :cache-write 6.875}
     :context-window 1000000
     :max-tokens 128000}
    "au.anthropic.claude-opus-5"
@@ -275,7 +285,7 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
+    :cost {:input 5.5 :output 27.5 :cache-read 0.55 :cache-write 6.875}
     :context-window 1000000
     :max-tokens 128000}
    "au.anthropic.claude-sonnet-4-5-20250929-v1:0"
@@ -286,7 +296,7 @@
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning true
     :input [:text :image]
-    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
+    :cost {:input 3.3 :output 16.5 :cache-read 0.33 :cache-write 4.125}
     :context-window 200000
     :max-tokens 64000
     :compat {:supports-strict-mode true}}
@@ -312,10 +322,9 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
+    :cost {:input 2.2 :output 11 :cache-read 0.22 :cache-write 2.75}
     :context-window 1000000
-    :max-tokens 128000
-    :compat {:supports-strict-mode true}}
+    :max-tokens 128000}
    "ca.amazon.nova-lite-v1:0"
    {:id "ca.amazon.nova-lite-v1:0"
     :name "Nova Lite (CA)"
@@ -480,6 +489,17 @@
     :cost {:input 5.5 :output 27.5 :cache-read 0.55 :cache-write 6.875}
     :context-window 1000000
     :max-tokens 128000}
+   "eu.anthropic.claude-sonnet-4-20250514-v1:0"
+   {:id "eu.anthropic.claude-sonnet-4-20250514-v1:0"
+    :name "Claude Sonnet 4 (EU)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.eu-central-1.amazonaws.com"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
+    :context-window 200000
+    :max-tokens 64000}
    "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
    {:id "eu.anthropic.claude-sonnet-4-5-20250929-v1:0"
     :name "Claude Sonnet 4.5 (EU)"
@@ -503,7 +523,7 @@
     :input [:text :image]
     :cost {:input 3.3 :output 16.5 :cache-read 0.33 :cache-write 4.125}
     :context-window 1000000
-    :max-tokens 64000
+    :max-tokens 128000
     :compat {:supports-strict-mode true}}
    "eu.anthropic.claude-sonnet-5"
    {:id "eu.anthropic.claude-sonnet-5"
@@ -516,8 +536,7 @@
     :input [:text :image]
     :cost {:input 2.2 :output 11 :cache-read 0.22 :cache-write 2.75}
     :context-window 1000000
-    :max-tokens 128000
-    :compat {:supports-strict-mode true}}
+    :max-tokens 128000}
    "eu.mistral.pixtral-large-2502-v1:0"
    {:id "eu.mistral.pixtral-large-2502-v1:0"
     :name "Pixtral Large (25.02) (EU)"
@@ -637,6 +656,17 @@
     :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
     :context-window 1000000
     :max-tokens 128000}
+   "global.anthropic.claude-sonnet-4-20250514-v1:0"
+   {:id "global.anthropic.claude-sonnet-4-20250514-v1:0"
+    :name "Claude Sonnet 4 (Global)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
+    :context-window 200000
+    :max-tokens 64000}
    "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
    {:id "global.anthropic.claude-sonnet-4-5-20250929-v1:0"
     :name "Claude Sonnet 4.5 (Global)"
@@ -660,7 +690,7 @@
     :input [:text :image]
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
     :context-window 1000000
-    :max-tokens 64000
+    :max-tokens 128000
     :compat {:supports-strict-mode true}}
    "global.anthropic.claude-sonnet-5"
    {:id "global.anthropic.claude-sonnet-5"
@@ -673,8 +703,7 @@
     :input [:text :image]
     :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
     :context-window 1000000
-    :max-tokens 128000
-    :compat {:supports-strict-mode true}}
+    :max-tokens 128000}
    "global.openai.gpt-5.6-luna"
    {:id "global.openai.gpt-5.6-luna"
     :name "GPT-5.6 Luna (Global)"
@@ -854,7 +883,7 @@
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning true
     :input [:text :image]
-    :cost {:input 1 :output 5 :cache-read 0.1 :cache-write 1.25}
+    :cost {:input 1.1 :output 5.5 :cache-read 0.11 :cache-write 1.375}
     :context-window 200000
     :max-tokens 64000
     :compat {:supports-strict-mode true}}
@@ -867,7 +896,7 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
+    :cost {:input 5.5 :output 27.5 :cache-read 0.55 :cache-write 6.875}
     :context-window 1000000
     :max-tokens 128000}
    "jp.anthropic.claude-opus-4-8"
@@ -879,7 +908,7 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
+    :cost {:input 5.5 :output 27.5 :cache-read 0.55 :cache-write 6.875}
     :context-window 1000000
     :max-tokens 128000}
    "jp.anthropic.claude-opus-5"
@@ -891,7 +920,7 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
+    :cost {:input 5.5 :output 27.5 :cache-read 0.55 :cache-write 6.875}
     :context-window 1000000
     :max-tokens 128000}
    "jp.anthropic.claude-sonnet-4-5-20250929-v1:0"
@@ -902,7 +931,7 @@
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning true
     :input [:text :image]
-    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
+    :cost {:input 3.3 :output 16.5 :cache-read 0.33 :cache-write 4.125}
     :context-window 200000
     :max-tokens 64000
     :compat {:supports-strict-mode true}}
@@ -915,9 +944,9 @@
     :reasoning true
     :thinking-level-map {:max "max"}
     :input [:text :image]
-    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
+    :cost {:input 3.3 :output 16.5 :cache-read 0.33 :cache-write 4.125}
     :context-window 1000000
-    :max-tokens 64000
+    :max-tokens 128000
     :compat {:supports-strict-mode true}}
    "jp.anthropic.claude-sonnet-5"
    {:id "jp.anthropic.claude-sonnet-5"
@@ -928,10 +957,9 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
+    :cost {:input 2.2 :output 11 :cache-read 0.22 :cache-write 2.75}
     :context-window 1000000
-    :max-tokens 128000
-    :compat {:supports-strict-mode true}}
+    :max-tokens 128000}
    "meta.llama3-1-70b-instruct-v1:0"
    {:id "meta.llama3-1-70b-instruct-v1:0"
     :name "Llama 3.1 70B Instruct"
@@ -1539,7 +1567,7 @@
     :reasoning true
     :thinking-level-map {:max "max" :off nil :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 10 :output 50 :cache-read 1 :cache-write 12.5}
+    :cost {:input 11 :output 55 :cache-read 1.1 :cache-write 13.75}
     :context-window 1000000
     :max-tokens 128000}
    "us.anthropic.claude-fable-5-1"
@@ -1562,7 +1590,7 @@
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning true
     :input [:text :image]
-    :cost {:input 1 :output 5 :cache-read 0.1 :cache-write 1.25}
+    :cost {:input 1.1 :output 5.5 :cache-read 0.11 :cache-write 1.375}
     :context-window 200000
     :max-tokens 64000
     :compat {:supports-strict-mode true}}
@@ -1585,7 +1613,7 @@
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning true
     :input [:text :image]
-    :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
+    :cost {:input 5.5 :output 27.5 :cache-read 0.55 :cache-write 6.875}
     :context-window 200000
     :max-tokens 64000
     :compat {:supports-strict-mode true}}
@@ -1598,7 +1626,7 @@
     :reasoning true
     :thinking-level-map {:max "max"}
     :input [:text :image]
-    :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
+    :cost {:input 5.5 :output 27.5 :cache-read 0.55 :cache-write 6.875}
     :context-window 1000000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}
@@ -1611,7 +1639,7 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
+    :cost {:input 5.5 :output 27.5 :cache-read 0.55 :cache-write 6.875}
     :context-window 1000000
     :max-tokens 128000}
    "us.anthropic.claude-opus-4-8"
@@ -1623,7 +1651,7 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
+    :cost {:input 5.5 :output 27.5 :cache-read 0.55 :cache-write 6.875}
     :context-window 1000000
     :max-tokens 128000}
    "us.anthropic.claude-opus-5"
@@ -1635,9 +1663,20 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
+    :cost {:input 5.5 :output 27.5 :cache-read 0.55 :cache-write 6.875}
     :context-window 1000000
     :max-tokens 128000}
+   "us.anthropic.claude-sonnet-4-20250514-v1:0"
+   {:id "us.anthropic.claude-sonnet-4-20250514-v1:0"
+    :name "Claude Sonnet 4 (US)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
+    :context-window 200000
+    :max-tokens 64000}
    "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
    {:id "us.anthropic.claude-sonnet-4-5-20250929-v1:0"
     :name "Claude Sonnet 4.5 (US)"
@@ -1646,7 +1685,7 @@
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning true
     :input [:text :image]
-    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
+    :cost {:input 3.3 :output 16.5 :cache-read 0.33 :cache-write 4.125}
     :context-window 200000
     :max-tokens 64000
     :compat {:supports-strict-mode true}}
@@ -1659,9 +1698,9 @@
     :reasoning true
     :thinking-level-map {:max "max"}
     :input [:text :image]
-    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
+    :cost {:input 3.3 :output 16.5 :cache-read 0.33 :cache-write 4.125}
     :context-window 1000000
-    :max-tokens 64000
+    :max-tokens 128000
     :compat {:supports-strict-mode true}}
    "us.anthropic.claude-sonnet-5"
    {:id "us.anthropic.claude-sonnet-5"
@@ -1672,10 +1711,9 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
+    :cost {:input 2.2 :output 11 :cache-read 0.22 :cache-write 2.75}
     :context-window 1000000
-    :max-tokens 128000
-    :compat {:supports-strict-mode true}}
+    :max-tokens 128000}
    "us.meta.llama3-1-70b-instruct-v1:0"
    {:id "us.meta.llama3-1-70b-instruct-v1:0"
     :name "Llama 3.1 70B Instruct (US)"
