@@ -71,7 +71,7 @@ the duck-typed `{:render :handle-input :invalidate}` contract accepted by
 `ui/custom` (returning a real record is also fine). A `kmet.tui.*` require that
 is not part of the shared set (or a `kmet.app.*`/`kmet.modes.*`/`kmet.libs.*`
 require) fails the load with an explicit error. The loader
-(`kmet.libs.loader*`) is host machinery — never part of the shared set, so
+(`kmet.loader*`) is host machinery — never part of the shared set, so
 requiring it fails like any other internal.
 
 ## Where extensions live
@@ -215,7 +215,7 @@ evaluation context**. Every extension runs in its own isolated context:
   kmet registries. Extensions may depend only on `kmet.extension` plus the
   shared `kmet.tui.*` / `kmet.libs.*` libraries; other kmet internals are
   not resolvable from an extension context (the load fails with an explicit
-  error) — the loader, `kmet.libs.loader*`, is one of those internals.
+  error) — the loader, `kmet.loader*`, is one of those internals.
 
 ### Outbound HTTP (`kmet.libs.http`)
 

@@ -1,5 +1,5 @@
-(ns kmet.libs.loader.sci
-  "SCI code backend for kmet.libs.loader: a Loader that locates namespace
+(ns kmet.loader.sci
+  "SCI code backend for kmet.loader.core: a Loader that locates namespace
    sources, reads and evaluates them in a SCI context, and routes SCI's own
    `require` back through the loader.
 
@@ -47,7 +47,7 @@
    A SCI context is not thread-safe: same-key loads are serialized by the
    generic in-flight claim, but callers must not evaluate different keys
    in one context concurrently."
-  (:require [kmet.libs.loader :as loader]
+  (:require [kmet.loader.core :as loader]
             [sci.core :as sci]))
 
 ;; ─── Source provider ───────────────────────────────────────────────────────

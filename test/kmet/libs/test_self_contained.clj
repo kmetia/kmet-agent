@@ -13,19 +13,31 @@
        (filter #(re-find #"\.clj[ca]?$" (str %)))
        (map str)))
 
+(defn- ns-form [path]
+  ;; Read the ns form itself. A regex over the file was the original
+  ;; implementation and it silently checked almost nothing: `.*?` stops at
+  ;; the first `)` inside the ns docstring, long before `:require`.
+  (let [form (try (read-string (slurp path))
+                  (catch Exception e
+                    (throw (ex-info (str "self-containment guard cannot read " path) {} e))))]
+    (when (and (seq? form) (= 'ns (first form))) form)))
+
 (defn- kmet-requires [path]
-  (let [content (slurp path)
-        ;; DOTALL — the ns docstring spans lines, so .* must cross \n
-        ns-block (re-find #"(?s)\(ns\s+[\w.-]+(?:\s+.*?)?\)" content)]
-    (when ns-block
-      (->> (re-seq #"\[([\w.-]+)(?:\s+:as\s+\w+)?\]" ns-block)
-           (map second)
-           (filter #(str/starts-with? % "kmet."))
-           ;; sibling-lib requires are allowed; everything else is not
-           (remove #(str/starts-with? % "kmet.libs."))))))
+  (when-let [form (ns-form path)]
+    (->> (for [clause (rest form)
+               :when (and (seq? clause) (= :require (first clause)))
+               spec (rest clause)]
+           (cond
+             (symbol? spec) spec
+             (vector? spec) (first spec)
+             (seq? spec) (first spec)))
+         (map str)
+         (filter #(str/starts-with? % "kmet."))
+         ;; sibling-lib requires are allowed; everything else is not
+         (remove #(str/starts-with? % "kmet.libs.")))))
 
 (deftest libs-are-self-contained
   (doseq [f (lib-files)]
     (let [deps (kmet-requires f)]
       (is (empty? deps)
-          (str f " must not require kmet.* namespaces, found: " deps)))))
+          (str f " must not require kmet.* namespaces, found: " (vec deps))))))

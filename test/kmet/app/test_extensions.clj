@@ -597,7 +597,7 @@
                              "may depend only on kmet.extension, kmet.tui.* and kmet.libs.*"))))
     (testing "the loader is host machinery — not shared, not requireable"
       (let [result (load "loader-ns"
-                         (str "(ns bad-loader (:require [kmet.libs.loader :as ldr]))\n"
+                         (str "(ns bad-loader (:require [kmet.loader.core :as ldr]))\n"
                               "(defn init [api] nil)\n"))]
         (t/is (some? (:error result)))
         (t/is (str/includes? (:error result) "host machinery")
@@ -609,7 +609,7 @@
       ;; resolve and the require would succeed
       (let [result (load "loader-top"
                          (str "(ns loader-top (:require [kmet.extension :as ext]))\n"
-                              "(require 'kmet.libs.loader)\n"
+                              "(require 'kmet.loader.core)\n"
                               "(defn init [api] nil)\n"))]
         (t/is (some? (:error result)))
         (t/is (str/includes? (:error result) "host machinery")

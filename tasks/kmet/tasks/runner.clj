@@ -125,8 +125,9 @@
     kmet.tui.test-render-loop
     kmet.tui.test-terminal-native
     kmet.libs.test-self-contained
-    kmet.libs.test-loader
-    kmet.libs.test-loader-sci
+    kmet.loader.test-self-contained
+    kmet.loader.test-core
+    kmet.loader.test-sci
     kmet.libs.test-host
     kmet.libs.test-crypto
     kmet.libs.test-sse

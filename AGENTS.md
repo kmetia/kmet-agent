@@ -177,6 +177,10 @@
 src/kmet/
 ├── libs/     — Generic, self-contained code that would be a third-party library
 │              on the JVM (Babashka-compatible reimplementations)
+├── loader/   — The loader library (kmet.loader.core / .sci / .memory): the
+│              portable Loader protocol + backends. Extraction-ready: no
+│              kmet.* requires beyond kmet.loader.* (guarded), design doc
+│              and conformance suite ride along (src/kmet/loader/loader.md)
 ├── modes/    — Entry modes (pi: dist/modes/)
 ├── ai/       — Provider/auth subsystem (pi: packages/ai — a standalone library
 │              the agent depends on; enforced by the
@@ -268,6 +272,10 @@ path — no kmet namespace needs it today. Classes declared in
 install namespace loads on the first reference, whatever loaded first.
 
 ### Layer boundaries
+- **`kmet.loader.*`** — the loader library, extraction candidate: may require
+  third-party deps and `kmet.loader.*`, nothing else under `kmet.*`. Enforced
+  by `kmet.loader.test-self-contained`. App code may depend on it like
+  `kmet.libs.*`.
 - **`kmet.libs.*`** — generic, self-contained. **Must not require any kmet.*
   namespace outside `kmet.libs.*`** (no app, tui, modes, ai, or sibling-lib
   deps beyond the libs tree itself). Each lib is a portable
@@ -513,6 +521,9 @@ protocol — retired in DSL stage 2, see tui.md §8).
   mid-stream.
 
 ## Reference
+- **Loader docs**: `src/kmet/loader/loader.md` — the Loader design,
+  resolution semantics, conformance cases and phase status. It lives with the
+  library so it can be extracted with it; keep it up to date.
 - **TUI package docs**: `src/kmet/tui/tui.md` is the usage reference for
   `kmet.tui.*` (Hiccup DSL, fn components, reactivity/track!, state model,
   lifecycle, scheduling, input boundary). It must be kept up to date: a

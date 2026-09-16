@@ -7,26 +7,29 @@ promoted to a standalone library afterwards. It is the answer to the
 the port).
 
 Status: design locked; implementation staged (see §9). **Phase 0 and
-Phase 1 are implemented**: `src/kmet/libs/loader.clj` (protocol, generic
-body, combinators, host root), `src/kmet/libs/loader/memory.clj`
-(in-memory backend), `src/kmet/libs/loader/sci.clj` (SCI code backend:
-locate/read/eval, SCI's `require` routed through the loader, injected
-share list), the conformance suites (`test/kmet/libs/test_loader.clj`,
-`test/kmet/libs/test_loader_sci.clj`) and the extension runtime rewiring
-(`kmet.app.extensions` builds one loader per extension; the loader is
-deliberately excluded from the shared set — host machinery, not
-contract). Not implemented yet: Phases 2–4 (JVM and Jolt native
+Phase 1 are implemented**: `src/kmet/loader/core.clj` (protocol, generic
+body, combinators, host root), `src/kmet/loader/memory.clj` (in-memory
+backend), `src/kmet/loader/sci.clj` (SCI code backend: locate/read/eval,
+SCI's `require` routed through the loader, injected share list), the
+conformance suites (`test/kmet/loader/test_core.clj`,
+`test/kmet/loader/test_sci.clj`) and the extension runtime rewiring
+(`kmet.app.extensions` builds one loader per extension; the loader lives
+outside the shared `kmet.libs.*` layer — host machinery, not contract).
+The library keeps this doc and a self-containment guard
+(`kmet.loader.test-self-contained`) so `src/kmet/loader/` can be extracted
+as a whole. Not implemented yet: Phases 2–4 (JVM and Jolt native
 backends, promotion).
 
-Related docs: `jar-ext.md` (extension artifact format — the loader it touches),
-`jolt-port.md` §B3, `extensions/extensions.md` (the extension contract),
-`src/kmet/tui/tui.md` (house style for a package reference doc).
+Related docs (repo-root relative): `jar-ext.md` (extension artifact
+format — the loader it touches), `jolt-port.md` §B3,
+`extensions/extensions.md` (the extension contract), `src/kmet/tui/tui.md`
+(house style for a package reference doc).
 
 ---
 
 ## 0. Decisions locked (do not re-litigate in implementation)
 
-1. **Protocol name `Loader`**, namespace `kmet.libs.loader`. Methods:
+1. **Protocol name `Loader`**, namespace `kmet.loader.core`. Methods:
    `find`, `resolve`, `load`, `parent`, `unload!`. (`close` is the *host-view*
    spelling, see §6.4.)
 2. **There is no hardcoded parent.** Delegation is a slot, implemented by a
@@ -179,7 +182,7 @@ pass the ctx explicitly where the op is statically recognizable.
 ### 4.1 Protocol
 
 ```clojure
-(ns kmet.libs.loader
+(ns kmet.loader.core
   (:refer-clojure :exclude [find resolve load]))
 
 (defprotocol Loader
@@ -668,8 +671,8 @@ bb has `sci.core` built in — nothing to add. Jolt needs one of: the maven
 pins two jolt-lang git coordinates in `deps.edn`, so this is house style),
 or vendoring sci into kmet. **Pick the git pin**, matching the revision
 family the sci gate exercises, and verify early — it is the one unproven
-assumption in Phase 1. `kmet.libs.loader.sci` carries the requirement in its
-own namespace file, so a consumer that requires only `kmet.libs.loader` never
+assumption in Phase 1. `kmet.loader.sci` carries the requirement in its
+own namespace file, so a consumer that requires only `kmet.loader.core` never
 loads sci at runtime (Clojure namespace laziness); the dep is classpath-only
 for them.
 
@@ -738,22 +741,24 @@ upgrades that must satisfy the same suite.
 
 ### Phase 0 — protocol, policies, suite (no kmet integration yet)
 
-- `src/kmet/libs/loader.clj` — protocol, request/answer shapes, combinators
+- `src/kmet/loader/core.clj` — protocol, request/answer shapes, combinators
   (`->loader`, `delegating`, `allow`, `deny`, `self-first`, `isolated`,
   `pool`, `url-search`), `with-loader`/`current-loader`, link table,
   in-flight marks, generic `find`/`resolve`/`load` body, `open-hit`,
   `unloaded?`/`status`, `unload!` report.
-- `src/kmet/libs/loader/memory.clj` (ns `kmet.libs.loader.memory`) — an
+- `src/kmet/loader/memory.clj` (ns `kmet.loader.memory`) — an
   in-memory loader over a source map, used by the suite and as the demo
   loader (no sci yet).
-- `test/kmet/libs/test_loader.clj` (ns `kmet.libs.test-loader`) — cases 1–8,
+- `test/kmet/loader/test_core.clj` (ns `kmet.loader.test-core`) — cases 1–8,
   10 (case 9 needs a code backend). Register in `kmet.tasks.runner/all-namespaces`.
 - Gate: `bb test-changed`, `bb lint-changed`, `bb format-check-changed`.
-- Constraint: `kmet.libs.test-self-contained` must stay green — no app deps.
+- Constraint: the tree must stay extractable —
+  `kmet.loader.test-self-contained` (no `kmet.*` requires beyond
+  `kmet.loader.*`; `kmet.libs.*` may not reach into it either) stays green.
 
 ### Phase 1 — sci backend + kmet extension wiring (all hosts, sci)
 
-- `src/kmet/libs/loader/sci.clj` (ns `kmet.libs.loader.sci`; the file+dir
+- `src/kmet/loader/sci.clj` (ns `kmet.loader.sci`; the file+dir
   layout already has precedent in `kmet.app.ui`) — a Loader whose generic
   body delegates
   compile/eval to sci (`:load-fn`, `:namespaces`, `:classes`), with the
@@ -767,9 +772,11 @@ upgrades that must satisfy the same suite.
   (`{:extension … :error …}`; shutdown → deregister → `unload!`).
   The four `"Extensions not supported on Jolt"` guards collapse into backend
   selection.
-- `src/kmet/extension.clj` — **re-export** the loader constructors the
-  contract promises, so extensions never import `kmet.libs.loader` directly
-  (this is what keeps promotion non-breaking).
+- `src/kmet/extension.clj` — **no re-exports** (decided in Phase 1):
+  extensions never see the loader at all. `kmet.app.extensions` uses
+  `kmet.loader.*` directly, and a require of it from extension code fails
+  with an actionable "host machinery" error; the extension-facing surface is
+  unchanged, so promotion still breaks nothing.
 - Tests: existing extension/jar-ext tests stay green; add case 1 (v1/v2)
   as a real extension fixture; case 9 on sci.
 - Gate: `bb test-changed` (plus `bb test` for the extensions suites if
@@ -777,7 +784,7 @@ upgrades that must satisfy the same suite.
 
 ### Phase 2 — JVM native backend + hybrid
 
-- `kmet.libs.loader.jvm` (Clojure-only): `proxy [java.lang.ClassLoader]`
+- `kmet.loader.jvm` (Clojure-only): `proxy [java.lang.ClassLoader]`
   overriding `findClass`/`getResource(s)`/`findResources`; `parent` from the
   proxy's own parent; `close`/`unload!` mapped both ways;
   `as-classloader` returns the proxy itself.
@@ -825,10 +832,10 @@ extension backend uses.
 
 ### Phase 4 — promotion to a standalone library
 
-- Move `kmet.libs.loader*` (+ its doc and suite) out unchanged; add its own
-  `deps.edn`. Because `kmet.libs.*` is already "a third-party library on the
-  JVM" by project rule and extensions only ever see `kmet.extension`'s
-  re-exports, promotion is a rename + a root — no API break.
+- Move `src/kmet/loader/` (+ its doc and suite) out unchanged; add its own
+  `deps.edn`. The tree already lives outside `kmet.libs.*` with no `kmet.*`
+  requires (guarded by `kmet.loader.test-self-contained`) and extensions never
+  see the loader (option B), so promotion is a move — no API break.
 - jolt's `stdlib/jolt/loader.clj` (native backend) moves/stays jolt-side;
   the JVM backend stays a separate artifact.
 
@@ -838,7 +845,7 @@ extension backend uses.
 
 1. Phase 0 green on bb (fast, no kmet behavior change).
 2. Phase 1 on bb: `/reload`, extension fixtures, jar-ext suites unchanged.
-3. Phase 1 on Jolt: `jolt -e "(require 'kmet.libs.loader)"`, the suite, then
+3. Phase 1 on Jolt: `jolt -e "(require 'kmet.loader.core)"`, the suite, then
    kmet's extension tests (once the port reaches them).
 4. Phase 2 JVM, Phase 3 Jolt native — each must pass the *same* suite; a
    native backend that fails a case is a bug in the backend, not a
@@ -864,17 +871,17 @@ extension backend uses.
 
 ### 12.1 Where the sci backend lives / how the dep arrives — **A**
 
-*Decision*: a direct `sci.core` require in `kmet.libs.loader.sci` (its own
+*Decision*: a direct `sci.core` require in `kmet.loader.sci` (its own
 namespace file); jolt gets sci via a git pin (§6.5). Protocol-only consumers
-pay nothing at runtime — requiring `kmet.libs.loader` does not load
+pay nothing at runtime — requiring `kmet.loader.core` does not load
 `loader.sci` — and the only cost is a classpath entry.
 
-Note the premise: `kmet.libs` is *not* "no third-party deps". The
-self-contained guard only forbids `kmet.*` requires outside `kmet.libs.*`,
-and `deps.edn` already carries `babashka.http-client`, `deps.clj`,
-`data.json` and two jolt-lang git deps; `kmet.libs.http` requires
-`babashka.http-client` today. "Dep-light" is a promotion-quality argument,
-not an enforced rule.
+Note the premise: the loader is *not* "no third-party deps". Its guard
+(`kmet.loader.test-self-contained`) forbids `kmet.*` requires beyond
+`kmet.loader.*` and says nothing about third-party deps; `deps.edn` already
+carries `babashka.http-client`, `deps.clj`, `data.json` and two jolt-lang
+git deps, and the sci backend requires `sci.core`. "Dep-light" is a
+promotion-quality argument, not an enforced rule.
 
 | alt | pros | cons | verdict |
 |---|---|---|---|

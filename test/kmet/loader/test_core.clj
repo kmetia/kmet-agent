@@ -1,12 +1,12 @@
-(ns kmet.libs.test-loader
-  "Conformance suite for kmet.libs.loader — this list IS the spec
+(ns kmet.loader.test-core
+  "Conformance suite for kmet.loader.core — this list IS the spec
    (loader.md §8). Cases 1-8 and 10-12 run against the in-memory backend
    and the host root; case 9 (defining-ctx inheritance) needs a code
    backend and arrives with the sci backend (Phase 1)."
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
-            [kmet.libs.loader :as ldr]
-            [kmet.libs.loader.memory :as mem]))
+            [kmet.loader.core :as ldr]
+            [kmet.loader.memory :as mem]))
 
 (defn- req [kind name] {:kind kind :name name})
 
@@ -247,7 +247,7 @@
   (testing "loader construction validates roots eagerly"
     (is (= :loader/bad-root
            (:type (ex-data-of #(ldr/url-search ["/no/such/kmet-loader-root"])))))
-    (is (some? (first-hit (ldr/url-search ["src"]) :ns "kmet.libs.loader"))))
+    (is (some? (first-hit (ldr/url-search ["src"]) :ns "kmet.loader.core"))))
   (testing "a source that disappears after find fails at load, not silently"
     (let [src (atom {:namespaces {"vanish.lib" {:source "(ns vanish.lib)"}}})
           l (mem/memory src)
@@ -259,7 +259,7 @@
   (testing "a located ns with no code backend is unreadable, not silently loaded"
     (let [l (ldr/url-search ["src"])]
       (is (= :loader/unreadable
-             (:type (ex-data-of #(ldr/load l (req :ns "kmet.libs.loader")))))))))
+             (:type (ex-data-of #(ldr/load l (req :ns "kmet.loader.core")))))))))
 
 ;; ─── Link table, status, ambient tier, concurrency ─────────────────────────
 

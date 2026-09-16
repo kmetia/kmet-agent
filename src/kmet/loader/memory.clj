@@ -1,4 +1,4 @@
-(ns kmet.libs.loader.memory
+(ns kmet.loader.memory
   "In-memory Loader backend: a loader over a plain source map. Used by the
    loader conformance suite and as the demo/backend reference — it models
    the full contract (locate, read-at-load, resources, unload) without a
@@ -20,7 +20,7 @@
    (already-linked, returned as-is). Resource values are strings, byte
    arrays or thunks; `open-hit` turns them into streams."
   (:require [clojure.java.io :as io]
-            [kmet.libs.loader :as loader]))
+            [kmet.loader.core :as loader]))
 
 (defn- source-atom
   "SOURCES as the internal atom: maps are wrapped, atoms pass through."

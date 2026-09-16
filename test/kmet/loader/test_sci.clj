@@ -1,5 +1,5 @@
-(ns kmet.libs.test-loader-sci
-  "Conformance for the SCI backend (kmet.libs.loader.sci): the code-path
+(ns kmet.loader.test-sci
+  "Conformance for the SCI backend (kmet.loader.sci): the code-path
    cases of loader.md §8 — v1/v2 isolation (1), shared by reference (3),
    defining-ctx inheritance (9), the find/load read discipline (11) and a
    vanishing source (12) — plus the backend's own contract: `require`
@@ -13,8 +13,8 @@
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
-            [kmet.libs.loader :as ldr]
-            [kmet.libs.loader.sci :as lsci]
+            [kmet.loader.core :as ldr]
+            [kmet.loader.sci :as lsci]
             [sci.core :as sci]))
 
 (def ^:private shared-cell
@@ -164,7 +164,7 @@
   (let [l (lsci/sci-loader
            {:id "ref"
             :parent (ldr/delegating (ldr/isolated) (ldr/root))
-            :sources {'app {:file "app.clj" :source "(ns app (:require [kmet.libs.loader]))"}}})
+            :sources {'app {:file "app.clj" :source "(ns app (:require [kmet.loader.core]))"}}})
         e (err #(load-ns l "app"))]
     (is (some? e))
     (is (chain-message? e "inject"))
@@ -214,9 +214,9 @@
 
 (deftest test-find-without-a-parent-is-hermetic
   (let [l (lsci/sci-loader {:id "hermetic"})]
-    (is (= [] (ldr/find l {:kind :ns :name "kmet.libs.loader"})))
-    (is (= [] (ldr/find l {:kind :var :name "kmet.libs.loader/root"})))
-    (is (= :loader/miss (:type (ex-data (err #(load-ns l "kmet.libs.loader"))))))))
+    (is (= [] (ldr/find l {:kind :ns :name "kmet.loader.core"})))
+    (is (= [] (ldr/find l {:kind :var :name "kmet.loader.core/root"})))
+    (is (= :loader/miss (:type (ex-data (err #(load-ns l "kmet.loader.core"))))))))
 
 (deftest test-var-and-class-locate
   (let [l (lsci/sci-loader {:id "varc"

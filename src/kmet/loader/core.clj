@@ -1,4 +1,4 @@
-(ns kmet.libs.loader
+(ns kmet.loader.core
   "Portable Loader abstraction: resolve, link, find and unload namespaces,
    vars, classes and resources — one contract for babashka, the JVM and Jolt.
 
@@ -411,7 +411,7 @@
 
 (defn make-loader
   "Backend seam: build a loader from raw steps. The in-memory backend
-   (`kmet.libs.loader.memory`) and the host backends (sci, JVM, Jolt) are
+   (`kmet.loader.memory`) and the host backends (sci, JVM, Jolt) are
    all built through this; application code uses the constructors and
    combinators below instead.
 

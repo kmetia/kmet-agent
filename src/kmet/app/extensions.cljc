@@ -19,8 +19,8 @@
    clojure.tools.deps, bundled with babashka) — so
    different extensions can use different versions of the same library, and
    unloading an extension releases everything it pulled in. Loading goes
-   through kmet.libs.loader: each extension gets a Loader over its SCI
-   context (kmet.libs.loader.sci) whose source provider is that artifact /
+   through kmet.loader.core: each extension gets a Loader over its SCI
+   context (kmet.loader.sci) whose source provider is that artifact /
    deps / bundled lookup, and SCI's own requires route back through the
    loader — so nested requires share the link table, unload closes the
    loader, and the loader itself stays out of the shared set (host
@@ -49,8 +49,8 @@
             [kmet.config :as cfg]
             [kmet.tui.theme :as theme]
             [kmet.libs.host :as host]
-            [kmet.libs.loader :as loader]
-            [kmet.libs.loader.sci :as loader-sci]
+            [kmet.loader.core :as loader]
+            [kmet.loader.sci :as loader-sci]
             [kmet.extension]))
 
 ;; ─── Provider-event bridges (pi: context / before_provider_request /
@@ -1140,9 +1140,9 @@
   "The shared namespace map for extension contexts: kmet.extension (the
    contract), the clojure.*/babashka.* builtins (incl. slurp/spit, which
    SCI's builtin clojure.core lacks but bb's env has), and the shared
-   library layers kmet.tui.* and kmet.libs.* — except the loader
-   (kmet.libs.loader*, host machinery, deliberately not
-   extension-visible). Rebuilt per context so namespaces required since
+   library layers kmet.tui.* and kmet.libs.*. The loader (kmet.loader.*)
+   lives outside this tree — host machinery, deliberately not
+   extension-visible. Rebuilt per context so namespaces required since
    the last build (the shared library layers) are included. RESOURCE-FN
    replaces clojure.java.io/resource with a per-extension artifact-scoped
    lookup (io/resource shadowing — see extension-resource-fn). Values are
@@ -1186,8 +1186,7 @@
                                  (str/starts-with? n "kmet.tui.")
                                  (= n "kmet.app.ui.tool-renderers")
                                  (= n "kmet.app.keybindings")
-                                 (and (str/starts-with? n "kmet.libs.")
-                                      (not (str/starts-with? n "kmet.libs.loader")))))
+                                 (str/starts-with? n "kmet.libs.")))
                     [(ns-name ns-obj)
                      (if (and (= n "clojure.java.io") resource-fn)
                        (assoc (shared-var-map (ns-name ns-obj)) 'resource resource-fn)
@@ -1350,7 +1349,7 @@
         ;; requires are served by the loader itself), so it is not shared
         ;; into contexts and requires of it fail like any other unshared
         ;; internal
-        (str/starts-with? s "kmet.libs.loader")
+        (str/starts-with? s "kmet.loader")
         (throw (ex-info
                 (str "Extension " ext-name " requires " lib
                      " — the loader is host machinery and is not part of"
@@ -1622,7 +1621,7 @@
         (throw (ex-info
                 (cond
                   ;; the loader is host machinery (see build-context-namespaces)
-                  (str/starts-with? (str ns-sym) "kmet.libs.loader")
+                  (str/starts-with? (str ns-sym) "kmet.loader")
                   (str "Extension " ext-name " requires " ns-sym
                        " — the loader is host machinery and is not part of the extension contract")
 
@@ -1759,7 +1758,7 @@
    source, declared deps (resolved by load-extension! before the context
    evaluates), and bb-bundled namespaces — with actionable errors for
    everything else. SCI's own requires route back through the loader
-   (kmet.libs.loader.sci), so nested requires share the link table and
+   (kmet.loader.sci), so nested requires share the link table and
    unload semantics. RESOURCE-FN replaces clojure.java.io/resource with
    an artifact-scoped lookup (nil keeps the host resource)."
   [ext-name artifact owns-ns? deps-resolver resource-fn literal]
