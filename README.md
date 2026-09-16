@@ -32,13 +32,14 @@ the footer's first line is this word's initial.)
 
 ## Overview
 
-kmet provides an interactive terminal UI where you can chat with any of 39
+kmet provides an interactive terminal UI where you can chat with any of 40
 cataloged LLM providers (opencode-go, deepseek, anthropic, google, openai,
 openrouter, mistral, bedrock, ...) — the model registry, catalogs, auth and
-wire APIs are a port of pi's provider subsystem (see `models.md`). The agent
-has filesystem tools (read, write, edit, bash, grep, find, ls) plus skills,
-extensions and prompt templates. Fully cross-platform: runs on Linux, macOS,
-Windows, WSL, and Termux (Android).
+wire APIs are a port of pi's provider subsystem (`src/kmet/ai/`). The
+built-in tools are read, write, edit and bash; skills, extensions and prompt
+templates add more (the shipped `extensions/` add structural code tools, MCP
+servers and LSP). Fully cross-platform: runs on Linux, macOS, Windows, WSL,
+and Termux (Android).
 
 ### Features
 
@@ -51,15 +52,19 @@ Windows, WSL, and Termux (Android).
 - **Theme System** — customizable ANSI color themes from EDN files
 - **Session Persistence** — EDNL files with branching support
 - **Skills & Extensions** — markdown skills and Clojure extensions
-- **Provider Subsystem** — 39 generated provider catalogs (pi-faithful
-  `models.md` port), `--list-models`, model resolution/cycling, cost display,
-  custom providers via `models.edn`, OAuth logins (Copilot, Codex, Anthropic,
-  OpenRouter), and an image-model registry (`kmet.app.image-models`)
+- **Provider Subsystem** — 40 generated provider catalogs (a pi-faithful
+  port), `--list-models`, model resolution/cycling, cost display, custom
+  providers via `models.edn`, OAuth logins (Copilot, Codex, Anthropic,
+  OpenRouter), and an image-model registry (`kmet.ai.image-models`)
 - **Cross-platform** — Linux, macOS, Windows, WSL, and Termux (Android)
 
 ## Prerequisites
 
-- [Babashka](https://babashka.org/) ≥ 1.13.222 (bundles JLine 4.4.0)
+- [Babashka](https://babashka.org/) ≥ 1.13.222 (bundles JLine 4.4.0) — the
+  primary host
+- [Jolt](https://github.com/jolt-lang/jolt) ≥ v0.8.6-98 — optional: the same
+  code runs natively on jolt (`jolt run -m kmet.core`, `jolt dist`; see
+  `jolt-port.md`)
 - API keys: `OPENCODE_API_KEY` (opencode-go/opencode), `DEEPSEEK_API_KEY`,
   `OPENAI_API_KEY` (openai), `XAI_API_KEY` (xai), `AZURE_OPENAI_API_KEY`
   (azure-openai-responses; base URL/deployment from `AZURE_OPENAI_BASE_URL` /
@@ -75,7 +80,8 @@ Windows, WSL, and Termux (Android).
   (vercel-ai-gateway), `ZAI_API_KEY`/`ZAI_CODING_CN_API_KEY` (zai),
   `TOGETHER_API_KEY` (together), `BASETEN_API_KEY` (baseten),
   `ANT_LING_API_KEY` (ant-ling), `KIMI_API_KEY` (kimi-coding),
-  `CLOUDFLARE_API_KEY` + `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_GATEWAY_ID`
+  `CMD_API_KEY` (commandcode), `CLOUDFLARE_API_KEY` +
+  `CLOUDFLARE_ACCOUNT_ID`/`CLOUDFLARE_GATEWAY_ID`
   (cloudflare workers-ai / ai-gateway), `MISTRAL_API_KEY` (mistral),
   `GOOGLE_CLOUD_API_KEY` (google-vertex; or Application Default
   Credentials — `GOOGLE_APPLICATION_CREDENTIALS` + project + location) —
@@ -93,8 +99,9 @@ Windows, WSL, and Termux (Android).
 ```sh
 # Interactive TUI
 bb run
+jolt run -m kmet.core     # ...or on the Jolt host
 
-# Or via the entry script
+# Or via the checked-in entry script
 ./kmet
 
 # With options
@@ -102,14 +109,20 @@ bb run --model deepseek-v4-flash --provider opencode-go
 
 # Non-interactive mode
 bb run --print "list files in current directory"
+
+# Attach files to the initial message (@file args)
+bb run @tasks.md "summarize the tasks"
 ```
 
 ### Command-line options
 
 ```
+  -d, --debug           Log to debug.log
   -p, --print           Print response and exit (non-interactive)
   -c, --continue        Continue most recent session
   -r, --resume          Browse sessions
+  --session <id|path>   Resume session by id/prefix or file path
+  --session-dir <dir>   Session storage directory
   --model <id>          Model to use (pattern: provider/model[:thinking])
   --provider <name>     Provider (opencode-go, opencode, deepseek, github-copilot,
                         openai, xai, openai-codex, azure-openai-responses,
@@ -121,9 +134,15 @@ bb run --print "list files in current directory"
   --generate-models     Fetch current provider catalogs (models.dev + live
                         sources) into ~/.kmet/agent/models-cache and exit;
                         used at startup when newer than the built-in data
+  --system-prompt <txt> Replace the system prompt (or a path to read it from)
+  --append-system-prompt <txt> Append to the system prompt (repeatable)
   -t, --thinking <level> Thinking level (off, minimal, low, medium, high, xhigh, max)
   --version             Print the version and exit
   -h, --help            Show this help
+```
+
+Positional `@file` args attach file content to the initial message; the
+remaining positional args form it. Unknown `--flags` are exposed to extensions.
 
 ### Package subcommands
 
@@ -156,37 +175,56 @@ resource dirs.
   Single-extension packages (a file source or an `extension.edn` directory)
   ignore those filters, so their rows are marked *always loaded* and cannot
   be toggled.
-```
 
 ### In-TUI commands
 
 | Command | Description |
 |---------|-------------|
+| `/help` | Show available commands and shortcuts |
 | `/quit` | Exit kmet |
-| `/help` | Show help |
 | `/model <provider:model[:thinking]>` | Switch model (Ctrl+L opens a selector; an unmatched term opens the selector pre-filled with it) |
 | `/thinking [level]` | Set thinking level — bare: selector with search, ✓ current, `· default` marker (Enter selects, Ctrl+S sets as default); with a level arg: apply it directly |
 | `/scoped-models` | Enable/disable/reorder the models Ctrl+P cycles through (Ctrl+S saves to settings) |
-| `/settings` | Settings menu — thinking level, hide-thinking, retry (enabled / max retries / base delay), theme |
+| `/settings` | Settings menu — thinking, display, tool display, steering/follow-up mode, HTTP transport + timeouts, auto-compact, retry, repeat guard, images, theme |
+| `/tools` | List available tools with parameters |
 | `/login [provider]` | Configure provider auth — API key, or OAuth: Copilot device-code, Codex browser/device, Anthropic & OpenRouter browser PKCE |
 | `/logout [provider]` | Remove stored provider credentials |
-| `/new` | Start new session |
+| `/new` | Start a new session |
 | `/resume` | Browse past sessions |
-| `/tree` | Browse session entry tree |
+| `/continue` | Continue where the agent left off (e.g. after a network error) |
+| `/followup <message>` | Queue a follow-up message (like Alt+Enter) |
+| `/tree` | Navigate the session entry tree (switch branches) |
+| `/fork` | Create a new fork from a previous user message |
+| `/clone` | Duplicate the current session at the current position |
+| `/name <name>` | Set the session display name |
+| `/session` | Show session info and stats |
+| `/export [path]` | Export the session to HTML |
+| `/share` | Share the session as a secret GitHub gist |
+| `/copy` | Copy the last agent message to the clipboard |
+| `/compact [instructions]` | Manually compact the session context |
+| `/reload` | Reload settings, keybindings, extensions, skills, prompts, themes and context files |
 | `/theme <name>` | Switch color theme |
+
+`/skill:<name>` loads a skill on demand; any other `/command args` expands a
+prompt template; `/import` and `/hotkeys` are pi-parity placeholders that
+report as not implemented.
 
 ### Keyboard shortcuts
 
 | Key | Action |
 |-----|--------|
 | `Enter` | Submit message |
-| `Escape` | Cancel current turn |
-| `Ctrl+D` | Exit when editor is empty |
+| `Escape` | Cancel the current turn / running bash |
 | `Ctrl+C` | Clear editor (twice to quit) |
+| `Ctrl+D` | Exit when editor is empty |
 | `Ctrl+L` | Select model |
-| `Shift+Tab` | Cycle thinking level |
 | `Ctrl+P` / `Shift+Ctrl+P` | Cycle scoped models (`--models` / `/scoped-models`) |
-| `Ctrl+Up/Down` | Scroll chat viewport |
+| `Shift+Tab` | Cycle thinking level |
+| `Ctrl+T` | Toggle thinking blocks |
+| `Ctrl+O` | Cycle tool display — collapsed / expanded / quiet |
+| `Ctrl+G` | Open the external editor |
+| `Alt+Enter` / `Alt+Up` | Queue a follow-up message / restore queued messages |
+| Mouse wheel / terminal scroll | Browse history — the transcript lives in the terminal's own scrollback |
 
 ## Project Structure
 
@@ -195,16 +233,21 @@ src/kmet/
 ├── core.clj            — CLI entry, arg parsing, mode dispatch
 ├── config.clj          — Configuration loading (settings.edn, env vars)
 ├── debug.clj           — Debug/error logging
+├── extension.clj       — the extension contract root (`kmet.extension`)
+├── package_manager.clj — the install/remove/list/config CLI
 ├── libs/               — Generic, self-contained helpers (diff, process tree,
-│                         SSE parsing, terminal protocol, yaml frontmatter,
-│                         terminal images, file locks, hashing, highlighting)
+│                         SSE parsing, the outbound-HTTP boundary, terminal
+│                         protocol + images, YAML frontmatter, EDN store +
+│                         file locks, hashing, highlighting, markdown,
+│                         crypto, AWS SigV4, ...)
 ├── modes/              — Entry modes: interactive TUI + print mode
 ├── ai/                 — Provider/auth subsystem (pi: packages/ai — a standalone
 │   │                     library the agent depends on; self-contained, see AGENTS.md)
 │   ├── models.clj      — Provider/model registry + committed EDN catalogs
 │   │                     (model_data/), cost, catalog loading
-│   ├── model_config.clj / provider_composer.clj / config_value.clj —
-│   │                     models.edn custom providers, config resolution
+│   ├── model_config.clj / provider_composer.clj — models.edn custom
+│   │                     providers + config/extension layer composition
+│   ├── model_gen.clj   — the catalog generator (bb generate-models)
 │   ├── auth.clj        — env-var table, auth.edn, credential resolution
 │   ├── oauth.clj       — OAuthAuth record, device-code + PKCE loopback flows
 │   ├── llm.clj + api/  — LLM dispatcher + per-wire API builders
@@ -212,13 +255,18 @@ src/kmet/
 │   │                     bedrock/vertex/mistral)
 │   ├── image_models.clj — image-generation registry + :openrouter-images
 │   │                     wire (image_model_data/ catalog)
-│   ├── aws_sigv4.clj / google_adc.clj — bedrock SigV4 + vertex ADC auth
-│   ├── http.cljc      — the single outbound-HTTP boundary (proxy env
-│   │                     vars + curl transport; libs/http.cljc is the
-│   │                     shared transport)
+│   ├── google_adc.clj  — vertex Application Default Credentials
+│   ├── attribution.clj / constrained_sampling.clj / hooks.clj —
+│   │                     provider attribution headers, tool JSON-schema
+│   │                     constraints, injectable provider-event slots
+│   ├── http.clj        — provider streams over the kmet.libs.http boundary
 ├── app/                — App business logic (pi: dist/core/)
+│   ├── loop.clj        — the agent loop; session.clj — EDNL sessions
+│   ├── commands.clj / keybindings.clj / packages.clj / extensions.cljc —
+│   │                     slash commands, keymap, package + extension loading
 │   ├── model_resolver.clj — model pattern/CLI resolution
-│   ├── tools/          — read/write/edit/bash tools (grep/find/ls disabled)
+│   ├── tools/          — built-in tools: read, write, edit, bash
+│   │                     (the ported grep/find/ls stay disabled)
 │   └── ui/             — app TUI components (chat history, footer, ...)
 ├── tui/                — Generic TUI library (pi: @earendil-works/pi-tui;
 │   │                     usage docs in src/kmet/tui/tui.md)
@@ -254,7 +302,9 @@ Example `~/.kmet/agent/settings.edn`:
  :thinking :off
  :session-dir "~/.kmet/sessions"
  :http-idle-timeout-ms 300000   ; LLM stream idle + total deadline in ms; 0 disables
- :http-transport :platform      ; :platform (default) = babashka.http-client with curl fallback (SOCKS proxies, live streams on Jolt); :curl = everything through curl
+ :http-transport :platform      ; :platform (default) = babashka.http-client on both hosts,
+                                ; curl only for SOCKS/https-scheme proxies; :curl = everything through curl
+ :http-total-timeout-ms nil     ; whole-request deadline in ms; nil = the idle timeout, 0 disables
  :shell-command-prefix nil      ; line prepended to every bash command, e.g. "shopt -s expand_aliases"; nil = none
  :shell-path nil                ; custom shell binary for bash execution (e.g. Cygwin/Git Bash on Windows); a leading ~ expands
  :system-prompt "You are a helpful assistant."   ; replaces the default system prompt
@@ -357,12 +407,30 @@ bb lint            # clj-kondo over both reader views (babashka + jolt);
                    # `jolt lint` runs the same gate
 bb format          # cljfmt (fix) / bb format-check (verify)
 bb clean           # Remove build artifacts, caches, logs (--dry-run: list only)
+bb nrepl           # Start an nREPL server on port 1667 (blocks)
+bb check           # Verify all source namespaces compile
 bb generate-models     # Regenerate provider catalogs (network)
 kmet --generate-models # Refresh the user-level catalog cache (network)
 bb generate-image-models # Regenerate the image model catalog (network)
 bb check-model-data      # Offline catalog validation
+bb pack-extension <src-dir> [out.jar]  # Verify + pack an extension artifact root
 bb help            # Show task help
 ```
+
+The `*-changed` tasks are the iteration loop — they cover only the current
+changes (git diff vs HEAD + untracked, plus the namespaces/tests that
+transitively require them via the require graph); `jolt` runs the same tasks:
+
+```sh
+bb changed              # List changed files
+bb test-changed         # Tests of affected namespaces (non-slow)
+bb test-ext-changed     # ...only the slow ones
+bb lint-changed         # Lint changed files plus affected dependents
+bb format-check-changed # (or bb format-changed to write the fix)
+```
+
+The full gates — `bb test`, `bb test-ext`, `bb lint` (0 findings required) and
+`bb format-check` — are slow; run them before committing.
 
 ## Building
 
@@ -394,13 +462,14 @@ jolt dist --target tarm64le --target-pack /tmp/pack   # Cross-compile (tools/cro
 
 Both hosts name artifacts by one scheme:
 `kmet-<version>-<host><host-version>-<platform>[-dev]` (plus `.exe` on
-Windows), so one `dist/` lines the hosts up per platform —
-`kmet-20260911-54f2842-bb1.13.222-linux-amd64` next to
-`kmet-20260911-54f2842-jolt0.8.6-86-g234f460b-linux-amd64`. The platform is the
-jolt-style `<os>-<arch>` name (`linux-amd64`, `linux-aarch64`, `macos-amd64`,
-`macos-aarch64`, `windows-amd64`, `windows-aarch64`), shared by both packagers:
-babashka targets are those platforms, with babashka's statically linked linux
-release assets behind `linux-amd64`/`linux-aarch64` (a release asset slug like
+Windows; `-dev` marks a jolt `--dev` build), so one `dist/` lines the hosts up
+per platform — `kmet-0.8.0-56-g63374117-bb1.13.222-linux-amd64` next to
+`kmet-0.8.0-56-g63374117-jolt0.8.6-86-g234f460b-linux-amd64`. The platform is
+the jolt-style `<os>-<arch>` name (`linux-amd64`, `linux-aarch64`,
+`macos-amd64`, `macos-aarch64`, `windows-amd64`; jolt can also cross-compile
+`windows-aarch64`), shared by both packagers: babashka targets are its five
+platforms, with babashka's statically linked linux release assets behind
+`linux-amd64`/`linux-aarch64` (a release asset slug like
 `linux-amd64-static` is accepted too). Babashka binaries are cached in
 `target/build-cache/` (sha256-verified on download) and `bb dist` always
 rebuilds a fresh `target/kmet.jar` first so artifacts never bundle stale
@@ -428,14 +497,6 @@ therefore additionally emits a companion `.sh` launcher next to the artifact
 `$PREFIX/glibc/lib/ld-linux-*.so.1` (plus `--jar <self>` for the babashka
 binary). It requires the termux glibc package (`pkg install glibc-repo && pkg
 install glibc`).
-
-## Status
-
-- ✅ Phase 1 — TUI Foundation
-- ✅ Phase 2 — Interactive Components
-- ✅ Phase 3 — Agent Core
-- ✅ Phase 4 — Chat History, Layout, Commands
-- ✅ Phase 5 — Themes, Config, Polish
 
 ## License
 
