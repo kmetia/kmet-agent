@@ -49,6 +49,7 @@
             [kmet.ai.api.shared :as shared]
             [kmet.app.skills :as skills]
             [kmet.libs.context :as context]
+            [kmet.libs.usage :as usage]
             [kmet.app.prompts :as prompts]
             [kmet.app.commands :as commands]
             [kmet.app.extensions :as extensions]
@@ -1475,47 +1476,109 @@
                     :when (= :text (:type b))]
                 (:text b)))))
 
+(defn- run-message-renderer
+  "Run a registered extension message renderer for M. Returns the renderer's
+   result (a chat message map, a bare component, or nil). A throwing or
+   nil-returning renderer falls through to the default labeled box (pi:
+   CustomMessageComponent rebuild catches renderer errors and keeps the
+   default rendering when the renderer produces nothing)."
+  [renderer m]
+  (when renderer
+    (try (renderer m) (catch Exception _ nil))))
+
+(defn- run-entry-renderer
+  "Run a registered extension entry renderer for ENTRY. Returns the
+   renderer's result (a chat message map, a bare component, or nil). A
+   throwing renderer yields a visible error line naming the custom type
+   (pi: CustomEntryComponent rebuild catches renderer errors and renders
+   `[type] renderer failed: message`)."
+  [renderer entry]
+  (when renderer
+    (try (renderer entry)
+         (catch Exception e
+           (let [ct (or (:custom-type entry) "custom")]
+             {:role :notice
+              :style :error
+              :content (str "[" (if (keyword? ct) (name ct) (str ct))
+                            "] renderer failed: "
+                            (or (ex-message e) (str (class e))))})))))
+
+(defn- renderer-result->message
+  "Normalize an extension renderer result for chat-history-add-message!:
+   a plain message map passes through, a bare component is wrapped as
+   {:component c}. Components are records and records satisfy map?, so a
+   plain map? test would misclassify every component as a message map."
+  [rendered]
+  (if (and (map? rendered) (not (record? rendered)))
+    rendered
+    {:component rendered}))
+
+(defn- compaction-cost-notice
+  "pi: addCompactionCostNotice — the warning line appended after a
+   compaction / branch summary whose summarization call recorded usage
+   (entry :usage). Gated on :show-cache-miss-notices, like the assistant
+   cache-miss notice. Returns the message map to append, or nil."
+  [config variant usage]
+  (when (and (cfg/get-show-cache-miss-notices config) usage)
+    (when-let [u (usage/entry-usage usage)]
+      (let [tokens (+ (long (or (:input u) 0)) (long (or (:output u) 0))
+                      (long (or (:cache-read u) 0)) (long (or (:cache-write u) 0)))
+            cost (:cost u)]
+        (when (pos? tokens)
+          {:role :notice
+           :style :warning
+           :content (str (case variant
+                           :compaction "Compaction"
+                           :branch-summary "Branch summary"
+                           "Summary")
+                         ": " (footer/format-tokens tokens) " tokens billed"
+                         (when (and cost (>= (double cost) 0.01))
+                           (str " (~$" (format "%.2f" (double cost)) ")")))})))))
+
 (defn- replay-branch!
-  "Replay a session's active branch into the chat history (pi:
-   renderInitialMessages — only message entries; session_info, label and
+  "Replay a session's compaction-aware context into the chat history (pi:
+   renderInitialMessages — buildContextEntries, so summarized history is
+   not re-rendered; only message entries; session_info, label and
    model/thinking change entries are metadata and never rendered; custom
    (extension state) entries render when an extension registered a renderer
-   for their custom-type; compaction and branch_summary entries render their
-   summary text; custom_message entries render as labeled info boxes when
-   their display flag is set). Tool results replay as ToolExecutionComponents
-   created from the assistant entry's :tool-calls (name + args) and filled
-   by the matching :tool result entry by tool-call id (pi:
-   renderedPendingTools); a result without a matching call renders
-   standalone from its own :tool-name."
+   for their custom-type; compaction and branch_summary entries render as
+   dedicated collapsible summary boxes; custom_message entries render as
+   labeled info boxes when their display flag is set). Tool results replay
+   as ToolExecutionComponents created from the assistant entry's
+   :tool-calls (name + args) and filled by the matching :tool result entry
+   by tool-call id (pi: renderedPendingTools); a result without a matching
+   call renders standalone from its own :tool-name; !/!! bash entries replay
+   as completed BashExecutionComponents (pi: addMessageToChat case
+   bashExecution)."
   [cs sess]
   (ui/chat-history-clear! (:chat-history cs))
   (let [content-of
         (fn [e]
-          (if (contains? #{:compaction :branch-summary} (:role e))
-            (or (:summary e) "")
-            (str/join
-             (keep (fn [b]
-                     (case (:type b)
-                       :text (:text b)
-                       :tool_result (:content b)
-                       nil))
-                   (:content e)))))
+          (str/join
+           (keep (fn [b]
+                   (case (:type b)
+                     :text (:text b)
+                     :tool_result (:content b)
+                     nil))
+                 (:content e))))
         ;; Pi: renderedPendingTools — tool-call id → ToolExecutionComponent
         ;; created from the assistant message's tool calls, filled by the
         ;; matching tool-result entry (results can arrive out of order with
         ;; parallel tools).
         pending-tools (atom {})]
-    (doseq [e (session/get-branch sess)
+    (doseq [e (session/build-context sess)
             :when (not (contains? #{:session_info :label :model-change
                                     :thinking-level-change} (:role e)))]
       (let [role (:role e)]
         (cond
           (= role :custom)
           ;; extension state entries render only with a registered renderer
-          ;; (pi: registerEntryRenderer + CustomEntryComponent)
-          (when-let [renderer (extensions/get-entry-renderer (:custom-type e))]
-            (when-let [msg (renderer e)]
-              (ui/chat-history-add-message! (:chat-history cs) msg)))
+          ;; (pi: registerEntryRenderer + CustomEntryComponent); a renderer
+          ;; failure renders the pi error line instead of crashing the replay
+          (when-let [rendered (run-entry-renderer
+                               (extensions/get-entry-renderer (:custom-type e)) e)]
+            (ui/chat-history-add-message! (:chat-history cs)
+                                          (renderer-result->message rendered)))
 
           (= role :custom-message)
           ;; extension custom messages render only when display is set (pi:
@@ -1525,9 +1588,9 @@
           (when (:display e)
             (ui/chat-history-add-message!
              (:chat-history cs)
-             (if-let [renderer (extensions/get-message-renderer (:custom-type e))]
-               (let [msg (renderer e)]
-                 (if (map? msg) msg {:component msg}))
+             (if-let [rendered (run-message-renderer
+                                (extensions/get-message-renderer (:custom-type e)) e)]
+               (renderer-result->message rendered)
                {:role :info
                 :content (custom-message-text e)
                 :images (image-block/content-images (:content e))
@@ -1603,6 +1666,34 @@
                  ;; renders them like a matched result's would
                  (seq (:images e)) (assoc :images (:images e))))))
 
+          (= role :bash)
+          ;; pi: addMessageToChat case "bashExecution" — !/!! replays as a
+          ;; COMPLETED BashExecutionComponent (no spinner, no duration)
+          (let [comp (be/make-bash-execution
+                      :command (:command e)
+                      :exclude-from-context? (:exclude-from-context? e)
+                      :replayed? true
+                      :tools-expanded-atom (:tools-expanded-atom (:chat-history cs)))]
+            (when (seq (:output e))
+              (be/bash-execution-append-output! comp (:output e)))
+            (be/bash-execution-set-complete! comp (:exit-code e) (:cancelled e false)
+                                             :truncation (when (:truncated e) {:truncated true})
+                                             :full-output-path (:full-output-path e))
+            (ui/chat-history-add-message! (:chat-history cs)
+                                          {:role :bash :command (:command e) :component comp}))
+
+          ;; pi: CompactionSummaryMessageComponent / BranchSummary — dedicated
+          ;; collapsible summary boxes; a usage-carrying summary appends the
+          ;; billing notice when :show-cache-miss-notices is on
+          (contains? #{:compaction :branch-summary} role)
+          (do
+            (ui/chat-history-add-message!
+             (:chat-history cs)
+             (cond-> {:role role :summary (:summary e) :tokens-before (:tokens-before e)}
+               (:usage e) (assoc :usage (:usage e))))
+            (when-let [notice (compaction-cost-notice (:config cs) role (:usage e))]
+              (ui/chat-history-add-message! (:chat-history cs) notice)))
+
           :else
           (ui/chat-history-add-message!
            (:chat-history cs)
@@ -1611,13 +1702,7 @@
              ;; text, so the image blocks must ride the message's :images
              ;; (the live path carries them inside :content)
              (= role :user) (assoc :images (image-block/content-images (:content e)))
-             (= role :info) (assoc :label (:label e))
-             ;; pi: CompactionSummaryMessageComponent — compaction and
-             ;; branch-summary entries render as labeled boxes
-             (contains? #{:compaction :branch-summary} role)
-             (assoc :role :info
-                    :label (if (= role :compaction) "Compaction" "Branch summary")
-                    :content (content-of e)))))))))
+             (= role :info) (assoc :label (:label e)))))))))
 
 (defn- restore-session!
   "Restore a session into the UI and the agent: swap the active session,
@@ -1643,6 +1728,13 @@
     (agent/apply-session-settings! @(:agent-state cs))
     (sync-footer-model! cs))
   (replay-branch! cs sess)
+  ;; pi: renderInitialMessages — "Session compacted N times" status when
+  ;; the session file (any branch) contains compactions
+  (let [n (count (filter #(= :compaction (:role %)) @(:entries sess)))]
+    (when (pos? n)
+      (ui/chat-history-show-status!
+       (:chat-history cs)
+       (str "Session compacted " n (if (= n 1) " time" " times")))))
   ;; Repopulate the editor's prompt history only on the resume paths
   ;; (startup --continue, /resume — pi: renderInitialMessages with
   ;; populateHistory). Fork/clone keep the shared editor's existing history
@@ -3253,20 +3345,26 @@
       ;; ones stay in the LLM context only)
       (do (ui/chat-history-rebuild!
            chat-history
-           (map (fn [m]
-                  (if (and (= :custom (:role m)) (:display m))
-                    (if-let [renderer (extensions/get-message-renderer
-                                       (:custom-type m))]
-                      (let [msg (renderer m)]
-                        (if (map? msg) msg {:component msg}))
-                      (assoc m :role :info
-                             :content (custom-message-text m)
-                             :images (image-block/content-images (:content m))
-                             :label (:custom-type m)))
-                    m))
-                (remove #(and (= :custom (:role %))
-                              (not (:display %)))
-                        (:messages evt))))
+           (mapcat (fn [m]
+                     (let [m (if (and (= :custom (:role m)) (:display m))
+                               (if-let [rendered (run-message-renderer
+                                                  (extensions/get-message-renderer
+                                                   (:custom-type m)) m)]
+                                 (renderer-result->message rendered)
+                                 (assoc m :role :info
+                                        :content (custom-message-text m)
+                                        :images (image-block/content-images (:content m))
+                                        :label (:custom-type m)))
+                               m)]
+                       ;; pi: addCompactionCostNotice — the billing line
+                       ;; follows its summary message
+                       (if-let [notice (compaction-cost-notice (:config @cs-ref)
+                                                               (:role m) (:usage m))]
+                         [m notice]
+                         [m])))
+                   (remove #(and (= :custom (:role %))
+                                 (not (:display %)))
+                           (:messages evt))))
           (tui/tui-request-render tui))
       :message-start
       ;; Pi: message_start → user messages (the initial
@@ -3308,10 +3406,10 @@
                       (let [m (:message evt)]
                         (ui/chat-history-insert-before-streaming!
                          chat-history
-                         (if-let [renderer (extensions/get-message-renderer
-                                            (:custom-type m))]
-                           (let [msg (renderer m)]
-                             (if (map? msg) msg {:component msg}))
+                         (if-let [rendered (run-message-renderer
+                                            (extensions/get-message-renderer
+                                             (:custom-type m)) m)]
+                           (renderer-result->message rendered)
                            (assoc m :role :info
                                   :content (custom-message-text m)
                                   :images (image-block/content-images (:content m))
@@ -4567,11 +4665,11 @@
      (fn [msg] (agent/add-context-message! @(:agent-state cs) msg)))
     (extensions/set-entry-sink!
      (fn [entry]
-       (when-let [renderer (extensions/get-entry-renderer (:custom-type entry))]
-         (when-let [msg (renderer entry)]
-           (ui/chat-history-add-message!
-            (:chat-history cs)
-            (if (map? msg) msg {:component msg}))))))
+       (when-let [rendered (run-entry-renderer
+                            (extensions/get-entry-renderer (:custom-type entry)) entry)]
+         (ui/chat-history-add-message!
+          (:chat-history cs)
+          (renderer-result->message rendered)))))
     registry))
 
 ;; ─── Run ───────────────────────────────────────────────────────────────────

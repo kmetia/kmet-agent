@@ -61,9 +61,12 @@
 (defn- status-tree
   "Status element for a finished run: hidden-lines hint + exit status +
    Took duration + truncation warning. Nil when there is nothing to show
-   (only called for finished runs, so ended-at is always set)."
+   (only called for finished runs, so ended-at is always set). A REPLAYED
+   run (a session entry rebuilt at resume) shows no duration — its
+   timestamps are replay-time, not run-time (pi replays show no duration
+   either)."
   [t status exit-code hidden-line-count expanded?
-   truncated truncation full-output-path started-at ended-at]
+   truncated truncation full-output-path started-at ended-at replayed?]
   (when (not= status :running)
     (let [hint (when (pos? hidden-line-count)
                  (if expanded?
@@ -79,10 +82,11 @@
                       :error (theme/fg t :error (str "(exit " exit-code ")"))
                       nil)
           elapsed-ms (max 0 (- ended-at started-at))
-          duration (theme/fg t :muted
-                             (str "Took "
-                                  (format "%.1f" (float (/ elapsed-ms 1000)))
-                                  "s"))
+          duration (when-not replayed?
+                     (theme/fg t :muted
+                               (str "Took "
+                                    (format "%.1f" (float (/ elapsed-ms 1000)))
+                                    "s")))
           was-truncated (or truncated (:truncated truncation))
           trunc-part (when (and was-truncated full-output-path)
                        (theme/fg t :warning
@@ -165,7 +169,7 @@
           (elapsed-tree t started-at now-ms)]
          (status-tree t status exit-code hidden-line-count expanded?
                       truncated truncation full-output-path
-                      started-at ended-at))])))
+                      started-at ended-at (:replayed? st)))])))
 
 ;; ─── Record ────────────────────────────────────────────────────────────────
 ;; Transparent wrapper (tui.md section 3.2): uncached, so the spinner leaf
@@ -219,13 +223,16 @@
      :command                — the shell command string
      :exclude-from-context?  — boolean (!! vs !)
      :tools-expanded-atom    — chat-wide expansion toggle atom, or nil
+     :replayed?              — true for a component rebuilt from a session
+                               entry at resume: suppresses the Took
+                               duration (replay-time timestamps)
      :border                 — a kmet.tui.border set for the top/bottom
                                rules (default :normal; :ascii draws them
                                with ---, :hidden keeps the footprint
                                without ink, :none drops the rules
                                entirely), resolved here so an unknown style
                                throws at construction"
-  [& {:keys [command exclude-from-context? tools-expanded-atom border]
+  [& {:keys [command exclude-from-context? tools-expanded-atom border replayed?]
       :or {command "" exclude-from-context? false}}]
   (let [state-atom (atom {:command command
                           :output-lines []
@@ -235,6 +242,7 @@
                           :full-output-path nil
                           :started-at (System/currentTimeMillis)
                           :ended-at nil
+                          :replayed? (boolean replayed?)
                           :exclude? (boolean exclude-from-context?)})
         expanded-atom (atom false)
         color-key (if exclude-from-context? :dim :bash-mode)

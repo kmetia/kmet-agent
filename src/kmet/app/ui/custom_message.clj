@@ -72,7 +72,11 @@
    label Text → new Spacer(1) → content Markdown)."
   [comp]
   (let [theme (deref s/theme-sub)
-        label @(:label-atom comp)
+        ;; pi interpolates customType into `[${customType}]` — stringify so
+        ;; keyword custom types (the extension API default) render instead
+        ;; of crashing the `seq` check below
+        label (let [l @(:label-atom comp)]
+                (when (some? l) (if (keyword? l) (name l) (str l))))
         content (current-content comp)
         container @(:inner-container comp)
         label-children (when (seq label)

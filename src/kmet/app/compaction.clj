@@ -57,7 +57,8 @@
                         0
                         (+ (count (or (:command entry) ""))
                            (count (or (:output entry) ""))))
-                ;; summary entries project to a user message in context
+                ;; summary entries keep their role in context; the summary
+                ;; text is what the wire conversion sends (pi: convertToLlm)
                 (:compaction :branch-summary) (count (or (:summary entry) ""))
                 (+ (text-chars (:content entry))
                    (reduce + 0
@@ -118,7 +119,8 @@
 (defn- context-visible?
   "True when an entry contributes to the LLM context. Tool results and
    display-only entries are never valid cut points (pi: isCutPointMessage —
-   branch/compaction summaries count: they project to user messages)."
+   branch/compaction summaries count: they become user messages at the wire,
+   pi: convertToLlm)."
   [entry]
   (case (:role entry)
     :user true

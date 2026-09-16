@@ -33,6 +33,26 @@
   (t/is (= 40 (count (m/get-providers))))
   (t/is (fn? m/get-model)))
 
+(t/deftest test-convert-summary-messages
+  ;; pi: convertToLlm — compaction/branch-summary AgentMessages become user
+  ;; messages carrying the wrapped summary text at the wire; other roles
+  ;; pass through untouched
+  (let [convert @#'llm/convert-summary-messages
+        input [{:role :user :content [{:type :text :text "hi"}]}
+               {:role :compaction :summary "SUM" :tokens-before 123}
+               {:role :tool :content [{:type :tool_result :tool_use_id "t1"}]}
+               {:role :branch-summary :summary "BRANCH"}]
+        msgs (convert input)
+        text-of (fn [m] (-> m :content first :text))]
+    (t/is (= [:user :user :tool :user] (mapv :role msgs)))
+    (t/is (= "SUM" (:summary (nth input 1)))
+          "conversion is non-destructive: the input role map keeps its summary")
+    (t/is (str/includes? (text-of (nth msgs 1)) "compacted into the following summary"))
+    (t/is (str/includes? (text-of (nth msgs 1)) "<summary>\nSUM\n</summary>"))
+    (t/is (str/includes? (text-of (nth msgs 3)) "summary of a branch"))
+    (t/is (str/includes? (text-of (nth msgs 3)) "<summary>\nBRANCH\n</summary>"))
+    (t/is (= "hi" (text-of (first msgs))))))
+
 ;; ─── Model resolution & dispatch ───────────────────────────────────────────
 
 (t/deftest test-llm-unknown-model

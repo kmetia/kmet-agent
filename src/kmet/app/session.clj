@@ -563,20 +563,18 @@
 (defn context-messages
   "Project a session entry into LLM context messages (pi:
    sessionEntryToContextMessages). Message entries pass through unchanged;
-   compaction and branch_summary entries become a single :user message
-   carrying their summary (kmet providers don't know pi's
-   compactionSummary/branchSummary roles — the :user mapping mirrors the
-   pre-append-only summary entry); custom_message entries become a
-   :custom-role message (sent to the LLM as a user message — pi:
-   convertToLlm custom→user) with string content normalized to a text
-   block; :info, :session_info, :model-change, :thinking-level-change and
-   :custom are metadata/state and excluded. Excluded :bash entries are
-   kept here and dropped later by the
+   compaction and branch_summary entries also keep their roles (pi:
+   compactionSummary/branchSummary AgentMessages) — the provider edge
+   converts them to user messages carrying the wrapped summary text (pi:
+   convertToLlm). custom_message entries become a :custom-role message
+   (sent to the LLM as a user message — pi: convertToLlm custom→user) with
+   string content normalized to a text block; :info, :session_info,
+   :model-change, :thinking-level-change and :custom are metadata/state and
+   excluded. Excluded :bash entries are kept here and dropped later by the
    LLM conversion (pi: convertToLlm filters excludeFromContext)."
   [entry]
   (case (:role entry)
-    (:compaction :branch-summary)
-    [{:role :user :content [{:type :text :text (str (:summary entry))}]}]
+    (:compaction :branch-summary) [entry]
     :custom-message
     [{:role :custom
       :custom-type (:custom-type entry)

@@ -10,7 +10,6 @@
             [kmet.tui.theme :as theme]
             [kmet.tui.components.spacer :as spacer]
             [kmet.tui.components.text :as text]
-            [kmet.tui.components.truncated-text :as truncated-text]
             [kmet.tui.components.markdown :as md]
             [kmet.tui.components.container :as container]
             [kmet.app.ui.subs :as subs]
@@ -18,6 +17,7 @@
             [kmet.app.ui.assistant-message :as am]
             [kmet.app.ui.tool-execution :as te]
             [kmet.app.ui.custom-message :as cm]
+            [kmet.app.ui.summary-message :as summary-message]
             [kmet.app.ui.image-block :as image-block]
             [kmet.app.ui.skill-message :as skill-message]
             [kmet.app.skills :as skills]
@@ -214,18 +214,17 @@
 
 ;; ─── Status line (pi: showStatus) ──────────────────────────────────────────
 
-;; StatusLine — a dim single-line status entry appended to the chat (pi:
-;; showStatus appends Spacer(1) + Text to the chat container). Uses
-;; TruncatedText so long statuses truncate with an ellipsis instead of
-;; wrapping. No component kind — kind-based dispatch (toggles, theme
-;; application) returns nil for it.
+;; StatusLine — a dim status entry appended to the chat (pi: showStatus
+;; appends Spacer(1) + Text to the chat container). Like pi's Text, long
+;; statuses wrap instead of truncating. No component kind — kind-based
+;; dispatch (toggles, theme application) returns nil for it.
 (defcomponent StatusLine nil [spacer-atom text-atom cache-atom]
   (render [this width]
     (track! this width
       (let [sp @spacer-atom
             tt @text-atom]
-        ;; The inner TruncatedText's text atom changes on status updates
-        ;; (truncated-text-set-text!) — track it so the cache invalidates.
+        ;; The inner Text's text atom changes on status updates
+        ;; (text/text-set!) — track it so the cache invalidates.
         (track-deps @(:text-atom tt))
         (into [] (concat (protocols/render sp width)
                          (protocols/render tt width))))))
@@ -238,12 +237,10 @@
 
 (defn- make-status-line
   "Create a StatusLine for a status message (pi: showStatus — a Spacer(1)
-   plus a dim line)."
+   plus a dim, wrapping line)."
   [message]
   (map->StatusLine {:spacer-atom (atom (spacer/make-spacer 1))
-                    :text-atom (atom (truncated-text/make-truncated-text
-                                      (theme/dim message)
-                                      :padding-x 1 :padding-y 0))
+                    :text-atom (atom (text/make-text (theme/dim message) 1 0))
                     :cache-atom (atom nil)}))
 
 (defn- make-user-msg
@@ -275,15 +272,29 @@
                                                :output-pad output-pad))))
       (um/make-user-message :text text :images images :output-pad output-pad))))
 
+(defn- content->custom-text
+  "Display text of a custom message's content (pi: CustomMessageComponent
+   default rendering — text blocks only; strings pass through)."
+  [content]
+  (cond
+    (string? content) content
+    (nil? content) ""
+    :else (str/join (for [b content
+                          :when (= :text (:type b))]
+                      (:text b)))))
+
 (defn- make-component-for-msg
   "Create the appropriate component for a message map.
    For tool messages, looks up render functions from the tool registry.
    Assistant messages SHARE the chat history's thinking-hidden/hidden-label
    atoms (pi: hideThinkingBlock / hiddenThinkingLabel) — a toggle is one
-   reset! that invalidates every message at once; tool components share the
-   tools-expanded toggle atom the same way. A message carrying a pre-built :component
-   (extension renderers returning a component directly, and replayed :bash
-   executions) uses it as-is."
+   reset! that invalidates every message at once; tool, skill, and summary
+   components share the tools-expanded toggle atom the same way. A message
+   carrying a pre-built :component (extension renderers returning a
+   component directly, and replay-built :bash executions) uses it as-is.
+   :custom messages render through the default labeled box (a registered
+   message renderer arrives as :component) and honor the display flag, and
+   :compaction / :branch-summary render as collapsible summary boxes."
   [msg output-pad tools-expanded-atom thinking-hidden-atom hidden-label-atom]
   (let [thm @subs/theme-sub]
     (cond
@@ -332,6 +343,33 @@
                   (te/tool-execution-set-images! comp images))
                 comp)
         :bash (:component msg)  ;; Already-constructed BashExecutionComponent
+      ;; pi: addMessageToChat case "custom" — the default labeled box. Image
+      ;; blocks embedded in :content render like the call-site paths' do
+      ;; (image-block/content-images); the :images key is the flattened
+      ;; replay shape. The wire/stream/replay paths gate :display before
+      ;; dispatching (pi: display required); a direct add without one has
+      ;; nothing to gate on and renders.
+        :custom (when-not (false? (:display msg))
+                  (cm/make-custom-message :label (:custom-type msg)
+                                          :content (content->custom-text (:content msg))
+                                          :images (into (vec (:images msg))
+                                                        (image-block/content-images (:content msg)))
+                                          :output-pad output-pad))
+      ;; pi: CompactionSummaryMessageComponent / BranchSummaryMessageComponent
+      ;; — collapsible summary boxes (collapsed by default, expansion via
+      ;; the shared ctrl+o mode atom).
+        :compaction (summary-message/make-summary-message
+                     :variant :compaction
+                     :summary (:summary msg)
+                     :tokens-before (:tokens-before msg)
+                     :tools-expanded-atom tools-expanded-atom
+                     :output-pad output-pad)
+        :branch-summary (summary-message/make-summary-message
+                         :variant :branch
+                         :summary (:summary msg)
+                         :tokens-before (:tokens-before msg)
+                         :tools-expanded-atom tools-expanded-atom
+                         :output-pad output-pad)
         :info (cm/make-custom-message :label (:label msg)
                                       :content (:content msg "")
                                       :images (:images msg)
@@ -340,10 +378,10 @@
       ;; they are plain Text, there is nothing to re-theme
         :error (make-plain-msg (theme/fg thm :error (str "Error: " (:content msg ""))))
         :warning (make-plain-msg (theme/fg thm :warning (str "Warning: " (:content msg ""))))
+        :notice (make-plain-msg (theme/fg thm (:style msg :warning) (str (:content msg ""))))
         :status (make-status-line (:content msg ""))
-    ;; Fallback for roles with no dedicated component (e.g. :system compaction
-    ;; summaries, unknown roles from session data): render content as markdown
-    ;; (pi renders compaction summaries via Markdown) rather than dropping it.
+    ;; Fallback for roles with no dedicated component (unknown roles from
+    ;; session data): render content as markdown rather than dropping it.
         (make-plain-md-msg (content->display-text (:content msg "")) thm
                            (fn [c] (theme/fg thm :text c)))))))
 
@@ -674,8 +712,8 @@
   [ch message]
   (let [last-msg (peek @(:messages-atom ch))]
     (if (and last-msg (= :status (:role last-msg)))
-      (truncated-text/truncated-text-set-text! @(:text-atom (:component last-msg))
-                                               (theme/dim message))
+      (text/text-set! @(:text-atom (:component last-msg))
+                      (theme/dim message))
       (chat-history-add-message! ch {:role :status :content message})))
   nil)
 
@@ -718,9 +756,10 @@
   "Get all stored messages as plain maps — the data source of the chat,
    read directly from messages-atom (no component reverse-engineering).
    Includes the info banner first (its :images carried through); excludes
-   bash executions (!! / !) and status lines, which are UI-only, and strips
-   the :component/:streaming? keys plus live assistant content atoms
-   (dereferenced into plain :content/:thinking values)."
+   bash executions (!! / !), status lines and derived notice lines, which
+   are UI-only, and strips the :component/:streaming? keys plus live
+   assistant content atoms (dereferenced into plain :content/:thinking
+   values)."
   [ch]
   (->> (concat
         (when-let [info @(:info-comp-atom ch)]
@@ -729,7 +768,7 @@
             :content @(:content-atom info)
             :images @(:images-atom info)}])
         @(:messages-atom ch))
-       (remove #(#{:bash :status} (:role %)))
+       (remove #(#{:bash :status :notice} (:role %)))
        ;; deref live assistant content atoms (mid-stream reads); finalized
        ;; and replayed messages carry plain strings already
        (mapv (fn [{:keys [text-atom thinking-atom] :as m}]
@@ -751,6 +790,7 @@
     :assistant (am/assistant-message-set-output-pad! child n)
     :tool (te/tool-execution-set-output-pad! child n)
     :custom (cm/custom-message-set-output-pad! child n)
+    :summary (summary-message/summary-message-set-output-pad! child n)
     :skill (skill-message/skill-message-set-output-pad! child n)
     nil))
 

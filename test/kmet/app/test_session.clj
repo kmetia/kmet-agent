@@ -789,8 +789,9 @@
     (s/compact-with-summary! session "SUM" (:id (first (s/get-branch session))))
     (let [msgs (mapcat s/context-messages (s/build-context session))]
       (t/is (= 3 (count msgs)))
-      (t/is (= "SUM" (-> msgs first :content first :text))
-            "compaction projects to a :user summary message")
+      (t/is (= :compaction (:role (first msgs))))
+      (t/is (= "SUM" (:summary (first msgs)))
+            "compaction keeps its role + summary (pi: compactionSummary AgentMessage)")
       (t/is (= "q" (-> msgs second :content)))
       (t/is (= "a" (-> msgs last :content)))
       (t/is (not-any? #(contains? #{:info :session_info} (:role %)) msgs)
@@ -1023,9 +1024,9 @@
     (let [u2 (s/append-entry session {:role :user :content "q2"})
           _ (s/branch-with-summary! session (:id u2) "abandoned path")
           msgs (mapcat s/context-messages (s/build-context session))]
-      (t/is (= :user (:role (last msgs))))
-      (t/is (= "abandoned path" (-> msgs last :content first :text))
-            "branch_summary projects as a user summary message"))))
+      (t/is (= :branch-summary (:role (last msgs))))
+      (t/is (= "abandoned path" (:summary (last msgs)))
+            "branch_summary keeps its role + summary (pi: branchSummary)"))))
 
 (t/deftest test-branch-summary-entries
   ;; branch: root → u1 → a1 → u2 → a2; navigate from a2 back to u1

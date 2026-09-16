@@ -20,6 +20,41 @@
    [kmet.ai.api.openai-responses :refer [responses-request]]
    [kmet.ai.api.shared :refer [ambient-auth-available? apply-context-hook effective-effort]]))
 
+(def ^:private compaction-summary-prefix
+  "pi: COMPACTION_SUMMARY_PREFIX — the compacted-history preamble and
+   <summary> tag a compactionSummary message is wrapped in at the wire."
+  "The conversation history before this point was compacted into the following summary:\n\n<summary>\n")
+
+(def ^:private compaction-summary-suffix "\n</summary>")
+
+(def ^:private branch-summary-prefix
+  "pi: BRANCH_SUMMARY_PREFIX."
+  "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n")
+
+(def ^:private branch-summary-suffix "\n</summary>")
+
+(defn- convert-summary-messages
+  "pi: convertToLlm — compaction/branch-summary AgentMessages become user
+   messages carrying their wrapped summary text. The conversion happens per
+   request, so the agent context (and the TUI) keeps the summary roles and
+   the extension context hook still sees them; only the wire payload is
+   flattened."
+  [messages]
+  (mapv (fn [m]
+          (case (:role m)
+            :compaction {:role :user
+                         :content [{:type :text
+                                    :text (str compaction-summary-prefix
+                                               (:summary m "")
+                                               compaction-summary-suffix)}]}
+            :branch-summary {:role :user
+                             :content [{:type :text
+                                        :text (str branch-summary-prefix
+                                                   (:summary m "")
+                                                   branch-summary-suffix)}]}
+            m))
+        messages))
+
 (defn send-message
   "Send messages to LLM and receive streaming events via callbacks.
 
@@ -79,7 +114,11 @@
         ;; pi: emitContext — the context event fires before each LLM call;
         ;; the hook (installed by the extension bridge) may replace the
         ;; outgoing messages (first non-nil handler result wins)
-        opts (update opts :messages apply-context-hook)]
+        opts (update opts :messages apply-context-hook)
+        ;; pi: convertToLlm — compaction/branch-summary roles become wrapped
+        ;; user messages at the provider edge (after the context hook, which
+        ;; still sees the role-preserving AgentMessages)
+        opts (update opts :messages convert-summary-messages)]
     (cond
       ;; google-vertex (ADC) and amazon-bedrock (ambient AWS credentials)
       ;; resolve their own auth — the api-key check is per-request below

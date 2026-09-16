@@ -1579,7 +1579,10 @@ Be precise and concise in your responses."}}]
                                 ;; interactive mode clears the chat and re-renders the compacted
                                 ;; context, showing the compaction summary entry). Without this the
                                 ;; transcript keeps the pre-compaction messages and the compaction is
-                                ;; invisible until the session is reloaded.
+                                ;; invisible until the session is reloaded. The rebuild uses context
+                                ;; order (summary first, then kept tail), so the live view matches
+                                ;; the reloaded view; pi's live path appends the summary at the
+                                ;; bottom (its own replay renders it first) — kmet keeps one order.
                                 (emit agent {:type :context-replaced :messages @(:messages agent)})
                                 (debug/log "compacted session with LLM summary")
                                 true))
@@ -2288,8 +2291,9 @@ Be precise and concise in your responses."}}]
 (defn restore-session-context!
   "Rebuild the agent's in-memory context from the session (pi: the session is
    the source of truth — buildSessionContext). build-context walks root→leaf
-   through the latest compaction; compaction entries project to a :user
-   summary message, :info/:session_info are metadata and excluded. Messages
+   through the latest compaction; compaction entries keep their roles in the
+   rebuilt messages (pi: compactionSummary AgentMessage; convertToLlm wraps
+   them at the wire), :info/:session_info are metadata and excluded. Messages
    only — like pi's buildSessionContext consumers, the agent's model/thinking
    are left untouched here; the session-derived settings are applied on
    session load via apply-session-settings! (pi: sdk.ts createAgentSession

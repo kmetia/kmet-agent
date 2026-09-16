@@ -658,12 +658,14 @@ boolean true).
 ```clojure
 ;; custom ENTRY (extension state, never in LLM context) — hidden unless a
 ;; renderer is registered; renderer returns a chat message map (or bare
-;; component)
+;; component). A renderer that throws renders
+;; `[my-state] renderer failed: message` (pi: CustomEntryComponent)
 (ext/register-entry-renderer! api "my-state"
   (fn [entry] {:role :info :content (pr-str (:data entry)) :label "My state"}))
 
 ;; custom MESSAGE (participates in LLM context) — overrides the default
-;; labeled info box
+;; labeled info box; a renderer that returns nil/throws keeps the default
+;; box (pi: CustomMessageComponent fallback)
 (ext/register-message-renderer! api "my-message"
   (fn [msg] {:role :info :content "rendered" :label "My message"}))
 ```

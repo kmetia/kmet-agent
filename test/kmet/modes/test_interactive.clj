@@ -446,6 +446,204 @@
             (finally (timg/set-capabilities! prev-caps))))
         (finally (fs/delete-tree sess-dir))))))
 
+(deftest replay-branch-rebuilds-bash-executions
+  (testing "!/!! entries replay as COMPLETED bash components (pi:
+            addMessageToChat case bashExecution): command + output + exit
+            status, no spinner driver, no fabricated duration"
+    (let [sess-dir (str "target/test-interactive-replay-bash-" (System/currentTimeMillis))
+          sess (session/create-session sess-dir)]
+      (try
+        (session/append-entry sess {:role :user :content "run it"})
+        (session/append-entry sess {:role :bash :command "ls -la"
+                                    :output "a.txt\nb.txt" :exit-code 0
+                                    :cancelled false :truncated false
+                                    :exclude-from-context? false})
+        (session/append-entry sess {:role :bash :command "false"
+                                    :output "" :exit-code 1
+                                    :cancelled false :truncated false
+                                    :exclude-from-context? true})
+        ;; sessions persist lazily — the first assistant message writes the file
+        (session/append-entry sess {:role :assistant
+                                    :content [{:type :text :text "done"}]})
+        (let [loaded (session/load-session (:file sess))
+              ch (ui/make-chat-history)
+              cs (inter/map->CoreState {:chat-history ch})]
+          ((var inter/replay-branch!) cs loaded)
+          (let [bashes (filterv #(= :bash (:role %)) @(:messages-atom ch))
+                rendered (mapv (fn [m]
+                                 (str/join "\n" (protocols/render (:component m) 100)))
+                               bashes)]
+            (is (= 2 (count bashes)) "both bash entries replay")
+            (is (str/includes? (first rendered) "$ ls -la"))
+            (is (str/includes? (first rendered) "a.txt"))
+            (is (str/includes? (second rendered) "$ false"))
+            (is (str/includes? (second rendered) "(exit 1)"))
+            (is (not-any? #(str/includes? % "Took") rendered)
+                "replayed runs show no fabricated duration")
+            (is (every? #(nil? @(:ticker-id-atom (:component %))) bashes)
+                "no frame driver stays armed")))
+        (finally (fs/delete-tree sess-dir))))))
+
+(deftest replay-branch-uses-the-compaction-aware-context
+  (testing "resume replays buildContextEntries (pi: renderInitialMessages):
+            summarized history is not re-rendered, and the compaction
+            renders as the dedicated collapsible summary component"
+    (let [sess-dir (str "target/test-interactive-replay-compaction-" (System/currentTimeMillis))
+          sess (session/create-session sess-dir)]
+      (try
+        (dotimes [i 4]
+          (session/append-entry sess {:role :user
+                                      :content [{:type :text :text (str "msg " i)}]}))
+        (let [keep-id (:id (nth @(:entries sess) 2))]
+          (session/compact-with-summary! sess "THE SUMMARY" keep-id {:tokens-before 12345})
+          (session/append-entry sess {:role :assistant
+                                      :content [{:type :text :text "after"}]})
+          (let [loaded (session/load-session (:file sess))
+                ch (ui/make-chat-history)
+                cs (inter/map->CoreState {:chat-history ch})]
+            ((var inter/replay-branch!) cs loaded)
+            (is (= [:compaction :user :user :assistant]
+                   (mapv :role @(:messages-atom ch)))
+                "only the compaction + kept tail replay")
+            (let [rendered (str/join "\n"
+                                     (map #(str/join "\n" (protocols/render (:component %) 100))
+                                          @(:messages-atom ch)))]
+              (is (not (str/includes? rendered "msg 0"))
+                  "summarized history is not re-rendered (build-context)")
+              (is (not (str/includes? rendered "msg 1")))
+              (is (str/includes? rendered "msg 2") "the kept tail stays"))
+            (let [comp (:component (first @(:messages-atom ch)))
+                  collapsed (str/join "\n" (protocols/render comp 100))]
+              (is (= :summary (:kind comp)))
+              (is (str/includes? collapsed "[compaction]"))
+              (is (str/includes? collapsed "Compacted from 12,345 tokens"))
+              (is (not (str/includes? collapsed "THE SUMMARY"))
+                  "collapsed by default (pi: setExpanded(toolOutputExpanded))")
+              (ui/chat-history-set-tool-display-mode! ch :expanded)
+              (is (str/includes? (str/join "\n" (protocols/render comp 100))
+                                 "THE SUMMARY")
+                  "ctrl+o expands it"))))
+        (finally (fs/delete-tree sess-dir))))))
+
+(deftest run-message-renderer-falls-back-to-the-default-box
+  ;; pi: CustomMessageComponent rebuild — a throwing or empty renderer
+  ;; result keeps the default labeled box instead of an empty component
+  (let [run #'inter/run-message-renderer]
+    (is (nil? (run nil {:role :custom})) "no renderer")
+    (is (nil? (run (fn [_] nil) {:role :custom})) "nil result")
+    (is (nil? (run (fn [_] (throw (ex-info "boom" {}))) {:role :custom}))
+        "throwing renderer")
+    (is (= {:component :x} (run (fn [_] {:component :x}) {:role :custom})))))
+
+(deftest run-entry-renderer-catches-and-reports
+  ;; pi: CustomEntryComponent rebuild — a throwing entry renderer renders
+  ;; `[type] renderer failed: message` instead of crashing the replay
+  (let [run #'inter/run-entry-renderer]
+    (is (nil? (run nil {:custom-type :note})) "no renderer")
+    (is (nil? (run (fn [_] nil) {:custom-type :note})) "nil result")
+    (is (= {:role :notice :style :error
+            :content "[note] renderer failed: boom"}
+           (run (fn [_] (throw (ex-info "boom" {}))) {:custom-type :note})))
+    (is (= {:role :info :content "ok"}
+           (run (fn [_] {:role :info :content "ok"}) {:custom-type :note})))))
+
+(deftest renderer-result-wraps-components-not-maps
+  ;; all kmet components are records, and records satisfy map? — a plain
+  ;; map? test would treat a bare component as a message map (regression:
+  ;; the documented bare-component renderer result produced an empty
+  ;; fallback instead of the component)
+  (let [wrap #'inter/renderer-result->message
+        comp (container/make-container)]
+    (is (identical? comp (:component (wrap comp))))
+    (is (= {:role :info :content "x"} (wrap {:role :info :content "x"})))))
+
+(deftest replay-branch-hardens-custom-entry-renderers
+  (testing "a throwing entry renderer renders the pi failure line instead of
+            crashing the replay; a bare-component result is wrapped"
+    (let [component (container/make-container)
+          dereg-boom (extensions/register-entry-renderer!
+                      "boom-entry" (fn [_] (throw (ex-info "kaput" {}))))
+          dereg-comp (extensions/register-entry-renderer!
+                      "comp-entry" (fn [_] component))]
+      (try
+        (let [sess-dir (str "target/test-interactive-entry-rdr-" (System/currentTimeMillis))
+              sess (session/create-session sess-dir)]
+          (try
+            (session/append-entry sess {:role :user :content "q"})
+            (session/append-entry sess {:role :custom :custom-type "boom-entry" :data {}})
+            (session/append-entry sess {:role :custom :custom-type "comp-entry" :data {}})
+            (session/append-entry sess {:role :assistant
+                                        :content [{:type :text :text "a"}]})
+            (let [loaded (session/load-session (:file sess))
+                  ch (ui/make-chat-history)
+                  cs (inter/map->CoreState {:chat-history ch})]
+              ((var inter/replay-branch!) cs loaded)
+              (let [text (str/join "\n"
+                                   (map #(str/join "\n" (protocols/render (:component %) 100))
+                                        @(:messages-atom ch)))]
+                (is (str/includes? text "[boom-entry] renderer failed: kaput")))
+              (is (some #(identical? component (:component %)) @(:messages-atom ch))
+                  "a bare component result is wrapped"))
+            (finally (fs/delete-tree sess-dir))))
+        (finally (dereg-boom) (dereg-comp))))))
+
+(deftest compaction-cost-notice-follows-usage-and-setting
+  (let [notice #'inter/compaction-cost-notice]
+    (with-redefs [cfg/get-show-cache-miss-notices (constantly true)]
+      (is (= {:role :notice :style :warning
+              :content "Compaction: 12k tokens billed (~$0.01)"}
+             (notice nil :compaction {:input 10000 :output 1000
+                                      :cache-read 1000 :cache-write 0
+                                      :cost {:total 0.012}}))
+          "pi: Compaction: <tokens> tokens billed (~$cost) when usage is present")
+      (is (nil? (notice nil :compaction nil)) "no usage → no notice"))
+    (with-redefs [cfg/get-show-cache-miss-notices (constantly false)]
+      (is (nil? (notice nil :compaction {:input 1 :output 1 :cost 0.5}))
+          "gated on :show-cache-miss-notices (pi: showCacheMissNotices)"))))
+
+(deftest context-replaced-renders-summary-roles-live
+  ;; the live compaction rebuild carries role-preserving context messages,
+  ;; so the dedicated summary component renders without a reload
+  (let [ch (ui/make-chat-history)
+        handler ((var inter/make-agent-event-handler)
+                 {:chat-history ch
+                  :tui {:render-requested? (atom false)}
+                  :cs-ref (atom nil)
+                  :pending-tool-comps (atom {})})]
+    (handler {:type :context-replaced
+              :messages [{:role :compaction :summary "SUM" :tokens-before 99}
+                         {:role :user :content [{:type :text :text "kept"}]}]})
+    (is (= [:compaction :user] (mapv :role @(:messages-atom ch))))
+    (is (= :summary (:kind (:component (first @(:messages-atom ch))))))
+    (let [collapsed (str/join "\n" (protocols/render (:component (first @(:messages-atom ch))) 100))]
+      (is (str/includes? collapsed "[compaction]"))
+      (is (not (str/includes? collapsed "SUM")) "collapsed by default"))))
+
+(deftest replay-branch-renders-a-branch-summary-box
+  (testing "a branch_summary entry replays as the dedicated collapsible
+            branch component (pi: BranchSummaryMessageComponent)"
+    (let [sess-dir (str "target/test-interactive-replay-branch-sum-" (System/currentTimeMillis))
+          sess (session/create-session sess-dir)]
+      (try
+        (session/append-entry sess {:role :user :content "q"})
+        (session/append-entry sess {:role :branch-summary :summary "BRANCH SUM"})
+        (session/append-entry sess {:role :assistant
+                                    :content [{:type :text :text "a"}]})
+        (let [loaded (session/load-session (:file sess))
+              ch (ui/make-chat-history)
+              cs (inter/map->CoreState {:chat-history ch})]
+          ((var inter/replay-branch!) cs loaded)
+          (is (= [:user :branch-summary :assistant] (mapv :role @(:messages-atom ch))))
+          (let [comp (:component (second @(:messages-atom ch)))
+                collapsed (str/join "\n" (protocols/render comp 100))]
+            (is (= :summary (:kind comp)))
+            (is (str/includes? collapsed "[branch]"))
+            (is (str/includes? collapsed "Branch summary"))
+            (is (not (str/includes? collapsed "BRANCH SUM")) "collapsed by default")
+            (ui/chat-history-set-tool-display-mode! ch :expanded)
+            (is (str/includes? (str/join "\n" (protocols/render comp 100)) "BRANCH SUM"))))
+        (finally (fs/delete-tree sess-dir))))))
+
 (deftest reload-reseeds-image-settings-and-block-images
   (testing "/reload re-reads the image settings and the provider image-blocking
             knob from the reloaded config (pi: settingsManager.reload)"
