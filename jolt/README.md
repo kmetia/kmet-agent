@@ -22,10 +22,8 @@ RSA is jolt.crypto's — it provides `Signature` / `KeyPairGenerator` /
 of a class the runtime IMPLEMENTS but does not fully supply cannot be
 claimed at all; that needs the guarded-require convention instead
 (AGENTS.md's `jolt/` section). When even a registration cannot back the
-member — `java.lang.Object`'s missing `wait`/`notify` pair, where jolt
-exposes no monitor API to register against — the consumer carries a
-reader-conditional workaround instead (`kmet.tui.wake`; tracked in
-`jolt-bugs.md`, jolt#1011).
+member — `java.lang.Object`'s `wait`/`notify` pair (a gap until v0.8.8-53,
+now runtime surface — `kmet.tui.wake` parks on the object monitor).
 
 **Re-verified 2026-09-11 on `v0.8.6-98-g23296732`:** all six shims the lib
 used to carry are live in a bare Jolt — `(java.net.http.HttpTimeoutException. "x")`,

@@ -2,7 +2,7 @@
   "Tests for kmet.tui.wake — the render loop's park/wake primitive. The
    contract is host-independent: park! blocks until wake! or the timeout,
    and the recheck consumes a wakeup that races the park instead of losing
-   it (jolt has no Object.wait — tracked in jolt-bugs.md)."
+   it."
   (:require [clojure.test :as t]
             [kmet.tui.wake :as wake]))
 

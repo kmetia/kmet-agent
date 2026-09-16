@@ -74,12 +74,11 @@
         ;; Maven artifact unmodified. The mvn dep feeds the jolt classpath
         ;; (bb has http-client built in; plain JVM clojure gets it too).
         ;; kmet.libs.http routes direct/http-proxy traffic through it on
-        ;; Jolt — curl stays only for SOCKS/https-scheme proxies and live
-        ;; :as :stream feeds (jolt-port.md B1).
+        ;; Jolt — curl stays only for SOCKS/https-scheme proxies.
         org.babashka/http-client {:mvn/version "0.4.25"}
         ;; The shims behind babashka.http-client on Jolt (upstream main).
         io.github.jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
-                                         :git/sha "b98833b8338b66d435cdbffa480ba2b59c005a2e"}
+                                         :git/sha "2fb8a981972b67631150e81765de58d822a99e54"}
         ;; cljfmt for the format tasks (kmet.tasks.format — one code path on
         ;; both hosts; bb.edn carries the same version for babashka).
         ;; org.clojure/spec.alpha is declared explicitly: jolt's resolver

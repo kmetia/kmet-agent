@@ -108,7 +108,7 @@ atom change → reaction dirty → queued → frame flush runs it →
 | `kmet.tui.utils` | text wrapping, visible width, truncation helpers |
 | `kmet.tui.border` | box-drawing glyph sets (frames, rules, table junctions) |
 | `kmet.tui.timers` | loop-owned timer registry (§6.1) |
-| `kmet.tui.wake` | cross-host park/wake primitive for the idle render loop (§6; jolt has no `Object.wait` — see `jolt-bugs.md`, jolt#1011) |
+| `kmet.tui.wake` | park/wake primitive for the idle render loop (§6) |
 
 ---
 
@@ -750,8 +750,7 @@ heartbeat drives the terminal resize poll (JLine's WINCH callback never
 fires under babashka's native image) and is the safety net for any wakeup
 path that bypasses `tui-request-render`. `tui-request-render` sets the flag
 before it wakes the loop, and the loop re-checks the flag inside the park:
-a request is consumed, never lost to the park (on jolt the host has no
-`Object.wait` — tracked in `jolt-bugs.md`, jolt#1011).
+a request is consumed, never lost to the park.
 
 ### 6.1 Timers — `kmet.tui.timers`
 

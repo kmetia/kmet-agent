@@ -1,9 +1,12 @@
 # jolt-bugs — open upstream tickets
 
 Every **open** jolt-side ticket whose fix requires a change in kmet or the
-removal of a kmet workaround. Closed and
-unfiled findings are not tracked here. `jolt-port.md` / `jolt-tui.md` describe
-port state without ticket IDs.
+removal of a kmet workaround. Closed and unfiled findings are not tracked
+here — recent closures (jolt v0.8.8-53 / http-client PR #21): #1011
+(`Object.wait`/`notify`), #1007 (streaming HTTP), #1015/#1016
+(`StringBuilder` `append`/`insert` char[]), #1017 (stream timeout). Their
+workarounds are removed from kmet alongside this edit. `jolt-port.md` /
+`jolt-tui.md` describe port state without ticket IDs.
 
 **Workarounds live next to their ticket below.** Each workaround block is the
 removal checklist: when an upstream fix lands, delete the listed code (and the
@@ -14,65 +17,6 @@ Historical labels from the deleted `bb-jolt.md` map as: `JOLT-12`→#947,
 `JOLT-13`→#944; git history has the full field reports.
 
 ## Open
-
-### [jolt#1011](https://github.com/jolt-lang/jolt/issues/1011) — `Object.wait` / `.notify` / `.notifyAll` missing on every object
-
-**Area:** host method tables — `java.lang.Object`. `locking`/monitor-enter is
-real (per-object, reentrant, fiber-aware) and deliberately uninterruptible like
-the JVM, but the wait/notify family is absent on every object.
-`monitor-wait!` in `host/chez/java/concurrency.ss` is the monitor-ENTER
-contention wait, not `Object.wait`. Recorded upstream as a deliberate gap ("NOT
-a divergence, and recorded so it does not read as an oversight") in
-`test/conformance/known-divergences.edn` and `test/chez/unit.edn`. Verified on
-`v0.8.8-4-g2039710e` (2026-09-15):
-
-```clojure
-;; succeeds on bb/JVM, fails on jolt:
-(let [o (Object.)]
-  (locking o (.wait o 10)))
-;; jolt: IllegalArgumentException: No matching method wait found taking 1 args
-;;       for class java.lang.Object  (the no-arg/notify forms report a field)
-```
-
-**Workaround:** `src/kmet/tui/wake.cljc` — the render loop's park/wake
-primitive (tui.md §6). Each function is `#?(:jolt … :default …)`: the object
-monitor on bb/JVM, a capacity-1 `LinkedBlockingQueue` binary semaphore on jolt.
-
-| API | bb/JVM (`:default`) | jolt |
-|---|---|---|
-| `make-waker` | `(Object.)` | `(java.util.concurrent.LinkedBlockingQueue. 1)` |
-| `wake!` | `(locking w (.notifyAll w))` | `(.offer w :wake)` |
-| `park!` | `(locking w (.wait w timeout-ms))` | `(.poll w timeout-ms TimeUnit/MILLISECONDS)` |
-
-Both hosts keep one contract because `park!` re-runs the caller's recheck before
-blocking (under the monitor): the request flag / batch-queue state is read
-there, so a wakeup racing the park is consumed, never lost — a monitor
-`notifyAll` with nobody waiting is dropped, the queue would remember it, and the
-recheck makes the two behave identically. Consumers: `kmet.tui.core`
-(create-tui's waker; `tui-request-render` sets the flag then wakes; the loop's
-`work-pending?` recheck and `idle-park-ms` timeout) and
-`test/kmet/tui/test_wake.clj`.
-
-No RFC 0014 provider shim: `java.lang.Object` is runtime-implemented, so the
-claim is refused, and the member cannot be backed by a registration — jolt's
-object monitors (`object-monitor`, `monitor-enter!`/`monitor-exit!`, the waiter
-list, the condition variable) are internal Scheme in
-`host/chez/java/concurrency.ss`, and the only exposed piece
-(`jolt.host/with-monitor`) is enter/exit with no wait/notify to call. A
-registration that cannot release and reacquire the monitor would have wrong
-semantics (a naive `.wait` = `Thread/sleep` inside the monitor would hold it and
-block the notifier), so the host-conditional workaround is the honest fix.
-
-**Removal:** replace each `#?(:jolt X :default Y)` in `src/kmet/tui/wake.cljc`
-with just `Y` (the monitor body) and drop the ns docstring's workaround
-sentence — the API and its callers do not change; then delete this entry and
-the now-false pointers to the gap in `jolt-port.md` §9, `jolt/README.md`,
-`tui.md` (§1 table and §6) and the `test/kmet/tui/test_wake.clj` docstring.
-Verify on jolt: the repro above prints; `jolt test` (`kmet.tui.test-wake`
-covers wake, timeout and the recheck contract on whichever branch compiles); a
-pty smoke of `jolt run -m kmet.core` (a key echoes immediately, an idle
-terminal repaints only on input/timers, a resize reflows within the
-heartbeat). `bb` behavior must not change (it already used the monitor branch).
 
 ### [jolt#992](https://github.com/jolt-lang/jolt/issues/992) — Windows: `jolt C:/…/file.clj` is read as project-relative — `open-input-file` fails for `./C:/…`
 
@@ -260,139 +204,6 @@ kmet reworks `defcomponent`/injection to the recipe) AND the clojure chain
 loads, drop `^:bb-only`, run
 `jolt test kmet.app.test-extensions/test-shipped-extensions-load-from-src`, and
 delete this block.
-
-### [jolt#1007](https://github.com/jolt-lang/jolt/issues/1007) — `:as :stream` never returns on a body that does not end: the `java.net.http` shim reads every response to EOF before handing back the `HttpResponse`
-
-**Area:** `io.github.jolt-lang/http-client` — `src/jolt/http/core.clj`
-(`read-response`, `read-chunked`, `read-sized`), `src/jolt/http/jdk.clj`
-(`net-http-send` → `core/make-bais`)
-
-The shim buffers: `core/read-response` returns a COMPLETE body (Content-Length
-via `read-sized`, chunked via `read-chunked` to the terminal chunk,
-read-to-close when unframed), and `net-http-send` maps
-`:jolt.http/handler-inputstream` — `BodyHandlers/ofInputStream`, which is what
-`babashka.http-client`'s `:as :stream` builds — to a `ByteArrayInputStream` over
-those bytes. So a response that never ends never returns: the call blocks
-inside the shim until the socket closes or the deadline fires. bb/JVM with the
-same `org.babashka/http-client` returns as soon as the headers are in and
-streams incrementally. Verified on jolt v0.8.8 + http-client @ `b98833b8`
-(upstream `main`) + `org.babashka/http-client` 0.4.25:
-
-```
-bb:    call returned 200, then "data: tick N" every 250ms
-jolt:  SocketTimeoutException: Response exceeded the total time limit of the
-       request timeoutms — at core/read-response (core.clj:653),
-       jdk/net-http-send (jdk.clj:610), babashka.http-client.internal/request
-```
-
-(no `:timeout` → blocks forever). Upstream documents the buffering in its
-README ("Response bodies are read in full before the response is returned…"),
-so #1007 is a parity/feature request, not a regression. Condensed repro — one
-server command, one client file run under both hosts:
-
-```sh
-bb -e '(let [s (java.net.ServerSocket. 8765) c (.accept s) w (java.io.PrintWriter. (.getOutputStream c) true)] (.print w "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n") (.flush w) (dotimes [i 10] (.print w (str "data: tick " i "\n\n")) (.flush w) (Thread/sleep 250)))' &
-
-;; client.clj
-(require '[babashka.http-client :as http])
-(let [r (http/get "http://127.0.0.1:8765/" {:as :stream :timeout 2000})]
-  (println "call returned" (:status r))
-  (println (line-seq (clojure.java.io/reader (:body r)))))
-```
-
-**Workaround** (`src/kmet/libs/http.cljc:740`): the host carve-out in `request`
-— `#?(:jolt (= :stream (:as opts)) :default false)` folded into the `curl?`
-decision, so every `:as :stream` request on jolt goes through `curl-request`
-(SOCKS/https-scheme proxies keep their own, unchanged curl fallback).
-Consequence: on jolt every LLM provider SSE stream (the `kmet.ai.api/*` hot
-path) runs on a curl subprocess — no pooled connections, no native proxy
-routing, one child process per request. Removal: delete the conditional (the
-`if` becomes plain `(if curl? …)`), drop the "live `:as :stream` feeds on Jolt"
-caveats from the three docstrings in the same file (ns docstring ~31,
-`set-transport!` ~675, the `request` body comment ~732-739), update the
-transport-mode comment in `test/kmet/libs/test_http.clj` (~111: "curl only for
-the fallback cases: SOCKS/https-scheme proxies, and live `:as :stream` feeds on
-Jolt") — `deftest-transports test-stream` then exercises the native path under
-`:platform` on jolt — and re-run the repro above under jolt plus
-`jolt test` over `kmet.libs.test-http`. `jolt-port.md` §B1 records the same
-decision and wants its "What still keeps curl on Jolt: live streams" text
-removed with it.
-
-### [jolt#1015](https://github.com/jolt-lang/jolt/issues/1015) — `StringBuilder` / `StringBuffer` `append(char[])` and `append(char[], offset, len)` append the array's rendering instead of its characters
-
-**Area:** host method tables — `java.lang.StringBuilder` / `java.lang.StringBuffer`
-(`host/chez/java/host-static-classes.ss`, `string-builder-methods`). The single
-`append` arm funnels every argument through `append-text` (`render-piece` +
-CharSequence start/end substring), so a `char[]` renders as `"#object[[C]"`;
-the 3-arg form then substrings that rendering — silently appending the wrong
-characters, or throwing `StringIndexOutOfBoundsException` once the requested
-length exceeds it. The JVM dispatches those calls to the distinct
-`append(char[], int offset, int len)` overload (offset/len, not start/end).
-Verified on `v0.8.8-4-g2039710e` (2026-09-15):
-
-```clojure
-;; succeeds on bb/JVM, fails on jolt:
-(let [b (char-array [\a \b \c])]
-  [(str (doto (java.lang.StringBuilder.) (.append b)))
-   (str (doto (java.lang.StringBuilder.) (.append b 0 2)))])
-;; bb/JVM: ["abc" "ab"]
-;; jolt:   ["#object[[C]" "#o"]
-```
-
-The `String(char[], offset, count)` path already handles char arrays
-(`char-array-arg?` / `char-array->string` in the same file, used by
-`writer-piece`); only `append` lacks the dispatch. The same `append-text`
-helper also backs `insert` (jolt#1016 — same fix, shared workaround).
-
-**Workaround:** the nine mock-server body readers in `test/kmet/ai/test_llm.clj`
-build the request body with `(.append sb (String. buf 0 m))` instead of the
-native `(.append sb buf 0 m)` — without it the server thread died with the
-`StringIndexOutOfBoundsException` above and every mock-server e2e hung until
-the runner's per-namespace timeout. Removal: drop the `(String. …)` wrapping at
-the nine sites (grep `(String. buf 0 m)` in that test file) — and this block —
-when the overloads land.
-
-### [jolt#1016](https://github.com/jolt-lang/jolt/issues/1016) — `StringBuilder` / `StringBuffer` `insert(int, char[])` / `insert(int, char[], int offset, int len)` insert the array's rendering instead of its characters
-
-**Area:** host method tables — same `string-builder-methods` in
-`host/chez/java/host-static-classes.ss`; the `insert` arm passes its value
-argument through the same `append-text` helper as #1015, so a `char[]` is
-rendered and the 4-arg form substrings the rendering. Verified on
-`v0.8.8-4-g2039710e` (2026-09-15):
-
-```clojure
-;; succeeds on bb/JVM, fails on jolt:
-(let [b (char-array [\a \b \c])]
-  [(str (doto (java.lang.StringBuilder. "x") (.insert 0 b)))
-   (str (doto (java.lang.StringBuilder. "x") (.insert 0 b 0 2)))])
-;; bb/JVM: ["abcx" "abx"]
-;; jolt:   ["#object[[C]x" "#ox"]
-```
-
-**Workaround:** none of its own — the nine-site `(.append sb (String. buf 0 m))`
-workaround and its removal checklist live with #1015 (the `char-array-arg?`
-dispatch fix there covers `insert` too), so both entries come out together when
-the fix lands.
-
-### [jolt#1017](https://github.com/jolt-lang/jolt/issues/1017) — on the curl path (`:as :stream` on Jolt, #1007) a stream is cut at `:timeout`/`--max-time`, a total deadline, even while data flows
-
-**Area:** kmet-side consequence of #1007: `kmet.libs.http` routes `:as :stream`
-through curl on Jolt, and `curl-argv` maps `:timeout` to `--max-time` (total
-transfer deadline). Providers set `:timeout (or total-timeout idle-timeout)`
-(default `:http-idle-timeout-ms` 300000), so every provider stream is
-hard-capped at 5 min wall-clock on Jolt, while bb's `java.net.http` timeout
-never cuts an in-progress body. Verified on `v0.8.8-4-g2039710e`
-(2026-09-15): server streams a chunk every 200 ms, client
-`{:as :stream :timeout 1000}` — Jolt delivers 5 of 40 ticks and cuts at ~1.2 s
-(server sees a broken pipe); bb delivers all 40 over ~8.1 s.
-
-**Workaround / relation:** none of its own — the divergence exists only because
-of #1007's stream carve-out, so the #1007 removal checklist retires it when the
-shim can stream. If fixed kmet-side instead, the change is in
-`src/kmet/libs/http.cljc` (`curl-argv`'s `:max-time`): don't apply an
-idle-derived `:timeout` to `:as :stream` (let the SSE reader's idle timeout +
-`abort!` govern), or plumb an explicit total deadline separately.
-`test-llm-body-stall-idle-timeout-completes` is `^:bb-only` for this.
 
 ### [jolt#1020](https://github.com/jolt-lang/jolt/issues/1020) — host method tables silently ignore extra trailing arguments; `String/valueOf(char[], offset, count)` ignores offset/count
 

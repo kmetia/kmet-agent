@@ -27,8 +27,8 @@
 
    The transport itself is a process-wide user knob (set-transport!):
    :platform (default) — babashka.http-client wherever it can serve, curl
-   only for the fallback cases (SOCKS/https-scheme proxies, and live
-   :as :stream feeds on Jolt); :curl — every request through curl.
+   only for the fallback cases (SOCKS/https-scheme proxies); :curl — every
+   request through curl.
 
    `transport-error-message` classifies raw JVM exceptions (the retry
    classifier's stable \"network error\" token), so callers never depend on
@@ -672,9 +672,7 @@
   "Choose the transport for all subsequent requests (the /settings HTTP
    transport row and the config's :http-transport key call this):
    :platform (default) — babashka.http-client wherever it can serve, curl
-   fallback where it cannot (SOCKS/https-scheme proxies; live :as :stream
-   feeds on Jolt — the java.net.http shim buffers a body fully before
-   returning, so an endless SSE feed never returns there); :curl — every
+   fallback where it cannot (SOCKS/https-scheme proxies); :curl — every
    request through the curl transport (requires curl on PATH). Anything
    else falls back to :platform."
   [t]
@@ -729,16 +727,11 @@
         ;; user's explicit choice); platform mode uses the native
         ;; babashka.http-client transport unless the proxy needs curl.
         curl? (or (= :curl @transport-atom) (and p (curl-proxy? p)))]
-        ;; Jolt: babashka.http-client runs unmodified over the
-        ;; jolt-lang/http-client java.net.http shims (RFC 0014) — the
-        ;; native transport works for direct and http-proxy traffic.
-        ;; One carve-out stays on curl there: the shim reads a response
-        ;; body in full before returning, so an endless SSE feed
-        ;; (:as :stream) never returns (jolt-port.md B1). SOCKS and
-        ;; https-scheme proxies go through curl on both hosts
-        ;; (curl-proxy? above).
-    (if (or curl? #?(:jolt (= :stream (:as opts))
-                     :default false))
+        ;; babashka.http-client runs unmodified over the jolt-lang/http-client
+        ;; java.net.http shims (RFC 0014) — the native transport works for
+        ;; direct and http-proxy traffic on both hosts. SOCKS and https-scheme
+        ;; proxies go through curl on both hosts (curl-proxy? above).
+    (if curl?
       (curl-request (:url opts) opts p throw?)
       (native-request opts throw? p))))
 

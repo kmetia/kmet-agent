@@ -112,8 +112,8 @@
 ;; The :http-transport user setting picks the transport (see
 ;; kmet.libs.http/set-transport!): :platform (default) uses
 ;; babashka.http-client wherever it can serve — curl only for the
-;; fallback cases: SOCKS/https-scheme proxies, and live :as :stream
-;; feeds on Jolt — while :curl routes every request through curl.
+;; fallback cases: SOCKS/https-scheme proxies — while :curl routes
+;; every request through curl.
 ;; The request-contract tests below run under BOTH modes; the curl-path
 ;; regressions force :curl explicitly (platform mode would route them
 ;; natively). A fixture restores :platform before every test so a

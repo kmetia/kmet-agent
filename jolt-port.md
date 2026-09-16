@@ -13,7 +13,7 @@ the rest is code reasoning, not a running port.
 **Bottom line**: a full port is a multi-month project with 2 hard blockers
 (subprocess/process management, extension isolation) plus the HTTP/SSE
 wrapper workstream (B1: babashka.http-client over the jolt-lang shims,
-curl for SOCKS proxies and live streams — sse reader ported 2026-09-09)
+curl for SOCKS proxies — sse reader ported 2026-09-09, streams 2026-09-16)
 and ~15 medium rewrites. A staged port is viable: pure layers first
 (`libs` minus I/O → `ai/api` builders → `reakt`/`hiccup`/components), then
 the terminal adapter, then transports, then the agent loop + tools, with the
@@ -64,24 +64,19 @@ kmet funnels ALL outbound HTTP through `kmet.libs.http` (enforced by
 requests + raw `curl` subprocess for SOCKS/https-scheme proxies, streaming
 bodies, idle-timeout readers. Every LLM call in every provider rides this.
 
-**Decision (revised 2026-09-09): native `babashka.http-client` on Jolt over the
-`jolt-lang/http-client` shims; curl only for SOCKS/https-scheme proxies and
-live `:as :stream` feeds.** The 2026-09-06 rejection below predated the
-library's `java.net.http` work. Its main (`4744256f83e5`, 2026-09-09) runs
-`org.babashka/http-client` 0.4.24 unmodified from Maven over `jolt.http.jdk`
-(RFC 0014 `:jolt/provides`): real `:proxy` routing (absolute-form http,
-CONNECT-tunnelled https), `:follow-redirects` `:never`/`:normal`/`:always`
-with https→http downgrade refusal, `:ssl-context` incl. `{:insecure true}` +
-PKCS#12 stores, `:authenticator`, `:cookie-handler`, `:connect-timeout` +
-per-request total `:timeout`, pooled connections with stale-peer retry, and
-`CompletableFuture` async on jolt's own pool (no caller `:executor`, no
-HTTP/2 on the wire — `:version :http2` degrades to 1.1). What still keeps
-curl on Jolt: **live streams** — the shim reads a body in full before the
-response returns, so an endless SSE feed (`api/*` hot path) never returns
-and `:as :stream` requests stay on `curl-request` — and SOCKS/https-scheme
-proxies (same `curl-proxy?` split the JVM side already has). `http.cljc`
-is one dispatch body shared by both hosts — the stream carve-out is the only
-host-specific part (`#?(:jolt (= :stream (:as opts)) :default false)`).
+**Decision (revised 2026-09-16): native `babashka.http-client` on Jolt over the
+`jolt-lang/http-client` shims; curl only for SOCKS/https-scheme proxies.**
+The shim runs `org.babashka/http-client` unmodified from Maven over
+`jolt.http.jdk` (RFC 0014 `:jolt/provides`): real `:proxy` routing
+(absolute-form http, CONNECT-tunnelled https), `:follow-redirects`
+`:never`/`:normal`/`:always` with https→http downgrade refusal, `:ssl-context`
+incl. `{:insecure true}` + PKCS#12 stores, `:authenticator`, `:cookie-handler`,
+`:connect-timeout` + per-request total `:timeout`, pooled connections with
+stale-peer retry, and `CompletableFuture` async on jolt's own pool (no caller
+`:executor`, no HTTP/2 on the wire — `:version :http2` degrades to 1.1), and
+`:as :stream` returns at the headers and streams the body off the wire (PR #21).
+SOCKS/https-scheme proxies ride curl (same `curl-proxy?` split the JVM side
+already has). `http.cljc` is one host-shared dispatch body.
 The transport is also a user setting (`settings.edn` `:http-transport`,
 `/settings` HTTP transport row): `:platform` (default, as above) or
 `:curl` — every request through curl on both hosts; `test-http` covers
@@ -321,7 +316,7 @@ crypto/oauth/http re-verified 2026-09-11 (counts below).
 | `hash` | 🟢 | 🟢 | pure, works |
 | `highlight` | 🟢 | 🟢 | tests pass (139/139) |
 | `hooks` | 🟢 | 🟢 | pure, works |
-| `http` | 🟢 | 🟢 | **ported** — Jolt runs direct/http-proxy traffic through babashka.http-client over the jolt-lang/http-client shims (deps.edn: org.babashka/http-client 0.4.24 + io.github.jolt-lang/http-client, upstream `b98833b8`), curl for SOCKS/https-scheme proxies and `:as :stream` (see B1); the `:http-transport` setting can force curl for everything. test-http 25/90 green on Jolt (every contract under both modes, Termux/bionic included). Loads on bb |
+| `http` | 🟢 | 🟢 | **ported** — Jolt runs direct/http-proxy traffic through babashka.http-client over the jolt-lang/http-client shims (deps.edn: org.babashka/http-client 0.4.24 + io.github.jolt-lang/http-client, upstream `2fb8a98`), curl for SOCKS/https-scheme proxies (see B1); the `:http-transport` setting can force curl for everything. test-http green on Jolt (every contract under both modes, Termux/bionic included). Loads on bb |
 | `json` | 🟢 | 🟢 | Jolt 2026-09-09: 4 tests/18 assertions green — data.json resolves via deps.edn (M1 closed) |
 | `jsonrpc` | 🟢 | 🟢 | Jolt 2026-09-09: 17 tests/41 assertions green (M1 closed) |
 | `markdown` | 🟢 | 🟢 | tests pass (137/137) |
@@ -362,7 +357,7 @@ status (the app/ai/tui namespaces beyond `libs`).
 6. **Packaging + tooling** (1–2 wks): `jolt build` pipeline replacing `build.cljc`, test runner `^:slow` split, lint/format gates, model generators.
 7. **Extensions** (open-ended): B3 redesign decision; port shipped extensions after.
 
-Estimate honesty: B1 transport is **decided** (babashka.http-client on both hosts — native on bb/JVM, over the jolt-lang/http-client shims on Jolt — with curl for SOCKS/https-scheme proxies, Jolt live streams, and the user's `:curl` mode; `http.cljc` ported), and its consumers are green on Jolt — `sse.clj` (33/109) and `libs.oauth`/`ai.oauth`/`ai.google_adc` (M4). M1 is closed (data.json on both hosts) — all 27 libs load and test green on bb/JVM, and json/jsonrpc/sse/aws_sigv4 are green on Jolt too. B3 is a research spike before it is labor.
+Estimate honesty: B1 transport is **decided** (babashka.http-client on both hosts — native on bb/JVM, over the jolt-lang/http-client shims on Jolt — with curl for SOCKS/https-scheme proxies and the user's `:curl` mode; `http.cljc` ported), and its consumers are green on Jolt — `sse.clj` and `libs.oauth`/`ai.oauth`/`ai.google_adc` (M4). M1 is closed (data.json on both hosts) — all 27 libs load and test green on bb/JVM, and json/jsonrpc/sse/aws_sigv4 are green on Jolt too. B3 is a research spike before it is labor.
 
 ---
 
@@ -499,13 +494,9 @@ What that means for kmet's load-order payloads:
    a member cannot be claimed, so the guard is the only install path. The
    lib used one for `java.util.Base64/getMimeDecoder` while the runtime
    lacked it;
-4. a member gap a registration cannot back gets a **reader-conditional
-   workaround** in the consumer instead — the live case is
-   `Object.wait`/`notify`/`notifyAll`, which jolt lacks on every object and
-   exposes no monitor API to register against: `kmet.tui.wake` parks on the
-   object monitor on bb/JVM and on a capacity-1 `LinkedBlockingQueue` on
-   jolt (`#?(:jolt … :default …)`), with the ticket and removal checklist in
-   `jolt-bugs.md` (jolt#1011).
+4. a member gap a registration cannot back is resolved by the runtime — no
+   consumer workaround needed (the `Object.wait`/`notify` family, once such a
+   gap, landed in v0.8.8-53).
 
 This pattern is the AGENTS.md convention for any future consumer — a claim
 on a class the runtime implements is still refused.
