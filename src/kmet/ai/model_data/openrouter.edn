@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-16T09:25:53Z"
+ :generated-at "2026-09-16T18:28:51Z"
  :provider {:id :openrouter
             :name "OpenRouter"
             :env-vars ["OPENROUTER_API_KEY"]
@@ -808,7 +808,7 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.088606 :output 0.177212 :cache-read 0.017721 :cache-write 0}
+    :cost {:input 0.084 :output 0.168 :cache-read 0.0168 :cache-write 0}
     :context-window 1024000
     :max-tokens 384000
     :compat {:supports-developer-role false
@@ -934,9 +934,9 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.9834 :output 2.9502 :cache-read 0.03278 :cache-write 0}
-    :context-window 1024000
-    :max-tokens 384000
+    :cost {:input 0.57948 :output 1.73844 :cache-read 0.018438 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 393216
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter}}
@@ -976,7 +976,7 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 0.3 :output 1.2 :cache-read 0.006 :cache-write 0}
+    :cost {:input 0.15 :output 0.6 :cache-read 0.003 :cache-write 0}
     :context-window 1048576
     :max-tokens 384000
     :compat {:supports-developer-role false
@@ -2384,10 +2384,7 @@
                          :off "none"
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 2.648138
-           :output 13.282724
-           :cache-read 0.302644
-           :cache-write 0}
+    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-developer-role false :thinking-format :openrouter}}
@@ -4366,9 +4363,9 @@
     :base-url "https://openrouter.ai/api/v1"
     :reasoning false
     :input [:text :image]
-    :cost {:input 0.15 :output 0.6 :cache-read 0 :cache-write 0}
-    :context-window 262144
-    :max-tokens 16384
+    :cost {:input 0.13 :output 0.52 :cache-read 0 :cache-write 0}
+    :context-window 131072
+    :max-tokens 32768
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "qwen/qwen3-vl-30b-a3b-thinking"
    {:id "qwen/qwen3-vl-30b-a3b-thinking"
@@ -4824,6 +4821,18 @@
     :context-window 131072
     :max-tokens 16384
     :compat {:supports-developer-role false :thinking-format :openrouter}}
+   "stealth/union-alpha"
+   {:id "stealth/union-alpha"
+    :name "Union Alpha"
+    :provider :openrouter
+    :api :openai-completions
+    :base-url "https://openrouter.ai/api/v1"
+    :reasoning false
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 262144
+    :max-tokens 131072
+    :compat {:supports-developer-role false :thinking-format :openrouter}}
    "stepfun/step-3.5-flash"
    {:id "stepfun/step-3.5-flash"
     :name "StepFun: Step 3.5 Flash"
@@ -4871,7 +4880,7 @@
                          :off "none"
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.132 :output 0.528 :cache-read 0.033 :cache-write 0}
+    :cost {:input 0.0825 :output 0.33 :cache-read 0.020625 :cache-write 0}
     :context-window 262144
     :max-tokens 128000
     :compat {:supports-developer-role false :thinking-format :openrouter}}
@@ -4912,18 +4921,6 @@
     :cost {:input 0.834 :output 2.501 :cache-read 0.042 :cache-write 0}
     :context-window 1048576
     :max-tokens 64000
-    :compat {:supports-developer-role false :thinking-format :openrouter}}
-   "thedrummer/unslopnemo-12b"
-   {:id "thedrummer/unslopnemo-12b"
-    :name "TheDrummer: UnslopNemo 12B"
-    :provider :openrouter
-    :api :openai-completions
-    :base-url "https://openrouter.ai/api/v1"
-    :reasoning false
-    :input [:text]
-    :cost {:input 0.4 :output 0.4 :cache-read 0 :cache-write 0}
-    :context-window 1024000
-    :max-tokens 819200
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "thinkingmachines/inkling"
    {:id "thinkingmachines/inkling"
@@ -5306,7 +5303,7 @@
     :input [:text]
     :cost {:input 1.4 :output 4.4 :cache-read 0.14 :cache-write 0}
     :context-window 1048576
-    :max-tokens 128000
+    :max-tokens 131072
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "z-ai/glm-5.2:batch"
    {:id "z-ai/glm-5.2:batch"
@@ -5361,7 +5358,7 @@
                          :off nil
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 0.1 :output 0.3333 :cache-read 0.02 :cache-write 0}
+    :cost {:input 0.09 :output 0.3 :cache-read 0.018 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-developer-role false :thinking-format :openrouter}}
@@ -5500,8 +5497,8 @@
                          :xhigh nil}
     :input [:text :image]
     :cost {:input 0.15 :output 0.6 :cache-read 0.015 :cache-write 0}
-    :context-window 1048576
-    :max-tokens 943718
+    :context-window 1000000
+    :max-tokens 393216
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~deepseek/deepseek-pro-latest"
    {:id "~deepseek/deepseek-pro-latest"
@@ -5518,9 +5515,9 @@
                          :off "none"
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.96 :output 2.88 :cache-read 0.088 :cache-write 0}
+    :cost {:input 0.57948 :output 1.73844 :cache-read 0.018438 :cache-write 0}
     :context-window 1048576
-    :max-tokens 943718
+    :max-tokens 393216
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~deepseek/deepseek-v4-flash-latest"
    {:id "~deepseek/deepseek-v4-flash-latest"
@@ -5596,7 +5593,7 @@
                          :off "none"
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 1.775 :output 9.94 :cache-read 0.2059 :cache-write 0}
+    :cost {:input 2 :output 11.2 :cache-read 0.232 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-developer-role false :thinking-format :openrouter}}

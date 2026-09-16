@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-11T16:53:55Z"
+ :generated-at "2026-09-16T18:28:51Z"
  :provider {:id :opencode-go
             :name "OpenCode Go"
             :env-vars ["OPENCODE_API_KEY"]
@@ -31,6 +31,17 @@
     :input [:text :image]
     :cost {:input 0.15 :output 0.47 :cache-read 0.016 :cache-write 0.2}
     :context-window 1000000
+    :max-tokens 131072}
+   "union-alpha"
+   {:id "union-alpha"
+    :name "Union Alpha Free"
+    :provider :opencode-go
+    :api :anthropic-messages
+    :base-url "https://opencode.ai/zen/go"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 262144
     :max-tokens 131072}}
   :openai-completions
   {"deepseek-v4-flash"

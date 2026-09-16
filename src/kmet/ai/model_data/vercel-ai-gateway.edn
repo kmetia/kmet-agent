@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-15T14:39:46Z"
+ :generated-at "2026-09-16T18:28:51Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -158,8 +158,8 @@
     :reasoning false
     :input [:text]
     :cost {:input 0.15 :output 1.2 :cache-read 0 :cache-write 0}
-    :context-window 131072
-    :max-tokens 32768}
+    :context-window 262114
+    :max-tokens 262114}
    "alibaba/qwen3-next-80b-a3b-thinking"
    {:id "alibaba/qwen3-next-80b-a3b-thinking"
     :name "Qwen3 Next 80B A3B Thinking"
@@ -169,8 +169,8 @@
     :reasoning true
     :input [:text]
     :cost {:input 0.15 :output 1.2 :cache-read 0 :cache-write 0}
-    :context-window 131072
-    :max-tokens 32768}
+    :context-window 262144
+    :max-tokens 262144}
    "alibaba/qwen3-vl-235b-a22b-instruct"
    {:id "alibaba/qwen3-vl-235b-a22b-instruct"
     :name "Qwen3 VL 235B A22B Instruct"
@@ -322,8 +322,8 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 2 :output 6 :cache-read 0.25 :cache-write 2.5}
-    :context-window 1000000
+    :cost {:input 2 :output 6 :cache-read 0.25 :cache-write 0}
+    :context-window 262144
     :max-tokens 128000}
    "alibaba/qwen3.8-max-0902"
    {:id "alibaba/qwen3.8-max-0902"
@@ -749,9 +749,9 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.15 :output 0.6 :cache-read 0.015 :cache-write 0}
-    :context-window 1000000
-    :max-tokens 384000}
+    :cost {:input 0.3 :output 1.2 :cache-read 0.03 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 32768}
    "google/gemini-2.5-flash"
    {:id "google/gemini-2.5-flash"
     :name "Gemini 2.5 Flash"
@@ -1038,50 +1038,6 @@
     :cost {:input 1.5 :output 3.5 :cache-read 0 :cache-write 0}
     :context-window 1000000
     :max-tokens 32000}
-   "kwaipilot/kat-coder-air-v2.5"
-   {:id "kwaipilot/kat-coder-air-v2.5"
-    :name "Kat Coder Air V2.5"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning true
-    :input [:text :image]
-    :cost {:input 0.15 :output 0.6 :cache-read 0.03 :cache-write 0}
-    :context-window 256000
-    :max-tokens 80000}
-   "kwaipilot/kat-coder-pro-v1"
-   {:id "kwaipilot/kat-coder-pro-v1"
-    :name "KAT-Coder-Pro V1"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning false
-    :input [:text]
-    :cost {:input 0.3 :output 1.2 :cache-read 0.06 :cache-write 0}
-    :context-window 256000
-    :max-tokens 32000}
-   "kwaipilot/kat-coder-pro-v2"
-   {:id "kwaipilot/kat-coder-pro-v2"
-    :name "Kat Coder Pro V2"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning true
-    :input [:text]
-    :cost {:input 0.3 :output 1.2 :cache-read 0.06 :cache-write 0}
-    :context-window 256000
-    :max-tokens 256000}
-   "kwaipilot/kat-coder-pro-v2.5"
-   {:id "kwaipilot/kat-coder-pro-v2.5"
-    :name "Kat Coder Pro V2.5"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning true
-    :input [:text :image]
-    :cost {:input 0.74 :output 2.96 :cache-read 0.15 :cache-write 0}
-    :context-window 256000
-    :max-tokens 80000}
    "meta/llama-3.1-70b"
    {:id "meta/llama-3.1-70b"
     :name "Llama 3.1 70B Instruct"
@@ -1409,9 +1365,9 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.6 :output 3 :cache-read 0.1 :cache-write 0}
-    :context-window 262114
-    :max-tokens 262114}
+    :cost {:input 0.6 :output 3 :cache-read 0 :cache-write 0}
+    :context-window 256000
+    :max-tokens 256000}
    "moonshotai/kimi-k2.6"
    {:id "moonshotai/kimi-k2.6"
     :name "Kimi K2.6"
@@ -2090,7 +2046,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text]
-    :cost {:input 0.05 :output 0.2 :cache-read 0 :cache-write 0}
+    :cost {:input 0.03 :output 0.14 :cache-read 0 :cache-write 0}
     :context-window 131072
     :max-tokens 8192}
    "openai/gpt-oss-safeguard-120b"

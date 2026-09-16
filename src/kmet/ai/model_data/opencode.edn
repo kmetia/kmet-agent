@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-06T20:10:23Z"
+ :generated-at "2026-09-16T18:28:51Z"
  :provider {:id :opencode
             :name "OpenCode (Zen)"
             :env-vars ["OPENCODE_API_KEY"]
@@ -183,7 +183,18 @@
     :input [:text :image]
     :cost {:input 0.5 :output 3 :cache-read 0.05 :cache-write 0.625}
     :context-window 262144
-    :max-tokens 65536}}
+    :max-tokens 65536}
+   "union-alpha"
+   {:id "union-alpha"
+    :name "Union Alpha Free"
+    :provider :opencode
+    :api :anthropic-messages
+    :base-url "https://opencode.ai/zen"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 262144
+    :max-tokens 131072}}
   :google-generative-ai
   {"gemini-3-flash"
    {:id "gemini-3-flash"
