@@ -461,13 +461,13 @@ Rules:
   with a did-you-mean, so a typo cannot silently draw the wrong frame.
 - The props are resolved when the component is built, not per render.
 - **`:none` removes chrome, never structure.** Where the border is the
-  component's own ink — a `dynamic-border` rule, the bash-execution box —
+  component's own ink — a `dynamic-border` rule, the bash-execution rules —
   `:none` draws nothing there. Where it is structural — a markdown table's
   box, the editor's rule (it carries the scroll indicators) — `:none` falls
   back to the default set; the table would not be a table without its box.
 - Components with a border prop: `:dynamic-border` (a rule),
   `:markdown` (table glyphs), `:editor` (the rule above and below the
-  text), `kmet.app.ui.bash-execution` (its box, `:border` option). All
+  text), `kmet.app.ui.bash-execution` (its top/bottom rules, `:border` option). All
   default to `:normal`, so existing output is unchanged.
 - A component that *draws* a frame uses `border/top-line`,
   `border/bottom-line`, `border/mid-line` (with an optional edge-styling fn
@@ -1020,7 +1020,7 @@ DSL tags of §2.2):
 
 Frame glyphs come from `kmet.tui.border` (§2.8), not from the components:
 `dynamic_border` and `editor` draw a rule, `markdown` its table, and the
-app-layer `bash_execution` its box — each with a `:border` style.
+app-layer `bash_execution` its top/bottom rules — each with a `:border` style.
 
 Message-like app components live in `kmet.app.ui.*`, not here — this layer
 stays generic: chat history, tool executions, the skill invocation

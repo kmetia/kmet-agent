@@ -13,8 +13,8 @@
   (let [c (be/make-bash-execution :command "sleep 1" :exclude-from-context? false)
         lines (protocols/render c 40)]
     (t/is (seq lines))
-    (t/is (= 40 (u/visible-width (first lines))) "top border spans the width")
-    (t/is (= 40 (u/visible-width (last lines))) "bottom border spans the width")
+    (t/is (= 40 (u/visible-width (first lines))) "top rule spans the width")
+    (t/is (= 40 (u/visible-width (last lines))) "bottom rule spans the width")
     (t/is (some #(clojure.string/includes? % "$ sleep 1") lines) "command header shown")
     (t/is (some #(clojure.string/includes? % "Running") lines) "spinner shown while running")
     (t/is (some #(clojure.string/includes? % "Elapsed") lines) "elapsed shown while running")
@@ -22,30 +22,35 @@
     (protocols/dispose c)))
 
 (t/deftest test-bash-execution-border-sets
-  ;; the frame glyphs come from a kmet.tui.border set (R5): the default is
-  ;; the pre-R5 hardcoded box, :ascii degrades it, :none drops the frame
-  ;; and keeps the content
+  ;; the top/bottom rules come from a kmet.tui.border set (R5): the default
+  ;; is the pi-parity rule, :ascii degrades it, :none drops the rules and
+  ;; keeps the content. There are no side borders (issue #6), so output
+  ;; stays mouse-select / copy-paste friendly.
   (let [render (fn [style]
                  (let [c (be/make-bash-execution :command "ls" :border style)
                        lines (protocols/render c 20)]
                    (be/bash-execution-set-complete! c 0 false)
                    (protocols/dispose c)
                    (mapv u/strip-ansi-codes lines)))]
-    (t/is (= "┌──────────────────┐" (first (render nil))) "default frame unchanged")
-    (t/is (= "│ $ ls             │" (second (render nil))))
+    (t/is (= (apply str (repeat 20 "─")) (first (render nil))) "default rule unchanged")
+    (t/is (clojure.string/includes? (second (render nil)) "$ ls") "command header shown")
+    (t/is (not-any? #(or (clojure.string/starts-with? % "│")
+                         (clojure.string/starts-with? % "|"))
+                    (render nil))
+          "no side-border glyphs on any line")
     (t/testing ":ascii"
       (let [lines (render :ascii)]
-        (t/is (= "+------------------+" (first lines)))
-        (t/is (= "| $ ls             |" (second lines)))))
-    (t/testing ":hidden keeps the frame's footprint without ink"
+        (t/is (= (apply str (repeat 20 "-")) (first lines)))
+        (t/is (clojure.string/includes? (second lines) "$ ls"))))
+    (t/testing ":hidden keeps the rules' footprint without ink"
       (let [lines (render :hidden)]
-        (t/is (= "                    " (first lines)))
-        (t/is (= "  $ ls              " (second lines)))))
-    (t/testing ":none drops the frame entirely"
+        (t/is (= (apply str (repeat 20 " ")) (first lines)))
+        (t/is (clojure.string/includes? (second lines) "$ ls"))))
+    (t/testing ":none drops the rules entirely"
       (let [lines (render :none)]
-        (t/is (= " $ ls             " (first lines)))
+        (t/is (clojure.string/includes? (first lines) "$ ls"))
         (t/is (= (- (count (render nil)) 2) (count lines))
-              "the two border lines are gone, the content is untouched")))
+              "the two rule lines are gone, the content is untouched")))
     (t/testing "an unknown style fails at construction"
       (t/is (thrown-with-msg? Exception #"unknown border style"
                               (be/make-bash-execution :command "ls" :border :asci))))))
@@ -114,27 +119,30 @@
       (protocols/dispose c))))
 
 (t/deftest test-bash-execution-borders-flush
-  ;; Every content line — preview output, blank separator, status — must be
-  ;; padded to the content width so both border columns stay flush. A broken
-  ;; right border shows as a │ not at the last column.
+  ;; The top/bottom rules span the full width and the content carries no
+  ;; side borders (issue #6), so output stays mouse-select / copy-paste
+  ;; friendly. A broken rule shows as a line short of the last column.
   (let [c (be/make-bash-execution :command "ls" :exclude-from-context? false)]
     (be/bash-execution-append-output! c (clojure.string/join "\n" (repeat 30 "line")))
     (be/bash-execution-set-complete! c 0 false)
-    (let [lines (protocols/render c 40)]
-      (t/is (= 40 (u/visible-width (first lines))))
-      (t/is (= 40 (u/visible-width (last lines))))
-      (doseq [line (rest (butlast lines))]
-        (t/is (= 40 (u/visible-width line))
-              (str "content line spans full width: " (pr-str line))))
-      ;; No stray spacer line between status and bottom border
+    (let [lines (protocols/render c 40)
+          plain (mapv u/strip-ansi-codes lines)]
+      (t/is (= 40 (u/visible-width (first lines))) "top rule spans the width")
+      (t/is (= 40 (u/visible-width (last lines))) "bottom rule spans the width")
+      (t/is (not-any? #(or (clojure.string/starts-with? % "│")
+                           (clojure.string/starts-with? % "|"))
+                      plain)
+            "no side-border glyphs on any line")
+      (t/is (some #(clojure.string/includes? % "line") lines) "preview lines shown")
+      ;; No stray spacer line between status and bottom rule
       (t/is (some #(clojure.string/includes? % "Took") lines))
       (let [took-idx (first (keep-indexed #(when (clojure.string/includes? %2 "Took") %1) lines))]
         (t/is (= took-idx (- (count lines) 2))
-              "bottom border directly follows the status line")))))
+              "bottom rule directly follows the status line")))))
 
 (t/deftest test-theme-sub-retheme
   ;; Stage 5: the component subscribes to ui.subs/theme-sub — swapping the
-  ;; shared atom re-themes borders/spinner on the next render, without any
+  ;; shared atom re-themes rules/spinner on the next render, without any
   ;; per-component setter.
   (let [c (be/make-bash-execution :command "ls")]
     (t/is (some? c))
@@ -145,7 +153,7 @@
         (let [lines (protocols/render c 40)]
           (t/is (some #(clojure.string/includes? % "$ ls") lines)
                 "still renders after theme switch")
-          (t/is (= 40 (u/visible-width (first lines))) "borders stay flush")
+          (t/is (= 40 (u/visible-width (first lines))) "rules stay flush")
           (t/is (not= before lines) "styling changed with the theme"))
         (finally
           (reset! theme/theme-atom (theme/get-theme "dark"))

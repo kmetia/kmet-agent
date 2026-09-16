@@ -170,9 +170,10 @@
 ;; ─── Record ────────────────────────────────────────────────────────────────
 ;; Transparent wrapper (tui.md section 3.2): uncached, so the spinner leaf
 ;; paints on every driven frame. The memoization boundary is the root's
-;; reaction. Pi's component keeps the bordered box too (DynamicBorder top
-;; + content + DynamicBorder bottom); the box frame is chrome around the
-;; running spinner, not a pending/error background like tool calls have.
+;; reaction. Like pi, the chrome is a DynamicBorder rule above and below
+;; the content — no side borders, so output stays mouse-select and
+;; copy-paste friendly (issue #6). The rules frame the running spinner;
+;; they are not a pending/error background like tool calls have.
 
 (defcomponent BashExecutionComponent :bash
               [state-atom
@@ -186,8 +187,8 @@
                ticker-id-atom
                elapsed-ticker-id-atom
                done-atom
-               ;; resolved kmet.tui.border set for the chrome (R5), or nil
-               ;; for :none (no frame at all — content lines only)
+               ;; resolved kmet.tui.border set for the top/bottom rules
+               ;; (R5), or nil for :none (no rules — content lines only)
                border-atom]
   (render [_this width]
     (let [st @state-atom
@@ -195,18 +196,12 @@
           color-key (if (:exclude? st) :dim :bash-mode)
           border-color (fn [s] (theme/fg thm color-key s))
           b @border-atom
-          cw (max 1 (- width 2))
-          content-lines (protocols/render @root cw)
-          pad-line (fn [line]
-                     (let [vis (u/visible-width line)]
-                       (if (>= vis cw)
-                         line
-                         (str line (apply str (repeat (- cw vis) \space))))))]
+          w (max 1 width)
+          content-lines (protocols/render @root w)]
       (if b
-        (conj (into [(border-color (border/top-line b width))]
-                    (map #(border/mid-line b (pad-line %) border-color)
-                         content-lines))
-              (border-color (border/bottom-line b width)))
+        (vec (concat [(border-color (border/rule-line b w))]
+                     content-lines
+                     [(border-color (border/rule-line b w))]))
         content-lines)))
   (dispose [_this]
     ;; Idempotent: safe to call twice (chat-history-clear! disposes message
@@ -224,12 +219,12 @@
      :command                — the shell command string
      :exclude-from-context?  — boolean (!! vs !)
      :tools-expanded-atom    — chat-wide expansion toggle atom, or nil
-     :border                 — a kmet.tui.border set for the frame
-                               (default :normal; :ascii draws it with -|+,
-                               :hidden keeps the footprint without ink,
-                               :none drops the frame entirely), resolved
-                               here so an unknown style throws at
-                               construction"
+     :border                 — a kmet.tui.border set for the top/bottom
+                               rules (default :normal; :ascii draws them
+                               with ---, :hidden keeps the footprint
+                               without ink, :none drops the rules
+                               entirely), resolved here so an unknown style
+                               throws at construction"
   [& {:keys [command exclude-from-context? tools-expanded-atom border]
       :or {command "" exclude-from-context? false}}]
   (let [state-atom (atom {:command command
