@@ -722,7 +722,7 @@ backend's own namespace.
 
 Host-agnostic, written against the protocol; must pass on every backend
 that serves the kind in question. The **executable spec** is
-`test/chez/loaderconf-test.clj` in the Jolt repo — 18 cases, `make
+`test/chez/loaderconf-test.clj` in the Jolt repo — 20 cases, `make
 loaderconf`, empty baseline — mirrored on the kmet side by
 `test/kmet/loader/test_core.clj` (data-path cases, any backend) and
 `test/kmet/loader/test_sci_loader.clj` (code-path cases, SCI). Cases marked
@@ -861,7 +861,7 @@ ctx-propagation mechanisms §6.1.4, gotchas §6.1.9, stage table §6.1.10).
 Shipped in the Jolt repo rather than here: `stdlib/jolt/loader.clj` plus
 the host seams (`clojure.java.io/resource` 2-arity, `RT/baseLoader`, the
 tagged-table classloader facade), with `test/chez/loaderconf-test.clj` as
-the writ — `make loaderconf`, 18 cases, empty baseline. Tracked in
+the writ — `make loaderconf`, 20 cases, empty baseline. Tracked in
 jolt-lang/jolt#912 and jolt-lang/jolt#1039.
 
 **What landed, and how it differs from M0–M4.** The substrate is one
@@ -970,7 +970,7 @@ one exception: they are stored and compared by identity.
    kmet's extension tests. **Done** — `jolt test
    kmet.loader.test-core kmet.loader.test-sci-loader` and `kmet.app.test-extensions`
    are green on jolt.
-4. Phase 2 (Jolt native) — **done** in the Jolt repo, 18/18. Phase 3 (JVM,
+4. Phase 2 (Jolt native) — **done** in the Jolt repo, 20/20. Phase 3 (JVM,
    plus hybrid) is last and may follow promotion. Each backend must pass
    the *same* suite; a native backend that fails a case is a bug in the
    backend, not a permitted divergence (§6.3 excepted, recorded in the
