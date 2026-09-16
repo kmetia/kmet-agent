@@ -18,7 +18,13 @@
    declared libraries from its deps.edn (resolved in-process via
    clojure.tools.deps, bundled with babashka) — so
    different extensions can use different versions of the same library, and
-   unloading an extension releases everything it pulled in. Optional
+   unloading an extension releases everything it pulled in. Loading goes
+   through kmet.libs.loader: each extension gets a Loader over its SCI
+   context (kmet.libs.loader.sci) whose source provider is that artifact /
+   deps / bundled lookup, and SCI's own requires route back through the
+   loader — so nested requires share the link table, unload closes the
+   loader, and the loader itself stays out of the shared set (host
+   machinery, not contract). Optional
    (defn shutdown [api]) runs on unload, which also unregisters everything
    the extension registered (each registration tracks its deregister fn).
 
@@ -43,6 +49,8 @@
             [kmet.config :as cfg]
             [kmet.tui.theme :as theme]
             [kmet.libs.host :as host]
+            [kmet.libs.loader :as loader]
+            [kmet.libs.loader.sci :as loader-sci]
             [kmet.extension]))
 
 ;; ─── Provider-event bridges (pi: context / before_provider_request /
@@ -85,7 +93,7 @@
 (install-provider-event-bridges!)
 
 ;; ─── Extension records ────────────────────────────────────────────────────
-(defrecord Extension [name path kind entry-ns ctx jars api deregister-fns initialized?])
+(defrecord Extension [name path kind entry-ns loader jars api deregister-fns initialized?])
 
 (defn- extension-dir-of
   "The extension's own directory: for a dir extension :path IS the
@@ -1132,12 +1140,14 @@
   "The shared namespace map for extension contexts: kmet.extension (the
    contract), the clojure.*/babashka.* builtins (incl. slurp/spit, which
    SCI's builtin clojure.core lacks but bb's env has), and the shared
-   library layers kmet.tui.* and kmet.libs.*. Rebuilt per context so
-   namespaces required since the last build (the shared library layers)
-   are included. RESOURCE-FN replaces clojure.java.io/resource with a
-   per-extension artifact-scoped lookup (io/resource shadowing — see
-   extension-resource-fn). Values are deref'd (see shared-var-map): host
-   Var objects cannot enter a SCI context."
+   library layers kmet.tui.* and kmet.libs.* — except the loader
+   (kmet.libs.loader*, host machinery, deliberately not
+   extension-visible). Rebuilt per context so namespaces required since
+   the last build (the shared library layers) are included. RESOURCE-FN
+   replaces clojure.java.io/resource with a per-extension artifact-scoped
+   lookup (io/resource shadowing — see extension-resource-fn). Values are
+   deref'd (see shared-var-map): host Var objects cannot enter a SCI
+   context."
   [& [resource-fn]]
   (into {'kmet.extension (shared-var-map 'kmet.extension)
          ;; slurp/spit/file-seq are absent from SCI's builtin clojure.core —
@@ -1176,7 +1186,8 @@
                                  (str/starts-with? n "kmet.tui.")
                                  (= n "kmet.app.ui.tool-renderers")
                                  (= n "kmet.app.keybindings")
-                                 (str/starts-with? n "kmet.libs.")))
+                                 (and (str/starts-with? n "kmet.libs.")
+                                      (not (str/starts-with? n "kmet.libs.loader")))))
                     [(ns-name ns-obj)
                      (if (and (= n "clojure.java.io") resource-fn)
                        (assoc (shared-var-map (ns-name ns-obj)) 'resource resource-fn)
@@ -1334,6 +1345,18 @@
         ;; the extension's own internal namespace — always resolvable
         ;; (strict layout: membership derives from paths, not contents)
         (owns-ns? lib) nil
+
+        ;; the loader is host machinery: extensions never need it (their
+        ;; requires are served by the loader itself), so it is not shared
+        ;; into contexts and requires of it fail like any other unshared
+        ;; internal
+        (str/starts-with? s "kmet.libs.loader")
+        (throw (ex-info
+                (str "Extension " ext-name " requires " lib
+                     " — the loader is host machinery and is not part of"
+                     " the extension contract")
+                {:extension ext-name :ns lib}))
+
         (str/starts-with? s "kmet.tui.")
         ;; tui-namespaces covers what is loaded NOW; the library-root list
         ;; covers what CAN be shared (lazily-loaded internal nss validate
@@ -1518,17 +1541,17 @@
           source-extensions)))
 
 (defn- register-source-classes!
-  "Pre-register classes a load-fn SOURCE needs: scan the source text for
-   fully-qualified static/ctor positions (`(fq.Name/...`, `(fq.Name.`),
+  "Pre-register classes an evaluated SOURCE needs: scan the source text
+   for fully-qualified static/ctor positions (`(fq.Name/...`, `(fq.Name.`),
    bare class positions (`(instance? fq.Name`), and type hints
    (`^StringBuilder`, `^java.io.InputStream` — hinted classes never appear
    in a callable position, so the scan collects them separately, resolving
-   short hints through bb-imports). load-fn sources bypass
-   eval-source-with-retry! (SCI evaluates the returned :source directly),
-   so without this the first internal-namespace use of an unseeded JDK
-   class fails the whole load. Short-name statics need no scan — the seed
-   covers bb-imports. Same lazy forName as the entry path; unresolvable
-   names are skipped (the analysis error surfaces them)."
+   short hints through bb-imports). The loader's :eval-fn calls this for
+   every source it evaluates, so the first internal-namespace use of an
+   unseeded JDK class resolves on the first analysis pass. Short-name
+   statics need no scan — the seed covers bb-imports. Same lazy forName as
+   the entry path; unresolvable names are skipped (the analysis error
+   surfaces them)."
   [ctx source]
   (let [text (str source)
         ctor-pat (re-pattern (str "\\(" "([a-z][a-z0-9_]*"
@@ -1559,9 +1582,10 @@
         (try-add-class! ctx fq))))
   nil)
 
-(defn- make-load-fn
-  "Per-extension namespace resolver, evaluated inside the extension's
-   context: own artifact, declared deps (closure resolved lazily on first
+(defn- make-source-fn
+  "Per-extension namespace resolver for the loader's :sources: own
+   artifact (or, for a single-file extension, its literal LITERAL source
+   keyed by ns symbol), declared deps (closure resolved lazily on first
    library require), then bb-bundled classpath namespaces. kmet.* beyond
    the contract and undeclared non-bundled libraries are rejected with
    actionable errors — extensions must depend only on kmet.extension.
@@ -1573,48 +1597,55 @@
    must also match the requested symbol (strict layout is enforced at
    load, not just pack time) — otherwise the failure surfaces later as
    a missing init fn."
-  [ext-name artifact owns-ns? deps-resolver tui-namespaces libs-namespaces ctx-holder]
-  (fn [{:keys [namespace]}]
-    (or (when-let [{:keys [source display]} (and artifact (artifact-source artifact namespace))]
+  [ext-name artifact owns-ns? deps-resolver tui-namespaces libs-namespaces literal]
+  (fn [ns-sym]
+    (or (when-let [{:keys [source display]} (and literal (get literal ns-sym))]
+          (validate-entry-requires! ext-name (ns-form-of-source source)
+                                    tui-namespaces libs-namespaces owns-ns?)
+          {:file display :source source})
+        (when-let [{:keys [source display]} (and artifact (artifact-source artifact ns-sym))]
           (let [ns-form (ns-form-of-source source)]
-            (when-not (= namespace (second ns-form))
+            (when-not (= ns-sym (second ns-form))
               (throw (ex-info (str "Extension " ext-name " strict layout violation: "
                                    display " declares " (second ns-form)
-                                   ", expected " namespace)
-                              {:extension ext-name :ns namespace})))
+                                   ", expected " ns-sym)
+                              {:extension ext-name :ns ns-sym})))
             (validate-entry-requires! ext-name ns-form
                                       tui-namespaces libs-namespaces
                                       owns-ns?))
-          (when-let [ctx @ctx-holder]
-            (register-source-classes! ctx source))
           {:file display :source source})
         (when-let [entries (and deps-resolver (deps-resolver))]
-          (some (fn [e] (dep-source e namespace))
+          (some (fn [e] (dep-source e ns-sym))
                 entries))
-        (when-not (str/starts-with? (str namespace) "kmet.")
-          (resource-source namespace))
+        (when-not (str/starts-with? (str ns-sym) "kmet.")
+          (resource-source ns-sym))
         (throw (ex-info
                 (cond
-                  (or (str/starts-with? (str namespace) "kmet.tui.")
-                      (= (str namespace) "kmet.app.ui.tool-renderers")
-                      (= (str namespace) "kmet.app.keybindings"))
-                  (str "Extension " ext-name " requires " namespace
+                  ;; the loader is host machinery (see build-context-namespaces)
+                  (str/starts-with? (str ns-sym) "kmet.libs.loader")
+                  (str "Extension " ext-name " requires " ns-sym
+                       " — the loader is host machinery and is not part of the extension contract")
+
+                  (or (str/starts-with? (str ns-sym) "kmet.tui.")
+                      (= (str ns-sym) "kmet.app.ui.tool-renderers")
+                      (= (str ns-sym) "kmet.app.keybindings"))
+                  (str "Extension " ext-name " requires " ns-sym
                        " — the shared TUI/renderer library is shared by reference and was"
                        " not loaded when this context was built")
 
-                  (str/starts-with? (str namespace) "kmet.libs.")
-                  (str "Extension " ext-name " requires " namespace
+                  (str/starts-with? (str ns-sym) "kmet.libs.")
+                  (str "Extension " ext-name " requires " ns-sym
                        " — the kmet.libs.* library is shared by reference and was"
                        " not loaded when this context was built")
 
-                  (str/starts-with? (str namespace) "kmet.")
-                  (str "Extension " ext-name " requires " namespace
+                  (str/starts-with? (str ns-sym) "kmet.")
+                  (str "Extension " ext-name " requires " ns-sym
                        " — extensions may depend only on kmet.extension, kmet.tui.* and kmet.libs.*")
 
                   :else
-                  (str "Extension " ext-name " requires " namespace
+                  (str "Extension " ext-name " requires " ns-sym
                        " — not declared in deps.edn and not a babashka-bundled library"))
-                {:extension ext-name :ns namespace})))))
+                {:extension ext-name :ns ns-sym})))))
 
 (def ^:private spec-port-namespaces
   "bb-bundled clojure.spec ports (spec.alpha and, transitively, its
@@ -1650,43 +1681,13 @@
    SCI-incompatible Maven sources with bb-bundled replacements) are
    required only on bb: Jolt has no bundled copies (its require fails),
    and their namespaces stay absent from Jolt contexts — extensions
-   requiring them there get the actionable load-fn error."
+   requiring them there get the actionable provider error."
   []
   (require 'clojure.core.async)
   (apply require (concat tui-library-namespaces libs-library-namespaces))
   (when-not (host/jolt?)
     (apply require (concat spec-port-namespaces bb-shared-namespaces)))
   nil)
-
-(defn- create-context
-  "Build the isolated sci context for one extension: lazy host-delegated
-   classes ({:allow :all} for instances + Class/forName seeding and
-   miss-retry for statics/ctors — identical on bb and Jolt), the bb
-   short-name :imports, shared global namespaces (contract + builtins +
-   the kmet.tui.* TUI library + the kmet.libs.* library layer, required
-   first so they exist for the injection), and the per-extension load-fn
-   that checks deps — own artifact, declared deps (resolved by
-   load-extension! before the context evaluates), bb-bundled namespaces, with actionable errors
-   for everything else. RESOURCE-FN replaces clojure.java.io/resource
-   with an artifact-scoped lookup (nil keeps the host resource)."
-  [ext-name artifact owns-ns? deps-resolver resource-fn]
-  (host-requires!)
-  ;; ctx-holder lets the load-fn pre-register source classes on the context
-  ;; being built: the load-fn runs after init returns, so the atom is set by
-  ;; then (single-threaded load — no race).
-  (let [ctx-holder (atom nil)
-        ctx (sci/init {:classes {:allow :all}
-                       :imports bb-imports
-                       :features (if (host/jolt?) #{:jolt :clj} #{:bb :clj})
-                       :namespaces (build-context-namespaces resource-fn)
-                       :load-fn (make-load-fn ext-name artifact owns-ns?
-                                              deps-resolver
-                                              (shared-tui-namespaces)
-                                              (shared-libs-namespaces)
-                                              ctx-holder)})]
-    (reset! ctx-holder ctx)
-    (seed-context-classes! ctx)
-    ctx))
 
 (defn- missing-class-of
   "The class to register for an eval failure with message MSG, or nil.
@@ -1728,25 +1729,62 @@
             (recur (inc attempt))
             (throw result)))))))
 
-(defn- eval-source!
-  "Evaluate the SOURCE string in CTX via eval-string* (one call — SCI binds
-   its own current-ns per form, so (ns ...) switches work on both hosts;
-   the old host-read + eval-form loop needed sci/binding on Jolt, which is
-   broken on bb). DISPLAY names the origin (file path or jar!/entry) in
-   error messages."
-  [ctx source display]
+(defn- eval-extension-source
+  "The loader's :eval-fn: evaluate one namespace SOURCE in its context —
+   pre-register the classes the source references (the bb seed covers
+   short names; this covers FQ ones appearing only in a callable
+   position), eval with class-miss retry, then wrap failures with the
+   source's display (entry and internal namespaces alike; an already
+   wrapped nested failure is left alone)."
+  [ctx {:keys [source file]}]
+  (register-source-classes! ctx source)
   (try
     (eval-source-with-retry! ctx source)
     (catch Exception e
-      (throw (ex-info (str (ex-message e) " (" display ")")
-                      (assoc (ex-data e) :extension-file display)
-                      e)))))
+      (let [data (try (ex-data e) (catch Throwable _ nil))]
+        (if (:extension-file data)
+          (throw e)
+          (throw (ex-info (str (ex-message e) " (" file ")")
+                          (assoc data :extension-file file)
+                          e)))))))
+
+(defn- create-loader
+  "Build the isolated loader + SCI context for one extension: lazy
+   host-delegated classes ({:allow :all} for instances + Class/forName
+   seeding and miss-retry for statics/ctors — identical on bb and Jolt),
+   the bb short-name :imports, the shared namespace injection (contract +
+   builtins + kmet.tui.* + kmet.libs.*; the loader itself deliberately
+   excluded), and the per-extension loader whose :sources (see
+   make-source-fn) serve the own artifact or the single-file LITERAL
+   source, declared deps (resolved by load-extension! before the context
+   evaluates), and bb-bundled namespaces — with actionable errors for
+   everything else. SCI's own requires route back through the loader
+   (kmet.libs.loader.sci), so nested requires share the link table and
+   unload semantics. RESOURCE-FN replaces clojure.java.io/resource with
+   an artifact-scoped lookup (nil keeps the host resource)."
+  [ext-name artifact owns-ns? deps-resolver resource-fn literal]
+  (host-requires!)
+  (let [l (loader-sci/sci-loader
+           {:id (str "ext:" ext-name)
+            :sources (make-source-fn ext-name artifact owns-ns?
+                                     deps-resolver
+                                     (shared-tui-namespaces)
+                                     (shared-libs-namespaces)
+                                     literal)
+            :namespaces (build-context-namespaces resource-fn)
+            :sci-opts {:classes {:allow :all}
+                       :imports bb-imports
+                       :features (if (host/jolt?) #{:jolt :clj} #{:bb :clj})}
+            :eval-fn eval-extension-source})]
+    (seed-context-classes! (loader/context l))
+    l))
 
 (defn- extension-var
   "The value of VAR-NAME in ENTRY-NS of EXT's context, or nil."
   [ext entry-ns var-name]
-  (when-let [ctx @(:ctx ext)]
-    (get-in @(:env ctx) [:namespaces entry-ns var-name])))
+  (when-let [l @(:loader ext)]
+    (when-let [ctx (loader/context l)]
+      (get-in @(:env ctx) [:namespaces entry-ns var-name]))))
 
 (defn load-extension!
   "Load a single extension from PATH (.clj file, dir with extension.edn,
@@ -1765,7 +1803,7 @@
               :path (str (fs/canonicalize f))
               :kind kind
               :entry-ns (atom nil)
-              :ctx (atom nil)
+              :loader (atom nil)
               :jars (atom [])
               :api (atom nil)
               :deregister-fns (atom [])
@@ -1784,71 +1822,56 @@
             deps-resolver (make-deps-resolver deps (:jars ext))
             ;; Force the closure resolution HERE, in host scope: during the
             ;; context's SCI eval, require/requiring-resolve run through the
-            ;; extension load-fn (bb hosts the interpreter), and
+            ;; loader's source provider (bb hosts the interpreter), and
             ;; clojure.tools.deps internally loads its dep-extension
             ;; namespaces via requiring-resolve — resolving lazily from
             ;; inside the eval re-enters this resolver until the stack
-            ;; overflows. Resolved up front, the load-fn only reads the
+            ;; overflows. Resolved up front, the provider only reads the
             ;; cache.
             _ (when deps-resolver (deps-resolver))
-            ctx (create-context name artifact owns-ns?
-                                deps-resolver
-                                (when artifact (extension-resource-fn artifact jar-info deps-resolver)))]
+            ;; Single-file extensions have no artifact: the file itself is
+            ;; the entry namespace, served as a literal source (its ns is
+            ;; read here so the loader knows what to ask for).
+            file-source (when-not artifact (slurp file))
+            file-ns (when-not artifact
+                      (or (some-> (ns-form-of-source file-source) second)
+                          (throw (ex-info (str "Extension " name
+                                               " file does not start with (ns ...)")
+                                          {:path path}))))
+            l (create-loader name artifact owns-ns? deps-resolver
+                             (when artifact
+                               (extension-resource-fn artifact jar-info deps-resolver))
+                             (when-not artifact
+                               {file-ns {:file (str file) :source file-source}}))]
         (doseq [lib (keys deps)]
           (when (contains? bb-bundled-libs (str lib))
             (binding [*out* *err*]
               (println "Warning: extension" (:name ext) "pins" lib
                        "which babashka bundles — the Maven copy may not run;"
                        "omit it from deps.edn to use the bundled version."))))
-        (reset! (:ctx ext) ctx)
+        (reset! (:loader ext) l)
         (if artifact
-          (let [{:keys [source display]} (artifact-source artifact entry-ns)]
-            (when-not source
+          (do
+            (when-not (:source (artifact-source artifact entry-ns))
               (throw (ex-info (str "extension.edn :entry not found: " entry-ns)
                               {:path path :entry entry-ns})))
-            ;; fail fast on forbidden/misspelled kmet.* requires — sci's
-            ;; require machinery swallows the load-fn error into an NPE.
-            ;; The entry source must also declare :entry-ns itself (strict
-            ;; layout is enforced at load, not just pack time).
-            (let [ns-form (ns-form-of-source source)]
-              (when-not (= entry-ns (second ns-form))
-                (throw (ex-info (str "Extension " name " strict layout violation: "
-                                     display " declares " (second ns-form)
-                                     ", expected " entry-ns)
-                                {:path path :entry entry-ns})))
-              (validate-entry-requires! name ns-form
-                                        (shared-tui-namespaces)
-                                        (shared-libs-namespaces)
-                                        owns-ns?))
-            (eval-source! ctx source display)
-            (let [init-var (extension-var ext entry-ns 'init)]
-              (when-not init-var
-                (throw (ex-info (str "Extension " (:name ext)
-                                     " does not define an init fn")
-                                {:path path})))
-              (reset! (:entry-ns ext) entry-ns)))
-          ;; single-file extension: the file is the entry itself
-          (let [source (slurp file)]
-            (validate-entry-requires! name (ns-form-of-source source)
-                                      (shared-tui-namespaces)
-                                      (shared-libs-namespaces)
-                                      owns-ns?)
-            (eval-source! ctx source (str file))
-            (let [ns-sym (some-> (ns-form-of-source source) second)]
-              (when-not ns-sym
-                (throw (ex-info (str "Extension " (:name ext)
-                                     " file does not start with (ns ...)")
-                                {:path path})))
-              (let [init-var (extension-var ext ns-sym 'init)]
-                (when-not init-var
-                  (throw (ex-info (str "Extension " (:name ext)
-                                       " does not define an init fn")
-                                  {:path path}))))
-              (reset! (:entry-ns ext) ns-sym))))
-        (let [api (create-extension-api ext)]
-          (reset! (:api ext) api)
-          ((extension-var ext @(:entry-ns ext) 'init) api)
-          (reset! (:initialized? ext) true)))
+            ;; the source provider validates the entry's ns form (strict
+            ;; layout + allowed requires) at locate, before anything
+            ;; evaluates
+            (loader/load l {:kind :ns :name (str entry-ns)})
+            (reset! (:entry-ns ext) entry-ns))
+          (do
+            (loader/load l {:kind :ns :name (str file-ns)})
+            (reset! (:entry-ns ext) file-ns)))
+        (let [init-var (extension-var ext @(:entry-ns ext) 'init)]
+          (when-not init-var
+            (throw (ex-info (str "Extension " (:name ext)
+                                 " does not define an init fn")
+                            {:path path})))
+          (let [api (create-extension-api ext)]
+            (reset! (:api ext) api)
+            (init-var api)
+            (reset! (:initialized? ext) true))))
       (swap! extensions conj ext)
       {:extension (:name ext) :error nil}
       (catch Exception e
@@ -1875,7 +1898,9 @@
                  (println "Warning: extension shutdown error:" (ex-message e)))))))
     (doseq [f @(:deregister-fns ext)]
       (try (f) (catch Exception _)))
-    (reset! (:ctx ext) nil)
+    (when-let [l @(:loader ext)]
+      (loader/unload! l))
+    (reset! (:loader ext) nil)
     (reset! (:jars ext) [])
     (swap! extensions (fn [exts] (remove #(identical? % ext) exts)))
     nil))

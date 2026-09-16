@@ -595,6 +595,25 @@
         (t/is (some? (:error result)))
         (t/is (str/includes? (:error result)
                              "may depend only on kmet.extension, kmet.tui.* and kmet.libs.*"))))
+    (testing "the loader is host machinery — not shared, not requireable"
+      (let [result (load "loader-ns"
+                         (str "(ns bad-loader (:require [kmet.libs.loader :as ldr]))\n"
+                              "(defn init [api] nil)\n"))]
+        (t/is (some? (:error result)))
+        (t/is (str/includes? (:error result) "host machinery")
+              (str "got: " (:error result))))
+      ;; a *top-level* require evaluates in the extension's own context;
+      ;; unlike a host-called init's require (which follows the ambient
+      ;; host context, loader.md §3), this proves the loader is absent
+      ;; from the injected share map — an injected namespace would
+      ;; resolve and the require would succeed
+      (let [result (load "loader-top"
+                         (str "(ns loader-top (:require [kmet.extension :as ext]))\n"
+                              "(require 'kmet.libs.loader)\n"
+                              "(defn init [api] nil)\n"))]
+        (t/is (some? (:error result)))
+        (t/is (str/includes? (:error result) "host machinery")
+              (str "got: " (:error result)))))
     (testing "a kmet.tui.* typo is rejected (sci would NPE silently)"
       (let [result (load "typo" "(ns bad-typo (:require [kmet.tui.theem :as t]))\n(defn init [api] nil)\n")]
         (t/is (some? (:error result)))
