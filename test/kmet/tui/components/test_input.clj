@@ -275,6 +275,16 @@
       (core/handle-input inp "\u001b[104;5u")
       (t/is (= "a" (input/input-get-value inp)) "ctrl+h deletes backward"))))
 
+(t/deftest test-input-kitty-printable-csi-u-inserts-text
+  (t/testing "flag-1 terminals send CSI-u for printable keys (pi #3780)"
+    (let [inp (input/make-input)]
+      (core/handle-input inp "\u001b[97u")   ;; kitty 'a'
+      (t/is (= "a" (input/input-get-value inp)))
+      (core/handle-input inp "\u001b[224u")  ;; Italian-layout 'à'
+      (t/is (= "aà" (input/input-get-value inp)))
+      (core/handle-input inp "\u001b[97;5u") ;; kitty ctrl+a: a chord, not text
+      (t/is (= "aà" (input/input-get-value inp))))))
+
 (t/deftest test-input-on-change-fires-on-value-edits
   ;; editor parity: value-changing edits fire the callback with the value,
   ;; cursor-only moves do not, and a programmatic set-value! is not an edit

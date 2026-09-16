@@ -1540,12 +1540,14 @@
               (refresh-autocomplete this) nil)
 
           :else
-          (let [has-ctrl? (some #(let [c (int %)]
-                                   (or (< c 32) (== c 127)
-                                       (and (>= c 128) (<= c 159))))
-                                data)]
+          (let [printable (keys/decode-printable-key data)
+                has-ctrl? (and (nil? printable)
+                               (some #(let [c (int %)]
+                                        (or (< c 32) (== c 127)
+                                            (and (>= c 128) (<= c 159))))
+                                     data))]
             (when-not has-ctrl?
-              (insert-character this data))))))))
+              (insert-character this (or printable data)))))))))
 
 ;; ─── Construction ──────────────────────────────────────────────────────────
 

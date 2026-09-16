@@ -182,3 +182,40 @@
     (t/is (k/matches-key? "a" "a"))
     (t/is (k/matches-key? " " "space"))
     (t/is (k/matches-key? "\u001b[32u" "space") "kitty space matches the space id")))
+
+(t/deftest test-decode-kitty-printable
+  (testing "unmodified and shifted CSI-u sequences decode to text"
+    (t/is (= "a" (k/decode-kitty-printable "\u001b[97u")))
+    (t/is (= "à" (k/decode-kitty-printable "\u001b[224u"))
+          "Italian-layout printable key (pi #3780)")
+    (t/is (= "@" (k/decode-kitty-printable "\u001b[64u")))
+    (t/is (= "@" (k/decode-kitty-printable "\u001b[64;2u")) "shift-modified")
+    (t/is (= "x" (k/decode-kitty-printable "\u001b[120:88u"))
+          "the shifted codepoint is used only when Shift is held")
+    (t/is (= "X" (k/decode-kitty-printable "\u001b[120:88;2u")))
+    (t/is (= "." (k/decode-kitty-printable "\u001b[57409u"))
+          "functional keypad codepoints map to their printable equivalents"))
+  (testing "control, alt and function sequences are not text"
+    (t/is (nil? (k/decode-kitty-printable "\u001b[97;5u")) "ctrl+a")
+    (t/is (nil? (k/decode-kitty-printable "\u001b[97;3u")) "alt+a")
+    (t/is (nil? (k/decode-kitty-printable "\u001b[13;2u")) "shift+enter")
+    (t/is (nil? (k/decode-kitty-printable "\u001b[A")) "arrow")
+    (t/is (nil? (k/decode-kitty-printable "abc")))))
+
+(t/deftest test-decode-printable-key
+  (testing "kitty CSI-u and modifyOtherKeys printables decode"
+    (t/is (= "a" (k/decode-printable-key "\u001b[97u")))
+    (t/is (= "@" (k/decode-printable-key "\u001b[27;2;64~")))
+    (t/is (nil? (k/decode-printable-key "\u001b[27;5;97~")) "modifyOtherKeys ctrl+a")
+    (t/is (nil? (k/decode-printable-key "\u001b[27;3;97~")) "modifyOtherKeys alt+a")
+    (t/is (nil? (k/decode-printable-key "x")))))
+
+(t/deftest test-decode-out-of-range-never-throws
+  (testing "malformed/astral codepoints are nil, not exceptions"
+    (t/is (nil? (k/decode-kitty-printable "\u001b[99999999999999999999u")))
+    (t/is (nil? (k/decode-kitty-printable "\u001b[97;99999999999999999999u")))
+    (t/is (nil? (k/decode-kitty-printable "\u001b[128512u"))
+          "astral codepoints have no single-char representation")
+    (t/is (nil? (k/decode-printable-key "\u001b[27;2;99999999999999999999~")))
+    (t/is (nil? (k/parse-key "\u001b[128512u")))
+    (t/is (nil? (k/parse-key "\u001b[27;99999999999999999999;97~")))))

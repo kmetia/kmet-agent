@@ -1279,6 +1279,23 @@
       (core/handle-input e (ctrl 14))         ;; ctrl+n
       (t/is (= "ab\n" (editor/editor-get-text e)) "the new chord inserts a newline"))))
 
+(t/deftest test-editor-kitty-printable-csi-u-inserts-text
+  (t/testing "flag-1 terminals send CSI-u for printable keys (pi #3780)"
+    (let [e (editor/make-editor)]
+      (core/handle-input e "\u001b[97u")     ;; kitty 'a'
+      (t/is (= "a" (editor/editor-get-text e)))
+      (core/handle-input e "\u001b[224u")    ;; Italian-layout 'à'
+      (t/is (= "aà" (editor/editor-get-text e)))
+      (core/handle-input e "\u001b[64;2u")   ;; shift+'2' → '@'
+      (t/is (= "aà@" (editor/editor-get-text e)))
+      (core/handle-input e "\u001b[27;2;64~") ;; modifyOtherKeys '@'
+      (t/is (= "aà@@" (editor/editor-get-text e))))
+    (t/testing "control chords are still chords, not text"
+      (let [e (editor/make-editor)]
+        (core/handle-input e "ab")
+        (core/handle-input e "\u001b[97;5u")  ;; kitty ctrl+a
+        (t/is (= "ab" (editor/editor-get-text e)) "ctrl+a is a chord")))))
+
 
 
 

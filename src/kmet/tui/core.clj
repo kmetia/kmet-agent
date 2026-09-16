@@ -7,6 +7,7 @@
             [kmet.tui.macros :as macros]
             [kmet.tui.protocols :as protocols]
             [kmet.libs.reakt :as reakt]
+            [kmet.libs.terminal :as lib-terminal]
             [kmet.tui.terminal :as terminal]
             [kmet.tui.timers :as timers]
             [kmet.tui.wake :as wake]
@@ -104,12 +105,13 @@
                 terminal-response-timer color-scheme-notifications-enabled?
                 debug-redraw? tui-debug?
                 input-generation incomplete-flush-timer
-                paste-burst
+                paste-burst kitty-printable
                 focus-home])
 
 (declare tui-request-render tui-stop set-focused-component!
          overlay-visible? overlay-handle process-input-buffer! tui-invalidate
-         normalize-paste-burst! ghost-restore!)
+         normalize-input-unit! trace-negotiation! trace-terminal-response!
+         ghost-restore!)
 
 (defn create-tui [terminal]
   (let [tui (map->TUI {:terminal (atom terminal)
@@ -152,7 +154,11 @@
                        ;; unbracketed-paste burst state (see paste-burst-step)
                        :paste-burst (atom {:recent []
                                            :swallow-lf-at nil
-                                           :in-paste? false})
+                                           :in-paste? false
+                                           :paste-deadline nil})
+                       ;; pending kitty CSI-u printable codepoint (see
+                       ;; drop-kitty-printable-duplicate!)
+                       :kitty-printable (atom nil)
                        ;; terminal focus fallback, registered by the app
                        ;; layer (tui-set-focus-home!) — see resolve-focus-home
                        :focus-home (atom nil)})]
@@ -774,6 +780,7 @@
         (do (clear-negotiation-timer! tui)
             (reset! (:negotiation-buffer tui) "")
             (reset! buf rest)
+            (trace-negotiation! (subs combined 0 (- (count combined) (count rest))) parsed)
             (terminal/handle-negotiation-sequence! @(:terminal tui) parsed)
             (tui-request-render tui)
             ;; One read batch can carry several responses (kitty answers
@@ -881,6 +888,7 @@
   (clear-terminal-response-timer! tui)
   (reset! (:terminal-response-buffer tui) "")
   (reset! buf rest)
+  (trace-terminal-response! kind value)
   (case kind
     :cell-size
     (do (img/set-cell-dimensions! value)
@@ -952,10 +960,11 @@
 (defn- dispatch-input!
   "Port of pi's TUI input routing: listeners first, the modality guard
    (input belongs to the topmost visible capturing overlay), then delivery
-   to the focused component. DATA first passes the unbracketed-paste
-   normalization (see paste-burst-step): a CR ending a paste-like burst of
+   to the focused component. DATA first passes the input-unit
+   normalization (normalize-input-unit!): a raw char duplicating the Kitty
+   CSI-u printable before it is dropped, a CR ending a paste-like burst of
    text is delivered as LF, and the LF half of a rewritten CRLF is swallowed
-   here — nil means the unit was swallowed and never dispatched. Key release
+   — nil means the unit was dropped and never dispatched. Key release
    events are filtered unless the component opts in via a :wants-key-release?
    field (pi: Component.wantsKeyRelease). FLUSH-GEN is the input generation
    captured when a flush timer armed (nil for reader-path dispatches): a lone
@@ -965,7 +974,7 @@
    Checked at delivery, under dispatch-lock: a stale timer racing the reader's
    own pass must not corrupt the sequence even when it wins the lock."
   [tui data & [flush-gen]]
-  (when-some [data (normalize-paste-burst! tui data)]
+  (when-some [data (normalize-input-unit! tui data)]
     ;; pi: input listeners run as a chain — each may :consume (stop dispatch)
     ;; or return transformed :data for the later listeners and the focused
     ;; component (pi: handleInput listener loop).
@@ -1396,6 +1405,111 @@
                 (do (reset! buf rest-s)
                     (process-input-buffer! tui read-fn buf))))))))))
 
+;; ─── Input trace (KMET_TUI_INPUT_LOG) ──────────────────────────────────────
+;; Opt-in ground truth for input bugs that only reproduce in one terminal:
+;; every reader drain, every dispatched input unit (raw bytes, parsed key,
+;; kitty event flags, paste-burst state and outcome) and every intercepted
+;; response is appended to the trace file (kmet.libs.terminal/input-log!;
+;; see tui.md §11). The trace never changes behavior — every helper here
+;; no-ops when the env var is unset.
+
+(def ^:private trace-max-chars 120)
+
+(defn- trace-escape
+  "Render DATA for the trace: quoted, with control bytes (ESC included —
+   pr-str leaves those raw) as \\uXXXX escapes, capped at TRACE-MAX-CHARS so
+   a pasted megabyte stays one short line. Nil renders as \"-\"."
+  [data]
+  (if (nil? data)
+    "-"
+    (let [q (str "\""
+                 (str/escape (str data)
+                             (fn [c]
+                               (let [n (int c)]
+                                 (cond
+                                   (== n 10) "\\n"
+                                   (== n 13) "\\r"
+                                   (== n 9) "\\t"
+                                   (or (< n 32) (= n 127))
+                                   (format "\\u%04x" n)))))
+                 "\"")]
+      (if (> (count q) trace-max-chars)
+        (str (subs q 0 trace-max-chars) "...(" (count (str data)) " chars)")
+        q))))
+
+(defn- trace-input-batch!
+  "Trace one reader drain — every byte the tty had queued at that moment.
+   How input is chunked is the ground truth for stall/split bugs."
+  [batch]
+  (when (lib-terminal/input-log-enabled?)
+    (lib-terminal/input-log!
+     (str "batch len=" (count batch) " raw=" (trace-escape batch)))))
+
+(defn- trace-input-unit!
+  "One dispatched input unit: what arrived (raw), what kmet makes of it
+   (parsed key + kitty release/repeat flags), the paste-burst state and the
+   normalization outcome (pass / rewritten / swallowed / duplicate)."
+  [data outcome out state]
+  (when (lib-terminal/input-log-enabled?)
+    (lib-terminal/input-log!
+     (str "unit raw=" (trace-escape data)
+          " kitty=" (if (keys/kitty-active?) 1 0)
+          " parsed=" (or (keys/parse-key data) "-")
+          " rel=" (if (keys/is-key-release? data) 1 0)
+          " rep=" (if (keys/is-key-repeat? data) 1 0)
+          " ipaste=" (if (:in-paste? state) 1 0)
+          " recent=" (trace-escape (apply str (map second (:recent state))))
+          " -> " (name outcome)
+          " out=" (trace-escape out)))))
+
+(defn- trace-negotiation!
+  "A kitty negotiation response consumed before dispatch (it would otherwise
+   be absent from the trace; RESPONSE is the matched sequence only, without
+   any trailing input the batch carried behind it)."
+  [response parsed]
+  (when (lib-terminal/input-log-enabled?)
+    (lib-terminal/input-log!
+     (str "intercept negotiation raw=" (trace-escape response)
+          " parsed=" (pr-str parsed)))))
+
+(defn- trace-terminal-response! [kind value]
+  (when (lib-terminal/input-log-enabled?)
+    (lib-terminal/input-log!
+     (str "intercept response kind=" (name kind)
+          " value=" (trace-escape (str value))))))
+
+;; ─── Kitty printable-input duplicates (pi: stdin-buffer.ts) ────────────────
+;; Some terminals deliver a key twice while the Kitty protocol is active: the
+;; CSI-u sequence AND the raw text char (pi: pendingKittyPrintableCodepoint).
+;; A raw single-char unit whose codepoint equals the one of the unmodified
+;; printable CSI-u sequence immediately before it is the duplicate half and
+;; is dropped. Every other unit re-arms the pending codepoint (nil for
+;; sequences that arm nothing), so the guard can only swallow the exact raw
+;; char following its own CSI-u — and only on terminals that emit unmodified
+;; printable CSI-u sequences at all (plain text arrives raw under the flags
+;; kmet requests, so ordinary typing never arms it).
+
+(defn- unmodified-printable-csi-u
+  "Codepoint of an unmodified printable Kitty CSI-u sequence (pi:
+   parseUnmodifiedKittyPrintableCodepoint), or nil. Modifiers and event
+   types (the ;mods / :event subfields) disqualify a sequence — only a bare
+   printable press arms the duplicate guard."
+  [data]
+  (when-let [[_ cp] (re-matches #"\u001b\[(\d+)(?::\d*)?(?::\d+)?u" data)]
+    (when-let [n (parse-long cp)]
+      (when (>= n 32) n))))
+
+(defn- drop-kitty-printable-duplicate!
+  "True when DATA is the raw text char duplicating the pending CSI-u
+   printable codepoint (the duplicate is dropped); otherwise re-arms the
+   pending codepoint from DATA."
+  [tui data]
+  (let [a (:kitty-printable tui)
+        pending @a]
+    (if (and pending (= 1 (count data)) (= (int (first data)) pending))
+      (do (reset! a nil) true)
+      (do (reset! a (unmodified-printable-csi-u data)) false))))
+
 ;; ─── Unbracketed paste detection (paste-like bursts) ────────────────────────
 ;; Bracketed paste (mode 2004) delivers paste content verbatim, but input
 ;; paths that bypass bracketing — Android IME text injection, terminals
@@ -1419,12 +1533,25 @@
 (def ^:private paste-burst-chars 4)
 (def ^:private paste-lf-swallow-ms 50)
 
+;; A lost paste-END marker (dropped by the transport, or a terminal killed
+;; mid-paste) must not leave the paste flag set forever — that would disable
+;; burst detection for the rest of the session. The deadline renews on every
+;; in-paste unit (a real paste arrives in one burst, well inside the
+;; timeout); a unit arriving after it clears the stale flag and processes
+;; normally.
+(def ^:private paste-idle-timeout-ms 60000)
+
 (def ^:dynamic *paste-burst-now-ms*
   "Test seam: the paste-burst decision is timing-based; tests bind this to
-   feed deterministic timestamps. Nil (the root value) = the wall clock."
+   feed deterministic timestamps. Nil (the root value) = burst-now-ms' own
+   monotonic clock."
   nil)
 
-(defn- burst-now-ms [] (long (or *paste-burst-now-ms* (System/currentTimeMillis))))
+(defn- burst-now-ms
+  "Monotonic milliseconds (nanoTime): the burst window and the paste
+   deadline must not jump when the wall clock is stepped (NTP, user change)."
+  []
+  (long (or *paste-burst-now-ms* (quot (System/nanoTime) 1000000))))
 
 (defn- cr-in-paste-burst?
   "True when the CR arriving at NOW ends an unbracketed paste: at least
@@ -1459,24 +1586,32 @@
 
 (defn- paste-burst-step
   "Decide the output for one dispatched input unit DATA at NOW given the
-   burst STATE (:recent :swallow-lf-at :in-paste?). Returns [STATE' OUT],
-   where OUT is nil when the unit is swallowed (the LF half of a rewritten
-   CRLF) and DATA otherwise. Only text runs feed the burst window: escape
-   sequences (Kitty key press/release CSI-u, arrows, mouse, focus, terminal
-   responses) and bracketed-paste content pass through untouched, so a key
-   release can never masquerade as paste content and turn the next Enter
-   into a newline."
+   burst STATE (:recent :swallow-lf-at :in-paste? :paste-deadline). Returns
+   [STATE' OUT], where OUT is nil when the unit is swallowed (the LF half of
+   a rewritten CRLF) and DATA otherwise. Only text runs feed the burst
+   window: escape sequences (Kitty key press/release CSI-u, arrows, mouse,
+   focus, terminal responses) and bracketed-paste content pass through
+   untouched, so a key release can never masquerade as paste content and turn
+   the next Enter into a newline. An in-paste unit arriving after
+   PASTE-IDLE-TIMEOUT-MS proves the END marker was lost: the stale flag is
+   cleared and the unit processed normally."
   [state data now]
-  (let [{:keys [recent in-paste? swallow-lf-at]} state
+  (let [{:keys [recent in-paste? swallow-lf-at paste-deadline]} state
         ;; the LF window closes on any other unit reaching dispatch
         base (assoc state :swallow-lf-at nil)]
     (cond
-      (= data PASTE-START) [(assoc base :in-paste? true) data]
-      (= data PASTE-END) [(assoc base :in-paste? false) data]
+      (= data PASTE-START)
+      [(assoc base :in-paste? true
+              :paste-deadline (+ now paste-idle-timeout-ms)) data]
+
+      (= data PASTE-END) [(assoc base :in-paste? false :paste-deadline nil) data]
 
       ;; bracketed-paste content is delivered literally; the editor buffers
       ;; it until the end marker (CR/LF included)
-      in-paste? [base data]
+      in-paste?
+      (if (and paste-deadline (> now paste-deadline))
+        (paste-burst-step (assoc base :in-paste? false :paste-deadline nil) data now)
+        [(assoc base :paste-deadline (+ now paste-idle-timeout-ms)) data])
 
       ;; key/terminal escape sequences are never typed text
       (str/starts-with? data "\u001b") [base data]
@@ -1497,14 +1632,26 @@
 
       :else [base data])))
 
-(defn- normalize-paste-burst!
-  "Run one dispatched input unit DATA through this TUI's paste-burst state.
-   Returns the data to dispatch, or nil when it is swallowed."
+;; ─── Input unit normalization (dispatch-input! funnel) ─────────────────────
+
+(defn- normalize-input-unit!
+  "Filter one dispatched input unit DATA: drop the raw text char duplicating
+   the Kitty CSI-u printable before it (drop-kitty-printable-duplicate!),
+   then run the paste-burst step. Returns the data to dispatch — possibly
+   rewritten — or nil when the unit is dropped (duplicate or swallowed LF
+   half). Traces the unit when KMET_TUI_INPUT_LOG is set."
   [tui data]
-  (let [a (:paste-burst tui)
-        [state out] (paste-burst-step @a data (burst-now-ms))]
-    (reset! a state)
-    out))
+  (if (drop-kitty-printable-duplicate! tui data)
+    (do (trace-input-unit! data :duplicate nil nil) nil)
+    (let [a (:paste-burst tui)
+          [state out] (paste-burst-step @a data (burst-now-ms))]
+      (reset! a state)
+      (trace-input-unit! data
+                         (cond (nil? out) :swallowed
+                               (not= out data) :rewritten
+                               :else :pass)
+                         out state)
+      out)))
 
 (defn- start-input-reader [tui]
   (let [term @(:terminal tui)
@@ -1572,6 +1719,7 @@
                             ;; (it can neither dispatch nor clear the fresh
                             ;; arm — the wakeup only clears its own slot).
                             (swap! (:input-generation tui) inc)
+                            (trace-input-batch! batch)
                             (swap! buf str batch)
                             (process-input-buffer! tui read-fn buf)
                             (catch Exception e

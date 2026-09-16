@@ -876,6 +876,33 @@ live:
 the thunk. If the home is unregistered or throws, focus becomes null -
 input drops at the dispatch guard rather than reaching a removed dialog.
 
+**Input unit normalization.** Before listeners and focus delivery,
+`dispatch-input!` filters every input unit (a run of text, a control char,
+an escape sequence, a paste marker) through two guards:
+
+- **Kitty printable duplicates.** Some terminals emit a printable key twice
+  while the Kitty protocol is active — the CSI-u sequence *and* the raw
+  character (pi: `pendingKittyPrintableCodepoint`). The editor and Input
+  insert the decoded printable (`keys/decode-printable-key` /
+  `keys/decode-kitty-printable`, plain and Shift-modified sequences only),
+  and dispatch drops the raw char immediately after it, so the pair lands
+  as one character. Only unmodified printable CSI-u arms the guard, so
+  ordinary typing (raw on the flags kmet requests) never triggers it.
+- **Unbracketed paste bursts.** A CR ending a paste-like burst of *text*
+  (>= 4 text chars within 100 ms, the CR included) is rewritten to LF, and
+  the LF half of a rewritten CRLF is swallowed — the editor never submits
+  pasted `/cmd` or `!cmd` text (input paths that bypass bracketed paste:
+  Android IME injection, tmux send-keys). Escape sequences (Kitty key
+  press/release, arrows, mouse, focus, terminal responses) and
+  bracketed-paste content never feed the burst window, so a key release
+  cannot turn the next Enter into a newline. A lost paste-END marker ages
+  out after a minute of idle time. The window uses a monotonic clock; tests
+  drive it through the `kmet.tui.core/*paste-burst-now-ms*` seam.
+
+Both guards live in `kmet.tui.core` and are observable in the input trace
+(§11, `KMET_TUI_INPUT_LOG`) — outcome `duplicate`, `rewritten`, `swallowed`
+or `pass`.
+
 ### 7.1 Key labels — how a chord is shown
 
 Two forms, one table (`kmet.tui.keys/key-label`):
@@ -1080,6 +1107,22 @@ stateful tag whose props never settle means fresh fn literals in its props
 | `render-crash.log` | a render body threw — full stack trace, then the TUI stops (loud-crash contract, §2.5) |
 | `debug.log` | opt-in via `--debug`: lifecycle events (submit, cancel, agent turns) |
 | `kmet.error.log` | unhandled top-level exceptions |
+
+### Output + input traces (env flags)
+
+- `KMET_TUI_WRITE_LOG=<dir|file> bb run` — every byte written to the
+  terminal is appended (a directory gets `tui-<ts>-<pid>.log`, a file is
+  appended in place); the raw counterpart of the term_dump workflow below.
+- `KMET_TUI_INPUT_LOG=<dir|file> bb run` — the input path is appended
+  (`tui-input-<ts>-<pid>.log` in a directory, or the given file). One line
+  per **batch** (every byte the tty had queued: how input chunks under
+  stalls), per **unit** (the raw bytes `\uXXXX`-escaped, the parsed key,
+  the Kitty release/repeat flags, the paste state, `recent=` burst window
+  and the normalization outcome `pass`/`rewritten`/`swallowed`/`duplicate`)
+  and per **intercepted response** (Kitty flag reports, DA, OSC 11, cell
+  size — they never reach dispatch). This is the ground truth for input
+  bugs that only reproduce in one terminal: reproduce with the env var
+  set, read the file (the trace never changes behavior).
 
 ### When bytes look wrong but headless render looks right
 

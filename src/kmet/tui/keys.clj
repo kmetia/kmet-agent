@@ -190,9 +190,12 @@
           key-name)))))
 
 (defn- safe-char
-  "Char string for a valid printable codepoint (nil otherwise)."
+  "Char string for a printable BMP codepoint, nil otherwise. Astral
+   codepoints have no single-char representation (pi: String.fromCodePoint;
+   kmet's transport delivers such text raw) and must not throw here — these
+   paths run on arbitrary terminal input."
   [cp]
-  (when (and (>= cp 32) (<= cp 0x10ffff))
+  (when (and (>= cp 32) (<= cp 0xffff))
     (str (char cp))))
 
 (defn- format-parsed-key
@@ -241,8 +244,8 @@
    Event type: 1=press, 2=repeat, 3=release (pi: KeyEventType)."
   [data]
   (or
-   ;; shifted-key group is decoded but unused for key ids (pi uses it only
-   ;; for printable decoding, which kmet does not need)
+   ;; shifted-key group is decoded for printable characters (see
+   ;; decode-kitty-printable) but unused for key ids
    (when-let [[_ cp _shifted base mod evt]
               (re-matches #"\u001b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u" data)]
      {:codepoint (parse-long cp)
@@ -273,11 +276,49 @@
 
 (defn- parse-modify-other-keys
   "Decode xterm modifyOtherKeys format CSI 27;mods;code ~
-   (pi: parseModifyOtherKeysSequence)."
+   (pi: parseModifyOtherKeysSequence). Nil for out-of-range numbers."
   [data]
   (when-let [[_ mod code] (re-matches #"\u001b\[27;(\d+);(\d+)~" data)]
-    {:codepoint (parse-long code)
-     :modifier (dec (parse-long mod))}))
+    (when-let [modifier (parse-long mod)]
+      (when-let [codepoint (parse-long code)]
+        {:codepoint codepoint
+         :modifier (dec modifier)}))))
+
+;; ─── Printable decoding (pi: decodeKittyPrintable / decodePrintableKey) ────
+;; Flag-1 (disambiguate) terminals send CSI-u for printable keys too, and
+;; some send the raw character alongside — the printable half must reach the
+;; editor (kmet.tui.core then drops the raw duplicate, see
+;; drop-kitty-printable-duplicate!). Control/Super-modified sequences are not
+;; text: they belong to keybinding matching.
+
+(defn decode-kitty-printable
+  "Printable character of a Kitty CSI-u sequence (pi: decodeKittyPrintable),
+   or nil. Only plain and Shift-modified keys decode (locks are masked);
+   the shifted codepoint wins when Shift is held, functional keypad
+   codepoints are mapped and control codepoints dropped."
+  [data]
+  (when-let [[_ cp shifted _base mod _evt]
+             (re-matches #"\u001b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u" data)]
+    (when-let [codepoint (parse-long cp)]
+      (when-let [modifier (if mod (some-> mod parse-long dec) 0)]
+        (let [effective (bit-and modifier (bit-not LOCK-MASK))]
+          (when (zero? (bit-and effective (bit-not MODIFIER-SHIFT)))
+            (let [shifted (when (and shifted (seq shifted)) (parse-long shifted))
+                  cp (if (and (pos? (bit-and effective MODIFIER-SHIFT)) shifted)
+                       shifted
+                       codepoint)]
+              (safe-char (kitty-functional-equiv cp)))))))))
+
+(defn decode-printable-key
+  "Printable character of a Kitty CSI-u or xterm modifyOtherKeys sequence
+   (pi: decodePrintableKey), or nil — what the editor inserts before falling
+   back to the raw data."
+  [data]
+  (or (decode-kitty-printable data)
+      (when-let [{:keys [codepoint modifier]} (parse-modify-other-keys data)]
+        (let [effective (bit-and modifier (bit-not LOCK-MASK))]
+          (when (zero? (bit-and effective (bit-not MODIFIER-SHIFT)))
+            (safe-char codepoint))))))
 
 ;; ─── Legacy key sequence map (pi: LEGACY_SEQUENCE_KEY_IDS) ─────────────────
 

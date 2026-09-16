@@ -1,5 +1,6 @@
 (ns kmet.tui.test-core
   (:require [clojure.test :as t :refer [testing]]
+            [clojure.string :as str]
             [kmet.tui.core :as core]
             [kmet.libs.reakt :as reakt]
             [kmet.tui.keys :as keys]
@@ -362,7 +363,48 @@
         (when (< i 4)
           (let [[s' out] (paste-burst-step s "\r" (+ 1000 (* i 30)))]
             (t/is (= "\r" out))
-            (recur s' (inc i))))))))
+            (recur s' (inc i))))))
+    (testing "a lost paste-END marker cannot stick the in-paste flag forever"
+      (let [s1 (first (paste-burst-step state "\u001b[200~" 1000))]
+        (t/is (true? (:in-paste? s1)))
+        (t/is (= 61000 (:paste-deadline s1)) "deadline armed at START")
+        (let [[s2 out] (paste-burst-step s1 "abc" 20000)]
+          (t/is (= "abc" out) "in-paste content still passes")
+          (t/is (true? (:in-paste? s2)))
+          (t/is (= 80000 (:paste-deadline s2)) "in-paste content renews the deadline")
+          (let [[s3 out3] (paste-burst-step s2 "abc" 1000000)]
+            (t/is (= "abc" out3) "the stale-paste unit is processed normally")
+            (t/is (false? (:in-paste? s3)) "the idle timeout cleared the flag")
+            (t/is (nil? (:paste-deadline s3)))))
+        (let [[s2 _] (paste-burst-step s1 "\u001b[201~" 20000)]
+          (t/is (false? (:in-paste? s2)))
+          (t/is (nil? (:paste-deadline s2)) "END clears the deadline"))))))
+
+;; ─── Kitty printable-input duplicates ─────────────────────────────────────
+
+(t/deftest test-kitty-printable-guard
+  (let [tui (core/create-tui nil)
+        dup? #((var kmet.tui.core/drop-kitty-printable-duplicate!) tui %)]
+    (t/is (false? (dup? "\u001b[120u")) "unmodified printable CSI-u arms the guard")
+    (t/is (true? (dup? "x")) "the raw char duplicating it is dropped")
+    (t/is (false? (dup? "x")) "the guard disarms after one drop")
+    (t/is (false? (dup? "\u001b[120;2u")) "a modified CSI-u arms nothing")
+    (t/is (false? (dup? "x")) "so the next raw char passes")
+    (t/is (false? (dup? "\u001b[27u")) "a control codepoint arms nothing")
+    (t/is (false? (dup? "x")))
+    (t/is (false? (dup? "\u001b[120u")))
+    (t/is (false? (dup? "xy")) "a multi-char run is never a duplicate")
+    (t/is (false? (dup? "x")) "and it disarms the pending codepoint")))
+
+(t/deftest test-trace-escape
+  (let [esc #((var kmet.tui.core/trace-escape) %)]
+    (t/is (= "\"abc\"" (esc "abc")))
+    (t/is (= "\"\\u001b[A\"" (esc "\u001b[A")) "ESC and controls become \\uXXXX text")
+    (t/is (= "\"a\\r\\nb\"" (esc "a\r\nb")))
+    (t/is (= "\"\"" (esc "")) "empty is not nil")
+    (t/is (= "-" (esc nil)))
+    (t/is (str/ends-with? (esc (apply str (repeat 500 "x"))) "...(500 chars)")
+          "long units are capped")))
 
 (defn- reader-feed!
   "Simulate the app reader loop (start-input-reader) for CHARS: each entry is
@@ -417,6 +459,18 @@
   (testing "an Enter key repeat stream (all CRs) keeps submitting"
     (let [{:keys [submitted]} (pasted-editor (paste-chars "\r\r\r\r" 30 1000))]
       (t/is (= 4 (count @submitted)) "repeated Enters are not rewritten"))))
+
+(t/deftest test-kitty-printable-duplicate-not-typed-twice
+  ;; Some terminals emit both the CSI-u sequence and the raw char for a
+  ;; printable key (pi: pendingKittyPrintableCodepoint); the raw duplicate
+  ;; must not insert a second copy.
+  (keys/set-kitty-active! true)
+  (try
+    (let [{:keys [editor]}
+          (pasted-editor [["\u001b[120u" 1000] ["x" 1001]
+                          ["\u001b[121u" 1002] ["y" 1003]])]
+      (t/is (= "xy" (editor/editor-get-text editor))))
+    (finally (keys/set-kitty-active! false))))
 
 (t/deftest test-kitty-key-then-enter-still-submits
   ;; The reported bug: with the Kitty protocol enabled (Windows Terminal 1.25,

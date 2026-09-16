@@ -5,6 +5,7 @@
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.keybindings :as kb]
+            [kmet.tui.keys :as keys]
             [kmet.tui.utils :as u]
             [kmet.tui.components.editing :as edit]))
 
@@ -359,14 +360,19 @@
             (reset! cursor-atom (edit/word-boundary-right @value-atom @cursor-atom))
             nil)
 
-        ;; Regular character input (reject control chars)
+        ;; Kitty CSI-u printable character (e.g. \u001b[97u for 'a'):
+        ;; flag-1 terminals send CSI-u for printable keys too, and the
+        ;; sequence contains ESC — decode before the control check or the
+        ;; character is discarded (pi: Input.handleInput).
         :else
-        (let [has-ctrl? (some #(let [c (int %)]
-                                 (or (< c 32) (== c 127)
-                                     (and (>= c 128) (<= c 159))))
-                              data)]
-          (when-not has-ctrl?
-            (insert-character this data)))))))
+        (if-let [printable (keys/decode-kitty-printable data)]
+          (insert-character this printable)
+          (let [has-ctrl? (some #(let [c (int %)]
+                                   (or (< c 32) (== c 127)
+                                       (and (>= c 128) (<= c 159))))
+                                data)]
+            (when-not has-ctrl?
+              (insert-character this data))))))))
 
 ;; ─── Construction ──────────────────────────────────────────────────────────
 

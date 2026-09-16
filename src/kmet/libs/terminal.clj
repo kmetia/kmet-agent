@@ -15,21 +15,31 @@
 (defn set-kitty-active! [v] (reset! kitty-active v))
 (defn kitty-active? [] @kitty-active)
 
-;; ─── Raw ANSI stream capture (pi: PI_TUI_WRITE_LOG) ────────────────────────
-;; When KMET_TUI_WRITE_LOG points at a directory, a timestamped
-;; tui-<ts>-<pid>.log file is created inside it; when it points at a file,
-;; that file is appended to.
+;; ─── Raw stream capture (pi: PI_TUI_WRITE_LOG) ─────────────────────────────
+;; KMET_TUI_WRITE_LOG captures raw OUTPUT; KMET_TUI_INPUT_LOG the input path
+;; (reader batches, dispatched input units, intercepted terminal responses —
+;; see kmet.tui.core). For both: a directory gets a timestamped
+;; <prefix>-<ts>-<pid>.log file created inside it, a file path is appended.
+
+(defn- capture-log-path
+  "Resolve an env value into a log path: a directory gets a timestamped
+   <prefix>-<ts>-<pid>.log file inside it, a file path is used as-is."
+  [env prefix]
+  (when (and env (seq env))
+    (if (fs/directory? env)
+      (let [now (java.time.LocalDateTime/now)
+            ts (format "%d-%02d-%02d_%02d-%02d-%02d"
+                       (.getYear now) (.getMonthValue now) (.getDayOfMonth now)
+                       (.getHour now) (.getMinute now) (.getSecond now))]
+        (str env fs/file-separator prefix "-" ts "-"
+             (.pid (java.lang.ProcessHandle/current)) ".log"))
+      env)))
 
 (def ^:private write-log-path
-  (let [env (System/getenv "KMET_TUI_WRITE_LOG")]
-    (when (and env (seq env))
-      (if (fs/directory? env)
-        (let [now (java.time.LocalDateTime/now)
-              ts (format "%d-%02d-%02d_%02d-%02d-%02d"
-                         (.getYear now) (.getMonthValue now) (.getDayOfMonth now)
-                         (.getHour now) (.getMinute now) (.getSecond now))]
-          (str env fs/file-separator "tui-" ts "-" (.pid (java.lang.ProcessHandle/current)) ".log"))
-        env))))
+  (capture-log-path (System/getenv "KMET_TUI_WRITE_LOG") "tui"))
+
+(def ^:private input-log-path
+  (capture-log-path (System/getenv "KMET_TUI_INPUT_LOG") "tui-input"))
 
 (defn write-log!
   "Append raw output to the write-log path, ignoring errors (pi: write())."
@@ -38,6 +48,21 @@
     (try
       (with-open [w (io/writer write-log-path :append true)]
         (.write w s))
+      (catch Exception _))))
+
+(defn input-log-enabled?
+  "True when KMET_TUI_INPUT_LOG is set (the input trace is active)."
+  []
+  (some? input-log-path))
+
+(defn input-log!
+  "Append one timestamped line to the input trace, ignoring errors. The
+   caller (kmet.tui.core) formats the line; this only stamps and appends."
+  [s]
+  (when input-log-path
+    (try
+      (with-open [w (io/writer input-log-path :append true)]
+        (.write w (str (java.time.LocalDateTime/now) " " s "\n")))
       (catch Exception _))))
 
 ;; ─── Shared escape sequences ────────────────────────────────────────────────
