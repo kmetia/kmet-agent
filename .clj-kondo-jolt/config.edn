@@ -41,6 +41,5 @@
   ;; are linted, so a genuinely dead one still fails that view).
   kmet.app.extensions {:linters {:unresolved-namespace {:exclude [sci]}
                                  :unused-namespace {:exclude [kmet.loader.sci-loader]}
-                                 :unused-private-var {:level :off}
-                                 :unused-binding {:level :off}}}
+                                 :unused-private-var {:level :off}}}
   kmet.tasks.build {:linters {:unresolved-namespace {:exclude [bcp]}}}}}

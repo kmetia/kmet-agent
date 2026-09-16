@@ -632,7 +632,7 @@
                   (session/append-session-info! sess (session/sanitize-session-name name))))
    :get-name (fn [] (when-let [sess @session-atom] (session/get-session-name sess)))})
 
-(declare loader-aware)
+(declare loader-aware loader-aware-map)
 
 (defn- create-extension-api
   "Build the api map for an extension. Every registration records its
@@ -654,8 +654,9 @@
                           ;; the runner can pass it the extension context
                           ;; (pi: handler(args, ctx)) while builtin commands
                           ;; keep receiving CoreState
-                          (let [cmd (assoc cmd :extension-handler
-                                           (loader-aware ext (:handler cmd)))]
+                          (let [cmd (loader-aware-map
+                                     ext (assoc cmd :extension-handler
+                                                (:handler cmd)))]
                             (commands/register-command! cmd)
                             (track (fn [] (commands/unregister-command! (:name cmd))))))
      :unregister-command! commands/unregister-command!
@@ -663,9 +664,7 @@
      :get-commands #(mapv (fn [c] (select-keys c [:name :description]))
                           (commands/get-commands))
      :register-tool! (fn [tool]
-                       (tools/register-tool!
-                        (cond-> tool
-                          (:execute tool) (update :execute #(loader-aware ext %))))
+                       (tools/register-tool! (loader-aware-map ext tool))
                        (track (fn [] (tools/unregister-tool! (:name tool)))))
      :unregister-tool! tools/unregister-tool!
      ;; pi: createBashTool — the bash tool constructor with its options
@@ -1153,6 +1152,20 @@
                     [k (sci/copy-var* v sci-ns)])))
           (ns-interns ns-sym))))
 
+(defn- tui-layer?
+  "Is namespace name N one of the shared TUI layers? The one place the set is
+   spelled out — shared-namespace? (the SCI injection and the native host
+   filter) and shared-tui-namespaces both read it."
+  [n]
+  (or (str/starts-with? n "kmet.tui.")
+      (= n "kmet.app.ui.tool-renderers")
+      (= n "kmet.app.keybindings")))
+
+(defn- libs-layer?
+  "Is namespace name N a shared kmet.libs.* layer? (see tui-layer?)"
+  [n]
+  (str/starts-with? n "kmet.libs."))
+
 (defn- shared-namespace?
   "Is NS-OBJ a host namespace extension contexts share? The scan's rule,
    used by the SCI path (which copies the vars into its context) and by the
@@ -1183,10 +1196,8 @@
          (or (str/starts-with? n "clojure.")
              (str/starts-with? n "babashka.")
              (contains? bb-shared-namespaces (ns-name ns-obj))
-             (str/starts-with? n "kmet.tui.")
-             (= n "kmet.app.ui.tool-renderers")
-             (= n "kmet.app.keybindings")
-             (str/starts-with? n "kmet.libs.")))))
+             (tui-layer? n)
+             (libs-layer? n)))))
 
 #?(:jolt
    (defn- shared-namespace-names
@@ -1242,6 +1253,12 @@
         (when (and (list? form) (= 'ns (first form)))
           form)))
     (catch Exception _ nil)))
+
+(defn- jar-artifact?
+  "True when ARTIFACT is a jar/zip artifact (bb keeps those unexpanded; Jolt
+   materializes them to directories first — see materialize-jar!)."
+  [artifact]
+  (and artifact (= :jar (:kind artifact))))
 
 (defn- jar-archive?
   "True when F is a regular .jar/.zip file path."
@@ -1450,11 +1467,8 @@
    (what the context injection shares with extensions)."
   []
   (set (keep (fn [ns-obj]
-               (let [n (str (ns-name ns-obj))]
-                 (when (or (str/starts-with? n "kmet.tui.")
-                           (= n "kmet.app.ui.tool-renderers")
-                           (= n "kmet.app.keybindings"))
-                   (ns-name ns-obj))))
+               (when (tui-layer? (str (ns-name ns-obj)))
+                 (ns-name ns-obj)))
              (all-ns))))
 
 (defn- shared-libs-namespaces
@@ -1462,9 +1476,8 @@
    context injection shares with extensions)."
   []
   (set (keep (fn [ns-obj]
-               (let [n (str (ns-name ns-obj))]
-                 (when (str/starts-with? n "kmet.libs.")
-                   (ns-name ns-obj))))
+               (when (libs-layer? (str (ns-name ns-obj)))
+                 (ns-name ns-obj)))
              (all-ns))))
 
 #?(:jolt
@@ -1791,8 +1804,8 @@
      "Write a single-file extension's SOURCE into a per-extension cache dir at
       the path its namespace names (dots as slashes, dashes munged) and answer
       that dir: the Jolt native reader is strict-layout, so a loose single file
-      needs a home at its own path. Keyed by the file's mtime, so an edited
-      extension re-materializes."
+      needs a home at its own path. Keyed by the source's content, so an
+      edited extension re-materializes (see the key comment)."
      [ext-name ns-sym file source]
      ;; the key is the CONTENT, not the file name: several single-file probes
      ;; share a base name ("ext.clj") and, written in the same second, the same
@@ -1806,7 +1819,12 @@
            target (str (fs/path dir (str (ns-path ns-sym) "."
                                          (or (fs/extension (str file)) "clj"))))]
        (fs/create-dirs (fs/parent target))
-       (spit target source)
+       ;; write-then-rename: the key IS the content, so a half-written file
+       ;; left under a valid key would be read as that content by every later
+       ;; load (and by a concurrent one in another process)
+       (let [tmp (str target ".tmp")]
+         (spit tmp source)
+         (fs/move tmp target {:replace-existing true}))
        dir)))
 
 #?(:jolt
@@ -1843,9 +1861,18 @@
    through the source provider (make-source-fn), the bb imports and class
    seeding. The host is bb or the JVM — the native backend owns Jolt — so the
    SCI read feature is :bb."
-  [ext-name artifact owns-ns? deps-resolver resource-fn literal
+  [ext-name artifact owns-ns? deps-resolver literal
    tui-namespaces libs-namespaces]
-  (let [l (loader-sci/sci-loader
+  ;; the extension's own resources shadow the host's inside the context: a
+  ;; jar's entries and a declared dep's roots answer io/resource. Only the SCI
+  ;; path needs the injected fn — the Jolt loader answers resources from its
+  ;; own roots and the filtered host.
+  (let [resource-fn (when artifact
+                      (extension-resource-fn
+                       artifact
+                       (when (jar-artifact? artifact) (jar-namespaces (:root artifact)))
+                       deps-resolver))
+        l (loader-sci/sci-loader
            {:id (str "ext:" ext-name)
             :sources (make-source-fn ext-name artifact owns-ns? deps-resolver
                                      tui-namespaces libs-namespaces literal)
@@ -1885,13 +1912,13 @@
    same extension sources and dep closure — they differ in what that means:
    injected namespace maps and a source provider under SCI, the filtered host
    root and real source roots under Jolt."
-  [ext-name artifact owns-ns? deps-resolver resource-fn literal]
+  [ext-name artifact owns-ns? deps-resolver literal]
   (host-requires!)
   #?(:jolt
      (create-jolt-loader ext-name artifact owns-ns? deps-resolver literal
                          (shared-tui-namespaces) (shared-libs-namespaces))
      :default
-     (create-sci-loader ext-name artifact owns-ns? deps-resolver resource-fn literal
+     (create-sci-loader ext-name artifact owns-ns? deps-resolver literal
                         (shared-tui-namespaces) (shared-libs-namespaces))))
 
 (defn- loader-aware
@@ -1914,6 +1941,19 @@
                  (fn [] (apply handler args))))
              handler)
      :default handler))
+
+(defn- loader-aware-map
+  "M with every fn value wrapped by `loader-aware`. The map-shaped
+   registrations (commands, tools) carry callbacks besides their main one —
+   :get-argument-completions, :render-call/:render-result, :title,
+   :prepare-arguments, … — and the app invokes each of them long after the
+   load, so each needs the ambient binding as much as the handler does.
+   Non-fn values (:description, :parameters, :render-shell :self) pass
+   through; a record stays a record (the reduce walks the map itself)."
+  [ext m]
+  (reduce-kv (fn [acc k v]
+               (cond-> acc (fn? v) (assoc k (loader-aware ext v))))
+             m m))
 
 (defn- extension-var
   "The value of VAR-NAME in ENTRY-NS of EXT's context, or nil. Backend-
@@ -1949,13 +1989,13 @@
               :deregister-fns (atom [])
               :initialized? (atom false)})]
     (try
-      (let [jar-artifact? (and artifact (= :jar (:kind artifact)))
+      (let [jar? (jar-artifact? artifact)
             deps (when artifact
-                   (if jar-artifact?
+                   (if jar?
                      (:deps (edn/read-string
                              (or (jar-entry-source (:root artifact) "deps.edn") "{}")))
                      (deps-of-root (:root artifact))))
-            jar-info (when jar-artifact? (jar-namespaces (:root artifact)))
+            jar-info (when jar? (jar-namespaces (:root artifact)))
             owns-ns? (if artifact
                        (fn [ns-sym] (artifact-owns-ns? artifact jar-info ns-sym))
                        (constantly false))
@@ -1979,8 +2019,6 @@
                                                " file does not start with (ns ...)")
                                           {:path path}))))
             l (create-loader name artifact owns-ns? deps-resolver
-                             (when artifact
-                               (extension-resource-fn artifact jar-info deps-resolver))
                              (when-not artifact
                                {file-ns {:file (str file) :source file-source}}))]
         (doseq [lib (keys deps)]

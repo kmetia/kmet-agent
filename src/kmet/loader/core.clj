@@ -349,8 +349,15 @@
         [base [{:message (ex-message e) :exception e}]]))
     [base []]))
 
+(declare ^:private root-loader)
+
 (defn- unload-run
+  "The generic teardown. The host root is refused: it is the host's global
+   world, not a context — closing it would break every later load through
+   `(root)` for the rest of the process."
   [l]
+  (when (identical? l @root-loader)
+    (throw (ex-info "the host root is not unloadable" {:type :loader/bad-request})))
   (let [state (:state l)]
     (if (compare-and-set! (:unloaded? state) false true)
       (let [in-flight (count @(:in-flight state))

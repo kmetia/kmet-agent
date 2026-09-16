@@ -364,6 +364,14 @@
     (is (= :loader/bad-request (:type (ex-data-of #(ldr/find l {:kind :wat :name "x"})))))
     (is (= :loader/bad-request (:type (ex-data-of #(ldr/find l {:kind :var})))))))
 
+(deftest test-host-root-is-not-unloadable
+  (testing "the root is the host's own world, not a disposable context"
+    (is (= :loader/bad-request
+           (:type (ex-data-of #(ldr/unload! (ldr/root)))))))
+  (testing "and it is untouched by the attempt"
+    (is (some? (ldr/find (ldr/root) (req :ns "clojure.string"))))
+    (is (false? (ldr/unloaded? (ldr/root))))))
+
 (deftest test-as-classloader-unsupported-host
   (let [l (mem/memory {})]
     (is (= :loader/no-classloader (:type (ex-data-of #(ldr/as-classloader l)))))

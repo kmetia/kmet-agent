@@ -387,6 +387,13 @@ Mapping:
 | `Bundle.getState` | — | `(unloaded? l)` + `(status l)` |
 | in-use wirings stay live | "already loaded … still accessible" | same rule |
 
+- **The host root is not a context**: `unload!` on it throws
+  `:loader/bad-request` instead of tearing down. Closing the root would leave
+  the process with no world to load from — every later `(root)` operation,
+  including the extension system's host view, would fail. Case 21; both
+  implementations enforce it (kmet's generic teardown and Jolt's, which the
+  adapter inherits).
+
 ---
 
 ## 6. Hosts and backends
@@ -695,8 +702,12 @@ table above, which also makes `(io/resource n loader)`'s currently-ignored
 bb has `sci.core` built in — nothing to add — and **jolt's stdlib bundles
 it too** (`make sci` / `scifunctional` pin the vendored copy, and
 `kmet.loader.sci-loader` runs on jolt via `jolt test kmet.loader.test-sci-loader`). So
-kmet declares **no sci dependency at all**: no maven jar, no git pin, no
-vendoring, no reader conditional. The one unproven assumption of the
+the *library* declares **no sci dependency at all**: no maven jar, no git
+pin, no vendoring, no reader conditional. (kmet's own `jolt/deps.edn` — the
+jolt-only RFC 0014 slot, not the lib's deps — does pin `org.babashka/sci`
+0.13.53, because the jolt-gated version is what runs the SCI backend's suite
+under `jolt test`; extension contexts on jolt no longer go through sci at
+all.) The one unproven assumption of the
 phase-1 plan turned out to be a non-issue. A consumer that requires only
 `kmet.loader.core` never loads sci anyway — the require lives in the
 backend's own namespace.
@@ -785,8 +796,12 @@ loaderconf`, empty baseline — mirrored on the kmet side by
 20. *(native)* **Resources follow the ambient loader** — inside `with-loader`,
     the 1-arity `(io/resource "x")` resolves against the bound loader's roots;
     outside one it keeps the host answer.
+21. **The host root is not unloadable** — `unload!` on it is a bad request
+    (`:loader/bad-request`), not a teardown: closing the host's own world
+    would leave the process with nothing to load from. Every other loader —
+    contexts, views, combinators — unloads normally.
 
-Cases 1–8, 10, 11 and 13–16, 18 are expressible against SCI on bb and jolt
+Cases 1–8, 10, 11, 13–16, 18 and 21 are expressible against SCI on bb and jolt
 today, which is the point: pin the semantics before any runtime work, the
 way the corpus does for `clojure.core`. Case 9 needs a code backend and
 lives in the SCI suite; case 12 has a data-path version in the core suite
@@ -940,7 +955,10 @@ first, and every own source is validated up front, because the native reader
 never calls back into kmet — dep roots are the `jolt.deps` extraction dirs,
 and the shared contract arrives as the filtered host root instead of copied
 vars. Every callback an extension registers, and init/shutdown themselves, run
-wrapped in `with-loader*`: that is what the ambient tier is for, and it is how
+wrapped in `with-loader*` — every fn inside a registration *map* too
+(`:get-argument-completions`, `:render-call`/`:render-result`, `:title`, …),
+not just its handler, since the app calls each of them long after the load:
+that is what the ambient tier is for, and it is how
 `(io/resource "x")` inside an extension resolves against its own roots at call
 time (conformance case 20 — the 1-arity follows the ambient loader, which is
 also why the runtime's own host views resolve through the host resolver

@@ -44,6 +44,18 @@
     nil
     (catch Throwable e e)))
 
+;;; The Jolt root behind the adapter refuses too (the runtime's own rule, loader.ss):
+;; kmet's portable root refuses in its unload!; this is the other half of the
+;; same contract — the host's global world is not a disposable context.
+(deftest adapter-root-is-not-unloadable
+  (if-let [{:keys [root]} (adapter)]
+    (let [r (root)
+          e (threw #(loader/unload! r))]
+      (t/is (some? e) "unload! on the host root is refused")
+      (t/is (false? (loader/unloaded? r)) "and the root is still live")
+      (t/is (some? (loader/find r {:kind :ns :name "clojure.string"}))))
+    (t/testing "bb/JVM: the adapter is a .jolt source" (t/is true))))
+
 (deftest adapter-loads-a-dashed-namespace
   (if-let [{:keys [classpath status]} (adapter)]
     (let [d (dir! "dashed")]

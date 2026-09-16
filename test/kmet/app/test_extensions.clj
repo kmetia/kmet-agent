@@ -210,6 +210,22 @@
             "unload unmaps the native backend's context namespaces")
       (t/is (empty? (extensions/get-loaded-extensions))))))
 
+(t/deftest test-extension-resource-in-a-late-callback
+  ;; Every fn an extension registers runs in its own context whenever the app
+  ;; calls it — including the fns inside a registration map that are not the
+  ;; handler. The manifest fixture's :get-argument-completions reads a file
+  ;; bundled at the extension's own root: on the SCI backend the injected
+  ;; io/resource answers it, on Jolt the callback's ambient loader does.
+  (extensions/clear-extensions!)
+  (let [result (extensions/load-extension! "test/fixtures/ext-dir")]
+    (t/is (nil? (:error result)) (str "loaded: " (:error result)))
+    (let [cmd (commands/find-command "multi-ext-cmd")]
+      (t/is (some? cmd) "the command registered")
+      (t/is (= [{:value "from-own-root"}]
+               ((:get-argument-completions cmd) ""))
+            "the later callback resolves the extension's own resource"))
+    (extensions/unload-all-extensions!)))
+
 (t/deftest test-unload-removes-provider-registration
   (extensions/clear-extensions!)
   (models/load-catalogs!)
