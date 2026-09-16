@@ -6,6 +6,7 @@
    flows are validated by manual /review and /end-review invocations
    in the TUI."
   (:require [clojure.test :refer [deftest is testing]]
+            [clojure.string :as str]
             [kmet.extension :as ext]
             [kmet.extensions.review.core :as review]
             [kmet.extensions.review.dialogs :as dlg]))
@@ -108,3 +109,89 @@
   (is (= 0 (dlg/smart-default true false)))
   (is (= 1 (dlg/smart-default false true)))
   (is (= 2 (dlg/smart-default false false))))
+
+;; -- Custom review instructions -----------------------------------------
+;;
+;; The settings live as a `review-settings` custom entry. pi reads them
+;; with sessionManager.getEntries (ALL entries), not getBranch: the
+;; fresh-session jump branches away from the entry that was just saved, so
+;; a branch-scoped read loses the instructions right when the review prompt
+;; is assembled. The stubs below model exactly that split.
+;;
+;; Module-local atoms: @#'review/x derefs the var to its atom, @@#'… to the
+;; value (SCI vars are not IAtoms themselves).
+
+(defn- stub-review-api
+  "Nullable api with a session facade whose current branch holds only the
+   first user message (the state after the fresh-session jump) while
+   ALL-ENTRIES is the whole session (get-all-entries). Records
+   append-entry! calls and ui-calls."
+  [all-entries]
+  (let [{:keys [api] :as nullable} (ext/create-nullable-api)
+        appended (atom [])
+        branch (atom [{:id "u1" :role :user :content "hi"}])
+        settings-type-matcher (fn [custom-type entry]
+                                (and (= :custom (:role entry))
+                                     (= custom-type (:custom-type entry))))
+        session {:append-entry! (fn [custom-type data]
+                                  (swap! appended conj {:custom-type custom-type
+                                                        :data data})
+                                  "gen-id")
+                 :get-all-entries (fn [custom-type]
+                                    (filterv #(settings-type-matcher custom-type %)
+                                             all-entries))
+                 :get-entries (fn [custom-type]
+                                (filterv #(settings-type-matcher custom-type %) @branch))
+                 :get-branch (fn [] @branch)
+                 :get-leaf-id (fn [] "leaf-1")}]
+    (assoc nullable
+           :api (assoc api :session session)
+           :appended appended)))
+
+(defn- settings-entry [instructions]
+  {:role :custom
+   :custom-type "review-settings"
+   :data {:custom-instructions instructions}})
+
+(deftest review-settings-read-session-wide-test
+  (reset! @#'review/review-custom-instructions nil)
+  (let [{:keys [api]} (stub-review-api
+                       [(settings-entry "First")
+                        (settings-entry "Latest instruction")])]
+    (#'review/apply-review-settings! api)
+    (is (= "Latest instruction" @@#'review/review-custom-instructions)
+        "last session-wide entry wins (pi: getEntries scan)")
+    (let [prompt (#'review/assemble-review-prompt
+                  api "/nonexistent-review-test-cwd" {:type :uncommitted} nil)]
+      (is (str/includes? prompt "Shared custom review instructions"))
+      (is (str/includes? prompt "Latest instruction")))))
+
+(deftest execute-review-keeps-origin-and-instructions-test
+  ;; The fresh-session branch jump emits :session-tree, whose handler
+  ;; re-derives module state from the new branch. The origin must be
+  ;; restored afterwards (pi: lockedOriginId) and the settings must still
+  ;; be found session-wide — otherwise the review prompt silently drops
+  ;; the custom instructions.
+  (reset! @#'review/review-origin-id nil)
+  (reset! @#'review/review-custom-instructions nil)
+  (let [{:keys [api state appended]}
+        (stub-review-api [(settings-entry "Check off-by-one errors")])
+        nav-calls (atom [])
+        ctx {:cwd "/nonexistent-review-test-cwd"
+             :mode :interactive
+             :navigate-tree (fn [target-id opts]
+                              (swap! nav-calls conj [target-id opts])
+                              (#'review/apply-review-settings! api)
+                              (#'review/apply-review-state! api)
+                              {:cancelled false})}]
+    (is (true? (#'review/execute-review api ctx {:type :uncommitted} true nil)))
+    (is (= [["u1" {:summarize false :label "code-review"}]] @nav-calls))
+    (is (= "leaf-1" @@#'review/review-origin-id)
+        "origin survives the :session-tree reset")
+    (is (= [{:custom-type "review-session"
+             :data {:active true :origin-id "leaf-1"}}]
+           @appended))
+    (let [sent (some (fn [[k text _]] (when (= k :send-user-message) text))
+                     (:ui-calls @state))]
+      (is (str/includes? sent "Check off-by-one errors")
+          "custom instructions reach the review prompt"))))

@@ -29,7 +29,7 @@ If a `REVIEW_GUIDELINES.md` file sits beside the `.kmet` (or `.pi`) project mark
 
 ## Shared custom review instructions
 
-The preset selector includes an "Add custom review instructions" row. The instructions are stored as a `review-settings` custom entry, applied to every review until removed.
+The preset selector includes an "Add custom review instructions" row. The instructions are stored as a `review-settings` custom entry, applied to every review until removed. The entry is read session-wide (`get-all-entries`, pi: `sessionManager.getEntries`), not from the active branch, so it survives the fresh-session branch jump.
 
 ## State model
 

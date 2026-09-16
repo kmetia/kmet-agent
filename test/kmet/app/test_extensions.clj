@@ -686,6 +686,9 @@
     (try
       (let [id (extensions/append-custom-entry! "st" {:n 1})]
         (t/is (some? id)))
+      (testing "get-all-entries reads custom entries across the session"
+        (t/is (= [{:n 1}] (mapv :data (extensions/get-all-custom-entries "st"))))
+        (t/is (= [] (extensions/get-all-custom-entries "nope"))))
       (testing "ctx/sessionManager facades (review extension needs them)"
         (let [_u1 (session/append-entry sess {:role :user :content [{:type :text :text "hi"}]})
               a1 (session/append-entry sess {:role :assistant :content [{:type :text :text "ok"}]})
@@ -720,6 +723,8 @@
       (t/is (nil? ((:get-leaf-id sess-api))) "nullable get-leaf-id → nil")
       (t/is (nil? ((:get-entry sess-api) "any")) "nullable get-entry → nil")
       (t/is (= [] ((:get-entries sess-api) "x")))
+      (t/is (= [] ((:get-all-entries sess-api) "x"))
+            "nullable get-all-entries → empty")
       ((:set-label! sess-api) "id1" "bookmark")
       (t/is (= "bookmark" ((:get-label sess-api) "id1")))
       ((:set-name! sess-api) "hello")

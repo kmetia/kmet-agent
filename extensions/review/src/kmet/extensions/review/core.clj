@@ -92,10 +92,13 @@
           (reverse entries))))
 
 (defn- read-review-settings
-  "Most recent review-settings custom entry, or
-   {:custom-instructions nil}."
+  "Most recent review-settings custom entry in the whole session, or
+   {:custom-instructions nil}. Session-wide on purpose (pi:
+   getReviewSettings scans sessionManager.getEntries): the fresh-session
+   jump branches away from the entry, and a branch-scoped read would wipe
+   the instructions right before the review prompt is assembled."
   [api]
-  (let [entries ((:get-entries (ext/session api)) review-settings-type)]
+  (let [entries ((:get-all-entries (ext/session api)) review-settings-type)]
     (if-let [entry (last entries)]
       (let [data (:data entry)]
         {:custom-instructions (some-> data :custom-instructions str/trim not-empty)})
@@ -432,6 +435,12 @@
 
                     :else
                     (do (ext/ui-set-editor-text api "")
+                        ;; :session-tree fired during navigation re-derived
+                        ;; state from the new review branch (no review-session
+                        ;; entry there) and cleared the origin — restore it
+                        ;; (pi: lockedOriginId); the review-state entry below
+                        ;; re-persists it.
+                        (reset! review-origin-id origin)
                         (set-review-widget! api true)
                         ((:append-entry! (ext/session api))
                          review-state-type

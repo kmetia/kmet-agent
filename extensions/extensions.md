@@ -827,7 +827,8 @@ oauth block goes away with it.
 (def sess (ext/session api))
 (sess/append-entry! "my-state" {:n 1})    ; durable extension state (not in LLM context)
 (sess/append-message! "my-msg" "content" true {:details ...})  ; in LLM context; :display controls rendering
-(sess/get-entries "my-state")
+(sess/get-entries "my-state")     ; :custom entries of this type on the active branch (pi: getBranch)
+(sess/get-all-entries "my-state") ; same, across the whole session incl. abandoned branches (pi: getEntries)
 (sess/set-label! entry-id "bookmark")
 (sess/get-label entry-id)
 (sess/set-name! "my session")
@@ -838,7 +839,10 @@ The same facades are available on the extension **context** as `(:session
 ctx)` (pi: `ctx.sessionManager`) — command and event handlers that only
 receive `ctx` can read session state. The ctx map itself is a fresh merge of
 a headless default and the interactive mode's live `:build-context`
-capability per call (pi: `createContext()`).
+capability per call (pi: `createContext()`). `get-entries` follows the
+active branch (a settings entry appended before a tree navigation is not
+on the new branch); use `get-all-entries` for extension settings that must
+outlive branch jumps (the review extension's custom instructions do).
 
 ### Shell
 

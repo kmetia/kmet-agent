@@ -1265,6 +1265,19 @@
     (t/is (= 1 (count (s/get-custom-entries session :my-state))))
     (t/is (= {:v 2} (:data (first (s/get-custom-entries session :my-state)))))))
 
+(t/deftest test-all-custom-entries-session-wide
+  ;; get-all-custom-entries spans abandoned branches (pi: getEntries);
+  ;; get-custom-entries stays branch-scoped (pi: getBranch)
+  (let [session (s/create-session test-dir)
+        q (s/append-entry session {:role :user :content "q"})
+        _ (s/append-custom-entry! session :my-state {:v 1})]
+    (s/branch! session (:id q))
+    (t/is (empty? (s/get-custom-entries session :my-state))
+          "branch read does not see abandoned state")
+    (t/is (= [{:v 1}] (mapv :data (s/get-all-custom-entries session :my-state)))
+          "session read sees abandoned state")
+    (t/is (empty? (s/get-all-custom-entries session :other)) "type filter")))
+
 (t/deftest test-custom-message-entry
   ;; G10: custom_message entries participate in context as a :custom-role
   ;; message; display flag + details carried through; excluded from counts

@@ -509,6 +509,11 @@
     (session/get-custom-entries sess custom-type)
     []))
 
+(defn get-all-custom-entries [custom-type]
+  (if-let [sess @session-atom]
+    (session/get-all-custom-entries sess custom-type)
+    []))
+
 (defn get-branch-entries
   ([]
    (if-let [sess @session-atom]
@@ -607,6 +612,7 @@
   {:append-entry! append-custom-entry!
    :append-message! append-custom-message!
    :get-entries get-custom-entries
+   :get-all-entries get-all-custom-entries
    :get-branch get-branch-entries
    :get-leaf-id get-leaf-id
    :get-entry get-entry

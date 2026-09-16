@@ -497,6 +497,15 @@
   (filter #(and (= :custom (:role %)) (= custom-type (:custom-type %)))
           (get-branch session)))
 
+(defn get-all-custom-entries
+  "All :custom entries of CUSTOM-TYPE in the session, abandoned branches
+   included (pi: sessionManager.getEntries filtered by customType). Use for
+   extension settings that outlive a branch jump; get-custom-entries stays
+   scoped to the active branch (pi: getBranch)."
+  [session custom-type]
+  (filter #(and (= :custom (:role %)) (= custom-type (:custom-type %)))
+          @(:entries session)))
+
 ;; ─── Model & thinking changes (G6 — pi: appendModelChange / appendThinkingLevelChange) ──
 
 (defn append-model-change!
