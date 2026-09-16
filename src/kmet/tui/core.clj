@@ -860,51 +860,56 @@
     (when (and q @settled?)
       (deliver (:promise q) color))))
 
+(defn- deliver-terminal-response!
+  "Act on a parsed terminal response (KIND is :cell-size / :osc-11 /
+   :color-scheme, VALUE its parsed value), consume it from the response hold
+   and the input buffer, and re-process any rest of the batch in the same
+   pass."
+  [tui read-fn buf kind value rest]
+  (clear-terminal-response-timer! tui)
+  (reset! (:terminal-response-buffer tui) "")
+  (reset! buf rest)
+  (case kind
+    :cell-size
+    (do (img/set-cell-dimensions! value)
+        ;; Invalidate all components so images re-render at the new size
+        ;; (pi: consumeCellSizeResponse — ungated, no pending query).
+        (tui-invalidate tui)
+        (tui-request-render tui))
+
+    :osc-11
+    (settle-osc-11-response! tui value)
+
+    :color-scheme
+    (doseq [l @(:color-scheme-listeners tui)]
+      (try (l value)
+           (catch Exception e
+             (binding [*out* *err*]
+               (println "color scheme listener:" (ex-message e)))))))
+  ;; One read batch can carry several responses (an OSC 11 reply and a color
+  ;; scheme report arrive back-to-back after the startup queries and the tty
+  ;; coalesces them): re-process the remainder so the next one is handled in
+  ;; this same pass instead of being dropped as garbage.
+  (when (seq rest)
+    (process-input-buffer! tui read-fn buf))
+  :consumed)
+
 (defn- intercept-terminal-response!
   "Consume terminal query responses — cell size (\u001b[6;h;wt), OSC 11
    background color, color scheme report (\u001b[?997;Nn) — before key
-   parsing; pi consumes them in handleInput before listeners. Cell size is
-   ungated (pi: consumeCellSizeResponse has no pending query); OSC 11 is
-   gated on an outstanding query. Returns :consumed (handled), :pending
-   (fragment held), or nil (not a response). On nil the input buffer is left
-   UNTOUCHED: blanking it would drop the fragment just examined (see
-   process-input-buffer!)."
+   parsing; pi consumes them in handleInput before listeners. A batch may
+   hold several responses at once — the leading one is consumed and the
+   remainder re-processed in the same pass. Returns :consumed (handled),
+   :pending (fragment held), or nil (not a response). On nil the input
+   buffer is left UNTOUCHED: blanking it would drop the fragment just
+   examined (see process-input-buffer!)."
   [tui read-fn buf]
   (let [held @(:terminal-response-buffer tui)
         combined (str held @buf)
-        cell-size (terminal/parse-cell-size-response combined)
-        osc-11 (when @(:pending-osc-11? tui)
-                 (terminal/parse-osc-11-background-response combined))
-        scheme (terminal/parse-terminal-color-scheme-report combined)]
+        {:keys [kind value rest]} (terminal/split-terminal-response combined)]
     (cond
-      cell-size
-      (do (clear-terminal-response-timer! tui)
-          (reset! (:terminal-response-buffer tui) "")
-          (reset! buf "")
-          (img/set-cell-dimensions! cell-size)
-          ;; Invalidate all components so images re-render at the new size
-          ;; (pi: consumeCellSizeResponse — ungated, no pending query).
-          (tui-invalidate tui)
-          (tui-request-render tui)
-          :consumed)
-
-      osc-11
-      (do (clear-terminal-response-timer! tui)
-          (reset! (:terminal-response-buffer tui) "")
-          (reset! buf "")
-          (settle-osc-11-response! tui osc-11)
-          :consumed)
-
-      scheme
-      (do (clear-terminal-response-timer! tui)
-          (reset! (:terminal-response-buffer tui) "")
-          (reset! buf "")
-          (doseq [l @(:color-scheme-listeners tui)]
-            (try (l scheme)
-                 (catch Exception e
-                   (binding [*out* *err*]
-                     (println "color scheme listener:" (ex-message e))))))
-          :consumed)
+      kind
+      (deliver-terminal-response! tui read-fn buf kind value rest)
 
       ;; Prefix hold — only when the fragment is UNAMBIGUOUSLY a response
       ;; head. A bare "\u001b[" or a lone "\u001b" is also an arrow-key /

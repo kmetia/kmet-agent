@@ -180,6 +180,30 @@
     (when-let [parsed (parse-negotiation-sequence response)]
       {:parsed parsed :rest (subs s (count response))})))
 
+(def ^:private cell-size-leading-re #"^\u001b\[6;\d+;\d+t")
+(def ^:private osc-11-leading-re #"(?i)^\u001b\]11;[^\u0007\u001b]*(?:\u0007|\u001b\\)")
+(def ^:private color-scheme-leading-re #"^\u001b\[\?997;[12]n")
+
+(defn split-terminal-response
+  "Split a LEADING terminal query response off S. Returns
+   {:kind :cell-size|:osc-11|:color-scheme :value V :rest R} when S begins
+   with one, nil otherwise. Same batching problem as the negotiation
+   responses: the reader drains every queued byte into one batch, so an
+   OSC 11 reply and a color scheme report (or a cell size report and a key)
+   can share a read; parsing the whole string would miss them and the
+   leading response would be dropped as garbage."
+  [s]
+  (or
+   (when-let [m (re-find cell-size-leading-re s)]
+     (when-let [value (parse-cell-size-response m)]
+       {:kind :cell-size :value value :rest (subs s (count m))}))
+   (when-let [m (re-find osc-11-leading-re s)]
+     (when-let [value (parse-osc-11-background-response m)]
+       {:kind :osc-11 :value value :rest (subs s (count m))}))
+   (when-let [m (re-find color-scheme-leading-re s)]
+     (when-let [value (parse-terminal-color-scheme-report m)]
+       {:kind :color-scheme :value value :rest (subs s (count m))}))))
+
 (defn negotiation-prefix?
   "True when s could still become a negotiation response (pi:
    isKeyboardProtocolNegotiationSequencePrefix). A bare \"\u001b[\" is NOT

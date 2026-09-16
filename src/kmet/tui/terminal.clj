@@ -173,6 +173,7 @@
 (def TERMINAL-PROGRESS-KEEPALIVE-MS lib/TERMINAL-PROGRESS-KEEPALIVE-MS)
 (def parse-negotiation-sequence lib/parse-negotiation-sequence)
 (def split-negotiation-response lib/split-negotiation-response)
+(def split-terminal-response lib/split-terminal-response)
 (def negotiation-prefix? lib/negotiation-prefix?)
 (def cell-size-response-prefix? lib/cell-size-response-prefix?)
 (def osc-11-response-prefix? lib/osc-11-response-prefix?)

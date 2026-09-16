@@ -82,6 +82,28 @@
     (t/is (nil? (lib/parse-cell-size-response "\u001b[6~")) "PageDown is not a cell size response")
     (t/is (nil? (lib/parse-cell-size-response "a")))))
 
+(deftest test-split-terminal-response
+  (testing "a leading response splits off the remainder of the batch"
+    (t/is (= {:kind :cell-size :value {:width-px 100 :height-px 30} :rest ""}
+             (lib/split-terminal-response "\u001b[6;30;100t")))
+    (t/is (= {:kind :cell-size :value {:width-px 100 :height-px 30} :rest "\u001b[A"}
+             (lib/split-terminal-response "\u001b[6;30;100t\u001b[A"))
+          "a key sharing the batch stays in the remainder")
+    (t/is (= {:kind :osc-11 :value {:r 0x1a :g 0x2b :b 0x3c} :rest "\u001b[?997;2n"}
+             (lib/split-terminal-response "\u001b]11;#1a2b3c\u0007\u001b[?997;2n")))
+    (t/is (= {:kind :color-scheme :value :light :rest "\u001b]11;#1a2b3c\u0007"}
+             (lib/split-terminal-response "\u001b[?997;2n\u001b]11;#1a2b3c\u0007"))
+          "a color scheme report first splits too")
+    (t/is (= {:kind :osc-11 :value {:r 0x1a :g 0x2b :b 0x3c} :rest ""}
+             (lib/split-terminal-response "\u001b]11;rgb:1a1a/2b2b/3c3c\u001b\\"))
+          "ST-terminated OSC 11 splits too"))
+  (testing "non-responses and rejected values stay untouched"
+    (t/is (nil? (lib/split-terminal-response "a")))
+    (t/is (nil? (lib/split-terminal-response "\u001b[6~")) "PageDown is not a cell size response")
+    (t/is (nil? (lib/split-terminal-response "\u001b[6;")) "an incomplete fragment is not a response")
+    (t/is (nil? (lib/split-terminal-response "\u001b[6;0;100t"))
+          "a zero cell size is rejected, never split")))
+
 (deftest test-response-prefixes
   (testing "fragments that could still become responses"
     (t/is (true? (lib/cell-size-response-prefix? "\u001b[6;")))
@@ -164,6 +186,32 @@
           p (core/tui-query-terminal-color-scheme tui :timeout-ms 500)]
       (intercept tui (atom "\u001b[?997;2n"))
       (t/is (= :light (deref p 1000 ::timeout))))))
+
+(deftest test-intercept-batched-terminal-responses
+  (testing "an OSC 11 reply and a color scheme report in one batch are each consumed"
+    (let [tui (recording-tui)
+          schemes (atom [])
+          p (core/tui-query-terminal-background-color tui :timeout-ms 200)
+          buf (atom "\u001b]11;#1a2b3c\u0007\u001b[?997;2n")]
+      (core/tui-on-terminal-color-scheme-change tui #(swap! schemes conj %))
+      (t/is (= :consumed (intercept tui buf)))
+      (t/is (= "" @buf) "both responses removed from the input buffer")
+      (t/is (= {:r 0x1a :g 0x2b :b 0x3c} (deref p 1000 ::timeout))
+            "the OSC 11 promise settles from the same batch")
+      (t/is (= [:light] @schemes) "the color scheme report after it still fires"))))
+
+(deftest test-intercept-batched-cell-size-then-key
+  (testing "a key sharing the batch with a cell size response dispatches once"
+    (img/set-cell-dimensions! {:width-px 9 :height-px 18})
+    (let [tui (recording-tui)
+          dispatched (atom [])
+          buf (atom "\u001b[6;30;100t\u001b[A")]
+      (swap! (:input-listeners tui)
+             conj (fn [data] (swap! dispatched conj data) nil))
+      (t/is (= :consumed (intercept tui buf)))
+      (t/is (= "" @buf))
+      (t/is (= {:width-px 100 :height-px 30} (img/get-cell-dimensions)))
+      (t/is (= ["\u001b[A"] @dispatched) "the arrow key survives and is not duplicated"))))
 
 (deftest test-intercept-non-response-passthrough
   (testing "ordinary input is never held or consumed"
