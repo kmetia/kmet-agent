@@ -736,7 +736,7 @@ backend's own namespace.
 
 Host-agnostic, written against the protocol; must pass on every backend
 that serves the kind in question. The **executable spec** is
-`test/chez/loaderconf-test.clj` in the Jolt repo — 26 cases, `make
+`test/chez/loaderconf-test.clj` in the Jolt repo — 27 cases, `make
 loaderconf`, empty baseline — mirrored on the kmet side by
 `test/kmet/loader/test_core.clj` (data-path cases, any backend) and
 `test/kmet/loader/test_sci_loader.clj` (code-path cases, SCI). Cases marked
@@ -819,10 +819,14 @@ loaderconf`, empty baseline — mirrored on the kmet side by
 25. *(native)* **`load`/`load-file` are refused** — a host-file path would step
     outside the context's roots; the error says so and names the alternatives.
 26. *(native)* **Per-context data readers fail loudly** — a `#tag` the host's
-    `*data-readers*` does not know fails the load naming the tag, and says so
-    when the context's roots ship a `data_readers.clj` (per-context readers are
-    not supported: the runtime's reader resolves tags before the loader sees the
-    form).
+    `*data-readers*` does not know fails the load naming the tag; when the
+    context's roots ship a `data_readers.clj` the message says so, and when they
+    do not it blames no file (per-context readers are not supported: the
+    runtime's reader resolves tags before the loader sees the form).
+27. *(native)* **`:reload` reaches a delegate** — a namespace served through a
+    delegate re-reads there, in place, because the reload intent is keyed by
+    name; and the delegate's own link table holds the namespace's var links, not
+    just the namespace.
 
 Cases 1–8, 10, 11, 13–16, 18 and 21 are expressible against SCI on bb and jolt
 today, which is the point: pin the semantics before any runtime work, the
@@ -903,7 +907,7 @@ ctx-propagation mechanisms §6.1.4, gotchas §6.1.9, stage table §6.1.10).
 Shipped in the Jolt repo rather than here: `stdlib/jolt/loader.clj` plus
 the host seams (`clojure.java.io/resource` 2-arity, `RT/baseLoader`, the
 tagged-table classloader facade), with `test/chez/loaderconf-test.clj` as
-the writ — `make loaderconf`, 26 cases, empty baseline. Tracked in
+the writ — `make loaderconf`, 27 cases, empty baseline. Tracked in
 jolt-lang/jolt#912 and jolt-lang/jolt#1039.
 
 **What landed, and how it differs from M0–M4.** The substrate is one
@@ -956,14 +960,19 @@ the semantics Clojure gives them: `require`/`use`/`refer` load through the
 loader and apply `:as`/`:as-alias`/`:refer`/`:only`/`:exclude`/`:rename` in
 the DEFINING namespace (a runtime require's alias used to vanish, `Unknown
 class h`), `:reload` re-reads through the loader into the *installed*
-namespace so definitions other code already links to pick up the new roots
-(for a namespace the context's own roots serve; one shared through a delegate
-reloads there, under the evict-and-evaluate rule). A reload that THROWS keeps
+namespace so definitions other code already links to pick up the new roots.
+The intent is keyed by name, so it reaches wherever the namespace is served
+from — the context's own roots or a delegate's, which reloads in place too; the
+host root is the exception (it loads through the host's own loaded-mark, so a
+host namespace's reload re-links and re-applies its effects without a re-read).
+A reload that THROWS keeps
 the installed namespace — the "a failed load leaves nothing behind" rule is
 for fresh loads; for a reload, that namespace is what already-linked code is
 holding — a requirement the loader cannot serve fails `:loader/unreadable` instead of
 leaking to the runtime's global require, and `load`/`load-file` are refused as
-host-file operations. The test harness's per-row reset now also drops the
+host-file operations. A hit served through a delegate is linked at its home
+with its var links as well as its namespace link (a delegate's table used to
+answer `resolve` for none of its vars). The test harness's per-row reset now also drops the
 loader's own bookkeeping (`reset-context-state!`, called from
 `run-case-isolation.ss`). Per-context `data_readers.clj` stays unsupported —
 the runtime's reader resolves `#tag` against the host's `*data-readers*`
@@ -1061,7 +1070,7 @@ one exception: they are stored and compared by identity.
    kmet's extension tests. **Done** — `jolt test
    kmet.loader.test-core kmet.loader.test-sci-loader` and `kmet.app.test-extensions`
    are green on jolt.
-4. Phase 2 (Jolt native) — **done** in the Jolt repo, 26/26. Phase 3 (JVM,
+4. Phase 2 (Jolt native) — **done** in the Jolt repo, 27/27. Phase 3 (JVM,
    plus hybrid) is last and may follow promotion. Each backend must pass
    the *same* suite; a native backend that fails a case is a bug in the
    backend, not a permitted divergence (§6.3 excepted, recorded in the
