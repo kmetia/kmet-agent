@@ -8,10 +8,10 @@ the port).
 
 Status: design locked; implementation staged (see §9). **Phases 0, 1 and 2
 are implemented**: `src/kmet/loader/core.clj` (protocol, generic body,
-combinators, host root), `src/kmet/loader/memory.clj` (in-memory backend),
-`src/kmet/loader/sci.clj` (SCI code backend: locate/read/eval, SCI's
+combinators, host root), `src/kmet/loader/memory_loader.clj` (in-memory backend),
+`src/kmet/loader/sci_loader.clj` (SCI code backend: locate/read/eval, SCI's
 `require` routed through the loader, injected share list), the conformance
-suites (`test/kmet/loader/test_core.clj`, `test/kmet/loader/test_sci.clj`)
+suites (`test/kmet/loader/test_core.clj`, `test/kmet/loader/test_sci_loader.clj`)
 and the extension runtime rewiring (`kmet.app.extensions` builds one
 loader per extension; the loader lives outside the shared `kmet.libs.*`
 layer — host machinery, not contract). The library keeps this doc and a
@@ -23,7 +23,7 @@ Phase 2, the **native Jolt backend**, is implemented in the *Jolt* repo
 classloader-lite request) and jolt-lang/jolt#1039 (the implementation),
 with `test/chez/loaderconf-test.clj` as its writ — the 20-case suite
 `make loaderconf` runs, baseline empty. kmet consumes it through its own
-adapter, `src/kmet/loader/jolt.clj`, and the extension system evaluates
+adapter, `src/kmet/loader/jolt_loader.jolt`, and the extension system evaluates
 natively on Jolt through it (see §9 Phase 2 for what landed, on both sides,
 and what remains of §6.1's M0–M4 plan).
 
@@ -284,7 +284,7 @@ only on success, and a backend that creates host state while reading must
 undo it when the read throws — SCI creates the namespace before it
 evaluates the body, so a source that throws mid-namespace would otherwise
 be re-used by the next `load` (its vars unbound) instead of being retried
-(`kmet.loader.sci/drop-ns!`; conf case 15).
+(`kmet.loader.sci-loader/drop-ns!`; conf case 15).
 
 This is also what jolt already does internally — `find-ns-file` locates,
 `ldr-read-source` reads; `resolve-resource` returns a URL that opens on
@@ -693,7 +693,7 @@ table above, which also makes `(io/resource n loader)`'s currently-ignored
 
 bb has `sci.core` built in — nothing to add — and **jolt's stdlib bundles
 it too** (`make sci` / `scifunctional` pin the vendored copy, and
-`kmet.loader.sci` runs on jolt via `jolt test kmet.loader.test-sci`). So
+`kmet.loader.sci-loader` runs on jolt via `jolt test kmet.loader.test-sci-loader`). So
 kmet declares **no sci dependency at all**: no maven jar, no git pin, no
 vendoring, no reader conditional. The one unproven assumption of the
 phase-1 plan turned out to be a non-issue. A consumer that requires only
@@ -725,7 +725,7 @@ that serves the kind in question. The **executable spec** is
 `test/chez/loaderconf-test.clj` in the Jolt repo — 18 cases, `make
 loaderconf`, empty baseline — mirrored on the kmet side by
 `test/kmet/loader/test_core.clj` (data-path cases, any backend) and
-`test/kmet/loader/test_sci.clj` (code-path cases, SCI). Cases marked
+`test/kmet/loader/test_sci_loader.clj` (code-path cases, SCI). Cases marked
 *(host)* need a host-global registry and live only in the Jolt suite.
 
 1. **v1/v2 isolation** — two ctxs, one mvn lib at v1 and v2: `ctx1/foo` ≠
@@ -798,7 +798,7 @@ namespaces to paths (their source provider is asked by symbol) and shadow
 loader. Cases 14 and 16 have *host* strengthenings in the Jolt suite that
 the portable cases cannot express (a replaced registration surviving
 `unload!`; a context-owned name evicted from the process-global registry),
-and `test/kmet/loader/test_jolt.clj` mirrors the adapter's own contract
+and `test/kmet/loader/test_jolt_loader.clj` mirrors the adapter's own contract
 (host view, var links, unload, ambient resources) on the kmet side.
 
 ---
@@ -816,7 +816,7 @@ upgrades that must satisfy the same suite.
   `pool`, `url-search`), `with-loader`/`current-loader`, link table,
   in-flight marks, generic `find`/`resolve`/`load` body, `open-hit`,
   `unloaded?`/`status`, `unload!` report.
-- `src/kmet/loader/memory.clj` (ns `kmet.loader.memory`) — an
+- `src/kmet/loader/memory_loader.clj` (ns `kmet.loader.memory-loader`) — an
   in-memory loader over a source map, used by the suite and as the demo
   loader (no sci yet).
 - `test/kmet/loader/test_core.clj` (ns `kmet.loader.test-core`) — cases 1–8,
@@ -828,13 +828,13 @@ upgrades that must satisfy the same suite.
 
 ### Phase 1 — sci backend + kmet extension wiring (all hosts, sci)
 
-- `src/kmet/loader/sci.clj` (ns `kmet.loader.sci`) — a Loader whose
+- `src/kmet/loader/sci_loader.clj` (ns `kmet.loader.sci-loader`) — a Loader whose
   generic body delegates compile/eval to sci (`:load-fn`, `:namespaces`,
   `:classes`), with the **share list injected** by the caller. No sci
   dependency is declared: babashka and jolt bundle `sci.core` (§6.5), and
   a plain JVM needs `org.borkdude/sci` on its classpath.
 - `src/kmet/app/extensions.cljc` — replace `create-context` +
-  `make-load-fn` + `jars-for` plumbing with `loader/sci` + policies
+  `make-load-fn` + `jars-for` plumbing with `loader/sci-loader` + policies
   (`allow` over the root for the shared layers; per-extension deps resolver
   injected). `load-extension!` / `unload-extension!` keep their shape
   (`{:extension … :error …}`; shutdown → deregister → `unload!`).
@@ -842,7 +842,7 @@ upgrades that must satisfy the same suite.
   selection — **done**: the guards are gone, the jolt branch resolves dep
   roots through `jolt.deps/resolve-deps`, and the Jolt host no longer needs
   SCI for extension isolation at all (see Phase 2 — the native backend is
-  what runs there now; `kmet.loader.sci` remains the bb/JVM backend, which is
+  what runs there now; `kmet.loader.sci-loader` remains the bb/JVM backend, which is
   the only host left that needs an interpreter).
 - `src/kmet/extension.clj` — **no re-exports** (decided in Phase 1):
   extensions never see the loader at all. `kmet.app.extensions` uses
@@ -912,7 +912,9 @@ Gates for the M-stages, when they land: the corpus/unit/cts/sbperf set
 §6.1.10; `make sci` / `scifunctional` must stay green throughout — they
 pin the sci path the extension backend uses.
 
-**kmet's side of the native backend.** `src/kmet/loader/jolt.clj` forwards
+**kmet's side of the native backend.** `src/kmet/loader/jolt_loader.jolt` (a
+`.jolt` source, so Jolt-only by extension and free of reader conditionals)
+forwards
 kmet's protocol to the Jolt loader — protocols do not unify, so it adapts
 rather than aliases — and adds what the extension contract needs and the raw
 surface does not express: `host-view` (a *miss-not-denial* filter of the host
@@ -966,7 +968,7 @@ one exception: they are stored and compared by identity.
    **Done.**
 3. Phase 1 on Jolt: `jolt -e "(require 'kmet.loader.core)"`, the suite, then
    kmet's extension tests. **Done** — `jolt test
-   kmet.loader.test-core kmet.loader.test-sci` and `kmet.app.test-extensions`
+   kmet.loader.test-core kmet.loader.test-sci-loader` and `kmet.app.test-extensions`
    are green on jolt.
 4. Phase 2 (Jolt native) — **done** in the Jolt repo, 18/18. Phase 3 (JVM,
    plus hybrid) is last and may follow promotion. Each backend must pass
@@ -994,7 +996,7 @@ one exception: they are stored and compared by identity.
 
 ### 12.1 Where the sci backend lives / how the dep arrives — **A**
 
-*Decision*: a direct `sci.core` require in `kmet.loader.sci` (its own
+*Decision*: a direct `sci.core` require in `kmet.loader.sci-loader` (its own
 namespace file); jolt gets sci via a git pin (§6.5). Protocol-only consumers
 pay nothing at runtime — requiring `kmet.loader.core` does not load
 `loader.sci` — and the only cost is a classpath entry.

@@ -1,4 +1,4 @@
-(ns kmet.loader.sci
+(ns kmet.loader.sci-loader
   "SCI code backend for kmet.loader.core: a Loader that locates namespace
    sources, reads and evaluates them in a SCI context, and routes SCI's own
    `require` back through the loader.

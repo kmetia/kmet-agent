@@ -177,7 +177,8 @@
 src/kmet/
 ├── libs/     — Generic, self-contained code that would be a third-party library
 │              on the JVM (Babashka-compatible reimplementations)
-├── loader/   — The loader library (kmet.loader.core / .sci / .memory): the
+├── loader/   — The loader library (kmet.loader.core + the backends
+│              memory-loader / sci-loader / jolt-loader): the
 │              portable Loader protocol + backends. Extraction-ready: no
 │              kmet.* requires beyond kmet.loader.* (guarded), design doc
 │              and conformance suite ride along (src/kmet/loader/loader.md)

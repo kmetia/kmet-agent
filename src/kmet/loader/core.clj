@@ -411,7 +411,7 @@
 
 (defn make-loader
   "Backend seam: build a loader from raw steps. The in-memory backend
-   (`kmet.loader.memory`) and the host backends (sci, JVM, Jolt) are
+   (`kmet.loader.memory-loader`) and the host backends (sci, JVM, Jolt) are
    all built through this; application code uses the constructors and
    combinators below instead.
 

@@ -38,7 +38,7 @@
 (def ^:private changed-path-re
   "Changed-file paths that are lint/format/scan material: a .clj[c] file under
    one of `source-roots`."
-  #"(?:src|test|tasks|extensions)/.*\.clj[c]?")
+  #"(?:src|test|tasks|extensions)/.*\.(?:clj[c]?|jolt)")
 
 (defn- git-repo?
   []
@@ -67,7 +67,8 @@
    (e.g. extensions/tools.clj) need the `*.cljc` pattern too."
   [dir]
   (concat (fs/glob dir "*.clj") (fs/glob dir "**/*.clj")
-          (fs/glob dir "*.cljc") (fs/glob dir "**/*.cljc")))
+          (fs/glob dir "*.cljc") (fs/glob dir "**/*.cljc")
+          (fs/glob dir "*.jolt") (fs/glob dir "**/*.jolt")))
 
 (defn- mtime-changed-files
   "The source-roots' .clj files modified after the baseline timestamp (mtime
@@ -113,7 +114,7 @@
   [path]
   (symbol
    (-> path
-       (str/replace #"\.clj[c]?$" "")
+       (str/replace #"\.(?:clj[c]?|jolt)$" "")
        (str/replace "_" "-")
        (str/replace "/" ".")
        (str/replace #"^src\.|^test\.|^tasks\." ""))))

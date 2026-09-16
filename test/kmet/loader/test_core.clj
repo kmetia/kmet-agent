@@ -2,11 +2,11 @@
   "Conformance suite for kmet.loader.core — this list IS the spec
    (loader.md §8). Everything here runs against bare loaders (the
    in-memory backend, the host root, or `make-loader`); the cases that
-   need a code backend live in kmet.loader.test-sci."
+   need a code backend live in kmet.loader.test-sci-loader."
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.loader.core :as ldr]
-            [kmet.loader.memory :as mem]))
+            [kmet.loader.memory-loader :as mem]))
 
 (defn- req [kind name] {:kind kind :name name})
 

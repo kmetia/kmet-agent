@@ -1,5 +1,5 @@
-(ns kmet.loader.test-sci
-  "Conformance for the SCI backend (kmet.loader.sci): the code-path
+(ns kmet.loader.test-sci-loader
+  "Conformance for the SCI backend (kmet.loader.sci-loader): the code-path
    cases of loader.md §8 — v1/v2 isolation (1), shared by reference (3),
    defining-ctx inheritance (9), the find/load read discipline (11), a
    vanishing source (12), and the private-load semantics the Jolt suite
@@ -19,7 +19,7 @@
             [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.loader.core :as ldr]
-            [kmet.loader.sci :as lsci]
+            [kmet.loader.sci-loader :as lsci]
             [sci.core :as sci]))
 
 (def ^:private shared-cell

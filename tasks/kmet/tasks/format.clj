@@ -38,7 +38,7 @@
    generators, not cljfmt)."
   []
   (->> ["src" "test" "tasks" "extensions"]
-       (mapcat (fn [root] (fs/glob root "**.{clj,cljs,cljc,cljd,bb,edn}")))
+       (mapcat (fn [root] (fs/glob root "**.{clj,cljs,cljc,cljd,bb,edn,jolt}")))
        (remove (fn [path] (re-find #"/target/|/(image_)?model_data/" (str path))))
        (mapv str)))
 

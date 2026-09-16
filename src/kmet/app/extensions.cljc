@@ -20,7 +20,7 @@
    different extensions can use different versions of the same library, and
    unloading an extension releases everything it pulled in. Loading goes
    through kmet.loader.core: each extension gets a Loader over its SCI
-   context (kmet.loader.sci) whose source provider is that artifact /
+   context (kmet.loader.sci-loader) whose source provider is that artifact /
    deps / bundled lookup, and SCI's own requires route back through the
    loader — so nested requires share the link table, unload closes the
    loader, and the loader itself stays out of the shared set (host
@@ -50,8 +50,8 @@
             [kmet.tui.theme :as theme]
             [kmet.libs.host :as host]
             [kmet.loader.core :as loader]
-            [kmet.loader.sci :as loader-sci]
-            #?(:jolt [kmet.loader.jolt :as loader-jolt])
+            [kmet.loader.sci-loader :as loader-sci]
+            #?(:jolt [kmet.loader.jolt-loader :as loader-jolt])
             [kmet.extension]))
 
 ;; ─── Provider-event bridges (pi: context / before_provider_request /

@@ -1,9 +1,10 @@
-(ns kmet.loader.test-jolt
-  "kmet.loader.jolt's adapter tests — Jolt-only.
+(ns kmet.loader.test-jolt-loader
+  "kmet.loader.jolt-loader's adapter tests — Jolt-only.
 
-   The adapter's body is a single #?(:jolt ...) branch, so on bb/JVM the
-   namespace loads empty and every test here skips; under `jolt test` they
-   exercise the native backend through the *portable* protocol: a dashed
+   The adapter is a `.jolt` source — the runtime's own extension — so bb and
+   the JVM cannot load it at all; every test here skips there, and under
+   `jolt test` they exercise the native backend through the *portable*
+   protocol: a dashed
    namespace loading from a root, a var request answered through a context's
    namespace link, the host view the extension contract is built on, unload,
    and the ambient resource path extension code relies on."
@@ -15,13 +16,13 @@
             [kmet.loader.core :as loader]))
 
 (defn- adapter
-  "The adapter's public constructors, or nil on bb/JVM (the namespace is
-   empty there). Resolved at runtime so this test namespace compiles on both
+  "The adapter's public constructors, or nil on bb/JVM (it is a .jolt source
+   there). Resolved at runtime so this test namespace compiles on both
    hosts."
   []
   (when (boolean (find-var 'clojure.core/*jolt-version*))
-    (require 'kmet.loader.jolt)
-    (let [v (fn [s] (some-> (ns-resolve 'kmet.loader.jolt s) deref))]
+    (require 'kmet.loader.jolt-loader)
+    (let [v (fn [s] (some-> (ns-resolve 'kmet.loader.jolt-loader s) deref))]
       {:root (v 'root)
        :classpath (v 'classpath)
        :host-view (v 'host-view)

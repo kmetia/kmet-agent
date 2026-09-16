@@ -204,10 +204,11 @@
 ;; ─── files ────────────────────────────────────────────────────────────────
 
 (def ^:private lint-exts
-  ;; what clj-kondo picks up from a directory scan (.edn files are data)
-  #{"clj" "cljc" "cljs" "cljd" "clj_kondo"})
+  ;; what clj-kondo picks up from a directory scan (.edn files are data; .jolt
+  ;; is the Jolt runtime's own source extension — clj-kondo reads it as Clojure)
+  #{"clj" "cljc" "cljs" "cljd" "clj_kondo" "jolt"})
 
-(def ^:private glob-pattern "*.{clj,cljc,cljs,cljd,clj_kondo}")
+(def ^:private glob-pattern "*.{clj,cljc,cljs,cljd,clj_kondo,jolt}")
 
 (defn- lintable?
   [path]

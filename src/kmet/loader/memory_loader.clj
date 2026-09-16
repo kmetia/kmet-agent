@@ -1,4 +1,4 @@
-(ns kmet.loader.memory
+(ns kmet.loader.memory-loader
   "In-memory Loader backend: a loader over a plain source map. Used by the
    loader conformance suite and as the demo/backend reference — it models
    the full contract (locate, read-at-load, resources, unload) without a

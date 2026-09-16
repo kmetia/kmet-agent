@@ -11,7 +11,7 @@
 
 (defn- loader-files []
   (->> (fs/list-dir "src/kmet/loader")
-       (filter #(re-find #"\.clj[ca]?$" (str %)))
+       (filter #(re-find #"\.(?:clj[ca]?|jolt)$" (str %)))
        (map str)))
 
 (defn- ns-form [path]
