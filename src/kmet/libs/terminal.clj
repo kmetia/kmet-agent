@@ -23,7 +23,9 @@
 
 (defn- capture-log-path
   "Resolve an env value into a log path: a directory gets a timestamped
-   <prefix>-<ts>-<pid>.log file inside it, a file path is used as-is."
+   <prefix>-<ts>-<pid>.log file inside it, a file path is used as-is. The
+   value is a literal path, not a boolean — a bare `1` is a file named `1`
+   in the cwd (tui.md §11)."
   [env prefix]
   (when (and env (seq env))
     (if (fs/directory? env)

@@ -1124,6 +1124,12 @@ stateful tag whose props never settle means fresh fn literals in its props
   bugs that only reproduce in one terminal: reproduce with the env var
   set, read the file (the trace never changes behavior).
 
+Both values are **literal paths, not booleans**: only an existing
+*directory* gets a timestamped file inside it — every other value is
+appended to as a file, so `KMET_TUI_INPUT_LOG=1` creates `./1` in the
+current directory. Prefer an existing, git-ignored directory, e.g.
+`mkdir -p target/trace && KMET_TUI_INPUT_LOG=target/trace bb run`.
+
 ### When bytes look wrong but headless render looks right
 
 Scroll-region/diff bugs are invisible at the lines level. Capture the
