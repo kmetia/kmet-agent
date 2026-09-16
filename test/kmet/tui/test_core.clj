@@ -548,7 +548,10 @@
     {:editor ed
      :submitted submitted
      :stop! (fn []
+              ;; tui-stop parity: the record must not read as running after
+              ;; its reader is gone
               (reset! (:stopped? tui) true)
+              (reset! (:running? tui) false)
               (when-let [f @(:input-reader tui)]
                 (deref f 3000 nil))
               (reset! (:input-reader tui) nil))}))
