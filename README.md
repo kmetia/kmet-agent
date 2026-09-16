@@ -460,6 +460,11 @@ jolt dist --dev         # Unoptimized build (--opt for optimized; release is the
 jolt dist --target tarm64le --target-pack /tmp/pack   # Cross-compile (tools/cross-compile)
 ```
 
+`jolt dist --help` lists every option: build modes, `--boot fast|small|plain`
+(startup versus size), `--closed-world` and `--dynamic`, cross-compiling with
+`--target`/`--target-pack`, `-o PATH`, `--force`, and `--smoke` to run the
+freshly built binary (`--list-models` plus `--version`) before publishing.
+
 Both hosts name artifacts by one scheme:
 `kmet-<version>-<host><host-version>-<platform>[-dev]` (plus `.exe` on
 Windows; `-dev` marks a jolt `--dev` build), so one `dist/` lines the hosts up

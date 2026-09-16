@@ -327,32 +327,77 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
 ;; ─── entry point ──────────────────────────────────────────────────────────
 
 (defn -main
-  "jolt dist [options]   (the bb.edn task's jolt branch; the babashka branch
-   runs kmet.tasks.build/-main)
+  "jolt dist [options]
 
-   Build the self-contained kmet executable for the jolt host into dist/ —
-   the jolt counterpart of the babashka packager. jolt AOT-compiles the app
-   (runtime, clojure.core, stdlib, deps and kmet.core in one native binary);
-   this task wraps that compile with the artifact naming, the scratch dir and
-   a smoke test. `jolt build` itself stays jolt's compiler command.
+   Build kmet's self-contained Jolt executable into dist/: one native binary
+   with the runtime, clojure.core, the stdlib, the dependencies and kmet
+   itself compiled in (the entry is kmet.core). Nothing has to be installed on
+   the machine that runs it — no jolt, no jar, no classpath.
+
+   This is the Jolt half of the project's `dist` task: `bb dist` builds the
+   same app for the babashka host and names its artifact for the same
+   platform, so one dist/ can carry both hosts' binaries side by side.
 
    Options:
-     --dev | --opt            build mode (default: release)
-     --closed-world           drop defs unreachable from -main (--tree-shake is jolt's alias)
-     --direct-link            direct-link vars (the release default; --no-direct-link reverts)
-     --dynamic                load :jolt/native libraries at runtime instead of :static archives
-     --boot fast|small|plain  boot image encoding (jolt's default: fast)
-     --target MACHINE         cross-compile for a Chez machine (ta6le, tarm64le, ta6osx, ...)
-     --target-pack DIR        the target's pack for --target (or $JOLT_TARGET_PACK)
-     -o, --out PATH           artifact path (default: dist/kmet-<ver>-jolt<jv>-<platform>)
-     --force                  clear the scratch build dir first (a full re-emit)
-     --smoke                  run the artifact after the build (--list-models plus --version;
-                              skipped by default to keep local dist builds fast and side-effect free)
-     --jolt PATH              the jolt executable that compiles (default: jolt on PATH)
-     -h, --help               this text
+     --dev                     unoptimized build, quickest to produce; vars
+                               stay redefinable (a development build)
+     --opt                     optimized build: smaller and faster, but the
+                               binary cannot render Clojure backtraces
+                               (the default is a release build: the same
+                               optimizations, with backtraces)
+     --closed-world            drop definitions unreachable from the entry
+                               point (alias: --tree-shake) — a smaller binary
+     --dynamic                 load :jolt/native libraries at run time instead
+                               of linking their archives in; the binary then
+                               needs those libraries where it runs, so it is
+                               no longer self-contained (the build lists them)
+     --direct-link             direct linking is already on in release and
+                               optimized builds — this is a redundant alias.
+                               With it a plain def is frozen into the binary
+                               (^:redef or ^:dynamic keeps a var redefinable);
+                               --no-direct-link opts back out
+     --boot fast|small|plain   how the boot image is shipped (default: fast,
+                               env var JOLT_BOOT):
+                                 fast   prebuilt image — quickest startup,
+                                        most disk
+                                 small  gzip-compressed image — smallest to
+                                        ship, still an image (fast startup)
+                                 plain  no image — slowest startup
+     --target MACHINE          cross-compile for another Chez machine, named
+                               by the kmet platform it maps to: ta6le
+                               (linux-amd64), tarm64le (linux-aarch64), ta6osx
+                               (macos-amd64), tarm64osx (macos-aarch64), ta6nt
+                               (windows-amd64), tarm64nt (windows-aarch64).
+                               Needs --target-pack DIR (or the JOLT_TARGET_PACK
+                               env var)
+     --target-pack DIR         the prepared pack for --target MACHINE
+     -o, --out PATH            write the artifact here instead of
+                               dist/kmet-<ver>-jolt<jv>-<platform>[-dev][.exe]
+     --force                   discard the incremental build state under
+                               target/jolt/ and compile from scratch
+     --smoke                   verify the artifact after building: run it from
+                               an empty directory, list the models and check
+                               --version against the version baked in — the
+                               check to run before publishing. A cross build
+                               skips it (only this host's own platform can run
+                               here)
+     --no-smoke                skip that verification (the default, so a plain
+                               `jolt dist` is quick and side-effect free)
+     --jolt PATH               the jolt executable that performs the compile
+                               (default: jolt from PATH)
+     -h, --help                this text
 
-   Artifacts: dist/kmet-<ver>-jolt<jv>-<platform>[-dev][.exe], plus a .sh
-   launcher on a Termux host (glibc dynamic linker)."
+   Examples:
+     jolt dist                          release build for this machine
+     jolt dist --smoke                  ... and verify the artifact runs
+     jolt dist --dev -o dist/kmet-dev   quick development build, own path
+     jolt dist --boot small             smallest artifact to ship
+     jolt dist --target tarm64le --target-pack ~/packs/tarm64le
+                                        cross build for linux-aarch64
+
+   Artifacts land in dist/ as kmet-<ver>-jolt<jv>-<platform>[-dev][.exe]. On a
+   Termux host the build also writes a .sh launcher next to the binary — the
+   binary is glibc-linked, so run the launcher; a cross build gets none."
   [& args]
   (let [{:keys [mode target target-pack out force? no-smoke? jolt help?] :as opts}
         (parse-args args)]
