@@ -50,15 +50,19 @@
   ;; Regression: the coarse emoji block ranges (0x2600-0x27BF etc.) counted
   ;; text-presentation dingbats as 2 columns, so background padding ended a
   ;; column short (e.g. "✓" in the model selector) and markdown table
-  ;; separators misaligned. Only RGI emoji / EAW-wide chars are 2-wide.
-  (doseq [s ["✓" "✗" "★" "☆" "❶" "➤" "✦" "✔" "☑" "☀" "❤" "⌚" "⏰" "⚽" "☕" "😀"]]
-    (t/is (= (if (contains? #{"✔" "☑" "☀" "❤" "⌚" "⏰" "⚽" "☕" "😀"} s) 2 1)
+  ;; separators misaligned. Only default-emoji-presentation (Emoji_Presentation
+  ;; =Yes, e.g. ⌚ ⏰ ⚽ ☕ 😀) / EAW-wide chars are 2-wide; the text-presentation
+  ;; forms (✔ ☑ ☀ ❤ …) render narrow bare and only turn 2-wide with U+FE0F.
+  (doseq [s ["✓" "✗" "★" "☆" "❶" "➤" "✦" "✔" "☑" "☀" "❤" "⌚" "⏰"
+             "⚽" "☕" "😀"]]
+    (t/is (= (if (contains? #{"⌚" "⏰" "⚽" "☕" "😀"} s) 2 1)
              (u/visible-width s))
           (str "width of " (pr-str s)))))
 
 (t/deftest test-visible-width-vs16
   ;; Text-presentation bases stay narrow bare but turn 2-wide with U+FE0F
-  ;; (©️ ™️ ↔️ ▶️ ▪️ ⬛️ …); RGI emoji keep their width with or without it.
+  ;; (©️ ™️ ↔️ ▶️ ▪️ ✔️ ☀️ ☑️ ❤️ …). Default-presentation emoji and EAW-wide
+  ;; chars (⬛ ⬜ …) are already 2-wide bare.
   (t/is (= 1 (u/visible-width "©")))
   (t/is (= 2 (u/visible-width "©️")))
   (t/is (= 2 (u/visible-width "™️")))
@@ -66,9 +70,12 @@
   (t/is (= 1 (u/visible-width "▶")))
   (t/is (= 2 (u/visible-width "▶️")))
   (t/is (= 2 (u/visible-width "▪️")))
-  (t/is (= 1 (u/visible-width "⬛")))
-  (t/is (= 2 (u/visible-width "⬛️")))
-  (t/is (= 2 (u/visible-width "❤️"))))
+  (t/is (= 1 (u/visible-width "✔")))
+  (t/is (= 2 (u/visible-width "✔️")))
+  (t/is (= 1 (u/visible-width "❤")))
+  (t/is (= 2 (u/visible-width "❤️")))
+  (t/is (= 2 (u/visible-width "⬛")))
+  (t/is (= 2 (u/visible-width "⬛️"))))
 
 (t/deftest test-visible-width-zwj-vs16-chain
   ;; A VS16 between the emoji base and the ZWJ must not break the chain
@@ -78,6 +85,18 @@
   (t/is (= 2 (u/visible-width "👨‍👩‍👧‍👦")))
   (t/is (= 4 (u/visible-width "漢‍🔥")))
   (t/is (= 2 (u/visible-width "1️⃣"))))
+
+(t/deftest test-visible-width-skin-tone-modifiers
+  ;; A skin-tone modifier on an emoji base is part of the glyph: default-
+  ;; presentation bases are wide already and zero the modifier via prev-w;
+  ;; text-presentation bases (☝ ✌ 🏋 …) pair with it through the
+  ;; modifier-base set, FE0F or not. A lone modifier keeps its 2 columns.
+  (t/is (= 2 (u/visible-width "👍🏽")))
+  (t/is (= 2 (u/visible-width "☝🏽")))
+  (t/is (= 2 (u/visible-width "☝️🏽")))
+  (t/is (= 2 (u/visible-width "✌🏽")))
+  (t/is (= 2 (u/visible-width "🏋🏽")))
+  (t/is (= 2 (u/visible-width "🏽"))))
 
 (t/deftest test-visible-width-halfwidth
   ;; FF61..FFDC are halfwidth forms (ｱｲｳ…) — narrow, not 2 columns.

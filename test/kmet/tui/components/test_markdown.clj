@@ -434,12 +434,20 @@
     (t/is (apply = widths)))
   (doseq [src ["| 🇺🇸 | x |\n|------|---|\n| y | 2 |"
                "| 👍🏽 | x |\n|------|---|\n| y | 2 |"
+               "| ☝🏽 | x |\n|------|---|\n| y | 2 |"
+               "| ☝️🏽 | x |\n|------|---|\n| y | 2 |"
                "| 🚀 name |\n|--------|\n| x |"
                "| 你好 🚀 |\n|--------|\n| 世界 |"
                ;; Regression: ✓/✗ are narrow (1-col) dingbats — overcounting
                ;; them as 2 left the │ separators misaligned
                "| a ✓ | b |\n|-----|---|\n| 1 | 2 |"
-               "| a ✗ | b |\n|-----|---|\n| 1 | 2 |"]]
+               "| a ✗ | b |\n|-----|---|\n| 1 | 2 |"
+               ;; ✔/☀/☑/❤ are text-presentation emoji: narrow bare, 2-wide
+               ;; with VS16 — both forms must keep the columns aligned
+               "| a ✔ | b |\n|-----|---|\n| 1 | 2 |"
+               "| a ☑ | b |\n|-----|---|\n| 1 | 2 |"
+               "| a ❤ | b |\n|-----|---|\n| 1 | 2 |"
+               "| a ❤️ | b |\n|-----|---|\n| 1 | 2 |"]]
     (let [widths (mapv u/visible-width
                        (map strip-ansi (core/render (md/make-markdown src :padding-x 0) 30)))]
       (t/is (apply = widths) (pr-str src)))))
