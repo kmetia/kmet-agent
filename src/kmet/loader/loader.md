@@ -804,7 +804,11 @@ loaderconf`, empty baseline — mirrored on the kmet side by
     contexts, views, combinators — unloads normally.
 22. *(native)* **TCCL follows the ambient loader** — inside `with-loader`, the
     thread's context classloader is the context's own classloader and resolves
-    its roots; outside one it is the host's.
+    its roots; outside one it is the host's. Only a classloader-shaped ambient
+    answer is taken (a jhost or a tagged table): anything a library rebound
+    `RT/baseLoader` to keeps the historical host answer. There is no
+    `setContextClassLoader` — the getter is ambient-derived, not per-thread
+    state.
 23. *(native)* **`require`'s options, and `:reload`** — a runtime `(require
     '[lib :as h])` materializes the alias in the DEFINING namespace (and
     `:refer`/`:rename` with it); `:reload` re-reads through the loader into the
@@ -954,8 +958,10 @@ the DEFINING namespace (a runtime require's alias used to vanish, `Unknown
 class h`), `:reload` re-reads through the loader into the *installed*
 namespace so definitions other code already links to pick up the new roots
 (for a namespace the context's own roots serve; one shared through a delegate
-reloads there, under the evict-and-evaluate rule), a requirement the loader
-cannot serve fails `:loader/unreadable` instead of
+reloads there, under the evict-and-evaluate rule). A reload that THROWS keeps
+the installed namespace — the "a failed load leaves nothing behind" rule is
+for fresh loads; for a reload, that namespace is what already-linked code is
+holding — a requirement the loader cannot serve fails `:loader/unreadable` instead of
 leaking to the runtime's global require, and `load`/`load-file` are refused as
 host-file operations. The test harness's per-row reset now also drops the
 loader's own bookkeeping (`reset-context-state!`, called from
