@@ -145,6 +145,21 @@
     (press sel "alt+up")
     (t/is (= ["p2/x" "p1/a"] @changed) "alt+up moves the enabled entry up")))
 
+(t/deftest test-alt-up-at-top-is-a-no-op
+  ;; pi: reorder only moves within bounds — an out-of-bounds alt+up must not
+  ;; dirty the list or move the selection (the entry is already first)
+  (let [changed (atom ::none)
+        sel (selector ["p1/a" "p2/x"] :on-change (fn [ids] (reset! changed ids)))]
+    (press sel "alt+up")
+    (t/is (= ::none @changed) "no change callback")
+    (t/is (false? (:dirty @(:state-atom sel))) "not marked unsaved")
+    (t/is (= 0 (:selected-idx @(:state-atom sel))) "selection stays on the first row")
+    ;; the mirror case: the last enabled row cannot move down either
+    (press sel "down")
+    (press sel "alt+down")
+    (t/is (= ::none @changed) "no change callback at the bottom")
+    (t/is (false? (:dirty @(:state-atom sel))) "still not unsaved")))
+
 (t/deftest test-ctrl-s-persists
   (let [persisted (atom ::none)
         sel (selector ["p1/a"] :on-persist (fn [ids] (reset! persisted ids)))]

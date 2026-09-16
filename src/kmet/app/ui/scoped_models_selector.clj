@@ -190,11 +190,14 @@
               item (when (pos? n) (nth filtered (min (:selected-idx st) (dec n))))]
           (when (and item (:enabled item) (some? (:enabled-ids st)))
             (let [ids (move (:enabled-ids st) (:full-id item) delta)]
-              (swap! state-atom assoc
-                     :enabled-ids ids :dirty true
-                     :selected-idx (max 0 (min (+ (:selected-idx st) delta) (dec n))))
-              (when-let [cb @on-change-atom] (cb ids))
-              (scoped-models-refresh! this)))
+              ;; pi only moves within bounds — an out-of-bounds reorder is a
+              ;; no-op: it must not dirty the list or move the selection
+              (when (not= ids (:enabled-ids st))
+                (swap! state-atom assoc
+                       :enabled-ids ids :dirty true
+                       :selected-idx (max 0 (min (+ (:selected-idx st) delta) (dec n))))
+                (when-let [cb @on-change-atom] (cb ids))
+                (scoped-models-refresh! this))))
           nil)
 
         ;; Enter — toggle the selected model (pi tui.select.confirm)
