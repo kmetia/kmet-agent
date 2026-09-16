@@ -1,8 +1,8 @@
 (ns kmet.loader.test-core
   "Conformance suite for kmet.loader.core — this list IS the spec
-   (loader.md §8). Cases 1-8 and 10-12 run against the in-memory backend
-   and the host root; case 9 (defining-ctx inheritance) needs a code
-   backend and arrives with the sci backend (Phase 1)."
+   (loader.md §8). Everything here runs against bare loaders (the
+   in-memory backend, the host root, or `make-loader`); the cases that
+   need a code backend live in kmet.loader.test-sci."
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.loader.core :as ldr]
@@ -260,6 +260,25 @@
     (let [l (ldr/url-search ["src"])]
       (is (= :loader/unreadable
              (:type (ex-data-of #(ldr/load l (req :ns "kmet.loader.core")))))))))
+
+(deftest test-case-15-failed-load-leaves-nothing
+  (testing "a throwing :ns-load-fn links nothing, claims nothing, and retries"
+    (let [fail? (atom true)
+          l (ldr/make-loader
+             {:id "core15"
+              :locate-fn (fn [r]
+                           (when (= [:ns "boom"] [(:kind r) (:name r)])
+                             [{:kind :ns :file "boom.clj"}]))
+              :ns-load-fn (fn [_home _hit _req]
+                            (if @fail?
+                              (throw (ex-info "broken source" {:type :boom}))
+                              :the-ns-handle))})]
+      (is (= :boom (:type (ex-data-of #(load-name l :ns "boom")))))
+      (is (nil? (ldr/resolve l (req :ns "boom"))) "nothing was linked")
+      (is (= 0 (:in-flight (ldr/status l))) "the in-flight claim was released")
+      (reset! fail? false)
+      (is (= :the-ns-handle (load-name l :ns "boom")) "the retry installs the link")
+      (is (= :the-ns-handle (ldr/resolve l (req :ns "boom")))))))
 
 ;; ─── Link table, status, ambient tier, concurrency ─────────────────────────
 

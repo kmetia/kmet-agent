@@ -6,19 +6,29 @@ promoted to a standalone library afterwards. It is the answer to the
 **extension-isolation** workstream in `jolt-port.md` §B3 (a hard blocker for
 the port).
 
-Status: design locked; implementation staged (see §9). **Phase 0 and
-Phase 1 are implemented**: `src/kmet/loader/core.clj` (protocol, generic
-body, combinators, host root), `src/kmet/loader/memory.clj` (in-memory
-backend), `src/kmet/loader/sci.clj` (SCI code backend: locate/read/eval,
-SCI's `require` routed through the loader, injected share list), the
-conformance suites (`test/kmet/loader/test_core.clj`,
-`test/kmet/loader/test_sci.clj`) and the extension runtime rewiring
-(`kmet.app.extensions` builds one loader per extension; the loader lives
-outside the shared `kmet.libs.*` layer — host machinery, not contract).
-The library keeps this doc and a self-containment guard
-(`kmet.loader.test-self-contained`) so `src/kmet/loader/` can be extracted
-as a whole. Not implemented yet: Phases 2–4 (JVM and Jolt native
-backends, promotion).
+Status: design locked; implementation staged (see §9). **Phases 0, 1 and 2
+are implemented**: `src/kmet/loader/core.clj` (protocol, generic body,
+combinators, host root), `src/kmet/loader/memory.clj` (in-memory backend),
+`src/kmet/loader/sci.clj` (SCI code backend: locate/read/eval, SCI's
+`require` routed through the loader, injected share list), the conformance
+suites (`test/kmet/loader/test_core.clj`, `test/kmet/loader/test_sci.clj`)
+and the extension runtime rewiring (`kmet.app.extensions` builds one
+loader per extension; the loader lives outside the shared `kmet.libs.*`
+layer — host machinery, not contract). The library keeps this doc and a
+self-containment guard (`kmet.loader.test-self-contained`) so
+`src/kmet/loader/` can be extracted as a whole.
+
+Phase 2, the **native Jolt backend**, is implemented in the *Jolt* repo
+(`stdlib/jolt/loader.clj`), tracked in jolt-lang/jolt#912 (the
+classloader-lite request) and jolt-lang/jolt#1039 (the implementation),
+with `test/chez/loaderconf-test.clj` as its writ — the 18-case suite
+`make loaderconf` runs, baseline empty. It took a different route through
+§6.1 than the M0–M4 plan sketched; §9 Phase 2 records what landed and
+what remains of that plan.
+
+Not implemented yet: Phase 3 (JVM native backend + hybrid — deliberately
+last: the JVM host already gets isolation through SCI) and Phase 4
+(promotion).
 
 Related docs (repo-root relative): `jar-ext.md` (extension artifact
 format — the loader it touches), `jolt-port.md` §B3,
@@ -268,6 +278,13 @@ unreadable jar or a missing root fails at `(loader/classpath …)`, not at
 first load); and the AOT read-note bookkeeping (jolt) stays inside the
 loader instead of leaking into data.
 
+The complement: a **failed load installs nothing**. The link is installed
+only on success, and a backend that creates host state while reading must
+undo it when the read throws — SCI creates the namespace before it
+evaluates the body, so a source that throws mid-namespace would otherwise
+be re-used by the next `load` (its vars unbound) instead of being retried
+(`kmet.loader.sci/drop-ns!`; conf case 15).
+
 This is also what jolt already does internally — `find-ns-file` locates,
 `ldr-read-source` reads; `resolve-resource` returns a URL that opens on
 demand — so the native backend maps onto it without rework.
@@ -404,8 +421,16 @@ hierarchy (`class-hierarchy.ss:864`), and `resolve-resource` (io.ss:1438) is
 the single resource funnel. It is one global object; the work is making it
 per-ctx and wiring the compiler to it.
 
-Evolution stages are M0–M4 (§9 Phase 3); the subsections below are the
-detailed design for that work.
+**Status — shipped, by a different route than the stages below.** The
+implementation in the Jolt repo does not move the analyze/emit pipeline
+onto a per-loader record (M0/M1), and does not give classes, providers or
+type tables a per-loader home (M2). It builds contexts *out of* the one
+global registry instead, and pays for it with the documented limits — see
+§9 Phase 2 for what landed, what of M0–M4 remains, and which parts of this
+section are therefore still design only.
+
+Evolution stages are M0–M4 (§9 Phase 2); the subsections below are the
+detailed design for the unbuilt remainder.
 
 #### 6.1.1 Naming: "ctx" is taken inside jolt
 
@@ -665,16 +690,14 @@ table above, which also makes `(io/resource n loader)`'s currently-ignored
 
 ### 6.5 Which sci artifact (jolt)
 
-bb has `sci.core` built in — nothing to add. Jolt needs one of: the maven
-`org.borkdude/sci` (unverified that the *published jar* loads on jolt — the
-`make sci` gate proves the **vendored** copy only), a git pin (kmet already
-pins two jolt-lang git coordinates in `deps.edn`, so this is house style),
-or vendoring sci into kmet. **Pick the git pin**, matching the revision
-family the sci gate exercises, and verify early — it is the one unproven
-assumption in Phase 1. `kmet.loader.sci` carries the requirement in its
-own namespace file, so a consumer that requires only `kmet.loader.core` never
-loads sci at runtime (Clojure namespace laziness); the dep is classpath-only
-for them.
+bb has `sci.core` built in — nothing to add — and **jolt's stdlib bundles
+it too** (`make sci` / `scifunctional` pin the vendored copy, and
+`kmet.loader.sci` runs on jolt via `jolt test kmet.loader.test-sci`). So
+kmet declares **no sci dependency at all**: no maven jar, no git pin, no
+vendoring, no reader conditional. The one unproven assumption of the
+phase-1 plan turned out to be a non-issue. A consumer that requires only
+`kmet.loader.core` never loads sci anyway — the require lives in the
+backend's own namespace.
 
 ---
 
@@ -696,7 +719,13 @@ for them.
 
 ## 8. Conformance suite (this list *is* the spec)
 
-Host-agnostic, written against the protocol; must pass on every backend.
+Host-agnostic, written against the protocol; must pass on every backend
+that serves the kind in question. The **executable spec** is
+`test/chez/loaderconf-test.clj` in the Jolt repo — 18 cases, `make
+loaderconf`, empty baseline — mirrored on the kmet side by
+`test/kmet/loader/test_core.clj` (data-path cases, any backend) and
+`test/kmet/loader/test_sci.clj` (code-path cases, SCI). Cases marked
+*(host)* need a host-global registry and live only in the Jolt suite.
 
 1. **v1/v2 isolation** — two ctxs, one mvn lib at v1 and v2: `ctx1/foo` ≠
    `ctx2/foo`, both correct.
@@ -726,10 +755,40 @@ Host-agnostic, written against the protocol; must pass on every backend.
 12. **Eager construction, lazy load** — a loader built on an unreadable
     root/jar fails at the constructor; a *load* that reads a file that
     disappeared after `find` fails at `load`, not silently.
+13. **Concurrent context loads** — several contexts load one namespace
+    name at once, each with its own source: every context ends with its own
+    definition (no cross-talk through shared bookkeeping).
+14. **Unload releases what it installed** — `unload!` counts its links out,
+    the loader refuses new loads, definitions already resolved stay
+    callable, a *sibling* loader holding the same name is untouched, and a
+    fresh loader loads the name again. *(host)* a registration the loader
+    no longer owns survives the unload.
+15. **A failed load installs nothing** — a source that throws, or a nested
+    require that cannot be served, leaves no link, releases the in-flight
+    claim, and leaves no half-built namespace behind: the retry reads the
+    fixed source instead of re-using the broken one.
+16. **A context's own names are private** — a name the context loaded is
+    invisible through the root (namespace and var), while its owner still
+    resolves it. *(host)* the process-global registry is left clean too.
+17. *(host)* **Host namespaces load on demand** — a namespace the host can
+    load but has not is located by the root without reading, loaded through
+    the host's own loader (AOT cache included), and linked in the context.
+18. **Requirements resolve through the loader** — evaluated source that
+    requires a namespace the loader cannot serve fails the load with an
+    actionable `:loader/unreadable` and links nothing; the same source
+    loads once the requirement can be served.
 
-Cases 1–8, 11 are expressible on bb against sci **today**, which is the
-point: pin the semantics before any runtime work, the way the corpus does
-for `clojure.core`.
+Cases 1–8, 10, 11 and 13–16, 18 are expressible against SCI on bb and jolt
+today, which is the point: pin the semantics before any runtime work, the
+way the corpus does for `clojure.core`. Case 9 needs a code backend and
+lives in the SCI suite; case 12 has a data-path version in the core suite
+and a read-path one there too. Case 17 *(host)* is the
+Jolt root loading a host namespace it has not loaded yet — kmet's root
+answers loaded host namespaces only (`root`'s docstring), so a code backend
+serves shared names by injection and fails an unservable require (case 18)
+instead. Cases 14 and 16 have *host* strengthenings in the Jolt suite that
+the portable cases cannot express (a replaced registration surviving
+`unload!`; a context-owned name evicted from the process-global registry).
 
 ---
 
@@ -758,20 +817,19 @@ upgrades that must satisfy the same suite.
 
 ### Phase 1 — sci backend + kmet extension wiring (all hosts, sci)
 
-- `src/kmet/loader/sci.clj` (ns `kmet.loader.sci`; the file+dir
-  layout already has precedent in `kmet.app.ui`) — a Loader whose generic
-  body delegates
-  compile/eval to sci (`:load-fn`, `:namespaces`, `:classes`), with the
-  **share list injected** by the caller. Requires `sci.core` only where the
-  dep exists (bb built-in / JVM maven / jolt `vendor/sci` local root);
-  document the reader-conditional.
+- `src/kmet/loader/sci.clj` (ns `kmet.loader.sci`) — a Loader whose
+  generic body delegates compile/eval to sci (`:load-fn`, `:namespaces`,
+  `:classes`), with the **share list injected** by the caller. No sci
+  dependency is declared: babashka and jolt bundle `sci.core` (§6.5), and
+  a plain JVM needs `org.borkdude/sci` on its classpath.
 - `src/kmet/app/extensions.cljc` — replace `create-context` +
   `make-load-fn` + `jars-for` plumbing with `loader/sci` + policies
   (`allow` over the root for the shared layers; per-extension deps resolver
   injected). `load-extension!` / `unload-extension!` keep their shape
   (`{:extension … :error …}`; shutdown → deregister → `unload!`).
   The four `"Extensions not supported on Jolt"` guards collapse into backend
-  selection.
+  selection — **done**: the guards are gone, and the jolt branch resolves
+  dep roots through `jolt.deps/resolve-deps`.
 - `src/kmet/extension.clj` — **no re-exports** (decided in Phase 1):
   extensions never see the loader at all. `kmet.app.extensions` uses
   `kmet.loader.*` directly, and a require of it from extension code fails
@@ -782,7 +840,65 @@ upgrades that must satisfy the same suite.
 - Gate: `bb test-changed` (plus `bb test` for the extensions suites if
   touched broadly), `bb format-check-changed`.
 
-### Phase 2 — JVM native backend + hybrid
+### Phase 2 — Jolt native backend — **implemented** (Jolt repo)
+
+**Design and per-stage detail: §6.1** (state inventory §6.1.2, the two
+ctx-propagation mechanisms §6.1.4, gotchas §6.1.9, stage table §6.1.10).
+Shipped in the Jolt repo rather than here: `stdlib/jolt/loader.clj` plus
+the host seams (`clojure.java.io/resource` 2-arity, `RT/baseLoader`, the
+tagged-table classloader facade), with `test/chez/loaderconf-test.clj` as
+the writ — `make loaderconf`, 18 cases, empty baseline. Tracked in
+jolt-lang/jolt#912 and jolt-lang/jolt#1039.
+
+**What landed, and how it differs from M0–M4.** The substrate is one
+global namespace registry (rt.ss's var-table), so a context is built *out
+of* it rather than beside it: a namespace located on a loader's own roots
+is private — any installed version is evicted before the source is
+evaluated, so the evaluation makes fresh cells, and compiled references
+are direct cell links, so evicted cells stay live; the root hides owned
+names (and vars in them); a hit located by a delegate is linked at its
+home loader too; requires are pre-loaded through the loader, so a
+requirement the loader cannot serve fails the load instead of leaking to
+the runtime's global `require`; `require`/`resolve`/`ns-resolve`/
+`find-var` in evaluated source are rewritten to context-carrying forms,
+and a quoted `resolve`/`find-var` target is qualified with the defining
+namespace at rewrite time (at call time `*ns*` is the caller's). The
+evict-evaluate-snapshot window mutates global state under one name, so it
+is serialized by a per-name claim shared by every loader (waiters park on
+a promise, so fibers stay parkable; same-thread re-entry is
+`:loader/circular`), and `unload!` unmaps what it installed while the slot
+is still its own.
+
+So M1's analyzer-visible loader state (per-loader roots/loaded-ns/data
+readers, the analyze-ctx field, defining capture in `emit-with-cells`) was
+not built. Nor was M2: classes, provider tables and type tables stay
+process-global, and `:class` requests have no backend on jolt (the SCI
+backend answers them from its injected class map). Nor M3: private sources
+compile fresh (only the host-root path uses the AOT cache), embedded
+sources key by root-relative path, `dce` and state images remain
+single-loader, and the limits are recorded in the namespace docstring — a
+shadowing context evicts the host's registration (the runtime's loaded
+mark survives `remove-ns`, so a plain `require` does not restore it and
+`:reload` does), a host-side in-place reload of a context-owned name
+reuses that context's object and cells, and the per-name claim orders
+writers, not readers. M4 landed in part: `io/resource` 2-arity,
+`RT/baseLoader`, the facade and `as-classloader`; TCCL did not.
+
+**Remaining, if class-level isolation is ever wanted**: M0/M1, M2 (the
+per-loader class/provider/type tables, value-directed dispatch, cross-ctx
+identity — §6.1.5, §6.3), M3 (AOT keyed by (loader, ns) or resolved file,
+embedded-source root qualification, `dce` per loader, state-image home
+loader, the `run-case-isolation.ss` prune list) and the M4 leftover. Those
+untouched host edits are also why §6.1.9's extra gates (`gambitgencheck`,
+`mirror-drift-check`, the portability/park-lock checks, a possible
+`remint`) are not in play yet.
+
+Gates for the M-stages, when they land: the corpus/unit/cts/sbperf set
+(plus the jolt gates in §6.1.9) and the conformance cases named in
+§6.1.10; `make sci` / `scifunctional` must stay green throughout — they
+pin the sci path the extension backend uses.
+
+### Phase 3 — JVM native backend + hybrid (last)
 
 - `kmet.loader.jvm` (Clojure-only): `proxy [java.lang.ClassLoader]`
   overriding `findClass`/`getResource(s)`/`findResources`; `parent` from the
@@ -795,40 +911,9 @@ upgrades that must satisfy the same suite.
   isolation on the JVM.
 - Suite runs on the JVM for cases 1–8, 10; case 3 (shared var) via the sci
   half.
-
-### Phase 3 — Jolt native backend
-
-**Detailed design and per-stage file/gate lists: §6.1** (state inventory
-§6.1.2, the two ctx-propagation mechanisms §6.1.4, gotchas §6.1.9, stage
-table §6.1.10). Summary:
-
-Depends on the port reaching the extension system (`jolt-port.md` §B3);
-phases 0–2 already give Jolt isolation through sci.
-
-- **M0 — indirection, zero behaviour change.** Tables move behind a
-  `chez-loader` record; accessors read the ambient loader; the root loader
-  wraps today's globals; the analyze ctx gains a defaulted `loader` field.
-  ~100 sites, ~10 files. Also `manifestcheck`, `gambitgencheck`,
-  `mirror-drift-check`; `remint` only if a seed-listed file was touched.
-- **M1 — loaders + ctx propagation.** Ambient binding at the eval funnel;
-  per-loader roots/loaded-ns/data readers; defining capture in
-  `emit-with-cells` + IR screening; `find`/`resolve`/`load` mapped onto
-  `resolve-on-roots` / the link table / `load-namespace`; resolve-fn as the
-  delegate step.
-- **M2 — classes per loader.** Registry tables, class extensions, provider
-  claims/latches, type/protocol tables; boot `java.*` global; ctx-tagged
-  tokens; value-directed dispatch; divergence entry for cross-loader
-  identity (and, until then, the hierarchy leak).
-- **M3 — unload + caches.** The `run-case-isolation.ss` snapshot/prune list
-  as the checklist; shared-write ledger (class extensions, hierarchy
-  derives); AOT/embedded/class-path fixes (§6.1.9).
-- **M4 — host API + loader objects.** Per-loader `the-classloader`,
-  `RT/baseLoader`, TCCL, `(io/resource n loader)` honoring its argument,
-  `jolt.host` seams (§6.1.8), `as-classloader`.
-- Gates per M-stage: the corpus/unit/cts/sbperf set (plus the jolt gates in
-  §6.1.9) and the conformance cases named in §6.1.10; `make sci` /
-  `scifunctional` must stay green throughout — they pin the sci path the
-extension backend uses.
+- **Deliberately last**: the JVM host already gets isolation through SCI
+  (phase 1), so this is the upgrade for class-level isolation, not a
+  blocker. It may land after promotion (phase 4), as a separate artifact.
 
 ### Phase 4 — promotion to a standalone library
 
@@ -843,13 +928,18 @@ extension backend uses.
 
 ## 10. Rollout order and validation
 
-1. Phase 0 green on bb (fast, no kmet behavior change).
+1. Phase 0 green on bb (fast, no kmet behavior change). **Done.**
 2. Phase 1 on bb: `/reload`, extension fixtures, jar-ext suites unchanged.
+   **Done.**
 3. Phase 1 on Jolt: `jolt -e "(require 'kmet.loader.core)"`, the suite, then
-   kmet's extension tests (once the port reaches them).
-4. Phase 2 JVM, Phase 3 Jolt native — each must pass the *same* suite; a
-   native backend that fails a case is a bug in the backend, not a
-   permitted divergence (§6.3 excepted, recorded in the registry).
+   kmet's extension tests. **Done** — `jolt test
+   kmet.loader.test-core kmet.loader.test-sci` and `kmet.app.test-extensions`
+   are green on jolt.
+4. Phase 2 (Jolt native) — **done** in the Jolt repo, 18/18. Phase 3 (JVM,
+   plus hybrid) is last and may follow promotion. Each backend must pass
+   the *same* suite; a native backend that fails a case is a bug in the
+   backend, not a permitted divergence (§6.3 excepted, recorded in the
+   registry).
 5. Changed-file gates (`bb test-changed` / `lint-changed` /
    `format-changed`) during development; full gates only on request
    (AGENTS.md).

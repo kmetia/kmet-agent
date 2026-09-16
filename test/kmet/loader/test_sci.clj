@@ -1,10 +1,15 @@
 (ns kmet.loader.test-sci
   "Conformance for the SCI backend (kmet.loader.sci): the code-path
    cases of loader.md §8 — v1/v2 isolation (1), shared by reference (3),
-   defining-ctx inheritance (9), the find/load read discipline (11) and a
-   vanishing source (12) — plus the backend's own contract: `require`
-   routed through the loader, injected namespaces, policies, resources,
-   unload and the eval seam.
+   defining-ctx inheritance (9), the find/load read discipline (11), a
+   vanishing source (12), and the private-load semantics the Jolt suite
+   pinned first (13 concurrent contexts, 14 unload, 15 a failed load, 16
+   context-owned names, 18 an unservable requirement) — plus the backend's
+   own contract: `require` routed through the loader, injected namespaces,
+   policies, resources, unload and the eval seam. Case 17 is host-only
+   (the Jolt root loads host sources on demand); kmet's root answers
+   loaded host namespaces only, so this backend injects shared names and
+   fails an unservable require.
 
    Case 9 note: on SCI a dynamic `require` reached through a value follows
    the *ambient* context (loader.md §3), so the conformance shape is the
@@ -129,6 +134,107 @@
     (is (some? hit))
     (swap! src dissoc 'vanish)
     (is (= :loader/unreadable (:type (ex-data (err #(ldr/load l hit))))))))
+
+;; §8.13-8.18: the private-load semantics the Jolt native suite pinned
+;; first (loaderconf cases 13-18).
+(deftest test-case-13-concurrent-per-context-loads
+  ;; Several contexts race on one namespace name. Each has its own SCI
+  ;; context and its own source, so every load must end with its own
+  ;; definition — no cross-talk through the shared in-flight bookkeeping.
+  (let [mk (fn [n]
+             (lsci/sci-loader
+              {:id (str "conc" n)
+               :sources {'conc {:file (str "conc" n ".clj")
+                                :source (fn []
+                                          (Thread/sleep 5)
+                                          (str "(ns conc) (defn who [] :c" n ")"))}}}))
+        ls (mapv mk (range 4))
+        loaded (mapv deref (mapv #(future (load-ns % "conc")) ls))]
+    (is (every? some? loaded))
+    (is (= [:c0 :c1 :c2 :c3] (mapv #(call-var % 'conc/who) ls)))
+    (is (apply distinct? (mapv #(sci/resolve (ctx-of %) 'conc/who) ls))
+        "each context holds its own var")))
+
+(deftest test-case-14-unload-releases-without-touching-siblings
+  (let [mk (fn [id] (lsci/sci-loader {:id id :parent (ldr/root)}))
+        s1 (mk "u14a")
+        s2 (mk "u14b")]
+    (is (some? (load-ns s1 "clojure.string")))
+    (is (some? (ldr/load s1 {:kind :var :name "clojure.string/join"})))
+    (is (some? (load-ns s2 "clojure.string")))
+    (is (some? (ldr/load s2 {:kind :var :name "clojure.string/join"})))
+    (let [rep (ldr/unload! s1)]
+      (is (true? (:unloaded rep)))
+      (is (= 1 (:namespaces (:released rep))) "its namespace link is counted out")
+      (is (= 0 (:in-flight rep))))
+    (is (= :loader/unloaded
+           (:type (ex-data (err #(ldr/load s1 {:kind :var :name "clojure.string/join"})))))
+        "the unloaded loader refuses new loads")
+    (is (identical? (ns-resolve 'clojure.string 'join)
+                    (ldr/resolve s2 {:kind :var :name "clojure.string/join"}))
+        "the sibling's link is untouched")
+    (is (= "ab" ((ldr/load s2 {:kind :var :name "clojure.string/join"}) ["a" "b"]))
+        "and the definition stays callable")
+    (is (some? (load-ns (mk "u14c") "clojure.string"))
+        "a fresh loader loads the same name again")))
+
+(deftest test-case-15-failed-load-leaves-nothing-and-retries
+  (testing "a source that throws after (ns …) leaves no half-built namespace"
+    (let [src (atom "(ns boom15) (def x (throw (ex-info \"broken\" {})))")
+          l (lsci/sci-loader {:id "fail15"
+                              :sources (fn [s]
+                                         (when (= s 'boom15)
+                                           {:file "boom15.clj" :source @src}))})]
+      (is (some? (err #(load-ns l "boom15"))))
+      (is (nil? (ldr/resolve l {:kind :ns :name "boom15"})) "no link")
+      (is (nil? (sci/find-ns (ctx-of l) 'boom15)) "nothing left in the context")
+      (is (= 0 (:in-flight (ldr/status l))) "the in-flight claim was released")
+      (reset! src "(ns boom15) (def x :fixed)")
+      (is (some? (load-ns l "boom15")))
+      (is (= :fixed (deref (sci/resolve (ctx-of l) 'boom15/x)))
+          "the retry read the fixed source instead of re-using the broken one")))
+  (testing "a failed nested require leaves the requester uninstalled too"
+    (let [srcs (atom {'app15 {:file "app15.clj"
+                              :source "(ns app15 (:require [dep15])) (def v dep15/x)"}})
+          l (lsci/sci-loader {:id "fail15b" :sources (fn [s] (get @srcs s))})]
+      (is (chain-type? (err #(load-ns l "app15")) :loader/unreadable)
+          "the requirement error survives the host's wrapper")
+      (is (nil? (sci/find-ns (ctx-of l) 'app15)))
+      (swap! srcs assoc 'dep15 {:file "dep15.clj" :source "(ns dep15) (def x :dep)"})
+      (is (some? (load-ns l "app15")))
+      (is (= :dep (deref (sci/resolve (ctx-of l) 'app15/v)))))))
+
+(deftest test-case-16-a-contexts-names-are-invisible-through-the-root
+  (let [l (lsci/sci-loader {:id "priv16"
+                            :sources {'priv16 {:file "priv16.clj"
+                                               :source "(ns priv16) (def v :private)"}}})]
+    (load-ns l "priv16")
+    (is (= :private (deref (sci/resolve (ctx-of l) 'priv16/v))) "the owner sees it")
+    (is (= [] (ldr/find (ldr/root) {:kind :ns :name "priv16"})))
+    (is (= [] (ldr/find (ldr/root) {:kind :var :name "priv16/v"})))
+    (is (= :loader/miss
+           (:type (ex-data (err #(ldr/load (ldr/root) {:kind :ns :name "priv16"}))))))
+    (let [other (lsci/sci-loader {:id "other16" :parent (ldr/root)})]
+      (is (= [] (ldr/find other {:kind :ns :name "priv16"})))
+      (is (= :loader/miss (:type (ex-data (err #(load-ns other "priv16")))))))))
+
+(deftest test-case-18-a-requirement-the-loader-cannot-serve
+  (let [srcs {'app18 {:file "app18.clj"
+                      :source "(ns app18 (:require [nope.ns])) (def v nope.ns/x)"}}
+        l (lsci/sci-loader {:id "req18" :sources srcs})
+        e (err #(load-ns l "app18"))]
+    (is (some? e))
+    (is (chain-type? e :loader/unreadable))
+    (is (chain-message? e "inject") "the message says how to provide it")
+    (is (nil? (ldr/resolve l {:kind :ns :name "app18"})) "nothing was linked")
+    (is (nil? (sci/find-ns (ctx-of l) 'app18)) "and nothing was left behind")
+    (testing "the same source loads once the requirement can be served"
+      (let [l2 (lsci/sci-loader
+                {:id "req18b"
+                 :sources (assoc srcs 'nope.ns {:file "nope.clj"
+                                                :source "(ns nope.ns) (def x :served)"})})]
+        (is (some? (load-ns l2 "app18")))
+        (is (= :served (deref (sci/resolve (ctx-of l2) 'app18/v))))))))
 
 ;; ─── require / linkage ─────────────────────────────────────────────────────
 

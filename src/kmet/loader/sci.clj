@@ -119,11 +119,23 @@
                       :else {:kind :resource :url (str r)}))
         nil))))
 
+(defn- drop-ns!
+  "Undo an evaluation that created NS-SYM in CTX. SCI installs the namespace
+   before it evaluates the body, so a source that throws mid-namespace would
+   otherwise be re-used — by the next load, or by a nested `require`, which
+   consults the same map — as if it had loaded, with its vars unbound. The
+   environment's namespace map is the registry `sci/find-ns` and `require`
+   consult, so removing the entry removes the namespace."
+  [ctx ns-sym]
+  (swap! (:env ctx) update :namespaces dissoc ns-sym))
+
 (defn- read-ns
   "The generic body's reader for :ns hits: evaluate the namespace source in
    CTX and answer with the SCI namespace. A namespace already in the
    context is re-used — a SCI-internal `require` may have loaded it without
-   the link table knowing."
+   the link table knowing. A failed evaluation is undone (`drop-ns!`): the
+   loader's contract is that a failed load installs nothing, and a
+   half-built namespace would make the retry answer the broken one."
   [ctx provider eval-fn]
   (fn [home hit req]
     (let [ns-sym (symbol (:name hit))]
@@ -132,12 +144,17 @@
                 source (some-> ref read-source)]
             (when-not (string? source)
               (unreadable! home ns-sym "no source available"))
-            (eval-fn ctx {:namespace ns-sym
-                          :file (:file ref)
-                          :source source
-                          :load? (:load? req)})
-            (or (sci/find-ns ctx ns-sym)
-                (unreadable! home ns-sym "the source did not define it")))))))
+            (let [n (try
+                      (eval-fn ctx {:namespace ns-sym
+                                    :file (:file ref)
+                                    :source source
+                                    :load? (:load? req)})
+                      (sci/find-ns ctx ns-sym)
+                      (catch Throwable e
+                        (drop-ns! ctx ns-sym)
+                        (throw e)))]
+              (or n
+                  (unreadable! home ns-sym "the source did not define it"))))))))
 
 ;; ─── SCI require → loader ──────────────────────────────────────────────────
 
