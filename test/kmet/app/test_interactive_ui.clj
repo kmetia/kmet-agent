@@ -508,6 +508,33 @@
       ((var inter/clear-status-indicator!) cs)
       (t/is (nil? ((var inter/current-status-indicator) cs))))))
 
+(deftest test-transient-indicator-drives-frames
+  (testing "a transient indicator shown outside an agent turn arms its own
+            frame driver — the clock-driven frames only advance when
+            something requests renders (manual /compact regression: without
+            the driver the compaction spinner sits on one frame)"
+    (let [cs (assoc (test-status-cs)
+                    :tui {:running? (atom true)
+                          :render-requested? (atom false)})
+          tui (:tui cs)]
+      ((var inter/show-status-indicator!) cs :compaction
+                                          (ui/make-compaction-status-indicator))
+      (let [first-driver (:driver @(:status-current cs))]
+        (t/is (some? first-driver) "the driver is recorded on the status entry")
+        (reset! (:render-requested? tui) false)
+        (Thread/sleep 120)
+        (t/is (true? @(:render-requested? tui)) "frames are requested while it is up")
+        (testing "swapping in the next indicator retires the previous driver"
+          ((var inter/show-status-indicator!) cs :retry
+                                              (ui/make-retry-status-indicator 1 3 2000))
+          (let [next-driver (:driver @(:status-current cs))]
+            (t/is (some? next-driver))
+            (t/is (not (identical? first-driver next-driver)))
+            (t/is (future-cancelled? first-driver))
+            (testing "clearing cancels the driver with the status"
+              ((var inter/clear-status-indicator!) cs)
+              (t/is (future-cancelled? next-driver)))))))))
+
 (deftest test-clear-working-status
   (testing ":working clears the implicit working status — pi:
             setWorkingVisible(false) → clearStatusIndicator('working')"

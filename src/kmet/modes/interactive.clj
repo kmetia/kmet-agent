@@ -196,7 +196,6 @@
                       header-comp
                       loaded-resources-comp
                       anim-timer
-                      indicator-timer
                       footer-comp
                       footer-provider
                       status-indicator
@@ -2112,36 +2111,40 @@
                 (debug/log "anim timer: " e))))]
     (reset! (:anim-timer cs) t)))
 
-(defn- start-indicator-timer!
+(defn- start-indicator-driver!
   "Request renders every 80ms while a TRANSIENT status indicator is up.
    Covers indicators shown outside agent turns (manual /compact, /share)
    — the elapsed-time/countdown indicators render from wall-clock time per
    pass and otherwise sit on a single static frame when no anim timer is
-   running. Self-exits when the TUI stops or the indicator clears; also
-   cancelled explicitly by clear-status-indicator!."
-  [cs]
-  ;; tolerate stub CoreStates without the field (headless tests)
-  (let [cell (:indicator-timer cs)]
-    (when (and cell (not @cell))
-      (reset! cell
-              (future
-                (try
-                  (loop []
-                    (Thread/sleep 80)
-                    (if (and @(:running? (:tui cs))
-                             @(:status-current cs))
-                      (do (tui/tui-request-render (:tui cs))
-                          (recur))
-                      nil))
-                  (catch InterruptedException _)))))))
+   running (during turns the anim timer already drives frames). The future
+   is recorded on the indicator's :status-current entry: the driver's
+   lifetime is the indicator's, so there is no separate cell to initialize
+   (or forget) and a clear cancels exactly the driver it owns. Self-exits
+   when the TUI stops or the indicator it was started for is no longer
+   current; cancel-indicator-driver! stops it eagerly on a clear/swap."
+  [cs indicator]
+  (future
+    (try
+      (loop []
+        (Thread/sleep 80)
+        (when (and (some-> (:tui cs) :running? deref)
+                   (identical? indicator (:indicator @(:status-current cs))))
+          (tui/tui-request-render (:tui cs))
+          (recur)))
+      ;; cancelled via future-cancel — the interrupt raised on Thread/sleep
+      ;; is expected, not an error
+      (catch InterruptedException _)
+      (catch Exception e
+        (debug/log "indicator driver: " e)))))
 
-(defn- stop-indicator-timer!
-  "Cancel the transient-indicator frame driver (idempotent)."
+(defn- cancel-indicator-driver!
+  "Cancel the current status entry's frame driver (idempotent; read the
+   entry before clearing :status-current so the driver is still there to
+   cancel)."
   [cs]
-  (when-some [cell (:indicator-timer cs)]
-    (when-let [t @cell]
-      (future-cancel t))
-    (reset! cell nil)))
+  (when-some [t (:driver @(:status-current cs))]
+    (future-cancel t))
+  nil)
 
 (defn- stop-anim-timer!
   "Cancel the animation timer."
@@ -2153,9 +2156,10 @@
 ;; ─── Status indicator swap model (pi: showStatusIndicator/clearStatusIndicator) ──
 ;; The status layer is a fn component (ui/make-status-area) mounted via
 ;; hiccup/root: it renders whichever indicator the :status-current atom
-;; records ({:kind k :indicator c}), or the default working StatusIndicator
-;; when nil — except while the active editor embeds the status in its own
-;; top border (the default editor), when the layer renders nothing. A swap
+;; records ({:kind k :indicator c :driver f}), or the default working
+;; StatusIndicator when nil — except while the active editor embeds the
+;; status in its own top border (the default editor), when the layer renders
+;; nothing. A swap
 ;; is a pure reset! on that atom — reconcile diffs the tree and swaps the
 ;; child record; no container clear/add dance. The working indicator's
 ;; start/stop stays imperative (spinner lifecycle, dsl.md §5). The kind
@@ -2178,13 +2182,16 @@
    disposes the active indicator). KIND records which indicator is active
    for kind-gated clears. No manual render request for the SWAP itself —
    the tracked :status-current read schedules that frame (§3.4) — but the
-   transient indicators animate from wall-clock time, so outside agent
-   turns this starts an 80ms frame driver (a no-op while one is running;
-   during turns the anim timer already drives frames)."
+   transient indicators animate from wall-clock time, so the entry carries
+   an 80ms frame driver (start-indicator-driver!; during turns the anim
+   timer already drives frames)."
   [cs kind indicator]
+  (cancel-indicator-driver! cs)
   (ui/status-indicator-stop! (:status-indicator cs))
-  (reset! (:status-current cs) {:kind kind :indicator indicator})
-  (start-indicator-timer! cs))
+  (reset! (:status-current cs)
+          {:kind kind
+           :indicator indicator
+           :driver (start-indicator-driver! cs indicator)}))
 
 (defn- activate-working-indicator!
   "Restore the default working StatusIndicator as the current status and
@@ -2198,8 +2205,8 @@
   ;; frame right after, covering the spinner activation. The transient
   ;; indicator's frame driver stops — the working spinner animates via the
   ;; anim timer once the turn runs.
+  (cancel-indicator-driver! cs)
   (reset! (:status-current cs) nil)
-  (stop-indicator-timer! cs)
   (ui/status-indicator-start! (:status-indicator cs))
   ;; A background thread (share/branch-summary completion, an extension's
   ;; set-working-visible) can revive into a turn that just ended: teardown
@@ -2250,9 +2257,9 @@
               (and (= :working kind) (nil? current)))
       ;; A real swap (transient → idle) schedules its own frame through the
       ;; status-area root reaction; an already-idle clear needs no frame.
+      (cancel-indicator-driver! cs)
       (reset! (:status-current cs) nil)
-      (ui/status-indicator-stop! (:status-indicator cs))
-      (stop-indicator-timer! cs))))
+      (ui/status-indicator-stop! (:status-indicator cs)))))
 
 ;; ─── Pending messages display (pi: updatePendingMessagesDisplay) ──────────
 
