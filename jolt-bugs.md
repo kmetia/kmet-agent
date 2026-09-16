@@ -82,17 +82,20 @@ host protocols — that one is closed). The `IVar` protocol in vendored SCI
 doesn't implement it. This blocks mcp-adapter, lsp-adapter, review, and
 clojure extensions on jolt.
 
-**Workaround** (`test/kmet/app/test_extensions.clj:1056`): `^:bb-only` gate
-on `test-shipped-extensions-load-from-src`. Note (2026-09-16): upstream
-re-diagnoses this in PR jolt#1033 — `sci/copy-var*` never calls `getRawRoot`;
-the failure is the missing embedder-side `IVar` extension, and a host protocol
-copied into SCI as-is fails identically on JVM Clojure 1.12.5, so no jolt-side
-fix unblocks that shape. #1033 makes the extension writable (Var surface:
-`toSymbol`, `ns`/`sym`, `unbindRoot`, `set`, `fn`) but both hosts then land on
-`Unable to resolve symbol` — the supported sharing shape is the multimethod
-recipe in `test/chez/sci-functional-test.clj`. Keep the `^:bb-only` gate even
-after #1033 merges. Removal: only when the extensions stop copying host
-protocols as-is (or SCI itself changes) — drop `^:bb-only`, run
-`jolt test kmet.app.test-extensions/test-shipped-extensions-load-from-src`.
+**Workaround — retired on Jolt (2026-09-16).** Extension contexts no longer
+run under SCI there: `kmet.app.extensions/create-loader` builds them on the
+runtime's native loader (jolt#1039, loader.md §6.1), so the shipped
+extensions share host protocols by reference instead of copying them into an
+SCI env, and the `^:bb-only` gate on `test-shipped-extensions-load-from-src`
+is gone (the clojure extension still stays bb-side, but for its own deps
+closure — deps.edn excludes rewrite-clj, which bb bundles and Jolt does not).
+The SCI shape itself is unchanged for any SCI-on-Jolt use. Note (2026-09-16):
+upstream re-diagnoses this in PR jolt#1033 — `sci/copy-var*` never calls
+`getRawRoot`; the failure is the missing embedder-side `IVar` extension, and a
+host protocol copied into SCI as-is fails identically on JVM Clojure 1.12.5,
+so no jolt-side fix unblocks that shape. #1033 makes the extension writable
+(Var surface: `toSymbol`, `ns`/`sym`, `unbindRoot`, `set`, `fn`) but both
+hosts then land on `Unable to resolve symbol` — the supported sharing shape is
+the multimethod recipe in `test/chez/sci-functional-test.clj`.
 
 

@@ -276,8 +276,12 @@ keeps its slot for the sci backend's suite, not for extension contexts.
   (single-file, manifest dir with an internal ns through the load-fn, symlinked
   root, unload/reload with no duplicates, rollback on failure, resource
   fallback, self-registered skills/prompts, ctx dispatch, isolation allowlist).
-  The shipped-extension test stays bb-only for extension CONTENT reasons
-  (deps closures and the Jolt class-graph gap above).
+  The shipped-extension test runs on both hosts (2026-09-16): mcp-adapter,
+  lsp-adapter, review and tree-sitter load on Jolt; the clojure extension
+  stays bb-side (its deps.edn excludes rewrite-clj — bb bundles an adapted
+  port and Jolt has no replacement), and the test skips it there. The
+  tools.reader, version-isolation and bad-deps tests are likewise un-gated;
+  the spec-port, cljfmt-chain and jar tests stay ^:bb-only.
   Lazy-`mapcat` fix worth noting: `reload-extensions!` returned an unrealized
   `mapcat`, so a caller ignoring the value loaded nothing on Jolt (bb's
   `apply`/`concat` realized it) — now `vec`-forced.

@@ -2,10 +2,13 @@
   "Extension runtime tests: the init/shutdown contract, load/unload/reload
    lifecycle, per-extension deregistration, and the nullable api fixture
    (kmet.extension/create-nullable-api) for testing extensions in isolation.
-   The SCI loader runs on both hosts (bb's bundled SCI, Jolt's vendored
-   0.13.53); only bb-bundled-port tests (tools.reader/spec ports), Maven
-   deps tests (cljfmt, version isolation, bad deps) and jar tests
-   (java.util.zip is unshimmed on Jolt) stay ^:bb-only."
+   Contexts are per host — SCI on bb/JVM, the runtime's own loader on Jolt —
+   and the suite runs on both. ^:bb-only is what Jolt genuinely cannot do:
+   the bundled clojure.spec port test (nothing loads spec.alpha there, and
+   bb's port is not injected), the cljfmt Maven-chain test (its deps.edn
+   excludes the bb-bundled rewrite-clj and Jolt has no replacement — the
+   clojure extension's gap, extensions.md § bb-bundled ports) and the two jar
+   tests (they build archives with java.util.zip)."
   (:require [clojure.test :as t :refer [testing]]
             [clojure.string :as str]
             [clojure.java.io :as io]
@@ -339,11 +342,12 @@
         (fs/delete-if-exists "target/slurp-ext-out.txt")
         (fs/delete-if-exists "target/slurp-ext-in.txt")))))
 
-(t/deftest ^:bb-only test-extension-gets-bundled-tools-reader-port
-  ;; bb's tools.reader is a reduced custom port; the Maven copies have
-  ;; deftypes implementing java.io.Closeable and fail under SCI. The
-  ;; context injects the port by reference (bundled-port-namespaces), so
-  ;; extensions can require clojure.tools.reader* without deps.edn pins
+(t/deftest test-extension-gets-bundled-tools-reader-port
+  ;; extensions can require clojure.tools.reader* without deps.edn pins: bb
+  ;; pre-loads its reduced port and the context injects it by reference
+  ;; (bundled-port-namespaces); on Jolt the extension runtime's own sci.core
+  ;; require has already loaded the real tools.reader, which the native host
+  ;; view shares by the same loaded-namespace rule.
   (extensions/clear-extensions!)
   (let [dir "target/test-ext-tools-reader"]
     (fs/delete-tree dir)
@@ -373,6 +377,8 @@
   ;; (spec-port-namespaces), so extensions get working clojure.spec.alpha
   ;; without deps.edn pins. file-seq is likewise absent from SCI's core and
   ;; injected with slurp/spit (cljfmt.io's FileEntity protocol needs it).
+  ;; Stays ^:bb-only: Jolt has no bundled spec port and nothing there loads
+  ;; the Maven copy, so its contexts have no clojure.spec.alpha to share.
   (extensions/clear-extensions!)
   (let [dir "target/test-ext-spec-file-seq"]
     (fs/delete-tree dir)
@@ -410,6 +416,11 @@
   ;; under SCI, while cljfmt.io's file-seq and cljfmt.config's
   ;; clojure.spec.alpha had no working source. The bundled ports are now
   ;; injected and the bundled jars excluded.
+  ;;
+  ;; Stays ^:bb-only: the fixture's deps.edn excludes rewrite-clj for the
+  ;; bundled port, which leaves Jolt's closure without rewrite-clj.node and
+  ;; no bundled copy to fall back on — the same content gap as the shipped
+  ;; clojure extension (extensions.md § bb-bundled ports).
   (extensions/clear-extensions!)
   (let [result (extensions/load-extension! "test/fixtures/ext-cljfmt")]
     (t/is (nil? (:error result)) (str "loaded: " (:error result)))
@@ -442,7 +453,7 @@
       (t/is (empty? (extensions/get-loaded-extensions))))
     (fs/delete-tree dir)))
 
-(t/deftest ^:slow ^:bb-only test-extension-lib-version-isolation
+(t/deftest ^:slow test-extension-lib-version-isolation
   (extensions/clear-extensions!)
   (let [ra (extensions/load-extension! "test/fixtures/ext-iso-a")
         rb (extensions/load-extension! "test/fixtures/ext-iso-b")]
@@ -685,7 +696,7 @@
         (t/is (str/includes? (:error result) "kmet.libs.http")
               "the rejection names the proxy-aware boundary")))))
 
-(t/deftest ^:slow ^:bb-only test-extension-bad-deps-fails-load
+(t/deftest ^:slow test-extension-bad-deps-fails-load
   (extensions/clear-extensions!)
   (let [dir "target/test-ext-bad-deps"]
     (fs/create-dirs dir)
@@ -1113,39 +1124,41 @@
         (t/is (nil? (prompts/get-prompt-template "selfreg-tpl")) "unload removes the template")
         (fs/delete-tree dir)))))
 
-(t/deftest ^:bb-only test-shipped-extensions-load-from-src
+(t/deftest test-shipped-extensions-load-from-src
   ;; the repo's own extensions restructured to src/-as-artifact-root
   ;; (jar-ext.md §2): every shipped src/ dir loads through the real runtime.
+  ;; Jolt contexts run on the runtime's own loader, so the old SCI IVar gap
+  ;; (jolt#1031) no longer applies.
   ;;
-  ;; bb-only: on jolt the shipped extensions hit SCI gaps the loader
-  ;; cannot paper over:
-  ;;   * mcp-adapter / lsp-adapter / review / clojure: SCI's IVar protocol
-  ;;     lacks :getRawRoot for clojure.lang.Var (jolt#1031)
-  ;;   * clojure extension ALSO has Maven-chain gaps (rewrite-clj/tools.reader:
-  ;;     IMeta/ChunkedSeq misses + Closeable-in-deftype; SCI rejects host
-  ;;     interfaces in deftype on both hosts; jolt-bugs.md)
-  ;; jolt#1006 (defcomponent/defrecord over injected host protocol) is closed;
-  ;;   the defcomponent blocker is gone, but IVar gap (#1031) remains.
-  ;; (#998/#999 class tokens are fixed and verified — neither blocks
-  ;; anything anymore.) The SCI loader itself runs on both hosts
-  ;; (see the file docstring).
+  ;; The clojure extension is the one content gap left on Jolt: its deps.edn
+  ;; excludes rewrite-clj (bb bundles an adapted port there) and Jolt has no
+  ;; bundled copy, so the native loader cannot serve rewrite-clj.node. It
+  ;; stays a bb-side case until the shared deps.edn can express the per-host
+  ;; closure (extensions.md § bb-bundled ports); the other four extensions
+  ;; load on both hosts.
   (extensions/clear-extensions!)
-  (doseq [path ["extensions/clojure/src"
-                "extensions/lsp-adapter/src"
-                "extensions/mcp-adapter/src"
-                "extensions/review/src"
-                "extensions/tree-sitter/src"]]
-    (let [result (extensions/load-extension! path)]
-      (t/is (nil? (:error result)) (str path " loaded: " (:error result)))))
+  (let [shipped ["extensions/clojure/src"
+                 "extensions/lsp-adapter/src"
+                 "extensions/mcp-adapter/src"
+                 "extensions/review/src"
+                 "extensions/tree-sitter/src"]]
+    (doseq [path (if (host/jolt?)
+                   (remove #{"extensions/clojure/src"} shipped)
+                   shipped)]
+      (let [result (extensions/load-extension! path)]
+        (t/is (nil? (:error result)) (str path " loaded: " (:error result))))))
   (testing "tools + skills from the shipped extensions are live"
-    (t/is (some? (tools/get-tool "clojure_edit")))
     (t/is (some? (tools/get-tool "lsp")))
     (t/is (some? (tools/get-tool "mcp")))
-    (t/is (some? (skills/get-skill "clojure-edit")))
-    (t/is (some? (skills/get-skill "mcp"))))
+    (t/is (some? (skills/get-skill "mcp")))
+    (when-not (host/jolt?)
+      (t/is (some? (tools/get-tool "clojure_edit")))
+      (t/is (some? (skills/get-skill "clojure-edit")))))
   (testing "extension skills disclose from memory"
-    (t/is (str/includes? (skills/expand-skill-command "/skill:clojure-edit")
-                         "clojure_edit")))
+    (t/is (str/includes? (skills/expand-skill-command "/skill:mcp") "mcp"))
+    (when-not (host/jolt?)
+      (t/is (str/includes? (skills/expand-skill-command "/skill:clojure-edit")
+                           "clojure_edit"))))
   (extensions/unload-all-extensions!)
   (skills/clear-skills!)
   (prompts/clear-prompt-templates!))
