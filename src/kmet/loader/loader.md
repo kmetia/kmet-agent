@@ -734,7 +734,7 @@ backend's own namespace.
 
 Host-agnostic, written against the protocol; must pass on every backend
 that serves the kind in question. The **executable spec** is
-`test/chez/loaderconf-test.clj` in the Jolt repo — 20 cases, `make
+`test/chez/loaderconf-test.clj` in the Jolt repo — 21 cases, `make
 loaderconf`, empty baseline — mirrored on the kmet side by
 `test/kmet/loader/test_core.clj` (data-path cases, any backend) and
 `test/kmet/loader/test_sci_loader.clj` (code-path cases, SCI). Cases marked
@@ -877,7 +877,7 @@ ctx-propagation mechanisms §6.1.4, gotchas §6.1.9, stage table §6.1.10).
 Shipped in the Jolt repo rather than here: `stdlib/jolt/loader.clj` plus
 the host seams (`clojure.java.io/resource` 2-arity, `RT/baseLoader`, the
 tagged-table classloader facade), with `test/chez/loaderconf-test.clj` as
-the writ — `make loaderconf`, 20 cases, empty baseline. Tracked in
+the writ — `make loaderconf`, 21 cases, empty baseline. Tracked in
 jolt-lang/jolt#912 and jolt-lang/jolt#1039.
 
 **What landed, and how it differs from M0–M4.** The substrate is one
@@ -911,7 +911,15 @@ shadowing context evicts the host's registration (the runtime's loaded
 mark survives `remove-ns`, so a plain `require` does not restore it and
 `:reload` does), a host-side in-place reload of a context-owned name
 reuses that context's object and cells, and the per-name claim orders
-writers, not readers. M4 landed in part: `io/resource` 2-arity,
+writers, not readers. Two more are deliberate and recorded here because a
+review will ask: `loaders-by-id` (plus each loader's facade) keeps every
+loader ever constructed reachable — evaluated source finds its owning loader
+by id, including after close, so `:loader/unloaded` stays answerable — which
+is fine at one loader per extension and would want a closed-marker if a host
+ever minted one per request; and `jar-namespaces` is scanned a second time
+for a jar artifact when the SCI backend builds its resource fn (O(zip
+entries), once per load) — the price of not passing an unused argument
+through the Jolt branch. M4 landed in part: `io/resource` 2-arity,
 `RT/baseLoader`, the facade and `as-classloader`; TCCL did not.
 
 **Remaining, if class-level isolation is ever wanted**: M0/M1, M2 (the
@@ -1002,7 +1010,7 @@ one exception: they are stored and compared by identity.
    kmet's extension tests. **Done** — `jolt test
    kmet.loader.test-core kmet.loader.test-sci-loader` and `kmet.app.test-extensions`
    are green on jolt.
-4. Phase 2 (Jolt native) — **done** in the Jolt repo, 20/20. Phase 3 (JVM,
+4. Phase 2 (Jolt native) — **done** in the Jolt repo, 21/21. Phase 3 (JVM,
    plus hybrid) is last and may follow promotion. Each backend must pass
    the *same* suite; a native backend that fails a case is a bug in the
    backend, not a permitted divergence (§6.3 excepted, recorded in the
