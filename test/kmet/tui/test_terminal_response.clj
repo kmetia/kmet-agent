@@ -213,19 +213,37 @@
       (t/is (= {:width-px 100 :height-px 30} (img/get-cell-dimensions)))
       (t/is (= ["\u001b[A"] @dispatched) "the arrow key survives and is not duplicated"))))
 
+(deftest test-intercept-batched-color-scheme-reports
+  (testing "each report in a batch notifies (pi splits report sequences)"
+    (let [tui (recording-tui)
+          schemes (atom [])]
+      (core/tui-on-terminal-color-scheme-change tui #(swap! schemes conj %))
+      (t/is (= :consumed (intercept tui (atom "\u001b[?997;1n\u001b[?997;2n"))))
+      (t/is (= [:dark :light] @schemes)
+            "per-report notifications in arrival order"))))
+
+(deftest test-intercept-stray-osc-11
+  (testing "an OSC 11 reply with no outstanding query is consumed, not dropped as garbage"
+    (let [tui (recording-tui)
+          buf (atom "\u001b]11;#1a2b3c\u0007")]
+      (t/is (= :consumed (intercept tui buf)))
+      (t/is (= "" @buf))
+      (t/is (false? @(:pending-osc-11? tui))))))
+
 (deftest test-intercept-non-response-passthrough
   (testing "ordinary input is never held or consumed"
     (let [tui (recording-tui)
           buf (atom "a")]
       (t/is (nil? (intercept tui buf)))
       (t/is (= "a" @buf))))
-  (testing "a held fragment is flushed back when input stops matching"
+  (testing "a held fragment that can no longer become a response is
+            dropped; the new input keeps its own sequence boundaries"
     (let [tui (recording-tui)
           buf (atom "\u001b[6;")]
       (t/is (= :pending (intercept tui buf)))
-      (reset! buf "~")  ;; \u001b[6~ = PageDown, not a response
+      (reset! buf "\u001b[A")  ;; a key arrived while the response was pending
       (t/is (nil? (intercept tui buf)))
-      (t/is (= "\u001b[6;~" @buf) "held fragment + new input restored to the buffer")
+      (t/is (= "\u001b[A" @buf) "the key is NOT fused with the dead fragment")
       (t/is (= "" @(:terminal-response-buffer tui))))))
 
 (deftest test-request-render-force

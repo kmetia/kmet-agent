@@ -85,20 +85,23 @@
   (t/is (not (k/matches-key? "a" "b"))))
 
 (t/deftest test-key-release-repeat-detection
-  ;; kitty protocol off → no detection (gated by @kitty-active)
+  ;; Shape-based, never gated on the negotiated flag (pi: isKeyRelease /
+  ;; isKeyRepeat): the startup `CSI > 7u` push is what makes the terminal
+  ;; send releases, so filtering must not depend on the flags reply
+  ;; arriving (issue #4: a lost reply doubled every keypress).
   (k/set-kitty-active! false)
-  (t/is (nil? (k/is-key-release? "\u001b[97;1:3u")))
-  (t/is (nil? (k/is-key-repeat? "\u001b[97;1:2u")))
-  ;; protocol on → release (:3) / repeat (:2) detected
+  (t/is (true? (k/is-key-release? "\u001b[97;1:3u")))
+  (t/is (true? (k/is-key-repeat? "\u001b[97;1:2u")))
+  (t/is (nil? (k/is-key-release? "\u001b[97;1u")) "press is not a release")
+  (t/is (nil? (k/is-key-repeat? "\u001b[97;1u")))
+  ;; bracketed paste content is never a release/repeat (pi: ":3F" in MACs)
+  (t/is (nil? (k/is-key-release? "\u001b[200~90:62:3F:A5\u001b[201~")))
+  (t/is (nil? (k/is-key-repeat? "\u001b[200~x:2u\u001b[201~")))
+  ;; the negotiated flag does not change the answer either way
   (k/set-kitty-active! true)
   (try
     (t/is (true? (k/is-key-release? "\u001b[97;1:3u")))
     (t/is (true? (k/is-key-repeat? "\u001b[97;1:2u")))
-    (t/is (nil? (k/is-key-release? "\u001b[97;1u")) "press is not a release")
-    (t/is (nil? (k/is-key-repeat? "\u001b[97;1u")))
-    ;; bracketed paste content is never a release/repeat (pi: ":3F" in MACs)
-    (t/is (nil? (k/is-key-release? "\u001b[200~90:62:3F:A5\u001b[201~")))
-    (t/is (nil? (k/is-key-repeat? "\u001b[200~x:2u\u001b[201~")))
     (finally (k/set-kitty-active! false))))
 
 ;; ─── Kitty protocol parsing (pi keys.ts parity) ────────────────────────────

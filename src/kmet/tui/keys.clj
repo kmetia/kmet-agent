@@ -555,23 +555,25 @@
 
 (defn is-key-release?
   "Check if the data is a key release event (Kitty protocol, event type 3).
-   Only meaningful when Kitty keyboard protocol with flag 2 (report event types) is active.
-   Bracketed paste content is never a release event (pi: bluetooth MAC addresses like
-   \"90:62:3F:A5\" contain \":3F\")."
+   Shape-based and never gated on the negotiated flag (pi: isKeyRelease):
+   parse-kitty-event-type only matches a real kitty sequence carrying an
+   explicit \":3\" event subfield, and the terminal emits releases only
+   because of the startup `CSI > 7u` push — filtering must not depend on
+   the flags reply arriving (a lost reply doubled every keypress, issue
+   #4). Bracketed paste content is never a release event (pi: bluetooth
+   MAC addresses like \"90:62:3F:A5\" contain \":3F\")."
   [data]
   (when-not (str/includes? data "\u001b[200~")
-    (when (lib/kitty-active?)
-      (when (= 3 (parse-kitty-event-type data))
-        true))))
+    (when (= 3 (parse-kitty-event-type data))
+      true)))
 
 (defn is-key-repeat?
   "Check if the data is a key repeat event (Kitty protocol, event type 2).
-   Only meaningful when Kitty keyboard protocol with flag 2 (report event types) is active.
-   Bracketed paste content is never a repeat event."
+   Shape-based like is-key-release? (pi: isKeyRepeat). Bracketed paste
+   content is never a repeat event."
   [data]
   (when-not (str/includes? data "\u001b[200~")
-    (when (lib/kitty-active?)
-      (when (= 2 (parse-kitty-event-type data))
-        true))))
+    (when (= 2 (parse-kitty-event-type data))
+      true)))
 
 

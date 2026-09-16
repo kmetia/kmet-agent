@@ -68,9 +68,18 @@
 (def ^:const TERMINAL-PROGRESS-CLEAR-SEQUENCE "\u001b]9;4;0\u0007")
 (def ^:const TERMINAL-PROGRESS-KEEPALIVE-MS 1000)
 
-(def ^:private osc-11-response-re #"(?i)\u001b\]11;([^\u0007\u001b]*)(?:\u0007|\u001b\\)")
-(def ^:private color-scheme-report-re #"\u001b\[\?997;(1|2)n")
-(def ^:private cell-size-response-re #"\u001b\[6;(\d+);(\d+)t")
+;; Response grammars are defined once as pattern strings: the whole-string
+;; parser regex and the leading-split regex (several responses can share one
+;; read batch) are both built from them, so the two can never drift apart.
+(def ^:private osc-11-response-pattern
+  "(?i)\\u001b\\]11;([^\\u0007\\u001b]*)(?:\\u0007|\\u001b\\\\)")
+(def ^:private color-scheme-report-pattern "\\u001b\\[\\?997;([12])n")
+(def ^:private cell-size-response-pattern "\\u001b\\[6;(\\d+);(\\d+)t")
+
+(def ^:private osc-11-response-re (re-pattern osc-11-response-pattern))
+(def ^:private color-scheme-report-re (re-pattern color-scheme-report-pattern))
+(def ^:private color-scheme-batch-re (re-pattern (str "(?:" color-scheme-report-pattern ")+")))
+(def ^:private cell-size-response-re (re-pattern cell-size-response-pattern))
 
 (defn- parse-osc-hex-channel
   "Parse a hex color channel: 2- or 4-digit hex scaled to 0-255
@@ -120,7 +129,7 @@
    matching pi's repeated-group capture (pi: parseTerminalColorSchemeReport,
    pattern (?: ESC [ ?997;(1|2)n )+)."
   [s]
-  (when (re-matches #"(?:\u001b\[\?997;(1|2)n)+" s)
+  (when (re-matches color-scheme-batch-re s)
     (let [[_ v] (last (re-seq color-scheme-report-re s))]
       (if (= v "2") :light :dark))))
 
@@ -139,6 +148,14 @@
 
 (defonce ^:private modify-other-keys-active (atom false))
 
+(def ^:private kitty-flags-pattern "\\u001b\\[\\?(\\d+)u")
+(def ^:private kitty-push-pattern "\\u001b\\[>(\\d+)(?:;[\\d;]*)?u")
+(def ^:private device-attrs-pattern "\\u001b\\[\\?[\\d;]*c")
+
+(def ^:private kitty-flags-re (re-pattern kitty-flags-pattern))
+(def ^:private kitty-push-re (re-pattern kitty-push-pattern))
+(def ^:private device-attrs-re (re-pattern device-attrs-pattern))
+
 (defn parse-negotiation-sequence
   "Parse a Kitty keyboard protocol negotiation response (pi:
    parseKeyboardProtocolNegotiationSequence): {:type :kitty-flags
@@ -148,23 +165,28 @@
    the response is consumed instead of leaking into the input buffer, where
    an unparseable ESC sequence would swallow every subsequent key."
   [s]
-  (cond
-    (re-matches #"\u001b\[\?(\d+)u" s)
-    {:type :kitty-flags :flags (parse-long (second (re-matches #"\u001b\[\?(\d+)u" s)))}
+  (or
+   (when-let [m (re-matches kitty-flags-re s)]
+     {:type :kitty-flags :flags (parse-long (second m))})
 
-    (re-matches #"\u001b\[>(\d+)(?:;[\d;]*)?u" s)
-    {:type :kitty-flags :flags (parse-long (second (re-matches #"\u001b\[>(\d+)(?:;[\d;]*)?u" s)))}
+   (when-let [m (re-matches kitty-push-re s)]
+     {:type :kitty-flags :flags (parse-long (second m))})
 
-    (re-matches #"\u001b\[\?[\d;]*c" s)
-    {:type :device-attributes}
-
-    :else nil))
+   (when (re-matches device-attrs-re s)
+     {:type :device-attributes})))
 
 (def ^:private negotiation-leading-re
-  "A negotiation response at the START of a string (see
-   parse-negotiation-sequence) — used to split responses that share one
-   read batch."
-  #"^\u001b\[(?:\?[\d;]*c|[\?>][\d;]+(?:;[\d;]*)?u)")
+  (re-pattern (str "^(?:" kitty-flags-pattern
+                   "|" kitty-push-pattern
+                   "|" device-attrs-pattern ")")))
+
+(defn- leading-match
+  "The matched text when RE matches at the START of S, else nil. re-find
+   returns a group vector whenever the pattern captures (these response
+   grammars all do) — callers need the text."
+  [re s]
+  (when-let [m (re-find re s)]
+    (if (string? m) m (first m))))
 
 (defn split-negotiation-response
   "Split a LEADING negotiation response off S. Returns {:parsed P :rest R}
@@ -176,13 +198,13 @@
    be dropped as garbage — kitty-active would stay false and every release
    event would dispatch as a second keypress."
   [s]
-  (when-let [response (re-find negotiation-leading-re s)]
+  (when-let [response (leading-match negotiation-leading-re s)]
     (when-let [parsed (parse-negotiation-sequence response)]
       {:parsed parsed :rest (subs s (count response))})))
 
-(def ^:private cell-size-leading-re #"^\u001b\[6;\d+;\d+t")
-(def ^:private osc-11-leading-re #"(?i)^\u001b\]11;[^\u0007\u001b]*(?:\u0007|\u001b\\)")
-(def ^:private color-scheme-leading-re #"^\u001b\[\?997;[12]n")
+(def ^:private cell-size-leading-re (re-pattern (str "^" cell-size-response-pattern)))
+(def ^:private osc-11-leading-re (re-pattern (str "^" osc-11-response-pattern)))
+(def ^:private color-scheme-leading-re (re-pattern (str "^" color-scheme-report-pattern)))
 
 (defn split-terminal-response
   "Split a LEADING terminal query response off S. Returns
@@ -194,13 +216,13 @@
    leading response would be dropped as garbage."
   [s]
   (or
-   (when-let [m (re-find cell-size-leading-re s)]
+   (when-let [m (leading-match cell-size-leading-re s)]
      (when-let [value (parse-cell-size-response m)]
        {:kind :cell-size :value value :rest (subs s (count m))}))
-   (when-let [m (re-find osc-11-leading-re s)]
+   (when-let [m (leading-match osc-11-leading-re s)]
      (when-let [value (parse-osc-11-background-response m)]
        {:kind :osc-11 :value value :rest (subs s (count m))}))
-   (when-let [m (re-find color-scheme-leading-re s)]
+   (when-let [m (leading-match color-scheme-leading-re s)]
      (when-let [value (parse-terminal-color-scheme-report m)]
        {:kind :color-scheme :value value :rest (subs s (count m))}))))
 

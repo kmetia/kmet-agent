@@ -149,7 +149,24 @@
       (t/is (empty? @got) "nothing delivered without a focused component"))))
 
 (t/deftest test-dispatch-filters-key-releases
-  (testing "key release events are filtered unless the component opts in"
+  (testing "key release events are filtered by sequence shape, flag or not"
+    ;; No kitty-active required (pi: isKeyRelease is shape-based): a lost
+    ;; negotiation reply must not make releases dispatch as presses.
+    (keys/set-kitty-active! false)
+    (let [tui (core/create-tui nil)
+          got (atom [])
+          c (reify core/IComponent
+              (render [_ _] [""])
+              (handle-input [_ data] (swap! got conj data))
+              (invalidate [_]))]
+      (core/tui-add-child tui c)
+      (core/tui-set-focus tui c)
+      (dispatch! tui "a")
+      (dispatch! tui "\u001b[97;1:3u")  ;; kitty release event
+      (t/is (= ["a"] @got) "release events are filtered by default"))))
+
+(t/deftest test-dispatch-filters-releases-with-the-flag-on-too
+  (testing "the negotiated flag does not change release filtering"
     (keys/set-kitty-active! true)
     (try
       (let [tui (core/create-tui nil)
@@ -161,8 +178,8 @@
         (core/tui-add-child tui c)
         (core/tui-set-focus tui c)
         (dispatch! tui "a")
-        (dispatch! tui "\u001b[97;1:3u")  ;; kitty release event
-        (t/is (= ["a"] @got) "release events are filtered by default"))
+        (dispatch! tui "\u001b[97;1:3u")
+        (t/is (= ["a"] @got)))
       (finally (keys/set-kitty-active! false)))))
 
 (t/deftest test-batched-kitty-negotiation-keeps-releases-filtered

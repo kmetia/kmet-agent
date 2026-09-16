@@ -756,7 +756,8 @@
    remainder re-processed in the same pass. Returns :consumed / :pending /
    nil (not negotiation input — proceed normally). On nil the input buffer is
    left UNTOUCHED: blanking it would drop the fragment just examined (see
-   process-input-buffer!)."
+   process-input-buffer!); a held fragment that can no longer become a
+   response is dropped so it never fuses with the new input."
   [tui read-fn buf]
   (if-not @(:keyboard-protocol-pushed? tui)
     nil
@@ -789,8 +790,14 @@
 
         :else
         (do (when (seq held)
+              ;; The held prefix can never become a response in this shape
+              ;; (combined is neither a response nor a response prefix):
+              ;; drop it and leave the NEW input untouched for normal
+              ;; processing. Restoring the concatenation fused the fragment
+              ;; into the next sequence — a key arriving behind a stalled
+              ;; "\u001b[?7" became "\u001b[?7\u001b[A" and the ESC
+              ;; branch shredded it into a phantom "A".
               (clear-negotiation-timer! tui)
-              (reset! buf combined)
               (reset! (:negotiation-buffer tui) ""))
             nil)))))
 
@@ -902,7 +909,8 @@
    remainder re-processed in the same pass. Returns :consumed (handled),
    :pending (fragment held), or nil (not a response). On nil the input
    buffer is left UNTOUCHED: blanking it would drop the fragment just
-   examined (see process-input-buffer!)."
+   examined (see process-input-buffer!); a held fragment that can no longer
+   become a response is dropped so it never fuses with the new input."
   [tui read-fn buf]
   (let [held @(:terminal-response-buffer tui)
         combined (str held @buf)
@@ -929,8 +937,10 @@
 
       :else
       (do (when (seq held)
+            ;; Dead hold fragment — drop it and leave the new input for
+            ;; normal processing (same rule as the negotiation
+            ;; interception; see intercept-keyboard-negotiation!).
             (clear-terminal-response-timer! tui)
-            (reset! buf combined)
             (reset! (:terminal-response-buffer tui) ""))
           nil))))
 

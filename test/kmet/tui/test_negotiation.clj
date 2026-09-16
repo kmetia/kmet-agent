@@ -193,16 +193,34 @@
       (t/is (= :consumed (intercept tui buf)))
       (t/is (= "" @buf)))))
 
-(deftest test-intercept-flushes-non-negotiation
-  (testing "held fragments flush back into the buffer when input stops
-            matching the response shape"
+(deftest test-intercept-drops-dead-fragment
+  (testing "a held fragment that can no longer become a response is
+            dropped; the new input keeps its own sequence boundaries"
     (let [tui (core/create-tui (recording-terminal))
           buf (atom "\u001b[?7")]
       (reset! (:keyboard-protocol-pushed? tui) true)
       (t/is (= :pending (intercept tui buf)))
-      (reset! buf "A")  ;; user pressed up while the response was pending
+      (reset! buf "\u001b[A")  ;; user pressed up while the response was pending
       (t/is (nil? (intercept tui buf)) "not negotiation input")
-      (t/is (= "\u001b[?7A" @buf) "held fragment + new input restored"))))
+      (t/is (= "\u001b[A" @buf)
+            "the key is NOT fused with the dead fragment (was \"\u001b[?7\u001b[A\")")
+      (t/is (= "" @(:negotiation-buffer tui)) "dead fragment dropped"))))
+
+(deftest test-intercept-key-then-response-in-one-batch
+  (testing "a key ahead of a response still lets the response be consumed"
+    (keys/set-kitty-active! false)
+    (try
+      (let [tui (core/create-tui (recording-terminal))
+            buf (atom "\u001b[A\u001b[?7u")
+            dispatched (atom [])]
+        (reset! (:keyboard-protocol-pushed? tui) true)
+        (swap! (:input-listeners tui)
+               conj (fn [data] (swap! dispatched conj data) nil))
+        ((var core/process-input-buffer!) tui stub-read-fn buf)
+        (t/is (= ["\u001b[A"] @dispatched) "the key dispatches once")
+        (t/is (= "" @buf))
+        (t/is (true? (keys/kitty-active?)) "the response behind it is consumed"))
+      (finally (keys/set-kitty-active! false)))))
 
 (deftest test-intercept-inactive-when-not-pushed
   (testing "no interception before the query is sent"
@@ -289,9 +307,14 @@
   ;; holding it appended every subsequent char to it and swallowed all input
   ;; forever (the reported freeze: app alive, keys dead, no crash log).
   (testing "an unrecognized complete sequence is dropped; later chars dispatch"
+    ;; Stalled delivery (one char per read): the interpreter holds the
+    ;; partial "\u001b[?99;5" as a negotiation prefix; the tail "u" then
+    ;; arrives as its own input and dispatches as text. pi behaves the same
+    ;; (its flushed prefix + later tail process independently) — the thing
+    ;; that matters is the garbage never swallows what follows it.
     (let [{:keys [dispatched buf]} (process-chars (core/create-tui (recording-terminal))
                                                   "\u001b[?99;5uabc")]
-      (t/is (= ["a" "b" "c"] dispatched)
+      (t/is (= ["u" "a" "b" "c"] dispatched)
             "subsequent characters reach the input path")
       (t/is (= "" buf) "the garbage sequence is gone from the buffer")))
   (testing "a known complete sequence still dispatches normally"
