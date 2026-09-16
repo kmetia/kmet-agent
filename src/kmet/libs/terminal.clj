@@ -160,6 +160,26 @@
 
     :else nil))
 
+(def ^:private negotiation-leading-re
+  "A negotiation response at the START of a string (see
+   parse-negotiation-sequence) — used to split responses that share one
+   read batch."
+  #"^\u001b\[(?:\?[\d;]*c|[\?>][\d;]+(?:;[\d;]*)?u)")
+
+(defn split-negotiation-response
+  "Split a LEADING negotiation response off S. Returns {:parsed P :rest R}
+   when S begins with one, nil otherwise. The input reader drains every
+   queued byte in one batch, so a batch can hold several responses at once
+   (kitty answers the startup query with the flags report and the DA1
+   device-attributes report back-to-back, and the tty coalesces them);
+   parsing the whole string would miss them all and the flags report would
+   be dropped as garbage — kitty-active would stay false and every release
+   event would dispatch as a second keypress."
+  [s]
+  (when-let [response (re-find negotiation-leading-re s)]
+    (when-let [parsed (parse-negotiation-sequence response)]
+      {:parsed parsed :rest (subs s (count response))})))
+
 (defn negotiation-prefix?
   "True when s could still become a negotiation response (pi:
    isKeyboardProtocolNegotiationSequencePrefix). A bare \"\u001b[\" is NOT

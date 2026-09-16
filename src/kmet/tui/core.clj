@@ -751,23 +751,34 @@
 (defn- intercept-keyboard-negotiation!
   "Port of pi's setupStdinBuffer negotiation interception: while the Kitty
    protocol query is outstanding, hold response fragments in a separate
-   buffer so the response is consumed (never dispatched as input). Returns
-   :consumed / :pending / nil (not negotiation input — proceed normally).
-   On nil the input buffer is left UNTOUCHED: blanking it would drop the
-   fragment just examined (see process-input-buffer!)."
+   buffer so the response is consumed (never dispatched as input). A batch
+   may hold several responses at once — the leading one is consumed and the
+   remainder re-processed in the same pass. Returns :consumed / :pending /
+   nil (not negotiation input — proceed normally). On nil the input buffer is
+   left UNTOUCHED: blanking it would drop the fragment just examined (see
+   process-input-buffer!)."
   [tui read-fn buf]
   (if-not @(:keyboard-protocol-pushed? tui)
     nil
     (let [held @(:negotiation-buffer tui)
           combined (str held @buf)
-          parsed (terminal/parse-negotiation-sequence combined)]
+          {:keys [parsed rest]} (terminal/split-negotiation-response combined)]
       (cond
         parsed
         (do (clear-negotiation-timer! tui)
             (reset! (:negotiation-buffer tui) "")
-            (reset! buf "")
+            (reset! buf rest)
             (terminal/handle-negotiation-sequence! @(:terminal tui) parsed)
             (tui-request-render tui)
+            ;; One read batch can carry several responses (kitty answers
+            ;; the startup query with the flags report and DA1 back-to-back
+            ;; and the tty coalesces them): consume the LEADING response,
+            ;; then re-process the remainder so the next one is handled in
+            ;; this same pass instead of being dropped as garbage (which
+            ;; left kitty-active false — every key release then dispatched
+            ;; as a second keypress on Linux).
+            (when (seq rest)
+              (process-input-buffer! tui read-fn buf))
             :consumed)
 
         (terminal/negotiation-prefix? combined)

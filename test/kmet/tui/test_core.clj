@@ -165,6 +165,44 @@
         (t/is (= ["a"] @got) "release events are filtered by default"))
       (finally (keys/set-kitty-active! false)))))
 
+(t/deftest test-batched-kitty-negotiation-keeps-releases-filtered
+  ;; Issue #4: the terminal answers the startup kitty query with the flags
+  ;; report and DA1 back-to-back and the reader's drain coalesces them into
+  ;; one batch. The whole-buffer negotiation parse used to miss both, the
+  ;; flags report was dropped as garbage and kitty-active stayed false —
+  ;; every release event then dispatched as a second keypress (completion
+  ;; menu moved two steps per arrow, ctrl+o toggled twice).
+  (testing "a batched flags + DA1 response still enables release filtering"
+    (keys/set-kitty-active! false)
+    (try
+      (let [stub (reify core/ITerminal
+                   (start! [_ _ _] nil)
+                   (stop! [_] nil)
+                   (started? [_] true)
+                   (write-output [_ _] nil)
+                   (read-input [_ _] -1)
+                   (columns [_] 80)
+                   (rows [_] 24)
+                   (set-progress! [_ _] nil))
+            tui (core/create-tui stub)
+            got (atom [])
+            c (reify core/IComponent
+                (render [_ _] [""])
+                (handle-input [_ data] (swap! got conj data))
+                (invalidate [_]))
+            buf (atom "")]
+        (core/tui-add-child tui c)
+        (core/tui-set-focus tui c)
+        (reset! (:keyboard-protocol-pushed? tui) true)
+        (swap! buf str "\u001b[?7u\u001b[?1;2c")
+        ((var core/process-input-buffer!) tui (fn [_] -2) buf)
+        (t/is (true? (keys/kitty-active?)) "kitty enabled from the batched response")
+        (swap! buf str "\u001b[A\u001b[1;1:3A")
+        ((var core/process-input-buffer!) tui (fn [_] -2) buf)
+        (t/is (= ["\u001b[A"] @got)
+              "only the press reaches the focused component, never the release"))
+      (finally (keys/set-kitty-active! false)))))
+
 (defrecord WantsReleases [wants-key-release? log]
   core/IComponent
   (render [_ _] [""])

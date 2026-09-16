@@ -47,7 +47,24 @@
     (t/is (nil? (lib/parse-negotiation-sequence "a")))
     (t/is (nil? (lib/parse-negotiation-sequence "\u001b[A")) "arrow keys are not negotiation responses")
     (t/is (nil? (lib/parse-negotiation-sequence "\u001b[?7u\u001b[?1;2c"))
-          "multi-sequence chunks never parse (split by the char reader)")))
+          "multi-sequence chunks never parse whole — split-negotiation-response handles them")))
+
+(deftest test-split-negotiation-response
+  (testing "a leading response splits off the remainder of the batch"
+    (t/is (= {:parsed {:type :kitty-flags :flags 7} :rest ""}
+             (lib/split-negotiation-response "\u001b[?7u")))
+    (t/is (= {:parsed {:type :kitty-flags :flags 7} :rest "\u001b[?1;2c"}
+             (lib/split-negotiation-response "\u001b[?7u\u001b[?1;2c")))
+    (t/is (= {:parsed {:type :device-attributes} :rest "\u001b[?7u"}
+             (lib/split-negotiation-response "\u001b[?1;2c\u001b[?7u"))
+          "DA1 first is split too")
+    (t/is (= {:parsed {:type :kitty-flags :flags 7} :rest "\u001b[A"}
+             (lib/split-negotiation-response "\u001b[>7;1;2u\u001b[A"))
+          "the push response form splits as well"))
+  (testing "non-negotiation input is untouched"
+    (t/is (nil? (lib/split-negotiation-response "\u001b[A")))
+    (t/is (nil? (lib/split-negotiation-response "\u001b[?7")))
+    (t/is (nil? (lib/split-negotiation-response "\u001b[?u")))))
 
 (deftest test-negotiation-prefix
   (testing "fragments that could still become a response"
@@ -109,6 +126,49 @@
 
 (defn- intercept [tui buf]
   ((var core/intercept-keyboard-negotiation!) tui stub-read-fn buf))
+
+(deftest test-intercept-consumes-batched-responses
+  (testing "responses sharing one read batch are each consumed"
+    ;; The reader drains every queued byte into one batch, so kitty's flags
+    ;; report and the DA1 report arrive concatenated. Before this, the
+    ;; whole-string parse failed, the flags report was dropped as garbage,
+    ;; kitty-active stayed false and every release event dispatched as a
+    ;; second keypress (issue #4: Linux double input).
+    (keys/set-kitty-active! false)
+    (try
+      (let [tui (core/create-tui (recording-terminal))
+            buf (atom "\u001b[?7u\u001b[?1;2c")]
+        (reset! (:keyboard-protocol-pushed? tui) true)
+        (t/is (= :consumed (intercept tui buf)))
+        (t/is (= "" @buf) "both responses removed from the input buffer")
+        (t/is (true? (keys/kitty-active?)) "kitty enabled from the batched response"))
+      (finally (keys/set-kitty-active! false))))
+  (testing "a DA1-first batch is consumed in order: fallback on, kitty wins"
+    (keys/set-kitty-active! false)
+    (try
+      (let [tui (core/create-tui (recording-terminal))
+            buf (atom "\u001b[?1;2c\u001b[?7u")]
+        (reset! (:keyboard-protocol-pushed? tui) true)
+        (t/is (= :consumed (intercept tui buf)))
+        (t/is (= "" @buf))
+        (t/is (true? (keys/kitty-active?))))
+      (finally (keys/set-kitty-active! false)))))
+
+(deftest test-intercept-batched-response-then-key-dispatches-once
+  (testing "a key sharing the batch with the response still dispatches once"
+    (keys/set-kitty-active! false)
+    (try
+      (let [tui (core/create-tui (recording-terminal))
+            buf (atom "\u001b[?7u\u001b[?1;2c\u001b[A")
+            dispatched (atom [])]
+        (reset! (:keyboard-protocol-pushed? tui) true)
+        (swap! (:input-listeners tui)
+               conj (fn [data] (swap! dispatched conj data) nil))
+        ((var core/process-input-buffer!) tui stub-read-fn buf)
+        (t/is (= ["\u001b[A"] @dispatched)
+              "the arrow key survives and is not duplicated")
+        (t/is (true? (keys/kitty-active?))))
+      (finally (keys/set-kitty-active! false)))))
 
 (deftest test-intercept-consumes-response
   (testing "a complete response is consumed, never dispatched as input"
