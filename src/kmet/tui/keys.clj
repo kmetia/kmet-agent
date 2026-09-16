@@ -130,6 +130,8 @@
 ;; per-check str/split + set construction off the keystroke path.
 (defonce ^:private normalized-id-cache (atom {}))
 
+;; (removed: last-event-type-atom - now using parse-kitty-event-type directly)
+
 (defn set-kitty-active!
   "Set the kitty keyboard mode flag and drop the parse memo: the flag
    changes how the same raw bytes parse (the cached entry records the flag
@@ -234,22 +236,25 @@
    - Arrows with modifier: \\u001b[1;<mod>[:<event>]A/B/C/D
    - Functional keys: \\u001b[<num>[;<mod>[:<event>]]~
    - Home/End with modifier: \\u001b[1;<mod>[:<event>]H/F
-   Returns {:codepoint :modifier :base-layout-key} or nil. Modifiers are
-   normalized from 1-indexed to the bitmask (pi: modValue - 1)."
+   Returns {:codepoint :modifier :base-layout-key :event-type} or nil.
+   Modifiers are normalized from 1-indexed to the bitmask (pi: modValue - 1).
+   Event type: 1=press, 2=repeat, 3=release (pi: KeyEventType)."
   [data]
   (or
    ;; shifted-key group is decoded but unused for key ids (pi uses it only
    ;; for printable decoding, which kmet does not need)
-   (when-let [[_ cp _shifted base mod _evt]
+   (when-let [[_ cp _shifted base mod evt]
               (re-matches #"\u001b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u" data)]
      {:codepoint (parse-long cp)
       :base-layout-key (when (seq base) (parse-long base))
-      :modifier (dec (parse-long (or mod "1")))})
-   (when-let [[_ mod _evt arrow]
+      :modifier (dec (parse-long (or mod "1")))
+      :event-type (if (seq evt) (parse-long evt) 1)})
+   (when-let [[_ mod evt arrow]
               (re-matches #"\u001b\[1;(\d+)(?::(\d+))?([ABCD])" data)]
      {:codepoint (case arrow "A" -1 "B" -2 "C" -3 "D" -4)
-      :modifier (dec (parse-long mod))})
-   (when-let [[_ num mod _evt]
+      :modifier (dec (parse-long mod))
+      :event-type (if (seq evt) (parse-long evt) 1)})
+   (when-let [[_ num mod evt]
               (re-matches #"\u001b\[(\d+)(?:;(\d+))?(?::(\d+))?~" data)]
      (when-let [cp (case (parse-long num)
                      2 -11  ;; insert
@@ -259,11 +264,12 @@
                      7 -14  ;; home
                      8 -15  ;; end
                      nil)]
-       {:codepoint cp :modifier (dec (parse-long (or mod "1")))}))
-   (when-let [[_ mod _evt hf]
+       {:codepoint cp :modifier (dec (parse-long (or mod "1"))) :event-type (if (seq evt) (parse-long evt) 1)}))
+   (when-let [[_ mod evt hf]
               (re-matches #"\u001b\[1;(\d+)(?::(\d+))?([HF])" data)]
      {:codepoint (if (= hf "H") -14 -15)
-      :modifier (dec (parse-long mod))})))
+      :modifier (dec (parse-long mod))
+      :event-type (if (seq evt) (parse-long evt) 1)})))
 
 (defn- parse-modify-other-keys
   "Decode xterm modifyOtherKeys format CSI 27;mods;code ~
@@ -529,29 +535,43 @@
 
 ;; ─── Sequence helpers ───────────────────────────────────────────────────────
 
+(defn- parse-kitty-event-type
+  "Extract the Kitty event type from a raw CSI-u sequence.
+   Returns 1 (press), 2 (repeat), 3 (release), or nil if not a Kitty sequence."
+  [data]
+  (or
+   ;; CSI-u: \u001b[<cp>[:<shifted>[:<base>]];[<mod>[:<event>]]u
+   (when-let [[_ _ _ _ _ evt] (re-matches #"\u001b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u" data)]
+     (when (seq evt) (parse-long evt)))
+   ;; Arrow with modifier: \u001b[1;<mod>[:<event>]A/B/C/D
+   (when-let [[_ _ evt _] (re-matches #"\u001b\[1;(\d+)(?::(\d+))?([ABCD])" data)]
+     (when (seq evt) (parse-long evt)))
+   ;; Functional: \u001b[<num>[;<mod>[:<event>]]~
+   (when-let [[_ _ _ evt] (re-matches #"\u001b\[(\d+)(?:;(\d+))?(?::(\d+))?~" data)]
+     (when (seq evt) (parse-long evt)))
+   ;; Home/End: \u001b[1;<mod>[:<event>]H/F
+   (when-let [[_ _ evt _] (re-matches #"\u001b\[1;(\d+)(?::(\d+))?([HF])" data)]
+     (when (seq evt) (parse-long evt)))))
+
 (defn is-key-release?
-  "Check if the data looks like a key release event (Kitty protocol, event
-   type 3). Bracketed paste content is never a release event (pi: bluetooth
-   MAC addresses like \"90:62:3F:A5\" contain \":3F\")."
+  "Check if the data is a key release event (Kitty protocol, event type 3).
+   Only meaningful when Kitty keyboard protocol with flag 2 (report event types) is active.
+   Bracketed paste content is never a release event (pi: bluetooth MAC addresses like
+   \"90:62:3F:A5\" contain \":3F\")."
   [data]
   (when-not (str/includes? data "\u001b[200~")
     (when (lib/kitty-active?)
-      (when (and (str/includes? data ":3")
-                 (or (str/includes? data "u") (str/includes? data "~")
-                     (str/includes? data "A") (str/includes? data "B")
-                     (str/includes? data "C") (str/includes? data "D")))
+      (when (= 3 (parse-kitty-event-type data))
         true))))
 
 (defn is-key-repeat?
-  "Check if the data looks like a key repeat event (Kitty protocol, event
-   type 2). Bracketed paste content is never a repeat event."
+  "Check if the data is a key repeat event (Kitty protocol, event type 2).
+   Only meaningful when Kitty keyboard protocol with flag 2 (report event types) is active.
+   Bracketed paste content is never a repeat event."
   [data]
   (when-not (str/includes? data "\u001b[200~")
     (when (lib/kitty-active?)
-      (when (and (str/includes? data ":2")
-                 (or (str/includes? data "u") (str/includes? data "~")
-                     (str/includes? data "A") (str/includes? data "B")
-                     (str/includes? data "C") (str/includes? data "D")))
+      (when (= 2 (parse-kitty-event-type data))
         true))))
 
 
