@@ -11,6 +11,7 @@
             [clojure.java.io :as io]
             [babashka.fs :as fs]
             [kmet.extension :as ext]
+            [kmet.libs.host :as host]
             [kmet.config :as cfg]
             [kmet.ai.models :as models]
             [kmet.app.extensions :as extensions]
@@ -193,12 +194,20 @@
     (testing "multi-file: helper ns + entry ns load isolated; tool from helper works"
       (t/is (some? (tools/get-tool "multi-ext-tool")))
       (t/is (= "multi-ok" (:content (tools/execute-tool "multi-ext-tool" {}))))
-      (t/is (nil? (find-ns 'multi-ext.main))
-            "extension namespaces never enter the global registry")
-      (t/is (nil? (find-ns 'multi-ext.helper))))
+      (if (host/jolt?)
+        ;; The native backend keeps a context's namespaces in the process-global
+        ;; registry — context-private there: the root hides them and unload
+        ;; unmaps them (loader.md §9 Phase 2 records the one-registry gap) — so
+        ;; the host-invisibility claim is the SCI backends' alone.
+        (t/is (some? (find-ns 'multi-ext.main)))
+        (do (t/is (nil? (find-ns 'multi-ext.main))
+                  "extension namespaces never enter the global registry")
+            (t/is (nil? (find-ns 'multi-ext.helper))))))
     (testing "unload removes the tool"
       (extensions/unload-all-extensions!)
       (t/is (nil? (tools/get-tool "multi-ext-tool")))
+      (t/is (nil? (find-ns 'multi-ext.main))
+            "unload unmaps the native backend's context namespaces")
       (t/is (empty? (extensions/get-loaded-extensions))))))
 
 (t/deftest test-unload-removes-provider-registration

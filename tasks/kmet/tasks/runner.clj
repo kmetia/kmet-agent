@@ -127,6 +127,7 @@
     kmet.libs.test-self-contained
     kmet.loader.test-self-contained
     kmet.loader.test-core
+    kmet.loader.test-jolt
     kmet.loader.test-sci
     kmet.libs.test-host
     kmet.libs.test-crypto

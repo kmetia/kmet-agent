@@ -24,16 +24,23 @@
   ;; seam and the provider lib's host seam (a typo still surfaces — jolt.fi
   ;; is not excluded), plus the clojure.core functions jolt adds for RFC 0014
   ;; registration.
-  :unresolved-namespace {:exclude [jolt.ffi jolt.host]}
+  :unresolved-namespace {:exclude [jolt.ffi jolt.host jolt.loader]}
   :unresolved-var {:exclude [clojure.core/__register-class-statics!
                              clojure.core/__register-class-methods!
                              clojure.core/__register-class-ctor!]}}
 
  :config-in-ns
  {;; jolt resolves function-body symbols at call time, so these bb-only paths
-  ;; load on jolt too — dead there, not broken: extension contexts are SCI
-  ;; (babashka-only), and kmet.tasks.build is the babashka packaging pipeline (jolt
+  ;; load on jolt too — dead there, not broken: the SCI loader backend is the
+  ;; babashka/JVM one (jolt's extension contexts run natively through
+  ;; kmet.loader.jolt), and kmet.tasks.build is the babashka packaging pipeline (jolt
   ;; gets its own packager — jolt-port.md M5/M6). Their requires sit in the
   ;; :bb branch (skipped here), the references outside it.
-  kmet.app.extensions {:linters {:unresolved-namespace {:exclude [sci]}}}
+  ;; The sci backend's helpers are defined for the :default branch, which this
+  ;; view does not select — unused here, used on bb/JVM (where the same helpers
+  ;; are linted, so a genuinely dead one still fails that view).
+  kmet.app.extensions {:linters {:unresolved-namespace {:exclude [sci]}
+                                 :unused-namespace {:exclude [kmet.loader.sci]}
+                                 :unused-private-var {:level :off}
+                                 :unused-binding {:level :off}}}
   kmet.tasks.build {:linters {:unresolved-namespace {:exclude [bcp]}}}}}

@@ -21,10 +21,11 @@ self-containment guard (`kmet.loader.test-self-contained`) so
 Phase 2, the **native Jolt backend**, is implemented in the *Jolt* repo
 (`stdlib/jolt/loader.clj`), tracked in jolt-lang/jolt#912 (the
 classloader-lite request) and jolt-lang/jolt#1039 (the implementation),
-with `test/chez/loaderconf-test.clj` as its writ — the 18-case suite
-`make loaderconf` runs, baseline empty. It took a different route through
-§6.1 than the M0–M4 plan sketched; §9 Phase 2 records what landed and
-what remains of that plan.
+with `test/chez/loaderconf-test.clj` as its writ — the 20-case suite
+`make loaderconf` runs, baseline empty. kmet consumes it through its own
+adapter, `src/kmet/loader/jolt.clj`, and the extension system evaluates
+natively on Jolt through it (see §9 Phase 2 for what landed, on both sides,
+and what remains of §6.1's M0–M4 plan).
 
 Not implemented yet: Phase 3 (JVM native backend + hybrid — deliberately
 last: the JVM host already gets isolation through SCI) and Phase 4
@@ -777,18 +778,28 @@ loaderconf`, empty baseline — mirrored on the kmet side by
     requires a namespace the loader cannot serve fails the load with an
     actionable `:loader/unreadable` and links nothing; the same source
     loads once the requirement can be served.
+19. *(native)* **Dashed namespace names** — a namespace maps to its file the
+    way Clojure does (dots to slashes, dashes to underscores per segment), so
+    `lib-one.core` loads from `lib_one/core.clj`.
+20. *(native)* **Resources follow the ambient loader** — inside `with-loader`,
+    the 1-arity `(io/resource "x")` resolves against the bound loader's roots;
+    outside one it keeps the host answer.
 
 Cases 1–8, 10, 11 and 13–16, 18 are expressible against SCI on bb and jolt
 today, which is the point: pin the semantics before any runtime work, the
 way the corpus does for `clojure.core`. Case 9 needs a code backend and
 lives in the SCI suite; case 12 has a data-path version in the core suite
-and a read-path one there too. Case 17 *(host)* is the
-Jolt root loading a host namespace it has not loaded yet — kmet's root
-answers loaded host namespaces only (`root`'s docstring), so a code backend
-serves shared names by injection and fails an unservable require (case 18)
-instead. Cases 14 and 16 have *host* strengthenings in the Jolt suite that
+and a read-path one there too. Cases 17, 19 and 20 *(native)* are rules the
+native reader and the host registry state — kmet's root answers loaded host
+namespaces only (`root`'s docstring), so a code backend injects shared names
+and fails an unservable require (case 18) instead; the SCI backends never map
+namespaces to paths (their source provider is asked by symbol) and shadow
+`io/resource` with an artifact-scoped fn rather than consulting an ambient
+loader. Cases 14 and 16 have *host* strengthenings in the Jolt suite that
 the portable cases cannot express (a replaced registration surviving
-`unload!`; a context-owned name evicted from the process-global registry).
+`unload!`; a context-owned name evicted from the process-global registry),
+and `test/kmet/loader/test_jolt.clj` mirrors the adapter's own contract
+(host view, var links, unload, ambient resources) on the kmet side.
 
 ---
 
@@ -828,8 +839,11 @@ upgrades that must satisfy the same suite.
   injected). `load-extension!` / `unload-extension!` keep their shape
   (`{:extension … :error …}`; shutdown → deregister → `unload!`).
   The four `"Extensions not supported on Jolt"` guards collapse into backend
-  selection — **done**: the guards are gone, and the jolt branch resolves
-  dep roots through `jolt.deps/resolve-deps`.
+  selection — **done**: the guards are gone, the jolt branch resolves dep
+  roots through `jolt.deps/resolve-deps`, and the Jolt host no longer needs
+  SCI for extension isolation at all (see Phase 2 — the native backend is
+  what runs there now; `kmet.loader.sci` remains the bb/JVM backend, which is
+  the only host left that needs an interpreter).
 - `src/kmet/extension.clj` — **no re-exports** (decided in Phase 1):
   extensions never see the loader at all. `kmet.app.extensions` uses
   `kmet.loader.*` directly, and a require of it from extension code fails
@@ -897,6 +911,25 @@ Gates for the M-stages, when they land: the corpus/unit/cts/sbperf set
 (plus the jolt gates in §6.1.9) and the conformance cases named in
 §6.1.10; `make sci` / `scifunctional` must stay green throughout — they
 pin the sci path the extension backend uses.
+
+**kmet's side of the native backend.** `src/kmet/loader/jolt.clj` forwards
+kmet's protocol to the Jolt loader — protocols do not unify, so it adapts
+rather than aliases — and adds what the extension contract needs and the raw
+surface does not express: `host-view` (a *miss-not-denial* filter of the host
+root to the shared namespace names, with `kmet.loader.*` rejected as host
+machinery) and the ambient binding. `kmet.app.extensions/create-loader` picks
+it on Jolt: the extension's own sources are read by the native reader from its
+artifact root — a single-file extension is materialized at its munged ns path
+first, and every own source is validated up front, because the native reader
+never calls back into kmet — dep roots are the `jolt.deps` extraction dirs,
+and the shared contract arrives as the filtered host root instead of copied
+vars. Every callback an extension registers, and init/shutdown themselves, run
+wrapped in `with-loader*`: that is what the ambient tier is for, and it is how
+`(io/resource "x")` inside an extension resolves against its own roots at call
+time (conformance case 20 — the 1-arity follows the ambient loader, which is
+also why the runtime's own host views resolve through the host resolver
+explicitly rather than through the ambient one). Renderer factories are the
+one exception: they are stored and compared by identity.
 
 ### Phase 3 — JVM native backend + hybrid (last)
 

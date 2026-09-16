@@ -51,6 +51,7 @@
             [kmet.libs.host :as host]
             [kmet.loader.core :as loader]
             [kmet.loader.sci :as loader-sci]
+            #?(:jolt [kmet.loader.jolt :as loader-jolt])
             [kmet.extension]))
 
 ;; ─── Provider-event bridges (pi: context / before_provider_request /
@@ -631,6 +632,8 @@
                   (session/append-session-info! sess (session/sanitize-session-name name))))
    :get-name (fn [] (when-let [sess @session-atom] (session/get-session-name sess)))})
 
+(declare loader-aware)
+
 (defn- create-extension-api
   "Build the api map for an extension. Every registration records its
    deregister fn so unload removes exactly what this extension added."
@@ -651,7 +654,8 @@
                           ;; the runner can pass it the extension context
                           ;; (pi: handler(args, ctx)) while builtin commands
                           ;; keep receiving CoreState
-                          (let [cmd (assoc cmd :extension-handler (:handler cmd))]
+                          (let [cmd (assoc cmd :extension-handler
+                                           (loader-aware ext (:handler cmd)))]
                             (commands/register-command! cmd)
                             (track (fn [] (commands/unregister-command! (:name cmd))))))
      :unregister-command! commands/unregister-command!
@@ -659,7 +663,9 @@
      :get-commands #(mapv (fn [c] (select-keys c [:name :description]))
                           (commands/get-commands))
      :register-tool! (fn [tool]
-                       (tools/register-tool! tool)
+                       (tools/register-tool!
+                        (cond-> tool
+                          (:execute tool) (update :execute #(loader-aware ext %))))
                        (track (fn [] (tools/unregister-tool! (:name tool)))))
      :unregister-tool! tools/unregister-tool!
      ;; pi: createBashTool — the bash tool constructor with its options
@@ -672,36 +678,47 @@
      :set-active-tools set-active-tools
      :on-event (fn [event-type handler]
                  (let [dereg (event-bus/on-event event-type
-                                                 (wrap-event-handler handler))]
+                                                 (wrap-event-handler
+                                                  (loader-aware ext handler)))]
                    (track dereg)
                    dereg))
      :emit-event! event-bus/emit-event!
      :on-input (fn [hook]
-                 (register-input-hook! hook)
-                 (track (fn [] (swap! input-hooks
-                                      (fn [hs] (remove #(identical? % hook) hs))))))
+                 (let [h (loader-aware ext hook)]
+                   (register-input-hook! h)
+                   (track (fn [] (swap! input-hooks
+                                        (fn [hs] (remove #(identical? % h) hs)))))))
      :on-before-agent-start (fn [hook]
-                              (register-before-agent-start-hook! hook)
-                              (track (fn [] (swap! before-agent-start-hooks
-                                                   (fn [hs] (remove #(identical? % hook) hs))))))
+                              (let [h (loader-aware ext hook)]
+                                (register-before-agent-start-hook! h)
+                                (track (fn []
+                                         (swap! before-agent-start-hooks
+                                                (fn [hs] (remove #(identical? % h) hs)))))))
      :on-tool-call (fn [hook]
-                     (register-tool-call-hook! hook)
-                     (track (fn [] (swap! tool-call-hooks
-                                          (fn [hs] (remove #(identical? % hook) hs))))))
+                     (let [h (loader-aware ext hook)]
+                       (register-tool-call-hook! h)
+                       (track (fn [] (swap! tool-call-hooks
+                                            (fn [hs] (remove #(identical? % h) hs)))))))
      :on-tool-result (fn [hook]
-                       (register-tool-result-hook! hook)
-                       (track (fn [] (swap! tool-result-hooks
-                                            (fn [hs] (remove #(identical? % hook) hs))))))
+                       (let [h (loader-aware ext hook)]
+                         (register-tool-result-hook! h)
+                         (track (fn []
+                                  (swap! tool-result-hooks
+                                         (fn [hs] (remove #(identical? % h) hs)))))))
      :register-flag! (fn [flag-name & [opts]]
                        (register-flag! flag-name opts)
                        (track (fn [] (swap! flags dissoc flag-name))))
      :get-flag get-flag
      :register-shortcut! (fn [key-id & [opts]]
-                           (let [dereg (register-shortcut! key-id opts)]
+                           (let [dereg (register-shortcut!
+                                        key-id
+                                        (cond-> opts
+                                          (:handler opts) (update :handler #(loader-aware ext %))))]
                              (track dereg)
                              dereg))
      :register-markdown-transformer! (fn [transformer]
-                                       (let [dereg (register-markdown-transformer! transformer)]
+                                       (let [dereg (register-markdown-transformer!
+                                                    (loader-aware ext transformer))]
                                          (track dereg)
                                          dereg))
      :register-entry-renderer! (fn [custom-type renderer]
@@ -1136,6 +1153,54 @@
                     [k (sci/copy-var* v sci-ns)])))
           (ns-interns ns-sym))))
 
+(defn- shared-namespace?
+  "Is NS-OBJ a host namespace extension contexts share? The scan's rule,
+   used by the SCI path (which copies the vars into its context) and by the
+   Jolt native path (which filters the host root with the same names).
+   kmet.extension itself and the clojure.core patches are added on top by
+   build-context-namespaces."
+  [ns-obj]
+  (let [n (str (ns-name ns-obj))]
+    (and (not (str/starts-with? n "sci."))
+         (not= n "clojure.core")
+         ;; bundled libraries whose Maven versions run under
+         ;; SCI (clojure.tools.cli, data.json, data.csv,
+         ;; ...) are NOT injected — they resolve through
+         ;; the load-fn, so a declared Maven version wins
+         ;; over the bundled copy. The adapted libs
+         ;; (core.async, data.json, ...), the custom ports
+         ;; (bundled-port-namespaces), bb-shared-namespaces
+         ;; and the data.xml family stay injected: their
+         ;; Maven copies fail under SCI (data.xml uses
+         ;; definline), so the bundled copy is the only
+         ;; working one.
+         (not (or (and (str/starts-with? n "clojure.data.")
+                       (not (or (= n "clojure.data.xml")
+                                (str/starts-with? n "clojure.data.xml."))))
+                  (and (str/starts-with? n "clojure.tools.")
+                       (not (contains? bundled-port-namespaces
+                                       (ns-name ns-obj))))))
+         (or (str/starts-with? n "clojure.")
+             (str/starts-with? n "babashka.")
+             (contains? bb-shared-namespaces (ns-name ns-obj))
+             (str/starts-with? n "kmet.tui.")
+             (= n "kmet.app.ui.tool-renderers")
+             (= n "kmet.app.keybindings")
+             (str/starts-with? n "kmet.libs.")))))
+
+#?(:jolt
+   (defn- shared-namespace-names
+     "The shared host namespaces' names, for the native backend's host-root
+      filter (the SCI path injects the namespaces themselves, so it never asks
+      for the names). Rescanned per call — namespaces required since the last
+      call (the shared library layers) are included; kmet.extension is the one
+      explicit extra, the contract namespace itself (the clojure.core patches
+      ride on clojure.core, which every host has without asking a loader)."
+     []
+     (cons 'kmet.extension
+           (keep (fn [ns-obj] (when (shared-namespace? ns-obj) (ns-name ns-obj)))
+                 (all-ns)))))
+
 (defn- build-context-namespaces
   "The shared namespace map for extension contexts: kmet.extension (the
    contract), the clojure.*/babashka.* builtins (incl. slurp/spit, which
@@ -1159,34 +1224,8 @@
                         'spit (deref #'spit)
                         'file-seq (deref #'file-seq)}}
         (keep (fn [ns-obj]
-                (let [n (str (ns-name ns-obj))]
-                  (when (and (not (str/starts-with? n "sci."))
-                             (not= n "clojure.core")
-                             ;; bundled libraries whose Maven versions run under
-                             ;; SCI (clojure.tools.cli, data.json, data.csv,
-                             ;; ...) are NOT injected — they resolve through
-                             ;; the load-fn, so a declared Maven version wins
-                             ;; over the bundled copy. The adapted libs
-                             ;; (core.async, data.json, ...), the custom ports
-                             ;; (bundled-port-namespaces), bb-shared-namespaces
-                             ;; and the data.xml family stay injected: their
-                             ;; Maven copies fail under SCI (data.xml uses
-                             ;; definline), so the bundled copy is the only
-                             ;; working one.
-                             (not (or (and (str/starts-with? n "clojure.data.")
-                                           (not (or (= n "clojure.data.xml")
-                                                    (str/starts-with? n
-                                                                      "clojure.data.xml."))))
-                                      (and (str/starts-with? n "clojure.tools.")
-                                           (not (contains? bundled-port-namespaces
-                                                           (ns-name ns-obj))))))
-                             (or (str/starts-with? n "clojure.")
-                                 (str/starts-with? n "babashka.")
-                                 (contains? bb-shared-namespaces (ns-name ns-obj))
-                                 (str/starts-with? n "kmet.tui.")
-                                 (= n "kmet.app.ui.tool-renderers")
-                                 (= n "kmet.app.keybindings")
-                                 (str/starts-with? n "kmet.libs.")))
+                (when (shared-namespace? ns-obj)
+                  (let [n (str (ns-name ns-obj))]
                     [(ns-name ns-obj)
                      (if (and (= n "clojure.java.io") resource-fn)
                        (assoc (shared-var-map (ns-name ns-obj)) 'resource resource-fn)
@@ -1747,43 +1786,145 @@
                           (assoc data :extension-file file)
                           e)))))))
 
-(defn- create-loader
-  "Build the isolated loader + SCI context for one extension: lazy
-   host-delegated classes ({:allow :all} for instances + Class/forName
-   seeding and miss-retry for statics/ctors — identical on bb and Jolt),
-   the bb short-name :imports, the shared namespace injection (contract +
-   builtins + kmet.tui.* + kmet.libs.*; the loader itself deliberately
-   excluded), and the per-extension loader whose :sources (see
-   make-source-fn) serve the own artifact or the single-file LITERAL
-   source, declared deps (resolved by load-extension! before the context
-   evaluates), and bb-bundled namespaces — with actionable errors for
-   everything else. SCI's own requires route back through the loader
-   (kmet.loader.sci), so nested requires share the link table and
-   unload semantics. RESOURCE-FN replaces clojure.java.io/resource with
-   an artifact-scoped lookup (nil keeps the host resource)."
-  [ext-name artifact owns-ns? deps-resolver resource-fn literal]
-  (host-requires!)
+#?(:jolt
+   (defn- materialize-single-file!
+     "Write a single-file extension's SOURCE into a per-extension cache dir at
+      the path its namespace names (dots as slashes, dashes munged) and answer
+      that dir: the Jolt native reader is strict-layout, so a loose single file
+      needs a home at its own path. Keyed by the file's mtime, so an edited
+      extension re-materializes."
+     [ext-name ns-sym file source]
+     ;; the key is the CONTENT, not the file name: several single-file probes
+     ;; share a base name ("ext.clj") and, written in the same second, the same
+     ;; mtime — a name+mtime key would serve one probe's source to another. A
+     ;; changed source is a new key, so an edited extension re-materializes.
+     (let [dir (str (fs/path (temp-root) "kmet-ext-src"
+                             (str/replace
+                              (str ext-name "-" (ns-path ns-sym) "-"
+                                   (count source) "-" (hash source))
+                              #"[^A-Za-z0-9._-]" "_")))
+           target (str (fs/path dir (str (ns-path ns-sym) "."
+                                         (or (fs/extension (str file)) "clj"))))]
+       (fs/create-dirs (fs/parent target))
+       (spit target source)
+       dir)))
+
+#?(:jolt
+   (defn- validate-native-sources!
+     "Validate EXT-NAME's own sources before the Jolt native reader reads any:
+      it never calls back into kmet, so the checks the SCI path makes lazily in
+      its source provider (make-source-fn) happen here, up front, over the
+      artifact's own files — dep roots are deliberately skipped, they are
+      external libraries. Two checks: every declared ns must live where its
+      name munges to (otherwise the strict-layout reader can never find it —
+      the SCI path's 'strict layout violation'), and every ns form must
+      satisfy the extension contract's requires."
+     [ext-name root owns-ns? tui-namespaces libs-namespaces]
+     (doseq [f (->> (concat (fs/list-dir root) (fs/glob root "**/*"))
+                    (filter fs/regular-file?)
+                    distinct)
+             :let [rel (str (fs/normalize (fs/relativize root (str f))))
+                   ext (fs/extension rel)]
+             :when (contains? #{"clj" "cljc" "jolt"} ext)
+             :let [ns-form (ns-form-of-source (slurp (str f)))]
+             :when ns-form]
+       (let [relative (subs rel 0 (- (count rel) (inc (count ext))))]
+         (when-not (= relative (ns-path (second ns-form)))
+           (throw (ex-info (str "Extension " ext-name " strict layout violation: "
+                                f " declares " (second ns-form)
+                                ", which the loader would look for at "
+                                (ns-path (second ns-form)))
+                           {:extension ext-name :ns (second ns-form)}))))
+       (validate-entry-requires! ext-name ns-form tui-namespaces libs-namespaces owns-ns?))))
+
+(defn- create-sci-loader
+  "The SCI backend's per-extension loader: the shared contract as an injected
+   namespace map (build-context-namespaces), own sources and declared deps
+   through the source provider (make-source-fn), the bb imports and class
+   seeding. The host is bb or the JVM — the native backend owns Jolt — so the
+   SCI read feature is :bb."
+  [ext-name artifact owns-ns? deps-resolver resource-fn literal
+   tui-namespaces libs-namespaces]
   (let [l (loader-sci/sci-loader
            {:id (str "ext:" ext-name)
-            :sources (make-source-fn ext-name artifact owns-ns?
-                                     deps-resolver
-                                     (shared-tui-namespaces)
-                                     (shared-libs-namespaces)
-                                     literal)
+            :sources (make-source-fn ext-name artifact owns-ns? deps-resolver
+                                     tui-namespaces libs-namespaces literal)
             :namespaces (build-context-namespaces resource-fn)
             :sci-opts {:classes {:allow :all}
                        :imports bb-imports
-                       :features (if (host/jolt?) #{:jolt :clj} #{:bb :clj})}
+                       :features #{:bb :clj}}
             :eval-fn eval-extension-source})]
     (seed-context-classes! (loader/context l))
     l))
 
+#?(:jolt
+   (defn- create-jolt-loader
+     "The native backend's per-extension loader: own sources from the artifact
+      root (a single-file extension materialized at its munged ns path first)
+      plus the extracted dep roots, with the shared contract as the filtered
+      host root — real Jolt namespaces shared by reference. Own sources are
+      validated up front: the native reader never calls back into kmet."
+     [ext-name artifact owns-ns? deps-resolver literal
+      tui-namespaces libs-namespaces]
+     (let [root (if artifact
+                  (:root artifact)
+                  (let [[ns-sym {:keys [file source]}] (first literal)]
+                    (materialize-single-file! ext-name ns-sym file source)))]
+       (validate-native-sources! ext-name root owns-ns? tui-namespaces libs-namespaces)
+       (loader-jolt/classpath
+        (into [root] (when deps-resolver (deps-resolver)))
+        {:id (str "ext:" ext-name)
+         :parent (loader-jolt/host-view (loader-jolt/root)
+                                        (shared-namespace-names))}))))
+
+(defn- create-loader
+  "Build the isolated loader for one extension, on the host's backend: the
+   native Jolt loader where the runtime has one, SCI everywhere else. Both
+   sides get the same contract (the contract namespace + builtins +
+   kmet.tui.*/kmet.libs.*; the loader itself deliberately excluded) and the
+   same extension sources and dep closure — they differ in what that means:
+   injected namespace maps and a source provider under SCI, the filtered host
+   root and real source roots under Jolt."
+  [ext-name artifact owns-ns? deps-resolver resource-fn literal]
+  (host-requires!)
+  #?(:jolt
+     (create-jolt-loader ext-name artifact owns-ns? deps-resolver literal
+                         (shared-tui-namespaces) (shared-libs-namespaces))
+     :default
+     (create-sci-loader ext-name artifact owns-ns? deps-resolver resource-fn literal
+                        (shared-tui-namespaces) (shared-libs-namespaces))))
+
+(defn- loader-aware
+  "Wrap HANDLER so that whenever it runs, the loader's ambient tier points at
+   EXT's context (Jolt native: `clojure.java.io/resource` and `RT.baseLoader`
+   resolve through the extension's own loader — the native equivalent of the
+   SCI path's injected artifact-scoped resource fn; on SCI the handler is
+   already a closure over its context, so this is identity).
+
+   Everything an extension *registers* is wrapped here, because those
+   callbacks run long after the load, invoked by the app, with nothing else
+   to tell them which context they belong to. Renderer factories are the one
+   exception: they are stored and compared by identity (see
+   register-entry-renderer!), so wrapping them would break that contract —
+   they read no resources at registration."
+  [ext handler]
+  #?(:jolt (if (fn? handler)
+             (fn [& args]
+               (loader-jolt/with-loader* @(:loader ext)
+                 (fn [] (apply handler args))))
+             handler)
+     :default handler))
+
 (defn- extension-var
-  "The value of VAR-NAME in ENTRY-NS of EXT's context, or nil."
+  "The value of VAR-NAME in ENTRY-NS of EXT's context, or nil. Backend-
+   agnostic: a :var request through the loader (the SCI backend answers from
+   its context, the Jolt native backend from the namespace link it installed
+   when the namespace loaded). A missing var, or an unloaded loader, is nil."
   [ext entry-ns var-name]
   (when-let [l @(:loader ext)]
-    (when-let [ctx (loader/context l)]
-      (get-in @(:env ctx) [:namespaces entry-ns var-name]))))
+    (try
+      (loader/load l {:kind :var :name (str entry-ns "/" var-name)})
+      (catch Throwable _ nil))))
 
 (defn load-extension!
   "Load a single extension from PATH (.clj file, dir with extension.edn,
@@ -1869,7 +2010,7 @@
                             {:path path})))
           (let [api (create-extension-api ext)]
             (reset! (:api ext) api)
-            (init-var api)
+            ((loader-aware ext (deref init-var)) api)
             (reset! (:initialized? ext) true))))
       (swap! extensions conj ext)
       {:extension (:name ext) :error nil}
@@ -1891,7 +2032,7 @@
   (when ext
     (when (and @(:initialized? ext) @(:entry-ns ext))
       (when-let [shutdown (extension-var ext @(:entry-ns ext) 'shutdown)]
-        (try (shutdown @(:api ext))
+        (try ((loader-aware ext (deref shutdown)) @(:api ext))
              (catch Exception e
                (binding [*out* *err*]
                  (println "Warning: extension shutdown error:" (ex-message e)))))))
