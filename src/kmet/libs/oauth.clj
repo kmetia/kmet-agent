@@ -324,13 +324,13 @@
   [interaction code-p prompt-map timeout-ms]
   (let [result-p (promise)
         deadline (+ (System/currentTimeMillis) (or timeout-ms 600000))
-        _ (future
-            (try
-              (deliver result-p {:source :manual
-                                 :value ((:prompt interaction) prompt-map)})
-              (catch Exception e
-                (deliver result-p {:source :error :error e}))))
-        _ (future (deliver result-p {:source :callback :value (deref code-p)}))]
+        manual-future (future
+                        (try
+                          (deliver result-p {:source :manual
+                                             :value ((:prompt interaction) prompt-map)})
+                          (catch Exception e
+                            (deliver result-p {:source :error :error e}))))
+        callback-future (future (deliver result-p {:source :callback :value (deref code-p)}))]
     ;; The finally settles CODE-P so the callback future above never stays
     ;; blocked on a login that ended via manual/timeout/cancel (a no-op when
     ;; the callback already won — deliver is one-shot).
@@ -339,10 +339,18 @@
         (let [result (deref result-p 200 :pending)]
           (cond
             (not= :pending result) result
-            @(:signal interaction) {:source :cancelled}
+            @(:signal interaction)
+            (do (when-let [abort! (:abort-prompt! interaction)]
+                  (abort!))
+                ;; Wait briefly for manual future to settle after abort
+                (let [r (deref result-p 500 :pending)]
+                  (if (not= :pending r) r {:source :cancelled})))
             (< deadline (System/currentTimeMillis)) {:source :timeout}
             :else (recur))))
-      (finally (deliver code-p nil)))))
+      (finally
+        (deliver code-p nil)
+        (future-cancel manual-future)
+        (future-cancel callback-future)))))
 
 ;; ─── HTTP (RFC 8414 discovery / RFC 7591 DCR / token endpoints) ───────────
 ;; Transport via kmet.libs.http (proxy-aware; :env selection by default).

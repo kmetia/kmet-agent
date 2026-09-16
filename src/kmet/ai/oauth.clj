@@ -633,6 +633,9 @@
         url (codex-authorize-url challenge state)
         {:keys [server code-p]} (start-codex-callback-server state port)]
     (try
+      ;; Check signal BEFORE notifying — matches pi's abort check before notify
+      (when @(:signal interaction)
+        (throw (ex-info cancel-message {:type :login-cancelled})))
       ((:notify interaction)
        {:type :auth-url :url url
         :instructions "A browser window should open. Complete login to finish."})
@@ -811,6 +814,9 @@
                            "&code_challenge_method=S256"
                            "&state=" (oauth-lib/url-encode verifier))]
     (try
+      ;; Check signal BEFORE notifying — matches pi's abort check before notify
+      (when @(:signal interaction)
+        (throw (ex-info cancel-message {:type :login-cancelled})))
       ((:notify interaction)
        {:type :auth-url
         :url authorize-url
@@ -963,6 +969,9 @@
         callback-path (str "/oauth/callback/" (oauth-lib/random-hex 16))
         callback (start-openrouter-callback-server callback-path verifier)]
     (try
+      ;; Check signal BEFORE notifying — matches pi's abort check before notify
+      (when @(:signal interaction)
+        (throw (ex-info cancel-message {:type :login-cancelled})))
       ((:notify interaction)
        {:type :progress
         :message (str "Listening for OpenRouter OAuth callback on " (:callback-url callback))})

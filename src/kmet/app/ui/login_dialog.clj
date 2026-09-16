@@ -18,7 +18,6 @@
             [kmet.tui.components.input :as input]
             [kmet.tui.core :as tui]
             [kmet.tui.hiccup :as hiccup]
-            [kmet.tui.keybindings :as kb]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
             [kmet.libs.reakt :as r]
@@ -161,15 +160,30 @@
     (resolve value)))
 
 (defn login-dialog-cancel!
-  "Abort the login flow: settle any pending prompt as cancelled and fire
-   on-complete (pi cancel)."
+  "Abort the login flow: settle any pending prompt as cancelled, clean up
+   the dialog's UI state (remove the input row and hint), and fire
+   on-complete (pi cancel). Does NOT clear input callbacks — those are
+   cleared in dispose when the dialog is truly removed. Clearing them here
+   would break Escape handling if the user presses Escape again before the
+   dialog is disposed."
   [d]
+  ;; Clean up the dialog UI: remove the :input row and its trailing hint line
+  (swap! (:rows-atom d)
+         (fn [rows]
+           (let [input-idx (->> rows
+                                (map-indexed (fn [i row] (when (= :input (:row row)) i)))
+                                (remove nil?)
+                                first)]
+             (if input-idx
+               (into (subvec rows 0 input-idx) (drop 2 rows))
+               rows))))
   (when-let [reject @(:input-rejecter-atom d)]
     (reset! (:input-resolver-atom d) nil)
     (reset! (:input-rejecter-atom d) nil)
     (reject (ex-info "Login cancelled" {:type :login-cancelled})))
   (when-let [cb @(:on-complete-atom d)]
     (cb false "Login cancelled"))
+  (repaint! d)
   nil)
 
 (defn- show-input-prompt!
@@ -233,14 +247,48 @@
   (render [this width] (protocols/render (:root this) width))
 
   (handle-input [this data]
-    (if (kb/matches-key (kb/get-global-keybindings) data "tui.select.cancel")
-      (login-dialog-cancel! this)
-      (protocols/handle-input (:input-comp this) data)))
+    ;; Always forward to the Input component — it handles all keys including
+    ;; Escape (via its on-escape callback) and Enter (via on-submit).
+    ;; This works whether the Input is currently mounted in the rows or not.
+    (protocols/handle-input (:input-comp this) data))
 
   (dispose [this]
-    ;; unwind the content tree's reaction (watches on the rows atom) with
+    ;; Clear input callbacks to prevent any stale firings after dispose
+    (input/input-set-on-submit! (:input-comp this) nil)
+    (input/input-set-on-escape! (:input-comp this) nil)
+    ;; Dispose the input component (foreign, not auto-disposed by hiccup root)
+    (protocols/dispose (:input-comp this))
+    ;; Unwind the content tree's reaction (watches on the rows atom) with
     ;; the dialog — the flow owners call this after dock restore
     (protocols/dispose (:root this))))
+
+(extend-type LoginDialog
+  protocols/IFocusable
+  (focused [this] @(:focused? this))
+  (set-focused! [this val]
+    (reset! (:focused? this) val)
+    (protocols/set-focused! (:input-comp this) val)))
+
+(extend-type LoginDialog
+  protocols/IFocusable
+  (focused [this] @(:focused? this))
+  (set-focused! [this val]
+    (reset! (:focused? this) val)
+    (protocols/set-focused! (:input-comp this) val)))
+
+(extend-type LoginDialog
+  protocols/IFocusable
+  (focused [this] @(:focused? this))
+  (set-focused! [this val]
+    (reset! (:focused? this) val)
+    (protocols/set-focused! (:input-comp this) val)))
+
+(extend-type LoginDialog
+  protocols/IFocusable
+  (focused [this] @(:focused? this))
+  (set-focused! [this val]
+    (reset! (:focused? this) val)
+    (protocols/set-focused! (:input-comp this) val)))
 
 (extend-type LoginDialog
   protocols/IFocusable

@@ -1122,6 +1122,66 @@ kmet.libs.*     self-contained (terminal protocol lives here too)
 `kmet.tui.*` must never require `kmet.app.*`, `kmet.modes.*` or
 `kmet.ai.*`; app-specific components belong in `kmet.app.ui.*`.
 
+## 13.1 Foreign component cleanup — `defcomponent` + spliced records
+
+When a `defcomponent` splices a foreign record (e.g. `:input`, `:editor`,
+`:select-list`, `:settings-list` — created via `make-*` fns, NOT the DSL
+tags), that record is **not** owned by the hiccup reconciler. Its lifecycle
+is manual:
+
+- **Mount**: create the foreign component once, store it in a field.
+- **Render**: splice the record into the tree (identity preserved, never
+  disposed by reconcile).
+- **Focus**: forward `IFocusable.set-focused!` to the foreign component.
+- **Cleanup**: the owning component's `dispose` MUST explicitly:
+  1. Clear any callbacks on the foreign component (prevents stale firings)
+  2. Call `protocols/dispose` on the foreign component
+  3. Then dispose its own tree root
+
+Example (from `kmet.app.ui.login-dialog`):
+
+```clojure
+(defcomponent LoginDialog nil
+  [root rows-atom input-comp tui ...]
+
+  (render [this width] (protocols/render (:root this) width))
+
+  (handle-input [this data]
+    (if (kb/matches-key ... "tui.select.cancel")
+      (login-dialog-cancel! this)
+      (protocols/handle-input (:input-comp this) data)))
+
+  (dispose [this]
+    ;; 1. Clear callbacks — prevents stale firings after dialog is removed
+    (input/input-set-on-submit! (:input-comp this) nil)
+    (input/input-set-on-escape! (:input-comp this) nil)
+    ;; 2. Dispose the foreign Input component (not auto-disposed)
+    (protocols/dispose (:input-comp this))
+    ;; 3. Unwind the hiccup tree's reactions
+    (protocols/dispose (:root this))))
+
+(extend-type LoginDialog
+  protocols/IFocusable
+  (focused [this] @(:focused? this))
+  (set-focused! [this val]
+    (reset! (:focused? this) val)
+    (protocols/set-focused! (:input-comp this) val)))
+```
+
+**Critical**: `login-dialog-cancel!` (called on Escape) does NOT clear the
+input callbacks — it only rejects the prompt promise, cleans up the UI
+(rows), and fires `on-complete`. Clearing callbacks in `cancel!` would
+break Escape handling if the user presses Escape again before the dialog is
+disposed (the Input is the focused leaf and would stop responding to
+keys). The callbacks are cleared in `dispose` when the dialog is truly
+removed from the dock.
+
+Why this matters: without step 1 in `dispose`, a disposed dialog's Input
+callbacks could fire on a subsequent login attempt, targeting the **old**
+dialog instance. Without step 2, the Input's internal watches/timers (if
+any) would leak. The reconciler only disposes DSL-owned children; foreign
+records pass through untouched (§2.1 children rules).
+
 ---
 
 ## 14. Roadmap
