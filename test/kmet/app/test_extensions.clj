@@ -1068,13 +1068,15 @@
   ;; the repo's own extensions restructured to src/-as-artifact-root
   ;; (jar-ext.md §2): every shipped src/ dir loads through the real runtime.
   ;;
-  ;; bb-only: on jolt the shipped extensions still hit gaps the loader
-  ;; cannot paper over — defcomponent's defrecord over the injected
-  ;; kmet.tui.protocols/IComponent, which SCI cannot analyze from jolt's
-  ;; protocol representation (jolt#1000, closed upstream as recipe-only;
-  ;; jolt-bugs.md), plus the clojure extension's unfiled Maven-chain gaps
-  ;; (raw rewrite-clj/tools.reader sources: IMeta/ChunkedSeq misses plus
-  ;; Closeable-in-deftype, which SCI rejects on both hosts; jolt-bugs.md).
+  ;; bb-only: on jolt the shipped extensions hit SCI gaps the loader
+  ;; cannot paper over:
+  ;;   * mcp-adapter / lsp-adapter / review / clojure: SCI's IVar protocol
+  ;;     lacks :getRawRoot for clojure.lang.Var (jolt#1031)
+  ;;   * clojure extension ALSO has Maven-chain gaps (rewrite-clj/tools.reader:
+  ;;     IMeta/ChunkedSeq misses + Closeable-in-deftype; SCI rejects host
+  ;;     interfaces in deftype on both hosts; jolt-bugs.md)
+  ;; jolt#1006 (defcomponent/defrecord over injected host protocol) is closed;
+  ;;   the defcomponent blocker is gone, but IVar gap (#1031) remains.
   ;; (#998/#999 class tokens are fixed and verified — neither blocks
   ;; anything anymore.) The SCI loader itself runs on both hosts
   ;; (see the file docstring).

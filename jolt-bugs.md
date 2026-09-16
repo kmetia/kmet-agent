@@ -4,9 +4,14 @@ Every **open** jolt-side ticket whose fix requires a change in kmet or the
 removal of a kmet workaround. Closed and unfiled findings are not tracked
 here — recent closures (jolt v0.8.8-53 / http-client PR #21): #1011
 (`Object.wait`/`notify`), #1007 (streaming HTTP), #1015/#1016
-(`StringBuilder` `append`/`insert` char[]), #1017 (stream timeout). Their
-workarounds are removed from kmet alongside this edit. `jolt-port.md` /
+(`StringBuilder` `append`/`insert` char[]), #1017 (stream timeout), #1006
+(SCI `copy-var*` host protocol), #1020 (host method arity), #1021
+(`String/copyValueOf`), #1022 (`StringBuilder.getChars`). Their workarounds
+are removed from kmet alongside this edit. `jolt-port.md` /
 `jolt-tui.md` describe port state without ticket IDs.
+
+**Unfiled but confirmed blockers** (not yet in jolt tracker):
+*(none — the IVar gap is now filed as [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031))*
 
 **Workarounds live next to their ticket below.** Each workaround block is the
 removal checklist: when an upstream fix lands, delete the listed code (and the
@@ -132,104 +137,24 @@ revisions carrying the `:windows` keys, delete the `:jolt/native` block, and
 re-run `jolt -e '(println :ok)'` on Windows with the DLLs present. If only
 jolt#989 has landed by then, the block still has to stay for `z`.
 
-### [jolt#1006](https://github.com/jolt-lang/jolt/issues/1006) — SCI cannot implement a `copy-var*`-injected host protocol from `defrecord`/`extend-type` (follow-up to #1000, which closed as recipe-only)
+### [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) — SCI `IVar` protocol missing `:getRawRoot` for `clojure.lang.Var`
 
-**Area:** SCI interop / `defprotocol` representation
+**Area:** SCI vendored in jolt (`sci.impl.vars`), jolt's `clojure.lang.Var` shim
 
-Upstream closed #1000 with merge #1003 (`6e76671b`: `~@` lazy past the first
-splice + `:sigs` on protocol values — in the built `v0.8.1-443-gd55ec029`,
-verified on-device). What landed: SCI's `deftype` analysis ordering is fixed and
-the babashka recipe (multimethods on `sci.impl.types/type-impl` + a SCI-side
-protocol map + the host protocol extended to `SciRecord`/`SciType`, pinned by
-jolt's `sci-functional-test` gate) runs end to end. What did NOT land: the
-transparent flow — `(defrecord R [] p/P (m …))` over a `copy-var*`-injected host
-protocol — still fails under SCI on jolt with `Unable to resolve symbol:
-<method>` (phase `analysis`) and works on bb/JVM. Minimal repro on the built
-binary: inject `kmet.tui.protocols` by reference (`copy-var*` per var, as
-`shared-var-map` does) and eval
-`(defrecord R [x] kmet.tui.protocols/IComponent (render …) …)` →
-`FAIL: Unable to resolve symbol: render`. Upstream's own commit message declares
-this flow unsupported ("fails on the JVM too"); the recipe is the supported
-path. SCI-defined protocols are fine on jolt (verified: `defprotocol` +
-`deftype`/`defrecord` in one context, cross-namespace via load-fn, and aliased
-method calls all evaluate).
+All shipped extensions fail to load on jolt with:
+```
+No implementation of method: :getRawRoot of protocol: #'sci.impl.vars/IVar
+found for class: clojure.lang.Var
+```
+This is distinct from jolt#1006 (which was about `defrecord` over injected
+host protocols — that one is closed). The `IVar` protocol in vendored SCI
+0.13.53 expects `:getRawRoot` on `clojure.lang.Var`, but jolt's Var shim
+doesn't implement it. This blocks mcp-adapter, lsp-adapter, review, and
+clojure extensions on jolt.
 
-This is the `defcomponent` blocker: `defcomponent` expands to exactly that
-`defrecord` over the injected `kmet.tui.protocols/IComponent`, so every
-extension component fails. Deep probe of the real loader context (`eval-source!`
-chain): `extensions/mcp-adapter/src` fails at
-`extensions/mcp_adapter/panel.clj:450` (`(defcomponent McpPanel …)`) with
-`Unable to resolve symbol: render`. `lsp-adapter` (`panel.clj:61` `LspPanel`)
-and `review` (`dialogs.clj:93,108` plus `extend-type … IFocusable` at `:101,116`)
-fail with the same surface. NOTE: `lsp-adapter` is no longer blocked by #999 —
-`(java.net.URLDecoder/decode …)` resolves in SCI on the built binary (verified
-directly, via the loader's retry path); it dies earlier in its panel.
-`tree-sitter` (no components) loads fine, which corroborates.
+**Workaround** (`test/kmet/app/test_extensions.clj:1056`): `^:bb-only` gate
+on `test-shipped-extensions-load-from-src`. Removal: wait for fix in vendored
+SCI, bump jolt version, drop `^:bb-only`, run
+`jolt test kmet.app.test-extensions/test-shipped-extensions-load-from-src`.
 
-(#998 `Matcher` and #999 `URLEncoder`/`URLDecoder` class tokens landed with
-merge #1002 and are verified fixed on-device — `Class/forName`, `instance?`,
-`class`, and the SCI shapes all answer — so their sections are pruned; neither
-blocks any shipped extension anymore.)
 
-**Workaround** (`test/kmet/app/test_extensions.clj:1056`): the `^:bb-only` gate
-on `test-shipped-extensions-load-from-src` stays for #1006 (`mcp-adapter` /
-`review` / `lsp-adapter` panels) plus the clojure extension's unfiled
-Maven-chain gaps below — none of the three former tickets covers clojure
-anymore. Error-attribution pitfall: `load-extension!` names the ENTRY file in
-the error string (`…/core.clj`, `…/mcp_adapter.clj`); the real failure is the
-deepest `ex-data :file` in the cause chain. — `extensions/clojure/src`
-(unfiled, needs triage — not a jolt runtime ticket yet): its `deps.edn` closure
-pulls the raw Maven sources (`rewrite-clj 1.2.57`, `tools.reader 1.5.2`, `cljfmt
-0.16.5`) because jolt has no bundled ports for them (`bundled-port-namespaces` /
-`bb-shared-namespaces` are bb-only by design; `host-requires!` skips them on
-jolt). Requiring the closure in the real context gives: `reader-types` OK,
-`edamame.core` OK, `rewrite-clj.reader` FAIL at `tools.reader
-impl/inspect.clj:49` (`defmethod inspect* clojure.lang.PersistentVector$ChunkedSeq`
-— the `$ArrayMap$Seq` / `$NodeSeq` methods below it are the same shape),
-`rewrite-clj.node` / `cljfmt.core` FAIL at `rewrite-clj interop.cljc:42`
-(`(instance? clojure.lang.IMeta data)`). All three classes exist on jolt
-(`Class/forName` OK) and answer once `sci/add-class!`-registered (verified
-individually) — but dep-closure sources bypass both seed paths
-(`register-source-classes!` runs only for own-artifact sources in `make-load-fn`;
-`eval-source-with-retry!` covers only the entry source), so each miss is fatal
-single-attempt. Behind those sits a harder wall: `tools.reader
-reader_types.clj:14-15` imports `java.io InputStream/BufferedReader/Closeable`
-and implements `Closeable` in `deftype` positions (`:75,100,166`) — SCI rejects
-host interfaces in `deftype` on BOTH hosts (`defrecord/deftype currently only
-support protocol implementations`, verified on bb too), which bb never hits
-because it injects its port. Fix directions: kmet-side (extend seeding/retry to
-dep-closure sources; covers `IMeta`/`ChunkedSeq`) and upstream-or-port for the
-`Closeable`-in-`deftype` wall. Removal: when #1006 lands (or
-kmet reworks `defcomponent`/injection to the recipe) AND the clojure chain
-loads, drop `^:bb-only`, run
-`jolt test kmet.app.test-extensions/test-shipped-extensions-load-from-src`, and
-delete this block.
-
-### [jolt#1020](https://github.com/jolt-lang/jolt/issues/1020) — host method tables silently ignore extra trailing arguments; `String/valueOf(char[], offset, count)` ignores offset/count
-
-**Area:** host method dispatch (`host/chez/java/natives-str.ss`'s
-`jolt-string-method` and other `rest`-taking tables): extra args are dropped
-instead of raising the JVM's arity error, so
-`(String/valueOf (char-array [\a \b \c]) 1 2)` returns `"abc"` instead of
-`"bc"`. Found while sweeping the char[] API family around #1015/#1016.
-
-**Workaround:** none in kmet — no call sites; tracked because the
-silent-result class can mask user errors.
-
-### [jolt#1021](https://github.com/jolt-lang/jolt/issues/1021) — `String/copyValueOf` missing (both arities)
-
-**Area:** `java.lang.String` static table — `(String/copyValueOf (char-array …))`
-and the 3-arg form throw `No matching field or method: String/copyValueOf`;
-they are identical to the matching `String/valueOf` overloads on the JVM (and
-pair with #1020).
-
-**Workaround:** none in kmet — no call sites.
-
-### [jolt#1022](https://github.com/jolt-lang/jolt/issues/1022) — `StringBuilder`/`StringBuffer` `getChars(int, int, char[], int)` missing
-
-**Area:** `string-builder-methods` (`host/chez/java/host-static-classes.ss`) has
-no `getChars`, so `(.getChars (StringBuilder. "abc") 0 3 dst 0)` throws
-`No matching method getChars found`; `String.getChars` works. The char[] family
-companion to #1015/#1016.
-
-**Workaround:** none in kmet — no call sites.
