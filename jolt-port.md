@@ -133,6 +133,16 @@ pipe.
 
 ### B3. Extension isolation (`app/extensions.cljc` — SCI, 1668 LOC)
 
+**Superseded for Jolt (native loader, 2026-09).** Jolt's extension contexts
+do not go through SCI. `create-loader` there builds the context on the
+runtime's own loader — `kmet.loader.jolt-loader` over `jolt.loader`, a
+`.jolt` source adapting the runtime's protocol, with the shared contract
+arriving as a filtered host root instead of copied vars — and teardown
+unmaps what it loaded. SCI stays the bb/JVM backend, and the substrate work
+below is what proved it viable host-wide (it still runs there: `jolt test
+kmet.loader.test-sci-loader`). Everything past this note is the SCI-era plan
+and record.
+
 Each extension evaluates in its own **SCI context** (`sci/init`,
 `sci/eval-form`): private ns registry + loader serving own files, declared
 Maven jars (resolved in-process via `clojure.tools.deps`, bundled with
@@ -213,9 +223,17 @@ methods: `.indexOf`, `.getBytes`, java.time chains), and loaded libraries do
 too (cljfmt 0.16.5: `java.io.File` in 3 of its 12 sources). No `.-field`
 access anywhere in the corpus (0 hits).
 
-**LANDED (2026-09, unified loader).** The extension runtime now runs on both
-hosts with ONE implementation in `src/kmet/app/extensions.cljc` — no
-`:jolt`-specific loader build, no feature stubs. What changed:
+**LANDED (2026-09, unified loader).** The extension runtime runs on both
+hosts from one entry point in `src/kmet/app/extensions.cljc` — no per-host
+fork of the contract, no feature stubs. What changed (the SCI-era
+mechanics; the Jolt half of (a)/(b)/(c) is history — see the note above):
+
+**Superseded for Jolt.** The loader at the bottom of this section is the
+runtime's own: `create-loader` branches once (`#?(:jolt …)`) and builds a
+context of real Jolt namespaces read by the native reader, so a Jolt
+extension context has no interpreter in it at all and classes resolve
+through the compiler rather than a registered class map. The SCI pin in (e)
+keeps its slot for the sci backend's suite, not for extension contexts.
 
 - **(a) the `sci/binding` wrapper — resolved by not needing it.** `eval-source!`
   now evaluates a whole source with `sci/eval-string*` (SCI binds its own
@@ -252,7 +270,8 @@ hosts with ONE implementation in `src/kmet/app/extensions.cljc` — no
   Verified on Jolt with an extension declaring `org.clojure/tools.cli` (closure
   recorded as a root, tool runs, unload releases it). SCI pin: `org.babashka/sci`
   0.13.53, declared in `jolt/deps.edn` (the jolt-only slot) so the shared
-  deps.edn stays free of a host-bundled library.
+  deps.edn stays free of a host-bundled library — it is the sci backend's
+  suite's dependency on Jolt now, not the extension runtime's.
 - **Core load/unload coverage on Jolt**: the whole loader test set runs there
   (single-file, manifest dir with an internal ns through the load-fn, symlinked
   root, unload/reload with no duplicates, rollback on failure, resource
@@ -263,9 +282,11 @@ hosts with ONE implementation in `src/kmet/app/extensions.cljc` — no
   `mapcat`, so a caller ignoring the value loaded nothing on Jolt (bb's
   `apply`/`concat` realized it) — now `vec`-forced.
 
-The remaining Jolt work is therefore no longer loader design: it is the
-class-graph gap (upstream) and the bb-port gaps (per-extension deps), plus
-SCI-perf beyond one small extension (the 45/23/5 ms smoke).
+The remaining Jolt work is therefore no longer loader design: with the native
+loader a Jolt extension context needs no interpreter at all, so what is left
+is the bb-port gap (per-extension deps) and the class-graph gap where a *sci*
+context still resolves classes (upstream) — the SCI-perf caveat no longer
+applies to Jolt extensions.
 
 ---
 
@@ -355,7 +376,9 @@ status (the app/ai/tui namespaces beyond `libs`).
 4. **HTTP/SSE + providers** (3–5 wks, critical path): B1 transport decision + `sse` port + all 10 `api/` builders + `llm.clj` retry/cancel + auth (M4). First end-to-end: `print` mode (`modes/print.clj`, 102 LOC) answering one prompt — no TUI needed.
 5. **Agent loop + tools** (2–4 wks): `app/loop.clj`, session/compaction, tools (bash/edit/write need care: process + fs + diff), `modes/interactive.clj` wiring.
 6. **Packaging + tooling** (1–2 wks): `jolt build` pipeline replacing `build.cljc`, test runner `^:slow` split, lint/format gates, model generators.
-7. **Extensions** (open-ended): B3 redesign decision; port shipped extensions after.
+7. **Extensions**: landed the other way for Jolt — the runtime's own loader,
+   not SCI (B3's note); what remains there is bb-port deps for extension
+   *content*, not the loader.
 
 Estimate honesty: B1 transport is **decided** (babashka.http-client on both hosts — native on bb/JVM, over the jolt-lang/http-client shims on Jolt — with curl for SOCKS/https-scheme proxies and the user's `:curl` mode; `http.cljc` ported), and its consumers are green on Jolt — `sse.clj` and `libs.oauth`/`ai.oauth`/`ai.google_adc` (M4). M1 is closed (data.json on both hosts) — all 27 libs load and test green on bb/JVM, and json/jsonrpc/sse/aws_sigv4 are green on Jolt too. B3 is a research spike before it is labor.
 

@@ -618,9 +618,10 @@ jolt.host seams to extend or re-target: `set-source-roots!`/`source-roots`,
 - **Gates that will fail if forgotten**: `make manifestcheck` (any new
   `jolt.host` var); `make gambitgen`/`gambitgencheck` (`host/gambit/rt-core.ss`
   mirrors rt.ss, `records-gambit.ss` mirrors records.ss via
-  `gen-records.ss` — M0/M2 touch both mirrors); `make mirror-drift-check`;
-  `make portability-check`, `dead-host-check`, `lock-check`,
-  `park-lock-check` on the M0–M2 host edits; `make remint` only if a
+  `gen-records.ss` — M0/M2 touch both mirrors); `make mirrordrift`
+  (`host/chez/mirror-drift-check.sh`); `make portcheck`, `deadhost`,
+  `lockcheck`, `parkcheck` on the M0–M2 host edits (`host/chez/portability-check.sh`,
+  `dead-host-check.sh`, `lock-check.sh`, `park-lock-check.sh`); `make remint` only if a
   seed-listed file changes (only `reader.ss` among these is on the seed list —
   but an accidental `jolt-core/**` or `clojure.core` edit is not).
 - **AOT cache (M3)**: `aot-cacheable-file` (loader.ss:947) resolves through
@@ -652,7 +653,7 @@ jolt.host seams to extend or re-target: `set-source-roots!`/`source-roots`,
 
 | stage | content | files | gates |
 |---|---|---|---|
-| **M0** indirection | `chez-loader` record owning the M0 rows of §6.1.2; accessors read `(current-loader)`; root loader wraps today's globals; analyze ctx gains the field (defaulted) | rt.ss, ns.ss, host-contract.ss, compile-eval.ss, emit-image.ss, build.ss, loader.ss | `corpus` `unit` `cts` `sbperf` + `manifestcheck` + `gambitgencheck` + `mirror-drift-check`; `remint` only if a seed-listed file was touched |
+| **M0** indirection | `chez-loader` record owning the M0 rows of §6.1.2; accessors read `(current-loader)`; root loader wraps today's globals; analyze ctx gains the field (defaulted) | rt.ss, ns.ss, host-contract.ss, compile-eval.ss, emit-image.ss, build.ss, loader.ss | `corpus` `unit` `cts` `sbperf` + `manifestcheck` + `gambitgencheck` + `mirrordrift`; `remint` only if a seed-listed file was touched |
 | **M1** loaders + propagation | ambient binding at the eval funnel; per-loader roots/loaded-ns/data-readers; defining capture in `emit-with-cells` + screening; `find`/`resolve`/`load` split mapped onto `resolve-on-roots`/link table/`load-namespace` | loader.ss, compile-eval.ss, backend_scheme.clj, reader.ss | above + suite cases 1,2,3,5,6,9,10 (9 from a `go` block too) |
 | **M2** classes | per-loader class/provider/type tables; value-directed dispatch; ctx-tagged tokens; divergence entry | host-static.ss, protocols.ss, records*.ss, multimethods.ss, class-hierarchy.ss (read-only) | above + cases 4,10 + provider autoload inside a loader |
 | **M3** unload + caches | teardown against the `run-case-isolation.ss` list; AOT/embedded/class-path fixes from §6.1.9 | loader.ss, io.ss, build.ss, dce.ss | case 7, 11, 12 + world byte-compare + `aot-cache-smoke` |
@@ -904,8 +905,21 @@ identity — §6.1.5, §6.3), M3 (AOT keyed by (loader, ns) or resolved file,
 embedded-source root qualification, `dce` per loader, state-image home
 loader, the `run-case-isolation.ss` prune list) and the M4 leftover. Those
 untouched host edits are also why §6.1.9's extra gates (`gambitgencheck`,
-`mirror-drift-check`, the portability/park-lock checks, a possible
+`mirrordrift`, `portcheck`/`deadhost`/`lockcheck`/`parkcheck`, a possible
 `remint`) are not in play yet.
+
+Re-checked against the tree, so the list above is a state, not a memory:
+nothing in `rt.ss`, `compile-eval.ss`, `analyze.ss`, `ns.ss` or `emit.ss`
+reads a loader (no analyzer-visible loader state); the class/provider/type
+tables are the process-global ones (`host-static-classes.ss`'s
+`tagged-methods-tbl`, `protocols.ss`'s type registry — no per-loader tables
+anywhere in the host); the only `jolt.host/load-namespace` call is the
+host-root path (private sources read source, so nothing is AOT-keyed);
+`run-case-isolation.ss` rolls back the host's `loaded-ns` dedup
+(`ldr-unmark-loaded!`) and knows nothing of the loader's own
+`loaders-by-id`/`private-ns-owners`/claims/facades; and
+`Thread/getContextClassLoader` still hands back the host singleton
+(`the-classloader`, io.ss) rather than the ambient loader's facade.
 
 Gates for the M-stages, when they land: the corpus/unit/cts/sbperf set
 (plus the jolt gates in §6.1.9) and the conformance cases named in
@@ -1068,6 +1082,24 @@ maps onto it without rework.
 - Does the conformance suite ship with the lib at promotion (a `-test`
   artifact), or stay in kmet's `test/` as the reference implementation of
   the spec? (Phase 4 detail; the suite is the spec, so this is a packaging
-  question, not a design one.)
+  question, not a design one.) The portable half needs almost nothing to
+  travel: `test_core.clj` (data-path cases, any backend) and
+  `test_sci_loader.clj` (code-path cases, SCI) require only `kmet.loader.*`
+  — plus sci, which is that backend's suite's own need — and
+  `test_jolt_loader.clj` is the Jolt adapter's (Jolt-only at runtime, skips
+  elsewhere). `test_self_contained.clj` should travel with the tree it
+  guards, pointed at the new root: it is what keeps promotion a move. The
+  Jolt-side suite is Jolt's own (`make loaderconf`) and never ships. The one
+  thing kmet's copy gets from kmet that a `-test` half would not is an entry
+  point — `kmet.tasks.runner` registers the namespaces, and the lib would
+  carry a `bb test`-style task or a clojure.test main in its own alias.
 - `remove!` (OSGi's terminal uninstall: delete owned files/storage) — v1
-  leaves it out; revisit if a loader ever owns a cache directory.
+  leaves it out; revisit if a loader ever owns a cache directory. No loader
+  owns one today: kmet's backends and Jolt's never write anything —
+  `jar-entry-source`'s "opens and closes per call, no handles are held, so
+  unload needs no cleanup" is the stance throughout — and `unload!` takes
+  back namespaces, not files. The caches that do exist belong to someone
+  else: Jolt's host AOT cache (the host-root path) and the extension
+  system's temp dirs (`kmet-ext-jars`, keyed by jar path + mtime;
+  `kmet-ext-src`, keyed by the materialized source's content), both
+  reusable by design and left to the OS temp reaper.

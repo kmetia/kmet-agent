@@ -250,7 +250,7 @@ a clear error unless it is babashka-bundled.
 
 ### Background work (`kmet.libs.concurrent/spawn`)
 
-Extension code runs in an isolated SCI context without `future`/`pmap`/`pcalls` — SCI is a pure interpreter with no bundled `Executor`, while `babashka` injects `future` only at the host level (`sci/init {:namespaces {'clojure.core {'future …}}}`). `kmet` deliberately does **not** forward it; use the whitelisted helper `kmet.libs.concurrent/spawn` (the same daemon-`Thread` helper the shipped adapters already copied):
+Under the SCI host contexts (bb and the JVM) extension code runs without `future`/`pmap`/`pcalls` — SCI is a pure interpreter with no bundled `Executor`, while `babashka` injects `future` only at the host level (`sci/init {:namespaces {'clojure.core {'future …}}}`). `kmet` deliberately does **not** forward it; use the whitelisted helper `kmet.libs.concurrent/spawn` (the same daemon-`Thread` helper the shipped adapters already copied):
 
 ```clojure
 (ns my-ext.main
@@ -260,7 +260,7 @@ Extension code runs in an isolated SCI context without `future`/`pmap`/`pcalls` 
 ;; => Thread (started, daemon=true); exceptions swallowed, interrupt/join via the returned Thread
 ```
 
-- Whitelisting `future` would pull in an implicit global pool, let extension work survive `unload-extension!`/`reload-extensions!` and keep `kmet` alive past shutdown, enable unbounded submission with no backpressure, and need the rest of the family (`future-call`/`future-cancel`/`pmap`/`pcalls`) for consistency. An explicit daemon `Thread` keeps the lifecycle obvious and keeps unload/reload clean. Keep `Thread` use through `kmet.libs.concurrent/spawn` — don't construct `Thread.` directly in extensions.
+- Whitelisting `future` would pull in an implicit global pool, let extension work survive `unload-extension!`/`reload-extensions!` and keep `kmet` alive past shutdown, enable unbounded submission with no backpressure, and need the rest of the family (`future-call`/`future-cancel`/`pmap`/`pcalls`) for consistency. An explicit daemon `Thread` keeps the lifecycle obvious and keeps unload/reload clean. On Jolt there is no interpreter in the way — the extension runs in the runtime, so this is a convention there rather than an enforced absence; the lifecycle reasoning is the same, because `unload` still cannot stop work you started. Keep `Thread` use through `kmet.libs.concurrent/spawn` — don't construct `Thread.` directly in extensions.
 
 #### Limits (inherent to Babashka)
 
@@ -278,19 +278,25 @@ Extension code runs in an isolated SCI context without `future`/`pmap`/`pcalls` 
 
 #### Host support (Jolt)
 
-The loader runs on Jolt too, with the same contract (isolated SCI context per
-extension, `:load-fn` serving own files + declared deps, `unload` dropping the
-context). Host differences are implementation, not author-visible:
+The loader runs on Jolt too, with the same contract — but natively: Jolt has
+its own loader (`jolt.loader`), so an extension's context there is a set of
+real Jolt namespaces, read by the native reader from the extension's own
+sources plus its declared deps, shared host layers coming back by reference,
+and teardown unmapping what it loaded. No SCI is involved
+(`kmet.loader.jolt-loader` adapts the runtime's loader to the same protocol
+the bb/JVM backend implements). Host differences are implementation, not
+author-visible:
 
-- **SCI version.** babashka bundles SCI; Jolt resolves the jolt-gated pin
-  (`org.babashka/sci` 0.13.53, declared in `jolt/deps.edn`) since the latest
-  SCI needs `clojure.core/Inst`, absent on Jolt. A few SCI fixes present in
-  babashka's bundled build are therefore missing on Jolt.
-- **Classes.** Jolt has no class enumeration, so classes are registered
-  lazily: `{:classes {:allow :all}}` delegates instance calls, `bb-imports`
-  short names plus `Class/forName` cover statics/ctors/hints (with a miss
-  retry). Classes Jolt's class graph does not supply (e.g. some JDK classes
-  reachable only through a type hint) fail the load there for now.
+- **Classes.** Classes resolve through the compiler, against the runtime's
+  class graph — there is no lazily-registered class map (the SCI backend
+  builds one: `{:classes {:allow :all}}` delegates instance calls,
+  `bb-imports` covers statics/ctors/hints). A class Jolt's graph does not
+  supply (e.g. some JDK classes reachable only through a type hint) fails
+  the load.
+- **SCI.** Not in the extension path on Jolt. It is still the bb/JVM context
+  runtime, and `jolt/deps.edn` keeps the jolt-gated pin
+  (`org.babashka/sci` 0.13.53) so that backend's suite still runs under
+  `jolt test` — the latest SCI needs `clojure.core/Inst`, absent on Jolt.
 - **Deps.** bb resolves the closure to jars and serves them with `ZipFile`;
   Jolt uses `jolt.deps/resolve-deps` and serves the extracted source roots
   with fs probes (`extension-jars` returns roots on Jolt).

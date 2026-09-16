@@ -39,9 +39,10 @@
 
    Implementation status: this namespace is the protocol, the generic
    resolution body, the combinators and the host-root backend (loader.md
-   Phase 0). The sci backend (Phase 1), the JVM ClassLoader backend
-   (Phase 2) and Jolt's native backend (Phase 3) layer on the same
-   protocol; `make-loader` is their constructor seam."
+   Phase 0). The sci backend (Phase 1) and Jolt's native backend (Phase 2,
+   adapted by kmet.loader.jolt-loader) layer on the same protocol; the JVM
+   ClassLoader backend (Phase 3) is still to come. `make-loader` is their
+   constructor seam."
   (:refer-clojure :exclude [find resolve load])
   (:require [babashka.fs :as fs]
             [clojure.java.io :as io]

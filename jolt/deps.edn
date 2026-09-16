@@ -24,9 +24,12 @@
 
  :paths ["src"]
 
- ;; The SCI runtime the extension loader needs on Jolt (RFC 0014 lib: this
- ;; deps.edn is jolt/JVM-only, so the pin lives here rather than in the
- ;; root deps.edn, which hosts may treat as a host-vendored namespace).
+ ;; SCI for the sci backend's suite on Jolt (RFC 0014 lib: this deps.edn is
+ ;; jolt/JVM-only, so the pin lives here rather than in the root deps.edn,
+ ;; which hosts may treat as a host-vendored namespace). Extension contexts
+ ;; do not go through SCI on Jolt any more — they run on the runtime's own
+ ;; loader — but the sci backend is still the bb/JVM one and `jolt test`
+ ;; kmet.loader.test-sci-loader proves it there, which needs the dep.
  ;; babashka bundles SCI, so only jolt/JVM resolve it — 0.13.53 is the
  ;; jolt-gated version (jolt's own vendor/sci is 0.13.53; the latest
  ;; 0.15.x needs clojure.core/Inst, absent on jolt).
