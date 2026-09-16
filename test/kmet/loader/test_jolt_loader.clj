@@ -110,6 +110,26 @@
       (fs/delete-tree d))
     (t/is true "skipped: the adapter is Jolt-only")))
 
+(deftest adapter-ambient-tccl
+  ;; TCCL is where a library that finds its own resources the Java way looks:
+  ;; inside a context it must be that context's classloader, not the host's
+  ;; (jolt.loader conformance case 22; kmet-side, this is what makes a native
+  ;; extension dependency's (.getResource (.getContextClassLoader ...)) land in
+  ;; the extension's own roots).
+  (if-let [{:keys [classpath with-loader*]} (adapter)]
+    (let [d (dir! "tccl")]
+      (spit (str d "/ctx-res.edn") "{:ctx true}")
+      (let [l (classpath [d] {:id "test:tccl"})
+            outside (.getContextClassLoader (Thread/currentThread))
+            inside (with-loader* l (fn [] (.getContextClassLoader (Thread/currentThread))))]
+        (t/is (not (identical? outside inside))
+              "inside with-loader* the TCCL is the context's, not the host's")
+        (t/is (some? (.getResource inside "ctx-res.edn"))
+              "and a library finding its resources the Java way lands in the
+               context's own roots (jolt.loader conformance case 22)"))
+      (fs/delete-tree d))
+    (t/is true "skipped: the adapter is Jolt-only")))
+
 (deftest adapter-ambient-resources
   (if-let [{:keys [classpath with-loader*]} (adapter)]
     (let [d (dir! "res")]

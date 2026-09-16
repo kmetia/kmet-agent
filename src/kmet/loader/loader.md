@@ -695,7 +695,9 @@ Where the host has a real `ClassLoader`, expose one: `loadClass` → `find` +
 a `proxy [ClassLoader]`. On jolt, the per-ctx `jhost` loader with the method
 table above, which also makes `(io/resource n loader)`'s currently-ignored
 2-arity argument start meaning something, and keeps
-`(take-while identity (iterate #(.getParent %) l))` terminating.
+`(take-while identity (iterate #(.getParent %) l))` terminating. The same
+object is what the thread's context classloader answers inside `with-loader`
+(case 22).
 
 ### 6.5 Which sci artifact (jolt)
 
@@ -734,7 +736,7 @@ backend's own namespace.
 
 Host-agnostic, written against the protocol; must pass on every backend
 that serves the kind in question. The **executable spec** is
-`test/chez/loaderconf-test.clj` in the Jolt repo — 21 cases, `make
+`test/chez/loaderconf-test.clj` in the Jolt repo — 26 cases, `make
 loaderconf`, empty baseline — mirrored on the kmet side by
 `test/kmet/loader/test_core.clj` (data-path cases, any backend) and
 `test/kmet/loader/test_sci_loader.clj` (code-path cases, SCI). Cases marked
@@ -800,12 +802,32 @@ loaderconf`, empty baseline — mirrored on the kmet side by
     (`:loader/bad-request`), not a teardown: closing the host's own world
     would leave the process with nothing to load from. Every other loader —
     contexts, views, combinators — unloads normally.
+22. *(native)* **TCCL follows the ambient loader** — inside `with-loader`, the
+    thread's context classloader is the context's own classloader and resolves
+    its roots; outside one it is the host's.
+23. *(native)* **`require`'s options, and `:reload`** — a runtime `(require
+    '[lib :as h])` materializes the alias in the DEFINING namespace (and
+    `:refer`/`:rename` with it); `:reload` re-reads through the loader into the
+    installed namespace, so definitions other code already links to see the new
+    roots; a requirement the loader cannot serve fails `:loader/unreadable`.
+24. *(native)* **`use` and `refer`** — both load through the loader and act in
+    the defining namespace, filters (`:only`/`:exclude`/`:rename`) included.
+25. *(native)* **`load`/`load-file` are refused** — a host-file path would step
+    outside the context's roots; the error says so and names the alternatives.
+26. *(native)* **Per-context data readers fail loudly** — a `#tag` the host's
+    `*data-readers*` does not know fails the load naming the tag, and says so
+    when the context's roots ship a `data_readers.clj` (per-context readers are
+    not supported: the runtime's reader resolves tags before the loader sees the
+    form).
 
 Cases 1–8, 10, 11, 13–16, 18 and 21 are expressible against SCI on bb and jolt
 today, which is the point: pin the semantics before any runtime work, the
 way the corpus does for `clojure.core`. Case 9 needs a code backend and
 lives in the SCI suite; case 12 has a data-path version in the core suite
-and a read-path one there too. Cases 17, 19 and 20 *(native)* are rules the
+and a read-path one there too. Cases 22–26 *(native)* are the Jolt host seams
+and reader rules (TCCL, the rewritten load/alias ops, the host-file refusal,
+the data-reader failure); kmet's `test/kmet/loader/test_jolt_loader.clj`
+mirrors 22 through the adapter. Cases 17, 19 and 20 *(native)* are rules the
 native reader and the host registry state — kmet's root answers loaded host
 namespaces only (`root`'s docstring), so a code backend injects shared names
 and fails an unservable require (case 18) instead; the SCI backends never map
@@ -877,7 +899,7 @@ ctx-propagation mechanisms §6.1.4, gotchas §6.1.9, stage table §6.1.10).
 Shipped in the Jolt repo rather than here: `stdlib/jolt/loader.clj` plus
 the host seams (`clojure.java.io/resource` 2-arity, `RT/baseLoader`, the
 tagged-table classloader facade), with `test/chez/loaderconf-test.clj` as
-the writ — `make loaderconf`, 21 cases, empty baseline. Tracked in
+the writ — `make loaderconf`, 26 cases, empty baseline. Tracked in
 jolt-lang/jolt#912 and jolt-lang/jolt#1039.
 
 **What landed, and how it differs from M0–M4.** The substrate is one
@@ -919,14 +941,36 @@ is fine at one loader per extension and would want a closed-marker if a host
 ever minted one per request; and `jar-namespaces` is scanned a second time
 for a jar artifact when the SCI backend builds its resource fn (O(zip
 entries), once per load) — the price of not passing an unused argument
-through the Jolt branch. M4 landed in part: `io/resource` 2-arity,
-`RT/baseLoader`, the facade and `as-classloader`; TCCL did not.
+through the Jolt branch. M4 is complete now: `io/resource` 2-arity,
+`RT/baseLoader`, the facade and `as-classloader` as before, and TCCL — inside
+`with-loader` the thread's context classloader IS that context's classloader
+(case 22), so a dependency that finds its own resources the Java way lands in
+the context's roots.
 
-**Remaining, if class-level isolation is ever wanted**: M0/M1, M2 (the
-per-loader class/provider/type tables, value-directed dispatch, cross-ctx
-identity — §6.1.5, §6.3), M3 (AOT keyed by (loader, ns) or resolved file,
-embedded-source root qualification, `dce` per loader, state-image home
-loader, the `run-case-isolation.ss` prune list) and the M4 leftover. Those
+**Hardened since (cases 22–26).** The rewrite grew from four ops to nine, with
+the semantics Clojure gives them: `require`/`use`/`refer` load through the
+loader and apply `:as`/`:as-alias`/`:refer`/`:only`/`:exclude`/`:rename` in
+the DEFINING namespace (a runtime require's alias used to vanish, `Unknown
+class h`), `:reload` re-reads through the loader into the *installed*
+namespace so definitions other code already links to pick up the new roots
+(for a namespace the context's own roots serve; one shared through a delegate
+reloads there, under the evict-and-evaluate rule), a requirement the loader
+cannot serve fails `:loader/unreadable` instead of
+leaking to the runtime's global require, and `load`/`load-file` are refused as
+host-file operations. The test harness's per-row reset now also drops the
+loader's own bookkeeping (`reset-context-state!`, called from
+`run-case-isolation.ss`). Per-context `data_readers.clj` stays unsupported —
+the runtime's reader resolves `#tag` against the host's `*data-readers*`
+before the loader ever sees the form — but no longer as a cryptic compiler
+error: the load names the tag and the reason (case 26).
+
+**Remaining, if class-level isolation is ever wanted**: M0/M1 (the
+analyzer-visible loader state a full M2 would need), M2 (the per-loader
+class/provider/type tables, value-directed dispatch, cross-ctx identity —
+§6.1.5, §6.3; this is also why `:class` requests have no Jolt backend), and
+M3's cache work (AOT keyed by (loader, ns) or resolved file, `dce` per
+loader, state-image home loader — the embedded-source root qualification
+already landed, and the harness prune list is now wired). Those
 untouched host edits are also why §6.1.9's extra gates (`gambitgencheck`,
 `mirrordrift`, `portcheck`/`deadhost`/`lockcheck`/`parkcheck`, a possible
 `remint`) are not in play yet.
@@ -940,9 +984,10 @@ anywhere in the host); the only `jolt.host/load-namespace` call is the
 host-root path (private sources read source, so nothing is AOT-keyed);
 `run-case-isolation.ss` rolls back the host's `loaded-ns` dedup
 (`ldr-unmark-loaded!`) and knows nothing of the loader's own
-`loaders-by-id`/`private-ns-owners`/claims/facades; and
-`Thread/getContextClassLoader` still hands back the host singleton
-(`the-classloader`, io.ss) rather than the ambient loader's facade.
+`loaders-by-id`/`private-ns-owners`/claims/facades (it now calls the
+loader's `reset-context-state!`, which is what retires them between rows);
+and `Thread/getContextClassLoader` answers with the ambient loader's facade
+(io.ss, case 22).
 
 Gates for the M-stages, when they land: the corpus/unit/cts/sbperf set
 (plus the jolt gates in §6.1.9) and the conformance cases named in
@@ -1010,7 +1055,7 @@ one exception: they are stored and compared by identity.
    kmet's extension tests. **Done** — `jolt test
    kmet.loader.test-core kmet.loader.test-sci-loader` and `kmet.app.test-extensions`
    are green on jolt.
-4. Phase 2 (Jolt native) — **done** in the Jolt repo, 21/21. Phase 3 (JVM,
+4. Phase 2 (Jolt native) — **done** in the Jolt repo, 26/26. Phase 3 (JVM,
    plus hybrid) is last and may follow promotion. Each backend must pass
    the *same* suite; a native backend that fails a case is a bug in the
    backend, not a permitted divergence (§6.3 excepted, recorded in the
