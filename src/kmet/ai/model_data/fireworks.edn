@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-16T09:25:53Z"
+ :generated-at "2026-09-17T08:38:36Z"
  :provider {:id :fireworks
             :name "Fireworks AI"
             :env-vars ["FIREWORKS_API_KEY"]
@@ -197,21 +197,6 @@
     :cost {:input 0.3 :output 1.2 :cache-read 0.06 :cache-write 0}
     :context-window 512000
     :max-tokens 512000
-    :compat {:supports-long-cache-retention false
-             :send-session-affinity-headers true
-             :supports-cache-control-on-tools false
-             :supports-eager-tool-input-streaming false}}
-   "accounts/fireworks/models/mistral-large-3-fp8"
-   {:id "accounts/fireworks/models/mistral-large-3-fp8"
-    :name "Mistral Large 3 675B Instruct 2512"
-    :provider :fireworks
-    :api :anthropic-messages
-    :base-url "https://api.fireworks.ai/inference"
-    :reasoning false
-    :input [:text :image]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
-    :context-window 262144
-    :max-tokens 262144
     :compat {:supports-long-cache-retention false
              :send-session-affinity-headers true
              :supports-cache-control-on-tools false
