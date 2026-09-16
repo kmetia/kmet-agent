@@ -1321,12 +1321,18 @@
                 ;; CSI-u sequence ("\u001b\u001b[27;...u"). "\u001b\u001b"
                 ;; alone parses as ctrl+alt+[ — split it so the CSI-u tail
                 ;; survives when another ESC-prefixed sequence follows.
+                ;; A recognized legacy alt+arrow (ESC ESC [A-D) is the one
+                ;; exception: it is a single alt key, so it is dispatched
+                ;; whole instead of being split into Escape + arrow.
                 :else
-                (let [seq-str (if (and (clojure.string/starts-with? s "\u001b\u001b")
-                                       (> (count s) 2)
-                                       (contains? #{\[ \] \O \P \_} (nth s 2)))
+                (let [alt-len (keys/legacy-alt-sequence-length s)
+                      seq-str (cond
+                                alt-len (subs s 0 alt-len)
+                                (and (clojure.string/starts-with? s "\u001b\u001b")
+                                     (> (count s) 2)
+                                     (contains? #{\[ \] \O \P \_} (nth s 2)))
                                 "\u001b"
-                                (subs s 0 seq-len))
+                                :else (subs s 0 seq-len))
                       rest-s (subs s (count seq-str))]
                   (if (or (keys/mouse-sequence? seq-str)
                           (keys/focus-sequence? seq-str)

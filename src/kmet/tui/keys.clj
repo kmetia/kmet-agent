@@ -583,6 +583,24 @@
          (str c))))
    nil))
 
+(defn legacy-alt-sequence-length
+  "Length of a recognized ESC ESC-prefixed legacy key at the head of DATA,
+   or nil (longest candidate first). The only such keys are the 4-char
+   alt+arrow forms (ESC ESC [A-D) from terminals that send alt as an ESC
+   prefix (xterm altSendsEscape, macOS Terminal Option-as-Meta). The input
+   buffer's structural scan stops at the shorter ESC ESC pair (a complete
+   meta key, ctrl+alt+[), so it must prefer these longer legacy keys
+   explicitly — otherwise alt+up/down splits into Escape + arrow. A rapid
+   Escape-then-arrow in one read is the same bytes; the legacy map resolves
+   that ambiguity to alt+arrow, as it has since before the input buffer."
+  [data]
+  (when (str/starts-with? data "\u001b\u001b")
+    (some (fn [n]
+            (when (and (<= n (count data))
+                       (contains? @legacy-map (subs data 0 n)))
+              n))
+          [4 3])))
+
 ;; ─── Sequence helpers ───────────────────────────────────────────────────────
 
 (defn- parse-kitty-event-type

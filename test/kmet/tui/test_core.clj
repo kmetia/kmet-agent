@@ -875,6 +875,31 @@
       (t/is (= ["\u001b\u001b"] @dispatched) "pair dispatched whole")
       (t/is (= "" @buf) "buffer drained"))))
 
+(t/deftest test-legacy-alt-arrow-dispatches-whole
+  ;; ESC ESC [A-D is the legacy alt+arrow form (terminals that send alt as an
+  ;; ESC prefix). The structural scan stops at the shorter ESC ESC pair
+  ;; (ctrl+alt+[), and the WezTerm split must not turn alt+up/down into
+  ;; Escape + arrow — the scoped-models reorder and every other alt+arrow
+  ;; binding depend on the whole sequence.
+  (testing "ESC ESC [A dispatches as one alt+up sequence"
+    (let [tui (core/create-tui nil)
+          buf (atom "\u001b\u001b[A")
+          dispatched (atom [])]
+      (swap! (:input-listeners tui) conj (fn [data] (swap! dispatched conj data) nil))
+      ((var kmet.tui.core/process-input-buffer!) tui (fn [_] -2) buf)
+      (t/is (= ["\u001b\u001b[A"] @dispatched) "one sequence, not Escape + arrow")
+      (t/is (= "alt+up" (keys/parse-key (first @dispatched))))
+      (t/is (= "" @buf) "buffer drained")))
+  (testing "a following key still dispatches after the pair"
+    (let [tui (core/create-tui nil)
+          buf (atom "\u001b\u001b[B\u001b[C")
+          dispatched (atom [])]
+      (swap! (:input-listeners tui) conj (fn [data] (swap! dispatched conj data) nil))
+      ((var kmet.tui.core/process-input-buffer!) tui (fn [_] -2) buf)
+      (t/is (= ["\u001b\u001b[B" "\u001b[C"] @dispatched)
+            "alt+down then right, one sequence each")
+      (t/is (= "" @buf) "buffer drained"))))
+
 (t/deftest test-incomplete-sequence-flush-timeouts
   ;; A lone ESC fires as Escape after ESCAPE-FLUSH-MS (100ms, not pi's 10ms:
   ;; WSL/conpty stalls split sequences 50ms+ apart, so 10ms consumed a lone
