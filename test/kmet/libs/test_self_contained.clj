@@ -9,6 +9,7 @@
 
 (defn- lib-files []
   (->> (fs/list-dir "src/kmet/libs")
+       (mapcat (fn [f] (if (fs/directory? f) (fs/list-dir f) [f])))
        (filter #(re-find #"\.clj[ca]?$" (str %)))
        (map str)))
 

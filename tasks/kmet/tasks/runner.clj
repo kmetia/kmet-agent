@@ -126,6 +126,7 @@
     kmet.tui.test-terminal-native
     kmet.libs.test-self-contained
     kmet.libs.test-loader
+    kmet.libs.test-loader-sci
     kmet.libs.test-host
     kmet.libs.test-crypto
     kmet.libs.test-sse

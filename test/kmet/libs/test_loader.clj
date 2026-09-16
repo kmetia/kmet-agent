@@ -263,6 +263,15 @@
 
 ;; ─── Link table, status, ambient tier, concurrency ─────────────────────────
 
+(deftest test-memory-handles
+  (let [handle {:linked 'elsewhere}
+        l (mem/memory {:handles {"shared.lib" handle}
+                       :namespaces {"src.lib" {:source "(ns src.lib)"}}})]
+    (is (identical? handle (ldr/load l {:kind :ns :name "shared.lib"}))
+        "a :handles entry resolves by reference, without reading")
+    (is (identical? handle (ldr/resolve l (req :ns "shared.lib"))))
+    (is (= "(ns src.lib)" (:source (load-name l :ns "src.lib"))))))
+
 (deftest test-link-table-semantics
   (let [cell (atom 1)
         l (mem/memory {:vars {'lib/x cell}})]

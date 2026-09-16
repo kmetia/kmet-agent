@@ -50,10 +50,12 @@
       (case (:kind req)
         :var (when-let [cell (lookup sources :vars nm)]
                [{:kind :var :cell cell}])
-        :ns (when-let [entry (ns-entry sources nm)]
-              [(if (and (map? entry) (contains? entry :handle))
-                 {:kind :ns :handle (:handle entry)}
-                 {:kind :ns :file (str "memory://" nm)})])
+        :ns (or (when-let [h (get (:handles @sources) nm)]
+                  [{:kind :ns :handle h}])
+                (when-let [entry (lookup sources :namespaces nm)]
+                  [(if (and (map? entry) (contains? entry :handle))
+                     {:kind :ns :handle (:handle entry)}
+                     {:kind :ns :file (str "memory://" nm)})]))
         :class (when-let [entry (lookup sources :classes nm)]
                  [(cond
                     (and (map? entry) (contains? entry :class)) {:kind :class :class (:class entry)}

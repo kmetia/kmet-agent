@@ -6,12 +6,16 @@ promoted to a standalone library afterwards. It is the answer to the
 **extension-isolation** workstream in `jolt-port.md` §B3 (a hard blocker for
 the port).
 
-Status: design locked; implementation staged (see §9). **Phase 0 is
-implemented**: `src/kmet/libs/loader.clj` (protocol, generic body,
-combinators, host root), `src/kmet/libs/loader/memory.clj` and the
-conformance suite (`test/kmet/libs/test_loader.clj`). Phases 1–4 (sci
-backend + extension wiring, JVM and Jolt native backends, promotion) are
-not implemented yet.
+Status: design locked; implementation staged (see §9). **Phase 0 and the
+Phase 1 sci backend are implemented**: `src/kmet/libs/loader.clj`
+(protocol, generic body, combinators, host root),
+`src/kmet/libs/loader/memory.clj` (in-memory backend),
+`src/kmet/libs/loader/sci.clj` (SCI code backend: locate/read/eval, SCI's
+`require` routed through the loader, injected share list) and the
+conformance suites (`test/kmet/libs/test_loader.clj`,
+`test/kmet/libs/test_loader_sci.clj`). Not implemented yet: the rest of
+Phase 1 (kmet extension wiring through the loader, `kmet.extension`
+re-exports) and Phases 2–4 (JVM and Jolt native backends, promotion).
 
 Related docs: `jar-ext.md` (extension artifact format — the loader it touches),
 `jolt-port.md` §B3, `extensions/extensions.md` (the extension contract),
