@@ -3,7 +3,9 @@
             [clojure.string :as str]
             [kmet.tui.core :as core]
             [kmet.libs.reakt :as reakt]
+            [kmet.libs.terminal :as lib]
             [kmet.tui.keys :as keys]
+            [kmet.tui.terminal :as term]
             [kmet.tui.components.editor :as editor]
             [kmet.tui.components.input :as input]))
 
@@ -504,6 +506,84 @@
             (pasted-editor [["\u001b[200~abc" 1000] ["\u001b[201~" 1010] ["\r" 1030]])]
         (t/is (= ["abc"] @submitted))))
     (finally (keys/set-kitty-active! false))))
+
+;; ─── Reader-thread integration (start-input-reader) ───────────────────────
+
+(defn- scripted-terminal
+  "ITerminal stub feeding CHARS one code point per read; when the script is
+   exhausted read-input returns -1 after a short sleep (a blocking-read
+   stand-in, bounded by the caller's timeout)."
+  [chars]
+  (let [q (atom (vec chars))]
+    (reify term/ITerminal
+      (start! [_ _ _] nil)
+      (stop! [_] nil)
+      (started? [_] true)
+      (write-output [_ _] nil)
+      (read-input [_ timeout-ms]
+        (if-let [c (first @q)]
+          (do (swap! q subvec 1) (int c))
+          (do (Thread/sleep (max 1 (min (or timeout-ms 1) 5)))
+              -1)))
+      (columns [_] 80)
+      (rows [_] 24)
+      (set-progress! [_ _] nil))))
+
+(defn- reader-start!
+  "Start the REAL input reader (start-input-reader, its own thread) over a
+   scripted terminal with a focused editor. Returns {:editor :submitted
+   :stop!}; STOP! must run in a finally (it stops and joins the reader)."
+  [chars]
+  (let [tui (core/create-tui (scripted-terminal chars))
+        ed (editor/make-editor)
+        submitted (atom [])]
+    ;; as the app does before pushing the protocol query: negotiation
+    ;; responses are intercepted instead of dispatched
+    (reset! (:keyboard-protocol-pushed? tui) true)
+    (editor/editor-set-on-submit! ed (fn [t] (swap! submitted conj t)))
+    (core/tui-add-child tui ed)
+    (core/tui-set-focus tui ed)
+    (reset! (:running? tui) true)
+    ((var kmet.tui.core/start-input-reader) tui)
+    {:editor ed
+     :submitted submitted
+     :stop! (fn []
+              (reset! (:stopped? tui) true)
+              (when-let [f @(:input-reader tui)]
+                (deref f 3000 nil))
+              (reset! (:input-reader tui) nil))}))
+
+(defn- wait-for!
+  "Block until PRED holds or TIMEOUT-MS elapses; returns the final result."
+  [pred timeout-ms]
+  (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+    (while (and (not (pred)) (< (System/currentTimeMillis) deadline))
+      (Thread/sleep 5)))
+  (pred))
+
+(t/deftest test-reader-thread-kitty-enter-submits
+  ;; End-to-end through the real reader thread: the flags report activates
+  ;; kitty, the arrow's press+release is filtered, and Enter submits — the
+  ;; reported regression, one level above the dispatch-level tests.
+  (try
+    (let [{:keys [editor submitted stop!]}
+          (reader-start! "\u001b[?7u\u001b[A\u001b[1;1:3Ahi\r")]
+      (try
+        (t/is (wait-for! #(keys/kitty-active?) 10000)
+              "the flags report enabled kitty through the reader")
+        (t/is (wait-for! #(seq @submitted) 10000) "Enter submitted through the reader")
+        (t/is (= ["hi"] @submitted) "arrow press+release then text+Enter submits")
+        (t/is (= "hi" (editor/editor-get-text editor)))
+        (finally (stop!))))
+    (testing "bracketed paste through the reader then Enter"
+      (let [{:keys [submitted stop!]} (reader-start! "\u001b[200~abc\u001b[201~\r")]
+        (try
+          (t/is (wait-for! #(seq @submitted) 10000) "Enter submitted through the reader")
+          (t/is (= ["abc"] @submitted))
+          (finally (stop!)))))
+    (finally
+      (keys/set-kitty-active! false)
+      (lib/query-kitty-protocol! (fn [_])))))
 
 (t/deftest test-bracketed-paste-unaffected
   (testing "bracketed paste still buffers and normalizes via handle-paste"

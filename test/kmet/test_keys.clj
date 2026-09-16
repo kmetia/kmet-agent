@@ -219,3 +219,14 @@
     (t/is (nil? (k/decode-printable-key "\u001b[27;2;99999999999999999999~")))
     (t/is (nil? (k/parse-key "\u001b[128512u")))
     (t/is (nil? (k/parse-key "\u001b[27;99999999999999999999;97~")))))
+
+(t/deftest test-parse-key-out-of-range-never-throws
+  (testing "a numeric subfield that overflows a long is unparseable, not a throw"
+    (t/is (nil? (k/parse-key "\u001b[99999999999999999999u")))
+    (t/is (nil? (k/parse-key "\u001b[97;99999999999999999999u")))
+    (t/is (nil? (k/parse-key "\u001b[1;99999999999999999999A")))
+    (t/is (nil? (k/parse-key "\u001b[6;99999999999999999999~")))
+    (t/is (nil? (k/parse-key "\u001b[1;99999999999999999999H")))
+    (t/is (= "up" (k/parse-key "\u001b[A")) "valid sequences still parse")
+    (t/is (= "ctrl+up" (k/parse-key "\u001b[1;5A")))
+    (t/is (= "pageDown" (k/parse-key "\u001b[6~")))))

@@ -241,22 +241,27 @@
    - Home/End with modifier: \\u001b[1;<mod>[:<event>]H/F
    Returns {:codepoint :modifier :base-layout-key :event-type} or nil.
    Modifiers are normalized from 1-indexed to the bitmask (pi: modValue - 1).
-   Event type: 1=press, 2=repeat, 3=release (pi: KeyEventType)."
+   Event type: 1=press, 2=repeat, 3=release (pi: KeyEventType). A numeric
+   subfield that overflows a long makes the sequence unparseable (nil) —
+   never a throw: this runs on arbitrary terminal input."
   [data]
   (or
    ;; shifted-key group is decoded for printable characters (see
    ;; decode-kitty-printable) but unused for key ids
    (when-let [[_ cp _shifted base mod evt]
               (re-matches #"\u001b\[(\d+)(?::(\d*))?(?::(\d+))?(?:;(\d+))?(?::(\d+))?u" data)]
-     {:codepoint (parse-long cp)
-      :base-layout-key (when (seq base) (parse-long base))
-      :modifier (dec (parse-long (or mod "1")))
-      :event-type (if (seq evt) (parse-long evt) 1)})
+     (when-let [codepoint (parse-long cp)]
+       (when-let [modifier (if mod (parse-long mod) 1)]
+         {:codepoint codepoint
+          :base-layout-key (when (seq base) (parse-long base))
+          :modifier (dec modifier)
+          :event-type (or (some-> evt parse-long) 1)})))
    (when-let [[_ mod evt arrow]
               (re-matches #"\u001b\[1;(\d+)(?::(\d+))?([ABCD])" data)]
-     {:codepoint (case arrow "A" -1 "B" -2 "C" -3 "D" -4)
-      :modifier (dec (parse-long mod))
-      :event-type (if (seq evt) (parse-long evt) 1)})
+     (when-let [modifier (parse-long mod)]
+       {:codepoint (case arrow "A" -1 "B" -2 "C" -3 "D" -4)
+        :modifier (dec modifier)
+        :event-type (or (some-> evt parse-long) 1)}))
    (when-let [[_ num mod evt]
               (re-matches #"\u001b\[(\d+)(?:;(\d+))?(?::(\d+))?~" data)]
      (when-let [cp (case (parse-long num)
@@ -267,12 +272,16 @@
                      7 -14  ;; home
                      8 -15  ;; end
                      nil)]
-       {:codepoint cp :modifier (dec (parse-long (or mod "1"))) :event-type (if (seq evt) (parse-long evt) 1)}))
+       (when-let [modifier (if mod (parse-long mod) 1)]
+         {:codepoint cp
+          :modifier (dec modifier)
+          :event-type (or (some-> evt parse-long) 1)})))
    (when-let [[_ mod evt hf]
               (re-matches #"\u001b\[1;(\d+)(?::(\d+))?([HF])" data)]
-     {:codepoint (if (= hf "H") -14 -15)
-      :modifier (dec (parse-long mod))
-      :event-type (if (seq evt) (parse-long evt) 1)})))
+     (when-let [modifier (parse-long mod)]
+       {:codepoint (if (= hf "H") -14 -15)
+        :modifier (dec modifier)
+        :event-type (or (some-> evt parse-long) 1)}))))
 
 (defn- parse-modify-other-keys
   "Decode xterm modifyOtherKeys format CSI 27;mods;code ~
