@@ -270,23 +270,23 @@
 ;; Terminals/IMEs without bracketed-paste support deliver paste content as
 ;; ordinary key events, so a paste line ending arrives as a lone CR and the
 ;; editor would submit it (executing pasted /cmd or !cmd without Enter). The
-;; reader rewrites a CR that ends a paste-like burst to \n; only an isolated
-;; CR (a real Enter press) submits.
+;; dispatcher rewrites a CR that ends a paste-like burst to \n; only an
+;; isolated CR (a real Enter press) submits.
 
 (defn- cr-in-paste-burst?
   "Test helper for the private predicate."
   [recent now]
   ((var kmet.tui.core/cr-in-paste-burst?) recent now))
 
-(defn- paste-input-decision
-  "Test helper for the private decision fn."
-  [c now recent swallow-lf]
-  ((var kmet.tui.core/paste-input-decision) c now recent swallow-lf))
+(defn- paste-burst-step
+  "Test helper for the private per-unit burst decision."
+  [state data now]
+  ((var kmet.tui.core/paste-burst-step) state data now))
 
 (defn- burst-chars
   "N chars arriving BURST-APART ms apart, ending with LAST, all within the
    paste-burst window ending at NOW. Entries are [timestamp char] pairs like
-   the reader's recent-chars tracking."
+   the burst state's :recent tracking."
   [n burst-apart last now]
   (conj (mapv (fn [i]
                 [(- now (* (- n i) burst-apart))
@@ -310,57 +310,72 @@
                                             (range 4))
                                       1000)))))
 
-(t/deftest test-multibyte-input-passes-through
-  (let [norm #(let [rc (atom []) sl (atom nil)]
-                ((var kmet.tui.core/normalize-input-batch!) % rc sl))]
-    (t/is (= "ф" (norm "ф")) "single cyrillic char untouched")
-    (t/is (= "привет" (norm "привет")) "cyrillic word untouched")
-    (t/is (= "café" (norm "café")) "latin with accent untouched")
-    (t/is (= "abc" (norm "abc")) "plain ascii untouched")
-    (t/is (= "" (norm "")) "empty batch stays empty")))
+(t/deftest test-paste-burst-text-runs-pass-through
+  (let [empty-state {:recent [] :swallow-lf-at nil :in-paste? false}]
+    (testing "multibyte and plain text runs pass through unchanged"
+      (doseq [s ["ф" "привет" "café" "abc" ""]]
+        (t/is (= s (second (paste-burst-step empty-state s 1000))))))
+    (testing "a text run feeds the burst window"
+      (let [[state out] (paste-burst-step empty-state "abc" 1000)]
+        (t/is (= "abc" out))
+        (t/is (= [[1000 \a] [1000 \b] [1000 \c]] (:recent state)))))
+    (testing "escape sequences never feed the burst window"
+      ;; Issue: with the Kitty protocol enabled every non-text key sends a
+      ;; CSI-u press plus a release; counting those bytes made one arrow key
+      ;; a paste-sized burst, and the next Enter was rewritten to a newline.
+      (let [s1 (first (paste-burst-step empty-state "\u001b[1;1:3A" 1000))
+            s2 (first (paste-burst-step s1 "\u001b[A" 1005))
+            s3 (first (paste-burst-step s2 "\u001b[27u" 1010))]
+        (t/is (= [] (:recent s3)) "releases, arrows and escape stay invisible")
+        (t/is (= "\r" (second (paste-burst-step s3 "\r" 1050)))
+              "an isolated CR after a key still submits")))
+    (testing "bracketed-paste content never feeds the burst window"
+      (let [s1 (first (paste-burst-step empty-state "\u001b[200~" 1000))
+            s2 (first (paste-burst-step s1 "abc" 1005))
+            s3 (first (paste-burst-step s2 "\r" 1010))
+            s4 (first (paste-burst-step s3 "\u001b[201~" 1015))]
+        (t/is (= [] (:recent s4)) "paste content and its CR are not typed text")
+        (t/is (= "\r" (second (paste-burst-step s4 "\r" 1020)))
+              "the Enter after the paste submits")))))
 
-(t/deftest test-paste-input-decision
-  (let [recent (burst-chars 3 5 \return 1000)
-        now 1000]
-    (testing "CR ending a burst becomes a newline and arms the LF swallow"
-      (t/is (= {:append "\n" :new-swallow-lf 1000}
-               (paste-input-decision \return now recent nil))))
+(t/deftest test-paste-burst-step
+  (let [state {:recent [] :swallow-lf-at nil :in-paste? false}]
+    (testing "CR ending a text burst becomes a newline and arms the LF swallow"
+      (let [[s1 _] (paste-burst-step state "abc" 1000)
+            [s2 out] (paste-burst-step s1 "\r" 1005)]
+        (t/is (= "\n" out))
+        (t/is (= 1005 (:swallow-lf-at s2)))))
     (testing "the LF half of a rewritten CRLF is dropped"
-      (t/is (= {:drop true :new-swallow-lf nil}
-               (paste-input-decision \newline 1005 recent 1000)))
-      (t/is (= {:append "\n" :new-swallow-lf nil}
-               (paste-input-decision \newline 1100 recent 1000))
-            "a late LF is a real newline"))
-    (testing "ordinary chars pass through"
-      (t/is (= {:append "x" :new-swallow-lf nil}
-               (paste-input-decision \x now recent 1000)))
-      (t/is (= {:append "\r" :new-swallow-lf nil}
-               (paste-input-decision \return now [] nil))
-            "an isolated CR (real Enter) is untouched"))))
+      (let [[s1 _] (paste-burst-step state "abc" 1000)
+            [s2 _] (paste-burst-step s1 "\r" 1005)
+            [s3 out] (paste-burst-step s2 "\n" 1006)]
+        (t/is (nil? out) "immediate LF swallowed")
+        (t/is (nil? (:swallow-lf-at s3))))
+      (let [[s1 _] (paste-burst-step state "abc" 1000)
+            [s2 _] (paste-burst-step s1 "\r" 1005)
+            [_ out] (paste-burst-step s2 "\n" 1100)]
+        (t/is (= "\n" out) "a late LF is a real newline")))
+    (testing "an isolated CR (real Enter) is untouched"
+      (t/is (= "\r" (second (paste-burst-step state "\r" 1050)))))
+    (testing "an Enter key repeat stream (all CRs) keeps submitting"
+      (loop [s state i 0]
+        (when (< i 4)
+          (let [[s' out] (paste-burst-step s "\r" (+ 1000 (* i 30)))]
+            (t/is (= "\r" out))
+            (recur s' (inc i))))))))
 
 (defn- reader-feed!
   "Simulate the app reader loop (start-input-reader) for CHARS: each entry is
-   [char ts] with TS a monotonic timestamp; applies the paste-burst decision
-   and drives process-input-buffer! exactly like the real loop."
+   [char ts] with TS a monotonic timestamp. The burst clock is driven through
+   the test seam so dispatch sees the simulated arrival times."
   [tui chars]
   (let [read-fn (fn [_timeout-ms] -2)
-        buf (atom "")
-        recent-chars (atom [])
-        swallow-lf (atom nil)]
+        buf (atom "")]
     (doseq [[c ts] chars]
-      (let [now ts]
-        (swap! recent-chars
-               (fn [rc]
-                 (-> (conj rc [now c])
-                     (->> (filter (fn [[t _]] (>= t (- now 100)))))
-                     vec)))
-        (let [{:keys [append drop new-swallow-lf]}
-              (paste-input-decision c now @recent-chars @swallow-lf)]
-          (reset! swallow-lf new-swallow-lf)
-          (swap! (:input-generation tui) inc)
-          (when-not drop
-            (swap! buf str append)
-            ((var kmet.tui.core/process-input-buffer!) tui read-fn buf)))))
+      (binding [core/*paste-burst-now-ms* ts]
+        (swap! (:input-generation tui) inc)
+        (swap! buf str c)
+        ((var kmet.tui.core/process-input-buffer!) tui read-fn buf)))
     {:buf @buf}))
 
 (defn- pasted-editor
@@ -402,6 +417,39 @@
   (testing "an Enter key repeat stream (all CRs) keeps submitting"
     (let [{:keys [submitted]} (pasted-editor (paste-chars "\r\r\r\r" 30 1000))]
       (t/is (= 4 (count @submitted)) "repeated Enters are not rewritten"))))
+
+(t/deftest test-kitty-key-then-enter-still-submits
+  ;; The reported bug: with the Kitty protocol enabled (Windows Terminal 1.25,
+  ;; kitty, Konsole) every non-text key arrives as a CSI-u press plus a
+  ;; release, and the release bytes counted as a paste-like burst — so any
+  ;; arrow/Ctrl/Esc key shortly before Enter rewrote the Enter to a newline.
+  (keys/set-kitty-active! true)
+  (try
+    (testing "arrow press+release then Enter"
+      (let [{:keys [editor submitted]}
+            (pasted-editor [["x" 1000]
+                            ["\u001b[A" 1010] ["\u001b[1;1:3A" 1015]
+                            ["\r" 1050]])]
+        (t/is (= ["x"] @submitted))
+        (t/is (= "x" (editor/editor-get-text editor)))))
+    (testing "ctrl chord press+release then Enter"
+      (let [{:keys [submitted]}
+            (pasted-editor [["x" 1000]
+                            ["\u001b[111;5u" 1010] ["\u001b[111;5:3u" 1015]
+                            ["\r" 1050]])]
+        (t/is (= ["x"] @submitted))))
+    (testing "held backspace (DEL repeats) then Enter"
+      (let [{:keys [submitted]}
+            (pasted-editor [["x" 1000] ["y" 1010]
+                            ["\u007f" 1020] ["\u007f" 1030]
+                            ["\r" 1050]])]
+        (t/is (= [""] @submitted)
+              "DELs are not burst text; the Enter submits what remains")))
+    (testing "bracketed paste then Enter"
+      (let [{:keys [submitted]}
+            (pasted-editor [["\u001b[200~abc" 1000] ["\u001b[201~" 1010] ["\r" 1030]])]
+        (t/is (= ["abc"] @submitted))))
+    (finally (keys/set-kitty-active! false))))
 
 (t/deftest test-bracketed-paste-unaffected
   (testing "bracketed paste still buffers and normalizes via handle-paste"

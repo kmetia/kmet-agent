@@ -104,11 +104,12 @@
                 terminal-response-timer color-scheme-notifications-enabled?
                 debug-redraw? tui-debug?
                 input-generation incomplete-flush-timer
+                paste-burst
                 focus-home])
 
 (declare tui-request-render tui-stop set-focused-component!
          overlay-visible? overlay-handle process-input-buffer! tui-invalidate
-         ghost-restore!)
+         normalize-paste-burst! ghost-restore!)
 
 (defn create-tui [terminal]
   (let [tui (map->TUI {:terminal (atom terminal)
@@ -148,6 +149,10 @@
                        :tui-debug? (atom (= (System/getenv "KMET_TUI_DEBUG") "1"))
                        :input-generation (atom 0)
                        :incomplete-flush-timer (atom nil)
+                       ;; unbracketed-paste burst state (see paste-burst-step)
+                       :paste-burst (atom {:recent []
+                                           :swallow-lf-at nil
+                                           :in-paste? false})
                        ;; terminal focus fallback, registered by the app
                        ;; layer (tui-set-focus-home!) — see resolve-focus-home
                        :focus-home (atom nil)})]
@@ -947,74 +952,78 @@
 (defn- dispatch-input!
   "Port of pi's TUI input routing: listeners first, the modality guard
    (input belongs to the topmost visible capturing overlay), then delivery
-   to the focused component. Key release events are filtered unless the
-   component opts in via a :wants-key-release? field (pi:
-   Component.wantsKeyRelease). FLUSH-GEN is the input generation captured when
-   a flush timer armed (nil for reader-path dispatches): a lone ESC armed by
-   a stale timer is dropped when the generation moved on — input arrived after
-   the arm, so the ESC is the head of a stalled key sequence (WSL/conpty
-   splits sequences 50ms+ apart), never an Escape keypress. Checked at
-   delivery, under dispatch-lock: a stale timer racing the reader's own pass
-   must not corrupt the sequence even when it wins the lock."
+   to the focused component. DATA first passes the unbracketed-paste
+   normalization (see paste-burst-step): a CR ending a paste-like burst of
+   text is delivered as LF, and the LF half of a rewritten CRLF is swallowed
+   here — nil means the unit was swallowed and never dispatched. Key release
+   events are filtered unless the component opts in via a :wants-key-release?
+   field (pi: Component.wantsKeyRelease). FLUSH-GEN is the input generation
+   captured when a flush timer armed (nil for reader-path dispatches): a lone
+   ESC armed by a stale timer is dropped when the generation moved on — input
+   arrived after the arm, so the ESC is the head of a stalled key sequence
+   (WSL/conpty splits sequences 50ms+ apart), never an Escape keypress.
+   Checked at delivery, under dispatch-lock: a stale timer racing the reader's
+   own pass must not corrupt the sequence even when it wins the lock."
   [tui data & [flush-gen]]
-  ;; pi: input listeners run as a chain — each may :consume (stop dispatch)
-  ;; or return transformed :data for the later listeners and the focused
-  ;; component (pi: handleInput listener loop).
-  (let [{:keys [data] :as chained}
-        (reduce (fn [{:keys [data] :as acc} l]
-                  (if (:consumed acc)
-                    acc
-                    (let [result (try (l data)
-                                      (catch Exception e
-                                        (binding [*out* *err*]
-                                          (println "input listener error:" (ex-message e)))
-                                        nil))]
-                      (cond
-                        (:consume result) (assoc acc :consumed true)
-                        (map? result) (assoc acc :data (:data result data))
-                        :else acc))))
-                {:data data :consumed false}
-                @(:input-listeners tui))]
-    ;; pi: a listener chain that transforms data to an empty string drops
-    ;; the event entirely. Everything below runs app/component code on the
-    ;; reader thread - wrapped in Throwable so a buggy listener, component
-    ;; or focus thunk costs one key event, never the input loop (an Error
-    ;; escaping here would kill the reader future: keys dead, process
-    ;; alive).
-    (when-not (or (:consumed chained) (empty? data))
-      (try
-        ;; Modality invariant: while a visible capturing overlay exists,
-        ;; input belongs to its component - whatever else grabbed focus
-        ;; (including a hidden/removed overlay) hands it back before
-        ;; delivery. Replaces pi's blocked/eligible restore machine.
-        (if-let [cap (get-topmost-visible-overlay tui)]
-          (when-not (identical? (:component cap) @(:focused-component tui))
-            (tui-set-focus tui (:component cap)))
-          (let [fc @(:focused-component tui)]
-            (when-let [entry (some #(when (identical? (:component %) fc) %)
-                                   @(:overlays tui))]
-              (when-not (overlay-visible? tui entry)
-                (tui-set-focus tui (overlay-restore-target tui entry))))))
-        (when-let [fc @(:focused-component tui)]
-          ;; pi: input goes only to the focused leaf; key release events are
-          ;; filtered unless the component opts in via a :wants-key-release?
-          ;; field (pi: Component.wantsKeyRelease)
-          (when (or (not (keys/is-key-release? data))
-                    (:wants-key-release? fc))
-            ;; Stale-timer Escape guard (see docstring): a lone ESC whose
-            ;; arming generation is stale is a split sequence's head whose
-            ;; tail the reader owns — drop it so the tail dispatches whole.
-            ;; Listeners still observe it (it is genuinely ambiguous at
-            ;; dispatch time); only the focused component is shielded.
-            (when-not (and (= data "\u001b")
-                           (some? flush-gen)
-                           (not= flush-gen @(:input-generation tui)))
-              (handle-input fc data))))
-        (tui-request-render tui)
-        (catch Throwable e
-          (binding [*out* *err*]
-            (println "input dispatch:" (str (class e) ":"
-                                            (ex-message e)))))))))
+  (when-some [data (normalize-paste-burst! tui data)]
+    ;; pi: input listeners run as a chain — each may :consume (stop dispatch)
+    ;; or return transformed :data for the later listeners and the focused
+    ;; component (pi: handleInput listener loop).
+    (let [{:keys [data] :as chained}
+          (reduce (fn [{:keys [data] :as acc} l]
+                    (if (:consumed acc)
+                      acc
+                      (let [result (try (l data)
+                                        (catch Exception e
+                                          (binding [*out* *err*]
+                                            (println "input listener error:" (ex-message e)))
+                                          nil))]
+                        (cond
+                          (:consume result) (assoc acc :consumed true)
+                          (map? result) (assoc acc :data (:data result data))
+                          :else acc))))
+                  {:data data :consumed false}
+                  @(:input-listeners tui))]
+      ;; pi: a listener chain that transforms data to an empty string drops
+      ;; the event entirely. Everything below runs app/component code on the
+      ;; reader thread - wrapped in Throwable so a buggy listener, component
+      ;; or focus thunk costs one key event, never the input loop (an Error
+      ;; escaping here would kill the reader future: keys dead, process
+      ;; alive).
+      (when-not (or (:consumed chained) (empty? data))
+        (try
+          ;; Modality invariant: while a visible capturing overlay exists,
+          ;; input belongs to its component - whatever else grabbed focus
+          ;; (including a hidden/removed overlay) hands it back before
+          ;; delivery. Replaces pi's blocked/eligible restore machine.
+          (if-let [cap (get-topmost-visible-overlay tui)]
+            (when-not (identical? (:component cap) @(:focused-component tui))
+              (tui-set-focus tui (:component cap)))
+            (let [fc @(:focused-component tui)]
+              (when-let [entry (some #(when (identical? (:component %) fc) %)
+                                     @(:overlays tui))]
+                (when-not (overlay-visible? tui entry)
+                  (tui-set-focus tui (overlay-restore-target tui entry))))))
+          (when-let [fc @(:focused-component tui)]
+            ;; pi: input goes only to the focused leaf; key release events are
+            ;; filtered unless the component opts in via a :wants-key-release?
+            ;; field (pi: Component.wantsKeyRelease)
+            (when (or (not (keys/is-key-release? data))
+                      (:wants-key-release? fc))
+              ;; Stale-timer Escape guard (see docstring): a lone ESC whose
+              ;; arming generation is stale is a split sequence's head whose
+              ;; tail the reader owns — drop it so the tail dispatches whole.
+              ;; Listeners still observe it (it is genuinely ambiguous at
+              ;; dispatch time); only the focused component is shielded.
+              (when-not (and (= data "\u001b")
+                             (some? flush-gen)
+                             (not= flush-gen @(:input-generation tui)))
+                (handle-input fc data))))
+          (tui-request-render tui)
+          (catch Throwable e
+            (binding [*out* *err*]
+              (println "input dispatch:" (str (class e) ":"
+                                              (ex-message e))))))))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Input buffer (pi: stdin-buffer.ts)
@@ -1394,14 +1403,28 @@
 ;; ordinary key events. A paste line ending then arrives as a lone CR and the
 ;; editor submits, executing pasted "/cmd" or "!cmd" text without the user
 ;; pressing Enter. Human typing cannot reach paste speed, so a CR that ends a
-;; paste-like burst (several chars within a few ms) is rewritten to \n; only
-;; an isolated CR (a real Enter press) keeps submitting. The rewritten CR's
-;; LF half (CRLF line endings) is then swallowed so a \r\n pair still
+;; paste-like burst (several TEXT chars within a few ms) is rewritten to \n;
+;; only an isolated CR (a real Enter press) keeps submitting. The rewritten
+;; CR's LF half (CRLF line endings) is then swallowed so a \r\n pair still
 ;; produces a single newline (matching normalize-paste-text).
+;;
+;; Only text runs feed the burst window: escape sequences (Kitty key
+;; press/release CSI-u, arrows, mouse, focus, terminal responses) and
+;; bracketed-paste content do not. Counting raw bytes made every key release
+;; a "burst": with the Kitty protocol enabled (flags 2/4) one arrow key
+;; paints the window with a press + release sequence, so the next Enter
+;; within 100ms was rewritten to a newline instead of submitting.
 
 (def ^:private paste-burst-ms 100)
 (def ^:private paste-burst-chars 4)
 (def ^:private paste-lf-swallow-ms 50)
+
+(def ^:dynamic *paste-burst-now-ms*
+  "Test seam: the paste-burst decision is timing-based; tests bind this to
+   feed deterministic timestamps. Nil (the root value) = the wall clock."
+  nil)
+
+(defn- burst-now-ms [] (long (or *paste-burst-now-ms* (System/currentTimeMillis))))
 
 (defn- cr-in-paste-burst?
   "True when the CR arriving at NOW ends an unbracketed paste: at least
@@ -1414,45 +1437,74 @@
     (boolean (and (>= (count in-window) paste-burst-chars)
                   (some #(not= \return (second %)) in-window)))))
 
-(defn- paste-input-decision
-  "Decide how to process the input char C arriving at NOW. RECENT holds
-   [timestamp char] pairs of previously read chars, SWALLOW-LF the timestamp
-   of a recently rewritten paste CR (nil when none). Returns a map with
-   :append (the char to buffer), :drop (true when the char is swallowed — the
-   LF half of a rewritten CRLF), and :new-swallow-lf (the flag value to keep)."
-  [c now recent swallow-lf]
-  (cond
-    (and (= c \return) (cr-in-paste-burst? recent now))
-    {:append "\n" :new-swallow-lf now}
+(defn- burst-append
+  "Append the chars of the text RUN DATA to the burst window at NOW. Only the
+   last PASTE-BURST-CHARS entries matter (cr-in-paste-burst? needs no more),
+   so a huge pasted run stays O(1) per char instead of growing a vector."
+  [recent data now]
+  (let [fresh (mapv (fn [c] [now c]) (take-last paste-burst-chars data))]
+    (vec (take-last paste-burst-chars (concat recent fresh)))))
 
-    (and (= c \newline) swallow-lf (<= (- now swallow-lf) paste-lf-swallow-ms))
-    {:drop true :new-swallow-lf nil}
+(defn- text-run?
+  "True when DATA is a typed-text run as the reader dispatches it: no escape
+   introducer and no byte the editor would not insert (controls, DEL, C1).
+   Escape sequences and single control keys are not text — they never feed
+   the paste-burst window."
+  [data]
+  (and (not (str/starts-with? data "\u001b"))
+       (every? (fn [c]
+                 (let [n (int c)]
+                   (or (<= 32 n 126) (>= n 160))))
+               data)))
 
-    :else
-    {:append (str c) :new-swallow-lf nil}))
+(defn- paste-burst-step
+  "Decide the output for one dispatched input unit DATA at NOW given the
+   burst STATE (:recent :swallow-lf-at :in-paste?). Returns [STATE' OUT],
+   where OUT is nil when the unit is swallowed (the LF half of a rewritten
+   CRLF) and DATA otherwise. Only text runs feed the burst window: escape
+   sequences (Kitty key press/release CSI-u, arrows, mouse, focus, terminal
+   responses) and bracketed-paste content pass through untouched, so a key
+   release can never masquerade as paste content and turn the next Enter
+   into a newline."
+  [state data now]
+  (let [{:keys [recent in-paste? swallow-lf-at]} state
+        ;; the LF window closes on any other unit reaching dispatch
+        base (assoc state :swallow-lf-at nil)]
+    (cond
+      (= data PASTE-START) [(assoc base :in-paste? true) data]
+      (= data PASTE-END) [(assoc base :in-paste? false) data]
 
-(defn- normalize-input-batch!
-  "Apply the paste-burst decision to a whole drained BATCH at once: returns
-   the string to append to the input buffer (CRs that end a paste-like burst
-   rewritten to \n; the LF half of a rewritten CRLF dropped). RECENT-CHARS
-   and SWALLOW-LF are updated as a side effect, mirroring the per-char loop
-   they replaced. Doing this once per batch instead of per char keeps large
-   pastes O(n) — the per-char path appended to a growing string (O(n^2))."
-  [batch recent-chars swallow-lf]
-  (let [out (StringBuilder.)
-        now (System/currentTimeMillis)]
-    (doseq [c batch]
-      (let [{:keys [append drop new-swallow-lf]}
-            (paste-input-decision c now @recent-chars @swallow-lf)]
-        (reset! swallow-lf new-swallow-lf)
-        (swap! recent-chars
-               (fn [ts]
-                 (-> (conj ts [now c])
-                     (->> (filter (fn [[t _]] (>= t (- now paste-burst-ms)))))
-                     vec)))
-        (when-not drop
-          (.append out append))))
-    (str out)))
+      ;; bracketed-paste content is delivered literally; the editor buffers
+      ;; it until the end marker (CR/LF included)
+      in-paste? [base data]
+
+      ;; key/terminal escape sequences are never typed text
+      (str/starts-with? data "\u001b") [base data]
+
+      (= data "\r")
+      (let [recent (burst-append recent data now)]
+        (if (cr-in-paste-burst? recent now)
+          [(assoc base :recent recent :swallow-lf-at now) "\n"]
+          [(assoc base :recent recent) data]))
+
+      (= data "\n")
+      (if (and swallow-lf-at (<= (- now swallow-lf-at) paste-lf-swallow-ms))
+        [base nil]
+        [base data])
+
+      (text-run? data)
+      [(assoc base :recent (burst-append recent data now)) data]
+
+      :else [base data])))
+
+(defn- normalize-paste-burst!
+  "Run one dispatched input unit DATA through this TUI's paste-burst state.
+   Returns the data to dispatch, or nil when it is swallowed."
+  [tui data]
+  (let [a (:paste-burst tui)
+        [state out] (paste-burst-step @a data (burst-now-ms))]
+    (reset! a state)
+    out))
 
 (defn- start-input-reader [tui]
   (let [term @(:terminal tui)
@@ -1461,13 +1513,7 @@
     ;; session) exits as soon as a fresh backend is installed by resume.
     (reset! (:current-reader tui) term)
     (let [f (future
-              (let [buf (atom "")
-                    ;; [timestamp char] pairs of recently read chars, pruned
-                    ;; to the paste-burst window on every read so the vector
-                    ;; stays bounded; swallow-lf remembers a rewritten paste
-                    ;; CR whose LF half may still arrive.
-                    recent-chars (atom [])
-                    swallow-lf (atom nil)]
+              (let [buf (atom "")]
                 (while (and @(:running? tui) (not @(:stopped? tui))
                             (identical? term @(:current-reader tui)))
                   (try
@@ -1499,38 +1545,35 @@
                                         (if (>= more 0)
                                           (recur (.append acc (char more)))
                                           (str acc))))]
-                          ;; Normalize the whole batch once (paste-burst CR
-                          ;; rewriting / LF swallowing), then a SINGLE append
-                          ;; + process pass. Per-char processing made large
-                          ;; pastes O(n^2): n appends to a growing buffer, n
-                          ;; process passes each copying the remainder. An
-                          ;; exception during processing still loses the
-                          ;; remaining chars of the batch (they were already
-                          ;; consumed from the reader) — the per-char try
-                          ;; guard from the drain fix is kept around the
-                          ;; process call.
+                          ;; ONE append + process pass per drained batch.
+                          ;; Per-char processing made large pastes O(n^2): n
+                          ;; appends to a growing buffer, n process passes
+                          ;; each copying the remainder. An exception during
+                          ;; processing still loses the remaining chars of
+                          ;; the batch (they were already consumed from the
+                          ;; reader) — the per-char try guard from the drain
+                          ;; fix is kept around the process call. The
+                          ;; paste-burst CR rewrite / LF swallow runs at
+                          ;; DISPATCH (per unit), where escape sequences and
+                          ;; paste markers are already split out.
                           (try
-                            (let [append (normalize-input-batch! batch
-                                                                 recent-chars
-                                                                 swallow-lf)]
-                              (when (seq append)
-                                ;; Every read bumps the generation — including
-                                ;; reads that dispatch immediately. The flush
-                                ;; timers (incomplete/negotiation/terminal-
-                                ;; response) may only fire after true input
-                                ;; idleness: any arrival proves the remainder
-                                ;; is still in flight (WSL/conpty stalls split
-                                ;; sequences 50ms+ apart), so a stale timer
-                                ;; must never dispatch a lone ESC early and
-                                ;; corrupt the sequence into literal text.
-                                ;; Bump BEFORE processing: the pass below arms
-                                ;; the fresh flush timer with this generation,
-                                ;; which disowns any stale timer still sleeping
-                                ;; (it can neither dispatch nor clear the fresh
-                                ;; arm — the wakeup only clears its own slot).
-                                (swap! (:input-generation tui) inc)
-                                (swap! buf str append)
-                                (process-input-buffer! tui read-fn buf)))
+                            ;; Every read bumps the generation — including
+                            ;; reads that dispatch immediately. The flush
+                            ;; timers (incomplete/negotiation/terminal-
+                            ;; response) may only fire after true input
+                            ;; idleness: any arrival proves the remainder
+                            ;; is still in flight (WSL/conpty stalls split
+                            ;; sequences 50ms+ apart), so a stale timer
+                            ;; must never dispatch a lone ESC early and
+                            ;; corrupt the sequence into literal text.
+                            ;; Bump BEFORE processing: the pass below arms
+                            ;; the fresh flush timer with this generation,
+                            ;; which disowns any stale timer still sleeping
+                            ;; (it can neither dispatch nor clear the fresh
+                            ;; arm — the wakeup only clears its own slot).
+                            (swap! (:input-generation tui) inc)
+                            (swap! buf str batch)
+                            (process-input-buffer! tui read-fn buf)
                             (catch Exception e
                               (binding [*out* *err*]
                                 (println "input:" (ex-message e))))))))
