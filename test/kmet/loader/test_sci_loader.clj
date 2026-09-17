@@ -316,6 +316,47 @@
     (is (= '[app app] @calls) "SCI never asks the provider for an injected namespace")
     (is (= 42 (deref (sci/resolve (ctx-of l) 'app/y))))))
 
+(deftest test-base-forks-share-injected-namespaces-and-isolate-defs
+  ;; a :base context is forked per loader: injected namespaces/classes are
+  ;; shared (one copy), definitions and :namespaces overrides stay in the
+  ;; fork, and each fork routes requires through its own :load-fn.
+  (let [base (sci/init {:namespaces {'shared {'x 42}}})
+        a (lsci/sci-loader
+           {:id "fork-a"
+            :base base
+            :sources {'app {:file "app-a.clj"
+                            :source "(ns app (:require [shared] [dep])) (def v [shared/x dep/y])"}
+                      'dep {:file "dep-a.clj" :source "(ns dep) (def y :a)"}}})
+        b (lsci/sci-loader
+           {:id "fork-b"
+            :base base
+            :sources {'app {:file "app-b.clj"
+                            :source "(ns app (:require [shared] [dep])) (def v [shared/x dep/y])"}
+                      'dep {:file "dep-b.clj" :source "(ns dep) (def y :b)"}}})]
+    (testing "each fork serves its own namespaces through its own :load-fn"
+      (load-ns a "app")
+      (load-ns b "app")
+      (is (= [42 :a] (deref (sci/resolve (ctx-of a) 'app/v))))
+      (is (= [42 :b] (deref (sci/resolve (ctx-of b) 'app/v)))))
+    (testing "the injected namespace is visible in both forks; the base is untouched"
+      (is (= 42 (sci/eval-string* (ctx-of a) "shared/x")))
+      (is (= 42 (sci/eval-string* (ctx-of b) "shared/x")))
+      (is (nil? (sci/find-ns base 'app)))
+      (is (nil? (sci/find-ns base 'dep))))
+    (testing "a per-loader :namespaces override is local to its fork"
+      (let [c (lsci/sci-loader {:id "fork-c"
+                                :base base
+                                :namespaces {'shared {'x :overridden}}})]
+        (is (= :overridden (sci/eval-string* (ctx-of c) "shared/x")))
+        (is (= 42 (sci/eval-string* (ctx-of a) "shared/x"))
+            "sibling forks and the base keep the base's value")
+        (is (= 42 (sci/eval-string* base "shared/x")))))
+    (testing "classes added to the base are inherited by later forks"
+      (sci/add-class! base 'java.time.Instant java.time.Instant)
+      (let [d (lsci/sci-loader {:id "fork-d" :base base})]
+        (is (identical? java.time.Instant
+                        (:class (first (ldr/find d {:kind :class :name "java.time.Instant"})))))))))
+
 ;; ─── Requests, lifecycle, seams ────────────────────────────────────────────
 
 (deftest test-find-without-a-parent-is-hermetic

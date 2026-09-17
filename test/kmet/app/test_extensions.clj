@@ -497,6 +497,39 @@
         (t/is (empty? (extensions/get-loaded-extensions))))
       (fs/delete-tree dir))))
 
+(t/deftest test-extension-contexts-are-forked-and-isolated
+  ;; the SCI backend builds the shared layers once and forks that base per
+  ;; extension (kmet.loader.sci-loader :base); an extension's own namespaces
+  ;; and defs stay in its fork — two extensions may even declare the same
+  ;; namespace name without seeing each other. SCI-only: the Jolt native
+  ;; backend keeps its own per-context world (see loader.md §9).
+  (when-not (host/jolt?)
+    (extensions/clear-extensions!)
+    (let [dir "target/test-ext-fork-iso"]
+      (fs/delete-tree dir)
+      (fs/create-dirs dir)
+      (spit (str dir "/iso_a.clj")
+            (str "(ns fork-iso (:require [kmet.extension :as ext]))\n"
+                 "(def tag :a)\n"
+                 "(defn init [api]\n"
+                 "  (ext/register-tool! api {:name \"fork-iso-a\" :description \"a\"\n"
+                 "                           :execute (fn [_] {:content (name tag)})}))\n"))
+      (spit (str dir "/iso_b.clj")
+            (str "(ns fork-iso (:require [kmet.extension :as ext]))\n"
+                 "(def tag :b)\n"
+                 "(defn init [api]\n"
+                 "  (ext/register-tool! api {:name \"fork-iso-b\" :description \"b\"\n"
+                 "                           :execute (fn [_] {:content (name tag)})}))\n"))
+      (try
+        (t/is (nil? (:error (extensions/load-extension! (str dir "/iso_a.clj")))))
+        (t/is (nil? (:error (extensions/load-extension! (str dir "/iso_b.clj")))))
+        (t/is (= "a" (:content (tools/execute-tool "fork-iso-a" {})))
+              "each fork sees its own def")
+        (t/is (= "b" (:content (tools/execute-tool "fork-iso-b" {}))))
+        (finally
+          (extensions/unload-all-extensions!)
+          (fs/delete-tree dir))))))
+
 (t/deftest test-extension-context
   (testing "headless default context is complete and callable"
     (let [ctx (extensions/build-extension-context)]

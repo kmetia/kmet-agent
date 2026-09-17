@@ -13,7 +13,9 @@
      {:name \"my-ext\" :entry my.ext.main}
    The manifest lists only the initial namespace (:entry, a symbol);
    everything else is required from there. Each extension evaluates in its
-   own isolated SCI context: internal namespaces are served from the
+   own isolated SCI context — a fork of one shared base carrying the
+   injected host layers and the seeded classes, built once (see
+   shared-context): internal namespaces are served from the
    extension artifact (dir or jar) by strict ns-path lookup,
    declared libraries from its deps.edn (resolved in-process via
    clojure.tools.deps, bundled with babashka) — so
@@ -1199,32 +1201,29 @@
              (tui-layer? n)
              (libs-layer? n)))))
 
-#?(:jolt
-   (defn- shared-namespace-names
-     "The shared host namespaces' names, for the native backend's host-root
-      filter (the SCI path injects the namespaces themselves, so it never asks
-      for the names). Rescanned per call — namespaces required since the last
-      call (the shared library layers) are included; kmet.extension is the one
-      explicit extra, the contract namespace itself (the clojure.core patches
-      ride on clojure.core, which every host has without asking a loader)."
-     []
-     (cons 'kmet.extension
-           (keep (fn [ns-obj] (when (shared-namespace? ns-obj) (ns-name ns-obj)))
-                 (all-ns)))))
+(defn- shared-namespace-names
+  "The shared host namespaces' names, scanned from all-ns: the native
+   backend's host-root filter (create-jolt-loader) and the SCI base
+   context's cache key (shared-context — the namespaces copied into the
+   base; the set changing invalidates it). kmet.extension is the one
+   explicit extra, the contract namespace itself (the clojure.core patches
+   ride on clojure.core, which every host has without asking a loader)."
+  []
+  (into (sorted-set 'kmet.extension)
+        (keep (fn [ns-obj] (when (shared-namespace? ns-obj) (ns-name ns-obj))))
+        (all-ns)))
 
 (defn- build-context-namespaces
-  "The shared namespace map for extension contexts: kmet.extension (the
-   contract), the clojure.*/babashka.* builtins (incl. slurp/spit, which
-   SCI's builtin clojure.core lacks but bb's env has), and the shared
-   library layers kmet.tui.* and kmet.libs.*. The loader (kmet.loader.*)
-   lives outside this tree — host machinery, deliberately not
-   extension-visible. Rebuilt per context so namespaces required since
-   the last build (the shared library layers) are included. RESOURCE-FN
-   replaces clojure.java.io/resource with a per-extension artifact-scoped
-   lookup (io/resource shadowing — see extension-resource-fn). Values are
-   deref'd (see shared-var-map): host Var objects cannot enter a SCI
-   context."
-  [& [resource-fn]]
+  "The shared namespace map for the base extension context (see
+   shared-context): kmet.extension (the contract), the clojure.*/babashka.*
+   builtins (incl. slurp/spit, which SCI's builtin clojure.core lacks but
+   bb's env has), and the shared library layers kmet.tui.* and kmet.libs.*.
+   The loader (kmet.loader.*) lives outside this tree — host machinery,
+   deliberately not extension-visible. clojure.java.io/resource is the host
+   lookup here; an extension's artifact-scoped resource fn is merged onto
+   its fork instead (create-sci-loader). Values are deref'd (see
+   shared-var-map): host Var objects cannot enter a SCI context."
+  []
   (into {'kmet.extension (shared-var-map 'kmet.extension)
          ;; slurp/spit/file-seq are absent from SCI's builtin clojure.core —
          ;; inject the host fns so extensions can read/write files directly
@@ -1236,11 +1235,7 @@
                         'file-seq (deref #'file-seq)}}
         (keep (fn [ns-obj]
                 (when (shared-namespace? ns-obj)
-                  (let [n (str (ns-name ns-obj))]
-                    [(ns-name ns-obj)
-                     (if (and (= n "clojure.java.io") resource-fn)
-                       (assoc (shared-var-map (ns-name ns-obj)) 'resource resource-fn)
-                       (shared-var-map (ns-name ns-obj)))])))
+                  [(ns-name ns-obj) (shared-var-map (ns-name ns-obj))]))
               (all-ns))))
 
 (defn- ns-form-of-source
@@ -1740,6 +1735,47 @@
     (apply require (concat spec-port-namespaces bb-shared-namespaces)))
   nil)
 
+;; ─── The shared base context (per-extension forks) ───────────────────────
+
+(defonce ^:private shared-context-cache
+  ;; {:names (sorted-set shared ns symbols) :ctx sci context} — see shared-context
+  (atom nil))
+
+(defn- build-shared-context
+  "The base SCI context every extension context forks from: the shared
+   namespace map (build-context-namespaces) with the bb imports and the
+   runtime classes seeded. The copied shared vars (thousands) are built
+   once here, not per extension; forks then add only their own environment
+   deltas."
+  []
+  (let [ctx (sci/init {:namespaces (build-context-namespaces)
+                       :classes {:allow :all}
+                       :imports bb-imports
+                       :features #{:bb :clj}})]
+    (seed-context-classes! ctx)
+    ctx))
+
+(defn- shared-context
+  "The cached base context, built on first use and rebuilt when the shared
+   namespace name set changes (shared-namespace-names): host-requires!
+   loads the library roots up front, but app code can lazily load more
+   clojure.*/babashka.* namespaces, and a context built before that would
+   not inject them. Forks hold their own env snapshots, so a rebuild never
+   affects already-loaded extensions. Locked: extension loads could be
+   concurrent."
+  []
+  (let [names (shared-namespace-names)]
+    (or (when-let [cached @shared-context-cache]
+          (when (= names (:names cached))
+            (:ctx cached)))
+        (locking shared-context-cache
+          (let [cached @shared-context-cache]
+            (if (and cached (= names (:names cached)))
+              (:ctx cached)
+              (let [ctx (build-shared-context)]
+                (reset! shared-context-cache {:names names :ctx ctx})
+                ctx)))))))
+
 (defn- missing-class-of
   "The class to register for an eval failure with message MSG, or nil.
    Three miss shapes: `Unable to resolve classname: fq.Name` (FQN —
@@ -1856,33 +1892,35 @@
        (validate-entry-requires! ext-name ns-form tui-namespaces libs-namespaces owns-ns?))))
 
 (defn- create-sci-loader
-  "The SCI backend's per-extension loader: the shared contract as an injected
-   namespace map (build-context-namespaces), own sources and declared deps
-   through the source provider (make-source-fn), the bb imports and class
-   seeding. The host is bb or the JVM — the native backend owns Jolt — so the
-   SCI read feature is :bb."
+  "The SCI backend's per-extension loader: a fork of the shared base context
+   (shared-context — the injected contract + builtins + shared library
+   layers, with the imports and classes already seeded) carrying this
+   extension's source provider, :load-fn and, for artifact extensions, an
+   artifact-scoped clojure.java.io/resource merged onto the fork. The host
+   is bb or the JVM — the native backend owns Jolt — so the SCI read
+   feature is :bb."
   [ext-name artifact owns-ns? deps-resolver literal
    tui-namespaces libs-namespaces]
   ;; the extension's own resources shadow the host's inside the context: a
-  ;; jar's entries and a declared dep's roots answer io/resource. Only the SCI
-  ;; path needs the injected fn — the Jolt loader answers resources from its
-  ;; own roots and the filtered host.
+  ;; jar's entries and a declared dep's roots answer io/resource. The base
+  ;; context carries the host lookup; the per-extension fn is merged per
+  ;; namespace (sci/merge-opts), leaving the base and sibling forks alone.
   (let [resource-fn (when artifact
                       (extension-resource-fn
                        artifact
                        (when (jar-artifact? artifact) (jar-namespaces (:root artifact)))
-                       deps-resolver))
-        l (loader-sci/sci-loader
-           {:id (str "ext:" ext-name)
-            :sources (make-source-fn ext-name artifact owns-ns? deps-resolver
-                                     tui-namespaces libs-namespaces literal)
-            :namespaces (build-context-namespaces resource-fn)
-            :sci-opts {:classes {:allow :all}
-                       :imports bb-imports
-                       :features #{:bb :clj}}
-            :eval-fn eval-extension-source})]
-    (seed-context-classes! (loader/context l))
-    l))
+                       deps-resolver))]
+    (loader-sci/sci-loader
+     {:id (str "ext:" ext-name)
+      :sources (make-source-fn ext-name artifact owns-ns? deps-resolver
+                               tui-namespaces libs-namespaces literal)
+      :base (shared-context)
+      :namespaces (when resource-fn
+                    {'clojure.java.io {'resource resource-fn}})
+      :sci-opts {:classes {:allow :all}
+                 :imports bb-imports
+                 :features #{:bb :clj}}
+      :eval-fn eval-extension-source})))
 
 #?(:jolt
    (defn- create-jolt-loader

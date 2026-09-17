@@ -878,7 +878,13 @@ upgrades that must satisfy the same suite.
   generic body delegates compile/eval to sci (`:load-fn`, `:namespaces`,
   `:classes`), with the **share list injected** by the caller. No sci
   dependency is declared: babashka and jolt bundle `sci.core` (§6.5), and
-  a plain JVM needs `org.borkdude/sci` on its classpath.
+  a plain JVM needs `org.borkdude/sci` on its classpath. A caller that mints
+  many short-lived loaders over the same share list can pass **`:base`**: the
+  loader forks that context (`sci/fork` + `sci/merge-opts`) instead of
+  `sci/init`, sharing the injected namespaces and seeded classes, with only
+  `:load-fn` / `:namespaces` overrides and definitions per fork. The
+  extension runtime uses this — one base per shared-namespace set, forked
+  per extension (`kmet.app.extensions/shared-context`).
 - `src/kmet/app/extensions.cljc` — replace `create-context` +
   `make-load-fn` + `jars-for` plumbing with `loader/sci-loader` + policies
   (`allow` over the root for the shared layers; per-extension deps resolver

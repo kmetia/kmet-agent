@@ -15,6 +15,13 @@
         :namespaces shared-ns-map
         :parent     (loader/allow (loader/root) #{'kmet.tui})})
 
+   With `:base` the context is not built from scratch: the loader forks an
+   existing context (`sci/fork` + `sci/merge-opts`) and merges this
+   loader's opts onto the fork — for callers that mint many short-lived
+   loaders over the same share list, so the injected namespaces and the
+   seeded classes are copied once. New definitions stay in the fork; vars
+   the base injected are shared with it and its sibling forks.
+
    `:sources` is consulted by `find` (where the source is — :source may be
    a 0-arg thunk and stays unforced) and again by `load` (what it is), so a
    hit stays data and the read happens at load. A map of sources is
@@ -208,6 +215,15 @@
                  source string | nil; or a map of ns-sym/ns-string → source
    - :resources  (fn [name]) → url | {:url …} | nil for resource requests
    - :namespaces SCI share list, injected by reference (sci/init :namespaces)
+   - :base       an existing context (from sci/init) to FORK instead of
+                 building a fresh one: sci/fork + sci/merge-opts inherit
+                 its injected namespaces, classes, imports and features,
+                 and this loader's opts (:load-fn, :namespaces overrides,
+                 :sci-opts) are merged onto the fork. New definitions stay
+                 in the fork, but vars the base injected stay SHARED with
+                 it and its sibling forks — mutating a shared var's root
+                 (alter-var-root, alter-meta!) is visible across them
+                 (shared values already were)
    - :sci-opts   extra sci/init opts (:classes, :imports, :features, …)
    - :eval-fn    (fn [ctx {:keys [namespace file source load?]}] …) —
                  override the default `sci/eval-string*` (e.g. to register
@@ -221,15 +237,27 @@
 
    The context is the loader's `context` (the escape hatch); `unload!`
    leaves SCI objects already handed out alive and just closes the loader."
-  [{:keys [id parent sources resources namespaces sci-opts eval-fn open-fn release-fn]}]
+  [{:keys [id parent sources resources namespaces sci-opts eval-fn open-fn release-fn base]}]
   (let [provider (source-provider sources)
         eval-fn (or eval-fn default-eval)
         ctx-holder (atom nil)
         l-holder (atom nil)
-        sci-opts (merge sci-opts
-                        {:load-fn (require-load-fn ctx-holder l-holder)}
-                        (when (some? namespaces) {:namespaces namespaces}))
-        ctx (sci/init sci-opts)
+        opts (merge sci-opts
+                    {:load-fn (require-load-fn ctx-holder l-holder)}
+                    (when (some? namespaces) {:namespaces namespaces}))
+        ctx (if (some? base)
+              ;; sci/merge-opts rebuilds the ctx from opts: it defaults
+              ;; features/load-fn from the fork, but takes the reify/deftype
+              ;; factories and readers from opts only, and never carries
+              ;; :proxy-fn — so the base's fields are passed through
+              ;; explicitly (caller opts still win), or the fork loses its
+              ;; reify factory ("No reify factory" for any source that
+              ;; reifies) and proxy support.
+              (let [merged (merge (select-keys base [:reify-fn :proxy-fn :deftype-fn :readers])
+                                  opts)]
+                (assoc (sci/merge-opts (sci/fork base) merged)
+                       :proxy-fn (:proxy-fn merged)))
+              (sci/init opts))
         l (loader/make-loader
            {:id id
             :parent parent

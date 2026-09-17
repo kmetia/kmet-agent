@@ -216,6 +216,12 @@ evaluation context**. Every extension runs in its own isolated context:
   shared `kmet.tui.*` / `kmet.libs.*` libraries; other kmet internals are
   not resolvable from an extension context (the load fails with an explicit
   error) — the loader, `kmet.loader*`, is one of those internals.
+- **Contexts are forks of one shared base** — the shared layers and the
+  seeded classes are built once and forked per extension, so your
+  definitions live only in your context (two extensions may even declare
+  the same internal namespace name). Rebinding the *root* of a shared var
+  (`alter-var-root`, `alter-meta!`) is not isolated across extensions —
+  don't monkey-patch the shared layers.
 
 ### Outbound HTTP (`kmet.libs.http`)
 
