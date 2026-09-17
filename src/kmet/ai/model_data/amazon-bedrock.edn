@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-16T09:25:53Z"
+ :generated-at "2026-09-17T20:57:18Z"
  :provider {:id :amazon-bedrock
             :name "Amazon Bedrock"
             :env-vars []
@@ -760,6 +760,7 @@
     :api :bedrock-converse-stream
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 10
            :tiers [{:input 20 :input-tokens-above 272000 :output 75 :cache-read 2 :cache-write 25}]
@@ -1314,6 +1315,7 @@
     :api :bedrock-converse-stream
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 11
            :tiers [{:input 22 :input-tokens-above 272000 :output 82.5 :cache-read 2.2 :cache-write 27.5}]
@@ -1836,6 +1838,7 @@
     :api :bedrock-converse-stream
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 11
            :tiers [{:input 22 :input-tokens-above 272000 :output 82.5 :cache-read 2.2 :cache-write 27.5}]

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-06T20:10:23Z"
+ :generated-at "2026-09-17T20:57:18Z"
  :provider {:id :github-copilot
             :name "GitHub Copilot"
             :env-vars ["COPILOT_GITHUB_TOKEN"]
@@ -228,6 +228,7 @@
     :api :openai-completions
     :base-url "https://api.individual.githubcopilot.com"
     :reasoning true
+    :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 10
            :tiers [{:input 20 :input-tokens-above 272000 :output 75 :cache-read 2 :cache-write 25}]

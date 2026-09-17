@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-16T18:28:51Z"
+ :generated-at "2026-09-17T20:57:18Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -2012,6 +2012,7 @@
     :api :anthropic-messages
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 10 :output 50 :cache-read 1 :cache-write 12.5}
     :context-window 1050000
@@ -2023,6 +2024,7 @@
     :api :anthropic-messages
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 20 :output 100 :cache-read 2 :cache-write 25}
     :context-window 1050000

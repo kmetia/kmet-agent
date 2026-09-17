@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-17T08:38:36Z"
+ :generated-at "2026-09-17T20:57:18Z"
  :provider {:id :openrouter
             :name "OpenRouter"
             :env-vars ["OPENROUTER_API_KEY"]
@@ -703,9 +703,9 @@
     :base-url "https://openrouter.ai/api/v1"
     :reasoning false
     :input [:text]
-    :cost {:input 0.2574 :output 1.0287 :cache-read 0 :cache-write 0}
-    :context-window 128000
-    :max-tokens 16000
+    :cost {:input 0.32 :output 0.89 :cache-read 0 :cache-write 0}
+    :context-window 163840
+    :max-tokens 16384
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "deepseek/deepseek-chat-v3-0324"
    {:id "deepseek/deepseek-chat-v3-0324"
@@ -808,7 +808,7 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.088606 :output 0.177212 :cache-read 0.017721 :cache-write 0}
+    :cost {:input 0.07 :output 0.14 :cache-read 0.014 :cache-write 0}
     :context-window 1024000
     :max-tokens 384000
     :compat {:supports-developer-role false
@@ -934,9 +934,9 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 1.32 :output 3.96 :cache-read 0.044 :cache-write 0}
+    :cost {:input 0.57948 :output 1.73844 :cache-read 0.018438 :cache-write 0}
     :context-window 1048576
-    :max-tokens 384000
+    :max-tokens 393216
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter}}
@@ -976,7 +976,7 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 0.3 :output 1.2 :cache-read 0.006 :cache-write 0}
+    :cost {:input 0.15 :output 0.6 :cache-read 0.003 :cache-write 0}
     :context-window 1048576
     :max-tokens 384000
     :compat {:supports-developer-role false
@@ -1785,7 +1785,7 @@
                          :off nil
                          :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 0.35 :output 1.5 :cache-read 0.04 :cache-write 0}
+    :cost {:input 0.3 :output 1.1 :cache-read 0.04 :cache-write 0}
     :context-window 131072
     :max-tokens 117964
     :compat {:supports-developer-role false :thinking-format :openrouter}}
@@ -4678,6 +4678,25 @@
     :context-window 262144
     :max-tokens 131072
     :compat {:supports-developer-role false :thinking-format :openrouter}}
+   "qwen/qwen3.8-27b:free"
+   {:id "qwen/qwen3.8-27b:free"
+    :name "Qwen: Qwen3.8 27B (free)"
+    :provider :openrouter
+    :api :openai-completions
+    :base-url "https://openrouter.ai/api/v1"
+    :reasoning true
+    :thinking-level-map {:high nil
+                         :low "low"
+                         :max nil
+                         :medium "medium"
+                         :minimal nil
+                         :off "none"
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 262144
+    :max-tokens 235929
+    :compat {:supports-developer-role false :thinking-format :openrouter}}
    "qwen/qwen3.8-flash"
    {:id "qwen/qwen3.8-flash"
     :name "Qwen: Qwen3.8 Flash"
@@ -4880,7 +4899,7 @@
                          :off "none"
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.132 :output 0.528 :cache-read 0.033 :cache-write 0}
+    :cost {:input 0.0825 :output 0.33 :cache-read 0.020625 :cache-write 0}
     :context-window 262144
     :max-tokens 128000
     :compat {:supports-developer-role false :thinking-format :openrouter}}
@@ -5210,9 +5229,9 @@
     :base-url "https://openrouter.ai/api/v1"
     :reasoning true
     :input [:text]
-    :cost {:input 0.5 :output 2 :cache-read 0.1 :cache-write 0}
-    :context-window 202752
-    :max-tokens 131072
+    :cost {:input 0.43 :output 1.75 :cache-read 0.08 :cache-write 0}
+    :context-window 198000
+    :max-tokens 16384
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "z-ai/glm-4.6v"
    {:id "z-ai/glm-4.6v"
@@ -5497,8 +5516,8 @@
                          :xhigh nil}
     :input [:text :image]
     :cost {:input 0.15 :output 0.6 :cache-read 0.015 :cache-write 0}
-    :context-window 1048576
-    :max-tokens 943718
+    :context-window 1000000
+    :max-tokens 393216
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~deepseek/deepseek-pro-latest"
    {:id "~deepseek/deepseek-pro-latest"
@@ -5515,9 +5534,9 @@
                          :off "none"
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.7 :output 2.96 :cache-read 0.033 :cache-write 0}
+    :cost {:input 0.57948 :output 1.73844 :cache-read 0.018438 :cache-write 0}
     :context-window 1048576
-    :max-tokens 384000
+    :max-tokens 393216
     :compat {:supports-developer-role false :thinking-format :openrouter}}
    "~deepseek/deepseek-v4-flash-latest"
    {:id "~deepseek/deepseek-v4-flash-latest"
