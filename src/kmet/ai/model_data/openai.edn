@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-06T20:10:23Z"
+ :generated-at "2026-09-17T17:44:51Z"
  :provider {:id :openai
             :name "OpenAI"
             :env-vars ["OPENAI_API_KEY"]
@@ -509,6 +509,8 @@
     :max-tokens 128000
     :compat {:supports-strict-mode true
              :supports-openai-grammar-tools true
+             :supports-tool-search true
+             :supports-additional-tools true
              :supports-explicit-prompt-cache-mode true}}
    "gpt-realtime-2.1"
    {:id "gpt-realtime-2.1"
