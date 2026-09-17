@@ -6,6 +6,7 @@
             [babashka.fs :as fs]
             [kmet.ai.models :as m]
             [kmet.ai.auth :as auth]
+            [kmet.ai.oauth :as oauth]
             [kmet.libs.dynamic-value :as dynamic-value]))
 
 ;; ─── Registry semantics (pi: MutableModels) ────────────────────────────────
@@ -128,6 +129,20 @@
                (:api-types (m/get-provider :azure-openai-responses))))
       (t/is (= [] (:env-vars (m/get-provider :openai-codex)))
             "codex is OAuth-only — no env var")
+      (t/testing "GPT-6 Astra is a static Codex catalog model"
+        (let [astra (m/get-model :openai-codex "gpt-6-astra")]
+          (t/is (some? astra))
+          (t/is (= :openai-codex-responses (:api astra)))
+          (t/is (= [:text :image] (:input astra)))
+          (t/is (= 272000 (:context-window astra)))
+          (t/is (= 128000 (:max-tokens astra)))
+          (t/is (= {:off nil :minimal "low" :low "low" :medium "medium"
+                    :high "high" :xhigh "xhigh" :max "max"}
+                   (:thinking-level-map astra)))
+          (t/is (= {:supports-openai-grammar-tools true
+                    :supports-tool-search true
+                    :supports-additional-tools true}
+                   (:compat astra)))))
       (t/is (= ["AZURE_OPENAI_API_KEY"] (:env-vars (m/get-provider :azure-openai-responses))))
       (t/is (= #{:anthropic-messages} (:api-types (m/get-provider :anthropic))))
       (t/is (= #{:google-generative-ai} (:api-types (m/get-provider :google))))
@@ -259,6 +274,16 @@
       (let [available (m/get-available)]
         (t/is (= (count (m/get-models)) (count available)))
         (t/is (seq (m/get-available :deepseek))))))
+  (t/testing "Codex OAuth without a model list includes Astra"
+    (m/register-provider! (assoc (m/get-provider :openai-codex)
+                                 :oauth (oauth/make-openai-codex-oauth)))
+    (with-redefs [auth/stored-credential
+                  (fn [provider]
+                    (when (= :openai-codex provider)
+                      {:type :oauth :access "a" :refresh "r"
+                       :expires 9999999999999}))]
+      (t/is (some #(= "gpt-6-astra" (:id %))
+                  (m/get-available :openai-codex)))))
   (t/testing "per-provider filter"
     (with-redefs [auth/configured? (fn [p] (= p :deepseek))]
       (let [available (m/get-available)]

@@ -89,6 +89,43 @@
           (t/is (some #(re-find #"has no reasoning boolean" %) errors)
                 (str "expected a reasoning error, got: " errors)))))))
 
+(t/deftest test-openai-gpt-6-astra-context
+  (let [model (some #(when (= "gpt-6-astra" (:id %)) %)
+                    (#'mg/missing-openai-models #{}))
+        normalized (#'mg/normalize-openai model)]
+    (t/is (= 1050000 (:context-window model)))
+    (t/is (= 1050000 (:context-window normalized))
+          "the API context is not capped to the Codex subscription window")
+    (t/is (= 272000 (get-in normalized [:cost :tiers 0 :input-tokens-above])))))
+
+(t/deftest test-codex-gpt-6-astra
+  "GPT-6 Astra is a static ChatGPT OAuth catalog entry, not a model exposed
+   by the OAuth login response. Keep its Codex-specific wire metadata in
+   lockstep with pi's hardcoded codexModels entry."
+  (let [model (some #(when (= "gpt-6-astra" (:id %)) %)
+                    (#'mg/process-codex))]
+    (t/is (= "gpt-6-astra" (:id model)))
+    (t/is (= "GPT-6 Astra" (:name model)))
+    (t/is (= :openai-codex (:provider model)))
+    (t/is (= :openai-codex-responses (:api model)))
+    (t/is (= "https://chatgpt.com/backend-api" (:base-url model)))
+    (t/is (= true (:reasoning model)))
+    (t/is (= [:text :image] (:input model)))
+    (t/is (= {:input 10 :output 50 :cache-read 1 :cache-write 12.5
+              :tiers [{:input-tokens-above 272000
+                       :input 20.0 :output 75.0 :cache-read 2.0 :cache-write 25.0}]}
+             (:cost model)))
+    (t/is (= 272000 (:context-window model)))
+    (t/is (= 128000 (:max-tokens model)))
+    (let [model (#'mg/apply-thinking-maps model nil)]
+      (t/is (= {:off nil :minimal "low" :low "low" :medium "medium"
+                :high "high" :xhigh "xhigh" :max "max"}
+               (:thinking-level-map model)))
+      (t/is (= {:supports-openai-grammar-tools true
+                :supports-tool-search true
+                :supports-additional-tools true}
+               (:compat (#'mg/apply-compat-metadata model)))))))
+
 (t/deftest test-commandcode-refs-transfer-capabilities
   "Regression: the canonical-ref lookup in process-commandcode (get-in
    grouped [provider model-id]) must receive the {provider -> {model-id ->
