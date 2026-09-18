@@ -5,6 +5,7 @@
             [kmet.tui.macros :as macros]
             [kmet.libs.terminal-image :as timg]
             [kmet.app.ui :as ui]
+            [kmet.app.ui.tool-execution :as te]
             [kmet.app.ui.chat-history :as ch]))
 
 (defn- strip-ansi [s]
@@ -62,6 +63,26 @@
         (is (pos? (count lines)))
         (is (some #(re-find #"my-tool" %) lines))
         (is (some #(re-find #"file contents" %) lines))))))
+
+(deftest test-tool-message-carries-the-runtime-cwd
+  (testing "tool components take the runtime cwd from the chat history's
+            cwd-fn (pi: ToolRenderContext.cwd — renderers shorten paths
+            against it), and each component keeps the cwd its tool ran in"
+    (let [cwd (atom "/project/one")
+          chh (ch/make-chat-history :cwd-fn #(deref cwd))
+          ctx (var te/tool-execution-context)
+          one (ch/chat-history-add-message! chh {:role :tool :name "read" :content "x"})]
+      (is (= "/project/one" (:cwd (ctx one nil true))))
+      (reset! cwd "/project/two")
+      (let [two (ch/chat-history-add-message! chh {:role :tool :name "read" :content "x"})]
+        (is (= "/project/two" (:cwd (ctx two nil true))))
+        (is (= "/project/one" (:cwd (ctx one nil true)))
+            "an existing component keeps the cwd its tool ran in")))
+    (testing "without a cwd-fn the process cwd is used"
+      (let [chh (ch/make-chat-history)
+            ctx (var te/tool-execution-context)
+            comp (ch/chat-history-add-message! chh {:role :tool :name "read" :content "x"})]
+        (is (= (System/getProperty "user.dir") (:cwd (ctx comp nil true))))))))
 
 (deftest test-render-tool-error
   (testing "render a tool error message with Pi-style box"

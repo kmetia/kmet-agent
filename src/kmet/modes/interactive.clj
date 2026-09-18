@@ -64,6 +64,7 @@
             [babashka.process :as proc]
             [kmet.app.bash-executor :as bash-exec]
             [kmet.app.tools.bash :as bash-tool]
+            [kmet.app.tools.util :as tools-util]
             [kmet.app.ui.bash-execution :as be]
             [kmet.app.ui.dialogs :as dialogs]
             [kmet.tui.components.spinner :as spinner]
@@ -103,12 +104,25 @@
     d))
 
 (defn- ensure-cwd-session-dir
-  "The sessions dir for the current cwd — where new sessions are placed:
-   BASE/<--cwd-->/ (pi: getDefaultSessionDir — per-project isolation, G2)."
-  []
-  (let [d (session/session-dir-for-cwd (get-session-dir) (str (fs/cwd)))]
-    (fs/create-dirs d)
-    d))
+  "The sessions dir for a cwd — where new sessions are placed:
+   BASE/<--cwd-->/ (pi: getDefaultSessionDir — per-project isolation, G2).
+   The 0-arity uses the process cwd (startup, --continue); callers with a
+   live session pass the runtime cwd (runtime-cwd), so a session resumed or
+   imported from another project keeps creating its sessions in that
+   project's dir (pi: newSession uses the runtime cwd, not process.cwd)."
+  ([] (ensure-cwd-session-dir (str (fs/cwd))))
+  ([cwd]
+   (let [d (session/session-dir-for-cwd (get-session-dir) cwd)]
+     (fs/create-dirs d)
+     d)))
+
+(defn- runtime-cwd
+  "The working directory of CS's runtime (pi: AgentSession._cwd, seeded from
+   the active session's recorded cwd): the footer data provider's cwd — the
+   live value the footer pwd, the extension ctx.cwd, and tool components
+   read — else the process cwd (tests, headless)."
+  [cs]
+  (or (some-> (:footer-provider cs) fdp/fdp-get-cwd) (str (fs/cwd))))
 
 (defn- find-session
   "Most recent session for the current cwd (pi: continueRecent →
@@ -299,14 +313,15 @@
 
 (defn- update-terminal-title!
   "Set the terminal window title to \"kmet - <session name> - <cwd basename>\"
-   (pi: updateTerminalTitle). The session display name is included when set
-   (/name); an explicit empty name clears it, falling back to just app + cwd.
-   No-ops when the TUI/terminal isn't live (e.g. tests with a stub tui)."
+   (pi: updateTerminalTitle — the session's runtime cwd, not the process
+   cwd). The session display name is included when set (/name); an explicit
+   empty name clears it, falling back to just app + cwd. No-ops when the
+   TUI/terminal isn't live (e.g. tests with a stub tui)."
   [cs]
   (let [title (str "kmet"
                    (when-let [name (session/get-session-name @(:session-atom cs))]
                      (str " - " name))
-                   " - " (fs/file-name (str (fs/cwd))))]
+                   " - " (fs/file-name (runtime-cwd cs)))]
     (when-let [term (:terminal (:tui cs))]
       (term/set-title! @term title))))
 
@@ -1725,6 +1740,51 @@
              (= role :user) (assoc :images (image-block/content-images (:content e)))
              (= role :info) (assoc :label (:label e)))))))))
 
+(defn- refresh-system-prompt!
+  "Rebuild the system prompt for CWD (pi: a new runtime rebuilds it from its
+   own cwd): the project context files are re-read from the new directory
+   and the prompt's Current working directory line follows. The
+   loaded-resources display is rebuilt with them (pi: showLoadedResources)."
+  [cs cwd]
+  (let [ag @(:agent-state cs)
+        opts (assoc @(:system-prompt-opts ag)
+                    :cwd cwd
+                    :context-files (context/load-project-context-files
+                                    (cfg/get-agent-dir) cwd))]
+    (reset! (:system-prompt-opts ag) opts)
+    (reset! (:system ag) (apply skills/build-system-prompt (mapcat identity opts)))
+    (when-let [lr (:loaded-resources-comp cs)]
+      (ui/loaded-resources-set-sections! lr (build-loaded-resource-sections)))))
+
+(defn- apply-session-cwd!
+  "Point the runtime at SESS's working directory (pi: createRuntime's cwd +
+   footerDataProvider.setCwd — a resumed or imported session brings its
+   recorded cwd): the footer pwd, the extension ctx.cwd, tool components and
+   the tools' relative-path resolution all read the footer provider's cwd,
+   and the system prompt is rebuilt for the new directory. A recorded cwd
+   that no longer exists keeps the current one (pi asks via
+   MissingSessionCwdError; kmet says so and continues). Returns the cwd in
+   effect."
+  [cs sess]
+  (let [fdp* (:footer-provider cs)
+        recorded (get-in sess [:header :cwd])
+        cwd (session/session-cwd sess)
+        current (when fdp* (fdp/fdp-get-cwd fdp*))]
+    (cond
+      (or (nil? fdp*) (= cwd current))
+      current
+
+      cwd
+      (do (fdp/fdp-set-cwd! fdp* cwd)
+          (refresh-system-prompt! cs cwd)
+          cwd)
+
+      :else
+      (do (ui/chat-history-show-status!
+           (:chat-history cs)
+           (str "Session cwd " recorded " no longer exists — continuing in " current))
+          current))))
+
 (defn- restore-session!
   "Restore a session into the UI and the agent: swap the active session,
    rebuild the agent's in-memory context from the session branch (pi: the
@@ -1756,6 +1816,10 @@
       (ui/chat-history-show-status!
        (:chat-history cs)
        (str "Session compacted " n (if (= n 1) " time" " times")))))
+  ;; pi: createRuntime's cwd + footerDataProvider.setCwd — the session's
+  ;; working directory becomes the runtime's (tools, the prompt's cwd line,
+  ;; the footer pwd and ctx.cwd all follow it)
+  (apply-session-cwd! cs sess)
   ;; Repopulate the editor's prompt history only on the resume paths
   ;; (startup --continue, /resume — pi: renderInitialMessages with
   ;; populateHistory). Fork/clone keep the shared editor's existing history
@@ -1818,7 +1882,10 @@
         ;; so they can persist state before the swap.
         (event-bus/emit-event! {:type :session-shutdown :reason :new
                                 :target-session-file previous-file})
-        (let [new-session (session/create-session (ensure-cwd-session-dir))]
+        (let [new-session (session/create-session (ensure-cwd-session-dir (runtime-cwd cs))
+                                                  ;; the new session belongs to the runtime's
+                                                  ;; project (pi: newSession keeps this.cwd)
+                                                  {:cwd (runtime-cwd cs)})]
           (debug/log "new session created: " (:id new-session))
           (ui/chat-history-clear! (:chat-history cs))
           (ui/dispose-pending-bash! @(:pending-bash-components cs))
@@ -1915,7 +1982,10 @@
    header. Written against kmet's session-switch path rather than pi's
    teardownCurrent: an in-flight turn refuses the import (like /fork and
    /clone — the switch path does not abort) and the switch emits
-   :session-before-switch, exactly as /resume does."
+   :session-before-switch, exactly as /resume does. The session's recorded
+   cwd becomes the runtime cwd (restore-session! → apply-session-cwd!), so
+   the tools, the prompt's cwd line and the footer follow it, as in pi's
+   createRuntime."
   [cs args]
   (let [chat (:chat-history cs)
         path-arg (parse-path-argument args)]
@@ -2223,8 +2293,9 @@
                                            :content "Fork cancelled by an extension."})
             (let [fork (if (:parent-id entry)
                          (session/fork-session sess (:parent-id entry))
-                         (session/create-session (ensure-cwd-session-dir)
-                                                 {:parent-session (:file sess)}))]
+                         (session/create-session (ensure-cwd-session-dir (runtime-cwd cs))
+                                                 {:parent-session (:file sess)
+                                                  :cwd (runtime-cwd cs)}))]
               (if (nil? fork)
                 (ui/chat-history-add-message! (:chat-history cs)
                                               {:role :assistant :content "Failed to create forked session."})
@@ -2796,12 +2867,15 @@
             ;; session-env thunk so their bash tools see the same KMET_*
             ;; metadata as the ! command itself (pi: the execute ctx).
             _ (binding [bash-tool/*cancel-signal* (:bash-signal cs)
-                        bash-tool/*session-env-fn* (constantly session-env)]
+                        bash-tool/*session-env-fn* (constantly session-env)
+                        ;; relative paths in extension bash/tool calls resolve
+                        ;; against the runtime cwd, as in an agent run
+                        tools-util/*cwd* (runtime-cwd cs)]
                 (event-bus/emit-event!
                  {:type :user-bash
                   :command command
                   :exclude-from-context? exclude-from-context?
-                  :cwd (System/getProperty "user.dir")}))
+                  :cwd (runtime-cwd cs)}))
 
             ;; ── Spawn hook (pi: BashSpawnHook) — extensions can modify command ──
             spawn-hook nil]
@@ -2824,7 +2898,7 @@
           (try
             (let [result (bash-exec/execute-bash
                           {:command command
-                           :cwd (System/getProperty "user.dir")
+                           :cwd (runtime-cwd cs)
                            :env session-env
                            :on-chunk (fn [chunk]
                                        ;; pure data append: the component's
@@ -3582,14 +3656,24 @@
         provider (cfg/get-provider config)
         model (models/resolve-config-model config)
 
+        ;; The runtime working directory (pi: AgentSession._cwd — the cwd
+        ;; the resumed/continued session was recorded in, else the process
+        ;; cwd). The atom is shared by the footer data provider (the footer
+        ;; pwd, the extension ctx.cwd) and the chat history (tool-component
+        ;; path displays), so apply-session-cwd! switches both with one
+        ;; write.
+        cwd (or (session/session-cwd session) (str (fs/cwd)))
+        cwd-atom (atom cwd)
+
         ;; Load skills and prompt templates (pi: the unified resolution —
         ;; top-level entries, auto roots, then packages)
         _ (packages/load-skills!)
         _ (packages/load-prompts!)
         system-prompt-opts {:custom-prompt (cfg/get-custom-prompt config)
                             :append-prompt (cfg/get-append-system-prompt config)
+                            :cwd cwd
                             :context-files (context/load-project-context-files
-                                            (cfg/get-agent-dir) (str (fs/cwd)))
+                                            (cfg/get-agent-dir) cwd)
                             :tools (vals (tools/get-all-tools))}
         system-prompt (apply skills/build-system-prompt
                              (mapcat identity system-prompt-opts))
@@ -3618,6 +3702,7 @@
         ;; no :theme — message components subscribe to ui.subs/theme-sub
         ;; themselves (Stage 5)
         ch (ui/make-chat-history
+            :cwd-fn #(deref cwd-atom)
             :thinking-hidden (cfg/get-hide-thinking-block config)
             :tool-display-mode (cfg/get-tool-display-mode config)
             :output-pad (cfg/get-output-pad config))
@@ -3736,6 +3821,7 @@
         ;; B.6: footer data provider + footer (pi: FooterComponent; the
         ;; model line wraps to its own line when the stats line is too narrow)
         fdp (ui/make-footer-data-provider
+             :cwd-atom cwd-atom
              :session session
              :provider-count (count (distinct (map :provider (model-catalog/scoped-or-available-models ag))))
              ;; Phase 2: context window from the resolved Model record, falling
@@ -3808,7 +3894,8 @@
                                                :commands-fn #(vec (concat (commands/get-commands)
                                                                           (prompts/as-command-maps (prompts/get-prompt-templates))
                                                                           (skills/as-command-maps (skills/get-skills))))
-                                               :base-path (System/getProperty "user.dir")))
+                                               ;; a fn: path completion follows a session switch's cwd
+                                               :base-path #(deref cwd-atom)))
     (editor/editor-set-autocomplete-theme! ed (th/get-select-list-theme (cfg/get-theme config)))
 
     ;; Status indicator: the default editor embeds the active status in its
@@ -4269,7 +4356,7 @@
                                                                          (commands/get-commands)
                                                                          (prompts/as-command-maps (prompts/get-prompt-templates))
                                                                          (skills/as-command-maps (skills/get-skills))))
-                                                     :base-path (System/getProperty "user.dir"))
+                                                     :base-path #(fdp/fdp-get-cwd fdp))
                                                provider (reduce (fn [prov factory]
                                                                   (or (normalize-autocomplete-provider
                                                                        (factory prov))

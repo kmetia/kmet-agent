@@ -4,9 +4,45 @@
             [clojure.test :as t]
             [babashka.fs :as fs]
             [kmet.app.tools.core :as tools]
+            [kmet.app.tools.util :as tool-util]
             [kmet.ai.api.shared :as schema-shared]
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.bash-executor :as bash-exec]))
+
+(t/deftest test-tool-cwd-binding
+  (t/testing "relative tool paths resolve against the bound runtime cwd (pi:
+              the cwd the tool definitions were created with), not the process cwd"
+    (let [dir (str (fs/absolutize (str "target/test-tools-cwd-" (System/currentTimeMillis))))]
+      (fs/create-dirs dir)
+      (try
+        (t/is (= (System/getProperty "user.dir") (tool-util/cwd))
+              "unbound: the process cwd")
+        (binding [tool-util/*cwd* dir]
+          (t/is (= dir (tool-util/cwd)))
+          (t/is (= "/abs/path.txt" (tool-util/resolve-tool-path "/abs/path.txt"))
+                "absolute paths pass through")
+          (t/is (= (str (fs/path dir "sub/notes.txt"))
+                   (tool-util/resolve-tool-path "sub/notes.txt")))
+          (t/is (not (:is-error (tools/execute-tool "write" {:path "notes.txt" :content "hi"}))))
+          (t/is (= "hi" (slurp (str (fs/path dir "notes.txt"))))
+                "write lands inside the bound cwd")
+          (t/is (str/includes? (:content (tools/execute-tool "read" {:path "notes.txt"})) "hi"))
+          (t/is (not (:is-error (tools/execute-tool "edit" {:path "notes.txt"
+                                                            :old-text "hi"
+                                                            :new-text "bye"}))))
+          (t/is (= "bye" (slurp (str (fs/path dir "notes.txt"))))))
+        (finally (fs/delete-tree dir))))))
+
+(t/deftest ^:slow test-tool-bash-cwd-binding
+  (t/testing "the bash tool runs in the bound runtime cwd"
+    (let [dir (str (fs/absolutize (str "target/test-tools-bash-cwd-" (System/currentTimeMillis))))]
+      (fs/create-dirs dir)
+      (try
+        (binding [tool-util/*cwd* dir]
+          (let [result (tools/execute-tool "bash" {:command "pwd"})]
+            (t/is (not (:is-error result)))
+            (t/is (str/includes? (:content result) dir))))
+        (finally (fs/delete-tree dir))))))
 
 ;; ─── Tool registry ─────────────────────────────────────────────────────────
 

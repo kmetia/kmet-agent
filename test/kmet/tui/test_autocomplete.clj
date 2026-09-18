@@ -100,6 +100,24 @@
         (t/is (some? s))
         (t/is (= ["@beta.txt"] (mapv :value (:items s))))))))
 
+(t/deftest base-path-fn-is-resolved-per-call
+  (with-temp-dir
+    (fn []
+      ;; the app passes a fn so a session switch's runtime cwd is picked up
+      ;; (pi: setupAutocompleteProvider rebuilds the provider on session
+      ;; replacement)
+      (let [dir (atom test-dir)
+            p (ac/make-combined-provider
+               :commands-fn (constantly commands)
+               :base-path #(deref dir))]
+        (t/is (= ["beta.txt"] (mapv :label (:items (ac/get-suggestions p ["be"] 0 2 {:force true})))))
+        (let [other (str test-dir "/nested")]
+          (reset! dir other)
+          (t/is (= ["gamma.md"] (mapv :label (:items (ac/get-suggestions p ["ga"] 0 2 {:force true})))))
+          (reset! dir test-dir)
+          (t/is (nil? (ac/get-suggestions p ["ga"] 0 2 {:force true}))
+                "back to the first base dir — resolution is live, not captured"))))))
+
 (t/deftest should-trigger-file-completion
   (let [p (make-provider)]
     (t/is (false? (ac/should-trigger-file-completion p ["/model"] 0 6)))

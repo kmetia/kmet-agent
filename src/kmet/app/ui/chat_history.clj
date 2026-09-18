@@ -116,6 +116,9 @@
               [messages-atom  ;; atom of vec of message maps, each with :component
                info-comp-atom  ;; atom of CustomMessageComponent or nil
                output-pad-atom
+               cwd-fn          ;; 0-arg fn → the runtime cwd for tool components
+                               ;; (pi: ToolRenderContext.cwd — path displays are
+                               ;; relative to the session's cwd)
                streaming-atom  ;; atom of streaming message map or nil
                tools-expanded-atom   ;; tool display mode: :collapsed | :expanded | :quiet
                                       ;; (pi: toolOutputExpanded, extended with quiet)
@@ -148,12 +151,16 @@
      :thinking-hidden  — initial thinking-blocks hidden flag (default false;
                          pi: hideThinkingBlock loaded from settings at startup)
      :tool-display-mode — initial tool display mode (default :collapsed;
-                         loaded from settings at startup)"
-  [& {:keys [output-pad thinking-hidden tool-display-mode]
-      :or {output-pad 1 thinking-hidden false tool-display-mode :collapsed}}]
+                         loaded from settings at startup)
+     :cwd-fn           — 0-arg fn returning the runtime working directory for
+                         tool components (default: the process cwd)"
+  [& {:keys [output-pad thinking-hidden tool-display-mode cwd-fn]
+      :or {output-pad 1 thinking-hidden false tool-display-mode :collapsed
+           cwd-fn #(or (System/getProperty "user.dir") ".")}}]
   (map->ChatHistoryComponent {:messages-atom (atom [])
                               :info-comp-atom (atom nil)
                               :output-pad-atom (atom output-pad)
+                              :cwd-fn cwd-fn
                               :streaming-atom (atom nil)
                               :tools-expanded-atom (atom (normalize-tool-display-mode tool-display-mode))
                               :thinking-hidden-atom (atom (boolean thinking-hidden))
@@ -295,7 +302,7 @@
    :custom messages render through the default labeled box (a registered
    message renderer arrives as :component) and honor the display flag, and
    :compaction / :branch-summary render as collapsible summary boxes."
-  [msg output-pad tools-expanded-atom thinking-hidden-atom hidden-label-atom]
+  [msg output-pad tools-expanded-atom thinking-hidden-atom hidden-label-atom cwd-fn]
   (let [thm @subs/theme-sub]
     (cond
     ;; Pre-built component — extension entry/message renderers may return a
@@ -324,6 +331,10 @@
                           :truncation (:truncation msg)
                           :details (:details msg)
                           :output-pad output-pad
+                          ;; pi: ToolRenderContext.cwd — path displays resolve
+                          ;; against the runtime cwd (the session's), not the
+                          ;; process cwd
+                          :cwd (when cwd-fn (cwd-fn))
                           :tools-expanded-atom tools-expanded-atom
                         ;; pi: ToolDefinition.renderCall/renderResult — the
                         ;; record's fns (extension tools) win over the
@@ -407,7 +418,7 @@
   (let [msg (with-assistant-data msg)
         comp (make-component-for-msg msg @(:output-pad-atom ch)
                                      (:tools-expanded-atom ch) (:thinking-hidden-atom ch)
-                                     (:hidden-label-atom ch))]
+                                     (:hidden-label-atom ch) (:cwd-fn ch))]
     (when comp
       (swap! (:messages-atom ch) conj (assoc msg :component comp)))
     comp))
@@ -421,7 +432,7 @@
   (let [msg (with-assistant-data msg)
         comp (make-component-for-msg msg @(:output-pad-atom ch)
                                      (:tools-expanded-atom ch) (:thinking-hidden-atom ch)
-                                     (:hidden-label-atom ch))
+                                     (:hidden-label-atom ch) (:cwd-fn ch))
         streaming @(:streaming-atom ch)]
     (when comp
       (let [entry (assoc msg :component comp)]

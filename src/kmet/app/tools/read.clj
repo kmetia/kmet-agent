@@ -55,8 +55,10 @@
        :else s))))
 
 (defn- resolve-path
-  "Pi: resolvePath(input, baseDir, opts) — normalize then resolve against baseDir."
-  ([input] (resolve-path input (str (fs/cwd)) {}))
+  "Pi: resolvePath(input, baseDir, opts) — normalize then resolve against baseDir.
+   The default base directory is the runtime cwd (pi: the cwd the tool was
+   created with), not the process cwd."
+  ([input] (resolve-path input (tool-util/cwd) {}))
   ([input base-dir] (resolve-path input base-dir {}))
   ([input base-dir opts]
    (let [norm (normalize-path input opts)
@@ -257,7 +259,7 @@
     (try
       (if (or (nil? raw-path) (and (string? raw-path) (str/blank? raw-path)))
         {:content "File not found: " :is-error true}
-        (let [cwd (str (fs/cwd))
+        (let [cwd (tool-util/cwd)
               abs-path (resolve-read-path (str raw-path) cwd)
               f (io/file abs-path)
               on-disk? (file-exists? abs-path)

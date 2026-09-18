@@ -21,6 +21,20 @@
       (is (= 1 (fdp/fdp-get-provider-count p)))
       (is (nil? (fdp/fdp-get-context-window p))))))
 
+(deftest test-cwd-swap
+  (testing "cwd swaps for a session switch (pi: setCwd), and an injected
+            atom is shared — one write switches the footer, ctx.cwd, and
+            tool components"
+    (let [p (fdp/make-footer-data-provider :cwd "/one")]
+      (is (= "/one" (fdp/fdp-get-cwd p)))
+      (fdp/fdp-set-cwd! p "/two")
+      (is (= "/two" (fdp/fdp-get-cwd p))))
+    (let [shared (atom "/one")
+          p (fdp/make-footer-data-provider :cwd-atom shared)]
+      (is (identical? shared (:cwd-atom p)))
+      (fdp/fdp-set-cwd! p "/two")
+      (is (= "/two" @shared) "the injected atom is the single source"))))
+
 (deftest test-session-swap
   (testing "session is swappable"
     (let [p (fdp/make-footer-data-provider)]

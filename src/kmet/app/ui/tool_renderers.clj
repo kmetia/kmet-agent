@@ -143,12 +143,12 @@
 (defn- get-pi-docs-classification
   "Pi: getPiDocsClassification — README.md and docs/* / examples/* inside the
    package root render as 'read docs'. In kmet the package root is the repo
-   root that contains README.md; walk up from cwd to find it. Returns
+   root that contains README.md; walk up from CWD (the runtime cwd — the
+   project the session works in, not the process cwd). Returns
    {:kind :docs :label str} or nil."
-  [absolute-path]
+  [absolute-path cwd]
   (try
     (let [;; Find repo root by walking up from cwd until README.md is found
-          cwd (str (fs/cwd))
           repo-root (loop [d (str (fs/absolutize cwd))]
                       (cond
                         (fs/exists? (str (fs/path d "README.md"))) d
@@ -182,7 +182,7 @@
         {:kind :skill
          :label (or (some-> (fs/parent absolute) fs/file-name str) file-name)}
         :else
-        (if-let [docs (get-pi-docs-classification absolute)]
+        (if-let [docs (get-pi-docs-classification absolute cwd)]
           docs
           (when (contains? compact-resource-file-names file-name)
             {:kind :resource

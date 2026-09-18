@@ -211,6 +211,13 @@ resource dirs.
 prompt template. kmet's sessions are EDN (`.ednl`), so `/import` takes a kmet
 session file — pi's JSONL sessions are not importable.
 
+Sessions record their working directory: resuming or importing a session from
+another project moves the runtime there — tools resolve relative paths in it,
+the system prompt's `Current working directory` line and the footer pwd follow,
+path completion completes there, and new sessions land in that project's
+sessions dir (pi: `createRuntime`'s cwd). A recorded directory that no longer
+exists keeps the current one.
+
 ### Keyboard shortcuts
 
 | Key | Action |

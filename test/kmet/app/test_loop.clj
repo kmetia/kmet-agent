@@ -9,6 +9,7 @@
             [kmet.ai.google-adc :as google-adc]
             [kmet.libs.usage :as usage]
             [kmet.app.tools.core :as tools]
+            [kmet.app.tools.util :as tool-util]
             [kmet.app.skills :as skills]
             [kmet.app.tools.registry :as tools-registry]
             [kmet.app.extensions :as extensions]
@@ -20,6 +21,45 @@
             [kmet.tui.theme :as th]))
 
 (declare make-test-provider)
+
+(t/deftest run-binds-the-session-cwd-for-tools
+  (t/testing "an agent run binds the tool cwd from the session (pi: the
+              runtime cwd the tool definitions were created with) — tools of a
+              session resumed/imported from another project resolve their
+              relative paths there, not in the process cwd"
+    (let [dir (-> (fs/create-dirs (fs/path "target" (str "test-loop-cwd-" (System/currentTimeMillis))))
+                  fs/absolutize str)
+          sessions (str dir "-sessions")
+          sess (session/create-session sessions {:cwd dir})
+          seen (atom nil)
+          call-count (atom 0)
+          agent (loop/make-agent-state :session sess)]
+      (try
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [opts]
+                        (future
+                          (if (= 1 (swap! call-count inc))
+                            (do (when-let [on-tc (:on-tool-call opts)]
+                                  (on-tc {:id "tc1" :name "bash" :arguments "{}" :index 0}))
+                                (when-let [on-done (:on-done opts)]
+                                  (on-done :tool-calls)))
+                            (do (when-let [on-text (:on-text opts)]
+                                  (on-text "done"))
+                                (when-let [on-done (:on-done opts)]
+                                  (on-done :stop))))
+                          :done))
+                      tools/execute-tool
+                      (fn [_ _ _]
+                        (reset! seen (tool-util/cwd))
+                        {:content "ok" :is-error false})]
+          @(loop/run-agent-turn agent {:message "run"
+                                       :on-done (fn [_])
+                                       :on-error (fn [_])}))
+        (t/is (= dir @seen) "the tool call ran with the session's cwd bound")
+        (t/is (= (System/getProperty "user.dir") (tool-util/cwd))
+              "the binding does not leak past the run")
+        (finally (fs/delete-tree dir) (fs/delete-tree sessions))))))
 
 ;; ─── State construction ───────────────────────────────────────────────────
 

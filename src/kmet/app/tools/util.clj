@@ -22,6 +22,34 @@
                    (fn [d] (fs/list-dir d))
                    (fs/file dir-path))))))
 
+;; ─── Runtime working directory ────────────────────────────────────────────
+
+(def ^:dynamic *cwd*
+  "The working directory tool paths resolve against (pi: the cwd the tool
+   definitions were created with — createAllToolDefinitions(cwd, …); pi's
+   read/write/edit resolve relative paths against the runtime cwd, not the
+   process cwd). Bound by kmet.app.loop around each agent run and by the
+   interactive ! flow, from the active session's cwd. nil outside those
+   paths — cwd falls back to the process cwd."
+  nil)
+
+(defn cwd
+  "The runtime working directory: *cwd* when a run or command bound one,
+   else the process cwd."
+  []
+  (or *cwd* (System/getProperty "user.dir") "."))
+
+(defn resolve-tool-path
+  "Resolve PATH against the runtime working directory — pi: resolveToCwd.
+   Absolute paths pass through; a relative path becomes CWD/PATH, so the
+   file tools follow the session's cwd instead of the process cwd (a
+   session resumed or imported from another project)."
+  [path]
+  (let [p (str path)]
+    (if (fs/absolute? p)
+      p
+      (str (fs/normalize (fs/path (cwd) p))))))
+
 (defn shorten-title-path
   "Home-relative display path for a quiet title (pi: shortenPath).
    Non-string input passes through — callers guard with string?/seq."

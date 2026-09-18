@@ -55,7 +55,9 @@
       {:content "Edit tool input is invalid. edits must contain at least one replacement."
        :is-error true}
       (try
-        (let [f (io/file path)]
+        ;; relative paths resolve against the runtime cwd (pi: resolveToCwd),
+        ;; not the process cwd — a session resumed from another project
+        (let [f (io/file (tool-util/resolve-tool-path path))]
           (if-not (fs/exists? f)
             {:content (str "File not found: " path) :is-error true}
             (let [raw (fs/read-all-bytes f)

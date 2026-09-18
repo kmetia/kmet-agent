@@ -29,6 +29,9 @@
   "Create a FooterDataProvider.
    Options:
      :cwd            — process cwd (default (System/getProperty \"user.dir\"))
+     :cwd-atom       — inject the cwd atom instead of creating one (the
+                       interactive mode shares it with the chat history, so
+                       one write switches both — see fdp-set-cwd!)
      :session        — kmet.app.session Session record or nil
      :provider-count — number of configured providers (pi: availableProviderCount)
      :context-window — model context window in tokens, or nil when unknown
@@ -38,11 +41,11 @@
      :reasoning      — whether the current model supports reasoning (pi:
                        state.model.reasoning — gates the footer's thinking
                        suffix)"
-  [& {:keys [cwd session provider-count context-window model provider thinking reasoning]
+  [& {:keys [cwd cwd-atom session provider-count context-window model provider thinking reasoning]
       :or {cwd (System/getProperty "user.dir")
            provider-count 1}}]
   (map->FooterDataProvider
-   {:cwd-atom (atom cwd)
+   {:cwd-atom (or cwd-atom (atom cwd))
     :git-branch-atom (atom nil)
     :git-branch-resolved?-atom (atom false)
     :session-atom (atom session)

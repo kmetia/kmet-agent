@@ -80,6 +80,7 @@
             [kmet.app.compaction :as compaction]
             [kmet.app.skills :as skills]
             [kmet.app.tools.core :as tools]
+            [kmet.app.tools.util :as tools-util]
             [kmet.app.tools.bash :as bash-tool]
             [kmet.ai.auth :as auth]
             [kmet.app.session :as session]
@@ -2017,13 +2018,18 @@ Be precise and concise in your responses."}}]
       ;; cancels bash everywhere, not just in the loop's own tool futures.
       ;; The session-env thunk resolves per bash execution (pi: the execute
       ;; ctx), so a mid-run model/thinking change is reflected.
+      ;; Relative tool paths resolve against the session's cwd for the whole
+      ;; run (pi: the runtime cwd the tool definitions were created with) —
+      ;; a session resumed or imported from another project.
       (binding [bash-tool/*cancel-signal* (:signal agent)
                 bash-tool/*session-env-fn*
                 (fn []
                   (bash-tool/session-env {:session (:session agent)
                                           :provider @(:provider agent)
                                           :model @(:model agent)
-                                          :thinking-level @(:thinking agent)}))]
+                                          :thinking-level @(:thinking agent)}))
+                tools-util/*cwd* (or (session/session-cwd (:session agent))
+                                     (tools-util/cwd))]
         (future
           (try
             (let [msg-count-before (count @(:messages agent))

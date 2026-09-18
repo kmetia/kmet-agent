@@ -1159,6 +1159,25 @@
     (t/is (nil? (s/common-ancestor-id session nil (:id a2)))
           "no old leaf → nil")))
 
+;; ─── Runtime working directory (pi: AgentSession._cwd) ────────────────────
+
+(t/deftest test-session-cwd
+  (t/testing "a session's runtime cwd is its recorded header cwd"
+    (let [dir (str (fs/absolutize (str test-dir "-cwd")))
+          other (str dir "-other")]
+      (try
+        (fs/create-dirs other)
+        (t/testing "the recorded cwd when the directory exists"
+          (let [s (s/create-session dir {:cwd other})]
+            (t/is (= other (s/session-cwd s)))))
+        (t/testing "nil when it is gone (pi: MissingSessionCwdError — the caller falls back)"
+          (let [s (s/create-session dir {:cwd (str dir "/gone")})]
+            (t/is (nil? (s/session-cwd s)))))
+        (t/testing "nil without a header (legacy/empty)"
+          (let [s (s/create-session dir)]
+            (t/is (nil? (s/session-cwd (assoc s :header nil))))))
+        (finally (fs/delete-tree dir) (fs/delete-tree other))))))
+
 ;; ─── Import (pi: agent-session-runtime importFromJsonl) ───────────────────
 
 (t/deftest test-import-plan-and-copy

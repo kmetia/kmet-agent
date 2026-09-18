@@ -679,10 +679,13 @@
 (defn- import-test-cs
   "CoreState for the /import tests: real chat/session/agent/footer state so
    the resume path runs for real (pi: importFromJsonl swaps the runtime),
-   with only the dock and the render calls stubbed (no terminal in tests)."
+   with only the dock and the render calls stubbed (no terminal in tests).
+   The cwd atom is shared by the footer provider and the chat history, as in
+   build-layout."
   [active-sess]
-  (let [ch (ui/make-chat-history)
-        prov (fdp/make-footer-data-provider :session active-sess)
+  (let [cwd-atom (atom (or (session/session-cwd active-sess) (str (fs/cwd))))
+        ch (ui/make-chat-history :cwd-fn #(deref cwd-atom))
+        prov (fdp/make-footer-data-provider :cwd-atom cwd-atom :session active-sess)
         ed (editor/make-editor)
         ag (agent/make-agent-state :session active-sess)]
     (inter/map->CoreState
@@ -768,9 +771,13 @@
     (commands/clear-commands!)
     (install-app-keybindings!)
     ((var inter/register-builtin-commands!) cfg/default-config)
-    (let [dir (str (fs/absolutize (str "target/test-import-flow-" (System/currentTimeMillis))))]
+    (let [dir (str (fs/absolutize (str "target/test-import-flow-" (System/currentTimeMillis))))
+          foreign (str dir "/foreign-project")]
       (try
-        (let [src (session/create-session (str dir "/src"))]
+        (fs/create-dirs foreign)
+        ;; the imported session was recorded in another project — pi's import
+        ;; moves the runtime cwd there (createRuntime's cwd)
+        (let [src (session/create-session (str dir "/src") {:cwd foreign})]
           (append-message! src "imported question")
           (let [active (session/create-session (str dir "/dest"))
                 _ (append-message! active "hello")
@@ -806,7 +813,13 @@
               (t/is (= {:role :status
                         :content (str "Session imported from: " (:file src))}
                        (last-message ch))
-                    "pi: showStatus 'Session imported from: …'"))))
+                    "pi: showStatus 'Session imported from: …'")
+              (t/is (= foreign (fdp/fdp-get-cwd (:footer-provider cs)))
+                    "the runtime cwd follows the imported session's")
+              (t/is (= foreign (get-in @(:system-prompt-opts @(:agent-state cs)) [:cwd]))
+                    "and the system prompt options")
+              (t/is (str/includes? @(:system @(:agent-state cs)) foreign)
+                    "the model is told where its tools will run"))))
         (finally (fs/delete-tree dir))))))
 
 (deftest test-import-cancellation-paths
@@ -861,6 +874,38 @@
                 (t/is (= 1 (count (fs/list-dir (str dir "/dest"))))
                       "no suffixed duplicate")
                 (t/is (= (:id active) (:id @(:session-atom cs))))))))
+        (finally (fs/delete-tree dir))))))
+
+(deftest test-import-keeps-the-current-cwd-when-the-recorded-one-is-gone
+  (testing "a recorded cwd that no longer exists keeps the current runtime
+            cwd — kmet says so and continues (pi: MissingSessionCwdError asks
+            for a fallback cwd)"
+    (commands/clear-commands!)
+    (install-app-keybindings!)
+    ((var inter/register-builtin-commands!) cfg/default-config)
+    (let [dir (str (fs/absolutize (str "target/test-import-gone-cwd-" (System/currentTimeMillis))))
+          gone (str dir "/gone-project")]
+      (try
+        (let [src (session/create-session (str dir "/src") {:cwd gone})]
+          (append-message! src "from a deleted project")
+          (let [active (session/create-session (str dir "/dest"))
+                _ (append-message! active "hello")
+                cs (import-test-cs active)
+                ch (:chat-history cs)
+                before (fdp/fdp-get-cwd (:footer-provider cs))
+                sel-ref (atom nil)]
+            (with-redefs [tui/tui-request-render (fn [_])
+                          tui/tui-set-focus (fn [_ _])
+                          dock/mount! (capture-mount! sel-ref)]
+              ((:handler (commands/find-command "import")) cs (:file src))
+              (protocols/handle-input @sel-ref "\r")
+              (t/is (= (:id src) (:id @(:session-atom cs))) "the session still switches")
+              (t/is (= before (fdp/fdp-get-cwd (:footer-provider cs)))
+                    "the current cwd is kept")
+              (t/is (some #(and (= :status (:role %))
+                                (str/includes? (str (:content %)) "no longer exists"))
+                          @(:messages-atom ch))
+                    "and the user is told"))))
         (finally (fs/delete-tree dir))))))
 
 (deftest test-scoped-models-selector-initial-state

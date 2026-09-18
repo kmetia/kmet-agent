@@ -655,6 +655,17 @@
           (when (seq n) n))
         (recur (rest entries))))))
 
+(defn session-cwd
+  "The working directory a session works in (pi: AgentSession._cwd — a
+   resumed or imported session brings its recorded cwd): the header's :cwd
+   as an absolute path when it is set and the directory still exists, else
+   nil. pi throws (MissingSessionCwdError) and the interactive mode asks /
+   falls back; kmet keeps the current cwd, so nil reads as \"no opinion\"."
+  [session]
+  (when-let [cwd (get-in session [:header :cwd])]
+    (let [abs (-> (str cwd) fs/expand-home fs/absolutize fs/normalize str)]
+      (when (fs/directory? abs) abs))))
+
 (defn get-tree
   "Build a tree structure from session entries.
    Returns map of {:id info, :children [...]}. O(n): children are grouped

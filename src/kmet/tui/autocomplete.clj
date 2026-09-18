@@ -150,6 +150,15 @@
 
     :else name))
 
+(defn- base-path-value
+  "The provider's base path: a string, or a 0-arg fn resolved per call. The
+   app passes a fn so the runtime cwd is picked up — pi rebuilds the
+   autocomplete provider on session replacement (setupAutocompleteProvider),
+   kmet resolves it live."
+  [provider]
+  (let [b (:base-path provider)]
+    (if (fn? b) (b) b)))
+
 (defn- get-file-suggestions
   "Directory listing for the given path prefix (pi: readdirSync approach).
    Returns a vector of AutocompleteItem maps."
@@ -280,10 +289,11 @@
   (get-trigger-characters [_this]
     trigger-chars)
 
-  (get-suggestions [_this lines cursor-line cursor-col {:keys [force]}]
+  (get-suggestions [this lines cursor-line cursor-col {:keys [force]}]
     (let [line (or (nth lines cursor-line) "")
           cursor-col (min cursor-col (count line))
-          before (subs line 0 cursor-col)]
+          before (subs line 0 cursor-col)
+          base-path (base-path-value this)]
       (if-let [at-prefix (extract-at-prefix before)]
         (let [suggestions (get-file-suggestions base-path at-prefix)]
           (when (seq suggestions)
@@ -345,7 +355,9 @@
    :commands-fn — thunk returning the current slash commands (maps with
                   :name, :description, optional :argument-hint and
                   :get-argument-completions).
-   :base-path — directory that relative path completion resolves against.
+   :base-path — directory that relative path completion resolves against —
+                a string or a 0-arg fn resolved per call (the app passes a
+                fn so a session's runtime cwd is picked up).
    :trigger-chars — extra auto-trigger characters (default none)."
   [& {:keys [commands-fn base-path trigger-chars]
       :or {commands-fn (constantly []) trigger-chars []}}]

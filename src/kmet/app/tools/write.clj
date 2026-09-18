@@ -15,7 +15,9 @@
   "Write content to a file (create or overwrite)."
   [{:keys [path content]}]
   (try
-    (let [f (io/file path)]
+    ;; relative paths resolve against the runtime cwd (pi: resolveToCwd), not
+    ;; the process cwd — a session resumed from another project
+    (let [f (io/file (tool-util/resolve-tool-path path))]
       ;; Pi: mkdir(dir, {recursive: true}) — skip when the path has no parent
       (when-let [parent (fs/parent f)]
         (fs/create-dirs parent))

@@ -23,6 +23,7 @@
             [kmet.app.keybindings :as app-kb]
             [kmet.app.session :as session]
             [kmet.app.ui.dock :as dock]
+            [kmet.app.ui.footer-data-provider :as fdp]
             [kmet.debug :as debug]
             [kmet.tui.components.input :as input]
             [kmet.tui.core :as tui]
@@ -953,7 +954,13 @@
    (show-session-selector cs session-dir-fn on-select {}))
   ([cs session-dir-fn on-select & [{:keys [current-session-file]}]]
    (let [base-dir (session-dir-fn)
-         cwd-dir (session/session-dir-for-cwd base-dir (str (fs/cwd)))
+         ;; the current-folder scope is the session's project (pi: the
+         ;; runtime cwd), so a session resumed from elsewhere browses that
+         ;; project's sessions
+         cwd-dir (session/session-dir-for-cwd
+                  base-dir
+                  (or (some-> (:footer-provider cs) fdp/fdp-get-cwd)
+                      (str (fs/cwd))))
          tui* (:tui cs)
          ;; late binding: the hide/select/cancel closures resolve the
          ;; selector through this atom once it exists

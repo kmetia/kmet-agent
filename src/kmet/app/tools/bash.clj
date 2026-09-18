@@ -96,7 +96,7 @@
     (try
       (let [result (bash-exec/execute-bash
                     {:command command
-                     :cwd (or (System/getProperty "user.dir") ".")
+                     :cwd (tool-util/cwd)
                      :timeout timeout  ;; nil = no timeout (pi: optional, no default)
                      :signal *cancel-signal*  ;; agent-loop cancel (pi: AbortSignal)
                      :env (when (and expose-session-env? *session-env-fn*)
