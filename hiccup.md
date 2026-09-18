@@ -66,7 +66,7 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `chat_history.clj` | KEEP + DONE (Tier 1 #5) | none — `make-plain-msg`/`make-plain-md-msg` are `hiccup/root`s of `[:container]`/`[:spacer]`/`[:text]`/`[:markdown]` elements; `StatusLine` is a thin record over a root whose body tracks the text atom (the in-place status rewrite resets it); the last four component requires are gone | `ChatHistoryComponent` and the message records stay records (§4) |
 | `session_selector.clj` | DONE (full) | none — both inputs are `[:input]` tags (`:value`/`:cursor`/`:focused?` props over the state mirror; see Phase 2 #3) | none — the body reads state via `tracked-deref` and `hide!` disposes the root (which cascades to the tag-owned inputs) |
 | `login_dialog.clj` | DONE (full) | none — the prompt field is a `[:input]` tag whose row descriptor carries its text/caret and whose emphasis is the dialog's focus flag (Phase 2 #4) | none — chrome is `[:dynamic-border]` / `[:text]` elements and the input is tag-owned |
-| `bash_execution.clj` | DONE | `spinner/make-spinner` (248) spliced into `hiccup/root` (256) | none — long-lived spinner identity intentional |
+| `bash_execution.clj` | DONE | `spinner/make-spinner` (248) spliced into `hiccup/root` (256) | none — long-lived spinner inside a line-based record, §4's measured reason |
 | `tree_selector.clj` | DONE | `make-tree-list` ctor (937); `dialogs/make-input-dialog` (1082); panel `compile-tree` (1099) | none — `TreeList` is a string-direct `track!` leaf by design; the close path disposes the frame + the spliced list |
 | `user_message.clj` | KEEP | `container`/`box`/`md`/`spacer`/`image-block` (89–114) | none (§4) |
 | `custom_message.clj` | KEEP | `container`/`spacer`/`box`/`text`/`md`/`image-block` (81–93,153–155) | none (§4) |
@@ -75,7 +75,7 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `tool_execution.clj` | KEEP | `container`/`box`/`spacer`/`image-block` (221–222,277–279) | none (§4) |
 | `image_block.clj` | KEEP | transient `ic/make-image` per render (54) | none — render-time branch, not a stored tree |
 | `status_indicator.clj` | KEEP | `spinner/make-spinner` host-owned (79) | none |
-| `resource_config.clj` | KEEP / Tier 3 | `input/make-input` (557); render returns string lines directly | full-screen `hiccup/root` (session_selector pattern) only if rewriting the screen anyway |
+| `resource_config.clj` | KEEP / Tier 3 | `input/make-input` (557); render returns string lines directly | full-screen `hiccup/root` (session_selector pattern) only if rewriting the screen anyway — measured §4: 0.001 ms idle, 0.76 ms per change flat to 50 000 rows, so a mechanical port is a small *regression* (~+0.3 ms) and there is no performance case; only the input tag/consistency argument stands |
 | `footer.clj`, `pending_messages.clj`, `loaded_resources.clj` | KEEP | none | string-direct `track!` renders — no tree to migrate |
 | `dock.clj`, `subs.clj`, `model_catalog.clj`, `external_editor.clj`, `custom_dialog_adapter.clj`, `footer_data_provider.clj` | N/A | none | fn component / data / adapter — nothing to migrate; the dock owns the *displacement* and *input* halves of a panel's lifecycle (`mount!`/`clear!` dispose the panel they lift out unless it was mounted `:borrowed?`, and its `::focus-guard` watch hands focus back when the occupant leaves — tui.md §7) |
 
@@ -310,32 +310,61 @@ the same asymmetry the old selectors had).
 
 ## 4. Non-goals (stays imperative)
 
+These keeps are measurement-backed, not taste. Numbers below are from
+2026-09-18, HEAD `562ed80`, babashka (the app's own runtime), width 120,
+min of three means. Re-measure before changing a verdict; method for the
+transcript table: the shipped record tree vs a `hiccup/root` whose body
+splices those same record components vs a body that rebuilds one
+`[:text]` element per assistant/user message from its content.
+
+| messages | record tree | DSL container (splice) | content rebuilt in the body |
+|---|---|---|---|
+| 300  | 1.6 ms | 1.1 ms | 6.6 ms (4×) |
+| 1200 | 4.8 ms | 4.6 ms | 41.3 ms (10×) |
+| 2400 | 8.8 ms | 9.5 ms | 136.4 ms (16×) |
+
+(streaming pass = append 4 chars + render; idle = render only and lands at
+0.9 / 4.1 / 7.4 ms for the record tree, 0.9 / 3.2 / 8.8 for the container
+and 0.4 / 1.2 / 2.3 for the rebuilt body. The rebuilt body's counters show
+*full* reuse — 2N+2 reuses, 1 construct, 1 disposal per pass — so that
+cost is assembling and comparing 2N element vectors per pass, nothing
+re-rendered: it grows with the transcript while the record tree's cost
+stays near-linear with a small constant.)
+
 - **Transcript hot path** — `ChatHistoryComponent`, `UserMessage`,
   `AssistantMessage`, `CustomMessage`, `SkillInvocationMessage`,
   `ToolExecutionComponent`: records with instance storage, `track!`
   caches, theme apply-once, renderer-state / last-component dedup, image
   children lifecycle, streaming reflow, and persistence reading the
-  message maps directly. What must NEVER move to the DSL is message
-  *content* re-derived as data inside a body — a token append would
-  re-run the body and rebuild O(transcript) elements, superlinear
-  (measured: ~6× the record at 300 messages). A DSL **container** that
-  only splices the message records and tracks the messages vector is a
-  different thing: its body re-runs on add/remove, not per token, and it
-  measures on par-or-slightly-better than the record (2400 messages: 6.9
-  vs 7.4 ms per streaming pass; 6.2 vs 6.6 idle). It stays a non-target
-  anyway — it buys a few percent and costs the persistence/lifecycle
-  clarity that is the record's reason to exist. The plain-entry helpers
-  under `chat_history` (§2 — now DSL roots, Tier 1 #5) are the only
-  transcript-adjacent exception.
+  message maps directly. The record tree is the *fastest* of the three
+  designs above; a DSL container that splices the records is parity
+  (±20%, ahead on idle at 1200) and buys nothing, while content re-derived
+  in a body is 4–16× worse and degrades as the transcript grows — exactly
+  the streaming case it would be used in. The plain-entry helpers under
+  `chat_history` (§2 — now DSL roots, Tier 1 #5) are the
+  transcript-adjacent exception: they own no state a body would re-derive.
 - **String-direct `track!` leaves** — `footer`, `pending_messages`,
   `loaded_resources`, `ForkMessageList`, `TreeList`, `TreeSearchLine` /
   `TreeHelpLine`, `ResourceConfigScreen` render, `Retry` / `Compaction` /
   `BranchSummary` indicators: they return plain string lines, not child
-  trees. Wrapping them in hiccup adds reconcile cost for zero benefit.
-- **Intentional foreign splices** — `bash_execution` spinner (animation
-  identity), `login_dialog` border (built once outside the body),
-  `image_block` transient image-per-render, `assistant_message`
-  transient markdown-per-reflow.
+  trees. Measured on an identical 20-row frame with identical styling work
+  per pass: 0.038 ms as strings vs 0.314 ms as `[:text]` elements (8×) per
+  change, 0.000 vs 0.016 ms idle — a body that rebuilds the frame pays
+  every line's construction either way, and reconciling 22 equal-props
+  elements on top of that is pure overhead. `ResourceConfigScreen` is the
+  same shape: 0.001 ms idle, 0.76 ms per selection change, flat from 100
+  to 50 000 rows (it renders the visible window only). Not a performance
+  problem at either end — the cost of a mechanical DSL port is what keeps
+  these leaves imperative.
+- **Record-hosted leaves ("foreign splices")** — `bash_execution`'s
+  spinner, `image_block`'s image, `assistant_message`'s
+  markdown-per-reflow: one reason, not three — they sit inside a record
+  whose render returns terminal-ready lines, so an element can only be
+  spliced as a hand-managed child (tui.md §13.1). Feasibility is not the
+  constraint (the `[:spinner]` / `[:markdown]` / `[:image]` tags exist and
+  patch in place); the cost is the 8× full-frame penalty above plus the
+  rewrite risk. `login_dialog`'s border left this list when it became a
+  `[:dynamic-border]` element.
 
 ## 5. Tiers
 
@@ -359,7 +388,10 @@ the same asymmetry the old selectors had).
   §2.4. Where a tag owns the leaf, verify typing/selection/focus survive
   unrelated prop passes (`:apply` semantics, tui.md §2.3).
 - **Tier 3 (optional, only with a rewrite)** — full-screen roots:
-  `resource_config` → `hiccup/root`. Never a drive-by.
+  `resource_config` → `hiccup/root`. Never a drive-by, and now measured
+  (§4): the string-direct frame costs 0.76 ms per change regardless of row
+  count, so the case is consistency and the tag-owned search field, not
+  speed.
 
 ## 6. Plan
 
