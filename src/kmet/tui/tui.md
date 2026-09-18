@@ -897,6 +897,13 @@ rots); it is enforced at the two removal chokepoints, both identity tests
   also *takes* focus on mount — it alone knows the focus target (a
   selector's inner list, not its chrome).
 
+  Corollary for focus targets: they must be components the app owns and
+  disposes through a guarded path (a panel record, a spliced widget). A
+  DSL-owned tree element must never be the TUI focus target — reconcile
+  retires elements without ever reaching the TUI, so a retired holder
+  could not be released. Inner leaves get *emphasis* by forwarding from
+  the panel that holds input, never the TUI focus itself.
+
 `tui-release-focus!` / `tui-focused-component` are the public halves of
 the rule: a surface owner compares the leaving component against
 `tui-focused-component` and calls `tui-release-focus!` (or relies on the
