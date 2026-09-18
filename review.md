@@ -7,7 +7,7 @@ kmet as a shipped opt-in extension, with the review rubric made
 
 Status: **shipped**. All 5 execution steps landed across
 `72091ce` (host plumbing), `df6b0ae` (extension), `4881904`
-(alignment.md sync), and `5f6aae9` (test fix). The review extension
+(pi-alignment.md sync), and `5f6aae9` (test fix). The review extension
 test suite passes (`bb test` in `extensions/review/`: 39 tests,
 87 assertions, 0 failures).
 
@@ -121,7 +121,7 @@ Done.
 3. `git.clj` → `dialogs.clj` → `core.clj` wiring → `df6b0ae`
 4. Extension tests (`bb test` inside `extensions/review/`), README,
    `extensions/README.md` registration → `df6b0ae`; follow-up test fix
-   `5f6aae9`; `alignment.md` event/API appendix sync `4881904`
+   `5f6aae9`; `pi-alignment.md` event/API appendix sync `4881904`
 5. Final validation: changed-file gates passed per commit; full gates were
    not requested.
 

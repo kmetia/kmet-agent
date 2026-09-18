@@ -1421,7 +1421,7 @@ embedded field.
 ## 15. Design non-goals and rationale
 
 Deliberate boundaries, recorded so the analysis behind them is not redone.
-This is not the gap tracker — kmet↔pi follow-ups live in `alignment.md`;
+This is not the gap tracker — kmet↔pi follow-ups live in `pi-alignment.md`;
 anything listed here changes only on an explicit request.
 
 ### 15.1 Features deliberately out of scope

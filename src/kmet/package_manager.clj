@@ -5,7 +5,7 @@
    1 on errors, 0 on success (pi process.exitCode = 1 + `true` handling).
    kmet has no project-trust model, so -l/--local always works and the
    -a/--approve and -na/--no-approve flags parse as no-ops (they exist for
-   pi CLI parity; project files load unconditionally, see alignment.md)."
+   pi CLI parity; project files load unconditionally, see pi-alignment.md)."
   (:require [clojure.string :as str]
             [babashka.fs :as fs]
             [kmet.app.packages :as pkgs]

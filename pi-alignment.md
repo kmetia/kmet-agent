@@ -160,12 +160,15 @@ reload, quit, help, tools, theme — full parity with pi's built-in command set.
 kmet (`config.clj`) covers: provider/model/thinking/theme/session-dir/
 http-idle-timeout-ms/system-prompt/append-system-prompt/retry
 (enabled/max-retries/base-delay-ms)/enabled-models/hide-thinking-block/
-extensions/skills/prompts/themes dirs, compaction thresholds, terminal image
-display (`:terminal` — show-images/image-width-cells), provider image
-blocking (`:images` — block-images), shell customization (`:shell-path` /
-`:shell-command-prefix` — applied to every bash execution: tool, `!`
-commands, and factory-built tools), `.kmet/SYSTEM.md` +
-`APPEND_SYSTEM.md` discovery, `KMET_PROVIDER`/`KMET_MODEL` env vars.
+auto-compact/show-cache-miss-notices/steering-mode/follow-up-mode/
+tree-filter-mode/output-pad/editor-padding-x/autocomplete-max-visible/
+show-hardware-cursor/extensions/skills/prompts/themes dirs, compaction
+thresholds, terminal image display (`:terminal` — show-images/
+image-width-cells), provider image blocking (`:images` — block-images),
+shell customization (`:shell-path` / `:shell-command-prefix` — applied to
+every bash execution: tool, `!` commands, and factory-built tools),
+`.kmet/SYSTEM.md` + `APPEND_SYSTEM.md` discovery, `KMET_PROVIDER`/
+`KMET_MODEL` env vars.
 
 Missing (pi `docs/settings.md`):
 
@@ -173,18 +176,13 @@ Missing (pi `docs/settings.md`):
 |---|---|
 | `enableInstallTelemetry`, `enableAnalytics`, `trackingId` | anonymous install/analytics pings (pi.dev infrastructure) |
 | `doubleEscapeAction` | double-escape behavior: `tree` / `fork` / `none` |
-| `treeFilterMode` | Done — `:tree-filter-mode` setting + `get-tree-filter-mode` (with validation; invalid values fall back to `:default`); consumed by `app/ui/tree_selector.clj` `:initial-filter-mode` |
-| `editorPaddingX`, `outputPad` | editor/message padding |
-| `autocompleteMaxVisible` | autocomplete dropdown size (kmet constant) |
-| `showHardwareCursor` | hardware cursor for IME support |
 | `tuiMode`, `fullscreenExitOutput`, `fullscreenScrollbar` | fullscreen TUI mode |
-| `httpProxy` | proxy URL applied as HTTP(S)_PROXY (kmet reads proxy env vars only — `ai/proxy.clj`) |
+| `httpProxy` | proxy URL applied as HTTP(S)_PROXY (kmet reads proxy env vars only — `libs/http.cljc`) |
 | `warnings.anthropicExtraUsage` | Anthropic subscription extra-usage warning |
 | `branchSummary.reserveTokens`, `branchSummary.skipPrompt` | branch summarization config |
 | `retry.provider.timeoutMs` / `maxRetries` / `maxRetryDelayMs` | provider/SDK retry tuning |
-| `steeringMode`, `followUpMode` | queue drain mode (kmet hardcodes `:all` in `app/loop.clj`; pi defaults `one-at-a-time`) |
-| `transport`, `websocketConnectTimeoutMs` | provider transport selection |
-| `terminal.clearOnShrink` | terminal display (the `terminal.showImages` / `terminal.imageWidthCells` rows are done — see §2) |
+| `transport`, `websocketConnectTimeoutMs` | provider transport selection (`sse` / `websocket` / `auto`) |
+| `terminal.clearOnShrink` | clear-on-shrink is TUI machinery only (`tui-set-clear-on-shrink!`, the `KMET_CLEAR_ON_SHRINK` env), not a settings key (the `terminal.showImages` / `terminal.imageWidthCells` rows are done — see §2) |
 | `images.autoResize` | image resize before sending (needs a resizer backend — babashka has no ImageIO/AWT; `images.blockImages` is done — see §2) |
 | `markdown.codeBlockIndent`, `markdown.mermaid` | markdown rendering |
 | `enableSkillCommands` | register skills as `/skill:name` commands |
@@ -192,7 +190,7 @@ Missing (pi `docs/settings.md`):
 
 ### 5. Extension API
 
-Aligned (`app/extensions.clj` + `app/event_bus.clj`): input + before-agent-start hooks,
+Aligned (`app/extensions.cljc` + `app/event_bus.clj`): input + before-agent-start hooks,
 provider registration (incl. OAuth), `ctx.models.*` facades, UI registry
 (select/confirm/input/notify/custom/widgets/footer/header/editor/theme/status/
 working-indicator/terminal-input), session append-entry/message/labels,
@@ -279,7 +277,7 @@ pi events (`core/extensions/types.ts`) → kmet status (`app/event_bus.clj` `eve
 | `thinking_level_select` | ✅ `:thinking-level-select` | emitted by `set-thinking-level!` on actual change |
 | `user_bash` | ✅ `:user-bash` | |
 | `input` | ✅ | input hooks (transform/handled) |
-| `before_provider_request` / `before_provider_headers` / `after_provider_response` | ✅ | defined in `event_bus.clj` and bridged to the ai-layer hooks (`ai/hooks.clj`) in `extensions.clj`: emit-event! → hook apply → last non-nil result |
+| `before_provider_request` / `before_provider_headers` / `after_provider_response` | ✅ | defined in `event_bus.clj` and bridged to the ai-layer hooks (`ai/hooks.clj`) in `app/extensions.cljc`: emit-event! → hook apply → last non-nil result |
 | `resources_discover` | ✅ `:resources-discover` | fired after `:session-start`; `extensions/discover-resources!` applies contributed path sets into skills/prompts/themes registries (reloads dedup via `applied-resource-paths`) |
 | `project_trust` | — | out of scope (see locked decisions) |
 

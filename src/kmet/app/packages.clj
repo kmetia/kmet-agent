@@ -2,7 +2,7 @@
   "Package manager + resource resolution (pi: core/package-manager.ts + the
    package part of core/resource-loader.ts — the local directory/file source
    subset; npm and git installs are deliberately out of scope, see
-   alignment.md).
+   pi-alignment.md).
 
    `resolve-package-items` is pi's full resolve pipeline: top-level settings
    resource entries (`:extensions`/`:skills`/`:prompts`/`:themes` — plain
