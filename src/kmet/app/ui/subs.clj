@@ -1,19 +1,25 @@
 (ns kmet.app.ui.subs
-  "Shared derived-state subscriptions for the UI (dsl.md §3.1/§3.2): plain
-   top-level computes def'd once — the def IS the registry. Components deref
-   these instead of receiving the values as constructor arguments, so a
-   change invalidates exactly the subscribed subtrees and no re-theming
-   walk is needed. kmet.tui.hiccup/compute is generic; the app-owned atoms
-   live here (image settings) and in kmet.tui.theme (palette)."
-  (:require [kmet.tui.hiccup :as h]
-            [kmet.tui.theme :as theme]))
+  "Shared state subscriptions for the UI: the app's globally-read atoms
+   (tui.md §4/§9), deref'd by components instead of passed as constructor
+   arguments, so a change invalidates exactly the subscribed subtrees and
+   no re-theming walk is needed. These subs ARE the source atoms — a plain
+   alias, not a compute: there is no derivation to do, `track!` watches the
+   atom and gates on identical?/= exactly like a reaction's notification
+   gate does, and a reaction's per-read cache verification costs about
+   twice an atom deref, paid by every subscriber on every frame. Use
+   kmet.tui.hiccup/compute for actual derivation over deps, not aliasing.
+   Treat the subs as read-only: they ARE the atoms, so a write through a
+   sub name mutates global state past its owner — write the owning atom
+   through its API instead (the theme setters, the settings rows)."
+  (:require [kmet.tui.theme :as theme]))
 
 (def theme-sub
-  "The active theme (pi: the global theme getter) as a reactive ref.
-   Deref inside render bodies — the tracked read subscribes the component,
-   and a theme switch (settings, /theme, custom-file reload) re-derives
-   exactly the subscribed caches on the next frame."
-  (h/compute [theme/theme-atom] identity))
+  "The active theme (pi: the global theme getter) as a subscribable ref —
+   kmet.tui.theme/theme-atom itself. Deref inside render bodies: the tracked
+   read subscribes the component, and a theme switch (settings, /theme,
+   custom-file reload) invalidates exactly the subscribed caches on the next
+   frame."
+  theme/theme-atom)
 
 (def image-settings-atom
   "Live inline-image display settings: {:show-images boolean
@@ -26,5 +32,6 @@
   (atom {:show-images true :image-width-cells 60}))
 
 (def image-settings-sub
-  "The image display settings as a reactive ref (see theme-sub)."
-  (h/compute [image-settings-atom] identity))
+  "The image display settings as a subscribable ref — image-settings-atom
+   itself (see theme-sub on why the sub is the atom, not a compute)."
+  image-settings-atom)

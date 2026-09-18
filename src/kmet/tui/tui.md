@@ -642,6 +642,12 @@ Two usage patterns over the one primitive:
 (defn status-line [_props] [:text {:text (str @agent-status-sub)}])
 ```
 
+A shared sub whose body would be a pure alias of one atom —
+`(hiccup/compute [a] identity)` — should be the atom itself: a reaction
+buys nothing there (no derivation), and its cache-hit verification costs
+roughly twice a plain atom deref, paid by every subscriber every frame.
+`kmet.app.ui.subs/theme-sub` and `image-settings-sub` are such atoms.
+
 There is deliberately no `reg-sub`/`subscribe`. Create computes ONCE per
 instance — one built bare inside a render body leaks a reaction per pass
 (visible as `:computes` climbing in hiccup's `--debug` counters).
@@ -1065,10 +1071,13 @@ Attribute-specific resets (not catch-all `\u001b[0m`) make nested styles
 compose correctly.
 
 The active theme is a reactive input: `theme/theme-atom` (a plain atom).
-Components subscribe through a shared compute — e.g. the app defines
-`kmet.app.ui.subs/theme-sub` = `(hiccup/compute [theme/theme-atom]
-identity)` — instead of receiving theme as a constructor argument; a palette
-switch invalidates exactly the subscribed subtrees. Construction-time
+Components subscribe to it — `kmet.app.ui.subs/theme-sub` is that atom, not
+a wrapper — instead of receiving theme as a constructor argument; a palette
+switch invalidates exactly the subscribed subtrees. The sub is a plain
+alias because there is no derivation to do: `track!` watches the atom and
+gates on `identical?`/`=`, exactly like a reaction's notification gate,
+while a reaction's per-read cache verification costs about twice an atom
+deref and every subscriber pays it on every frame's check. Construction-time
 snapshot reads (`get-current-theme`) remain valid.
 
 Theme definitions are EDN files (`examples/themes/` for format); the

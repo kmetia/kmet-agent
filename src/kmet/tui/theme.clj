@@ -641,10 +641,10 @@
 
 ;; ─── Current theme state (pi: global Theme instance + setTheme machinery) ───
 ;; The active theme as a reactive input (tui.md §9): components
-;; subscribe through kmet.app.ui.subs/theme-sub instead of receiving the
-;; theme as a constructor argument; a palette switch invalidates exactly the
-;; subscribed subtrees. Plain get-current-theme reads remain valid for
-;; construction-time snapshots.
+;; subscribe through kmet.app.ui.subs/theme-sub (= this atom) instead of
+;; receiving the theme as a constructor argument; a palette switch
+;; invalidates exactly the subscribed subtrees. Plain get-current-theme
+;; reads remain valid for construction-time snapshots.
 (defonce theme-atom (atom dark-theme))
 (defonce ^:private current-theme-name (atom nil))
 (defonce ^:private theme-change-callback (atom nil))
