@@ -128,7 +128,7 @@
 ;; ─── Component ─────────────────────────────────────────────────────────────
 
 (defcomponent ScopedModelsSelector nil
-              [root search-input state-atom
+              [root search-ref state-atom
                on-change-atom on-persist-atom on-cancel-atom focused? cache-atom]
 
   (render [this width] (protocols/render (:root this) width))
@@ -229,7 +229,6 @@
         (if (str/blank? (:search st))
           (do (when-let [cb @on-cancel-atom] (cb)) nil)
           (do (swap! state-atom assoc :search "" :selected-idx 0)
-              (input/input-set-value! search-input "")
               nil))
 
         ;; Escape — cancel
@@ -238,16 +237,16 @@
 
         ;; Everything else — the search input
         :else
-        (do (protocols/handle-input search-input data)
-            (let [value (input/input-get-value search-input)]
-              (when (not= value (:search st))
-                (swap! state-atom assoc :search value :selected-idx 0))
-              nil)))))
+        (let [i (h/materialize-ref! _this (:search-ref _this))]
+          (protocols/handle-input i data)
+          (let [value (input/input-get-value i)]
+            (when (not= value (:search st))
+              (swap! state-atom assoc :search value :selected-idx 0))
+            nil)))))
 
-  ;; the root's reaction and the foreign search input are the selector's
-  ;; lifecycle: show-scoped-models-selector unwinds both on close
+  ;; the root's reaction and the tag-owned search field are the selector's
+  ;; lifecycle: show-scoped-models-selector unwinds the root on close
   (dispose [this]
-    (protocols/dispose (:search-input this))
     (protocols/dispose (:root this))))
 
 ;; ─── Rendering helpers (pi refresh / updateList / getFooterText) ──────────
@@ -327,9 +326,11 @@
 (defn- scoped-models-body
   "The selector tree as a reactive body (dsl.md): the list window, the
    footer and the selected model's info block re-derive from the state
-   atom; the search input splices foreign. BORDER-FN is created once per
-   selector so the border's :color-fn keeps identity across passes."
-  [state-atom search-input border-fn]
+   atom; the search field is a tag-owned `[:input]` whose text is the
+   state's `:search` and whose emphasis is the panel's focus flag.
+   BORDER-FN is created once per selector so the border's :color-fn keeps
+   identity across passes."
+  [state-atom search-ref focused? border-fn]
   (fn [_props]
     (let [th (theme/get-current-theme)
           st (r/tracked-deref state-atom)
@@ -350,7 +351,9 @@
                   (str "Session-only. " (key-or "app.models.save" "ctrl+s")
                        " to save to settings."))]
        [:spacer {:lines 1}]
-       search-input
+       [:input {:ref search-ref
+                :value (:search st)
+                :focused? (r/tracked-deref focused?)}]
        [:spacer {:lines 1}]
        (row-elements th st filtered selected start-idx end-idx)
        [:spacer {:lines 1}]
@@ -375,22 +378,22 @@
                   :selected-idx 0
                   :search ""
                   :dirty false})
-        search-input (input/make-input)
         ;; stable identity across passes — a fresh color-fn per body run
         ;; would decline the border patch and rebuild it every time
         border-fn (fn [s] (theme/fg (theme/get-current-theme) :accent s))
+        focused? (atom false)
         sel (map->ScopedModelsSelector
              {:root nil
-              :search-input search-input
+              :search-ref (h/ref)
               :state-atom st
               :on-change-atom (atom on-change)
               :on-persist-atom (atom on-persist)
               :on-cancel-atom (atom on-cancel)
-              :focused? (atom false)
+              :focused? focused?
               :cache-atom (atom nil)})]
     ;; rows/footer are a tracked root body — no refresh call, the state
     ;; change alone re-derives
-    (assoc sel :root (h/root (scoped-models-body st search-input border-fn)))))
+    (assoc sel :root (h/root (scoped-models-body st (:search-ref sel) focused? border-fn)))))
 
 ;; ─── Public helpers ────────────────────────────────────────────────────────
 
@@ -471,11 +474,9 @@
   [sel]
   (:enabled-ids @(:state-atom sel)))
 
-;; ─── IFocusable — forward to the search input (IME cursor positioning) ─────
+;; ─── IFocusable — the panel's flag; the tree derives the field's emphasis ──
 
 (extend-type ScopedModelsSelector
   protocols/IFocusable
   (focused [this] @(:focused? this))
-  (set-focused! [this val]
-    (reset! (:focused? this) val)
-    (protocols/set-focused! (:search-input this) val)))
+  (set-focused! [this val] (reset! (:focused? this) val)))
