@@ -63,8 +63,8 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `settings_selector.clj` | DONE | none — `[:settings-list]` element under a `hiccup/ref`, read back right after `compile-tree`; the `:on-change` case hoisted to a named local, escape wired through the tag's `:on-escape`, one `dispose-tree!` unwinds the whole tree | none (Phase 2 #2) |
 | `tool_renderers.clj` | DONE | none — every renderer assembles a `h/compile-tree` (the last imperative legs, `render-edit-result`'s error branch, `render-bash-call` and `render-bash-result`, converted; the mangled token-per-line block reflowed, the collapsed output cap hoisted to `bash-result-preview-lines`) | none (Phase 1 #4) |
 | `chat_history.clj` | KEEP + Tier 1 helpers | `make-plain-msg` (204–206), `make-plain-md-msg` (213–215), `StatusLine` (249–250) | Tier 1 optional: helpers → `[:container {} [:spacer] [:text/:markdown/:truncated-text]]`; `ChatHistoryComponent` itself stays a record |
-| `session_selector.clj` | DONE (pattern) | 2× `input/make-input` (860–861); `hiccup/root` (900) | Tier 2 optional: `[:input {:ref ...}]`; low priority, works as-is — the body reads state via `tracked-deref` and `hide!` disposes the root + both inputs |
-| `login_dialog.clj` | DONE | `input/make-input` (308); `db/make-dynamic-border` built once outside body (323); `hiccup/root` (327) | none — border-once-outside is the documented identity pattern; input could go `[:input]` (Tier 2, optional) |
+| `session_selector.clj` | DONE (pattern) | 2× `input/make-input` — deliberate foreign splices (see Phase 2 #3) | none — the body reads state via `tracked-deref` and `hide!` disposes the root + both inputs |
+| `login_dialog.clj` | DONE | `input/make-input` as a deliberate foreign splice (see Phase 2 #4); `db/make-dynamic-border` built once outside the body | none — border-once-outside is the documented identity pattern, and the input is the dialog's long-lived prompt field (pi: `this.input`) |
 | `bash_execution.clj` | DONE | `spinner/make-spinner` (248) spliced into `hiccup/root` (256) | none — long-lived spinner identity intentional |
 | `tree_selector.clj` | DONE | `make-tree-list` ctor (937); `dialogs/make-input-dialog` (1082); panel `compile-tree` (1099) | none — `TreeList` is a string-direct `track!` leaf by design; the close path disposes the frame + the spliced list |
 | `user_message.clj` | KEEP | `container`/`box`/`md`/`spacer`/`image-block` (89–114) | none (§4) |
@@ -341,10 +341,12 @@ the same asymmetry the old selectors had).
   never `^:slow`); watch `hiccup/counters` (`bodies-run` climbing on
   idle frames = inline-callback trap).
 - **Tier 2 (one commit per file + interaction test)** — stateful leaves
-  to tags: `dialogs` (`:select-list`, `:input`), `settings_selector`
-  (`:settings-list`), selector search/rename inputs (`:input` + `:ref`,
-  §3.2). No component API changes are required. Verify
-  typing/selection/focus survive unrelated prop passes (`:apply`
+  to tags: `dialogs` (`:select-list`, `:input`) and `settings_selector`
+  (`:settings-list`) are DONE; the session-selector and login-dialog
+  inputs are documented KEEPs (Phase 2 #3/#4 — long-lived, mode-moving
+  instances, which foreign splices model better than owned elements). No
+  component API changes were required. Where a tag does own the leaf,
+  verify typing/selection/focus survive unrelated prop passes (`:apply`
   semantics, tui.md §2.3).
 - **Tier 3 (optional, only with a rewrite)** — full-screen roots:
   `resource_config` → `hiccup/root`. Never a drive-by.
@@ -450,12 +452,23 @@ commit stays behavior-neutral.
    at 100/60/30 cols, two-downs selection, a search filter, cleared
    search, escape restoring the dock) and a new `show-settings`
    interaction test (dock + focus target, filter/clear, escape unwinds).
-3. `session_selector` search/rename inputs — `[:input {:ref ...}]`;
-   `forward-to-search!` reads the value back from the deref'd instance;
-   rename submit wired through the deref after mount. (Its body already
-   reads the state atom through `tracked-deref` and `hide!` disposes the
-   root + both inputs, so only the input tags remain.)
-4. `login_dialog` input — optional, works as-is.
+3. **SKIPPED (documented) — `session_selector` search/rename inputs.**
+   The two inputs are mutually exclusive branches of the root body (list
+   mode splices the search input, rename mode the rename input). A
+   DSL-owned `[:input]` element is disposed when it leaves the tree
+   (`retire-item!`), so tagging them would destroy and rebuild the input
+   on every list⇄rename switch — losing the instance, the cursor and any
+   in-progress composition (IME), and forcing the rename prefill out of
+   `enter-rename-mode!` into state props. pi holds both as long-lived
+   fields (`this.searchInput`, `RenamePanel.renameInput`) and moves the
+   *instance* between containers, which is exactly what a foreign splice
+   does here — so this file is pi-faithful as it stands. Revisit only if
+   the inputs' chord/keybindings need the tag's `:apply` semantics.
+4. **SKIPPED (documented) — `login_dialog` input.** Same shape: the input
+   is the dialog's long-lived prompt field (pi: `this.input`),
+   the rows atom adds/removes its row across prompts, and
+   `show-input-prompt!` clears it *between* renders — all instance-state
+   interactions the tag would push into props for no behavioral gain.
 
 ### Phase 3 — only with a rewrite
 
