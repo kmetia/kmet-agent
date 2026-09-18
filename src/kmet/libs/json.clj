@@ -2,9 +2,9 @@
   "JSON encode/decode boundary for kmet and its shipped extensions (pi:
    the data.json npm package + the JSON.stringify/parse global). All JSON
    touches funnel through this namespace so the JSON engine is swappable
-   (clojure.data.json, the JSON library babashka bundles, today —
-   jolt-port.md M1 notes no JSON lib is in the Jolt stdlib, so the swap
-   point is this file alone).
+   (clojure.data.json, the JSON library babashka bundles — and a plain
+   Maven dep on Jolt, where deps resolve natively — so the swap point is
+   this file alone).
 
    The vars below ARE clojure.data.json's own fns (def alias — no wrapper
    layer, no behavior drift): data.json's lazy parse-string, keyword

@@ -1,6 +1,6 @@
 # jolt/ — kmet's RFC 0014 provider lib
 
-kmet's RFC 0014 provider scaffolding (jolt-port.md §9). This directory is a
+kmet's RFC 0014 provider scaffolding. This directory is a
 self-contained library: `jolt/deps.edn` declares its source root and its
 `:jolt/provides` (RFC 0014); kmet's root `deps.edn` pulls it in as
 `{:local/root "jolt"}`. It is **inert on bb/JVM** — nothing on the bb

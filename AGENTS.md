@@ -237,8 +237,7 @@ extension contract root: namespaces extensions depend on, init/shutdown, api).
 ```
 
 ### jolt/ — the RFC 0014 provider contract
-`jolt/` is kmet's RFC 0014 provider slot (details: jolt/README.md,
-jolt-port.md §9). **Empty by design**: the JDK gaps it was built for —
+`jolt/` is kmet's RFC 0014 provider slot (details: jolt/README.md). **Empty by design**: the JDK gaps it was built for —
 the `java.net.http.HttpTimeoutException` ctor, the multi-arg
 `java.net.URI` ctors, `ProcessBuilder` File redirects,
 `SocketOutputStream.write(byte[])`, `LinkedBlockingQueue` and the Base64

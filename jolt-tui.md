@@ -22,18 +22,20 @@ Source of truth: `src/kmet/tui/tui.md` (package docs),
 `src/kmet/tui/core.clj` (input/render loop to reimplement against).
 Jolt API refs: `jolt-lang.github.io/docs/native-interop.html`,
 `docs/host-interop.html`.
-Companion: `jolt-port.md` (whole-repo port report; this file is its TUI
-deep-dive).
+Companion: `jolt-port.md` (the port's remaining work; this file is its
+TUI deep-dive).
 
 ---
 
 ## 0. Status
 
-### Current (2026-09-11): the terminal adapter exists on Unix
+### Current (2026-09-18): the terminal adapter exists on Unix
 
-**Implemented and verified end to end on `jolt v0.8.6-72-g0f7d1a11`
-(WSL2 x86_64).** The abstraction was first made total on bb/JVM (no
-behavior change), then the Jolt backend landed:
+**Implemented and verified end to end** — first on `jolt
+v0.8.6-72-g0f7d1a11` (WSL2 x86_64), then re-verified on Termux/aarch64
+`jolt v0.8.8-103-g7b234243` (the focused suites and the nested-pty test
+below). The abstraction was first made total on bb/JVM (no behavior
+change), then the Jolt backend landed:
 
 - **`kmet.tui.terminal` is protocol + shared logic only.** The platform
   protocol is lean — `start!` / `stop!` / `started?` / `write-output` /
@@ -65,8 +67,9 @@ behavior change), then the Jolt backend landed:
   `ENABLE_VIRTUAL_TERMINAL_INPUT`, `WaitForSingleObject` + `ReadFile`,
   `GetConsoleScreenBufferInfo` — the same three calls as pi's
   `win32-platform.c`).
-- **Mouse tracking** is still untracked; the `kmet.libs.terminal` constants
-  are ready.
+- **Mouse tracking** is not implemented (no enable/disable sequences);
+  the key parser already recognizes and filters mouse events (`keys.clj`,
+  §7.7).
 
 Verified with the pty scripts (`scripts/pty_capture.py`):
 
@@ -75,14 +78,14 @@ Verified with the pty scripts (`scripts/pty_capture.py`):
 | FFI round-trip in a pty | raw size 90×25 via `ioctl`; `read` of `hi👋` → `[104 105 128075]`; cooked restore |
 | `jolt test kmet.libs.test-terminal` | 4 tests / 17 assertions green (decoder) |
 | `jolt test kmet.tui.test-terminal-native` | 1 test / 5 assertions green (tty-free surface) |
-| `jolt test-ext kmet.tui.test-terminal-native` | 1 test / 4 assertions green (nested jolt in a real pty) |
-| `jolt test-ext kmet.tui.test-render-loop` | **5 tests / 30 assertions green** (the suite drives a protocol stub, no JLine) |
+| `jolt test-ext kmet.tui.test-terminal-native` | 1 test / 7 assertions green (nested jolt in a real pty) |
+| `jolt test-ext kmet.tui.test-render-loop` | **12 tests / 77 assertions green** (the suite drives a protocol stub, no JLine) |
 | real kmet TUI on Jolt | `jolt run -m kmet.core` in a pty: renders, `/quit` exits 0, cursor restored (`\u001b[?25h`) |
 | suspend/resume shape | create → raw → read → stop, twice in one process: both rounds read their input |
 
-Follow-ups: re-verify on Termux/bionic (this run was glibc/WSL2;
-`cfmakeraw` exists in bionic but confirm on device), Windows (§6), and a
-Jolt-host variant of the pty app smoke — the existing
+Rows 2–5 re-verified 2026-09-18 on Termux/aarch64 — the nested-pty row
+runs the real raw-mode/read path under bionic. Follow-ups: Windows (§6)
+and a Jolt-host variant of the pty app smoke — the existing
 `modes.test-overlay-input-smoke` spawns `bb run` (testing bb's TUI even under
 the Jolt runner), so it is `^:bb-only`.
 Known divergences from the JLine backend: it uses stdin/stdout directly
@@ -119,8 +122,8 @@ binding), raw mode Unix/Windows (§§5–6), the input pipeline (§7), key
 parsing (§8), concurrency/host-shims (§9), what ports unchanged (§10),
 packaging (§11), a sketch (§12), next steps (§13) and the evaluated-and-
 rejected babashka.ffi variant (§14). The §§4–6 FFI notes were confirmed
-against the real jolt checkout while implementing; the three deltas listed
-above are the only places the landed code deviates from the samples.
+against the real jolt checkout while implementing; §5 now shows the landed
+shape, §6 is the Windows design still to implement.
 
 ---
 
@@ -158,11 +161,12 @@ Jolt backend (`terminal_native.cljc`) supplies the same primitive set
 surface the bb backend takes from JLine:
 
 - **raw on/off + handle acquire**: `.enterRawMode`, `.reader`/`.writer`,
-  `.close` (`terminal.clj:55-75`).
+  `.close` (`terminal_jline.clj`).
 - **timed reads**: `NonBlockingReader.read(timeout)` — a bounded `100ms`
-  read plus a `1ms` drain batch (`core.clj:1435,1452`), `.ready`/`.read` in
-  `drain-input!` (`terminal.clj:180-181`). A blocking read deadlocks close on
-  aarch64 Linux (comment at `core.clj:1432-1434`, jline3 #1909).
+  read plus a `1ms` drain batch (`core.clj`'s input reader), `.ready`/`.read`
+  in the backend's `read-input` (`drain-input!` is backend-neutral in
+  `terminal.clj`). A blocking read deadlocks close on aarch64 Linux (the
+  deadlock note in `core.clj`, jline3 #1909).
 - **size**: live `.getWidth`/`.getHeight` polled by the render loop — every
   ~16ms while frames are being requested, at most 100ms apart while parked
   (`core.clj` `IDLE-HEARTBEAT-MS`) — because WINCH signal handlers don't
@@ -170,10 +174,10 @@ surface the bb backend takes from JLine:
   callback.
 - **portability**: `TerminalBuilder/terminal` opens `/dev/tty`, detects the
   terminal type, and handles the Windows console. Babashka bundles JLine
-  4.3.1, so this costs zero extra deps.
+  4.4.0, so this costs zero extra deps.
 
 Half the work is already manual: `run-stty`/`capture-stty-snapshot`
-(`terminal.clj:28-50`) saves `stty -g` before JLine construction because
+(`terminal_jline.clj`) saves `stty -g` before JLine construction because
 JLine's FFM termios mapping writes baud `0` on construction and its own
 restore leaves speed `0`.
 
@@ -191,7 +195,7 @@ On bb/JVM there is no reason to do this (re-solve solved bugs to save a
 bundled dep). On Jolt there is no JVM, so it is mandatory — §§4–5 below.
 
 Decision (2026-09-06, probed on bb 1.13.220 / libffi 3.8.0): JLine stays
-the bb default — bundled 4.3.1, zero packaging cost, and the baud-`0` +
+the bb default — bundled 4.4.0, zero packaging cost, and the baud-`0` +
 aarch64 close-deadlock workarounds already hold. `babashka.ffi` can express
 the same §§4–6 bindings (translation in §14), but replacing JLine with it
 is rejected: same ~1wk Unix + 2–4wk Windows effort as the Jolt adapter for
@@ -436,62 +440,62 @@ and `ex-info` are portable. (Also: `tcsetattr`'s fd param is the same
 is fine, no `layout` needed.)
 
 Reads: raw mode makes bytes available immediately, but `read-char`-style
-port reads still buffer. Read fd 0 directly on a dedicated reader thread
-(Jolt's Chez backend runs `future` bodies on real shared-heap OS threads,
-so a captured atom is shared). Mark the call `:blocking`:
+port reads still buffer. The landed backend never parks a blocking read:
+`read-input` polls first (`poll(2)` with the caller's timeout, then one
+`read(2)` into a 1KB buffer), so the reader thread wakes on the timeout
+and re-checks the stop flag — `stop!` needs no wakeup byte or fd close.
+Both calls are `:blocking` (they run off the fiber carrier):
 
 ```clojure
+(ffi/defcfn c-poll "poll" [:pointer :ulong :int] :int :blocking)
 (ffi/defcfn c-read "read" [:int :pointer :size_t] :ssize_t :blocking)
 
-(defn start-reader! [on-bytes]
-  ;; on-bytes: (fn [byte-array n]) — hand batches to the input buffer (§7).
-  ;; read-into! fills an EXISTING buffer (no per-chunk array); byte-array elts
-  ;; are signed — mask with (bit-and b 0xFF) when reassembling UTF-8.
-  (future
-    (ffi/with-alloc [buf 65536]
-      (let [frame (byte-array 65536)]
-        (loop []
-          (let [n (c-read STDIN-FD buf 65536)]
-            (when (pos? n)
-              (ffi/read-into! buf frame 0 n)
-              (on-bytes frame n)
-              (recur))))))))
+(def pollfd-layout
+  (ffi/layout [:struct [[:fd :int] [:events :short] [:revents :short]]]))
+
+(defn read-once!
+  "Poll FD for at most TIMEOUT-MS, then read one bufferful."
+  [fd timeout-ms]
+  (ffi/with-alloc [pfd (ffi/sizeof pollfd-layout)]
+    (ffi/write-field pfd pollfd-layout [:fd] fd)
+    (ffi/write-field pfd pollfd-layout [:events] 1)  ; POLLIN
+    (when (pos? (c-poll pfd 1 timeout-ms))
+      ;; POLLIN → read; POLLERR|HUP|NVAL (0x38) → a gone pty, back off.
+      (let [revents (ffi/read-field pfd pollfd-layout [:revents])]
+        (when (pos? (bit-and revents 1))
+          (ffi/with-alloc [buf 1024]
+            (let [n (c-read fd buf 1024)]
+              (when (pos? n) (ffi/read-array buf n)))))))))
 ```
 
-Match kmet's batching: feed one burst per pass (kmet drains everything
-already queued behind the first char — `core.clj:1435-1460` reader loop) so a
-multi-byte sequence never straddles a scheduling stall byte-by-byte (that
-stall is what flushed phantom Escapes and leaked `[200~` as text). A close
-path must unblock the parked `read` (kmet uses timed reads for exactly this
-— `core.clj:1432-1434` deadlock note); with a blocking `read`, close the fd or
-send a signal/wakeup byte from `stop!` instead (`future-cancel` cannot
-substitute here: a thread blocked in a `__collect_safe` foreign call only
-sees the interrupt when it returns to Scheme — `concurrency.ss:1205-1206` — §9).
+UTF-8 is reassembled across read boundaries (`utf8-decode` keeps the
+partial tail per terminal — a read boundary is not a character boundary),
+and a dead pty (`POLLHUP`/`POLLERR`/`POLLNVAL`) backs off instead of
+spinning. Feed one burst per pass — kmet's reader drains everything
+already queued behind the first char (`core.clj`) so a multi-byte sequence
+never straddles a scheduling stall byte-by-byte (that stall is what flushed
+phantom Escapes and leaked `[200~` as text); the same `read-input` bound
+serves drain-on-exit.
 
-Size: cache and poll; `stty size` as a subprocess per poll is too
-heavy. Preferred is `ioctl(TIOCGWINSZ)` via FFI (bare-`:&` form, since the
-third arg is an out-pointer — `ffi.clj:1337-1360`), falling back to `stty
-size` at a slow cadence:
+Size: no subprocess. `ioctl(TIOCGWINSZ)` answers, with a `COLUMNS`/`LINES`
+env fallback (pi: `process.stdout.columns || env || 80/24`). The landed
+shape (`terminal_native.cljc`):
 
 ```clojure
-;; winsize = {ws_row, ws_col, ...} unsigned shorts; read back fields by offset.
-;; os.name answers "Linux" / "Mac OS X" (`host-static-methods.ss:905-907`
-;; — match strings, not keywords) / "Windows" — the TIOCGWINSZ cond below
-;; only needs the Mac branch.
-(def TIOCGWINSZ
-  (let [os (str (System/getProperty "os.name"))]
-    (cond (str/includes? os "Mac") 0x40087468
-          :else 0x5413)))
+;; winsize is 4× unsigned short {ws_row, ws_col, ws_xpixel, ws_ypixel} —
+;; rows = uint16 @0, cols = uint16 @2. ioctl is variadic (int fd, unsigned
+;; long request, ...): bind the bare-:& form and pass the out-pointer as
+;; the tail. os.name answers "Linux" / "Mac OS X" / "Windows" (match
+;; strings, not keywords) — the cond only needs the Mac branch.
+(def tiocgwinsz
+  (if (str/includes? (str (System/getProperty "os.name")) "Mac")
+    0x40087468
+    0x5413))
 
-;; Probe shape (not yet run — verify offsets + principles before trusting):
-;; winsize is 4× unsigned short {ws_row, ws_col, ws_xpixel, ws_ypixel},
-;; so rows = uint16 @0, cols = uint16 @2. ioctl is variadic
-;; (int fd, unsigned long request, ...) — bind bare-:& and pass the
-;; out-pointer as the tail:
-#_(ffi/defcfn c-ioctl "ioctl" [:int :ulong :&] :int)
-#_(ffi/with-alloc [ws 8]
-    (when (zero? (c-ioctl STDIN-FD TIOCGWINSZ ws))
-      {:rows (ffi/read ws :uint16) :cols (ffi/read ws :uint16 2)}))
+(ffi/defcfn c-ioctl "ioctl" [:int :ulong :&] :int)
+(ffi/with-alloc [ws 8]
+  (when (zero? (c-ioctl 0 tiocgwinsz ws))
+    {:rows (ffi/read ws :uint16) :cols (ffi/read ws :uint16 2)}))
 ```
 
 ---
@@ -572,7 +576,8 @@ and one shared parser handles it (§8).
 
 `read-char` + a 5-case `case` (up/down/left/right/shift-tab) will appear to
 work and then corrupt keys in production. `core.clj`'s machinery exists for
-observed bugs; port the behavior, not necessarily line-for-line:
+observed bugs — and it is shared code, already running on both hosts; the
+backend's only job is to feed it bytes. The behavior to preserve:
 
 1. **Kitty negotiation + fallback** (`libs/terminal.clj`, `core.clj`
    interceptors). Send `\u001b[>5u\u001b[?u\u001b[c` (flags 1+4 —
@@ -721,16 +726,19 @@ re-runs (`hiccup/render-lines`, no tty, no sleeps).
   static natives); linking needs Chez's kernel dev files (`libkernel.a`,
   `scheme.h`) + `cc` — both ship with the prebuilt jolt binary, NOT with
   distro `chezscheme` packages (per README).
-  **Verified 2026-09-11: `jolt build -m kmet.core` produces a working TUI
-  binary on Unix** — the native FFI terminal (raw mode, reads, size,
-  bracketed paste) works inside the AOT image, and the model catalogs load
-  from the embedded resources. One build hazard to know: with the `io.github.jolt-lang/time` git dep on the
-  classpath, a built binary dies at startup on
-  `unbound fn jolt.time.impl/register-type!` unless the build's analysis
-  resolves a gitlib-only `java.time` class in-process (open upstream — see
-  `jolt-bugs.md`); kmet's graph currently does, and an early
-  `(:require [jolt.time])` in the entry namespace is the workaround if that
-  ever stops being true.
+  **Verified and automated on Unix.** `kmet.tasks.build-jolt` (the `jolt
+  dist` branch) drives `jolt build -m kmet.core` and bakes the app in:
+  `deps.edn` `:jolt/build {:embed ["src" "target/kmet-version"]}` carries
+  the model catalogs and the built-as version, and the artifact lands in
+  `dist/kmet-<ver>-jolt<jv>-<platform>`. The native FFI terminal (raw
+  mode, reads, size, bracketed paste) works inside the AOT image, and the
+  model catalogs load from the embedded resources. One build hazard to
+  know: with the `io.github.jolt-lang/time` git dep on the classpath, a
+  *minimal* closure can die at startup on
+  `unbound fn jolt.time.impl/register-type!` (the jolt#944 build-time gap;
+  `perf.md` records it) — kmet's own graph resolves a `java.time` class
+  while the build analyzes, and an early `(:require [jolt.time])` in the
+  entry namespace is the workaround if that ever stops being true.
 - `jolt-lang/glimmer-tui` (evaluated 2026-09-06): the one Jolt terminal lib
   — terminal backend for `glimmer`, painting through `ncursesw` via
   `jolt.ffi` (ncurses 6.0 subset only; Unix-only per its `:jolt/native`
@@ -795,26 +803,14 @@ re-runs (`hiccup/render-lines`, no tty, no sleeps).
 
 ## 13. Next steps
 
-1. Prove the FFI slice first: `tcgetattr`/`cfmakeraw`/`tcsetattr` round-trip
-   + blocking `read` on Unix; `GetStdHandle`/`GetConsoleMode`/
-   `SetConsoleMode` + VT-input on Windows (real Windows host).
-2. ~~Port `keys` + `libs.terminal` with their tests under irregex.~~
-   **Done** — green on Jolt unchanged (see §0).
-3. ~~Port `reakt` → `hiccup` → components headless (`render-lines`).~~
-   **Done, and better than planned**: no porting was needed — the whole
-   component set and the headless render surface run on Jolt as-is (§0).
-4. Build the `ITerminal` adapter (§§5–6), then the §7 input pipeline.
-   This unblocks the red `test-render-loop` set (§0). **Done 2026-09-11
-   (Unix)** — both the render-loop suite and the new native pty test are
-   green on Jolt; Windows (§6) remains.
-5. Retarget the render loop's terminal I/O — overlays, focus/modality and
-   the diff logic are already portable (§10); drain-on-exit and the
-   size/timer plumbing are the JVM-bound halves. **Done** — `core.clj`
-   reads `columns`/`rows`, times out `read-input`, and drains through the
-   protocol.
-6. **Widget library: done** (input/editor/select/settings lists are green
-   on Jolt — §0). Remaining here: mouse tracking (`libs.terminal`
-   constants already cover the protocol) and the Windows backend.
+1. **Windows backend** (§6): `GetStdHandle`/`GetConsoleMode`/
+   `SetConsoleMode` + `ENABLE_VIRTUAL_TERMINAL_INPUT`,
+   `WaitForSingleObject` + `ReadFile`, `GetConsoleScreenBufferInfo` —
+   `terminal_native.cljc`'s Windows error is the landing spot.
+2. **Mouse tracking** — the enable/disable sequences are not implemented;
+   the key parser already recognizes and filters mouse events (§7.7).
+3. **Jolt-host pty app smoke** — `modes.test-overlay-input-smoke` spawns
+   `bb run` and is `^:bb-only`; a Jolt-host variant is the follow-up.
 
 ---
 

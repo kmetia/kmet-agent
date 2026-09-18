@@ -18,7 +18,7 @@
 
    The runner is TOLERANT: every test namespace is required inside a try.
    A namespace that cannot load under the host (a babashka-internal
-   require, a JDK class gap, a java.time.* gap — jolt-port.md M1/M6) is
+   require, a JDK class gap, a java.time.* gap — see jolt-port.md) is
    reported and skipped, never fatal; the remaining namespaces run. This
    is what lets the same runner serve `bb test` and `jolt test` while the
    Jolt port is staged. On a full run every unloadable namespace is listed
