@@ -8,13 +8,16 @@
    The dynamic content is a mounted hiccup tree (dsl.md stage 4): show-*
    mutations are pure swaps on a row-descriptor atom, the root's reaction
    re-derives on change, and reconcile reuses unchanged rows (equal props)
-   plus the input record (identity splice). The defcomponent shell stays for
-   IFocusable/handle-input — focus and key routing are imperative (dsl.md
-   §5 input boundary)."
+   while the prompt field is a tag-owned `[:input]` whose text, caret and
+   emphasis are state fed back as `:value`/`:cursor`/`:focused?` props. The
+   defcomponent shell stays for IFocusable/handle-input — key routing stays
+   imperative (dsl.md §5 input boundary): the panel forwards to the input
+   through its ref."
   (:require [babashka.process :as p]
             [clojure.string :as str]
             [kmet.app.keybindings :as app-kb]
             [kmet.tui.components.input :as input]
+            [kmet.tui.keybindings :as kb]
             [kmet.tui.core :as tui]
             [kmet.tui.hiccup :as hiccup]
             [kmet.tui.macros :refer [defcomponent]]
@@ -43,8 +46,9 @@
 
 ;; ─── Content rows ──────────────────────────────────────────────────────────
 ;; Row descriptors: {:row :spacer} | {:row :text :text s} (padding 1 0) |
-;; {:row :input} (the live Input record) | {:row :submitted :text s}
-;; (`> answer`, padding 0 0).
+;; {:row :input :value s :caret n} (the prompt field: its text and caret ARE
+;; state — the tree feeds them to the tag-owned [:input] as props) |
+;; {:row :submitted :text s} (`> answer`, padding 0 0).
 
 (def ^:private spacer-row {:row :spacer})
 
@@ -185,19 +189,37 @@
   (repaint! d)
   nil)
 
+(defn- mirror-input!
+  "Copy the live prompt field's text and caret into its row descriptor — the
+   dialog's state for the field. The tree derives :value/:cursor from it, so
+   a re-prompt that moves (or clears) the row is an ordinary state change
+   rather than an imperative poke at a held instance."
+  [d]
+  (when-let [i (deref (:input-ref d))]
+    (let [value (input/input-get-value i)
+          caret @(:cursor-atom i)]
+      (swap! (:rows-atom d)
+             (fn [rows]
+               (mapv (fn [row]
+                       (if (= :input (:row row))
+                         (assoc row :value value :caret caret)
+                         row))
+                     rows)))))
+  nil)
+
 (defn- show-input-prompt!
   "Common tail of show-prompt!/show-manual-input!: append MESSAGE rows + the
-   input row + hint, clear the input, return a promise delivering the
-   submitted string (or the cancellation ex-info). Exactly one :input row
-   exists at a time — a previous one (e.g. the initial bare input) MOVES to
-   the new position (pi: Container.addChild moves the component), so the
-   same Input instance never renders twice."
+   input row + hint, return a promise delivering the submitted string (or the
+   cancellation ex-info). Exactly one :input row exists at a time — a
+   previous one (e.g. the initial bare input) MOVES to the new position (pi:
+   Container.addChild moves the component). The new row carries an empty
+   `:value`/`:caret`, which is the clear pi does by hand: the props differ
+   from the moved instance's, so the tag writes the fresh text through."
   [d rows hint-line]
   (reset! (:rows-atom d)
           (into (vec (remove #(= :input (:row %)) @(:rows-atom d)))
-                (concat rows [{:row :input} (text-row hint-line)])))
-  (input/input-set-value! (:input-comp d) "")
-  (reset! (:cursor-atom (:input-comp d)) 0)
+                (concat rows [{:row :input :value "" :caret 0}
+                              (text-row hint-line)])))
   (let [p (promise)]
     (reset! (:input-resolver-atom d) #(deliver p %))
     (reset! (:input-rejecter-atom d) #(deliver p %))
@@ -240,33 +262,32 @@
 ;; ─── Component ─────────────────────────────────────────────────────────────
 
 (defcomponent LoginDialog nil
-              [root rows-atom input-comp tui input-resolver-atom
+              [root rows-atom input-ref tui input-resolver-atom
                input-rejecter-atom on-complete-atom focused? cache-atom]
 
   (render [this width] (protocols/render (:root this) width))
 
   (handle-input [this data]
-    ;; Always forward to the Input component — it handles all keys including
-    ;; Escape (via its on-escape callback) and Enter (via on-submit).
-    ;; This works whether the Input is currently mounted in the rows or not.
-    (protocols/handle-input (:input-comp this) data))
+    ;; Forward to the prompt field when the tree mounts one — it handles every
+    ;; key, Escape (via :on-escape) and Enter (via :on-submit) included. In the
+    ;; URL/device-code states pi mounts no Input at all, so the cancel key is
+    ;; answered here: it is the only key those states respond to.
+    (if-let [i (hiccup/materialize-ref! this (:input-ref this))]
+      (do (protocols/handle-input i data)
+          (mirror-input! this))
+      (when (kb/matches-key (kb/get-global-keybindings) data "tui.select.cancel")
+        (login-dialog-cancel! this))))
 
   (dispose [this]
-    ;; Clear input callbacks to prevent any stale firings after dispose
-    (input/input-set-on-submit! (:input-comp this) nil)
-    (input/input-set-on-escape! (:input-comp this) nil)
-    ;; Dispose the input component (foreign, not auto-disposed by hiccup root)
-    (protocols/dispose (:input-comp this))
-    ;; Unwind the content tree's reaction (watches on the rows atom) with
-    ;; the dialog — the flow owners call this after dock restore
+    ;; Unwind the content tree's reaction (watches on the rows atom) with the
+    ;; dialog — the flow owners call this after dock restore. The prompt field
+    ;; is tag-owned, so this cascades to it.
     (protocols/dispose (:root this))))
 
 (extend-type LoginDialog
   protocols/IFocusable
   (focused [this] @(:focused? this))
-  (set-focused! [this val]
-    (reset! (:focused? this) val)
-    (protocols/set-focused! (:input-comp this) val)))
+  (set-focused! [this val] (reset! (:focused? this) val)))
 
 (defn make-login-dialog
   "Create the login dialog for PROVIDER-NAME (pi LoginDialogComponent).
@@ -276,7 +297,7 @@
   (let [th (theme/get-current-theme)
         d (map->LoginDialog
            {:rows-atom (atom [])
-            :input-comp (input/make-input)
+            :input-ref (hiccup/ref)
             :tui tui
             :input-resolver-atom (atom nil)
             :input-rejecter-atom (atom nil)
@@ -288,24 +309,31 @@
         ;; stable :color-fn (created here, not in the body) so their props
         ;; stay =-equal across passes and reconcile keeps the instances
         ;; instead of rebuilding them; the title is a tag element reused by
-        ;; equal props, and only the input is spliced foreign (its instance
-        ;; outlives the rows it moves through). The body returns a SEQ of
-        ;; sibling roots — a vector would parse its head as a tag.
+        ;; equal props, and the prompt field is a tag-owned [:input] whose
+        ;; text, caret and emphasis come from state (its row descriptor and
+        ;; the dialog's focus flag). The body returns a SEQ of sibling roots —
+        ;; a vector would parse its head as a tag.
         accent-fn #(theme/fg th :accent %)
         title [:text {:text (theme/fg th :accent
                                       (theme/bold (str "Login to " provider-name)))
                       :padding-x 1 :padding-y 0}]
         root (hiccup/root
               (fn [_props]
-                (concat [[:dynamic-border {:color-fn accent-fn}]
-                         title]
-                        (mapv #(case (:row %)
-                                 :spacer [:spacer {:lines 1}]
-                                 :text [:text {:text (:text %) :padding-x 1 :padding-y 0}]
-                                 :submitted [:text {:text (:text %) :padding-x 0 :padding-y 0}]
-                                 :input (:input-comp d))
-                              (r/tracked-deref (:rows-atom d)))
-                        [[:dynamic-border {:color-fn accent-fn}]])))]
-    (input/input-set-on-submit! (:input-comp d) #(resolve-input! d %))
-    (input/input-set-on-escape! (:input-comp d) #(login-dialog-cancel! d))
+                (let [focused? (r/tracked-deref (:focused? d))
+                      on-submit #(resolve-input! d %)
+                      on-escape #(login-dialog-cancel! d)]
+                  (concat [[:dynamic-border {:color-fn accent-fn}]
+                           title]
+                          (mapv #(case (:row %)
+                                   :spacer [:spacer {:lines 1}]
+                                   :text [:text {:text (:text %) :padding-x 1 :padding-y 0}]
+                                   :submitted [:text {:text (:text %) :padding-x 0 :padding-y 0}]
+                                   :input [:input {:ref (:input-ref d)
+                                                   :value (or (:value %) "")
+                                                   :cursor (or (:caret %) 0)
+                                                   :focused? focused?
+                                                   :on-submit on-submit
+                                                   :on-escape on-escape}])
+                                (r/tracked-deref (:rows-atom d)))
+                          [[:dynamic-border {:color-fn accent-fn}]]))))]
     (assoc d :root root)))

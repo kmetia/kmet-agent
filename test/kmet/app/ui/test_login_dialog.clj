@@ -8,6 +8,7 @@
             [kmet.app.ui.login-dialog :as ld]
             [kmet.tui.hiccup :as h]
             [kmet.tui.protocols :as protocols]
+            [kmet.tui.utils :as u]
             [kmet.libs.reakt :as r]))
 
 (defn- strip-ansi [s]
@@ -147,3 +148,37 @@
                                             (protocols/dispose d)
                                             (is (= :disposed (:state (r/reaction-state @(:rx (:root d)))))
                                                 "content reaction disposed with the dialog"))))
+
+(deftest test-prompt-field-emphasis-is-data
+  (testing "the [:input] emphasis is the dialog's focus flag; a re-prompt that
+            moves the field clears its text and keeps it focused"
+    (let [d (make-dialog)]
+      (try
+        (protocols/set-focused! d true)
+        (ld/login-dialog-show-prompt! d "Question one" nil)
+        (is (some #(str/includes? % u/CURSOR-MARKER) (protocols/render d 60))
+            "the field renders its caret while the dialog is focused")
+        (doseq [c "abc"] (protocols/handle-input d (str c)))
+        (is (some #(str/includes? % "abc") (render-plain d 60)) "typed text shows")
+        (protocols/set-focused! d false)
+        (is (not-any? #(str/includes? % u/CURSOR-MARKER) (protocols/render d 60))
+            "unfocused: no caret")
+        (protocols/set-focused! d true)
+        ;; the second prompt moves the row (the first value is carried in the
+        ;; descriptor, so the clear is a prop change) and re-derives its state
+        (ld/login-dialog-show-prompt! d "Question two" nil)
+        (let [lines (protocols/render d 60)]
+          (is (not-any? #(str/includes? % "abc") lines) "the field is cleared")
+          (is (some #(str/includes? % u/CURSOR-MARKER) lines) "and still focused"))
+        (finally (protocols/dispose d))))))
+
+(deftest test-escape-cancels-without-a-mounted-field
+  (testing "the URL/device-code states mount no input; escape still aborts"
+    (let [done (atom nil)
+          d (ld/make-login-dialog nil "TestProv" (fn [ok msg] (reset! done [ok msg])))]
+      (try
+        (with-redefs [ld/open-browser (fn [_] nil)]
+          (ld/login-dialog-show-auth! d "https://example.com/auth" nil))
+        (protocols/handle-input d "\u001b")
+        (is (= [false "Login cancelled"] @done))
+        (finally (protocols/dispose d))))))

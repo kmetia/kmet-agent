@@ -93,6 +93,21 @@
       clojure.lang.IDeref
       (deref [_] @cell))))
 
+(defn materialize-ref!
+  "The component REF points at, compiling OWNER's tree first when the ref is
+   still empty. An element's ref fills during a render pass (the body builds
+   the element), so a caller that needs the instance *before* the host has
+   painted — forwarding a key right after a branch switch, a test driving
+   the component directly — would otherwise find nil and drop the input.
+   WIDTH (default 80) only shapes the discarded render; structure is what the
+   ref needs. Returns nil when the element is genuinely absent from the tree
+   (a state that does not mount it), so callers decide what that means."
+  ([owner ref] (materialize-ref! owner ref 80))
+  ([owner ref width]
+   (or (deref ref)
+       (do (protocols/render owner width)
+           (deref ref)))))
+
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Dynamics + observability (tui.md §2.5)
 ;; ═══════════════════════════════════════════════════════════════════════════

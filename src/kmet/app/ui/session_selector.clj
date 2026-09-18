@@ -576,18 +576,6 @@
       (swap! (:state-atom this)
              update :selected-idx #(max 0 (min (dec n) (+ % delta)))))))
 
-(defn- panel-input
-  "The tag-owned input the panel forwards keys to. The element is built by
-   the root body, i.e. on a render pass — if the host has not rendered the
-   panel since that element appeared (a mode switch the host has not painted
-   yet, or a key arriving before the first paint), materialize the tree here
-   instead of dropping the key. The width only shapes the discarded output;
-   structure is what the ref needs."
-  [this ref]
-  (or (deref ref)
-      (do (protocols/render this 80)
-          (deref ref))))
-
 (defn- forward-to-search!
   "Everything that isn't a selector key goes to the search input; a changed
    value re-filters the list (pi: searchInput.handleInput + filterSessions).
@@ -595,7 +583,7 @@
    them back as :value/:cursor props, so a list⇄rename switch (which rebuilds
    the input) cannot lose either."
   [this data]
-  (let [i (panel-input this (:search-ref this))
+  (let [i (hiccup/materialize-ref! this (:search-ref this))
         before (:query @(:state-atom this))]
     (protocols/handle-input i data)
     (let [value (input/input-get-value i)]
@@ -608,7 +596,7 @@
    rename input; text and caret are mirrored into state so leaving and
    re-entering the mode restores both."
   [this data]
-  (let [i (panel-input this (:rename-ref this))]
+  (let [i (hiccup/materialize-ref! this (:rename-ref this))]
     (protocols/handle-input i data)
     (swap! (:state-atom this) assoc
            :rename-value (input/input-get-value i)

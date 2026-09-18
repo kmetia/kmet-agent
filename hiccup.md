@@ -65,7 +65,7 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `tool_renderers.clj` | DONE | none — every renderer assembles a `h/compile-tree` (the last imperative legs, `render-edit-result`'s error branch, `render-bash-call` and `render-bash-result`, converted; the mangled token-per-line block reflowed, the collapsed output cap hoisted to `bash-result-preview-lines`) | none (Phase 1 #4) |
 | `chat_history.clj` | KEEP + Tier 1 helpers | `make-plain-msg` (204–206), `make-plain-md-msg` (213–215), `StatusLine` (249–250) | Tier 1 optional: helpers → `[:container {} [:spacer] [:text/:markdown/:truncated-text]]`; `ChatHistoryComponent` itself stays a record |
 | `session_selector.clj` | DONE (full) | none — both inputs are `[:input]` tags (`:value`/`:cursor`/`:focused?` props over the state mirror; see Phase 2 #3) | none — the body reads state via `tracked-deref` and `hide!` disposes the root (which cascades to the tag-owned inputs) |
-| `login_dialog.clj` | DONE | `input/make-input` as a deliberate foreign splice (see Phase 2 #4) | none — chrome is `[:dynamic-border]` / `[:text]` elements (Phase 2 #4), and the input is the dialog's long-lived prompt field (pi: `this.input`) |
+| `login_dialog.clj` | DONE (full) | none — the prompt field is a `[:input]` tag whose row descriptor carries its text/caret and whose emphasis is the dialog's focus flag (Phase 2 #4) | none — chrome is `[:dynamic-border]` / `[:text]` elements and the input is tag-owned |
 | `bash_execution.clj` | DONE | `spinner/make-spinner` (248) spliced into `hiccup/root` (256) | none — long-lived spinner identity intentional |
 | `tree_selector.clj` | DONE | `make-tree-list` ctor (937); `dialogs/make-input-dialog` (1082); panel `compile-tree` (1099) | none — `TreeList` is a string-direct `track!` leaf by design; the close path disposes the frame + the spliced list |
 | `user_message.clj` | KEEP | `container`/`box`/`md`/`spacer`/`image-block` (89–114) | none (§4) |
@@ -476,19 +476,28 @@ commit stays behavior-neutral.
    insert-at-caret, rename prefill/edit, list⇄rename returns, delete
    confirm/cancel) plus `mode-switch-preserves-text-and-caret` and
    `focus-drives-the-input-emphasis`.
-4. **PARTIAL — `login_dialog`**: the border splices converted to two
-   `[:dynamic-border {:color-fn accent-fn}]` elements sharing the one
-   stable `accent-fn` the dialog already created — equal props keep
-   reconcile on the same instances (the tag has no `:apply`, so a
-   body-built closure would rebuild both), pinned by a counters test: 3
+4. **DONE — `login_dialog`** (chrome first, then the field). The border
+   splices are two `[:dynamic-border {:color-fn accent-fn}]` elements
+   sharing the one stable `accent-fn` the dialog already created — equal
+   props keep reconcile on the same instances (the tag has no `:apply`, so
+   a body-built closure would rebuild both) — pinned by a counters test: 3
    constructs on the first render, zero disposals across a rows change.
-   The `dynamic-border` require drops and the dump is 339 identical lines
-   (all seven show-* states, prompt transcript, submit, cancel). The
-   **input stays foreign**: it is the dialog's long-lived prompt field
-   (pi: `this.input`), the rows atom adds/removes its row across prompts,
-   and `show-input-prompt!` clears it *between* renders — a clearing a
-   value prop cannot express (an unchanged `:value` prop never re-applies,
-   tui.md §2.3).
+   The prompt field is now a `[:input]` too: the `{:row :input}` marker
+   carries its text and caret (`:value`/`:caret` — the panel mirrors the
+   live instance into the descriptor as it forwards, and
+   `show-input-prompt!`'s clear is the fresh row's empty `:value`, a prop
+   change the moved instance writes through), `:focused?` is the dialog's
+   focus flag, and `IFocusable` shrank to that atom. `handle-input` still
+   forwards through the ref (`materialize-ref!`, which compiles the tree on
+   demand so a key before the first paint is not dropped) and answers the
+   cancel key itself in the URL/device-code states, where pi mounts no
+   input at all and escape is the only key that matters. The
+   `:input-comp` field, its callback teardown and its explicit dispose are
+   gone; `login_dialog`'s own dump is **273 identical lines** across all
+   seven show-* states, both prompts (typing, caret moves, submit), the
+   manual-input cancel and escape-in-the-auth-state, plus the new
+   `test-prompt-field-emphasis-is-data` and
+   `test-escape-cancels-without-a-mounted-field`.
 
 ### Phase 3 — only with a rewrite
 
