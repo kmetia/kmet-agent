@@ -364,17 +364,20 @@ stays near-linear with a small constant.)
   change, 0.000 vs 0.016 ms idle — a body that rebuilds the frame pays
   every line's construction either way, and reconciling 22 equal-props
   elements on top of that is pure overhead. `ResourceConfigScreen` was the
-  same shape — 0.001 ms idle, 0.76 ms per selection change, flat from 100
-  to 50 000 rows (it renders the visible window only) — and it is now a
-  root anyway (Tier 3, §5): its leaf lines are `[:truncated-text]`, which
-  keeps the frame one exact line per string instead of paying `[:text]`'s
-  re-wrap. Measured after the port on the same 202-row fixture (min of 3):
-  idle render 0.000 → 0.035 ms, **selection move + render 0.58 → 1.2 ms
-  (≈2×)** — the element reconcile on top of the same styling work, the
-  +0.3–0.6 ms this note predicted — and a filter keystroke ≈5.2 ms both
-  ways (dominated by the settings re-read, not the frame). So the port is
-  a real, if sub-millisecond, cost: it exists to make the screen one
-  idiom (tag-owned field, state-as-data rows), never for speed. The
+  same shape — on a synthetic 100-to-50 000-row fixture (rows injected
+  straight into the state; min of 3) 0.001 ms idle and 0.76 ms per
+  selection change, flat across that range, because it renders the visible
+  window only — and it is now a root anyway (Tier 3, §5): its leaf lines
+  are `[:truncated-text]`, which keeps the frame one exact line per string
+  instead of paying `[:text]`'s re-wrap. Re-measured after the port on a
+  *different*, real fixture (a 202-row package resolved from settings, min
+  of 3, both builds): idle render 0.000 → 0.029 ms, **selection move +
+  render 0.58 → 1.2 ms (≈2×, 0.582/0.585/0.595 → 1.195/1.219/1.289)** —
+  the element reconcile on top of the same styling work, the +0.3–0.6 ms
+  this note predicted — and a filter keystroke ≈5.2 ms both ways
+  (dominated by the settings re-read, not the frame). So the port is a
+  real, if sub-millisecond, cost: it exists to make the screen one idiom
+  (tag-owned field, state-as-data rows), never for speed. The
   string-direct leaves that remain (footer, status, pending messages) have
   no tree to migrate at all, so the cost of a mechanical port never arises
   for them.
@@ -430,7 +433,8 @@ stays near-linear with a small constant.)
   screen emitted a 58-column scope hint into a 45-column frame — the
   pre-conversion build shows 1–2 over-width lines at widths 10–45, the
   new one zero at every width 9–81 (asserted). The port is ≈2× per
-  selection change (0.58 → 1.2 ms on a 202-row fixture, §4) —
+  selection change (0.58 → 1.2 ms, min of 3, on the 202-row real fixture,
+  §4) —
   sub-millisecond and key-driven, so not a drive-by candidate either way;
   the case was consistency, as measured.
 

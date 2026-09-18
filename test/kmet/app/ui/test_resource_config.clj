@@ -551,8 +551,8 @@
           (t/is (= [] (rc/screen-rows screen)))
           (let [lines (render-lines screen 80)]
             (t/is (some #(str/includes? % "Global Resources") lines))
-            (t/is (not-any? #(str/includes? % "(0/0)") lines)
-                  "no counter when nothing is clipped"))
+            (t/is (not-any? #(re-find #"\(\d+/\d+\)" %) lines)
+                  "no clipped counter at all when nothing is clipped"))
           (protocols/handle-input screen K-DOWN)
           (protocols/handle-input screen " ")
           (t/is (= 0 (rc/screen-selected screen)) "navigation on an empty view is a no-op")))
@@ -572,9 +572,11 @@
   (let [dir (make-package (tmp-dir))]
     (with-settings
       (fn [_]
-        (let [screen (rc/make-resource-config-screen
-                      :rows 24 :write-scope :project :project-mode? true)]
+        (doseq [[label screen]
+                [["global" (rc/make-resource-config-screen :rows 24)]
+                 ["project" (rc/make-resource-config-screen
+                             :rows 24 :write-scope :project :project-mode? true)]]]
           (doseq [w [9 10 11 20 21 30 31 44 45 60 61 80 81]]
             (t/is (every? #(<= (u/visible-width %) w) (render-lines screen w))
-                  (str "every line fits " w " columns")))))
+                  (str label ": every line fits " w " columns")))))
       {:user {:packages [dir]}})))
