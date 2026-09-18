@@ -25,8 +25,7 @@
             [kmet.tui.hiccup :as h]
             [kmet.tui.core :as tui]
             [kmet.tui.protocols :as protocols]
-            [kmet.tui.theme :as th]
-            [kmet.tui.components.settings-list :as settings-list]))
+            [kmet.tui.theme :as th]))
 
 ;; pi: HTTP_IDLE_TIMEOUT_CHOICES (http-dispatcher.ts)
 (def ^:private http-idle-timeout-choices
@@ -228,144 +227,149 @@
                        :label "Theme"
                        :value (theme-ctrl/get-active-theme-name (:theme-controller cs))
                        :values (sort (keys (th/get-all-themes)))}))
-        sl (settings-list/make-settings-list
-            items
-            :enable-search true
-            :on-change (fn [id value]
-                         (case id
-                           :auto-compact
-                           (let [on? (= value "true")]
-                             (agent/set-auto-compact! ag on?)
-                             (cfg/save-setting! [:auto-compact] on?)
-                             (when-let [f (:footer-comp cs)]
-                               (ui/footer-set-auto-compact! f on?)))
-                           :show-images
-                           (let [on? (= value "true")]
-                             (swap! subs/image-settings-atom assoc :show-images on?)
-                             (cfg/save-setting! [:terminal :show-images] on?))
-                           :image-width-cells
-                           (let [w (parse-long value)]
-                             (swap! subs/image-settings-atom assoc :image-width-cells w)
-                             (cfg/save-setting! [:terminal :image-width-cells] w))
-                           :block-images
-                           (let [blocked? (= value "true")]
-                             (agent/set-block-images! ag blocked?)
-                             (cfg/save-setting! [:images :block-images] blocked?))
-                           :steering-mode
-                           (let [mode (keyword value)]
-                             (swap! (:cfg ag) assoc :steering-mode mode)
-                             (cfg/save-setting! [:steering-mode] mode))
-                           :follow-up-mode
-                           (let [mode (keyword value)]
-                             (swap! (:cfg ag) assoc :follow-up-mode mode)
-                             (cfg/save-setting! [:follow-up-mode] mode))
-                           :http-idle-timeout
-                           (let [ms (:ms (some #(when (= value (:label %)) %)
-                                               http-idle-timeout-choices))]
-                             (agent/set-http-idle-timeout-ms! ag ms)
-                             (cfg/save-setting! [:http-idle-timeout-ms] ms))
-                           :http-total-timeout
-                           (let [ms (:ms (some #(when (= value (:label %)) %)
-                                               http-total-timeout-choices))]
-                             (agent/set-http-total-timeout-ms! ag ms)
-                             (cfg/save-setting! [:http-total-timeout-ms] ms))
-                           :http-transport
-                           (let [mode (keyword value)]
-                             (http/set-transport! mode)
-                             (cfg/save-setting! [:http-transport] mode))
+        ;; pi: SettingsSelector's onChange — one branch per row id, each
+        ;; applying live and persisting (hoisted so the [:settings-list]
+        ;; element below stays readable)
+        on-change (fn [id value]
+                    (case id
+                      :auto-compact
+                      (let [on? (= value "true")]
+                        (agent/set-auto-compact! ag on?)
+                        (cfg/save-setting! [:auto-compact] on?)
+                        (when-let [f (:footer-comp cs)]
+                          (ui/footer-set-auto-compact! f on?)))
+                      :show-images
+                      (let [on? (= value "true")]
+                        (swap! subs/image-settings-atom assoc :show-images on?)
+                        (cfg/save-setting! [:terminal :show-images] on?))
+                      :image-width-cells
+                      (let [w (parse-long value)]
+                        (swap! subs/image-settings-atom assoc :image-width-cells w)
+                        (cfg/save-setting! [:terminal :image-width-cells] w))
+                      :block-images
+                      (let [blocked? (= value "true")]
+                        (agent/set-block-images! ag blocked?)
+                        (cfg/save-setting! [:images :block-images] blocked?))
+                      :steering-mode
+                      (let [mode (keyword value)]
+                        (swap! (:cfg ag) assoc :steering-mode mode)
+                        (cfg/save-setting! [:steering-mode] mode))
+                      :follow-up-mode
+                      (let [mode (keyword value)]
+                        (swap! (:cfg ag) assoc :follow-up-mode mode)
+                        (cfg/save-setting! [:follow-up-mode] mode))
+                      :http-idle-timeout
+                      (let [ms (:ms (some #(when (= value (:label %)) %)
+                                          http-idle-timeout-choices))]
+                        (agent/set-http-idle-timeout-ms! ag ms)
+                        (cfg/save-setting! [:http-idle-timeout-ms] ms))
+                      :http-total-timeout
+                      (let [ms (:ms (some #(when (= value (:label %)) %)
+                                          http-total-timeout-choices))]
+                        (agent/set-http-total-timeout-ms! ag ms)
+                        (cfg/save-setting! [:http-total-timeout-ms] ms))
+                      :http-transport
+                      (let [mode (keyword value)]
+                        (http/set-transport! mode)
+                        (cfg/save-setting! [:http-transport] mode))
                            ;; read live at emit time — no runtime state needed
-                           :cache-miss-notices
-                           (cfg/save-setting! [:show-cache-miss-notices] (= value "true"))
-                           :tree-filter-mode
-                           (cfg/save-setting! [:tree-filter-mode] (keyword value))
-                           :theme
-                           (let [result (theme-ctrl/set-theme-name!
-                                         (:theme-controller cs) value)]
-                             (if (:success result)
-                               (cfg/save-setting! [:theme] value)
-                               (ui/chat-history-add-message!
-                                (:chat-history cs)
-                                {:role :info :label "Theme"
-                                 :content (str "Failed to load theme \"" value
-                                               "\": " (:error result))})))
-                           :thinking
-                           (let [level (keyword value)]
-                             (agent/set-thinking-level! ag level)
-                             (cfg/save-setting! [:thinking] level)
-                             (model-selector/sync-footer-model! cs))
-                           :hide-thinking
-                           (let [hidden? (= value "on")]
-                             (ui/chat-history-set-thinking-hidden!
-                              (:chat-history cs) hidden?)
-                             (cfg/set-hide-thinking-block! hidden?))
-                           :tool-display-mode
-                           (let [mode (keyword value)]
-                             (ui/chat-history-set-tool-display-mode!
-                              (:chat-history cs) mode)
-                             (cfg/set-tool-display-mode! mode)
-                             (when-let [hdr (:header-comp cs)]
-                               (expandable-text/expandable-text-set-expanded!
-                                hdr (= :expanded mode)))
-                             (when-let [lr (:loaded-resources-comp cs)]
-                               (ui/loaded-resources-set-expanded!
-                                lr (= :expanded mode)))
-                             (when (:tui cs)
-                               (tui/tui-request-render (:tui cs) true)))
-                           :editor-padding
-                           (do (set-editor-setting! cs #(protocols/editor-set-padding-x! % value))
-                               (cfg/save-setting! [:editor-padding-x] value))
-                           :output-padding
-                           (do (ui/chat-history-set-output-pad! (:chat-history cs) value)
-                               (cfg/save-setting! [:output-pad] value))
-                           :autocomplete-max-visible
-                           (do (set-editor-setting!
-                                cs #(protocols/editor-set-autocomplete-max-visible! % value))
-                               (cfg/save-setting! [:autocomplete-max-visible] value))
-                           :show-hardware-cursor
-                           (let [on? (= value "true")]
-                             (tui/tui-set-show-hardware-cursor! (:tui cs) on?)
-                             (cfg/set-show-hardware-cursor! on?))
-                           :auto-retry
-                           (do (swap! retry-atom assoc :enabled (boolean value))
-                               (save-retry! [:retry :enabled] (boolean value)))
-                           :max-retries
-                           (do (swap! retry-atom assoc :max-retries value)
-                               (save-retry! [:retry :max-retries] value))
-                           :base-delay-ms
-                           (do (swap! retry-atom assoc :base-delay-ms value)
-                               (save-retry! [:retry :base-delay-ms] value))
-                           :loop-guard-enabled
-                           (do (swap! lg-atom assoc :enabled (boolean value))
-                               (save-lg! [:loop-guard :enabled] (boolean value)))
-                           :loop-guard-threshold
-                           (do (swap! lg-atom assoc :threshold value)
-                               (save-lg! [:loop-guard :threshold] value))
-                           :thinking-loop-guard-enabled
-                           (do (swap! (:cfg ag) assoc :thinking-loop-guard-enabled (boolean value))
-                               (cfg/save-setting! [:thinking-loop-guard-enabled] (boolean value))))))]
-    (settings-list/settings-list-set-on-escape!
-     sl (fn []
-          ;; pi: done() — restore the editor and unwind the panel: the
-          ;; compiled frame's DSL chrome via dispose-tree!, the spliced
-          ;; list explicitly (the tree does not own it). Frame is
-          ;; late-bound — it is built below.
-          ((:done @sel-atom))
-          (when-let [frame @frame-atom]
-            (h/dispose-tree! frame))
-          (protocols/dispose sl)
-          (tui/tui-request-render (:tui cs))))
-    ;; Frame the list like pi's SettingsSelectorComponent (DynamicBorder +
-    ;; SettingsList + DynamicBorder); the list is the focus target (pi:
-    ;; showSelector's focus) since the frame container is inert chrome.
-    (let [th (th/get-current-theme)
-          ;; The frame is a compiled hiccup tree (dsl.md): the border chrome
-          ;; is DSL-owned; the SettingsList splices foreign (the focus target).
-          frame (h/compile-tree
-                 [:container {}
-                  [:dynamic-border {:color-fn #(th/fg th :accent %)}]
-                  sl
-                  [:dynamic-border {:color-fn #(th/fg th :accent %)}]])]
-      (reset! frame-atom frame)
-      ;; pi: showSelector — mount the framed panel, focus the list
-      ;; (focus: the interactive child)
-      (reset! sel-atom {:done (dock/mount! cs frame sl)}))))
+                      :cache-miss-notices
+                      (cfg/save-setting! [:show-cache-miss-notices] (= value "true"))
+                      :tree-filter-mode
+                      (cfg/save-setting! [:tree-filter-mode] (keyword value))
+                      :theme
+                      (let [result (theme-ctrl/set-theme-name!
+                                    (:theme-controller cs) value)]
+                        (if (:success result)
+                          (cfg/save-setting! [:theme] value)
+                          (ui/chat-history-add-message!
+                           (:chat-history cs)
+                           {:role :info :label "Theme"
+                            :content (str "Failed to load theme \"" value
+                                          "\": " (:error result))})))
+                      :thinking
+                      (let [level (keyword value)]
+                        (agent/set-thinking-level! ag level)
+                        (cfg/save-setting! [:thinking] level)
+                        (model-selector/sync-footer-model! cs))
+                      :hide-thinking
+                      (let [hidden? (= value "on")]
+                        (ui/chat-history-set-thinking-hidden!
+                         (:chat-history cs) hidden?)
+                        (cfg/set-hide-thinking-block! hidden?))
+                      :tool-display-mode
+                      (let [mode (keyword value)]
+                        (ui/chat-history-set-tool-display-mode!
+                         (:chat-history cs) mode)
+                        (cfg/set-tool-display-mode! mode)
+                        (when-let [hdr (:header-comp cs)]
+                          (expandable-text/expandable-text-set-expanded!
+                           hdr (= :expanded mode)))
+                        (when-let [lr (:loaded-resources-comp cs)]
+                          (ui/loaded-resources-set-expanded!
+                           lr (= :expanded mode)))
+                        (when (:tui cs)
+                          (tui/tui-request-render (:tui cs) true)))
+                      :editor-padding
+                      (do (set-editor-setting! cs #(protocols/editor-set-padding-x! % value))
+                          (cfg/save-setting! [:editor-padding-x] value))
+                      :output-padding
+                      (do (ui/chat-history-set-output-pad! (:chat-history cs) value)
+                          (cfg/save-setting! [:output-pad] value))
+                      :autocomplete-max-visible
+                      (do (set-editor-setting!
+                           cs #(protocols/editor-set-autocomplete-max-visible! % value))
+                          (cfg/save-setting! [:autocomplete-max-visible] value))
+                      :show-hardware-cursor
+                      (let [on? (= value "true")]
+                        (tui/tui-set-show-hardware-cursor! (:tui cs) on?)
+                        (cfg/set-show-hardware-cursor! on?))
+                      :auto-retry
+                      (do (swap! retry-atom assoc :enabled (boolean value))
+                          (save-retry! [:retry :enabled] (boolean value)))
+                      :max-retries
+                      (do (swap! retry-atom assoc :max-retries value)
+                          (save-retry! [:retry :max-retries] value))
+                      :base-delay-ms
+                      (do (swap! retry-atom assoc :base-delay-ms value)
+                          (save-retry! [:retry :base-delay-ms] value))
+                      :loop-guard-enabled
+                      (do (swap! lg-atom assoc :enabled (boolean value))
+                          (save-lg! [:loop-guard :enabled] (boolean value)))
+                      :loop-guard-threshold
+                      (do (swap! lg-atom assoc :threshold value)
+                          (save-lg! [:loop-guard :threshold] value))
+                      :thinking-loop-guard-enabled
+                      (do (swap! (:cfg ag) assoc :thinking-loop-guard-enabled (boolean value))
+                          (cfg/save-setting! [:thinking-loop-guard-enabled] (boolean value)))))
+        on-escape (fn []
+                    ;; pi: done() — restore the editor and unwind the panel:
+                    ;; the tree owns the chrome AND the settings list, so one
+                    ;; dispose-tree! releases both (the frame is late-bound —
+                    ;; built below)
+                    ((:done @sel-atom))
+                    (when-let [frame @frame-atom]
+                      (h/dispose-tree! frame))
+                    (tui/tui-request-render (:tui cs)))
+        ;; Frame the list like pi's SettingsSelectorComponent (DynamicBorder +
+        ;; SettingsList + DynamicBorder); the list is the focus target (pi:
+        ;; showSelector's focus) since the frame container is inert chrome.
+        ;; The frame is a compiled hiccup tree (dsl.md): the border chrome
+        ;; and the settings list are both DSL-owned, and the instance is read
+        ;; back through the ref right after compile (tui.md §2.4).
+        th (th/get-current-theme)
+        sl-ref (h/ref)
+        frame (h/compile-tree
+               [:container {}
+                [:dynamic-border {:color-fn #(th/fg th :accent %)}]
+                [:settings-list {:ref sl-ref
+                                 :items items
+                                 :enable-search true
+                                 :on-change on-change
+                                 :on-escape on-escape}]
+                [:dynamic-border {:color-fn #(th/fg th :accent %)}]])
+        sl @sl-ref]
+    (reset! frame-atom frame)
+    ;; pi: showSelector — mount the framed panel, focus the list
+    ;; (focus: the interactive child)
+    (reset! sel-atom {:done (dock/mount! cs frame sl)})))

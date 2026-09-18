@@ -60,7 +60,7 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `scoped_models_selector.clj` | DONE | none — root body, keyed `[:text]` rows, live footer as an element, input foreign, `dispose` unwinds both | none (Phase 1 #2) |
 | `thinking_selector.clj` | DONE | none — root body, keyed `[:text]` rows, input foreign, `dispose` unwinds both | none (Phase 1 #1) |
 | `dialogs.clj` | DONE | none — `[:select-list]` / `[:input]` elements under a `hiccup/ref`, read back right after `compile-tree` (the record keeps its `:select-list`/`:input-comp` field); frame hint bug fixed first (see Phase 2) | none (Phase 2 #1) |
-| `settings_selector.clj` | HYBRID | `settings-list/make-settings-list` (229); frame `compile-tree` (354) | Tier 2: `[:settings-list]`; close path disposes the compiled frame (`dispose-tree!`) + the spliced list |
+| `settings_selector.clj` | DONE | none — `[:settings-list]` element under a `hiccup/ref`, read back right after `compile-tree`; the `:on-change` case hoisted to a named local, escape wired through the tag's `:on-escape`, one `dispose-tree!` unwinds the whole tree | none (Phase 2 #2) |
 | `tool_renderers.clj` | DONE | none — every renderer assembles a `h/compile-tree` (the last imperative legs, `render-edit-result`'s error branch, `render-bash-call` and `render-bash-result`, converted; the mangled token-per-line block reflowed, the collapsed output cap hoisted to `bash-result-preview-lines`) | none (Phase 1 #4) |
 | `chat_history.clj` | KEEP + Tier 1 helpers | `make-plain-msg` (204–206), `make-plain-md-msg` (213–215), `StatusLine` (249–250) | Tier 1 optional: helpers → `[:container {} [:spacer] [:text/:markdown/:truncated-text]]`; `ChatHistoryComponent` itself stays a record |
 | `session_selector.clj` | DONE (pattern) | 2× `input/make-input` (860–861); `hiccup/root` (900) | Tier 2 optional: `[:input {:ref ...}]`; low priority, works as-is — the body reads state via `tracked-deref` and `hide!` disposes the root + both inputs |
@@ -439,10 +439,17 @@ commit stays behavior-neutral.
    (130 identical lines: renders at 3 widths, nav/select/cancel, focus
    forwarding, typing/submit/trim/escape, prefill cursor) and the new
    render-driven tests (`test-input-dialog-prefill`, hint tests).
-2. `settings_selector` — `[:settings-list]`; the large `:on-change`
-   closure hoists to a named fn over the existing atoms. If the frame
-   stays a `compile-tree`, items remain construction-time — make the
-   frame a root only if the items must be live.
+2. **DONE — `settings_selector`**: one flat binding — `[:settings-list]`
+   under a ref (items construction-time; the panel is re-opened, not
+   re-rendered live), the big `:on-change` case hoisted to a named local
+   next to a named `on-escape` (which the tag applies via
+   `settings-list-set-on-escape!`), and one `dispose-tree!` unwinds the
+   chrome *and* the list (both DSL-owned now — the explicit
+   `protocols/dispose sl` is gone). The `settings-list` require drops.
+   Pinned by a pre-conversion-vs-new dump (103 identical lines: the frame
+   at 100/60/30 cols, two-downs selection, a search filter, cleared
+   search, escape restoring the dock) and a new `show-settings`
+   interaction test (dock + focus target, filter/clear, escape unwinds).
 3. `session_selector` search/rename inputs — `[:input {:ref ...}]`;
    `forward-to-search!` reads the value back from the deref'd instance;
    rename submit wired through the deref after mount. (Its body already
