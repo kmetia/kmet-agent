@@ -4407,9 +4407,12 @@
         terminal-input-unsubscribers (atom [])
         hide-dialog (fn []
                       ;; the dialog's own close disposes it (its custody) —
-                      ;; clear! only unwinds what a selector mode-switch left
+                      ;; clear! only unwinds what a selector mode-switch left.
+                      ;; Focus needs no restore here: the dock's
+                      ;; ::focus-guard watch hands input back to the active
+                      ;; editor the moment the occupant leaves, and the
+                      ;; tracked dock atom re-derives the area
                       (dock/clear! cs)
-                      (tui/tui-set-focus t @current-editor-atom)
                       (tui/tui-request-render t))
         rebuild-autocomplete-provider! (fn []
                                          ;; pi: setupAutocompleteProvider — each
