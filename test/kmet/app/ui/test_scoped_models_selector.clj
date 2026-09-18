@@ -8,8 +8,11 @@
             [kmet.app.keybindings :as kb]
             [kmet.app.ui.scoped-models-selector :as sms]
             [kmet.ai.models :as models]
+            [kmet.tui.hiccup :as hiccup]
             [kmet.tui.keybindings :as tui-kb]
-            [kmet.tui.protocols :as protocols]))
+            [kmet.tui.macros :as macros]
+            [kmet.tui.protocols :as protocols]
+            [kmet.tui.utils :as u]))
 
 (defn- model [provider id]
   (models/map->Model {:id id :name (str "Model " id) :provider provider
@@ -49,6 +52,16 @@
      "alt+down" "\u001b\u001b[B"
      key)))
 
+(defn- render-lines
+  "The selector's rendered lines, ANSI-stripped."
+  [sel]
+  (mapv u/strip-ansi-codes (protocols/render sel 120)))
+
+(defn- arrow-line
+  "The rendered row line carrying the selection arrow, ANSI-stripped."
+  [sel]
+  (first (filter #(str/includes? % "→") (render-lines sel))))
+
 ;; ─── Enabled-ids helpers ───────────────────────────────────────────────────
 
 (t/deftest test-toggle-helper
@@ -87,20 +100,43 @@
 ;; ─── handle-input behaviors ────────────────────────────────────────────────
 
 (t/deftest test-arrow-keys-move-selection
-  ;; navigation must rebuild the rows (pi updateList), not just move the
+  ;; navigation must re-derive the rows (pi updateList), not just move the
   ;; state — the rendered selection arrow follows the selection
-  (let [sel (selector nil)
-        row (fn [i] @(:text-atom (nth @(:children (:rows-container sel)) i)))]
-    (t/is (str/includes? (row 0) "→") "initially the first row is selected")
+  (let [sel (selector nil)]
+    (t/is (str/includes? (arrow-line sel) "a [p1]") "initially the first row is selected")
     (press sel "down")
-    (t/is (str/includes? (row 1) "→") "down moves the arrow to the next row")
-    (t/is (not (str/includes? (row 0) "→")) "and off the previous row")
+    (t/is (str/includes? (arrow-line sel) "b [p1]") "down moves the arrow to the next row")
     (press sel "up")
-    (t/is (str/includes? (row 0) "→") "up moves the arrow back")
+    (t/is (str/includes? (arrow-line sel) "a [p1]") "up moves the arrow back")
     (press sel "down")
     (press sel "down")
     (press sel "down")
-    (t/is (str/includes? (row 0) "→") "down wraps to the top at the bottom")))
+    (t/is (str/includes? (arrow-line sel) "a [p1]") "down wraps to the top at the bottom")))
+
+(t/deftest test-navigation-does-not-leak-watches
+  ;; re-derived rows must be disposed — a dropped Text keeps its track!
+  ;; watch registered, which would grow the registry per keypress
+  (let [sel (selector nil)
+        watchers #(count @(deref #'macros/watch-registry))]
+    (protocols/render sel 120)
+    (let [baseline (watchers)]
+      (dotimes [_ 6] (press sel "down") (protocols/render sel 120))
+      (t/is (= baseline (watchers))
+            "steady state: navigation does not accumulate watches"))))
+
+(t/deftest test-root-body-memoizes-idle-frames
+  ;; The state atom is read through tracked-deref: an idle re-render hands
+  ;; back the cached tree (0 bodies run) and a state change re-derives once.
+  (let [sel (selector nil)]
+    (protocols/render sel 120)
+    (hiccup/reset-counters!)
+    (protocols/render sel 120)
+    (t/is (zero? (:bodies-run (hiccup/counters))) "idle frame: body cached")
+    (t/is (= 1 (:bodies-skipped (hiccup/counters))))
+    (hiccup/reset-counters!)
+    (press sel "down")
+    (protocols/render sel 120)
+    (t/is (= 1 (:bodies-run (hiccup/counters))) "state change re-derives once")))
 
 (t/deftest test-enter-toggles-selected
   (let [changed (atom ::none)
@@ -211,21 +247,22 @@
         _ (tui-kb/set-global-keybindings! (kb/create-agent-keybindings-manager dir))
         sel (sms/make-scoped-models-selector
              [priced (model :p1 "b") (model :p2 "x")]
-             nil)
-        text (fn [i] @(:text-atom (nth @(:children (:rows-container sel)) i)))]
-    (t/is (str/includes? (text 4) "Model Name: Model a")
+             nil)]
+    ;; the info block under the rows: the name line plus the cost line with
+    ;; the direction marks
+    (t/is (some #(str/includes? % "Model Name: Model a") (render-lines sel))
           "the name line under the rows")
-    (t/is (str/includes? (text 5) "↑$0.44") "input rate marked ↑")
-    (t/is (str/includes? (text 5) "↓$1.5") "output rate marked ↓")
-    (t/is (str/includes? (text 5) "C↑$0.11") "cache read marked C↑")
-    (t/is (str/includes? (text 5) "C↓$3.3") "cache write marked C↓")
+    (t/is (some #(str/includes? % "↑$0.44") (render-lines sel)) "input rate marked ↑")
+    (t/is (some #(str/includes? % "↓$1.5") (render-lines sel)) "output rate marked ↓")
+    (t/is (some #(str/includes? % "C↑$0.11") (render-lines sel)) "cache read marked C↑")
+    (t/is (some #(str/includes? % "C↓$3.3") (render-lines sel)) "cache write marked C↓")
     (press sel "down")
-    (t/is (str/includes? (text 5) "Cost: free")
+    (t/is (some #(str/includes? % "Cost: free") (render-lines sel))
           "unpriced model renders the free line")
     (let [ghost (sms/make-scoped-models-selector [] ["ghost/id"])
-          kids @(:children (:rows-container ghost))]
-      (t/is (= (count kids) 3)
-            "unavailable row renders the name line only, no cost line")
-      (t/is (str/includes? @(:text-atom (nth kids 2)) "Model unavailable")
-            "marked unavailable"))))
+          lines (render-lines ghost)]
+      (t/is (some #(str/includes? % "Model unavailable") lines)
+            "marked unavailable")
+      (t/is (not-any? #(str/includes? % "Cost:") lines)
+            "unavailable row renders the name line only, no cost line"))))
 

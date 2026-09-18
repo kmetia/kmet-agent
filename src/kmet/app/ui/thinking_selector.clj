@@ -12,9 +12,8 @@
             [kmet.app.keybindings :as app-kb]
             [kmet.app.ui.dock :as dock]
             [kmet.config :as cfg]
-            [kmet.tui.components.container :as container]
+            [kmet.libs.reakt :as r]
             [kmet.tui.components.input :as input]
-            [kmet.tui.components.text :as text]
             [kmet.tui.core :as tui]
             [kmet.tui.hiccup :as h]
             [kmet.tui.keys :as keys]
@@ -76,15 +75,13 @@
 
 ;; ─── Component ─────────────────────────────────────────────────────────────
 
-(declare thinking-refresh!)
-
 (defcomponent ThinkingSelector nil
-              [container rows-container search-input state-atom
+              [root search-input state-atom
                on-select-atom on-persist-atom on-cancel-atom focused? cache-atom]
 
-  (render [this width] (protocols/render (:container this) width))
+  (render [this width] (protocols/render (:root this) width))
 
-  (handle-input [this data]
+  (handle-input [_this data]
     (let [kmgr (kb/get-global-keybindings)
           st @state-atom
           filtered (filtered-levels st)
@@ -97,8 +94,7 @@
               (swap! state-atom assoc
                      :selected-idx (if (zero? (:selected-idx st))
                                      (dec n)
-                                     (dec (:selected-idx st))))
-              (thinking-refresh! this))
+                                     (dec (:selected-idx st)))))
             nil)
 
         (kb/matches-key kmgr data "tui.select.down")
@@ -106,8 +102,7 @@
               (swap! state-atom assoc
                      :selected-idx (if (= (:selected-idx st) (dec n))
                                      0
-                                     (inc (:selected-idx st))))
-              (thinking-refresh! this))
+                                     (inc (:selected-idx st)))))
             nil)
 
         ;; Enter — apply the selected level to the session (pi
@@ -137,7 +132,6 @@
           (do (when-let [cb @on-cancel-atom] (cb)) nil)
           (do (swap! state-atom assoc :search "" :selected-idx 0)
               (input/input-set-value! search-input "")
-              (thinking-refresh! this)
               nil))
 
         ;; Escape — cancel (pi tui.select.cancel; the ctrl+c half is handled
@@ -150,9 +144,14 @@
         (do (protocols/handle-input search-input data)
             (let [value (input/input-get-value search-input)]
               (when (not= value (:search st))
-                (swap! state-atom assoc :search value :selected-idx 0)
-                (thinking-refresh! this)))
-            nil)))))
+                (swap! state-atom assoc :search value :selected-idx 0))
+              nil)))))
+
+  ;; the root's reaction and the foreign search input are the selector's
+  ;; lifecycle: show-thinking-selector unwinds both when the panel closes
+  (dispose [this]
+    (protocols/dispose (:search-input this))
+    (protocols/dispose (:root this))))
 
 ;; ─── Rendering helpers (pi updateList / SelectList rows) ──────────────────
 
@@ -172,34 +171,59 @@
                             (when default? " · default")))]
     (str prefix mark name-text desc)))
 
-(defn thinking-refresh!
-  "Rebuild the level rows from the current state (pi updateList — the rows
-   move with the selection and the search filter)."
-  [this]
-  (let [st @(:state-atom this)
-        th (theme/get-current-theme)
-        filtered (filtered-levels st)
-        n (count filtered)
-        selected (min (:selected-idx st) (max 0 (dec n)))
-        _ (swap! (:state-atom this) assoc :selected-idx selected)
-        rows (container/make-container)
-        name-width (reduce (fn [w l] (max w (count (name l))))
+(defn- row-elements
+  "Level rows as hiccup elements (pi updateList): the selection arrow, the
+   ✓ mark for the ACTIVE level, the muted description and the empty-filter
+   state. Keyed by level — stable under filter reordering."
+  [th st filtered selected]
+  (let [name-width (reduce (fn [w l] (max w (count (name l))))
                            0 (:levels st))]
-    (if (zero? n)
-      (container/container-add-child
-       rows (text/make-text (theme/fg th :muted "  No matching levels") 1 0))
-      (doseq [i (range n)]
-        (let [level (nth filtered i)]
-          (container/container-add-child
-           rows (text/make-text
-                 (think-row th level
-                            (= i selected)
-                            (= level (:current st))
-                            (= level (:default st))
-                            name-width)
-                 1 0)))))
-    (container/container-replace-children! (:rows-container this) @(:children rows))
-    nil))
+    (if (zero? (count filtered))
+      (list [:text {:key ::empty :padding-x 1 :padding-y 0
+                    :text (theme/fg th :muted "  No matching levels")}])
+      (map (fn [i]
+             (let [level (nth filtered i)]
+               [:text {:key level :padding-x 1 :padding-y 0
+                       :text (think-row th level
+                                        (= i selected)
+                                        (= level (:current st))
+                                        (= level (:default st))
+                                        name-width)}]))
+           (range (count filtered))))))
+
+(defn- thinking-body
+  "The selector tree as a reactive body (dsl.md): chrome and rows re-derive
+   from the state atom; the search input splices foreign. BORDER-FN is
+   created once per selector so the border's :color-fn prop keeps identity
+   across passes (a fresh closure would decline the patch, rebuilding the
+   border on every body run)."
+  [state-atom search-input border-fn]
+  (fn [_props]
+    (let [th (theme/get-current-theme)
+          st (r/tracked-deref state-atom)
+          filtered (filtered-levels st)
+          n (count filtered)
+          selected (min (:selected-idx st) (max 0 (dec n)))]
+      [:container {}
+       [:dynamic-border {:color-fn border-fn}]
+       [:spacer {:lines 1}]
+       [:text {:padding-x 1 :padding-y 0}
+        (theme/fg th :accent (theme/bold "Thinking Level"))]
+       [:text {:padding-x 1 :padding-y 0}
+        (theme/fg th :muted
+                  (str (key-or "app.thinking.cycle" "Shift+Tab")
+                       " cycles thinking levels in-session"))]
+       [:spacer {:lines 1}]
+       search-input
+       [:spacer {:lines 1}]
+       (row-elements th st filtered selected)
+       [:spacer {:lines 1}]
+       [:text {:padding-x 1 :padding-y 0}
+        (theme/dim (str "  " (key-or "tui.select.confirm" "Enter") " to select · "
+                        (key-or "app.thinking.save" "Ctrl+S") " to set as default · "
+                        (key-or "tui.select.cancel" "Esc") " to cancel"))]
+       [:spacer {:lines 1}]
+       [:dynamic-border {:color-fn border-fn}]])))
 
 ;; ─── Construction ──────────────────────────────────────────────────────────
 
@@ -213,41 +237,17 @@
    settings default;
    :on-cancel."
   [levels current default & {:keys [on-select on-persist on-cancel]}]
-  (let [th (theme/get-current-theme)
-        st (atom {:levels (vec levels)
+  (let [st (atom {:levels (vec levels)
                   :current current
                   :default default
                   :selected-idx 0
                   :search ""})
         search-input (input/make-input)
-        rows-container (container/make-container)
-        cycle-key (key-or "app.thinking.cycle" "Shift+Tab")
-        ;; The frame is a compiled hiccup tree (dsl.md): the border/spacer/
-        ;; title/hint chrome is DSL-owned; the search input and the rebuilt
-        ;; rows splice foreign (imperative, updated via setters).
-        c (h/compile-tree
-           [:container {}
-            [:dynamic-border {:color-fn #(theme/fg th :accent %)}]
-            [:spacer {:lines 1}]
-            [:text {:padding-x 1 :padding-y 0}
-             (theme/fg th :accent (theme/bold "Thinking Level"))]
-            [:text {:padding-x 1 :padding-y 0}
-             (theme/fg th :muted
-                       (str cycle-key " cycles thinking levels in-session"))]
-            [:spacer {:lines 1}]
-            search-input
-            [:spacer {:lines 1}]
-            rows-container
-            [:spacer {:lines 1}]
-            [:text {:padding-x 1 :padding-y 0}
-             (theme/dim (str "  " (key-or "tui.select.confirm" "Enter") " to select · "
-                             (key-or "app.thinking.save" "Ctrl+S") " to set as default · "
-                             (key-or "tui.select.cancel" "Esc") " to cancel"))]
-            [:spacer {:lines 1}]
-            [:dynamic-border {:color-fn #(theme/fg th :accent %)}]])
+        ;; stable identity across passes — a fresh color-fn per body run
+        ;; would decline the border patch and rebuild it every time
+        border-fn (fn [s] (theme/fg (theme/get-current-theme) :accent s))
         sel (map->ThinkingSelector
-             {:container c
-              :rows-container rows-container
+             {:root nil
               :search-input search-input
               :state-atom st
               :on-select-atom (atom on-select)
@@ -256,12 +256,12 @@
               :focused? (atom false)
               :cache-atom (atom nil)})]
     ;; initial selection: the active level when present, else the top row
-    ;; (pi preselects the current level in the SelectList)
+    ;; (pi preselects the current level in the SelectList). The rows are a
+    ;; tracked root body — no refresh call, the state change alone re-derives.
     (let [idx (first (keep-indexed (fn [i l] (when (= l current) i))
                                    levels))]
       (swap! st assoc :selected-idx (or idx 0)))
-    (thinking-refresh! sel)
-    sel))
+    (assoc sel :root (h/root (thinking-body st search-input border-fn)))))
 
 ;; ─── IFocusable — forward to the search input (IME cursor positioning) ─────
 
@@ -308,21 +308,27 @@
   [cs & {:keys [on-select on-persist]}]
   (let [ag @(:agent-state cs)
         sel-atom (atom nil)
+        ;; the dock's done restores the editor; dispose unwinds the
+        ;; selector's root reaction and foreign input (the dock drops
+        ;; foreign records without disposing them)
+        close! (fn []
+                 ((:done @sel-atom))
+                 (when-let [s (:sel @sel-atom)] (protocols/dispose s)))
         sel (make-thinking-selector
              (available-levels cs)
              @(:thinking ag)
              (default-thinking-level cs)
              :on-select (fn [level]
-                          ((:done @sel-atom))
+                          (close!)
                           (on-select level)
                           (tui/tui-request-render (:tui cs)))
              :on-persist (fn [level]
-                           ((:done @sel-atom))
+                           (close!)
                            (on-persist level)
                            (tui/tui-request-render (:tui cs)))
              :on-cancel (fn []
-                          ((:done @sel-atom))
+                          (close!)
                           (tui/tui-request-render (:tui cs))))]
     ;; pi: showSelector — the selector replaces the editor dock
-    (reset! sel-atom {:done (dock/mount! cs sel)})
+    (reset! sel-atom {:done (dock/mount! cs sel) :sel sel})
     (tui/tui-request-render (:tui cs))))

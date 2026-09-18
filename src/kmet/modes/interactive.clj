@@ -572,6 +572,20 @@
 
 (declare show-login-provider-selector!)
 
+(defn- mount-selector!
+  "Swap SEL into CS's editor dock, recording the mount's done and the
+   selector itself on SEL-ATOM so close-selector! can unwind both."
+  [cs sel-atom sel]
+  (reset! sel-atom {:done (dock/mount! cs sel) :sel sel}))
+
+(defn- close-selector!
+  "Run the mount's done (restores the editor) and dispose the selector —
+   the dock drops foreign records without disposing them, so the root
+   reaction + foreign inputs would otherwise outlive the panel."
+  [sel-atom]
+  ((:done @sel-atom))
+  (when-let [s (:sel @sel-atom)] (protocols/dispose s)))
+
 (defn- oauth-prompt!
   "Show PROMPT inside the dock-mounted login dialog and block for the
    entered string (pi showAuthPrompt → LoginDialogComponent.showPrompt /
@@ -589,18 +603,21 @@
           labels (mapv :label (:options prompt))
           ;; pi showAuthSelect: swap the dock to the selector, restore the
           ;; login dialog when it resolves (re-mounting IS the restore)
-          restore #(dock/mount! cs dlg)]
+          sel-atom (atom nil)
+          restore #(dock/mount! cs dlg)
+          sel (auth-selector/make-auth-method-selector
+               (:message prompt) labels
+               (fn [label]
+                 (close-selector! sel-atom)
+                 (restore)
+                 (deliver p (or (:id (first (filter #(= label (:label %)) (:options prompt))))
+                                label)))
+               (fn []
+                 (close-selector! sel-atom)
+                 (restore)
+                 (deliver p (ex-info "Login cancelled" {:type :login-cancelled}))))]
       (reset! prompt-state {:promise p})
-      (dock/mount!
-       cs (auth-selector/make-auth-method-selector
-           (:message prompt) labels
-           (fn [label]
-             (restore)
-             (deliver p (or (:id (first (filter #(= label (:label %)) (:options prompt))))
-                            label)))
-           (fn []
-             (restore)
-             (deliver p (ex-info "Login cancelled" {:type :login-cancelled})))))
+      (mount-selector! cs sel-atom sel)
       (login-dialog/await-prompt! p))
 
     :manual-code
@@ -825,24 +842,22 @@
                      (str "Select authentication method for "
                           (:name (first provider-options)) ":")
                      "Select authentication method:")
-             sel-atom (atom nil)]
-         (reset! sel-atom
-                 {:done (dock/mount!
-                         cs
-                         (auth-selector/make-auth-method-selector
-                          title options
-                          (fn [label]
-                            ((:done @sel-atom))
-                            (let [auth-type (if (= label subscription-label)
-                                              :oauth :api-key)]
-                              (if provider-options
-                                (when-let [entry (some #(when (= auth-type (:auth-type %)) %)
-                                                       provider-options)]
-                                  (start-provider-login! cs entry))
-                                (show-login-provider-selector! cs auth-type))))
-                          (fn []
-                            ((:done @sel-atom))
-                            (tui/tui-request-render (:tui cs)))))}))))))
+             sel-atom (atom nil)
+             sel (auth-selector/make-auth-method-selector
+                  title options
+                  (fn [label]
+                    (close-selector! sel-atom)
+                    (let [auth-type (if (= label subscription-label)
+                                      :oauth :api-key)]
+                      (if provider-options
+                        (when-let [entry (some #(when (= auth-type (:auth-type %)) %)
+                                               provider-options)]
+                          (start-provider-login! cs entry))
+                        (show-login-provider-selector! cs auth-type))))
+                  (fn []
+                    (close-selector! sel-atom)
+                    (tui/tui-request-render (:tui cs))))]
+         (mount-selector! cs sel-atom sel))))))
 
 (defn- show-login-provider-selector!
   "pi showLoginProviderSelector: the searchable provider selector over the
@@ -860,26 +875,24 @@
                                                  :oauth "No subscription providers available."
                                                  :api-key "No API key providers available."
                                                  "No login providers available.")})
-       (let [sel-atom (atom nil)]
-         (reset! sel-atom
-                 {:done (dock/mount!
-                         cs
-                         (auth-selector/make-auth-selector
-                          :login entries
-                          (fn [provider-id selected-type]
-                            ((:done @sel-atom))
-                            (if-let [entry (some #(when (and (= provider-id (:id %))
-                                                             (= selected-type (:auth-type %)))
-                                                    %)
-                                                 entries)]
-                              (start-provider-login! cs entry)
-                              (tui/tui-request-render (:tui cs))))
-                          (fn []
-                            ((:done @sel-atom))
-                            (if auth-type
-                              (show-login-auth-type-selector! cs)
-                              (tui/tui-request-render (:tui cs))))
-                          search))}))))))
+       (let [sel-atom (atom nil)
+             sel (auth-selector/make-auth-selector
+                  :login entries
+                  (fn [provider-id selected-type]
+                    (close-selector! sel-atom)
+                    (if-let [entry (some #(when (and (= provider-id (:id %))
+                                                     (= selected-type (:auth-type %)))
+                                            %)
+                                         entries)]
+                      (start-provider-login! cs entry)
+                      (tui/tui-request-render (:tui cs))))
+                  (fn []
+                    (close-selector! sel-atom)
+                    (if auth-type
+                      (show-login-auth-type-selector! cs)
+                      (tui/tui-request-render (:tui cs))))
+                  search)]
+         (mount-selector! cs sel-atom sel))))))
 
 (defn- login-argument-completions
   "pi getArgumentCompletions for /login (getLoginProviderCompletionOptions +
@@ -940,33 +953,31 @@
       (ui/chat-history-add-message! (:chat-history cs)
                                     {:role :assistant
                                      :content "No stored credentials to remove. /logout only removes credentials saved by /login; environment variables are unchanged."})
-      (let [sel-atom (atom nil)]
-        (reset! sel-atom
-                {:done (dock/mount!
-                        cs
-                        (auth-selector/make-auth-selector
-                         :logout entries
-                         (fn [provider-id _selected-type]
-                           ((:done @sel-atom))
-                           (if-let [entry (some #(when (= provider-id (:id %)) %) entries)]
-                             (try
-                               (auth/remove-credential! (keyword provider-id))
-                               (when (and (:session-atom cs) (:footer-comp cs)
-                                          (:footer-provider cs))
-                                 (update-footer! cs))
-                               (ui/chat-history-add-message! (:chat-history cs)
-                                                             {:role :assistant
-                                                              :content (if (= :oauth (:auth-type entry))
-                                                                         (str "Logged out of " (:name entry))
-                                                                         (str "Removed stored API key for " (:name entry)
-                                                                              ". Environment variables are unchanged."))})
-                               (catch Exception e
-                                 (ui/show-warning! (:chat-history cs)
-                                                   (str "Logout failed: " (ex-message e)))))
-                             (tui/tui-request-render (:tui cs))))
-                         (fn []
-                           ((:done @sel-atom))
-                           (tui/tui-request-render (:tui cs)))))})))))
+      (let [sel-atom (atom nil)
+            sel (auth-selector/make-auth-selector
+                 :logout entries
+                 (fn [provider-id _selected-type]
+                   (close-selector! sel-atom)
+                   (if-let [entry (some #(when (= provider-id (:id %)) %) entries)]
+                     (try
+                       (auth/remove-credential! (keyword provider-id))
+                       (when (and (:session-atom cs) (:footer-comp cs)
+                                  (:footer-provider cs))
+                         (update-footer! cs))
+                       (ui/chat-history-add-message! (:chat-history cs)
+                                                     {:role :assistant
+                                                      :content (if (= :oauth (:auth-type entry))
+                                                                 (str "Logged out of " (:name entry))
+                                                                 (str "Removed stored API key for " (:name entry)
+                                                                      ". Environment variables are unchanged."))})
+                       (catch Exception e
+                         (ui/show-warning! (:chat-history cs)
+                                           (str "Logout failed: " (ex-message e)))))
+                     (tui/tui-request-render (:tui cs))))
+                 (fn []
+                   (close-selector! sel-atom)
+                   (tui/tui-request-render (:tui cs))))]
+        (mount-selector! cs sel-atom sel)))))
 
 (defn- register-builtin-command!
   "Register a builtin slash command unless an extension already took the

@@ -8,9 +8,11 @@
             [kmet.app.keybindings :as kb]
             [kmet.app.ui.thinking-selector :as ts]
             [kmet.tui.core :as core]
+            [kmet.tui.hiccup :as hiccup]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.tui.macros :as macros]
-            [kmet.tui.protocols :as protocols]))
+            [kmet.tui.protocols :as protocols]
+            [kmet.tui.utils :as u]))
 
 (defn- selector
   "Build a selector over off/low/medium/high with global keybindings
@@ -41,10 +43,15 @@
      key)))
 
 (defn- rows
-  "The rendered row texts of the selector's rows container."
+  "The rendered level rows, ANSI-stripped: everything between the search
+   input line and the footer hint."
   [sel]
-  (mapv (fn [c] @(:text-atom c))
-        @(:children (:rows-container sel))))
+  (->> (mapv u/strip-ansi-codes (protocols/render sel 120))
+       (drop-while #(not (str/starts-with? % "> ")))
+       (drop 1)
+       (remove str/blank?)
+       (take-while #(not (str/includes? % "to select")))
+       vec))
 
 (t/deftest test-initial-state
   (let [sel (selector)]
@@ -130,8 +137,8 @@
     (t/is (= ::none @selected) "enter with no matches is a no-op")))
 
 (t/deftest test-navigation-rebuilds-do-not-leak-watches
-  ;; Rows are rebuilt on every navigation (pi updateList) — the replaced rows
-  ;; must be disposed, or each keypress leaks a row-set of track! watches.
+  ;; Rows re-derive per navigation (pi updateList) — the retired rows must
+  ;; be disposed or each keypress leaks a row-set of track! watches.
   (let [sel (selector)
         watchers #(count @(deref #'macros/watch-registry))]
     (core/render sel 60)
@@ -139,6 +146,25 @@
       (dotimes [_ 6] (press sel "down") (core/render sel 60))
       (t/is (= baseline (watchers))
             "steady state: navigation does not accumulate watches"))))
+
+(t/deftest test-root-body-memoizes-idle-frames
+  ;; The state atom is read through tracked-deref: an idle re-render hands
+  ;; back the cached tree (0 bodies run) and a state change re-derives once;
+  ;; only the rows whose text changed rebuild.
+  (let [sel (selector)]
+    (protocols/render sel 80)
+    (hiccup/reset-counters!)
+    (protocols/render sel 80)
+    (t/is (zero? (:bodies-run (hiccup/counters))) "idle frame: body cached")
+    (t/is (= 1 (:bodies-skipped (hiccup/counters))))
+    (hiccup/reset-counters!)
+    (press sel "down")
+    (protocols/render sel 80)
+    (t/is (= 1 (:bodies-run (hiccup/counters))) "state change re-derives once")
+    ;; :text carries no patch lens — the two rows whose text changed (the
+    ;; arrow moving) rebuild; unchanged rows are reused as-is
+    (t/is (= 2 (:constructs (hiccup/counters))))
+    (t/is (= 2 (:disposals (hiccup/counters))) "dropped rows are disposed")))
 
 (t/deftest test-thinking-save-and-cancel-resolve-through-the-manager
   (t/testing "app.thinking.save is a real id (pi) — a rebind moves Ctrl+S"

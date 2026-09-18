@@ -10,6 +10,7 @@
             [kmet.ai.models :as models]
             [kmet.tui.components.input :as input]
             [kmet.tui.core :as core]
+            [kmet.tui.hiccup :as hiccup]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.tui.macros :as macros]
             [kmet.tui.protocols :as protocols]
@@ -50,11 +51,24 @@
      "ctrl+c" "\u0003"
      key)))
 
+(defn- render-lines
+  "The selector's rendered lines, ANSI-stripped."
+  [sel]
+  (mapv u/strip-ansi-codes (protocols/render sel 120)))
+
+(defn- rows
+  "The rendered list region between the search input and the bottom border
+   (rows, scroll counter and info block), with the same indexes the old
+   list-container children had."
+  [sel]
+  (let [after-input (drop-while #(not (str/starts-with? % "> ")) (render-lines sel))]
+    (vec (drop 1 (take-while #(not (re-matches #"[─]+" (str/trim %)))
+                             (drop 1 after-input))))))
+
 (defn- row-text
-  "Text of the i-th visible row in the list container, ANSI stripped."
+  "Text of the i-th rendered row line, ANSI stripped."
   [sel i]
-  (u/strip-ansi-codes
-   @(:text-atom (nth @(:children (:list-container sel)) i))))
+  (nth (rows sel) i))
 
 (defn- search-value [sel]
   (input/input-get-value (:search-input sel)))
@@ -148,7 +162,8 @@
 (t/deftest test-no-scope-without-scoped-models
   ;; no scoped models → scope text is absent; Tab is a no-op
   (let [sel (selector)]
-    (t/is (nil? (:scope-text sel)))
+    (t/is (not-any? #(str/includes? % "Scope:") (render-lines sel))
+          "no scope line without scoped models")
     (press sel "tab")
     (t/is (str/includes? (row-text sel 0) "x [p2]") "Tab does nothing without scoped models")))
 
@@ -172,9 +187,9 @@
           "unpriced model renders the free line")))
 
 (t/deftest test-row-rebuilds-do-not-leak-watches
-  ;; Rows are rebuilt on every navigation (pi updateList). The replaced rows
-  ;; must be disposed — a dropped Text keeps its track! watch registered,
-  ;; which would grow the registry per keypress and pin the components.
+  ;; Rows re-derive per navigation (pi updateList). The retired rows must be
+  ;; disposed — a dropped Text keeps its track! watch registered, which
+  ;; would grow the registry per keypress and pin the components.
   (let [sel (selector)
         watchers #(count @(deref #'macros/watch-registry))]
     (core/render sel 80)
@@ -182,3 +197,17 @@
       (dotimes [_ 6] (press sel "down") (core/render sel 80))
       (t/is (= baseline (watchers))
             "steady state: navigation does not accumulate watches"))))
+
+(t/deftest test-root-body-memoizes-idle-frames
+  ;; The state atom is read through tracked-deref: an idle re-render hands
+  ;; back the cached tree (0 bodies run) and a state change re-derives once.
+  (let [sel (selector)]
+    (protocols/render sel 120)
+    (hiccup/reset-counters!)
+    (protocols/render sel 120)
+    (t/is (zero? (:bodies-run (hiccup/counters))) "idle frame: body cached")
+    (t/is (= 1 (:bodies-skipped (hiccup/counters))))
+    (hiccup/reset-counters!)
+    (press sel "down")
+    (protocols/render sel 120)
+    (t/is (= 1 (:bodies-run (hiccup/counters))) "state change re-derives once")))

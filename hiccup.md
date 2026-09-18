@@ -35,36 +35,37 @@ frame + `track!` list returning strings), `bash_execution.clj`
    children remain (focused inputs, long-lived spinners, static chrome
    built once outside the body for identity stability).
    `session_selector`, `login_dialog`, `fork_selector`, `bash_execution`,
-   `tree_selector` panel, `dock`, `status-area`.
+   `tree_selector` panel, `dock`, `status-area`, plus the four converted
+   selectors (`thinking_selector`, `model_selector`,
+   `scoped_models_selector`, `auth_selector`).
 2. **HYBRID** — `compile-tree` chrome + imperative content spliced
    foreign: a `Container` of `make-text` rows rebuilt on every filter
    pass, plus `make-input` search fields, plus `make-select-list` /
    `make-settings-list` where a tag would do.
-   `auth_selector`, `model_selector`, `scoped_models_selector`,
-   `thinking_selector`, `dialogs`, `settings_selector`,
-   `tool_renderers` (partial).
+   `dialogs`, `settings_selector`, `tool_renderers` (partial).
 3. **KEEP (imperative by design)** — transcript records and string-direct
    `track!` leaves. Not migration targets (§4).
 
-## 2. Inventory (2026-09-15)
+## 2. Inventory (2026-09-18)
 
 | file | shape | remaining `make-*` | plan |
 |---|---|---|---|
 | `assistant_message.clj` | KEEP | transient `md/make-markdown` per reflow (`render-text-to-width`, `render-thinking-to-width`) | none — render-to-width helper, not a tree node |
-| `auth_selector.clj` | HYBRID | rows `container` + `truncated-text` (137,150,155,160); `input` + `list-container` (179–180); frame `compile-tree` (187). Method selector: rows `container` + `text` (294,299), `list-container` (313), frame (317) | Tier 1: rows → `[:text]` seqs; Tier 2: `[:input]` |
-| `model_selector.clj` | HYBRID | rows `container` + `text` + `spacer` (219–245); `input` + `list-container` + `scope-text` (267–272); frame (279) | Tier 1 |
-| `scoped_models_selector.clj` | HYBRID | rows `container` + `text` + `spacer` (303–336); `input` + `rows-container` + `footer-text` (358–360); frame (364) | Tier 1 |
-| `thinking_selector.clj` | HYBRID | rows `container` + `text` (185–194); `input` + `rows-container` (222–223); frame (228) | Tier 1 |
+| `auth_selector.clj` | DONE | none — root bodies for both selectors, `[:truncated-text]` rows, inputs foreign, `dispose` unwinds both; new `test_auth_selector.clj` (render-driven) | none (Phase 1 #3) |
+| `model_selector.clj` | DONE | none — root body, keyed `[:text]` rows, live scope/hint labels as elements, input foreign, `dispose` unwinds both | none (Phase 1 #2) |
+| `scoped_models_selector.clj` | DONE | none — root body, keyed `[:text]` rows, live footer as an element, input foreign, `dispose` unwinds both | none (Phase 1 #2) |
+| `thinking_selector.clj` | DONE | none — root body, keyed `[:text]` rows, input foreign, `dispose` unwinds both | none (Phase 1 #1) |
 | `dialogs.clj` | HYBRID | frame `compile-tree` (49); `select-list/make-select-list` (82); `input/make-input` (117) | Tier 2: `[:select-list]` / `[:input]` (the input via `:ref`, §3.2) — `:apply` covers all props used; keep `defcomponent` shell for `IFocusable` + `handle-input` forwarding |
-| `settings_selector.clj` | HYBRID | `settings-list/make-settings-list` (220); frame `compile-tree` (332) | Tier 2: `[:settings-list]` |
-| `tool_renderers.clj` | PARTIAL | trees already (444,453,526,570,575,946,970); imperative leftovers: `render-edit-result` (711), `render-bash-call` (766), `render-bash-result` (791,838,848,869), default/warning legs (907,920) — all `container` + `spacer` + `text` | Tier 1: `[:container {} [:spacer] [:text ...]]` / `[:box ...]` |
-| `chat_history.clj` | KEEP + Tier 1 helpers | `make-plain-msg` (145–147), `make-plain-md-msg` (154–157), `StatusLine` (191–192) | Tier 1 optional: helpers → `[:container {} [:spacer] [:text/:markdown/:truncated-text]]`; `ChatHistoryComponent` itself stays a record |
-| `session_selector.clj` | DONE (pattern) | 2× `input/make-input` (859–860); `hiccup/root` (899) | Tier 2 optional: `[:input {:ref ...}]`; low priority, works as-is |
-| `login_dialog.clj` | DONE | `input/make-input` (260); `db/make-dynamic-border` built once outside body (275); `hiccup/root` (279) | none — border-once-outside is the documented identity pattern; input could go `[:input]` (Tier 2, optional) |
+| `settings_selector.clj` | HYBRID | `settings-list/make-settings-list` (229); frame `compile-tree` (354) | Tier 2: `[:settings-list]` |
+| `tool_renderers.clj` | PARTIAL | trees already (452,461,534,578,583,969,993); imperative leftovers: `render-edit-result` (719–722), `render-bash-call` (775–780), `render-bash-result` (814–946) — the default/warning legs are already hiccup | Tier 1: `h/compile-tree` like the converted renderers; the mangled token-per-line regions (~814–946) need a manual reflow while there |
+| `chat_history.clj` | KEEP + Tier 1 helpers | `make-plain-msg` (204–206), `make-plain-md-msg` (213–215), `StatusLine` (249–250) | Tier 1 optional: helpers → `[:container {} [:spacer] [:text/:markdown/:truncated-text]]`; `ChatHistoryComponent` itself stays a record |
+| `session_selector.clj` | DONE (pattern) | 2× `input/make-input` (860–861); `hiccup/root` (900) | Tier 2 optional: `[:input {:ref ...}]`; low priority, works as-is |
+| `login_dialog.clj` | DONE | `input/make-input` (308); `db/make-dynamic-border` built once outside body (323); `hiccup/root` (327) | none — border-once-outside is the documented identity pattern; input could go `[:input]` (Tier 2, optional) |
 | `bash_execution.clj` | DONE | `spinner/make-spinner` (248) spliced into `hiccup/root` (256) | none — long-lived spinner identity intentional |
 | `tree_selector.clj` | DONE | `make-tree-list` ctor (937); `dialogs/make-input-dialog` (1082); panel `compile-tree` (1099) | none — `TreeList` is a string-direct `track!` leaf by design |
 | `user_message.clj` | KEEP | `container`/`box`/`md`/`spacer`/`image-block` (89–114) | none (§4) |
 | `custom_message.clj` | KEEP | `container`/`spacer`/`box`/`text`/`md`/`image-block` (81–93,153–155) | none (§4) |
+| `summary_message.clj` | KEEP | `text`/`md`/`spacer`/`container`/`box` (129–144,174–183) | none — transcript record (§4) |
 | `skill_message.clj` | KEEP | `text`/`md`/`container`/`box`/`spacer` (132–137,175–186) | none (§4) |
 | `tool_execution.clj` | KEEP | `container`/`box`/`spacer`/`image-block` (221–222,277–279) | none (§4) |
 | `image_block.clj` | KEEP | transient `ic/make-image` per render (54) | none — render-time branch, not a stored tree |
@@ -76,9 +77,11 @@ frame + `track!` list returning strings), `bash_execution.clj`
 Tier 2's former blockers (no `:on-change` on `:input`, the dialogs
 prefill cursor poke, `session_selector`'s post-construct wiring) are all
 reachable through refs (§3.2); the missing tag props are ergonomics, not
-prerequisites. The rows conversion is a measured win, not just hygiene
-(§3.1), and the transcript stays put for design reasons — not because a
-DSL container over records would be slow (§4).
+prerequisites. Tier 1's rows work is mostly plumbing deletion plus one
+idiom (see §3.1's "what reuse actually buys") — a wash at today's
+windowed selector sizes, real at list scale — and the transcript stays
+put for design reasons, not because a DSL container over records would
+be slow (§4).
 
 ## 3. Migration patterns
 
@@ -94,20 +97,21 @@ rows (container/make-container)
 (container/container-replace-children! (:list-container this) @(:children rows))
 ```
 
-After (the `session_selector` pattern — rows re-derive from the state
-atom inside the tree body, keyed, truncated at `hiccup/*width*`):
+After (the converted-selector pattern — rows re-derive from the state
+atom inside the tree body, keyed, `r/tracked-deref` on the atom):
 
 ```clojure
-;; compile-tree frame (current hybrid step): keep the defcomponent +
-;; handle-input + dock mount, drop the refresh fn + list-container.
+;; root body (or compile-tree frame in the hybrid step): keep the
+;; defcomponent + handle-input + dock mount, drop the refresh fn +
+;; list-container.
 (defn- row-elements
   "Row data as hiccup elements (replaces *-refresh!)."
   [th filtered selected start-idx end-idx]
-  (into (mapv (fn [i]
-                  [:truncated-text {:key i :padding-x 1
-                                    :text (row-line th (nth filtered i)
-                                                    (= i selected))}])
-                (range start-idx end-idx))
+  (concat (map (fn [i]
+                 [:truncated-text {:key i :padding-x 1
+                                   :text (row-line th (nth filtered i)
+                                                   (= i selected))}])
+               (range start-idx end-idx))
           [(when (or (pos? start-idx) (< end-idx (count filtered)))
              [:truncated-text {:padding-x 1
                                :text (theme/fg th :muted
@@ -119,17 +123,20 @@ atom inside the tree body, keyed, truncated at `hiccup/*width*`):
 
 c (h/compile-tree
    [:container {}
-    [:dynamic-border {:color-fn #(theme/fg th :accent %)}]
+    [:dynamic-border {:color-fn border-fn}] ; created once per selector
     [:spacer {:lines 1}]
     search-input ;; stays foreign: focus target, updated via input-set-value!
     [:spacer {:lines 1}]
     (row-elements th filtered selected start-idx end-idx)
     [:spacer {:lines 1}]
-    [:dynamic-border {:color-fn #(theme/fg th :accent %)}]])
+    [:dynamic-border {:color-fn border-fn}]])
 ```
 
 Rules: a body-built seq splices (§2.1) — always `:key` spliced rows or
-prepending rebuilds every unkeyed sibling; `:text` takes the
+prepending rebuilds every unkeyed sibling; **the rows value must be a
+seq, not a vector** (a vector is always ONE element: `mapv`/`into []`
+rows parse as an element whose head is the first row — `invalid element
+head`; `map`/`concat`/`for` splice); `:text` takes the
 pre-styled string (truncate with `u/truncate-to-width` against the
 known panel width, or move to `hiccup/root` and read
 `hiccup/*width*`); the refresh fn shrinks to a pure
@@ -143,6 +150,17 @@ becomes declarative. `footer-text`-style live labels (`model_selector`
 `:scope-text`, `scoped_models_selector` `:footer-text` via
 `text-set!`) become elements too — derived strings in the same
 sequence, not setter-poked records.
+
+**What reuse actually buys**: unchanged rows reconcile by reuse (stable
+record, its track! cache intact); a row whose `:text` changes is
+rebuilt, because the `[:text]` tag carries no patch lens — a text prop
+change constructs a fresh Text and disposes the old one. Measured on
+the converted `thinking_selector` (4 rows, one arrow move): 1 body run,
+2 constructs / 2 disposals — only the two rows whose text changed; the
+imperative `container-replace-children!` rebuilt and disposed all 4.
+The `bodies-run` win is separate: the root body is memoized on the
+tracked state atom, so idle frames run zero bodies and render zero rows
+(the table's third column).
 
 **Why rows-first is a measured win**: `container-replace-children!`
 rebuilds AND disposes every row per refresh, while reconcile reuses
@@ -244,20 +262,33 @@ Pitfalls: build static chrome (borders, titles) once outside the body
 and close over it (`login_dialog` pattern — `border` + `title`
 constructed once, only the row-descriptor seq re-derives inside) — a
 body-built record changes identity every re-run and churns
-retire+reconstruct; `hiccup/*width*` is the truncation width inside the
-body (`session_selector` reads `w` once per pass and threads it through
-`header-line` / `hint-lines` / `content-lines`); `compile-tree`-
-outside-a-mount trees are holder-disposed (`dispose-tree!`), `root`s via
-`dispose` (which must unwind the root — `session_selector`,
-`login_dialog` both do). `scope-text` / `footer-text` / `hint-text`
-conditionals (`model_selector:269-274`) become `when` elements inline —
-nil splices free (§2.1) — instead of nil-or-record fields.
+retire+reconstruct (the converted selectors close over a per-instance
+`border-fn` for exactly this reason); `hiccup/*width*` is the truncation
+width inside the body (`session_selector` reads `w` once per pass and
+threads it through `header-line` / `hint-lines` / `content-lines`);
+`compile-tree`-outside-a-mount trees are holder-disposed
+(`dispose-tree!`), `root`s via `dispose`. **A root conversion must wire
+`dispose`** (`dispose` the root plus any foreign child the root cannot
+own — inputs) and make the close path call it: the dock drops foreign
+records without disposing them, so an unwired root leaks its reaction,
+and the old splices already leaked their track! watches on close
+(verified: the four converted selectors carry a `dispose` method, their
+close paths call it, and their watch-registry entries drop to 0).
+`scope-text` / `footer-text` / `hint-text` conditionals
+(`model_selector:269-274`) become `when` elements inline — nil splices
+free (§2.1) — instead of nil-or-record fields.
 
-Read the state atom with `r/tracked-deref` (the `session_selector`
-pattern), never a bare `@`: an untracked read leaves the reaction without
-deps, so the body re-derives on every render pass instead of on change —
-correct output, silent loss of the memoization (`bodies-run` climbs in
-`hiccup/counters`).
+Read the state atom with `r/tracked-deref` — never a bare `@`: an
+untracked read leaves the reaction without deps, so the body re-derives
+on every render pass instead of on change — correct output, silent loss
+of the memoization (`bodies-run` climbs in `hiccup/counters`).
+`bash_execution` is the reference (`(r/tracked-deref state-atom)`);
+`session_selector`'s body uses a bare `@` and does re-derive per pass —
+new conversions follow the tracked form. Theme reads are plain
+(`theme/get-current-theme`): a memoized body restyles on its next derive,
+while the stable per-instance border `:color-fn` re-reads the theme at
+every render (borders restyle live, chrome on the next state change —
+the same asymmetry the old selectors had).
 
 ## 4. Non-goals (stays imperative)
 
@@ -290,13 +321,9 @@ correct output, silent loss of the memoization (`bodies-run` climbs in
 
 ## 5. Tiers
 
-- **Tier 1 (do on touch)** — data-only rows and leftover renderer
-  branches: `auth_selector` rows, `model_selector` rows,
-  `scoped_models_selector` rows, `thinking_selector` rows (+
-  `AuthMethodSelector` rows), `tool_renderers` imperative legs,
-  `chat_history` plain-msg helpers. The rows work is a measured 3–5×
-  fewer-rebuild win at list scale (§3.1), not just hygiene. No behavior
-  change; assert with
+- **Tier 1** — DONE: the four selectors (Phase 1 #1–#3). Remaining:
+  `tool_renderers` imperative legs and the optional `chat_history`
+  plain-msg helpers. No behavior change; assert with
   `hiccup/render-lines` headless tests (no tty, `bb test` material,
   never `^:slow`); watch `hiccup/counters` (`bodies-run` climbing on
   idle frames = inline-callback trap).
@@ -313,10 +340,11 @@ correct output, silent loss of the memoization (`bodies-run` climbs in
 
 Ordered phases; each step is its own commit and ships alone. Validation
 per step is the changed-file loop (`bb test-changed`, `bb lint-changed`,
-`bb format-check-changed`); conversion steps also assert the two-render
-property — render twice with one irrelevant state change between passes,
-then identical lines and `hiccup/counters` `:constructs 0 :disposals 0`
-on the second render — and a flat `bodies-run` on an idle frame.
+`bb format-check-changed`); conversion steps assert the two-render
+property — first render settles, an idle second render runs zero bodies
+(`:bodies-skipped` 1) — and a state change runs exactly one body run,
+reuses unchanged rows and disposes dropped ones, with a steady
+`macros/watch-registry` count across navigation.
 
 ### Phase 0 — reconciler + tag ergonomics (independent; land any time) — DONE
 
@@ -335,23 +363,34 @@ on the second render — and a flat `bodies-run` on an idle frame.
    Interaction tests: typing fires the callback; an unrelated prop pass
    neither clobbers typed text nor moves a live cursor.
 
-### Phase 1 — Tier 1 (the measurable win)
+### Phase 1 — Tier 1 (legacy rows and renderer legs)
 
 One commit per file, simplest first:
 
-1. `thinking_selector` — rows + `thinking-refresh!` → root body; delete
-   `rows-container` and the `container`/`text` requires; the refresh
-   call sites (up/down, ctrl+c, filter) collapse into state swaps.
-2. `auth_selector` — both row builders (auth and method selector).
-3. `model_selector`, `scoped_models_selector` — rows, and the live
-   labels (`:scope-text`, `scope-hint-text`, `hint-text`, `:footer-text`)
-   become elements instead of `text-set!` targets.
+1. **DONE — `thinking_selector`**: rows + `thinking-refresh!` → a root
+   body (`r/tracked-deref` on the state atom; a stable per-instance
+   border `:color-fn`); `rows-container` and the `container`/`text`
+   requires are gone; the refresh call sites (up/down, ctrl+c, filter)
+   are plain state swaps; `dispose` unwinds the root reaction and the
+   foreign input, wired through `show-thinking-selector`'s close.
+   Tests render (`rows` slices the rendered lines) and pin the
+   idle-frame memoization + rebuild counts.
+2. **DONE — `model_selector`, `scoped_models_selector`**: root bodies
+   with keyed `[:text]` rows; the live labels (`:scope-text`,
+   `scope-hint-text`, `hint-text`, `:footer-text`) are elements now — all
+   `text-set!` setters gone; `dispose` unwinds the root reaction and the
+   foreign input through each show-*'s close. Tests render.
+3. **DONE — `auth_selector`**: both selectors are root bodies
+   (`[:truncated-text]` rows, `[:text]` method rows); a new render-driven
+   `test_auth_selector.clj` added — it had none (rows, status indicators,
+   clamped nav, search/empty states, idle-frame memoization, dispose
+   unwinds); interactive mode's four auth mount sites now go through
+   `mount-selector!` / `close-selector!` (dock done + dispose).
 4. `tool_renderers` — the imperative legs (`render-edit-result`,
-   `render-bash-call`, `render-bash-result`, the default/warning legs).
-   Keep the `:last-component` reuse contract (tool-execution's context):
-   a renderer may return a held compile-tree on unchanged passes. Reflow
-   the token-per-line regions (~890–930) while there — `bb format` will
-   not rejoin them.
+   `render-bash-call`, `render-bash-result`). Keep the `:last-component`
+   reuse contract (tool-execution's context): a renderer may return a
+   held compile-tree on unchanged passes. Reflow the token-per-line
+   regions (~814–946) while there — `bb format` will not rejoin them.
 5. `chat_history` helpers (`make-plain-msg`, `make-plain-md-msg`,
    `StatusLine`) — optional, no behavior change, no measurable win.
 
@@ -389,3 +428,10 @@ One commit per file, each with its interaction test (§3.2):
 - Keep `tui.md` §2.3/§2.4 in lockstep: this plan leans on the `:apply`
   semantics and the ref lifecycle; a behavior change to either updates
   both docs in the same commit.
+- Root conversions dispose on their **close callbacks**. A *displaced*
+  panel is still dropped without dispose: another dialog/selector taking
+  the dock, or `/new` clearing it, bypasses the close path — the latent
+  gap `session_selector` (whose `dispose` is never called) and
+  `login_dialog` already have. A future `dock` change that disposes the
+  displaced component would close it everywhere; out of scope for the
+  conversion steps.
