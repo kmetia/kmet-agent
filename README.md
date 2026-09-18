@@ -181,6 +181,7 @@ resource dirs.
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands and shortcuts |
+| `/hotkeys` | Show all keyboard shortcuts — the bindings the app actually wired, resolved live (keybindings.edn overrides and extension shortcuts included) |
 | `/quit` | Exit kmet |
 | `/model <provider:model[:thinking]>` | Switch model (Ctrl+L opens a selector; an unmatched term opens the selector pre-filled with it) |
 | `/thinking [level]` | Set thinking level — bare: selector with search, ✓ current, `· default` marker (Enter selects, Ctrl+S sets as default); with a level arg: apply it directly |
@@ -206,8 +207,8 @@ resource dirs.
 | `/theme <name>` | Switch color theme |
 
 `/skill:<name>` loads a skill on demand; any other `/command args` expands a
-prompt template; `/import` and `/hotkeys` are pi-parity placeholders that
-report as not implemented.
+prompt template; `/import` is a pi-parity placeholder that reports as not
+implemented.
 
 ### Keyboard shortcuts
 
@@ -226,6 +227,10 @@ report as not implemented.
 | `Ctrl+G` | Open the external editor |
 | `Alt+Enter` / `Alt+Up` | Queue a follow-up message / restore queued messages |
 | Mouse wheel / terminal scroll | Browse history — the transcript lives in the terminal's own scrollback |
+
+Type `/hotkeys` for the full list — it resolves the live bindings the app
+has actually wired (including `keybindings.edn` overrides) and adds a section
+for extension-registered shortcuts.
 
 ## Project Structure
 

@@ -34,6 +34,7 @@
             [kmet.app.ui.tree-selector :refer [show-session-tree]]
             [kmet.app.ui.footer :as footer]
             [kmet.app.ui.footer-data-provider :as fdp]
+            [kmet.app.ui.hotkeys :as hotkeys-ui]
             [kmet.app.theme-controller :as theme-ctrl]
             [kmet.tui.components.select-list :as select-list]
             [kmet.app.loop :as agent]
@@ -384,8 +385,7 @@
          "  Ctrl+G     — Open external editor\n"
          "  Ctrl+O     — Cycle tool display (collapsed/expanded/quiet)\n"
          "  Ctrl+T     — Toggle thinking blocks\n"
-         "  Ctrl+L     — Select model
-"
+         "  Ctrl+L     — Select model\n"
          "  Up/Down    — Scroll chat history")))
 
 (defn- tools-text
@@ -950,6 +950,23 @@
   (when-not (commands/find-command (:name cmd))
     (commands/register-command! cmd)))
 
+(defn- make-hotkey-wired?
+  "Predicate over a keybinding id: is it wired in this interactive mode?
+   TUI ids are the editor's own (it implements the ids it declares); an app
+   action counts only when a handler is installed on the editor
+   (editor-set-on-action! — read live, so the predicate cannot drift from
+   the wiring) or a global input listener owns the id (app.quit, see
+   global-quit-listener). /hotkeys shows wired bindings only: a declared
+   pi-parity id whose action was never installed (app.suspend,
+   app.message.copy in the main editor) stays out."
+  [cs]
+  (let [installed (into #{"app.quit"}
+                        (when-let [ed (:editor cs)]
+                          (editor/editor-app-action-ids ed)))]
+    (fn [id]
+      (or (not (str/starts-with? id "app."))
+          (contains? installed id)))))
+
 (defn- register-builtin-commands!
   "Register kmet's builtin slash commands. Handlers receive [cs args];
    argument completions feed the editor autocomplete dropdown."
@@ -966,6 +983,14 @@
     :handler (fn [cs _]
                (ui/chat-history-add-message! (:chat-history cs)
                                              {:role :assistant :content (help-text)}))})
+  (register-builtin-command!
+   {:name "hotkeys"
+    :description "Show all keyboard shortcuts"
+    :handler (fn [cs _]
+               (ui/chat-history-add-message!
+                (:chat-history cs)
+                {:component (hotkeys-ui/make-hotkeys-view
+                             (make-hotkey-wired? cs))}))})
   (register-builtin-command!
    {:name "tools"
     :description "List available tools with parameters"
@@ -1465,8 +1490,7 @@
    they never clobber extension-registered commands."
   []
   (doseq [{:keys [name description argument-hint]}
-          [{:name "import" :description "Import and resume a session from a JSONL file"}
-           {:name "hotkeys" :description "Show all keyboard shortcuts"}]]
+          [{:name "import" :description "Import and resume a session from a JSONL file"}]]
     (register-builtin-command!
      {:name name
       :description description

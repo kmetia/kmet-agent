@@ -632,6 +632,51 @@
       (t/is (some? settings))
       (t/is (some? (:handler settings))))))
 
+(deftest test-hotkeys-registered-with-real-handler
+  (testing "/hotkeys is a real builtin (not the not-implemented placeholder):
+            its handler mounts the hiccup view, which shows wired actions only"
+    (commands/clear-commands!)
+    (install-app-keybindings!)
+    ((var inter/register-builtin-commands!) cfg/default-config)
+    ;; the placeholder pass runs after the builtins (main) — it must not
+    ;; clobber the real hotkeys command
+    ((var inter/register-not-implemented-commands!))
+    (let [hotkeys (commands/find-command "hotkeys")]
+      (t/is (some? hotkeys) "hotkeys registered")
+      (t/is (= "Show all keyboard shortcuts" (:description hotkeys)))
+      (t/is (some? (:handler hotkeys)))
+      (let [ed (editor/make-editor)
+            ch (ui/make-chat-history)]
+        ;; wire one app action; app.suspend / app.message.copy stay unwired
+        (editor/editor-set-on-action! ed "app.tools.expand" (fn [] nil))
+        ((:handler hotkeys) {:chat-history ch :editor ed} "")
+        (let [msg (last @(:messages-atom ch))
+              comp (:component msg)]
+          (t/is (some? comp) "the hiccup view is the message component")
+          (t/is (nil? (:content msg))
+                "no fallback assistant text — the view renders the content")
+          (let [lines (protocols/render comp 84)]
+            (t/is (some #(str/includes? % "Toggle tool output expansion") lines)
+                  "a wired app action has a row")
+            (t/is (not (some #(str/includes? % "Suspend to background") lines))
+                  "a declared-but-unwired action stays out"))
+          (protocols/dispose comp))))))
+
+(deftest test-hotkeys-wired-predicate
+  (testing "wired-hotkey? answers from the editor's installed actions"
+    (let [ed (editor/make-editor)]
+      (editor/editor-set-on-action! ed "app.tools.expand" (fn [] nil))
+      (let [wired? ((var inter/make-hotkey-wired?) {:editor ed})]
+        (t/is (wired? "tui.editor.cursorUp") "TUI ids are the editor's own")
+        (t/is (wired? "app.tools.expand") "installed on the editor")
+        (t/is (wired? "app.quit") "the global quit listener owns it")
+        (t/is (not (wired? "app.suspend")) "declared, never installed")
+        (t/is (not (wired? "app.message.copy")) "tree-selector-only in kmet"))
+      (testing "no editor: only the global-listener action survives"
+        (let [wired? ((var inter/make-hotkey-wired?) nil)]
+          (t/is (wired? "app.quit"))
+          (t/is (not (wired? "app.tools.expand"))))))))
+
 (deftest test-scoped-models-selector-initial-state
   (testing "/scoped-models opens the selector with session scoped models, then
             settings :enabled-models patterns, else nil (all enabled)"

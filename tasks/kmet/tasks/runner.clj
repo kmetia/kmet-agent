@@ -77,6 +77,7 @@
     kmet.app.test-packages
     kmet.test-package-manager
     kmet.app.ui.test-resource-config
+    kmet.app.ui.test-hotkeys
     kmet.app.test-extensions-ui
     kmet.app.test-interactive-ui
     kmet.app.test-event-bus

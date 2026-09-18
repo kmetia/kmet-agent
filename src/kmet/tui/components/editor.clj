@@ -1701,6 +1701,14 @@
     (swap! (:action-handlers editor) dissoc action-id))
   nil)
 
+(defn editor-app-action-ids
+  "The app-action keybinding ids this editor has handlers installed for
+   (editor-set-on-action! registrations, in insertion order). The wiring
+   context reads this back — /hotkeys shows installed actions only, so a
+   declared-but-unwired binding is never advertised."
+  [editor]
+  (vec (keys @(:action-handlers editor))))
+
 (defn editor-set-priority-action!
   "Register or clear a priority action handler (extension shortcuts — pi:
    onExtensionShortcut): checked before every builtin app action, including
