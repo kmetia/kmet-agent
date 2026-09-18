@@ -577,10 +577,14 @@ registration returns a deregister fn tracked for automatic unload.
 
 ### Contributing resource paths (`resources_discover`)
 
-After `:session-start` (startup, `/new`, `/resume`, `/reload`), kmet fires
+After `:session-start` (startup, `/new`, `/reload`), kmet fires
 `:resources-discover` (pi: resources_discover — fired after session_start)
 so extensions (and user config) can contribute skill, prompt-template and
-theme paths (directories):
+theme paths (directories). Session *switches* (`/resume`, `/import`,
+`/fork`, `/clone`) fire neither event by design: they import the session's
+transcript and working directory, never the other project's configuration or
+resources — the payload `:cwd` and the contributed paths stay those of the
+directory kmet was launched in.
 
 ```clojure
 (ext/on-event api :resources-discover

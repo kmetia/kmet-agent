@@ -216,7 +216,12 @@ another project moves the runtime there — tools resolve relative paths in it,
 the system prompt's `Current working directory` line and the footer pwd follow,
 path completion completes there, and new sessions land in that project's
 sessions dir (pi: `createRuntime`'s cwd). A recorded directory that no longer
-exists keeps the current one.
+exists keeps the current one. The other project's *configuration* is not part
+of that move: `.kmet/settings.edn`, project-scoped extensions/skills/prompts/
+themes and project packages stay with the directory kmet was launched in — a
+switch imports the session's transcript (and its working directory), never the
+other project's configuration. (Context files — AGENTS.md/CLAUDE.md — do
+follow the working directory, since they describe it.)
 
 ### Keyboard shortcuts
 

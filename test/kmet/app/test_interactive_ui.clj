@@ -908,6 +908,33 @@
                     "and the user is told"))))
         (finally (fs/delete-tree dir))))))
 
+(deftest test-export-defaults-to-the-runtime-cwd
+  (testing "/export without a path writes into the session's runtime cwd —
+            where its tools work (pi resolves its default against the process
+            cwd; kmet's runtime cwd follows the session)"
+    (commands/clear-commands!)
+    (install-app-keybindings!)
+    ((var inter/register-builtin-commands!) cfg/default-config)
+    (let [dir (str (fs/absolutize (str "target/test-export-cwd-" (System/currentTimeMillis))))
+          project (str dir "/project")]
+      (try
+        (fs/create-dirs project)
+        (let [sess (session/create-session (str dir "/sessions") {:cwd project})]
+          (append-message! sess "hello")
+          (let [cs (import-test-cs sess)
+                ch (:chat-history cs)]
+            (with-redefs [tui/tui-request-render (fn [_])
+                          tui/tui-set-focus (fn [_ _])]
+              ((:handler (commands/find-command "export")) cs ""))
+            (let [msg (last-message ch)]
+              (t/is (= :info (:role msg)))
+              (t/is (str/includes? (str (:content msg)) project)
+                    "the reported path is inside the session's project"))
+            (let [files (vec (fs/list-dir project))]
+              (t/is (= 1 (count files)) "one export, in the project dir")
+              (t/is (str/starts-with? (fs/file-name (first files)) "kmet-session-")))))
+        (finally (fs/delete-tree dir))))))
+
 (deftest test-scoped-models-selector-initial-state
   (testing "/scoped-models opens the selector with session scoped models, then
             settings :enabled-models patterns, else nil (all enabled)"

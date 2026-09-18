@@ -1225,6 +1225,10 @@
                            system-prompt (or @(:system-prompt-override ag) @(:system ag))
                            tool-defs (vals (tools/get-all-tools))
                            opts (cond-> (when arg {:path arg})
+                                  ;; without an explicit path the export lands in
+                                  ;; the session's runtime cwd (where its tools work),
+                                  ;; not the launch directory
+                                  (not arg) (assoc :cwd (runtime-cwd cs))
                                   system-prompt (assoc :system-prompt system-prompt)
                                   (seq tool-defs) (assoc :tools tool-defs))
                            path (session-export/export-to-html! sess opts)]
@@ -1744,7 +1748,12 @@
   "Rebuild the system prompt for CWD (pi: a new runtime rebuilds it from its
    own cwd): the project context files are re-read from the new directory
    and the prompt's Current working directory line follows. The
-   loaded-resources display is rebuilt with them (pi: showLoadedResources)."
+   loaded-resources display is rebuilt with them (pi: showLoadedResources).
+
+   Context files follow the cwd because they describe it; the rest of the
+   project scope deliberately does not move — settings.edn, project
+   extensions/skills/prompts/themes and project packages stay with the
+   launch directory (see apply-session-cwd!)."
   [cs cwd]
   (let [ag @(:agent-state cs)
         opts (assoc @(:system-prompt-opts ag)
@@ -1764,7 +1773,12 @@
    and the system prompt is rebuilt for the new directory. A recorded cwd
    that no longer exists keeps the current one (pi asks via
    MissingSessionCwdError; kmet says so and continues). Returns the cwd in
-   effect."
+   effect.
+
+   The session's *configuration* does not move with it: settings.edn,
+   project-scoped extensions/skills/prompts/themes and project packages stay
+   resolved against the launch directory — a switch imports the session's
+   transcript and working directory only."
   [cs sess]
   (let [fdp* (:footer-provider cs)
         recorded (get-in sess [:header :cwd])

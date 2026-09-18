@@ -152,6 +152,22 @@
       (t/is (str/starts-with? (fs/file-name path) "kmet-session-"))
       (t/is (str/ends-with? path ".html")))))
 
+(t/deftest test-export-default-path-follows-the-runtime-cwd
+  (t/testing "the default path resolves against the given runtime cwd — a
+              session resumed/imported from another project exports there,
+              not into the launch directory"
+    (let [sess (make-session)]
+      (s/append-entry sess {:role :user :content "q"})
+      (s/append-entry sess {:role :assistant :content "a"})
+      (let [project (str test-dir "/project")
+            path (se/default-export-path sess project)]
+        (t/is (= project (str (fs/parent path))))
+        (t/is (str/starts-with? (fs/file-name path) "kmet-session-"))
+        (t/testing "export-to-html! takes the same :cwd"
+          (let [written (se/export-to-html! sess {:cwd project})]
+            (t/is (= path written))
+            (t/is (fs/exists? written))))))))
+
 (t/deftest test-export-refuses-unpersisted
   ;; Lazy creation (G4): no file until the first assistant message.
   (let [sess (make-session)]

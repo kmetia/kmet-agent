@@ -300,25 +300,32 @@
          "\n</body>\n</html>\n")))
 
 (defn default-export-path
-  "Default HTML output path for a session (pi: exportSessionToHtml —
-   <app>-session-<basename>.html in the cwd)."
-  [session]
-  (let [basename (-> (:file session) fs/file-name (str/replace #"\.ednl$" ""))]
-    (str (fs/path (fs/cwd) (str "kmet-session-" basename ".html")))))
+  "Default HTML output path for a session (pi: exportSessionToHtml's
+   <app>-session-<basename>.html): in CWD, or the process cwd without one.
+   The caller passes the session's runtime working directory, so a session
+   resumed or imported from another project exports into that project's
+   directory — where its tools and the user's shell work (pi resolves the
+   default against its process cwd; kmet's runtime cwd is the session's)."
+  ([session] (default-export-path session (str (fs/cwd))))
+  ([session cwd]
+   (let [basename (-> (:file session) fs/file-name (str/replace #"\.ednl$" ""))]
+     (str (fs/path cwd (str "kmet-session-" basename ".html"))))))
 
 (defn export-to-html!
   "Write the session's HTML export to PATH (default: default-export-path in
-   the cwd). OPTS: :path, :system-prompt (string), :tools (seq of tool
-   defs) — pi: exportSessionToHtml(state) embeds the system prompt and
-   tool definitions. Creates parent dirs; returns the written path. Throws
-   when the session has no file or the file does not exist yet (lazy
-   creation — nothing to export)."
-  [session & [{:keys [path system-prompt tools]}]]
+   the runtime working directory from the :cwd opt). OPTS: :path, :cwd (the
+   runtime working directory the default path resolves against, e.g. the
+   session's), :system-prompt (string), :tools (seq of tool defs) — pi:
+   exportSessionToHtml(state) embeds the system prompt and tool definitions.
+   Creates parent dirs; returns the written path. Throws when the session
+   has no file or the file does not exist yet (lazy creation — nothing to
+   export)."
+  [session & [{:keys [path cwd system-prompt tools]}]]
   (let [file (:file session)]
     (when (or (nil? file) (not (fs/exists? file)))
       (throw (ex-info "Nothing to export yet - start a conversation first"
                       {:type :export-error :path file})))
-    (let [out (or path (default-export-path session))]
+    (let [out (or path (default-export-path session (or cwd (str (fs/cwd)))))]
       (fs/create-dirs (fs/parent out))
       (spit out (session->html session {:system-prompt system-prompt :tools tools}))
       (str out))))
