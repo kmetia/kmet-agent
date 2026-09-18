@@ -14,6 +14,7 @@
             [kmet.app.loop :as agent]
             [kmet.app.session :as session]
             [kmet.app.ui :as ui]
+            [kmet.app.ui.footer-data-provider :as fdp]
             [kmet.app.ui.subs :as subs]
             [kmet.app.packages :as packages]
             [kmet.app.skills :as skills]
@@ -739,6 +740,54 @@
         (is (false? @(:expanded?-atom lr)) "quiet projects to collapsed")
         (finally
           (reset! subs/image-settings-atom prev-settings))))))
+
+(deftest reload-keeps-the-runtime-cwd-and-the-launch-context
+  (testing "/reload rebuilds the prompt from the launch dir's config: the cwd
+            line keeps the session's runtime cwd (a foreign session's — it
+            must not revert to the launch dir) and context files keep loading
+            from the launch dir, whatever session is active"
+    (let [ag (agent/make-agent-state)
+          runtime-cwd "/fake/runtime-project"
+          cs {:agent-state (atom ag)
+              :chat-history (ui/make-chat-history)
+              :footer-provider (fdp/make-footer-data-provider
+                                :cwd-atom (atom runtime-cwd))
+              :theme-controller nil
+              :loaded-resources-comp nil
+              :header-comp nil
+              :footer-comp nil
+              :config cfg/default-config
+              :tui nil}
+          loader-cwd (atom nil)]
+      (with-redefs [cfg/init! (fn [] cfg/default-config)
+                    theme-ctrl/set-config! (fn [_ _] nil)
+                    app-kb/reload-agent-keybindings! (fn [] nil)
+                    packages/load-extensions! (fn [] [])
+                    packages/load-themes! (fn [] nil)
+                    models/load-models-config! (fn [] nil)
+                    skills/clear-skills! (fn [] nil)
+                    prompts/clear-prompt-templates! (fn [] nil)
+                    packages/load-skills! (fn [] nil)
+                    packages/load-prompts! (fn [] nil)
+                    context/load-project-context-files
+                    (fn [_ cwd]
+                      (reset! loader-cwd cwd)
+                      [{:path "AGENTS.md" :content "LAUNCH CONTEXT"}])
+                    ui/chat-history-set-thinking-hidden! (fn [_ _] nil)
+                    ui/loaded-resources-set-sections! (fn [_ _] nil)
+                    extensions/ui-reset! (fn [] nil)
+                    extensions/clear-extensions! (fn [] nil)
+                    extensions/discover-resources! (fn [_ _] nil)
+                    event-bus/emit-event! (fn [_] nil)]
+        ((var inter/handle-reload) cs nil))
+      (is (= (str (fs/cwd)) @loader-cwd)
+          "context files load from the launch dir, not the active session's cwd")
+      (is (= runtime-cwd (get-in @(:system-prompt-opts ag) [:cwd]))
+          "the rebuilt prompt options carry the runtime cwd")
+      (is (str/includes? @(:system ag) (str "Current working directory: " runtime-cwd))
+          "the prompt's cwd line does not revert to the launch dir")
+      (is (str/includes? @(:system ag) "LAUNCH CONTEXT")
+          "the launch dir's context files are in the rebuilt prompt"))))
 
 (deftest heal-stale-scrollback-when-idle-gating
   (testing "input heals a stale scrollback only at a streaming-free moment"

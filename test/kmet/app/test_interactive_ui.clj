@@ -936,9 +936,7 @@
           (append-message! sess "hello")
           (let [cs (import-test-cs sess)
                 ch (:chat-history cs)]
-            (with-redefs [tui/tui-request-render (fn [_])
-                          tui/tui-set-focus (fn [_ _])]
-              ((:handler (commands/find-command "export")) cs ""))
+            ((:handler (commands/find-command "export")) cs "")
             (let [msg (last-message ch)]
               (t/is (= :info (:role msg)))
               (t/is (str/includes? (str (:content msg)) project)

@@ -159,6 +159,9 @@
                                (catch Exception _
                                  (= base-dir default-base)))
             actual-dir (str (fs/parent (:file sess)))
+            ;; the recorded header cwd, not session/session-cwd (which checks
+            ;; existence): the hint needs the directory the session *belongs*
+            ;; to even when it is gone — expected-dir below is derived from it
             sess-cwd (or (get-in sess [:header :cwd]) (str (fs/cwd)))
             expected-dir (session/session-dir-for-cwd base-dir sess-cwd)
             ;; Pi's usesDefaultSessionDir: true only when sessionDir equals
@@ -3909,7 +3912,7 @@
                                                                           (prompts/as-command-maps (prompts/get-prompt-templates))
                                                                           (skills/as-command-maps (skills/get-skills))))
                                                ;; a fn: path completion follows a session switch's cwd
-                                               :base-path #(deref cwd-atom)))
+                                               :base-path #(fdp/fdp-get-cwd fdp)))
     (editor/editor-set-autocomplete-theme! ed (th/get-select-list-theme (cfg/get-theme config)))
 
     ;; Status indicator: the default editor embeds the active status in its
@@ -4787,8 +4790,12 @@
                              :get-system-prompt (fn [] @(:system @ag-atom))
                              :get-system-prompt-options (fn []
                                                           (let [config (:config cs)]
+                                                            ;; pi: getSystemPromptOptions — the prompt's build
+                                                            ;; inputs; cwd is the runtime one (a switched
+                                                            ;; session's), context files stay the launch dir's
                                                             {:custom-prompt (cfg/get-custom-prompt config)
                                                              :append-prompt (cfg/get-append-system-prompt config)
+                                                             :cwd (runtime-cwd cs)
                                                              :context-files (context/load-project-context-files
                                                                              (cfg/get-agent-dir)
                                                                              (str (fs/cwd)))}))

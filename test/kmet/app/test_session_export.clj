@@ -144,18 +144,10 @@
       (t/is (fs/exists? out))
       (t/is (str/starts-with? (slurp out) "<!DOCTYPE html>")))))
 
-(t/deftest test-export-default-path
-  (let [sess (make-session)]
-    (s/append-entry sess {:role :user :content "q"})
-    (s/append-entry sess {:role :assistant :content "a"})
-    (let [path (se/default-export-path sess)]
-      (t/is (str/starts-with? (fs/file-name path) "kmet-session-"))
-      (t/is (str/ends-with? path ".html")))))
-
 (t/deftest test-export-default-path-follows-the-runtime-cwd
-  (t/testing "the default path resolves against the given runtime cwd — a
-              session resumed/imported from another project exports there,
-              not into the launch directory"
+  (t/testing "the default path is kmet-session-<basename>.html in the given
+              runtime cwd — a session resumed/imported from another project
+              exports there, not into the launch directory"
     (let [sess (make-session)]
       (s/append-entry sess {:role :user :content "q"})
       (s/append-entry sess {:role :assistant :content "a"})
@@ -163,6 +155,7 @@
             path (se/default-export-path sess project)]
         (t/is (= project (str (fs/parent path))))
         (t/is (str/starts-with? (fs/file-name path) "kmet-session-"))
+        (t/is (str/ends-with? path ".html"))
         (t/testing "export-to-html! takes the same :cwd"
           (let [written (se/export-to-html! sess {:cwd project})]
             (t/is (= path written))

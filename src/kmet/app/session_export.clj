@@ -301,15 +301,14 @@
 
 (defn default-export-path
   "Default HTML output path for a session (pi: exportSessionToHtml's
-   <app>-session-<basename>.html): in CWD, or the process cwd without one.
-   The caller passes the session's runtime working directory, so a session
-   resumed or imported from another project exports into that project's
-   directory — where its tools and the user's shell work (pi resolves the
-   default against its process cwd; kmet's runtime cwd is the session's)."
-  ([session] (default-export-path session (str (fs/cwd))))
-  ([session cwd]
-   (let [basename (-> (:file session) fs/file-name (str/replace #"\.ednl$" ""))]
-     (str (fs/path cwd (str "kmet-session-" basename ".html"))))))
+   <app>-session-<basename>.html): in CWD. The caller passes the session's
+   runtime working directory, so a session resumed or imported from another
+   project exports into that project's directory — where its tools and the
+   user's shell work (pi resolves the default against its process cwd;
+   kmet's runtime cwd is the session's)."
+  [session cwd]
+  (let [basename (-> (:file session) fs/file-name (str/replace #"\.ednl$" ""))]
+    (str (fs/path cwd (str "kmet-session-" basename ".html")))))
 
 (defn export-to-html!
   "Write the session's HTML export to PATH (default: default-export-path in
