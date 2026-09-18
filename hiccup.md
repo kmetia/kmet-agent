@@ -344,14 +344,16 @@ the same asymmetry the old selectors had).
   never `^:slow`); watch `hiccup/counters` (`bodies-run` climbing on
   idle frames = inline-callback trap).
 - **Tier 2 (one commit per file + interaction test)** — stateful leaves
-  to tags: `dialogs` (`:select-list`, `:input`), `settings_selector`
-  (`:settings-list`) and login_dialog's borders are DONE; the session-
-  selector and login-dialog *inputs* are documented KEEPs (Phase 2 #3/#4 —
-  long-lived, mode-moving instances, which foreign splices model better
-  than owned elements). No
-  component API changes were required. Where a tag does own the leaf,
-  verify typing/selection/focus survive unrelated prop passes (`:apply`
-  semantics, tui.md §2.3).
+  to tags: **DONE in full**. `dialogs` (`:select-list`, `:input`),
+  `settings_selector` (`:settings-list`), `login_dialog` (borders +
+  prompt field) and `session_selector` (search/rename fields) are all
+  tag-owned; the two former input KEEPs (Phase 2 #3/#4) converted once
+  `[:input]` gained the `:focused?` prop, which is what makes a rebuilt
+  element come back whole. The conversions needed one component API
+  addition — that prop — plus `hiccup/materialize-ref!` for the
+  "key before the first paint" window; both are documented in tui.md
+  §2.4. Where a tag owns the leaf, verify typing/selection/focus survive
+  unrelated prop passes (`:apply` semantics, tui.md §2.3).
 - **Tier 3 (optional, only with a rewrite)** — full-screen roots:
   `resource_config` → `hiccup/root`. Never a drive-by.
 
