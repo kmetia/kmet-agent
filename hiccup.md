@@ -21,9 +21,10 @@ post-mount — goes through `hiccup/ref`: the sanctioned escape hatch
 (tui.md §2.4), not a workaround.
 
 Reference patterns: `session_selector.clj` (`hiccup/root` body
-tracked-derefing rows as `[:text ...]` data from the state atom,
-search/rename `Input` spliced foreign, focus/dispose imperative; the
-dock disposes on displacement too — §3.3), `login_dialog.clj`
+tracked-derefing rows as `[:text ...]` data from the state atom, its
+search/rename inputs tag-owned `[:input]` elements whose text, caret and
+emphasis are state fed back as props; the dock disposes on displacement
+too — §3.3), `login_dialog.clj`
 (`hiccup/root` + `r/tracked-deref` on a row-descriptor atom + static
 chrome built once outside the body; mounted `:borrowed?` because the
 auth flow re-mounts it around a prompt selector), `fork_selector.clj`
@@ -63,7 +64,7 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `settings_selector.clj` | DONE | none — `[:settings-list]` element under a `hiccup/ref`, read back right after `compile-tree`; the `:on-change` case hoisted to a named local, escape wired through the tag's `:on-escape`, one `dispose-tree!` unwinds the whole tree | none (Phase 2 #2) |
 | `tool_renderers.clj` | DONE | none — every renderer assembles a `h/compile-tree` (the last imperative legs, `render-edit-result`'s error branch, `render-bash-call` and `render-bash-result`, converted; the mangled token-per-line block reflowed, the collapsed output cap hoisted to `bash-result-preview-lines`) | none (Phase 1 #4) |
 | `chat_history.clj` | KEEP + Tier 1 helpers | `make-plain-msg` (204–206), `make-plain-md-msg` (213–215), `StatusLine` (249–250) | Tier 1 optional: helpers → `[:container {} [:spacer] [:text/:markdown/:truncated-text]]`; `ChatHistoryComponent` itself stays a record |
-| `session_selector.clj` | DONE (pattern) | 2× `input/make-input` — deliberate foreign splices (see Phase 2 #3) | none — the body reads state via `tracked-deref` and `hide!` disposes the root + both inputs |
+| `session_selector.clj` | DONE (full) | none — both inputs are `[:input]` tags (`:value`/`:cursor`/`:focused?` props over the state mirror; see Phase 2 #3) | none — the body reads state via `tracked-deref` and `hide!` disposes the root (which cascades to the tag-owned inputs) |
 | `login_dialog.clj` | DONE | `input/make-input` as a deliberate foreign splice (see Phase 2 #4) | none — chrome is `[:dynamic-border]` / `[:text]` elements (Phase 2 #4), and the input is the dialog's long-lived prompt field (pi: `this.input`) |
 | `bash_execution.clj` | DONE | `spinner/make-spinner` (248) spliced into `hiccup/root` (256) | none — long-lived spinner identity intentional |
 | `tree_selector.clj` | DONE | `make-tree-list` ctor (937); `dialogs/make-input-dialog` (1082); panel `compile-tree` (1099) | none — `TreeList` is a string-direct `track!` leaf by design; the close path disposes the frame + the spliced list |
@@ -125,11 +126,13 @@ atom inside the tree body, keyed, `r/tracked-deref` on the atom):
              [:truncated-text {:padding-x 1
                                :text (theme/fg th :muted "  No matches")}])]))
 
-c (h/compile-tree
+;; pre-conversion shape (compile-tree frame + a foreign input; §3.3's root
+;; body or a `[:input {...}]` tag replaces either half)
+(h/compile-tree
    [:container {}
     [:dynamic-border {:color-fn border-fn}] ; created once per selector
     [:spacer {:lines 1}]
-    search-input ;; stays foreign: focus target, updated via input-set-value!
+    search-input ;; foreign: focus target, updated via input-set-value!
     [:spacer {:lines 1}]
     (row-elements th filtered selected start-idx end-idx)
     [:spacer {:lines 1}]
@@ -227,15 +230,15 @@ since this inventory was written:
 (input/input-get-value @search-ref)     ;; keystroke → filter sync
 ```
 
-The former blockers were artifacts of avoiding refs: `dialogs` prefill is
-`(input/input-set-cursor! @inp-ref (count prefill))` immediately after
-`compile-tree` (refs fill synchronously during construction), and
-`session_selector`'s rename submit is
-`(input/input-set-on-submit! @rename-ref f)` post-mount. Both gaps landed
-in Phase 0: `[:input]` takes `:on-change` (parity with `[:editor]`,
-fired on value-changing edits) and `:cursor` (state-carrying like
-`:value`, nil = unmanaged) — ref-free conversions work for the simple
-cases; the ref path stays the general mechanism.
+The tag grew the prop surface the old blockers wanted: Phase 0 landed
+`:on-change` (parity with `[:editor]`, fired on value-changing edits) and
+`:cursor` (state-carrying like `:value`, nil = unmanaged), and Phase 2
+landed `:focused?` — the element's own emphasis flag, applied at
+construction and written through on change, never a rebuild trigger
+(tui.md §2.4). With text, caret and emphasis all declareable, a tagged
+input that a branch swap disposes and rebuilds comes back whole; the ref
+stays for *reaching* the instance (forwarding keys, reading its value),
+not for keeping it alive.
 
 Each Tier 2 file is one commit with its interaction test
 (type-then-rerender keeps text / selection / focus).
@@ -453,23 +456,26 @@ commit stays behavior-neutral.
    at 100/60/30 cols, two-downs selection, a search filter, cleared
    search, escape restoring the dock) and a new `show-settings`
    interaction test (dock + focus target, filter/clear, escape unwinds).
-3. **SKIPPED (documented) — `session_selector` search/rename inputs.**
-   The two inputs are mutually exclusive branches of the root body (list
-   mode splices the search input, rename mode the rename input). A
-   DSL-owned `[:input]` element is disposed when it leaves the tree
-   (`retire-item!`), so tagging them would destroy and rebuild the input
-   on every list⇄rename switch — losing the instance, the cursor and any
-   in-progress composition (IME), and forcing the rename prefill out of
-   `enter-rename-mode!` into state props. pi holds both as long-lived
-   fields (`this.searchInput`, `RenamePanel.renameInput`) and moves the
-   *instance* between containers, which is exactly what a foreign splice
-   does here — so this file is pi-faithful as it stands. Measured on a
-   two-branch root body: leaving the branch clears the ref (`nil`), the
-   instance is disposed, and the rebuilt one comes back **unfocused** (the
-   cursor would vanish until the host re-focuses). The tag's `:value` prop
-   restores the text; nothing restores focus without a focus-as-data
-   extension the DSL deliberately does not have (tui.md §2.4 keeps focus
-   imperative). Revisit only if focus/`IFocusable` becomes a tag prop.
+3. **DONE — `session_selector` search/rename inputs** (the revisit
+   condition this item names — "only if focus/`IFocusable` becomes a tag
+   prop" — landed with `[:input :focused?]`). The two mutually exclusive
+   branches now declare `[:input {:ref ... :value ... :cursor ...
+   :focused? ...}]`: the panel mirrors text and caret into state as it
+   forwards (`:query`/`:query-caret`, `:rename-value`/`:rename-caret`),
+   the rename prefill is state set by `enter-rename-mode!`, and
+   `IFocusable` shrank to the panel's own flag (the tree derives each
+   input's emphasis). The `:search-input`/`:rename-input` record fields,
+   their explicit disposes and the imperative `input-set-value!` prefill
+   are gone. The instance churn the old note worried about is real — one
+   construct + one dispose per mode switch — and accepted: the props bring
+   text, caret and emphasis back, and the switch is user-initiated. Keys
+   that arrive before a host render materialize the tree on demand
+   (`panel-input`), so a mode switch the host has not painted yet cannot
+   drop a key. Pinned by a pre-conversion-vs-new dump (**212 identical
+   lines**: 15 states across 3 widths, focused/unfocused, caret moves,
+   insert-at-caret, rename prefill/edit, list⇄rename returns, delete
+   confirm/cancel) plus `mode-switch-preserves-text-and-caret` and
+   `focus-drives-the-input-emphasis`.
 4. **PARTIAL — `login_dialog`**: the border splices converted to two
    `[:dynamic-border {:color-fn accent-fn}]` elements sharing the one
    stable `accent-fn` the dialog already created — equal props keep

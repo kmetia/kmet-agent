@@ -523,14 +523,14 @@
 
 (defn- enter-rename-mode!
   "ctrl+r — swap the panel content for the rename input, prefilled with the
-   session's current name (pi: enterRenameMode)."
+   session's current name (pi: enterRenameMode). The prefill is state: the
+   tree writes it into the input as :value/:cursor props."
   [this path]
   (let [current (some #(when (= (:path %) path) %) (active-sessions @(:state-atom this)))
-        rename-input (:rename-input this)
         current-name (or (:name current) "")]
-    (input/input-set-value! rename-input current-name)
-    (reset! (:cursor-atom rename-input) (count current-name))
-    (swap! (:state-atom this) assoc :rename-mode true :rename-target path)
+    (swap! (:state-atom this) assoc
+           :rename-mode true :rename-target path
+           :rename-value current-name :rename-caret (count current-name))
     ((:request-render this))))
 
 (defn- rename-selected!
@@ -576,15 +576,44 @@
       (swap! (:state-atom this)
              update :selected-idx #(max 0 (min (dec n) (+ % delta)))))))
 
+(defn- panel-input
+  "The tag-owned input the panel forwards keys to. The element is built by
+   the root body, i.e. on a render pass — if the host has not rendered the
+   panel since that element appeared (a mode switch the host has not painted
+   yet, or a key arriving before the first paint), materialize the tree here
+   instead of dropping the key. The width only shapes the discarded output;
+   structure is what the ref needs."
+  [this ref]
+  (or (deref ref)
+      (do (protocols/render this 80)
+          (deref ref))))
+
 (defn- forward-to-search!
   "Everything that isn't a selector key goes to the search input; a changed
-   value re-filters the list (pi: searchInput.handleInput + filterSessions)."
+   value re-filters the list (pi: searchInput.handleInput + filterSessions).
+   The panel mirrors the input's text and caret into state — the tree feeds
+   them back as :value/:cursor props, so a list⇄rename switch (which rebuilds
+   the input) cannot lose either."
   [this data]
-  (protocols/handle-input (:search-input this) data)
-  (let [value (input/input-get-value (:search-input this))]
-    (when-not (= value (:query @(:state-atom this)))
-      (swap! (:state-atom this) assoc :query value)
-      (refilter! this))))
+  (let [i (panel-input this (:search-ref this))
+        before (:query @(:state-atom this))]
+    (protocols/handle-input i data)
+    (let [value (input/input-get-value i)]
+      (swap! (:state-atom this) assoc :query value :query-caret @(:cursor-atom i))
+      (when-not (= value before)
+        (refilter! this)))))
+
+(defn- forward-to-rename!
+  "Rename mode's edit path (pi: RenamePanel.handleInput): keys edit the
+   rename input; text and caret are mirrored into state so leaving and
+   re-entering the mode restores both."
+  [this data]
+  (let [i (panel-input this (:rename-ref this))]
+    (protocols/handle-input i data)
+    (swap! (:state-atom this) assoc
+           :rename-value (input/input-get-value i)
+           :rename-caret @(:cursor-atom i))
+    nil))
 
 ;; ─── Rendering ─────────────────────────────────────────────────────────────
 
@@ -721,7 +750,7 @@
         (into rows (or scroll []))))))
 
 (defcomponent SessionSelector nil
-              [state-atom search-input rename-input loaders current-session-file
+              [state-atom search-ref rename-ref loaders current-session-file
                rename-session-fn delete-session-fn request-render on-select-atom
                on-cancel-atom timer-atom seq-atom hide-fn-atom focused? cache-atom
                root]
@@ -737,7 +766,7 @@
         (:rename-mode st)
         (if (kb/matches-key kmgr data "tui.select.cancel")
           (do (exit-rename-mode! this) nil)
-          (do (protocols/handle-input rename-input data) nil))
+          (do (forward-to-rename! this data) nil))
 
         ;; Delete confirmation intercepts every key until resolved
         ;; (pi: SessionList.handleInput confirming branch)
@@ -817,23 +846,17 @@
     (when-let [id @(:timer-atom this)]
       (timers/cancel! id)
       (reset! (:timer-atom this) nil))
-    ;; the search/rename inputs splice foreign (the root does not own them)
-    (protocols/dispose (:search-input this))
-    (protocols/dispose (:rename-input this))
     ;; unwind the content tree's reaction (tracked read of the state atom)
-    ;; with the selector — hide! disposes it on editor restore
+    ;; with the selector — hide! disposes it on editor restore. The search and
+    ;; rename inputs are tag-owned now, so this cascades to them.
     (protocols/dispose (:root this))))
 
-;; ─── IFocusable — forward to the inputs (IME cursor positioning) ───────────
+;; ─── IFocusable — the panel's flag; the tree derives the input emphasis ────
 
 (extend-type SessionSelector
   protocols/IFocusable
   (focused [this] @(:focused? this))
-  (set-focused! [this val]
-    (reset! (:focused? this) val)
-    (protocols/set-focused! (:search-input this) val)
-    (protocols/set-focused! (:rename-input this) val)))
-
+  (set-focused! [this val] (reset! (:focused? this) val)))
 ;; ─── Construction ──────────────────────────────────────────────────────────
 
 (defn- default-rename-session!
@@ -861,14 +884,13 @@
    off so tests can build selectors synchronously."
   [& {:keys [loaders current-session-file rename-session delete-session
              on-select on-cancel request-render]}]
-  (let [search-input (input/make-input)
-        rename-input (input/make-input)
-        sel (map->SessionSelector
+  (let [sel (map->SessionSelector
              {:state-atom (atom {:scope :current
                                  :sort :threaded
                                  :name-filter :all
                                  :show-path false
                                  :query ""
+                                 :query-caret 0
                                  :flat []
                                  :selected-idx 0
                                  :current-sessions nil
@@ -879,9 +901,11 @@
                                  :confirming-delete nil
                                  :status nil
                                  :rename-mode false
-                                 :rename-target nil})
-              :search-input search-input
-              :rename-input rename-input
+                                 :rename-target nil
+                                 :rename-value ""
+                                 :rename-caret 0})
+              :search-ref (hiccup/ref)
+              :rename-ref (hiccup/ref)
               :loaders (or loaders {:current (fn [_] []) :all (fn [_] [])})
               :current-session-file (some-> current-session-file canon-path)
               :rename-session-fn (or rename-session default-rename-session!)
@@ -896,16 +920,19 @@
               :cache-atom (atom nil)})
         ;; The panel frame as a mounted hiccup root (dsl.md): the border,
         ;; header and hint lines and the width-dependent rows re-derive from
-        ;; the state atom and the render width; the search/rename input
-        ;; splices foreign (lifecycle owned by the selector). Blank lines are
-        ;; spacers — the DSL does not full-width-pad blanks (only the bg'd
-        ;; selection row and the border span the panel; :text and
-        ;; dynamic-border provide that).
+        ;; the state atom and the render width. The search/rename inputs are
+        ;; tag-owned elements — the mode switch retires one and builds the
+        ;; other, and :value/:cursor/:focused? are what bring its text, caret
+        ;; and emphasis back (the panel mirrors them into state as it
+        ;; forwards). Blank lines are spacers — the DSL does not
+        ;; full-width-pad blanks (only the bg'd selection row and the border
+        ;; span the panel; :text and dynamic-border provide that).
         root (hiccup/root
               (fn [_props]
                 (let [w hiccup/*width*
                       th (theme/get-current-theme)
                       st (r/tracked-deref (:state-atom sel))
+                      focused? (r/tracked-deref (:focused? sel))
                       border-fn #(theme/fg th :accent %)
                       tree (if (:rename-mode st)
                              [:container {}
@@ -915,7 +942,11 @@
                               [:text {:text (str " " (theme/bold "Rename Session"))
                                       :padding-x 0 :padding-y 0}]
                               [:spacer {:lines 1}]
-                              (:rename-input sel)
+                              [:input {:ref (:rename-ref sel)
+                                       :value (:rename-value st)
+                                       :cursor (:rename-caret st)
+                                       :focused? focused?
+                                       :on-submit (fn [value] (confirm-rename! sel value))}]
                               [:spacer {:lines 1}]
                               [:text {:text (str " "
                                                  (theme/fg th :muted
@@ -935,7 +966,10 @@
                                 [:text {:text (hints 0) :padding-x 0 :padding-y 0}]
                                 [:text {:text (hints 1) :padding-x 0 :padding-y 0}]
                                 [:spacer {:lines 1}]
-                                (:search-input sel)
+                                [:input {:ref (:search-ref sel)
+                                         :value (:query st)
+                                         :cursor (:query-caret st)
+                                         :focused? focused?}]
                                 [:spacer {:lines 1}]
                                 (map (fn [row]
                                        [:text {:text row :padding-x 0 :padding-y 0}])
@@ -943,7 +977,6 @@
                                 [:spacer {:lines 1}]
                                 [:dynamic-border {:color-fn border-fn}]]))]
                   tree)))]
-    (input/input-set-on-submit! rename-input (fn [value] (confirm-rename! sel value)))
     (assoc sel :root root)))
 
 (defn show-session-selector

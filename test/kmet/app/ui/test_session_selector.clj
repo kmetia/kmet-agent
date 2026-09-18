@@ -81,6 +81,20 @@
   [sel width]
   (mapv u/strip-ansi-codes (protocols/render sel width)))
 
+(defn- caret-text
+  "The rendered line carrying the cursor, ANSI-stripped with the caret itself
+   kept as `|`. A raw substring match around the marker fails when styling
+   separates the marker from the next character, which the search input's
+   inverse-video caret does."
+  [sel width]
+  (some (fn [line]
+          (let [i (str/index-of line u/CURSOR-MARKER)]
+            (when i
+              (str (u/strip-ansi-codes (subs line 0 i))
+                   "|"
+                   (u/strip-ansi-codes (subs line (+ i (count u/CURSOR-MARKER))))))))
+        (protocols/render sel width)))
+
 (defn- selected-row-text
   "Text of the row carrying the › cursor, ANSI-stripped."
   [sel width]
@@ -493,13 +507,46 @@
     (t/is (some #(str/includes? % "3mo") ls))
     (t/is (some #(str/includes? % "2y") ls))))
 
-(t/deftest focus-forwards-to-search-input
+(t/deftest mode-switch-preserves-text-and-caret
+  ;; the inputs are tag-owned: a list⇄rename switch retires one and builds the
+  ;; other, so both texts and both carets are state (:query/:query-caret,
+  ;; :rename-value/:rename-caret) fed back as :value/:cursor props
+  (let [sel (new-sel :current [(info "/tmp/s/a.ednl" :name "alpha session")])]
+    (render-text sel 100)
+    (protocols/set-focused! sel true)
+    (doseq [k ["d" "e"]] (press sel k))
+    (press sel "\u001b[D")                      ;; caret between d and e
+    (t/is (str/includes? (caret-text sel 100) "> d|e")
+          "query text and caret position render")
+    (press sel "ctrl+r")                       ;; rename mode (prefilled)
+    (t/is (str/includes? (caret-text sel 100) "> alpha session|")
+          "the input is prefilled from the session name, caret at the end")
+    (press sel "escape")                       ;; back to the list
+    (t/is (str/includes? (caret-text sel 100) "> d|e")
+          "query text AND caret survived the switch")
+    (press sel "ctrl+r")
+    (t/is (str/includes? (caret-text sel 100) "> alpha session|")
+          "re-entering rename prefills from the name again")))
+
+(t/deftest focus-drives-the-input-emphasis
+  ;; the panel's flag is data for the tree ([:input :focused? ...]): the
+  ;; caret renders while focused, and a mode switch that rebuilds the input
+  ;; brings the caret back
   (let [sel (new-sel :current [(info "/tmp/s/a.ednl")])]
     (protocols/set-focused! sel true)
     (t/is (protocols/focused sel))
-    (t/is (protocols/focused (:search-input sel)))
+    (t/is (some #(str/includes? % u/CURSOR-MARKER) (protocols/render sel 100))
+          "the focused search input renders its caret")
     (protocols/set-focused! sel false)
-    (t/is (not (protocols/focused (:search-input sel))))))
+    (t/is (not-any? #(str/includes? % u/CURSOR-MARKER) (protocols/render sel 100)))
+    (protocols/set-focused! sel true)
+    (press sel "ctrl+r")                       ;; rename mode: a fresh input
+    (t/is (some #(str/includes? % u/CURSOR-MARKER) (protocols/render sel 100))
+          "the rebuilt rename input comes back focused")
+    (press sel "escape")
+    (t/is (some #(str/includes? % (str "> " u/CURSOR-MARKER))
+                (protocols/render sel 100))
+          "and the rebuilt search input too")))
 
 (t/deftest async-load-completes-and-refreshes
   (let [done (promise)
