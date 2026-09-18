@@ -8,7 +8,6 @@
             [kmet.app.keybindings :as kb]
             [kmet.app.ui.model-selector :as ms]
             [kmet.ai.models :as models]
-            [kmet.tui.components.input :as input]
             [kmet.tui.core :as core]
             [kmet.tui.hiccup :as hiccup]
             [kmet.tui.keybindings :as tui-kb]
@@ -70,8 +69,12 @@
   [sel i]
   (nth (rows sel) i))
 
-(defn- search-value [sel]
-  (input/input-get-value (:search-input sel)))
+(defn- search-value
+  "The live filter text: the panel mirrors the tag-owned input's text into
+   the state's :search after every forwarded key, so that is the readable
+   instance-state for assertions."
+  [sel]
+  (:search @(:state-atom sel)))
 
 ;; ─── handle-input behaviors ────────────────────────────────────────────────
 

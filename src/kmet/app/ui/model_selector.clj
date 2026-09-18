@@ -79,7 +79,7 @@
 (declare filtered-items models-equal?)
 
 (defcomponent ModelSelector nil
-              [root search-input state-atom
+              [root search-ref state-atom
                on-select-atom on-cancel-atom focused? cache-atom]
 
   (render [this width] (protocols/render (:root this) width))
@@ -140,16 +140,16 @@
 
         ;; Everything else — the search input (the visible filter, pi)
         :else
-        (do (protocols/handle-input search-input data)
-            (let [value (input/input-get-value search-input)]
-              (when (not= value (:search st))
-                (swap! state-atom assoc :search value :selected-idx 0))
-              nil)))))
+        (let [i (h/materialize-ref! _this (:search-ref _this))]
+          (protocols/handle-input i data)
+          (let [value (input/input-get-value i)]
+            (when (not= value (:search st))
+              (swap! state-atom assoc :search value :selected-idx 0))
+            nil)))))
 
-  ;; the root's reaction and the foreign search input are the selector's
-  ;; lifecycle: show-model-selector unwinds both when the panel closes
+  ;; the root's reaction and the tag-owned search field are the selector's
+  ;; lifecycle: show-model-selector unwinds the root when the panel closes
   (dispose [this]
-    (protocols/dispose (:search-input this))
     (protocols/dispose (:root this))))
 
 ;; ─── Helpers (pi sortModels / filterModels / updateList / getScopeText) ────
@@ -241,9 +241,11 @@
 (defn- model-body
   "The selector tree as a reactive body (dsl.md): the list window, the live
    scope/hint labels and the selected model's info block re-derive from the
-   state atom; the search input splices foreign. BORDER-FN is created once
-   per selector so the border's :color-fn keeps identity across passes."
-  [state-atom search-input border-fn]
+   state atom; the search field is a tag-owned `[:input]` whose text is the
+   state's `:search` and whose emphasis is the panel's focus flag. BORDER-FN
+   is created once per selector so the border's :color-fn keeps identity
+   across passes."
+  [state-atom search-ref focused? border-fn]
   (fn [_props]
     (let [th (theme/get-current-theme)
           st (r/tracked-deref state-atom)
@@ -266,7 +268,9 @@
        (when (seq (:scoped-models st))
          [:text {:padding-x 1 :padding-y 0 :text (scope-hint-str)}])
        [:spacer {:lines 1}]
-       search-input
+       [:input {:ref search-ref
+                :value (:search st)
+                :focused? (r/tracked-deref focused?)}]
        [:spacer {:lines 1}]
        (row-elements th st filtered selected start-idx end-idx)
        [:spacer {:lines 1}]
@@ -286,20 +290,18 @@
                   :current current-model
                   :selected-idx 0
                   :search (or search "")})
-        search-input (input/make-input)
         ;; stable identity across passes — a fresh color-fn per body run
         ;; would decline the border patch and rebuild it every time
         border-fn (fn [s] (theme/fg (theme/get-current-theme) :accent s))
+        focused? (atom false)
         sel (map->ModelSelector
              {:root nil
-              :search-input search-input
+              :search-ref (h/ref)
               :state-atom st
               :on-select-atom (atom on-select)
               :on-cancel-atom (atom on-cancel)
-              :focused? (atom false)
+              :focused? focused?
               :cache-atom (atom nil)})]
-    (when (seq search)
-      (input/input-set-value! search-input search))
     ;; initial selection: the current model when present, else the top row
     ;; (pi loadModelsFromSnapshot — the index comes from the ACTIVE list:
     ;; the scoped models when scoped, else all models); a pre-filled
@@ -309,16 +311,14 @@
           idx (first (keep-indexed (fn [i m] (when (models-equal? current-model m) i))
                                    active))]
       (swap! st assoc :selected-idx (if (seq search) 0 (or idx 0))))
-    (assoc sel :root (h/root (model-body st search-input border-fn)))))
+    (assoc sel :root (h/root (model-body st (:search-ref sel) focused? border-fn)))))
 
-;; ─── IFocusable — forward to the search input (IME cursor positioning) ─────
+;; ─── IFocusable — the panel's flag; the tree derives the field's emphasis ──
 
 (extend-type ModelSelector
   protocols/IFocusable
   (focused [this] @(:focused? this))
-  (set-focused! [this val]
-    (reset! (:focused? this) val)
-    (protocols/set-focused! (:search-input this) val)))
+  (set-focused! [this val] (reset! (:focused? this) val)))
 
 (defn show-model-selector
   "Model selector (pi ModelSelectorComponent, mounted via showSelector —
