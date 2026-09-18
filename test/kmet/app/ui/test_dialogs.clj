@@ -56,3 +56,21 @@
       (doseq [c "abc"] (core/handle-input comp (str c)))
       (core/handle-input comp "\r")
       (t/is (= "abc" @result)))))
+
+(deftest test-selector-hint-keys
+  (testing "the frame renders the dialog's keybinding hint (pi: keyHint line)"
+    (let [lines (render-plain (d/make-selector-dialog "Pick" ["A" "B"]
+                                                      (fn [_] nil) (fn [])
+                                                      theme/dark-theme)
+                              120)]
+      (t/is (some #(re-find #"navigate" %) lines))
+      (t/is (some #(re-find #"select" %) lines))
+      (t/is (some #(re-find #"cancel" %) lines)))))
+
+(deftest test-input-dialog-hint-keys
+  (testing "the input dialog hints submit/cancel (pi: ExtensionInputComponent)"
+    (let [lines (render-plain (d/make-input-dialog "Name" (fn [_] nil) (fn [])
+                                                   theme/dark-theme)
+                              120)]
+      (t/is (some #(re-find #"submit" %) lines))
+      (t/is (some #(re-find #"cancel" %) lines)))))

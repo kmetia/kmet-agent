@@ -44,8 +44,12 @@
    SelectList/Input record the dialog owns), and a dim keybinding hint.
    Returns the frame's root component (a Container) — its dispose cascades
    to the DSL-owned chrome AND the spliced content, so the dialog disposes
-   the frame once and the inner comp goes with it."
-  [th title content & [{:keys [hint-keys]}]]
+   the frame once and the inner comp goes with it.
+
+   HINT-KEYS is the call sites' keyword arg (`:hint-keys [[id desc] ...]`) —
+   the pair list `hint-str` renders. Destructuring it as a map (the rest
+   arg is the `:hint-keys` keyword, not a map) silently rendered it empty."
+  [th title content & {:keys [hint-keys]}]
   (h/compile-tree
    [:container {}
     [:dynamic-border {:color-fn #(theme/fg th :accent %)}]
