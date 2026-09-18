@@ -289,7 +289,9 @@
    Assistant messages SHARE the chat history's thinking-hidden/hidden-label
    atoms (pi: hideThinkingBlock / hiddenThinkingLabel) — a toggle is one
    reset! that invalidates every message at once; tool, skill, and summary
-   components share the tools-expanded toggle atom the same way. A message
+   components share the tools-expanded toggle atom the same way, and every
+   boxed component is handed the history's output-pad atom (a pad change is
+   one reset! the records read at render). A message
    carrying a pre-built :component (extension renderers returning a
    component directly, and replay-built :bash executions) uses it as-is.
    :custom messages render through the default labeled box (a registered
@@ -778,9 +780,12 @@
    on the atom every message component shares and reads in its render (like
    the tool-display and thinking-hidden atoms): the transcript re-pads on
    the next frame with no per-kind walk, and a pad change re-wraps the
-   cached assistant lines (the pad is part of their staleness key)."
+   cached assistant lines (the pad is part of their staleness key).
+   Components the history did not build (a pre-built :component from an
+   extension renderer) keep their own padding. Returns the pad set."
   [ch n]
-  (reset! (:output-pad-atom ch) n))
+  (reset! (:output-pad-atom ch) n)
+  n)
 
 ;; ─── IFocusable ─────────────────────────────────────────────────────────────
 

@@ -674,6 +674,24 @@
       (is (some #(re-find #"^   streaming text" %) (mapv strip-ansi (core/render ch 32)))
           "the pad is part of the reflow staleness key"))))
 
+(deftest test-output-pad-only-follows-history-built-components
+  (testing "a pre-built component (extension renderer) keeps its own padding"
+    (let [ch (ch/make-chat-history)
+          own (te/make-tool-execution :name "ls" :content "own pad")]
+      (ch/chat-history-add-message! ch {:role :tool :component own})
+      (ch/chat-history-set-output-pad! ch 4)
+      (core/render ch 40)
+      (is (= 1 @(:padding-x-atom @(:box own)))
+          "the transcript no longer pushes into components it did not build")))
+  (testing "…but one built with the history's pad atom follows it"
+    (let [ch (ch/make-chat-history)
+          mine (te/make-tool-execution :name "ls" :content "follows"
+                                       :output-pad-atom (:output-pad-atom ch))]
+      (ch/chat-history-add-message! ch {:role :tool :component mine})
+      (ch/chat-history-set-output-pad! ch 4)
+      (core/render ch 40)
+      (is (= 4 @(:padding-x-atom @(:box mine))) "opt-in through the shared atom"))))
+
 (deftest test-info-banner-in-children
   (testing "the info banner is a chat message: themed, persisted as :info, survives placeholder removal"
     (let [ch (ch/make-chat-history)]

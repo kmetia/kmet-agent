@@ -733,6 +733,12 @@ boolean true).
   (fn [msg] {:role :info :content "rendered" :label "My message"}))
 ```
 
+A renderer that returns a **bare component** owns it: the transcript hands
+its shared output-pad atom to the components it builds itself, so a
+component you construct keeps the padding you gave it and does not follow
+the output-padding setting. Return a message map (as above) when you want
+the transcript's current padding.
+
 ### Agent control
 
 ```clojure
