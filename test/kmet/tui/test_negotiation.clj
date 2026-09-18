@@ -49,6 +49,23 @@
     (t/is (nil? (lib/parse-negotiation-sequence "\u001b[?7u\u001b[?1;2c"))
           "multi-sequence chunks never parse whole — split-negotiation-response handles them")))
 
+(deftest test-desired-kitty-flags
+  (testing "flags 1 (disambiguate) + 4 (alternate keys) — ReportEventTypes
+            (2) is deliberately not requested"
+    (t/is (= 5 lib/DESIRED-KITTY-FLAGS))
+    (t/is (pos? (bit-and lib/DESIRED-KITTY-FLAGS 1)) "disambiguate escape codes")
+    (t/is (pos? (bit-and lib/DESIRED-KITTY-FLAGS 4)) "report alternate keys")
+    (t/is (zero? (bit-and lib/DESIRED-KITTY-FLAGS 2))
+          (str "key-up events must not be requested: a terminal that cannot "
+               "encode a release as a Kitty sequence falls back to the plain "
+               "character (Windows Terminal through 1.25, "
+               "microsoft/terminal#20522), duplicating every non-ASCII "
+               "keypress as raw text that no dedupe can separate from a real "
+               "second press"))
+    (t/is (= (str "\u001b[>" lib/DESIRED-KITTY-FLAGS "u\u001b[?u\u001b[c")
+             lib/KITTY-KEYBOARD-PROTOCOL-QUERY)
+          "the pushed query cannot drift from the flag constant")))
+
 (deftest test-split-negotiation-response
   (testing "a leading response splits off the remainder of the batch"
     (t/is (= {:parsed {:type :kitty-flags :flags 7} :rest ""}
@@ -282,10 +299,11 @@
       (t/is (= "" buf)))))
 
 (deftest test-negotiation-parses-kitty-push-response
-  ;; Termux answers the kitty push query (\u001b[>7u) with \u001b[>...u —
-  ;; this format must be parsed as kitty flags so it is consumed by the
-  ;; negotiation intercept (previously unrecognized, it leaked into the
-  ;; input buffer and swallowed every subsequent key).
+  ;; Termux answers the kitty push query with the push form (\u001b[>...u)
+  ;; rather than the \u001b[?...u query response — that format must be parsed
+  ;; as kitty flags so it is consumed by the negotiation intercept
+  ;; (previously unrecognized, it leaked into the input buffer and swallowed
+  ;; every subsequent key).
   (t/is (= {:type :kitty-flags :flags 7}
            (lib/parse-negotiation-sequence "\u001b[>7u")))
   (t/is (= {:type :kitty-flags :flags 7}

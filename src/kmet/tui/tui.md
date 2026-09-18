@@ -888,6 +888,18 @@ an escape sequence, a paste marker) through two guards:
   and dispatch drops the raw char immediately after it, so the pair lands
   as one character. Only unmodified printable CSI-u arms the guard, so
   ordinary typing (raw on the flags kmet requests) never triggers it.
+
+  The negotiation itself is part of the guard: kmet pushes flags 1
+  (disambiguate) + 4 (alternate keys) and deliberately not 2 (report event
+  types). A terminal that cannot encode a key-up as a Kitty sequence falls
+  back to the plain character, so without this a non-ASCII keypress
+  (Cyrillic, accented and dead-key-layout chars) arrives as the same text
+  twice — Windows Terminal through 1.25, microsoft/terminal#20522 — and no
+  app can tell the duplicate from a genuine second keypress (a dedupe would
+  eat fast double letters). Without flag 2 the terminal never processes
+  key-up at all, while auto-repeat keeps arriving as ordinary presses;
+  `keys/is-key-release?` stays as the safety net for terminals that report
+  releases anyway.
 - **Unbracketed paste bursts.** A CR ending a paste-like burst of *text*
   (>= 4 text chars within 100 ms, the CR included) is rewritten to LF, and
   the LF half of a rewritten CRLF is swallowed — the editor never submits

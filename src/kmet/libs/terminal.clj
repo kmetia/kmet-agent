@@ -77,10 +77,11 @@
 (def ^:const CSI-2026-SYNC-OFF "\u001b[?2026l")
 
 ;; ─── Kitty keyboard protocol negotiation (pi: terminal.ts) ─────────────────
-;; Requested flags: 1 = disambiguate escape codes, 2 = report event types,
-;; 4 = report alternate keys. The trailing DA query is a sentinel supported
-;; by terminals that do not know Kitty keyboard protocol — receiving DA
-;; before a Kitty response enables the modifyOtherKeys fallback.
+;; Requested flags: 1 = disambiguate escape codes, 4 = report alternate
+;; keys. Flag 2 (report event types) is deliberately omitted — see the flag
+;; block below. The trailing DA query is a sentinel supported by terminals
+;; that do not know Kitty keyboard protocol — receiving DA before a Kitty
+;; response enables the modifyOtherKeys fallback.
 
 ;; ─── Terminal queries + responses (pi: terminal.ts / terminal-colors.ts) ────
 
@@ -169,8 +170,25 @@
       (when (and (pos? h) (pos? w))
         {:width-px w :height-px h}))))
 
-(def ^:const DESIRED-KITTY-FLAGS 7)
-(def ^:const KITTY-KEYBOARD-PROTOCOL-QUERY "\u001b[>7u\u001b[?u\u001b[c")
+;; Flags 1 (disambiguate escape codes) + 4 (report alternate keys).
+;; Flag 2 (report event types) is DELIBERATELY not requested: kmet has no
+;; consumer for key release/repeat events, and asking for them makes
+;; terminals deliver some printable keys twice. Windows Terminal (through
+;; 1.25, microsoft/terminal#20522) cannot encode a key-up as a Kitty
+;; sequence when the key's base code cannot be derived — non-ASCII layouts
+;; (Cyrillic, accented and dead-key chars) — so the key-up falls back to
+;; the plain character: kmet receives press and release as the SAME text
+;; twice, and a raw duplicate is indistinguishable from a genuine second
+;; keypress (a dedupe would eat fast double letters). Without flag 2 those
+;; terminals never process key-up at all; auto-repeat keeps arriving as
+;; ordinary presses (the Kitty spec treats repeats as presses without flag
+;; 2 — Windows Terminal briefly suppressed them, microsoft/terminal#20499,
+;; fixed in #20500).
+;; The release filter (kmet.tui.keys/is-key-release?) stays as a safety net
+;; for terminals that report releases anyway (a stale push, a multiplexer
+;; replaying them).
+(def ^:const DESIRED-KITTY-FLAGS 5)
+(def ^:const KITTY-KEYBOARD-PROTOCOL-QUERY "\u001b[>5u\u001b[?u\u001b[c")
 (def ^:const NEGOTIATION-FLUSH-TIMEOUT-MS 150)
 
 (defonce ^:private modify-other-keys-active (atom false))

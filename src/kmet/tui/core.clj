@@ -1530,10 +1530,11 @@
 ;;
 ;; Only text runs feed the burst window: escape sequences (Kitty key
 ;; press/release CSI-u, arrows, mouse, focus, terminal responses) and
-;; bracketed-paste content do not. Counting raw bytes made every key release
-;; a "burst": with the Kitty protocol enabled (flags 2/4) one arrow key
-;; paints the window with a press + release sequence, so the next Enter
-;; within 100ms was rewritten to a newline instead of submitting.
+;; bracketed-paste content do not. Counting raw bytes made every escape
+;; sequence (a key release on a terminal that reports them, an arrow key's
+;; press+release pair) count as a "burst": one arrow key painted the
+;; window, so the next Enter within 100ms was rewritten to a newline
+;; instead of submitting.
 
 (def ^:private paste-burst-ms 100)
 (def ^:private paste-burst-chars 4)

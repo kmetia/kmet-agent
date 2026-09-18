@@ -575,7 +575,9 @@ work and then corrupt keys in production. `core.clj`'s machinery exists for
 observed bugs; port the behavior, not necessarily line-for-line:
 
 1. **Kitty negotiation + fallback** (`libs/terminal.clj`, `core.clj`
-   interceptors). Send `\u001b[>7u\u001b[?u\u001b[c`; consume the reply
+   interceptors). Send `\u001b[>5u\u001b[?u\u001b[c` (flags 1+4 —
+   event types are deliberately not requested; see the flag block in
+   `libs/terminal.clj`); consume the reply
    (`\u001b[?Nu` / `\u001b[>Nu` / DA `\u001b[?..c`) in the input path so it
    never dispatches as keys. Non-zero flags → Kitty; zero/DA → xterm
    `modifyOtherKeys` (`\u001b[>4;2m`). Flush held fragments after
