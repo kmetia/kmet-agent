@@ -40,12 +40,13 @@ frame + `track!` list returning strings), `bash_execution.clj`
    `session_selector`, `login_dialog`, `fork_selector`, `bash_execution`,
    `tree_selector` panel, `dock`, `status-area`, plus the four converted
    selectors (`thinking_selector`, `model_selector`,
-   `scoped_models_selector`, `auth_selector`).
+   `scoped_models_selector`, `auth_selector`) and the `tool_renderers`
+   surface (each renderer assembles one `compile-tree`).
 2. **HYBRID** — `compile-tree` chrome + imperative content spliced
    foreign: a `Container` of `make-text` rows rebuilt on every filter
    pass, plus `make-input` search fields, plus `make-select-list` /
    `make-settings-list` where a tag would do.
-   `dialogs`, `settings_selector`, `tool_renderers` (partial).
+   `dialogs`, `settings_selector`.
 3. **KEEP (imperative by design)** — transcript records and string-direct
    `track!` leaves. Not migration targets (§4).
 
@@ -60,7 +61,7 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `thinking_selector.clj` | DONE | none — root body, keyed `[:text]` rows, input foreign, `dispose` unwinds both | none (Phase 1 #1) |
 | `dialogs.clj` | HYBRID | frame `compile-tree` (49); `select-list/make-select-list` (82); `input/make-input` (117) | Tier 2: `[:select-list]` / `[:input]` (the input via `:ref`, §3.2) — `:apply` covers all props used; keep `defcomponent` shell for `IFocusable` + `handle-input` forwarding |
 | `settings_selector.clj` | HYBRID | `settings-list/make-settings-list` (229); frame `compile-tree` (354) | Tier 2: `[:settings-list]`; close path disposes the compiled frame (`dispose-tree!`) + the spliced list |
-| `tool_renderers.clj` | PARTIAL | trees already (452,461,534,578,583,969,993); imperative leftovers: `render-edit-result` (719–722), `render-bash-call` (775–780), `render-bash-result` (814–946) — the default/warning legs are already hiccup | Tier 1: `h/compile-tree` like the converted renderers; the mangled token-per-line regions (~814–946) need a manual reflow while there |
+| `tool_renderers.clj` | DONE | none — every renderer assembles a `h/compile-tree` (the last imperative legs, `render-edit-result`'s error branch, `render-bash-call` and `render-bash-result`, converted; the mangled token-per-line block reflowed, the collapsed output cap hoisted to `bash-result-preview-lines`) | none (Phase 1 #4) |
 | `chat_history.clj` | KEEP + Tier 1 helpers | `make-plain-msg` (204–206), `make-plain-md-msg` (213–215), `StatusLine` (249–250) | Tier 1 optional: helpers → `[:container {} [:spacer] [:text/:markdown/:truncated-text]]`; `ChatHistoryComponent` itself stays a record |
 | `session_selector.clj` | DONE (pattern) | 2× `input/make-input` (860–861); `hiccup/root` (900) | Tier 2 optional: `[:input {:ref ...}]`; low priority, works as-is — the body reads state via `tracked-deref` and `hide!` disposes the root + both inputs |
 | `login_dialog.clj` | DONE | `input/make-input` (308); `db/make-dynamic-border` built once outside body (323); `hiccup/root` (327) | none — border-once-outside is the documented identity pattern; input could go `[:input]` (Tier 2, optional) |
@@ -333,9 +334,9 @@ the same asymmetry the old selectors had).
 
 ## 5. Tiers
 
-- **Tier 1** — DONE: the four selectors (Phase 1 #1–#3). Remaining:
-  `tool_renderers` imperative legs and the optional `chat_history`
-  plain-msg helpers. No behavior change; assert with
+- **Tier 1** — DONE: the four selectors (Phase 1 #1–#3) and the
+  `tool_renderers` imperative legs (Phase 1 #4). Remaining: the optional
+  `chat_history` plain-msg helpers. No behavior change; assert with
   `hiccup/render-lines` headless tests (no tty, `bb test` material,
   never `^:slow`); watch `hiccup/counters` (`bodies-run` climbing on
   idle frames = inline-callback trap).
@@ -398,11 +399,20 @@ One commit per file, simplest first:
    clamped nav, search/empty states, idle-frame memoization, dispose
    unwinds); interactive mode's four auth mount sites now go through
    `mount-selector!` / `close-selector!` (dock done + dispose).
-4. `tool_renderers` — the imperative legs (`render-edit-result`,
-   `render-bash-call`, `render-bash-result`). Keep the `:last-component`
-   reuse contract (tool-execution's context): a renderer may return a
-   held compile-tree on unchanged passes. Reflow the token-per-line
-   regions (~814–946) while there — `bb format` will not rejoin them.
+4. **DONE — `tool_renderers`**: the three remaining imperative legs
+   (`render-edit-result`'s error branch, `render-bash-call`,
+   `render-bash-result`) assemble `h/compile-tree` trees from
+   `tool-text` leaves; the `container` / `text` / `spacer` requires are
+   gone, the mangled token-per-line block is reflowed, and the collapsed
+   output cap is hoisted next to the call-side one
+   (`bash-result-preview-lines`). The ticker/state/`:last-component`
+   contracts are untouched — the renderers still return a fresh
+   component per pass (or nil), so the execution drops and disposes the
+   previous one. Behavior pinned by a HEAD-vs-new render dump (244
+   identical lines: collapsed/expanded windows, hints, truncation
+   footers, timing) plus new render-driven tests for the two result
+   legs (`test-bash-result`, `test-edit-result-error-leg`,
+   `test-edit-result-preview-state`).
 5. `chat_history` helpers (`make-plain-msg`, `make-plain-md-msg`,
    `StatusLine`) — optional, no behavior change, no measurable win.
 

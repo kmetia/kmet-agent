@@ -8,9 +8,6 @@
             [kmet.tui.theme :as theme]
             [kmet.tui.timers :as timers]
             [kmet.tui.utils :as utils]
-            [kmet.tui.components.text :as text]
-            [kmet.tui.components.container :as container]
-            [kmet.tui.components.spacer :as spacer]
             [kmet.libs.terminal-image :as timg]
             [kmet.libs.edit-diff :as edit-diff]
             [kmet.libs.highlight :as hl]
@@ -716,11 +713,11 @@
     (if is-error
       (if (= content preview-error)
         nil
-        (let [c (container/make-container)]
-          (container/container-add-child c (spacer/make-spacer 1))
-          (container/container-add-child c
-                                         (text/make-text (theme/fg theme :error content) 1 0))
-          c))
+        ;; pi: new Text(content, 1, 0) — indented one column, on a spacer
+        (h/compile-tree
+         [:container {}
+          [:spacer {:lines 1}]
+          [:text {:padding-x 1 :padding-y 0} (theme/fg theme :error content)]]))
       (let [result-diff (get-in context [:details :diff])
             preview (:edit-preview state)
             preview-diff (when (and preview (:success? preview)) (:diff preview))
@@ -755,6 +752,11 @@
    full (pi always renders the raw command)."
   3)
 
+(def ^:private bash-result-preview-lines
+  "Collapsed cap on the rendered output, in visual lines — a wrapped line
+   counts once, and the expand hint reports the rest."
+  5)
+
 (defn render-bash-call
   "Call line for the shell tool: `$ <command>` (+ timeout suffix). The
    collapsed form keeps the head of a long command and hints at the rest;
@@ -770,187 +772,127 @@
         cmd-line (theme/fg theme :tool-title (theme/bold (str "$ " cmd-display)))
         timeout-suffix (if (and (number? timeout) (pos? timeout))
                          (theme/fg theme :muted (str " (timeout " timeout "s)"))
-                         "")]
-    (if (:expanded context)
-      (text/make-text (str cmd-line timeout-suffix) 0 0)
-      (let [{:keys [visual-lines skipped-count]}
-            (utils/truncate-head-to-visual-lines cmd-line bash-call-preview-lines width)]
-        (if (zero? skipped-count)
-          (text/make-text (str cmd-line timeout-suffix) 0 0)
-          (text/make-text
-           (str (str/join "\n" visual-lines)
-                "\n"
-                ;; one line, never a wrap: the marker plus the timeout suffix
-                ;; can outrun a narrow terminal
-                (utils/truncate-to-width
-                 (str (theme/fg theme :muted (str "... (" skipped-count " more lines,"))
-                      " "
-                      (app-kb/key-hint "app.tools.expand" "to toggle")
-                      (theme/fg theme :muted ")")
-                      timeout-suffix)
-                 width
-                 "..."))
-           0
-           0))))))
-(defn
-  render-bash-result
-  [content
-   is-error
-   theme
-   width
-   expanded?
-   started-at
-   ended-at
-   truncation
-   context]
-  (let
-   [state
-    (:state context)
-    set-state!
-    (:set-state! context)
-    invalidate
-    (:invalidate context)
-    c
-    (container/make-container)
-    BASH-PREVIEW-LINES
-    5
-    full-output-path
-    (:full-output-path truncation)
-    output
-    (let
-     [trimmed (str/trim (or content ""))]
-      (if
-       (and
-        truncation
-        full-output-path
-        (some? ended-at)
-        (str/ends-with? trimmed "]"))
-        (let
-         [footer-start (str/last-index-of trimmed "\n\n[")]
-          (if
-           (and
-            footer-start
-            (str/includes? (subs trimmed footer-start) full-output-path))
-            (str/trimr (subs trimmed 0 footer-start))
-            trimmed))
-        trimmed))]
+                         "")
+        rendered (if (:expanded context)
+                   (str cmd-line timeout-suffix)
+                   (let [{:keys [visual-lines skipped-count]}
+                         (utils/truncate-head-to-visual-lines cmd-line
+                                                              bash-call-preview-lines
+                                                              width)]
+                     (if (zero? skipped-count)
+                       (str cmd-line timeout-suffix)
+                       (str (str/join "\n" visual-lines)
+                            "\n"
+                            ;; one line, never a wrap: the marker plus the
+                            ;; timeout suffix can outrun a narrow terminal
+                            (utils/truncate-to-width
+                             (str (theme/fg theme :muted (str "... (" skipped-count " more lines,"))
+                                  " "
+                                  (app-kb/key-hint "app.tools.expand" "to toggle")
+                                  (theme/fg theme :muted ")")
+                                  timeout-suffix)
+                             width
+                             "...")))))]
+    (h/compile-tree (tool-text rendered))))
+
+(defn render-bash-result
+  "Result body for the shell tool: the output (collapsed to a visual-line
+   window with an expand hint, verbatim when expanded), the truncation
+   warning and the elapsed/took line.
+
+   While the tool runs, the renderer parks a 1s invalidate timer in its
+   state so the elapsed counter keeps moving with no output (pi:
+   setInterval → context.invalidate); completion and dispose cancel it."
+  [content is-error theme width expanded? started-at ended-at truncation context]
+  (let [state (:state context)
+        set-state! (:set-state! context)
+        invalidate (:invalidate context)
+        full-output-path (:full-output-path truncation)
+        ;; The runtime appends its own truncation footer; the renderer shows
+        ;; its own warn line instead (pi: strip the trailing [...] block
+        ;; naming the full-output file).
+        output (let [trimmed (str/trim (or content ""))]
+                 (if (and truncation
+                          full-output-path
+                          (some? ended-at)
+                          (str/ends-with? trimmed "]"))
+                   (let [footer-start (str/last-index-of trimmed "\n\n[")]
+                     (if (and footer-start
+                              (str/includes? (subs trimmed footer-start) full-output-path))
+                       (str/trimr (subs trimmed 0 footer-start))
+                       trimmed))
+                   trimmed))]
     ;; A running tool ticks its own 1s repaint so elapsed time keeps moving
-    ;; with no output. That tick is a loop-owned timer (§6.1), not a
-    ;; parked future: it fires on the loop thread, only while the loop
-    ;; runs, and tui-stop's cancel-all! means it cannot outlive the
-    ;; session. The id parks in renderer state so completion and dispose
-    ;; can cancel it (both paths here, plus tool_execution's dispose).
+    ;; with no output. That tick is a loop-owned timer (§6.1), not a parked
+    ;; future: it fires on the loop thread, only while the loop runs, and
+    ;; tui-stop's cancel-all! means it cannot outlive the session. The id
+    ;; parks in renderer state so completion and dispose can cancel it (both
+    ;; paths here, plus tool_execution's dispose).
     (when (and started-at (nil? ended-at) (nil? (:timer-id state)))
       (when (and invalidate set-state!)
         (set-state! (assoc state :timer-id (timers/every! 1000 invalidate)))))
     (when (or ended-at is-error)
-      (when-let [id (:timer-id state)] (timers/cancel! id))
+      (when-let [id (:timer-id state)]
+        (timers/cancel! id))
       (when (and set-state! (contains? state :timer-id))
         (set-state! (dissoc state :timer-id))))
-    (when
-     (seq output)
-      (let
-       [styled
-        (->>
-         (str/split-lines output)
-         (mapv (fn* [%1] (theme/fg theme :tool-output %1)))
-         (str/join "\n"))]
-        (if
-         expanded?
-          (do
-            (container/container-add-child c (spacer/make-spacer 1))
-            (doseq
-             [line (str/split-lines styled)]
-              (container/container-add-child c (text/make-text line 0 0))))
-          (let
-           [{:keys [visual-lines skipped-count]}
-            (utils/truncate-to-visual-lines
-             styled
-             BASH-PREVIEW-LINES
-             width)]
-            (container/container-add-child c (spacer/make-spacer 1))
-            (when
-             (pos? skipped-count)
-              (container/container-add-child
-               c
-               (text/make-text
-                (utils/truncate-to-width
-                 (str
-                  (theme/fg
-                   theme
-                   :muted
-                   (str "... (" skipped-count " earlier lines,"))
-                  " "
-                  (app-kb/key-hint "app.tools.expand" "to toggle")
-                  (theme/fg theme :muted ")"))
-                 width
-                 "...")
-                0
-                0)))
-            (doseq
-             [line visual-lines]
-              (container/container-add-child c (text/make-text line 0 0)))))))
-    (when
-     truncation
-      (let
-       [{:keys [total-lines shown-lines truncated-by max-bytes]}
-        truncation
-        size-str
-        (when
-         (= truncated-by :bytes)
-          (bash-exec/format-size
-           (or max-bytes bash-exec/DEFAULT-MAX-BYTES)))
-        truncated-part
-        (if
-         (= truncated-by :bytes)
-          (str
-           "Truncated: "
-           shown-lines
-           " lines shown ("
-           size-str
-           " limit)")
-          (str
-           "Truncated: showing "
-           shown-lines
-           " of "
-           total-lines
-           " lines"))
-        warn
-        (str
-         "["
-         (str/join
-          ". "
-          (cond->
-           []
-            full-output-path
-            (conj (str "Full output: " full-output-path))
-            :always
-            (conj truncated-part)))
-         "]")]
-        (container/container-add-child c (spacer/make-spacer 1))
-        (container/container-add-child
-         c
-         (text/make-text (theme/fg theme :warning warn) 0 0))))
-    (when
-     started-at
-      (let
-       [now
-        (or ended-at (System/currentTimeMillis))
-        elapsed-ms
-        (- now started-at)
-        label
-        (if ended-at "Took" "Elapsed")]
-        (container/container-add-child c (spacer/make-spacer 1))
-        (container/container-add-child
-         c
-         (text/make-text
-          (theme/fg
-           theme
-           :muted
-           (str label " " (format "%.1f" (float (/ elapsed-ms 1000))) "s"))
-          0
-          0))))
-    c))
+    (h/compile-tree
+     (into [:container {}]
+           (concat
+            (when (seq output)
+              (let [styled (->> (str/split-lines output)
+                                (mapv #(theme/fg theme :tool-output %))
+                                (str/join "\n"))]
+                (if expanded?
+                  (concat [[:spacer {:lines 1}]]
+                          (mapv tool-text (str/split-lines styled)))
+                  (let [{:keys [visual-lines skipped-count]}
+                        (utils/truncate-to-visual-lines styled
+                                                        bash-result-preview-lines
+                                                        width)]
+                    (concat
+                     [[:spacer {:lines 1}]]
+                     (when (pos? skipped-count)
+                       [(tool-text
+                         (utils/truncate-to-width
+                          (str (theme/fg theme :muted
+                                         (str "... (" skipped-count " earlier lines,"))
+                               " "
+                               (app-kb/key-hint "app.tools.expand" "to toggle")
+                               (theme/fg theme :muted ")"))
+                          width
+                          "..."))])
+                     (mapv tool-text visual-lines))))))
+            (when truncation
+              (let [{:keys [total-lines shown-lines truncated-by max-bytes]} truncation
+                    size-str (when (= truncated-by :bytes)
+                               (bash-exec/format-size
+                                (or max-bytes bash-exec/DEFAULT-MAX-BYTES)))
+                    truncated-part (if (= truncated-by :bytes)
+                                     (str "Truncated: " shown-lines " lines shown ("
+                                          size-str " limit)")
+                                     (str "Truncated: showing " shown-lines " of "
+                                          total-lines " lines"))
+                    warn (str "["
+                              (str/join ". "
+                                        (cond-> []
+                                          full-output-path
+                                          (conj (str "Full output: " full-output-path))
+                                          :always
+                                          (conj truncated-part)))
+                              "]")]
+                [[:spacer {:lines 1}]
+                 (tool-text (theme/fg theme :warning warn))]))
+            (when started-at
+              (let [now (or ended-at (System/currentTimeMillis))
+                    elapsed-ms (- now started-at)
+                    label (if ended-at "Took" "Elapsed")]
+                [[:spacer {:lines 1}]
+                 (tool-text
+                  (theme/fg theme :muted
+                            (str label " "
+                                 (format "%.1f" (float (/ elapsed-ms 1000)))
+                                 "s")))])))))))
 ;; ─── Default renderers (fallback when no custom or built-in) ──────────────
 
 (defn render-default-call

@@ -139,6 +139,66 @@
       (is (some #(str/includes? % gray-esc) txt-lines) ".txt content is toolOutput gray")
       (is (not-any? #(str/includes? % gray-esc) clj-lines) ".clj content uses syntax colors, not toolOutput"))))
 
+(deftest test-bash-result
+  (testing "collapsed keeps the tail of the output, capped, with the expand hint"
+    (let [content (str/join "\n" (mapv #(str "r-" %) (range 12)))
+          lines (plain (r/render-bash-result content false th 60 false 1000 2000 nil {}) 60)]
+      (is (= 9 (count lines)) "spacer + hint + 5 lines + spacer + took")
+      (is (str/starts-with? (second lines) "... (7 earlier lines,"))
+      (is (str/starts-with? (nth lines 2) "r-7") "the tail is what is kept")
+      (is (str/includes? (peek lines) "Took 1.0s"))))
+  (testing "expanded renders every line, no hint"
+    (let [content (str/join "\n" (mapv #(str "r-" %) (range 7)))
+          lines (plain (r/render-bash-result content false th 60 true 1000 2000 nil {}) 60)]
+      (is (= 10 (count lines)) "spacer + 7 lines + spacer + took")
+      (is (not-any? #(str/includes? % "earlier lines") lines))))
+  (testing "no output and no timing renders an empty body"
+    (is (= [] (plain (r/render-bash-result "" false th 60 false nil nil nil {}) 60)))
+    (is (= [] (plain (r/render-bash-result nil false th 60 false nil nil nil {}) 60))))
+  (testing "truncation warns, and the runtime's own footer is stripped first"
+    (let [trunc {:truncated-by :lines :shown-lines 2 :total-lines 99
+                 :full-output-path "/tmp/full.txt"}
+          content "a\nb\n\n[Full output: /tmp/full.txt. Truncated: showing 2 of 99 lines]"
+          lines (plain (r/render-bash-result content false th 100 true 1000 2000 trunc {}) 100)
+          warn "[Full output: /tmp/full.txt. Truncated: showing 2 of 99 lines]"]
+      (is (= ["a" "b"] (mapv str/trim (subvec lines 1 3)))
+          "the footer copy inside the body is gone — the warn line is rebuilt")
+      (is (some #(= warn (str/trimr %)) lines) "it is rebuilt from the truncation data")
+      (is (= 1 (count (filter #(str/includes? % warn) lines))) "…and renders once")))
+  (testing "the elapsed label flips to Took once the execution ended"
+    (let [partial (plain (r/render-bash-result "x" false th 60 true 1000 nil nil {}) 60)
+          done (plain (r/render-bash-result "x" false th 60 true 1000 3000 nil {}) 60)]
+      (is (some #(str/includes? % "Elapsed ") partial))
+      (is (some #(str/includes? % "Took 2.0s") done)))))
+
+(deftest test-edit-result-error-leg
+  (testing "error content renders indented, one column in (pi: new Text(content, 1, 0))"
+    (let [lines (plain (r/render-edit-result "tool blew up" true th 60 false nil nil nil {}) 60)]
+      (is (= 2 (count lines)))
+      (is (= "" (first lines)))
+      (is (= " tool blew up" (str/trimr (second lines))))))
+  (testing "an error the preview already showed is suppressed (pi dedup)"
+    (is (nil? (r/render-edit-result "same" true th 60 false nil nil nil
+                                    {:state {:edit-preview {:error "same"}}}))))
+  (testing "success renders nothing"
+    (is (nil? (r/render-edit-result "ok" false th 60 false nil nil nil {})))))
+
+(deftest test-edit-result-preview-state
+  (let [render (fn [state details]
+                 (let [st (atom state)]
+                   (r/render-edit-result "ok" false th 60 false nil nil nil
+                                         {:state @st :details details
+                                          :set-state! (fn [s] (reset! st s))})
+                   @st))]
+    (testing "a result diff correcting the preview replaces the cached one"
+      (is (= {:edit-preview {:success? true :diff "a\nb" :diff-lines ["a" "b"]}}
+             (render {} {:diff "a\nb"}))))
+    (testing "a matching diff leaves state alone"
+      (is (= {:edit-preview {:success? true :diff "d"}}
+             (render {:edit-preview {:success? true :diff "d"}} {:diff "d"}))))
+    (testing "a failed preview is cleared on a successful result"
+      (is (= {} (render {:edit-preview {:success? false :error "e"}} nil))))))
+
 (deftest test-default-renderers
   (testing "default call joins args, truncated to width"
     (let [lines (plain (r/render-default-call "grep" {:pattern "x" :path "y"} th 30 {}) 30)]
