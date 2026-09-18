@@ -258,10 +258,11 @@
                                  (spinner/spinner-set-message-color-fn!
                                   s (:message-color-fn props)))
                                true)))}
-   :input        {:ctor (fn [{:keys [value cursor on-submit on-escape on-change]}]
+   :input        {:ctor (fn [{:keys [value cursor focused? on-submit on-escape on-change]}]
                           (let [i (input/make-input)]
                             (when value (input/input-set-value! i value))
                             (when (some? cursor) (input/input-set-cursor! i cursor))
+                            (when (some? focused?) (protocols/set-focused! i (boolean focused?)))
                             (when on-submit (input/input-set-on-submit! i on-submit))
                             (when on-escape (input/input-set-on-escape! i on-escape))
                             (when on-change (input/input-set-on-change! i on-change))
@@ -282,6 +283,14 @@
                            (when (and (not= (:cursor props) (:cursor prev))
                                       (some? (:cursor props)))
                              (input/input-set-cursor! i (:cursor props)))
+                           ;; :focused? is the element's own emphasis flag
+                           ;; (cursor + key eligibility), NOT input routing —
+                           ;; the DSL has no TUI. Written when it changes, so
+                           ;; a host's imperative set-focused! is never
+                           ;; fought by a re-render of unchanged props (the
+                           ;; equal-props pass skips :apply entirely).
+                           (when (not= (:focused? props) (:focused? prev))
+                             (protocols/set-focused! i (boolean (:focused? props))))
                            (input/input-set-on-submit! i (:on-submit props))
                            (input/input-set-on-escape! i (:on-escape props))
                            (input/input-set-on-change! i (:on-change props))

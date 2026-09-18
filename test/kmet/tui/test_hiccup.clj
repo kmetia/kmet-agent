@@ -383,6 +383,57 @@
       (t/is (identical? i1 (deref iref)))
       (t/is (= 1 (:applies (h/counters))) "no re-apply on unchanged props"))))
 
+(t/deftest input-tag-focus-is-data
+  ;; :focused? is the element's own emphasis flag (cursor + key
+  ;; eligibility) — set on construct, patched in place when it changes,
+  ;; never a rebuild trigger. Routing stays imperative (tui-set-focus).
+  (let [iref (h/ref)
+        on (atom false)
+        root (h/root (fn [_] [:input {:ref iref
+                                      :focused? (rag/tracked-deref on)}]))]
+    (core/render root 40)
+    (let [i1 (deref iref)]
+      (t/is (false? (protocols/focused i1)) "construct applies the false prop")
+      (h/reset-counters!)
+      (reset! on true)
+      (core/render root 40)
+      (t/is (identical? i1 (deref iref)) "a focus change patches, no rebuild")
+      (t/is (true? (protocols/focused i1)))
+      (t/is (= 1 (:applies (h/counters))))
+      (t/is (zero? (:constructs (h/counters))) "no fresh construction")
+      ;; an unchanged prop never fights an imperative write
+      (protocols/set-focused! i1 false)
+      (core/render root 40)
+      (t/is (false? (protocols/focused i1))
+            "equal props take the reuse fast path — no re-apply"))))
+
+(t/deftest input-tag-focus-survives-a-branch-rebuild
+  ;; the reason the prop exists: a tagged input that leaves a branch is
+  ;; disposed and rebuilt as a fresh instance; :focused? restores the
+  ;; emphasis the rebuilt instance would otherwise lose (the host would have
+  ;; to re-focus it by hand — the session selector's list⇄rename switch).
+  (let [iref (h/ref)
+        mode (atom :list)
+        root (h/root (fn [_]
+                       (if (= :rename (rag/tracked-deref mode))
+                         [:container {}
+                          [:input {:ref iref :value "name" :focused? true}]]
+                         [:container {}
+                          [:text {:text "list"}]])))]
+    (core/render root 40)
+    (t/is (nil? (deref iref)) "no input in list mode")
+    (h/reset-counters!)
+    (reset! mode :rename)
+    (core/render root 40)
+    (let [i1 (deref iref)]
+      (t/is (some? i1) "rename mode constructs the input")
+      (t/is (true? (protocols/focused i1)) "the rebuilt instance comes back focused")
+      (t/is (= "name" (input/input-get-value i1)) "prefill rides the :value prop"))
+    (reset! mode :list)
+    (core/render root 40)
+    (t/is (nil? (deref iref)) "leaving the branch retires it")
+    (t/is (pos? (:disposals (h/counters))) "retirement disposes the instance")))
+
 (t/deftest input-tag-uncontrolled-text-survives-prop-change
   ;; an absent :value prop is not a write — typed text survives an
   ;; unrelated prop change (the construct-equivalent patch contract)

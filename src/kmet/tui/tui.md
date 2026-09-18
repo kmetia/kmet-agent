@@ -323,6 +323,31 @@ Rules:
 - one ref per element instance — sharing across two elements means
   last-mount wins.
 
+**`:focused?` — focus emphasis as data.** A focusable element also takes a
+`:focused?` prop: the flag that drives its own *emphasis* (an input's
+cursor, its key eligibility), as opposed to *where* the TUI routes input.
+
+```clojure
+[:input {:ref search-ref :focused? (not (:rename-mode st))}]
+```
+
+- Applied on construct and whenever the prop changes — an `=`-gated patch
+  through the tag's `:apply`, never a rebuild trigger. An *unchanged* prop
+  never re-applies, so a host's imperative `set-focused!` is not fought by
+  an unrelated re-render (the equal-props pass skips `:apply` entirely).
+- It does **not** move routing: the DSL has no TUI handle. Routing stays
+  imperative — `tui-set-focus` on the panel that forwards keystrokes, or
+  the app's focus guards (§7). The usual shape is both: the tree declares
+  the emphasis, the host routes.
+- Its reason to exist is lifecycle. A tagged input that leaves a branch is
+  *disposed* and rebuilt on return (`retire-item!`), so an
+  instance-local flag is gone with it. `:value` / `:cursor` restore the
+  text and caret the same way; `:focused?` restores the emphasis that
+  would otherwise force a foreign splice (or a manual re-focus).
+- A focusable tag opts in with the same two hooks in the tag registry
+  (`:ctor` applies it at construction, `:apply` writes it when it
+  changed); `[:input]` is the one that does today.
+
 The second canonical use, beside focus: a wrapper forwarding input to a
 DSL-owned leaf. Input is delivered to the focused leaf only (§7 — no
 bubbling), so a selector keeps focus itself and pushes keystrokes into
