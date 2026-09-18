@@ -570,13 +570,65 @@
   ;; agent-dir path) and the subgroup labels used to: they are longer than a
   ;; narrow frame and the old renderer emitted them untruncated.
   (let [dir (make-package (tmp-dir))]
+    ;; a wide-character name (each char is 2 columns) must truncate by
+    ;; visible width like any other
+    (spit (str dir "/extensions/\u4e00\u952e.clj") "(ns wide)\n")
     (with-settings
       (fn [_]
         (doseq [[label screen]
                 [["global" (rc/make-resource-config-screen :rows 24)]
                  ["project" (rc/make-resource-config-screen
                              :rows 24 :write-scope :project :project-mode? true)]]]
-          (doseq [w [9 10 11 20 21 30 31 44 45 60 61 80 81]]
+          (t/is (some #(str/includes? % "\u4e00\u952e") (render-lines screen 81))
+                (str label ": the 2-column name is actually on screen"))
+          ;; 2 is the floor that matters: a 0/1-column terminal also gets a
+          ;; 1-column border and the input's 2-column "> " prompt in the
+          ;; pre-conversion build (degenerate, unchanged, not this screen's)
+          (doseq [w [2 3 4 5 6 7 8 9 10 11 20 21 30 31 44 45 60 61 80 81]]
             (t/is (every? #(<= (u/visible-width %) w) (render-lines screen w))
                   (str label ": every line fits " w " columns")))))
+      {:user {:packages [dir]}})))
+
+(t/deftest test-counter-line-truncates-at-a-huge-count
+  ;; the clipped counter is truncated like every other line. Rows are
+  ;; normally derived, so this injects a synthetic list to reach a count
+  ;; whose "(1/120000)" is wider than a 9-column frame — without the
+  ;; truncation that line would be a kmet-crash.log anomaly in the frame.
+  (let [dir (make-package (tmp-dir))]
+    (with-settings
+      (fn [_]
+        (let [screen (rc/make-resource-config-screen :rows 24)
+              row {:kind :item
+                   :item {:path "/p/e.clj" :resource-type :extensions}
+                   :group {} :subgroup {}
+                   :override-state :inherit :inherited? false :enabled true}
+              rows (vec (repeat 120000 row))]
+          (swap! (:state-atom screen) assoc :rows rows :item-rows rows :selected 0)
+          (let [lines (render-lines screen 9)]
+            (t/is (some #(str/includes? % "(1/1200") lines)
+                  "the clipped counter renders")
+            (t/is (every? #(<= (u/visible-width %) 9) lines)
+                  "…clipped to the frame, not overflowing it"))))
+      {:user {:packages [dir]}})))
+
+(t/deftest test-tab-without-a-project-dir-is-a-no-op
+  ;; projectModeAvailable false: tab must not switch scopes (pi)
+  (let [dir (make-package (tmp-dir))]
+    (with-settings
+      (fn [_]
+        (let [screen (rc/make-resource-config-screen :rows 40 :write-scope :project)]
+          (protocols/handle-input screen K-TAB)
+          (t/is (= :project (rc/screen-write-scope screen)))
+          (protocols/handle-input screen K-TAB)
+          (t/is (= :project (rc/screen-write-scope screen)))))
+      {:user {:packages [dir]}})))
+
+(t/deftest test-window-math-at-a-tiny-terminal
+  ;; max-visible floors at 5 (pi): a 10-row terminal renders 11 chrome lines
+  ;; + 5 rows = 16 lines (both builds do — the frame scrolls; kept as parity)
+  (let [dir (make-package (tmp-dir))]
+    (with-settings
+      (fn [_]
+        (let [screen (rc/make-resource-config-screen :rows 10)]
+          (t/is (= 16 (count (render-lines screen 80))))))
       {:user {:packages [dir]}})))
