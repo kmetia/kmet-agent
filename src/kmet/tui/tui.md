@@ -372,16 +372,21 @@ Mixed bodies must read reactive inputs through component-body derefs,
 `tracked-deref`, computes or cursors (the coverage contract, §3.1).
 
 **Choosing the form** — the uncached (bare `@`/untracked) form is the safe
-default whenever state mutates asynchronously in multi-swap sequences
-(a `future`/timer clearing one key then setting another, e.g. a
-delete-confirm + status flow): the memoized `tracked-deref` form caches the
-body's tree on `:idle` and coalesces changes behind a dirty gate, so a body
-run that reads the state between two swaps can cache a tree stale relative
-to the atom — and the second swap's watch may be swallowed, so it never
-re-derives. The untracked form re-reads per pass, so it cannot cache stale
-output (this is also why the old `track!` renders were immune). Only adopt
-`tracked-deref` when a body is expensive enough to need narrow memoization
-and its state changes are single swaps the reaction can observe.
+default for cheap, hot bodies: it re-reads per pass, so it cannot cache
+stale output. Adopt `tracked-deref` when a body is expensive enough to
+deserve narrow memoization (a selector mapping rows into elements, a
+panel re-deriving chrome): the reaction caches the tree on `:idle` and
+re-derives on dep change.
+
+It is safe under asynchronous multi-swap state (a `future`/timer clearing
+one key then setting another). A run records each dep with the value it
+read and, right after registering that dep's watch, compares the two: a
+write landing inside the run — the read→subscribe window that would
+otherwise be swallowed, since add-watch never replays — marks the run
+dirty and `run-sync!`'s convergence loop re-runs it against fresh state.
+So a body can no longer cache a tree stale relative to a dep that was
+written mid-run (`test-dep-written-mid-run-still-invalidates`; the old
+"reads between two swaps" caveat no longer applies).
 
 **Granularity guidance** — don't build one giant screen component reading
 all app state: any change then re-runs the entire body, tracked reads of
@@ -503,6 +508,14 @@ explicit deps) / `cursor` (read-only lens) / `writable-cursor` +
 `watch-ref` / `unwatch-ref` (reactions aren't IRefs — core `add-watch`
 cannot take them) / `add-on-dispose!` / `flush!` (drain the batch queue) /
 `force-run!` / `invalidate!` / `dispose!` / `tracked-deref` / `changed?`.
+
+**Runs converge against concurrent writers.** A run captures each dep
+`{ref → value-as-read}`; after registering watches it re-reads the newly
+watched refs and compares, marking the run dirty on disagreement — the
+read→watch registration window cannot swallow a write (kmet mutates app
+state from futures, timers and agent events by design). Deps re-read
+through reactions/cursors compare by value, so an `=`-equal child result
+does not force a re-run.
 
 **Two cursors, split by capability.** `cursor` derives: reads are
 `(get-in @source path)`, tracked like any dep, and a subscriber that only

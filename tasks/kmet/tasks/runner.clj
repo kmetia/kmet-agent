@@ -170,6 +170,7 @@
     kmet.app.ui.test-model-selector
     kmet.app.ui.test-thinking-selector
     kmet.app.ui.test-auth-selector
+    kmet.app.ui.test-dock
     kmet.app.ui.test-session-selector
     kmet.app.ui.test-fork-selector
     kmet.app.ui.test-tree-selector

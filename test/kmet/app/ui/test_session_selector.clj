@@ -10,7 +10,9 @@
             [babashka.fs :as fs]
             [kmet.app.keybindings :as kb]
             [kmet.app.ui.session-selector :as ss]
+            [kmet.tui.hiccup :as hiccup]
             [kmet.tui.keybindings :as tui-kb]
+            [kmet.tui.macros :as macros]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.utils :as u]))
 
@@ -514,3 +516,33 @@
     (wait-for #(realized? done))
     (wait-for #(boolean (some (fn [l] (str/includes? l "async row"))
                               (render-text sel 100))))))
+
+;; ─── Panel lifecycle: reactive body + dispose ──────────────────────────────
+
+(t/deftest root-body-memoizes-idle-frames
+  ;; the body reads the state atom through tracked-deref: an idle re-render
+  ;; hands back the cached tree (0 bodies run), a state change re-derives once
+  (let [sel (new-sel :current [(info "/tmp/s/a.ednl")
+                               (info "/tmp/s/b.ednl")])]
+    (render-text sel 100)
+    (hiccup/reset-counters!)
+    (render-text sel 100)
+    (t/is (zero? (:bodies-run (hiccup/counters))) "idle frame: body cached")
+    (t/is (= 1 (:bodies-skipped (hiccup/counters))))
+    (hiccup/reset-counters!)
+    (press sel "down")
+    (render-text sel 100)
+    (t/is (= 1 (:bodies-run (hiccup/counters))) "state change re-derives once")))
+
+(t/deftest dispose-unwinds-the-root-and-inputs
+  ;; the close path (hide!) disposes the panel: the root reaction and the two
+  ;; foreign inputs must unwind — the dock drops records without disposing
+  (let [sel (new-sel :current [(info "/tmp/s/a.ednl")])
+        watchers #(count @(deref #'macros/watch-registry))
+        before (watchers)]
+    (render-text sel 100)
+    (t/is (> (watchers) before) "a rendered panel registers track! watches")
+    (protocols/dispose sel)
+    (t/is (= before (watchers)) "dispose unwinds the root and both inputs")
+    (protocols/dispose sel)
+    (t/is (= before (watchers)) "dispose is idempotent")))

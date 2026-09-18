@@ -1033,13 +1033,16 @@
                                (terminal/rows @term))
                              40)
              sel-ref (atom nil)
+             ;; late binding: the list callbacks close through this — the
+             ;; panel + list they must unwind are built after the callbacks
+             close-ref (atom nil)
              tl (make-tree-list (selector-tree sess)
                                 :leaf-id leaf-id
                                 :max-visible-lines (max 5 (quot term-height 2))
                                 :initial-filter-mode (cfg/get-tree-filter-mode (:config cs))
                                 :initial-selected-id initial-selected-id
                                 :on-select (fn [entry]
-                                             ((:done @sel-ref))
+                                             (@close-ref)
                                              (cond
                                                (= (:id entry) leaf-id)
                                                (ui/chat-history-add-message!
@@ -1055,7 +1058,7 @@
 
                                                :else
                                                (on-navigate entry)))
-                                :on-cancel (fn [] ((:done @sel-ref)))
+                                :on-cancel (fn [] (@close-ref))
                                 :on-copy (fn [text]
                                            (ui/chat-history-add-message!
                                             (:chat-history cs)
@@ -1109,5 +1112,13 @@
                      tl
                      [:spacer {:lines 1}]
                      [:dynamic-border {:color-fn #(th/fg panel-theme :accent %)}]])]
+         (reset! close-ref
+                 (fn []
+                   ;; pi: done() — restore the editor and unwind the panel:
+                   ;; the compiled frame's DSL chrome via dispose-tree!, the
+                   ;; spliced tree-list explicitly (the tree does not own it)
+                   ((:done @sel-ref))
+                   (h/dispose-tree! panel)
+                   (protocols/dispose tl)))
          (reset! sel-ref {:done (dock/mount! cs panel tl)})
          (tui/tui-request-render (:tui cs)))))))

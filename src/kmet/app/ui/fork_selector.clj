@@ -14,6 +14,7 @@
             [kmet.tui.hiccup :as h]
             [kmet.tui.keybindings :as kb]
             [kmet.tui.macros :refer [defcomponent track!]]
+            [kmet.tui.protocols :as protocols]
             [kmet.tui.theme :as theme]
             [kmet.tui.utils :as u]))
 
@@ -147,13 +148,20 @@
                         [:spacer {:lines 1}]
                         [:dynamic-border {:color-fn #(theme/fg th :accent %)}]])
                 ;; late binding: the list callbacks reach done via this atom
-                sel-atom (atom nil)]
+                sel-atom (atom nil)
+                ;; pi: done() — restore the editor and unwind the panel: the
+                ;; compiled frame's DSL chrome via dispose-tree!, the spliced
+                ;; list explicitly (the tree does not own it)
+                close! (fn []
+                         ((:done @sel-atom))
+                         (h/dispose-tree! panel)
+                         (protocols/dispose list))]
             (reset! on-select-atom
                     (fn [entry-id]
-                      ((:done @sel-atom))
+                      (close!)
                       (on-select entry-id)))
             (reset! on-cancel-atom
-                    (fn [] ((:done @sel-atom))))
+                    (fn [] (close!)))
             ;; pi: showSelector — mount the panel, focus the list
             ;; (focus: selector.getMessageList())
             (reset! sel-atom {:done (dock/mount! cs panel list)})))))))

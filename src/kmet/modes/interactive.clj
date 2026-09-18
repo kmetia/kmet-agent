@@ -604,7 +604,7 @@
           ;; pi showAuthSelect: swap the dock to the selector, restore the
           ;; login dialog when it resolves (re-mounting IS the restore)
           sel-atom (atom nil)
-          restore #(dock/mount! cs dlg)
+          restore #(dock/mount! cs dlg nil {:borrowed? true})
           sel (auth-selector/make-auth-method-selector
                (:message prompt) labels
                (fn [label]
@@ -681,7 +681,7 @@
                      :prompt prompt-fn
                      :abort-prompt! cancel-pending!
                      :notify (fn [event] (oauth-notify! dlg event))}
-        done (dock/mount! cs dlg)]
+        done (dock/mount! cs dlg nil {:borrowed? true})]
     (future
       (try
         (let [credential ((:login oauth) interaction)]
@@ -716,7 +716,7 @@
              ;; escape before submitting — nothing to abort, silently
              ;; restore like pi (the "Login cancelled" error is suppressed)
              (fn [_success _message] nil))
-        done (dock/mount! cs dlg)]
+        done (dock/mount! cs dlg nil {:borrowed? true})]
     (future
       (try
         (let [key (str/trim (login-dialog/await-prompt!
@@ -2008,8 +2008,14 @@
         ;; late binding: the callbacks reach the mount's done through this
         ;; atom (pi: done() is created by showSelector)
         sel-atom (atom nil)
+        ;; late binding: close! disposes the dialog it was built for
+        dlg-atom (atom nil)
         close! (fn []
                  ((:done @sel-atom))
+                 ;; the dock leaves foreign records alone — the owner disposes
+                 ;; (the frame's dispose cascades to its chrome + the list)
+                 (when-let [dlg @dlg-atom]
+                   (protocols/dispose dlg))
                  (tui/tui-request-render tui))
         cancelled! (fn []
                      (ui/chat-history-show-status! chat "Import cancelled")
@@ -2022,6 +2028,7 @@
                (if (= "Yes" choice) (on-confirm) (cancelled!)))
              (fn [] (close!) (cancelled!))
              (th/get-current-theme))]
+    (reset! dlg-atom dlg)
     ;; pi: showSelector — the selector replaces the editor dock
     (reset! sel-atom {:done (dock/mount! cs dlg)})
     (tui/tui-request-render tui)))
@@ -4399,7 +4406,9 @@
         extension-autocomplete-factories (atom [])
         terminal-input-unsubscribers (atom [])
         hide-dialog (fn []
-                      (reset! (:dock-current cs) nil)
+                      ;; the dialog's own close disposes it (its custody) —
+                      ;; clear! only unwinds what a selector mode-switch left
+                      (dock/clear! cs)
                       (tui/tui-set-focus t @current-editor-atom)
                       (tui/tui-request-render t))
         rebuild-autocomplete-provider! (fn []
@@ -4487,9 +4496,7 @@
                                           overlay-options)
                                    handle (tui/tui-show-overlay t component opts)]
                                (when on-handle (on-handle handle)))
-                             (do (reset! (:dock-current cs) {:component component})
-                                 (tui/tui-set-focus t component)
-                                 (tui/tui-request-render t)))))
+                             (dock/mount! cs component nil {:borrowed? true}))))
                        (catch Exception e
                          (when-not @closed
                            (reset! closed true)
@@ -4593,10 +4600,9 @@
                                  (let [current-text (editor-text-get @current-editor-atom)]
                                    ;; pi parity: setCustomEditorComponent runs
                                    ;; disposeActiveSelector() then clears the dock —
-                                   ;; the swap displaces whatever it held, and a
+                                   ;; the swap disposes whatever it held, and a
                                    ;; displaced selector's done() goes inert
-                                   (dock/invalidate-pending!)
-                                   (reset! (:dock-current cs) nil)
+                                   (dock/clear! cs)
                                    (if factory
                                      (let [new-ed (factory t (th/get-current-theme) (tui-kb/get-global-keybindings))]
                                        (transfer-editor! ed new-ed (tui-kb/get-global-keybindings))
@@ -4938,7 +4944,7 @@
                       (reset! current-editor-atom ed))
                     (reset! editor-factory-atom nil))
                   ;; restore any open dialog
-                  (reset! (:dock-current cs) nil)
+                  (dock/clear! cs)
                   (tui/tui-set-focus t ed)
                   (reset! current-editor-atom ed)
                   (when (tui/tui-has-overlay? t) (tui/tui-hide-overlay t))

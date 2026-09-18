@@ -25,6 +25,7 @@
             [kmet.app.ui.dock :as dock]
             [kmet.app.ui.footer-data-provider :as fdp]
             [kmet.debug :as debug]
+            [kmet.libs.reakt :as r]
             [kmet.tui.components.input :as input]
             [kmet.tui.core :as tui]
             [kmet.tui.fuzzy :as fuzzy]
@@ -816,8 +817,11 @@
     (when-let [id @(:timer-atom this)]
       (timers/cancel! id)
       (reset! (:timer-atom this) nil))
-    ;; unwind the content tree's reaction (watch on the state atom) with the
-    ;; selector — show-session-selector's done disposes it on editor restore
+    ;; the search/rename inputs splice foreign (the root does not own them)
+    (protocols/dispose (:search-input this))
+    (protocols/dispose (:rename-input this))
+    ;; unwind the content tree's reaction (tracked read of the state atom)
+    ;; with the selector — hide! disposes it on editor restore
     (protocols/dispose (:root this))))
 
 ;; ─── IFocusable — forward to the inputs (IME cursor positioning) ───────────
@@ -901,7 +905,7 @@
               (fn [_props]
                 (let [w hiccup/*width*
                       th (theme/get-current-theme)
-                      st @(:state-atom sel)
+                      st (r/tracked-deref (:state-atom sel))
                       border-fn #(theme/fg th :accent %)
                       tree (if (:rename-mode st)
                              [:container {}
@@ -977,7 +981,11 @@
               :request-render (fn [] (tui/tui-request-render tui*)))]
      (reset! sel-atom sel)
      ;; pi: showSelector — swap the selector into the editor dock; hide!
-     ;; runs the returned done, restoring the editor + focus
-     (reset! (:hide-fn-atom sel) {:hide (dock/mount! cs sel)})
+     ;; runs the returned done (restoring the editor + focus) and disposes
+     ;; the panel: the dock drops foreign records without disposing them,
+     ;; so the root reaction and the inputs would otherwise outlive it
+     (reset! (:hide-fn-atom sel)
+             {:hide (let [done (dock/mount! cs sel)]
+                      (fn [] (done) (protocols/dispose sel)))})
      (load-scope! sel :current :initial)
      sel)))

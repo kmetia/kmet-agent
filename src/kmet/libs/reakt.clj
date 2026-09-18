@@ -98,13 +98,18 @@
   (or (instance? clojure.lang.IRef ref) (satisfies? RXRef ref)))
 
 (defn record-dep!
-  "Record REF in the active reaction's pending-dependency set, if a reaction
-   is running. Called from tracked-deref; reactions and cursors additionally
-   record themselves from their own deref implementations."
-  [ref]
+  "Record REF — with the VALUE the body read — in the active reaction's
+   pending-dependency map, if a reaction is running. Called from
+   tracked-deref; reactions and cursors additionally record themselves from
+   their own deref implementations. The value is what the post-run
+   staleness check (run-sync!) compares against REF's current value: a dep
+   written between this read and the watch registration would otherwise be
+   lost — add-watch never replays, and nothing was watching yet (kmet
+   mutates app state from futures, timers and agent events)."
+  [ref value]
   (when-some [{:keys [pending self]} *reaction-frame*]
     (when-not (identical? self ref)
-      (swap! pending conj ref)))
+      (swap! pending assoc ref value)))
   nil)
 
 (defn tracked-deref
@@ -121,7 +126,7 @@
     (when (and *tracking-scope* (trackable-ref? ref))
       (swap! *tracking-scope* assoc ref v))
     (when (trackable-ref? ref)
-      (record-dep! ref))
+      (record-dep! ref v))
     v))
 
 (defn add-on-dispose!
@@ -358,8 +363,11 @@
            ;; Set-diff (Reagent's _update-watching), identity-flavored:
            ;; watch newly-captured refs, unwatch refs this run stopped
            ;; reading. VECTOR + identical? — see Identity plumbing above.
+           ;; Returns the newly watched refs: the caller compares their
+           ;; current values against the ones captured as-read to close the
+           ;; write-between-read-and-watch gap.
            (let [{:keys [watching]} @cell
-                 added (remove #(identical-member? watching %) collected)
+                 added (vec (remove #(identical-member? watching %) collected))
                  dropped (filter #(and (identical-member? watching %)
                                        (not (identical-member? collected %)))
                                  watching)]
@@ -367,7 +375,8 @@
                (watch-ref dep watch-key dep-handler))
              (doseq [dep dropped]
                (unwatch-ref dep watch-key))
-             (swap! cell assoc :watching (vec collected))))
+             (swap! cell assoc :watching (vec collected))
+             added))
          run-sync!
          (fn []
            (loop [guard 0]
@@ -390,7 +399,7 @@
                          ;; the pass can then only mean a dep was written while
                          ;; the body executed (mid-run invalidation), never the
                          ;; stale flag this run was started for.
-                         pending (atom #{})
+                         pending (atom {})
                          result (try
                                   (binding [*reaction-frame* {:pending pending :self @self}]
                                     ((:f snap)))
@@ -407,34 +416,46 @@
                      ;; re-registration, no value write, nothing observable.
                      (if (= :disposed (:state @cell))
                        nil
-                       (do (update-watching! collected)
-                           (swap! cell assoc :value result :caught nil
-                                  ;; A dep written while the body ran left :dirty
-                                  ;; behind — loop to re-run against fresh state.
-                                  :state (cond
-                                           (= :dirty (:state @cell)) :dirty
-                                           ;; Batched fallback: nothing tracked was
-                                           ;; read beyond the framework's own seeded
-                                           ;; deps, so this cached value could never
-                                           ;; be invalidated — re-run on next deref
-                                           ;; instead of caching stale output.
-                                           (and rerun-without-deps?
-                                                (empty? (remove exempt? collected))) :unrun
-                                           :else :idle))
-                           (when (changed? result value)
-                             ;; Watcher isolation: a throwing watcher must
-                             ;; not abort its siblings nor propagate into
-                             ;; whatever thread triggered the change.
-                             (doseq [[key fl] (:watches @cell)]
-                               (try
-                                 (fl key @self value result)
-                                 (catch Throwable e
-                                   (binding [*out* *err*]
-                                     (println "kmet.libs.reakt watcher error:"
-                                              (.getMessage e)))))))
-                           (if (= :dirty (:state @cell))
-                             (recur (inc guard))
-                             result)))))))))
+                       (let [added (update-watching! (keys collected))]
+                         (swap! cell assoc :value result :caught nil
+                                ;; A dep written while the body ran left :dirty
+                                ;; behind — loop to re-run against fresh state.
+                                :state (cond
+                                         (= :dirty (:state @cell)) :dirty
+                                         ;; A dep written between its read in the
+                                         ;; body and the watch registration just
+                                         ;; above: add-watch never replays, so
+                                         ;; nothing else catches it — re-read and
+                                         ;; compare against the value as read
+                                         ;; (the same discipline track-render's
+                                         ;; cache hit-check uses; kmet mutates
+                                         ;; app state from futures/timers).
+                                         (some (fn [dep]
+                                                 (try (changed? (get collected dep) (deref dep))
+                                                      (catch Throwable _ true)))
+                                               added) :dirty
+                                         ;; Batched fallback: nothing tracked was
+                                         ;; read beyond the framework's own seeded
+                                         ;; deps, so this cached value could never
+                                         ;; be invalidated — re-run on next deref
+                                         ;; instead of caching stale output.
+                                         (and rerun-without-deps?
+                                              (empty? (remove exempt? (keys collected)))) :unrun
+                                         :else :idle))
+                         (when (changed? result value)
+                           ;; Watcher isolation: a throwing watcher must
+                           ;; not abort its siblings nor propagate into
+                           ;; whatever thread triggered the change.
+                           (doseq [[key fl] (:watches @cell)]
+                             (try
+                               (fl key @self value result)
+                               (catch Throwable e
+                                 (binding [*out* *err*]
+                                   (println "kmet.libs.reakt watcher error:"
+                                            (.getMessage e)))))))
+                         (if (= :dirty (:state @cell))
+                           (recur (inc guard))
+                           result)))))))))
          deref-fn
          (fn []
            (let [{:keys [state value caught]} @cell]
@@ -514,10 +535,12 @@
                    (run-sync!))))
              clojure.lang.IDeref
              (deref [_]
-               ;; Record R as a dependency of the ENCLOSING reaction, if one
-               ;; is running, then produce the value under our own frame.
-               (record-dep! @self)
-               (deref-fn)))]
+               ;; Produce the value under our own frame, then record R as a
+               ;; dependency of the ENCLOSING reaction, if one is running
+               ;; (see the RXRef docstring).
+               (let [v (deref-fn)]
+                 (record-dep! @self v)
+                 v)))]
      (reset! self r)
      r)))
 
@@ -713,8 +736,9 @@
                  ;; Record the cursor (not only its inner reaction) as the
                  ;; enclosing reaction's dependency — the same contract
                  ;; reactions carry (see the RXRef docstring).
-                 (record-dep! @self)
-                 (deref rx)))]
+                 (let [v (deref rx)]
+                   (record-dep! @self v)
+                   v)))]
      (reset! self cur)
      cur))
   ([source k & ks]

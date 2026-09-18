@@ -98,6 +98,8 @@
    settings.edn (pi: SettingsManager setters)."
   [cs]
   (let [sel-atom (atom nil)
+        ;; late binding: the escape callback disposes the frame, built below
+        frame-atom (atom nil)
         ag @(:agent-state cs)
         model (models/get-model @(:provider ag) @(:model ag))
         levels (if model (shared/get-supported-thinking-levels model) [:off])
@@ -343,7 +345,14 @@
                                (cfg/save-setting! [:thinking-loop-guard-enabled] (boolean value))))))]
     (settings-list/settings-list-set-on-escape!
      sl (fn []
+          ;; pi: done() — restore the editor and unwind the panel: the
+          ;; compiled frame's DSL chrome via dispose-tree!, the spliced
+          ;; list explicitly (the tree does not own it). Frame is
+          ;; late-bound — it is built below.
           ((:done @sel-atom))
+          (when-let [frame @frame-atom]
+            (h/dispose-tree! frame))
+          (protocols/dispose sl)
           (tui/tui-request-render (:tui cs))))
     ;; Frame the list like pi's SettingsSelectorComponent (DynamicBorder +
     ;; SettingsList + DynamicBorder); the list is the focus target (pi:
@@ -356,6 +365,7 @@
                   [:dynamic-border {:color-fn #(th/fg th :accent %)}]
                   sl
                   [:dynamic-border {:color-fn #(th/fg th :accent %)}]])]
+      (reset! frame-atom frame)
       ;; pi: showSelector — mount the framed panel, focus the list
       ;; (focus: the interactive child)
       (reset! sel-atom {:done (dock/mount! cs frame sl)}))))

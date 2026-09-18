@@ -269,34 +269,6 @@
     (reset! (:focused? this) val)
     (protocols/set-focused! (:input-comp this) val)))
 
-(extend-type LoginDialog
-  protocols/IFocusable
-  (focused [this] @(:focused? this))
-  (set-focused! [this val]
-    (reset! (:focused? this) val)
-    (protocols/set-focused! (:input-comp this) val)))
-
-(extend-type LoginDialog
-  protocols/IFocusable
-  (focused [this] @(:focused? this))
-  (set-focused! [this val]
-    (reset! (:focused? this) val)
-    (protocols/set-focused! (:input-comp this) val)))
-
-(extend-type LoginDialog
-  protocols/IFocusable
-  (focused [this] @(:focused? this))
-  (set-focused! [this val]
-    (reset! (:focused? this) val)
-    (protocols/set-focused! (:input-comp this) val)))
-
-(extend-type LoginDialog
-  protocols/IFocusable
-  (focused [this] @(:focused? this))
-  (set-focused! [this val]
-    (reset! (:focused? this) val)
-    (protocols/set-focused! (:input-comp this) val)))
-
 (defn make-login-dialog
   "Create the login dialog for PROVIDER-NAME (pi LoginDialogComponent).
    ON-COMPLETE fires (fn [success message]) when the user escapes. TUI is

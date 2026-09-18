@@ -20,11 +20,14 @@ touched (Tier 1 first). Reaching a DSL-owned stateful leaf from a wrapper
 post-mount — goes through `hiccup/ref`: the sanctioned escape hatch
 (tui.md §2.4), not a workaround.
 
-Reference patterns: `session_selector.clj` (`hiccup/root` body re-derives
-rows as `[:text ...]` data from the state atom, search/rename `Input`
-spliced foreign, focus/dispose imperative), `login_dialog.clj`
+Reference patterns: `session_selector.clj` (`hiccup/root` body
+tracked-derefing rows as `[:text ...]` data from the state atom,
+search/rename `Input` spliced foreign, focus/dispose imperative; the
+dock disposes on displacement too — §3.3), `login_dialog.clj`
 (`hiccup/root` + `r/tracked-deref` on a row-descriptor atom + static
-chrome built once outside the body), `fork_selector.clj` (`compile-tree`
+chrome built once outside the body; mounted `:borrowed?` because the
+auth flow re-mounts it around a prompt selector), `fork_selector.clj`
+(`compile-tree`
 frame + `track!` list returning strings), `bash_execution.clj`
 (`hiccup/root` + long-lived `Spinner` spliced foreign), `dock.clj` /
 `status_indicator.clj:make-status-area` (fn components).
@@ -56,13 +59,13 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `scoped_models_selector.clj` | DONE | none — root body, keyed `[:text]` rows, live footer as an element, input foreign, `dispose` unwinds both | none (Phase 1 #2) |
 | `thinking_selector.clj` | DONE | none — root body, keyed `[:text]` rows, input foreign, `dispose` unwinds both | none (Phase 1 #1) |
 | `dialogs.clj` | HYBRID | frame `compile-tree` (49); `select-list/make-select-list` (82); `input/make-input` (117) | Tier 2: `[:select-list]` / `[:input]` (the input via `:ref`, §3.2) — `:apply` covers all props used; keep `defcomponent` shell for `IFocusable` + `handle-input` forwarding |
-| `settings_selector.clj` | HYBRID | `settings-list/make-settings-list` (229); frame `compile-tree` (354) | Tier 2: `[:settings-list]` |
+| `settings_selector.clj` | HYBRID | `settings-list/make-settings-list` (229); frame `compile-tree` (354) | Tier 2: `[:settings-list]`; close path disposes the compiled frame (`dispose-tree!`) + the spliced list |
 | `tool_renderers.clj` | PARTIAL | trees already (452,461,534,578,583,969,993); imperative leftovers: `render-edit-result` (719–722), `render-bash-call` (775–780), `render-bash-result` (814–946) — the default/warning legs are already hiccup | Tier 1: `h/compile-tree` like the converted renderers; the mangled token-per-line regions (~814–946) need a manual reflow while there |
 | `chat_history.clj` | KEEP + Tier 1 helpers | `make-plain-msg` (204–206), `make-plain-md-msg` (213–215), `StatusLine` (249–250) | Tier 1 optional: helpers → `[:container {} [:spacer] [:text/:markdown/:truncated-text]]`; `ChatHistoryComponent` itself stays a record |
-| `session_selector.clj` | DONE (pattern) | 2× `input/make-input` (860–861); `hiccup/root` (900) | Tier 2 optional: `[:input {:ref ...}]`; low priority, works as-is |
+| `session_selector.clj` | DONE (pattern) | 2× `input/make-input` (860–861); `hiccup/root` (900) | Tier 2 optional: `[:input {:ref ...}]`; low priority, works as-is — the body reads state via `tracked-deref` and `hide!` disposes the root + both inputs |
 | `login_dialog.clj` | DONE | `input/make-input` (308); `db/make-dynamic-border` built once outside body (323); `hiccup/root` (327) | none — border-once-outside is the documented identity pattern; input could go `[:input]` (Tier 2, optional) |
 | `bash_execution.clj` | DONE | `spinner/make-spinner` (248) spliced into `hiccup/root` (256) | none — long-lived spinner identity intentional |
-| `tree_selector.clj` | DONE | `make-tree-list` ctor (937); `dialogs/make-input-dialog` (1082); panel `compile-tree` (1099) | none — `TreeList` is a string-direct `track!` leaf by design |
+| `tree_selector.clj` | DONE | `make-tree-list` ctor (937); `dialogs/make-input-dialog` (1082); panel `compile-tree` (1099) | none — `TreeList` is a string-direct `track!` leaf by design; the close path disposes the frame + the spliced list |
 | `user_message.clj` | KEEP | `container`/`box`/`md`/`spacer`/`image-block` (89–114) | none (§4) |
 | `custom_message.clj` | KEEP | `container`/`spacer`/`box`/`text`/`md`/`image-block` (81–93,153–155) | none (§4) |
 | `summary_message.clj` | KEEP | `text`/`md`/`spacer`/`container`/`box` (129–144,174–183) | none — transcript record (§4) |
@@ -72,7 +75,7 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `status_indicator.clj` | KEEP | `spinner/make-spinner` host-owned (79) | none |
 | `resource_config.clj` | KEEP / Tier 3 | `input/make-input` (557); render returns string lines directly | full-screen `hiccup/root` (session_selector pattern) only if rewriting the screen anyway |
 | `footer.clj`, `pending_messages.clj`, `loaded_resources.clj` | KEEP | none | string-direct `track!` renders — no tree to migrate |
-| `dock.clj`, `subs.clj`, `model_catalog.clj`, `external_editor.clj`, `custom_dialog_adapter.clj`, `footer_data_provider.clj` | N/A | none | fn component / data / adapter — nothing to migrate |
+| `dock.clj`, `subs.clj`, `model_catalog.clj`, `external_editor.clj`, `custom_dialog_adapter.clj`, `footer_data_provider.clj` | N/A | none | fn component / data / adapter — nothing to migrate; the dock owns the *displacement* half of a panel's lifecycle (`mount!`/`clear!` dispose the panel they lift out unless it was mounted `:borrowed?`) |
 
 Tier 2's former blockers (no `:on-change` on `:input`, the dialogs
 prefill cursor poke, `session_selector`'s post-construct wiring) are all
@@ -269,11 +272,16 @@ threads it through `header-line` / `hint-lines` / `content-lines`);
 `compile-tree`-outside-a-mount trees are holder-disposed
 (`dispose-tree!`), `root`s via `dispose`. **A root conversion must wire
 `dispose`** (`dispose` the root plus any foreign child the root cannot
-own — inputs) and make the close path call it: the dock drops foreign
-records without disposing them, so an unwired root leaks its reaction,
-and the old splices already leaked their track! watches on close
-(verified: the four converted selectors carry a `dispose` method, their
-close paths call it, and their watch-registry entries drop to 0).
+own — inputs) and make the close path call it; the dock covers the
+*displaced* case itself (`dock/mount!`/`clear!` dispose the panel they
+lift out unless it was mounted `:borrowed?` — pi's
+`disposeActiveSelector` before every `showSelector`), but a panel that
+never leaves the dock still needs its own close to dispose — an unwired
+root leaks its reaction, and the old splices already leaked their track!
+watches on close (verified: the four converted selectors,
+`session_selector`, `settings_selector`, `fork_selector` and
+`tree_selector` dispose their roots on close, and their watch-registry
+entries drop to 0).
 `scope-text` / `footer-text` / `hint-text` conditionals
 (`model_selector:269-274`) become `when` elements inline — nil splices
 free (§2.1) — instead of nil-or-record fields.
@@ -282,9 +290,13 @@ Read the state atom with `r/tracked-deref` — never a bare `@`: an
 untracked read leaves the reaction without deps, so the body re-derives
 on every render pass instead of on change — correct output, silent loss
 of the memoization (`bodies-run` climbs in `hiccup/counters`).
-`bash_execution` is the reference (`(r/tracked-deref state-atom)`);
-`session_selector`'s body uses a bare `@` and does re-derive per pass —
-new conversions follow the tracked form. Theme reads are plain
+`bash_execution` is the reference (`(r/tracked-deref state-atom)`).
+Memoization is safe under state mutated from futures/timers: a run
+compares the values it read against their deps' current ones after
+registering watches, so a write landing mid-run re-runs it instead of
+being swallowed (tui.md §3.1;
+`test-dep-written-mid-run-still-invalidates`).
+Theme reads are plain
 (`theme/get-current-theme`): a memoized body restyles on its next derive,
 while the stable per-instance border `:color-fn` re-reads the theme at
 every render (borders restyle live, chrome on the next state change —
@@ -409,7 +421,9 @@ One commit per file, each with its interaction test (§3.2):
    frame a root only if the items must be live.
 3. `session_selector` search/rename inputs — `[:input {:ref ...}]`;
    `forward-to-search!` reads the value back from the deref'd instance;
-   rename submit wired through the deref after mount.
+   rename submit wired through the deref after mount. (Its body already
+   reads the state atom through `tracked-deref` and `hide!` disposes the
+   root + both inputs, so only the input tags remain.)
 4. `login_dialog` input — optional, works as-is.
 
 ### Phase 3 — only with a rewrite
@@ -428,10 +442,13 @@ One commit per file, each with its interaction test (§3.2):
 - Keep `tui.md` §2.3/§2.4 in lockstep: this plan leans on the `:apply`
   semantics and the ref lifecycle; a behavior change to either updates
   both docs in the same commit.
-- Root conversions dispose on their **close callbacks**. A *displaced*
-  panel is still dropped without dispose: another dialog/selector taking
-  the dock, or `/new` clearing it, bypasses the close path — the latent
-  gap `session_selector` (whose `dispose` is never called) and
-  `login_dialog` already have. A future `dock` change that disposes the
-  displaced component would close it everywhere; out of scope for the
-  conversion steps.
+- Root conversions dispose on their **close callbacks** *and* the dock
+  disposes on **displacement**: `dock/mount!`/`dock/clear!` unwind the
+  panel they lift out (pi: `disposeActiveSelector` at the top of
+  `showSelector`; the same call in `setCustomEditorComponent`, the
+  extension mounts and `stop`), so a selector that never runs its own done
+  — an editor swap, a session reset, another panel taking the dock — still
+  releases its root reaction and foreign children. Panels whose owner keeps
+  custody pass `:borrowed? true` (the auth dialog a prompt selector
+  temporarily replaces, an extension dialog the registry closes) and are
+  left to that owner.

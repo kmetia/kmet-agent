@@ -211,3 +211,43 @@
       (finally
         (r/set-enqueue-hook! nil)
         (r/dispose! d)))))
+
+(deftest test-dep-written-mid-run-still-invalidates
+  (testing "a dep written between its read and the run's watch registration is
+            not lost: the run compares captured values against current ones
+            and re-runs (kmet mutates app state from futures/timers/agent
+            events, so the write-between-read-and-watch window is real)"
+    (let [a (atom 0)
+          runs (atom 0)
+          writes (atom 0)
+          r (r/make-reaction (fn []
+                               (swap! runs inc)
+                               (let [v (r/tracked-deref a)]
+                                 ;; simulate a concurrent writer landing after
+                                 ;; the read but before the watch was added
+                                 (when (= 0 v)
+                                   (swap! writes inc)
+                                   (reset! a 1))
+                                 v)))]
+      (is (= 1 @r) "the reaction converges: the mid-run write is not cached over")
+      (is (= 1 @r) "and stays current on later reads")
+      (is (= 1 @writes) "the writer ran once — no re-run loop")
+      (is (= :idle (:state (r/reaction-state r))))
+      (r/dispose! r))))
+
+(deftest test-mid-run-write-on-a-child-reaction-is-seen
+  (testing "the same gap for a reaction dep: the child's captured value is
+            compared, so a child re-run inside the parent's window is seen"
+    (let [a (atom 0)
+          child (r/make-reaction (fn [] (r/tracked-deref a)))
+          out (atom nil)
+          parent (r/make-reaction (fn []
+                                    (let [v @child]
+                                      (when (= 0 v)
+                                        (reset! a 1)
+                                        (r/force-run! child))
+                                      (reset! out v)
+                                      v)))]
+      (is (= 1 @parent) "parent sees the child's mid-run change")
+      (r/dispose! parent)
+      (r/dispose! child))))
