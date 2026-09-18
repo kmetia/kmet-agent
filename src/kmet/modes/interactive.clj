@@ -1431,6 +1431,11 @@
                              (vals (tools/get-all-tools)))
               system-prompt-opts {:custom-prompt (cfg/get-custom-prompt config)
                                   :append-prompt (cfg/get-append-system-prompt config)
+                                  ;; the cwd line follows the runtime cwd (a session
+                                  ;; from another project may be active); context
+                                  ;; files and everything else project-scoped stay
+                                  ;; with the launch dir
+                                  :cwd (runtime-cwd cs)
                                   :context-files (context/load-project-context-files
                                                   (cfg/get-agent-dir) (str (fs/cwd)))
                                   :tools active-tools}
@@ -1744,26 +1749,18 @@
              (= role :user) (assoc :images (image-block/content-images (:content e)))
              (= role :info) (assoc :label (:label e)))))))))
 
-(defn- refresh-system-prompt!
-  "Rebuild the system prompt for CWD (pi: a new runtime rebuilds it from its
-   own cwd): the project context files are re-read from the new directory
-   and the prompt's Current working directory line follows. The
-   loaded-resources display is rebuilt with them (pi: showLoadedResources).
-
-   Context files follow the cwd because they describe it; the rest of the
-   project scope deliberately does not move — settings.edn, project
-   extensions/skills/prompts/themes and project packages stay with the
-   launch directory (see apply-session-cwd!)."
+(defn- refresh-prompt-cwd!
+  "Point the system prompt's `Current working directory` line at CWD (the
+   session's runtime cwd). Project context files are NOT re-read: everything
+   project-scoped — settings.edn, context files (AGENTS.md/CLAUDE.md),
+   project extensions/skills/prompts/themes, project packages — stays with
+   the launch directory, whatever session is imported; only the transcript
+   (and the working directory its tools run in) crosses the switch."
   [cs cwd]
   (let [ag @(:agent-state cs)
-        opts (assoc @(:system-prompt-opts ag)
-                    :cwd cwd
-                    :context-files (context/load-project-context-files
-                                    (cfg/get-agent-dir) cwd))]
+        opts (assoc @(:system-prompt-opts ag) :cwd cwd)]
     (reset! (:system-prompt-opts ag) opts)
-    (reset! (:system ag) (apply skills/build-system-prompt (mapcat identity opts)))
-    (when-let [lr (:loaded-resources-comp cs)]
-      (ui/loaded-resources-set-sections! lr (build-loaded-resource-sections)))))
+    (reset! (:system ag) (apply skills/build-system-prompt (mapcat identity opts)))))
 
 (defn- apply-session-cwd!
   "Point the runtime at SESS's working directory (pi: createRuntime's cwd +
@@ -1776,9 +1773,9 @@
    effect.
 
    The session's *configuration* does not move with it: settings.edn,
-   project-scoped extensions/skills/prompts/themes and project packages stay
-   resolved against the launch directory — a switch imports the session's
-   transcript and working directory only."
+   project context files, project-scoped extensions/skills/prompts/themes and
+   project packages stay resolved against the launch directory — a switch
+   imports the session's transcript and working directory only."
   [cs sess]
   (let [fdp* (:footer-provider cs)
         recorded (get-in sess [:header :cwd])
@@ -1790,7 +1787,7 @@
 
       cwd
       (do (fdp/fdp-set-cwd! fdp* cwd)
-          (refresh-system-prompt! cs cwd)
+          (refresh-prompt-cwd! cs cwd)
           cwd)
 
       :else
@@ -3685,9 +3682,12 @@
         _ (packages/load-prompts!)
         system-prompt-opts {:custom-prompt (cfg/get-custom-prompt config)
                             :append-prompt (cfg/get-append-system-prompt config)
+                            ;; the prompt's cwd line is the runtime cwd (the
+                            ;; resumed session's), but everything project-scoped —
+                            ;; context files included — stays with the launch dir
                             :cwd cwd
                             :context-files (context/load-project-context-files
-                                            (cfg/get-agent-dir) cwd)
+                                            (cfg/get-agent-dir) (str (fs/cwd)))
                             :tools (vals (tools/get-all-tools))}
         system-prompt (apply skills/build-system-prompt
                              (mapcat identity system-prompt-opts))

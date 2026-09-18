@@ -29,6 +29,7 @@
             [kmet.libs.http :as http]
             [kmet.libs.terminal-image :as timg]
             [kmet.app.session :as session]
+            [kmet.app.skills :as skills]
             [kmet.app.ui.footer-data-provider :as fdp]
             [babashka.fs :as fs]
             [kmet.config :as cfg]
@@ -681,13 +682,20 @@
    the resume path runs for real (pi: importFromJsonl swaps the runtime),
    with only the dock and the render calls stubbed (no terminal in tests).
    The cwd atom is shared by the footer provider and the chat history, as in
-   build-layout."
+   build-layout, and the system-prompt options carry a launch-project
+   context file — the switch must keep them (only the cwd line follows the
+   session's working directory)."
   [active-sess]
   (let [cwd-atom (atom (or (session/session-cwd active-sess) (str (fs/cwd))))
         ch (ui/make-chat-history :cwd-fn #(deref cwd-atom))
         prov (fdp/make-footer-data-provider :cwd-atom cwd-atom :session active-sess)
         ed (editor/make-editor)
-        ag (agent/make-agent-state :session active-sess)]
+        opts {:cwd (deref cwd-atom)
+              :context-files [{:path "AGENTS.md" :content "LAUNCH-PROJECT CONTEXT"}]}
+        ag (agent/make-agent-state
+            :session active-sess
+            :system-prompt-opts opts
+            :system (apply skills/build-system-prompt (mapcat identity opts)))]
     (inter/map->CoreState
      {:agent-state (atom ag)
       :chat-history ch
@@ -819,7 +827,12 @@
               (t/is (= foreign (get-in @(:system-prompt-opts @(:agent-state cs)) [:cwd]))
                     "and the system prompt options")
               (t/is (str/includes? @(:system @(:agent-state cs)) foreign)
-                    "the model is told where its tools will run"))))
+                    "the model is told where its tools will run")
+              (t/is (= [{:path "AGENTS.md" :content "LAUNCH-PROJECT CONTEXT"}]
+                       (get-in @(:system-prompt-opts @(:agent-state cs)) [:context-files]))
+                    "project context files stay with the launch project")
+              (t/is (str/includes? @(:system @(:agent-state cs)) "LAUNCH-PROJECT CONTEXT")
+                    "and stay in the rebuilt prompt"))))
         (finally (fs/delete-tree dir))))))
 
 (deftest test-import-cancellation-paths
