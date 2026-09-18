@@ -205,13 +205,15 @@
       (is (str/includes? text "an ordinary message"))
       (is (not (str/includes? text "[skill]"))))))
 
-(deftest test-output-pad-walk-reaches-the-skill-message
+(deftest test-output-pad-reaches-the-skill-message
+  ;; one reset! on the shared pad atom reaches both the box and the trailing
+  ;; user message (they were given the same atom at construction)
   (let [ch (ch/make-chat-history)]
     (ch/chat-history-add-message! ch {:role :user :content (str block "\n\nargs")})
     (ch/chat-history-set-output-pad! ch 3)
-    (let [lines (core/render ch 60)]
-      (is (some #(str/includes? (strip-ansi %) "[skill]") lines))
-      (is (some #(str/includes? (strip-ansi %) "args") lines)
+    (let [lines (mapv strip-ansi (core/render ch 60))]
+      (is (some #(str/starts-with? % "   [skill]") lines) "the skill box re-padded")
+      (is (some #(str/starts-with? % "   args") lines)
           "the trailing user message followed the padding change"))))
 
 ;; ─── Shared styling with the compact read call ────────────────────────────

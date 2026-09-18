@@ -63,7 +63,7 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `dialogs.clj` | DONE | none — `[:select-list]` / `[:input]` elements under a `hiccup/ref`, read back right after `compile-tree` (the record keeps its `:select-list`/`:input-comp` field); frame hint bug fixed first (see Phase 2) | none (Phase 2 #1) |
 | `settings_selector.clj` | DONE | none — `[:settings-list]` element under a `hiccup/ref`, read back right after `compile-tree`; the `:on-change` case hoisted to a named local, escape wired through the tag's `:on-escape`, one `dispose-tree!` unwinds the whole tree | none (Phase 2 #2) |
 | `tool_renderers.clj` | DONE | none — every renderer assembles a `h/compile-tree` (the last imperative legs, `render-edit-result`'s error branch, `render-bash-call` and `render-bash-result`, converted; the mangled token-per-line block reflowed, the collapsed output cap hoisted to `bash-result-preview-lines`) | none (Phase 1 #4) |
-| `chat_history.clj` | KEEP + DONE (Tier 1 #5) | none — `make-plain-msg`/`make-plain-md-msg` are `hiccup/root`s of `[:container]`/`[:spacer]`/`[:text]`/`[:markdown]` elements; `StatusLine` is a thin record over a root whose body tracks the text atom (the in-place status rewrite resets it); the last four component requires are gone | `ChatHistoryComponent` and the message records stay records (§4) |
+| `chat_history.clj` | KEEP + DONE (Tier 1 #5) | none — `make-plain-msg`/`make-plain-md-msg` are `hiccup/root`s of `[:container]`/`[:spacer]`/`[:text]`/`[:markdown]` elements; `StatusLine` is a thin record over a root whose body tracks the text atom (the in-place status rewrite resets it); the last four component requires are gone; the output pad is one shared atom every record reads at render (the tool-display/thinking-hidden pattern) — `chat-history-set-output-pad!` is a single `reset!`, not a per-kind walk | `ChatHistoryComponent` and the message records stay records (§4) |
 | `session_selector.clj` | DONE (full) | none — both inputs are `[:input]` tags (`:value`/`:cursor`/`:focused?` props over the state mirror; see Phase 2 #3) | none — the body reads state via `tracked-deref` and `hide!` disposes the root (which cascades to the tag-owned inputs) |
 | `login_dialog.clj` | DONE (full) | none — the prompt field is a `[:input]` tag whose row descriptor carries its text/caret and whose emphasis is the dialog's focus flag (Phase 2 #4) | none — chrome is `[:dynamic-border]` / `[:text]` elements and the input is tag-owned |
 | `bash_execution.clj` | DONE | `spinner/make-spinner` (248) spliced into `hiccup/root` (256) | none — long-lived spinner inside a line-based record, §4's measured reason |
@@ -335,8 +335,11 @@ stays near-linear with a small constant.)
   `AssistantMessage`, `CustomMessage`, `SkillInvocationMessage`,
   `ToolExecutionComponent`: records with instance storage, `track!`
   caches, theme apply-once, renderer-state / last-component dedup, image
-  children lifecycle, streaming reflow, and persistence reading the
-  message maps directly. The record tree is the *fastest* of the three
+  children lifecycle, streaming reflow, persistence reading the message
+  maps directly, and one shared output-pad atom each record reads at render
+  (the tool-display/thinking-hidden pattern — a pad change is one `reset!`,
+  not a walk pushing into six per-kind setters). The record tree is the
+  *fastest* of the three
   designs above; a DSL container that splices the records is parity
   (±20%, ahead on idle at 1200) and buys nothing, while content re-derived
   in a body is 4–16× worse and degrades as the transcript grows — exactly
@@ -471,7 +474,7 @@ One commit per file, simplest first:
    (`container`, `spacer`, `text`, `md`) plus the `track-deps` dance.
    Pinned by a HEAD-vs-new render dump (160 identical lines: three
    widths incl. wrap, the trailing-status rewrite, invalidate, the
-   output-pad walk, clear) and new/strengthened `test_chat_history`
+   output-pad change, clear) and new/strengthened `test_chat_history`
    cases (plain-entry lines, cached-status invalidation).
 
 Acceptance per file: interaction behavior identical (existing tests),

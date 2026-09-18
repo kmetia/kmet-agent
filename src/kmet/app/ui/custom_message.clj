@@ -34,13 +34,18 @@
     (track! this width
       (let [s @spacer
             b @box
+            ;; tracked read: the pad atom is shared by every message the chat
+            ;; history owns — one reset! re-pads them all (the box setter
+            ;; no-ops when the value is unchanged)
+            pad (deref output-pad-atom)
+            _ (box/box-set-padding-x! b pad)
             ;; tracked read: a palette switch re-applies once, then re-caches
             thm (deref s/theme-sub)
             _ (when-not (identical? thm @applied-theme-atom)
                 (reset! applied-theme-atom thm)
                 (apply-theme! this thm))]
         (track-deps @inner-container @label-atom @content-atom
-                    @output-pad-atom @expanded-atom @collapsed-content-atom
+                    @expanded-atom @collapsed-content-atom
                     @expanded-content-atom @s/image-settings-sub)
         (into [] (concat (protocols/render s width)
                          (protocols/render b width))))))
@@ -135,13 +140,6 @@
   (box/box-set-bg-fn @(:box comp) #(theme/bg theme :custom-message-bg %))
   (rebuild-content! comp))
 
-(defn custom-message-set-output-pad!
-  "Set the box's horizontal padding in place — the content container (and
-   the expansion state its children hold) is untouched."
-  [comp n]
-  (reset! (:output-pad-atom comp) n)
-  (box/box-set-padding-x! @(:box comp) n))
-
 ;; ─── Construction ──────────────────────────────────────────────────────────
 
 (defn make-custom-message
@@ -151,12 +149,14 @@
      :content     — message text (default \"\")
      :images      — optional [{:data base64 :mime-type str} …] content images
      :theme       — theme map (default dark-theme)
-     :output-pad  — horizontal padding (default 1)"
-  [& {:keys [label content images output-pad]
+     :output-pad  — horizontal padding (default 1); :output-pad-atom takes
+                    a caller-owned atom instead (the chat history shares one)"
+  [& {:keys [label content images output-pad output-pad-atom]
       :or {content "" output-pad 1}}]
-  (let [inner-container (container/make-container)
+  (let [pad-atom (or output-pad-atom (atom output-pad))
+        inner-container (container/make-container)
         s (spacer/make-spacer 1)
-        b (box/make-box output-pad 1 nil)]
+        b (box/make-box @pad-atom 1 nil)]
     (box/box-add-child b inner-container)
     (let [comp (map->CustomMessageComponent {:kind :custom
                                              :spacer (atom s)
@@ -166,7 +166,7 @@
                                              :content-atom (atom content)
                                              :images-atom (atom (vec images))
                                              :applied-theme-atom (atom nil)
-                                             :output-pad-atom (atom output-pad)
+                                             :output-pad-atom pad-atom
                                              :expanded-atom (atom false)
                                              :collapsed-content-atom (atom nil)
                                              :expanded-content-atom (atom nil)

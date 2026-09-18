@@ -82,13 +82,15 @@
           plain (mapv strip-ansi (core/render c 40))]
       (is (some #(re-find #"just content" %) plain)))))
 
-(deftest test-set-output-pad
-  (testing "set-output-pad! patches the live box's horizontal padding"
-    (let [c (te/make-tool-execution :name "ls" :content "x" :output-pad 1)]
+(deftest test-output-pad-follows-the-shared-atom
+  (testing "the pad lives in an atom: one reset! re-pads the live box"
+    (let [pad (atom 1)
+          c (te/make-tool-execution :name "ls" :content "x" :output-pad-atom pad)]
       (is (= 1 @(:padding-x-atom @(:box c))))
-      (te/tool-execution-set-output-pad! c 5)
-      (is (= 5 @(:padding-x-atom @(:box c))) "box padding-x updated")
+      (reset! pad 5)
+      ;; like the other shared atoms, the pad applies on the next frame
       (let [plain (mapv strip-ansi (core/render c 40))]
+        (is (= 5 @(:padding-x-atom @(:box c))) "box padding-x updated")
         (is (some #(re-find #"^     ls" %) plain)
             "call line indented by the new padding")))))
 

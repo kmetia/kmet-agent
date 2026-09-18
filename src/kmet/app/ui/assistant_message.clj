@@ -85,6 +85,7 @@
                rendered-streaming-atom   ;; streaming flag of the cached lines (stale check)
                rendered-hide?-atom       ;; hide flag the cached lines were built with
                rendered-hidden-label-atom ;; label the cached lines were built with
+               rendered-pad-atom        ;; output pad the cached lines were wrapped at
                rendered-theme-atom       ;; theme the cached lines were built with (theme-sub)
                last-render-width-atom
                cache-atom]
@@ -96,6 +97,9 @@
             text (let [t (str/trim (or @text-atom ""))] (when (seq t) t))
             thinking (let [t (str/trim (or @thinking-text-atom ""))] (when (seq t) t))
             streaming? (boolean @streaming-atom)
+            ;; the pad atom is shared by every message the chat history owns:
+            ;; reading it here is what re-wraps the cached lines when it moves
+            pad (deref output-pad-atom)
             ;; Read in the track! body: marking tool calls on a finalized
             ;; empty message invalidates the placeholder away.
             tool-calls? (boolean @tool-calls-atom)
@@ -118,6 +122,7 @@
                        (not= streaming? @rendered-streaming-atom)
                        (not= hide? @rendered-hide?-atom)
                        (not= hidden-label @rendered-hidden-label-atom)
+                       (not= pad @rendered-pad-atom)
                        (not= theme @rendered-theme-atom))
             _ (when stale? (reflow-all! this width))
             text-lines @rendered-text-lines-atom
@@ -176,6 +181,7 @@
     (reset! (:rendered-streaming-atom comp) streaming?)
     (reset! (:rendered-hide?-atom comp) hide?)
     (reset! (:rendered-hidden-label-atom comp) hidden-label)
+    (reset! (:rendered-pad-atom comp) pad-x)
     (reset! (:rendered-theme-atom comp) theme)
     (reset! (:last-render-width-atom comp) width)))
 
@@ -183,8 +189,9 @@
 
 (defn make-assistant-message
   "THEME is no longer taken: styling subscribes to ui.subs/theme-sub and
-   follows palette changes live (Stage 5)."
-  [& {:keys [text thinking text-atom thinking-atom output-pad
+   follows palette changes live (Stage 5). :output-pad takes a number,
+   :output-pad-atom a caller-owned atom (the chat history shares one)."
+  [& {:keys [text thinking text-atom thinking-atom output-pad output-pad-atom
              hide-thinking? hidden-label thinking-hidden-atom hidden-label-atom
              tool-calls?]
       :or {text "" thinking ""
@@ -202,7 +209,8 @@
         comp (map->AssistantMessageComponent {:kind :assistant
                                               :text-atom (or text-atom (atom text))
                                               :thinking-text-atom (or thinking-atom (atom thinking))
-                                              :output-pad-atom (atom output-pad)
+                                              :output-pad-atom (or output-pad-atom
+                                                                   (atom output-pad))
                                               :hide-thinking-atom (or thinking-hidden-atom
                                                                       (atom hide-thinking?))
                                               :hidden-label-atom (or hidden-label-atom
@@ -216,6 +224,7 @@
                                               :rendered-streaming-atom (atom nil)
                                               :rendered-hide?-atom (atom nil)
                                               :rendered-hidden-label-atom (atom nil)
+                                              :rendered-pad-atom (atom nil)
                                               :rendered-theme-atom (atom nil)
                                               :last-render-width-atom (atom nil)
                                               :cache-atom (atom nil)})]
@@ -252,8 +261,3 @@
   (when-let [w @(:last-render-width-atom comp)]
     (reflow-all! comp w)))
 
-(defn assistant-message-set-output-pad!
-  [comp n]
-  (reset! (:output-pad-atom comp) n)
-  (when-let [w @(:last-render-width-atom comp)]
-    (reflow-all! comp w)))

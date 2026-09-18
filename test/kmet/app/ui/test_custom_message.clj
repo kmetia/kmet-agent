@@ -77,11 +77,15 @@
         (finally
           (reset! theme/theme-atom (theme/get-theme "dark")))))))
 
-(deftest test-set-output-pad
-  (testing "set-output-pad! changes padding"
-    (let [c (cm/make-custom-message :label "test" :content "test" :output-pad 2)]
-      (cm/custom-message-set-output-pad! c 4)
-      (is (pos? (count (core/render c 40)))))))
+(deftest test-output-pad-follows-the-shared-atom
+  (testing "the pad lives in an atom: one reset! re-pads the box"
+    (let [pad (atom 2)
+          c (cm/make-custom-message :label "test" :content "test" :output-pad-atom pad)]
+      (is (some #(re-find #"^  \[test\]" %) (mapv strip-ansi (core/render c 40))))
+      (reset! pad 4)
+      (is (some #(re-find #"^    \[test\]" %) (mapv strip-ansi (core/render c 40)))
+          "the next render follows the atom")
+      (is (= 4 @(:padding-x-atom @(:box c)))))))
 
 (deftest test-background
   (testing "renders with custom-message-bg background"
@@ -148,17 +152,19 @@
           (finally (reset! theme/theme-atom (theme/get-theme "dark"))))))))
 
 (deftest test-output-pad-patches-in-place
-  (testing "set-output-pad! patches the live box — the inner container and
+  (testing "a pad change patches the live box — the inner container and
             its children are reused, so nothing is disposed and the watch
             registry does not move"
     (let [watchers #(count @(deref #'macros/watch-registry))
-          c (cm/make-custom-message :label "ext" :content "note")
+          pad (atom 1)
+          c (cm/make-custom-message :label "ext" :content "note"
+                                    :output-pad-atom pad)
           old-box @(:box c)
           old-container @(:inner-container c)]
       (core/render c 60)
       (let [old-children (vec @(:children old-container))
             baseline (watchers)]
-        (cm/custom-message-set-output-pad! c 3)
+        (reset! pad 3)
         (is (identical? old-box @(:box c)) "the box was not replaced")
         (is (identical? old-container @(:inner-container c))
             "the container was not replaced")

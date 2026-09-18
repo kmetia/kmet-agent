@@ -49,11 +49,15 @@
         (finally
           (reset! theme/theme-atom (theme/get-theme "dark")))))))
 
-(deftest test-set-output-pad
-  (testing "set-output-pad! changes padding"
-    (let [c (um/make-user-message :text "hello" :output-pad 3)]
-      (um/user-message-set-output-pad! c 5)
-      (is (pos? (count (core/render c 40)))))))
+(deftest test-output-pad-follows-the-shared-atom
+  (testing "the pad lives in an atom: one reset! re-pads the box"
+    (let [pad (atom 3)
+          c (um/make-user-message :text "hello" :output-pad-atom pad)]
+      (is (= 3 @(:padding-x-atom @(:box c))))
+      (reset! pad 5)
+      (is (some #(re-find #"^     hello" %) (mapv strip-ansi (core/render c 40)))
+          "the next render follows the atom")
+      (is (= 5 @(:padding-x-atom @(:box c))) "box padding-x updated"))))
 
 (deftest test-empty-text
   (testing "empty text renders lines (box padding)"
@@ -114,15 +118,16 @@
             (is (some #(re-find #"\[Image: \[image/png\] 1x1\]" %)
                       (mapv strip-ansi lines)))))))))
 
-(deftest test-images-survive-output-pad-rebuild
-  (testing "set-output-pad! rebuilds the box without dropping the image blocks"
+(deftest test-images-survive-an-output-pad-change
+  (testing "a pad change re-pads the box without dropping the image blocks"
     (with-image-env
       {:show-images true :image-width-cells 60}
       {:images nil :true-color true :hyperlinks true}
       (fn []
-        (let [c (um/make-user-message :text "see:" :output-pad 1
+        (let [pad (atom 1)
+              c (um/make-user-message :text "see:" :output-pad-atom pad
                                       :images [{:data png :mime-type "image/png"}])]
-          (um/user-message-set-output-pad! c 3)
+          (reset! pad 3)
           (let [plain (mapv strip-ansi (core/render c 60))]
             (is (some #(re-find #"see:" %) plain))
             (is (some #(re-find #"\[Image: \[image/png\] 1x1\]" %) plain))))))))

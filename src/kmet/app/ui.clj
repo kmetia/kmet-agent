@@ -18,7 +18,6 @@
 
 ;; UserMessageComponent
 (def make-user-message user-message/make-user-message)
-(def user-message-set-output-pad! user-message/user-message-set-output-pad!)
 
 ;; AssistantMessageComponent — content lives in the message map's data
 ;; atoms (Stage 5): no component-facing text/thinking setters or getters

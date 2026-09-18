@@ -28,12 +28,12 @@
   "Create a CustomMessageComponent for the top info banner.
    Supports :collapsed-content / :expanded-content variants (pi: ExpandableText),
    an :expanded? flag to restore a previously expanded banner, and :images."
-  [msg output-pad]
+  [msg output-pad-atom]
   (when msg
     (let [comp (cm/make-custom-message :label (:label msg)
                                        :content (:content msg "")
                                        :images (:images msg)
-                                       :output-pad output-pad)]
+                                       :output-pad-atom output-pad-atom)]
       (when (and (some? (:collapsed-content msg))
                  (some? (:expanded-content msg)))
         (cm/custom-message-set-collapsible-content! comp
@@ -249,7 +249,7 @@
    transcript — the trailing args (if any) stay a normal user message below
    it, exactly as pi splits the two (pi: parseSkillBlock +
    SkillInvocationMessageComponent). Attached image blocks render inline."
-  [msg output-pad tools-expanded-atom]
+  [msg output-pad-atom tools-expanded-atom]
   (let [text (content->user-text (:content msg ""))
         ;; live messages carry image blocks inside :content; the session
         ;; replay path attaches them as the message's :images (its content is
@@ -261,15 +261,16 @@
         (skill-message/make-skill-invocation-message
          :skill-block block
          :tools-expanded-atom tools-expanded-atom
-         :output-pad output-pad
+         :output-pad-atom output-pad-atom
          ;; the trailing args render as a user message below; images attached
          ;; to the invocation ride along with it (image-only attachments get
          ;; one too, with empty text)
          :user-message (when (or (seq args) (seq images))
                          (um/make-user-message :text (or args "")
                                                :images images
-                                               :output-pad output-pad))))
-      (um/make-user-message :text text :images images :output-pad output-pad))))
+                                               :output-pad-atom output-pad-atom))))
+      (um/make-user-message :text text :images images
+                            :output-pad-atom output-pad-atom))))
 
 (defn- content->custom-text
   "Display text of a custom message's content (pi: CustomMessageComponent
@@ -294,7 +295,7 @@
    :custom messages render through the default labeled box (a registered
    message renderer arrives as :component) and honor the display flag, and
    :compaction / :branch-summary render as collapsible summary boxes."
-  [msg output-pad tools-expanded-atom thinking-hidden-atom hidden-label-atom cwd-fn]
+  [msg output-pad-atom tools-expanded-atom thinking-hidden-atom hidden-label-atom cwd-fn]
   (let [thm @subs/theme-sub]
     (cond
     ;; Pre-built component — extension entry/message renderers may return a
@@ -304,14 +305,14 @@
 
       :else
       (case (:role msg)
-        :user (make-user-msg msg output-pad tools-expanded-atom)
+        :user (make-user-msg msg output-pad-atom tools-expanded-atom)
         :assistant (am/make-assistant-message
                   ;; content atoms come from the message map (with-assistant-data
                   ;; created them) — one home, owned by the data layer (§3.2)
                     :text-atom (:text-atom msg)
                     :thinking-atom (:thinking-atom msg)
                     :tool-calls? (boolean (seq (:tool-calls msg)))
-                    :output-pad output-pad
+                    :output-pad-atom output-pad-atom
                     :thinking-hidden-atom thinking-hidden-atom
                     :hidden-label-atom hidden-label-atom)
         :tool (let [tool (tools/get-tool (:name msg ""))
@@ -322,7 +323,7 @@
                           :is-error (:is-error msg false)
                           :truncation (:truncation msg)
                           :details (:details msg)
-                          :output-pad output-pad
+                          :output-pad-atom output-pad-atom
                           ;; pi: ToolRenderContext.cwd — path displays resolve
                           ;; against the runtime cwd (the session's), not the
                           ;; process cwd
@@ -357,7 +358,7 @@
                                           :content (content->custom-text (:content msg))
                                           :images (into (vec (:images msg))
                                                         (image-block/content-images (:content msg)))
-                                          :output-pad output-pad))
+                                          :output-pad-atom output-pad-atom))
       ;; pi: CompactionSummaryMessageComponent / BranchSummaryMessageComponent
       ;; — collapsible summary boxes (collapsed by default, expansion via
       ;; the shared ctrl+o mode atom).
@@ -366,17 +367,17 @@
                      :summary (:summary msg)
                      :tokens-before (:tokens-before msg)
                      :tools-expanded-atom tools-expanded-atom
-                     :output-pad output-pad)
+                     :output-pad-atom output-pad-atom)
         :branch-summary (summary-message/make-summary-message
                          :variant :branch
                          :summary (:summary msg)
                          :tokens-before (:tokens-before msg)
                          :tools-expanded-atom tools-expanded-atom
-                         :output-pad output-pad)
+                         :output-pad-atom output-pad-atom)
         :info (cm/make-custom-message :label (:label msg)
                                       :content (:content msg "")
                                       :images (:images msg)
-                                      :output-pad output-pad)
+                                      :output-pad-atom output-pad-atom)
       ;; one-shot styled entries take the palette snapshot at creation —
       ;; they are plain Text, there is nothing to re-theme
         :error (make-plain-msg (theme/fg thm :error (str "Error: " (:content msg ""))))
@@ -408,7 +409,7 @@
    created component (or nil)."
   [ch msg]
   (let [msg (with-assistant-data msg)
-        comp (make-component-for-msg msg @(:output-pad-atom ch)
+        comp (make-component-for-msg msg (:output-pad-atom ch)
                                      (:tools-expanded-atom ch) (:thinking-hidden-atom ch)
                                      (:hidden-label-atom ch) (:cwd-fn ch))]
     (when comp
@@ -422,7 +423,7 @@
    no streaming message exists. Returns the created component (or nil)."
   [ch msg]
   (let [msg (with-assistant-data msg)
-        comp (make-component-for-msg msg @(:output-pad-atom ch)
+        comp (make-component-for-msg msg (:output-pad-atom ch)
                                      (:tools-expanded-atom ch) (:thinking-hidden-atom ch)
                                      (:hidden-label-atom ch) (:cwd-fn ch))
         streaming @(:streaming-atom ch)]
@@ -483,7 +484,7 @@
         comp (am/make-assistant-message
               :text-atom (:text-atom msg)
               :thinking-atom (:thinking-atom msg)
-              :output-pad @(:output-pad-atom ch)
+              :output-pad-atom (:output-pad-atom ch)
               :thinking-hidden-atom (:thinking-hidden-atom ch)
               :hidden-label-atom (:hidden-label-atom ch))]
     (am/assistant-message-set-streaming! comp true)
@@ -593,18 +594,11 @@
   (when-let [prev @(:info-comp-atom ch)]
     (try (protocols/dispose prev) (catch Exception _)))
   (if msg
-    (when-let [comp (make-info-msg msg @(:output-pad-atom ch))]
+    (when-let [comp (make-info-msg msg (:output-pad-atom ch))]
       (reset! (:info-comp-atom ch) comp))
     (reset! (:info-comp-atom ch) nil)))
 
 ;; ─── Toggles ─────────────────────────────────────────────────────────────
-
-(defn- kind-of
-  "Kind-as-data dispatch (dsl.md §5): the component's stamped :kind field
-   (set by defcomponent). nil for components without one — same semantics
-   as the old IComponentKind satisfies? guard, without the protocol."
-  [child]
-  (:kind child))
 
 (def valid-tool-display-modes
   "The tool display modes ctrl+o cycles (pi: toolOutputExpanded, extended
@@ -779,32 +773,14 @@
                  text-atom (assoc :content @text-atom)
                  thinking-atom (assoc :thinking @thinking-atom))))))
 
-(defn- message-comps
-  "All message components plus the info banner component."
-  [ch]
-  (concat (map :component @(:messages-atom ch))
-          (when-let [info @(:info-comp-atom ch)] [info])))
-
-(defn- set-pad-on!
-  "Set output padding on a child based on its kind."
-  [child n]
-  (case (kind-of child)
-    :user (um/user-message-set-output-pad! child n)
-    :assistant (am/assistant-message-set-output-pad! child n)
-    :tool (te/tool-execution-set-output-pad! child n)
-    :custom (cm/custom-message-set-output-pad! child n)
-    :summary (summary-message/summary-message-set-output-pad! child n)
-    :skill (skill-message/skill-message-set-output-pad! child n)
-    nil))
-
 (defn chat-history-set-output-pad!
-  "Set horizontal padding on all messages and the info banner. Theme needs
-   no equivalent walk: components subscribe to ui.subs/theme-sub themselves
-   (Stage 5); output-pad is still a constructor-threaded value."
+  "Set horizontal padding on all messages and the info banner — one reset!
+   on the atom every message component shares and reads in its render (like
+   the tool-display and thinking-hidden atoms): the transcript re-pads on
+   the next frame with no per-kind walk, and a pad change re-wraps the
+   cached assistant lines (the pad is part of their staleness key)."
   [ch n]
-  (reset! (:output-pad-atom ch) n)
-  (doseq [child (message-comps ch)]
-    (set-pad-on! child n)))
+  (reset! (:output-pad-atom ch) n))
 
 ;; ─── IFocusable ─────────────────────────────────────────────────────────────
 

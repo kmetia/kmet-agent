@@ -174,7 +174,11 @@
             ;; tracked ended-ness only (never the timestamp): one re-render
             ;; on completion flips ... to done/(!), then immutable again
             running? (nil? @ended-at-atom)
-            output-pad @output-pad-atom
+            ;; tracked read: the pad atom is shared by every message the chat
+            ;; history owns — one reset! re-pads them all (the box setter
+            ;; no-ops when the value is unchanged)
+            output-pad (deref output-pad-atom)
+            _ (box/box-set-padding-x! @box output-pad)
             name @name-atom
             args @args-atom
             title-fn @title-fn-atom]
@@ -349,20 +353,21 @@
 (defn make-tool-execution
   "THEME is no longer taken: the box background subscribes to
    ui.subs/theme-sub and follows palette changes live (Stage 5)."
-  [& {:keys [name args content is-error output-pad expanded? tools-expanded-atom render-call-fn render-result-fn title-fn truncation details cwd render-shell]
+  [& {:keys [name args content is-error output-pad output-pad-atom expanded? tools-expanded-atom render-call-fn render-result-fn title-fn truncation details cwd render-shell]
       :or {name "" args {} content "" is-error false
            output-pad 1 expanded? false truncation nil details nil
            cwd (or (System/getProperty "user.dir") ".")}}]
   (let [inner-container (container/make-container)
         bg-key (if is-error :tool-error-bg :tool-success-bg)
-        b (box/make-box output-pad 1 #(theme/bg (theme/get-current-theme) bg-key %))]
+        pad-atom (or output-pad-atom (atom output-pad))
+        b (box/make-box @pad-atom 1 #(theme/bg (theme/get-current-theme) bg-key %))]
     (box/box-add-child b inner-container)
     (map->ToolExecutionComponent {:kind :tool
                                   :name-atom (atom name)
                                   :args-atom (atom args)
                                   :content-atom (atom content)
                                   :is-error-atom (atom is-error)
-                                  :output-pad-atom (atom output-pad)
+                                  :output-pad-atom pad-atom
                                   :expanded-atom (atom expanded?)
                                   :tools-expanded-atom tools-expanded-atom
                                   :started-at-atom (atom nil)
@@ -401,12 +406,6 @@
       (timers/cancel! id))
     (when (contains? state :timer-id)
       (reset! (:renderer-state-atom comp) (dissoc state :timer-id)))))
-
-(defn tool-execution-set-output-pad!
-  "Set the box's horizontal padding in place (render sets the bg-fn)."
-  [comp n]
-  (reset! (:output-pad-atom comp) n)
-  (box/box-set-padding-x! @(:box comp) n))
 
 (defn tool-execution-mark-execution-started!
   "Mark that tool execution has started (Pi: markExecutionStarted()).

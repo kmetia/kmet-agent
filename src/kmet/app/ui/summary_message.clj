@@ -98,6 +98,11 @@
     (track! this width
       (let [mode (or (some-> tools-expanded-atom reakt/tracked-deref) :collapsed)
             expanded (= :expanded mode)
+            ;; tracked read: the pad atom is shared by every message the chat
+            ;; history owns — one reset! re-pads them all (the box setter
+            ;; no-ops when the value is unchanged)
+            pad (deref output-pad-atom)
+            _ (box/box-set-padding-x! @box pad)
             ;; tracked read: a palette switch re-applies the box background once
             thm (deref s/theme-sub)
             _ (when-not (identical? thm @applied-theme-atom)
@@ -152,12 +157,6 @@
 
 ;; ─── Public API ────────────────────────────────────────────────────────────
 
-(defn summary-message-set-output-pad!
-  "Set the box's horizontal padding in place, reusing the children."
-  [comp n]
-  (reset! (:output-pad-atom comp) n)
-  (box/box-set-padding-x! @(:box comp) n))
-
 ;; ─── Construction ──────────────────────────────────────────────────────────
 
 (defn make-summary-message
@@ -167,12 +166,15 @@
      :summary              — the summary body text
      :tokens-before        — pre-compaction token count (nil → generic label)
      :tools-expanded-atom  — the shared ctrl+o display-mode atom
-     :output-pad           — horizontal padding (default 1)"
-  [& {:keys [variant summary tokens-before tools-expanded-atom output-pad]
+     :output-pad           — horizontal padding (default 1); :output-pad-atom
+                             takes a caller-owned atom instead"
+  [& {:keys [variant summary tokens-before tools-expanded-atom output-pad
+             output-pad-atom]
       :or {variant :compaction output-pad 1}}]
   (let [thm (theme/get-current-theme)
+        pad-atom (or output-pad-atom (atom output-pad))
         inner-container (container/make-container)
-        b (box/make-box output-pad 1 nil)]
+        b (box/make-box @pad-atom 1 nil)]
     (box/box-add-child b inner-container)
     (let [comp (map->SummaryMessage
                 {:kind :summary
@@ -185,7 +187,7 @@
                  :inner-container (atom inner-container)
                  :applied-theme-atom (atom nil)
                  :expanded-atom (atom false)
-                 :output-pad-atom (atom output-pad)
+                 :output-pad-atom pad-atom
                  :cache-atom (atom nil)})]
       ;; children + background built here from the global theme snapshot; the
       ;; first render re-applies from theme-sub if it changed meanwhile

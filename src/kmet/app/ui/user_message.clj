@@ -32,12 +32,17 @@
   (render [this width]
     (track! this width
       (let [b @box
+            ;; tracked read: the pad atom is shared by every message the chat
+            ;; history owns — one reset! re-pads them all (the box setter
+            ;; no-ops when the value is unchanged)
+            pad (deref output-pad-atom)
+            _ (box/box-set-padding-x! b pad)
             ;; tracked read: a palette switch re-applies once, then re-caches
             thm (deref s/theme-sub)
             _ (when-not (identical? thm @applied-theme-atom)
                 (reset! applied-theme-atom thm)
                 (apply-theme! this thm))]
-        (track-deps @text-atom @output-pad-atom @s/image-settings-sub)
+        (track-deps @text-atom @s/image-settings-sub)
         (protocols/render b width))))
   (invalidate [_this]
     (protocols/invalidate @box))
@@ -57,13 +62,6 @@
     (md/markdown-set-theme! m (theme/get-markdown-theme theme))
     (md/markdown-set-default-style! m
                                     (fn [s] (theme/fg theme :user-message-text s)))))
-
-(defn user-message-set-output-pad!
-  "Set the box's horizontal padding in place — the content child and the
-   box's bg-fn (re-applied per render) are untouched."
-  [comp n]
-  (reset! (:output-pad-atom comp) n)
-  (box/box-set-padding-x! @(:box comp) n))
 
 ;; ─── Construction ──────────────────────────────────────────────────────────
 
@@ -101,9 +99,13 @@
   "THEME is no longer taken: styling subscribes to ui.subs/theme-sub and
    follows palette changes live (Stage 5).
    :images — optional [{:data base64 :mime-type str} …] message attachments."
-  [& {:keys [text images output-pad]
+  [& {:keys [text images output-pad output-pad-atom]
       :or {text "" output-pad 1}}]
   (let [t0 (theme/get-current-theme)
+        ;; the pad lives in an atom: the chat history passes one shared atom
+        ;; so every message re-pads on a single reset!; a bare number is
+        ;; private to this component (standalone callers, tests)
+        pad-atom (or output-pad-atom (atom output-pad))
         m (md/make-markdown ""
                             :theme (theme/get-markdown-theme t0)
                             :default-style (fn [s]
@@ -111,14 +113,14 @@
                             :transform (make-user-transform)
                             :padding-x 0)
         content (make-content m images)
-        b (box/make-box output-pad 1 nil)
+        b (box/make-box @pad-atom 1 nil)
         comp (map->UserMessageComponent {:kind :user
                                          :box (atom b)
                                          :content-atom (atom content)
                                          :markdown-comp (atom m)
                                          :text-atom (atom text)
                                          :applied-theme-atom (atom nil)
-                                         :output-pad-atom (atom output-pad)
+                                         :output-pad-atom pad-atom
                                          :cache-atom (atom nil)})]
     (box/box-add-child b content)
     ;; Set initial text (content is fixed at construction — user messages

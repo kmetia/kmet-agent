@@ -80,11 +80,17 @@
 ;; reset the cache), live so the hiccup :box tag can patch a changed
 ;; :padding-x/:padding-y prop in place instead of ignoring it (§2.3).
 (defn box-set-padding-x!
+  "No-op when unchanged, so a caller may sync the padding every pass (the
+   chat history's output pad follows one shared atom) without dropping the
+   memoized composition each frame."
   [box n]
-  (reset! (:padding-x-atom box) n)
-  (reset! (:cache box) nil))
+  (when (not= n @(:padding-x-atom box))
+    (reset! (:padding-x-atom box) n)
+    (reset! (:cache box) nil)))
 
 (defn box-set-padding-y!
+  "No-op when unchanged — see box-set-padding-x!."
   [box n]
-  (reset! (:padding-y-atom box) n)
-  (reset! (:cache box) nil))
+  (when (not= n @(:padding-y-atom box))
+    (reset! (:padding-y-atom box) n)
+    (reset! (:cache box) nil)))

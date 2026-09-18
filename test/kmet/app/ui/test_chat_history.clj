@@ -644,6 +644,36 @@
           "the new message appears after the status — the status is no longer
            pinned to the bottom of the chat"))))
 
+(deftest test-output-pad-reaches-every-padded-kind
+  (testing "one reset! on the shared pad atom re-pads every boxed message kind"
+    (let [ch (ch/make-chat-history)]
+      (ch/chat-history-set-info-msg! ch {:label "kmet" :content "info"})
+      (ch/chat-history-add-message! ch {:role :user :content "user text"})
+      (ch/chat-history-add-message! ch {:role :assistant :content "assistant text"})
+      (ch/chat-history-add-message! ch {:role :custom :label "custom" :content "custom text"})
+      (ch/chat-history-add-message! ch {:role :compaction :summary "compacted" :tokens-before 5})
+      (ch/chat-history-set-output-pad! ch 3)
+      (let [lines (mapv strip-ansi (core/render ch 48))]
+        (is (some #(re-find #"^   \[kmet\]" %) lines) "info banner")
+        (is (some #(re-find #"^   user text" %) lines) "user message")
+        (is (some #(re-find #"^   assistant text" %) lines) "assistant message")
+        (is (some #(re-find #"^   custom text" %) lines) "custom message")
+        (is (some #(re-find #"^   \[compaction\]" %) lines) "compaction summary"))
+      (testing "and back down — the pad is not sticky"
+        (ch/chat-history-set-output-pad! ch 0)
+        (let [lines (mapv strip-ansi (core/render ch 48))]
+          (is (some #(re-find #"^\[kmet\]" %) lines))
+          (is (some #(re-find #"^assistant text" %) lines))))))
+  (testing "a pad change re-wraps an assistant message's cached lines"
+    (let [ch (ch/make-chat-history)]
+      (ch/chat-history-start-streaming! ch)
+      (ch/chat-history-append-streaming-text!
+       ch "streaming text that is long enough to wrap at some width")
+      (is (some #(re-find #"^ streaming text" %) (mapv strip-ansi (core/render ch 32))))
+      (ch/chat-history-set-output-pad! ch 3)
+      (is (some #(re-find #"^   streaming text" %) (mapv strip-ansi (core/render ch 32)))
+          "the pad is part of the reflow staleness key"))))
+
 (deftest test-info-banner-in-children
   (testing "the info banner is a chat message: themed, persisted as :info, survives placeholder removal"
     (let [ch (ch/make-chat-history)]

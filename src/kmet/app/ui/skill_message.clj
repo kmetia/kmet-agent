@@ -30,7 +30,6 @@
             [kmet.app.keybindings :as app-kb]
             [kmet.libs.reakt :as reakt]
             [kmet.app.ui.subs :as s]
-            [kmet.app.ui.user-message :as um]
             [kmet.tui.components.box :as box]
             [kmet.tui.components.container :as container]
             [kmet.tui.components.markdown :as md]
@@ -109,7 +108,11 @@
             ;; track! answers by not caching the frame (one extra body run
             ;; per flip — the same shape as the theme apply-once above)
             _ @expanded-atom
-            output-pad @output-pad-atom]
+            ;; tracked read: the pad atom is shared by every message the chat
+            ;; history owns (the trailing user message included) — one reset!
+            ;; re-pads them all; the box setter no-ops when it is unchanged
+            output-pad (deref output-pad-atom)
+            _ (box/box-set-padding-x! @box output-pad)]
         ;; Quiet short-circuit — one dimmed `[skill] name` line, no
         ;; box/hint/body (like hidden thinking). The trailing user message
         ;; (the invocation args) still renders: it is user content, not
@@ -173,15 +176,6 @@
 
 ;; ─── Public API ────────────────────────────────────────────────────────────
 
-(defn skill-message-set-output-pad!
-  "Set the box's horizontal padding in place, reusing the children; the
-   trailing user message follows the same padding."
-  [comp n]
-  (reset! (:output-pad-atom comp) n)
-  (box/box-set-padding-x! @(:box comp) n)
-  (when-let [um @(:user-message-atom comp)]
-    (um/user-message-set-output-pad! um n)))
-
 ;; ─── Construction ──────────────────────────────────────────────────────────
 
 (defn make-skill-invocation-message
@@ -193,12 +187,16 @@
      :user-message          — a UserMessageComponent for the trailing args,
                               or nil; separated from the box by a Spacer(1)
                               (pi adds the pair to the chat container)
-     :output-pad            — horizontal padding (default 1)"
-  [& {:keys [skill-block tools-expanded-atom user-message output-pad]
+     :output-pad            — horizontal padding (default 1); :output-pad-atom
+                              takes a caller-owned atom instead (the chat
+                              history shares one with the trailing message)"
+  [& {:keys [skill-block tools-expanded-atom user-message output-pad
+             output-pad-atom]
       :or {output-pad 1}}]
   (let [thm (theme/get-current-theme)
+        pad-atom (or output-pad-atom (atom output-pad))
         inner-container (container/make-container)
-        b (box/make-box output-pad 1 nil)]
+        b (box/make-box @pad-atom 1 nil)]
     (box/box-add-child b inner-container)
     (let [comp (map->SkillInvocationMessage
                 {:kind :skill
@@ -211,7 +209,7 @@
                  :user-spacer-atom (atom (when user-message (spacer/make-spacer 1)))
                  :applied-theme-atom (atom nil)
                  :expanded-atom (atom false)
-                 :output-pad-atom (atom output-pad)
+                 :output-pad-atom pad-atom
                  :cache-atom (atom nil)})]
       ;; Children and background built here from the global theme snapshot;
       ;; the first render re-applies from theme-sub if it changed meanwhile

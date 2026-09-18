@@ -46,6 +46,21 @@
     (t/is (.startsWith (first (core/render b 8)) "hi")
           "padding-x 0 removes the left inset")))
 
+(t/deftest test-box-set-padding-no-ops-when-unchanged
+  ;; callers sync the padding every pass (the chat history's shared output
+  ;; pad) — a same-value set must keep the memoized composition
+  (let [t1 (text/make-text "hi" 0 0)
+        b (box/make-box 1 1 nil)]
+    (box/box-add-child b t1)
+    (core/render b 8)
+    (let [cached @(:cache b)]
+      (t/is (some? cached) "a render memoizes the composition")
+      (box/box-set-padding-x! b 1)
+      (box/box-set-padding-y! b 1)
+      (t/is (identical? cached @(:cache b)) "same value keeps the memo")
+      (box/box-set-padding-x! b 2)
+      (t/is (nil? @(:cache b)) "a changed value drops it"))))
+
 (t/deftest test-box-multiple-children
   (let [t1 (text/make-text "a" 0 0)
         t2 (text/make-text "b" 0 0)
