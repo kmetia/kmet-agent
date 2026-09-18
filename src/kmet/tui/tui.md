@@ -180,11 +180,11 @@ extensions never add host elements. Tags and props:
 
 | tag | props | children |
 |---|---|---|
-| `:text` | `:text` (primary), `:padding-x` `:padding-y` (default 1), `:bg-fn` | none (leaf) |
+| `:text` | `:text` (primary), `:padding-x` `:padding-y` (default 1), `:bg-fn` — wraps and pads | none (leaf) |
 | `:markdown` | `:text` (primary), `:theme`, `:padding-x`, `:default-style`, `:transform`, `:border` (table glyphs, §2.8) | none (leaf) |
 | `:spacer` | `:lines` (default 1) | none (leaf) |
 | `:dynamic-border` | `:color-fn` (primary; default: theme `:border` color), `:border` (§2.8) | none (leaf) |
-| `:truncated-text` | `:text` (primary), `:padding-x` `:padding-y` (default 0) | none (leaf) |
+| `:truncated-text` | `:text` (primary), `:padding-x` `:padding-y` (default 0) — one exact line, never wraps | none (leaf) |
 | `:spinner` | `:text` (primary), `:active`, `:prefix`, `:frames`, `:interval-ms`, `:spinner-color-fn`, `:message-color-fn` | none (leaf) |
 | `:input` | `:value` (primary), `:cursor`, `:on-submit`, `:on-escape`, `:on-change` | none (leaf) |
 | `:expandable-text` | `:collapsed-fn`, `:expanded-fn` (both required), `:expanded?`, `:padding-x` `:padding-y` | none (leaf) |
@@ -1085,8 +1085,8 @@ DSL tags of §2.2):
 
 | component | purpose |
 |---|---|
-| `text` | multi-line word-wrapped text, optional padding/bg |
-| `truncated_text` | single-line truncated text |
+| `text` | multi-line word-wrapped text, optional padding/bg — wraps at the frame width and pads every line to it |
+| `truncated_text` | one exact line: the first line only, truncated with `...` when it does not fit and padded to the width; never wraps (pre-truncate yourself to control the ellipsis) |
 | `markdown` | markdown renderer with syntax highlighting |
 | `box` | padding + background wrapper (no input) |
 | `container` | transparent child list |

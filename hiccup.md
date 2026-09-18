@@ -5,11 +5,14 @@ inventory: which `app/ui` files still build trees with imperative
 `make-*` + `container-add-child` / `container-replace-children!`, which
 pattern replaces each case, and what explicitly stays imperative.
 
-**Status: all three tiers are landed** (§5) — no `app/ui` file builds a
-tree imperatively any more, and no un-migrated `make-*` site remains. The
-single item that is explicitly *not planned* is the transcript container
-as a DSL root (§4): measured perf-neutral, and it would cost
-persistence/lifecycle clarity for no win.
+**Status: all three tiers are landed** (§5). The 9 remaining
+`container-add-child` / `container-replace-children!` sites live in the
+five transcript record files (`user_message`, `custom_message`,
+`tool_execution`, `skill_message`, `summary_message`), whose renders
+return terminal-ready lines — kept by design and measured (§4), not
+un-migrated work. The single item explicitly *not planned* is the
+transcript container as a DSL root (§4): measured perf-neutral, and it
+would cost persistence/lifecycle clarity for no win.
 
 ## 0. Rule for new code
 
@@ -365,7 +368,13 @@ stays near-linear with a small constant.)
   to 50 000 rows (it renders the visible window only) — and it is now a
   root anyway (Tier 3, §5): its leaf lines are `[:truncated-text]`, which
   keeps the frame one exact line per string instead of paying `[:text]`'s
-  re-wrap, and the port kept the numbers in the same range. The
+  re-wrap. Measured after the port on the same 202-row fixture (min of 3):
+  idle render 0.000 → 0.035 ms, **selection move + render 0.58 → 1.2 ms
+  (≈2×)** — the element reconcile on top of the same styling work, the
+  +0.3–0.6 ms this note predicted — and a filter keystroke ≈5.2 ms both
+  ways (dominated by the settings re-read, not the frame). So the port is
+  a real, if sub-millisecond, cost: it exists to make the screen one
+  idiom (tag-owned field, state-as-data rows), never for speed. The
   string-direct leaves that remain (footer, status, pending messages) have
   no tree to migrate at all, so the cost of a mechanical port never arises
   for them.
@@ -407,10 +416,23 @@ stays near-linear with a small constant.)
   in the scope hint) and made the search field tag-owned, which surfaced
   the real gap: the screen had never been `IFocusable`, so pi's focus
   forwarding to `searchInput.focused` had no kmet counterpart and the
-  field never showed a caret. Parity is pinned by a 315-line fixture dump
-  across widths/heights/scopes/toggles/filters: identical except the
-  caret. Not a drive-by candidate for its performance — the numbers were
-  never a problem (§4); the case was consistency, as measured.
+  field never showed a caret. Parity is pinned by a 426-line fixture dump
+  across widths 10–140, heights 8–40, both scopes, the project tri-state
+  cycle, filters (incl. no match), empty settings and both focus states:
+  239 lines identical, 181 differing only by the trailing padding
+  `[:truncated-text]` adds to each line (`new = old + spaces`, checked
+  with zero exceptions — the frame padded those cells anyway), and 6
+  differing in content: the scope hint and the subgroup labels at the
+  widths where they exceeded the frame (now truncated instead of
+  frame-clipped, same visible cells) and the focused caret. That second
+  point is also a fix: an over-width rendered line is a `kmet-crash.log`
+  anomaly in the frame (tui.md §11, Crash + error logs), and the old
+  screen emitted a 58-column scope hint into a 45-column frame — the
+  pre-conversion build shows 1–2 over-width lines at widths 10–45, the
+  new one zero at every width 9–81 (asserted). The port is ≈2× per
+  selection change (0.58 → 1.2 ms on a 202-row fixture, §4) —
+  sub-millisecond and key-driven, so not a drive-by candidate either way;
+  the case was consistency, as measured.
 
 ## 6. Plan
 

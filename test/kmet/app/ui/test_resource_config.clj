@@ -521,3 +521,60 @@
           (t/is (= 1 (:bodies-run (hiccup/counters)))
                 "any number of keys between frames still settles in one run")))
       {:user {:packages [dir]}})))
+
+;; ─── Close paths and empty views ──────────────────────────────────────────
+
+(t/deftest test-close-paths-call-on-close
+  ;; escape and ctrl+c both close the screen (pi onExit) — the callback is
+  ;; what stops the standalone TUI in run-config-screen
+  (let [dir (make-package (tmp-dir))]
+    (with-settings
+      (fn [_]
+        (let [closed (atom [])
+              screen (rc/make-resource-config-screen :rows 40
+                                                     :on-close #(swap! closed conj :closed))]
+          (protocols/handle-input screen K-ESC)
+          (t/is (= [:closed] @closed) "escape closes")
+          (protocols/handle-input screen "\u0003")
+          (t/is (= [:closed :closed] @closed) "ctrl+c closes too")))
+      {:user {:packages [dir]}})))
+
+(t/deftest test-empty-and-unmatched-views-render-the-frame
+  ;; the row math must survive zero rows: an unmatched filter and a
+  ;; completely empty settings view both render the chrome, with nothing
+  ;; selected and no clipped counter
+  (let [dir (make-package (tmp-dir))]
+    (with-settings
+      (fn [_]
+        (let [screen (rc/make-resource-config-screen :rows 40)]
+          (rc/screen-set-query! screen "zzz-no-match")
+          (t/is (= [] (rc/screen-rows screen)))
+          (let [lines (render-lines screen 80)]
+            (t/is (some #(str/includes? % "Global Resources") lines))
+            (t/is (not-any? #(str/includes? % "(0/0)") lines)
+                  "no counter when nothing is clipped"))
+          (protocols/handle-input screen K-DOWN)
+          (protocols/handle-input screen " ")
+          (t/is (= 0 (rc/screen-selected screen)) "navigation on an empty view is a no-op")))
+      {:user {:packages [dir]}}))
+  (with-settings
+    (fn [_]
+      (let [screen (rc/make-resource-config-screen :rows 40)]
+        (t/is (= [] (rc/screen-rows screen)))
+        (t/is (pos? (count (render-lines screen 80))) "the chrome still renders")))
+    {}))
+
+(t/deftest test-every-rendered-line-fits-the-frame
+  ;; the frame truncates an over-width line *and* logs a kmet-crash.log
+  ;; anomaly for it, so the screen must never emit one. The scope hint (the
+  ;; agent-dir path) and the subgroup labels used to: they are longer than a
+  ;; narrow frame and the old renderer emitted them untruncated.
+  (let [dir (make-package (tmp-dir))]
+    (with-settings
+      (fn [_]
+        (let [screen (rc/make-resource-config-screen
+                      :rows 24 :write-scope :project :project-mode? true)]
+          (doseq [w [9 10 11 20 21 30 31 44 45 60 61 80 81]]
+            (t/is (every? #(<= (u/visible-width %) w) (render-lines screen w))
+                  (str "every line fits " w " columns")))))
+      {:user {:packages [dir]}})))

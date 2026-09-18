@@ -524,7 +524,11 @@
         scroll-line (when clipped?
                       (let [cur (count (filterv #(= :item (:kind %))
                                                 (subvec rows 0 (inc sel))))]
-                        (th/fg t :dim (str "  (" cur "/" item-total ")"))))]
+                        ;; truncated like every other line: an over-width line
+                        ;; is a kmet-crash.log anomaly in the frame (a huge
+                        ;; count in a narrow terminal would be one)
+                        (u/truncate-to-width
+                         (th/fg t :dim (str "  (" cur "/" item-total ")")) w "")))]
     [:container {}
      [:spacer {:lines 1}]
      [:dynamic-border {:color-fn border-fn}]
