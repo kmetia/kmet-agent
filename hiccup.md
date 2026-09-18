@@ -5,6 +5,12 @@ inventory: which `app/ui` files still build trees with imperative
 `make-*` + `container-add-child` / `container-replace-children!`, which
 pattern replaces each case, and what explicitly stays imperative.
 
+**Status: all three tiers are landed** (§5) — no `app/ui` file builds a
+tree imperatively any more, and no un-migrated `make-*` site remains. The
+single item that is explicitly *not planned* is the transcript container
+as a DSL root (§4): measured perf-neutral, and it would cost
+persistence/lifecycle clarity for no win.
+
 ## 0. Rule for new code
 
 New screens, dialogs, selectors and chrome are fn components + hiccup
@@ -75,7 +81,7 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `tool_execution.clj` | KEEP | `container`/`box`/`spacer`/`image-block` (221–222,277–279) | none (§4) |
 | `image_block.clj` | KEEP | transient `ic/make-image` per render (54) | none — render-time branch, not a stored tree |
 | `status_indicator.clj` | KEEP | `spinner/make-spinner` host-owned (79) | none |
-| `resource_config.clj` | KEEP / Tier 3 | `input/make-input` (557); render returns string lines directly | full-screen `hiccup/root` (session_selector pattern) only if rewriting the screen anyway — measured §4: 0.001 ms idle, 0.76 ms per change flat to 50 000 rows, so a mechanical port is a small *regression* (~+0.3 ms) and there is no performance case; only the input tag/consistency argument stands |
+| `resource_config.clj` | DONE (Tier 3) | none — the whole frame is a `hiccup/root`: `[:spacer]`/`[:dynamic-border]` chrome, `[:truncated-text]` leaves for the already-styled lines, rows spliced as a seq; the search field is a tag-owned `[:input]` fed `:value` from state and `:focused?` from the screen's flag, and `IFocusable` was added because pi's `ConfigSelectorComponent.setFocused` had always forwarded focus to `searchInput.focused` — the field never rendered its caret before | `ResourceConfigScreen` is the record wrapper (pi parity docstring) |
 | `footer.clj`, `pending_messages.clj`, `loaded_resources.clj` | KEEP | none | string-direct `track!` renders — no tree to migrate |
 | `dock.clj`, `subs.clj`, `model_catalog.clj`, `external_editor.clj`, `custom_dialog_adapter.clj`, `footer_data_provider.clj` | N/A | none | fn component / data / adapter — nothing to migrate; the dock owns the *displacement* and *input* halves of a panel's lifecycle (`mount!`/`clear!` dispose the panel they lift out unless it was mounted `:borrowed?`, and its `::focus-guard` watch hands focus back when the occupant leaves — tui.md §7) |
 
@@ -354,11 +360,15 @@ stays near-linear with a small constant.)
   per pass: 0.038 ms as strings vs 0.314 ms as `[:text]` elements (8×) per
   change, 0.000 vs 0.016 ms idle — a body that rebuilds the frame pays
   every line's construction either way, and reconciling 22 equal-props
-  elements on top of that is pure overhead. `ResourceConfigScreen` is the
-  same shape: 0.001 ms idle, 0.76 ms per selection change, flat from 100
-  to 50 000 rows (it renders the visible window only). Not a performance
-  problem at either end — the cost of a mechanical DSL port is what keeps
-  these leaves imperative.
+  elements on top of that is pure overhead. `ResourceConfigScreen` was the
+  same shape — 0.001 ms idle, 0.76 ms per selection change, flat from 100
+  to 50 000 rows (it renders the visible window only) — and it is now a
+  root anyway (Tier 3, §5): its leaf lines are `[:truncated-text]`, which
+  keeps the frame one exact line per string instead of paying `[:text]`'s
+  re-wrap, and the port kept the numbers in the same range. The
+  string-direct leaves that remain (footer, status, pending messages) have
+  no tree to migrate at all, so the cost of a mechanical port never arises
+  for them.
 - **Record-hosted leaves ("foreign splices")** — `bash_execution`'s
   spinner, `image_block`'s image, `assistant_message`'s
   markdown-per-reflow: one reason, not three — they sit inside a record
@@ -390,11 +400,17 @@ stays near-linear with a small constant.)
   "key before the first paint" window; both are documented in tui.md
   §2.4. Where a tag owns the leaf, verify typing/selection/focus survive
   unrelated prop passes (`:apply` semantics, tui.md §2.3).
-- **Tier 3 (optional, only with a rewrite)** — full-screen roots:
-  `resource_config` → `hiccup/root`. Never a drive-by, and now measured
-  (§4): the string-direct frame costs 0.76 ms per change regardless of row
-  count, so the case is consistency and the tag-owned search field, not
-  speed.
+- **Tier 3 (the one rewrite)** — DONE: the full-screen
+  `resource_config` → `hiccup/root`. The rewrite switched the
+  leaves to `[:truncated-text]` (the imperative renderer returned exact
+  lines; `[:text]` re-wraps, which the dump caught on the agent-dir path
+  in the scope hint) and made the search field tag-owned, which surfaced
+  the real gap: the screen had never been `IFocusable`, so pi's focus
+  forwarding to `searchInput.focused` had no kmet counterpart and the
+  field never showed a caret. Parity is pinned by a 315-line fixture dump
+  across widths/heights/scopes/toggles/filters: identical except the
+  caret. Not a drive-by candidate for its performance — the numbers were
+  never a problem (§4); the case was consistency, as measured.
 
 ## 6. Plan
 
@@ -554,10 +570,10 @@ commit stays behavior-neutral.
    `test-prompt-field-emphasis-is-data` and
    `test-escape-cancels-without-a-mounted-field`.
 
-### Phase 3 — only with a rewrite
+### Phase 3 — DONE
 
 - `resource_config` → full-screen `hiccup/root` (session_selector
-  pattern) if the screen is being rewritten anyway.
+  pattern), landed with the tag-owned search field and `IFocusable`.
 - Transcript container → DSL root: explicitly **not planned** — measured
   perf-neutral, costs persistence/lifecycle clarity (§4).
 

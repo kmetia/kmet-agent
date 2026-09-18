@@ -23,16 +23,24 @@
    Single-extension packages (a file source or an extension.edn directory)
    ignore per-type filters, so those rows are marked “always loaded” and
    cannot be toggled; top-level settings entries and auto-dir items toggle
-   via the scope's settings resource array instead of a package entry."
+   via the scope's settings resource array instead of a package entry.
+
+   The frame is a mounted hiccup root (hiccup.md): the two borders are
+   [:dynamic-border] elements, the header/hint/row lines are [:truncated-text]
+   leaves over the already-styled strings, and the search field is a tag-owned
+   [:input] whose text lives in state and whose emphasis and caret follow
+   the screen's focus flag (pi: searchInput.focused)."
   (:require [clojure.string :as str]
             [babashka.fs :as fs]
             [kmet.app.keybindings :as app-kb]
             [kmet.app.packages :as pkgs]
             [kmet.config :as cfg]
+            [kmet.libs.reakt :as r]
             [kmet.tui.components.input :as input]
+            [kmet.tui.hiccup :as hiccup]
             [kmet.tui.keybindings :as kb]
             [kmet.tui.keys :as keys]
-            [kmet.tui.macros :refer [defcomponent track!]]
+            [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.theme :as th]
             [kmet.tui.utils :as u]))
@@ -218,8 +226,10 @@
 
       :subgroup
       (let [inherited? (and (= write-scope :project) (= :user (:scope (:group row))))]
-        (str "    " (th/fg t (if inherited? :dim :muted)
-                           (get pkgs/resource-type-labels (:type (:subgroup row))))))
+        (u/truncate-to-width
+         (str "    " (th/fg t (if inherited? :dim :muted)
+                            (get pkgs/resource-type-labels (:type (:subgroup row)))))
+         width ""))
 
       :item
       (let [item (:item row)
@@ -425,10 +435,14 @@
                              (= :load next-state))})))))))))
 
 (defn- refresh-filter!
-  "Apply the search input's value to the row list (pi: searchInput change
-   → filterItems)."
+  "Apply the search field's text to the row list (pi: searchInput change →
+   filterItems). The field is tag-owned, so the panel mirrors its live text
+   into :query as it forwards — the tree feeds that value straight back,
+   which is why an unchanged value never disturbs the caret."
   [this]
-  (swap! (:state-atom this) assoc :query (input/input-get-value (:search-input this)))
+  (swap! (:state-atom this) assoc
+         :query (input/input-get-value
+                 (hiccup/materialize-ref! this (:search-ref this))))
   (rebuild-layout! this))
 
 (defn- switch-scope!
@@ -443,68 +457,95 @@
   [this]
   (when-let [f @(:on-close-atom this)] (f)))
 
-;; ─── The screen component ─────────────────────────────────────────────────
+;; ─── The screen frame (a mounted hiccup root) ─────────────────────────────
+
+(defn- line-leaf
+  "One already-styled line as an element. [:truncated-text], not [:text]:
+   the imperative renderer returned exact lines, and [:text] would re-wrap
+   any line that is wider than the frame (the agent-dir path in the scope
+   hint is the real one) — the old frame clipped it instead."
+  [line]
+  [:truncated-text {:text line :padding-x 0 :padding-y 0}])
+
+(defn- frame-tree
+  "The screen's element tree: the lines the frame has always emitted —
+   spacers, accent borders, the title/hint/scope lines, the width-truncated
+   row lines and the clipped counter — with the search field as a
+   tag-owned [:input] (state carries its text, the panel's focus flag its
+   emphasis). A seq child splices (the rows), a bare element child is an
+   element (the counter)."
+  [screen]
+  (let [w hiccup/*width*
+        t (th/get-current-theme)
+        st (r/tracked-deref (:state-atom screen))
+        write-scope (:write-scope st)
+        rows (:rows st)
+        item-rows (:item-rows st)
+        n (count rows)
+        item-total (count item-rows)
+        max-visible (max 5 (- (:rows-count screen) chrome-lines))
+        sel (min (or (:selected st) 0) (max 0 (dec n)))
+        start-idx (max 0 (min (- sel (quot max-visible 2)) (- n max-visible)))
+        visible (subvec rows start-idx (min (+ start-idx max-visible) n))
+        border-fn #(th/fg t :accent %)
+        title (th/bold (if (= write-scope :project)
+                         "Project Local Resources"
+                         "Global Resources"))
+        sep (th/fg t :muted " · ")
+        switch-hint (when (:project-mode? screen)
+                      (hint "tui.input.tab" "tab" "switch mode"))
+        action (if (= write-scope :project)
+                 "space cycle inherit/+/-"
+                 "space toggle")
+        hints (str (when switch-hint (str switch-hint sep))
+                   action sep "esc close")
+        title-line (u/truncate-to-width
+                    (str title (apply str (repeat (max 1 (- w (u/visible-width title)
+                                                            (u/visible-width hints)))
+                                                  " "))
+                         hints)
+                    w "")
+        scope-hint (u/truncate-to-width
+                    (th/fg t :muted
+                           (if (= write-scope :global)
+                             ;; pi: ~/.pi/agent/settings.json — the actual
+                             ;; agent-dir path (KMET_CODING_AGENT_DIR-aware)
+                             (cfg/global-settings-path)
+                             (str ".kmet/settings.edn"
+                                  (when (:project-mode? screen)
+                                    " · inherited global resources are dimmed"))))
+                    w "")
+        row-lines (map-indexed (fn [rel row]
+                                 (row-line t st w row
+                                           (and (= :item (:kind row))
+                                                (= (+ start-idx rel) sel))))
+                               visible)
+        clipped? (or (pos? start-idx) (< (+ start-idx max-visible) n))
+        scroll-line (when clipped?
+                      (let [cur (count (filterv #(= :item (:kind %))
+                                                (subvec rows 0 (inc sel))))]
+                        (th/fg t :dim (str "  (" cur "/" item-total ")"))))]
+    [:container {}
+     [:spacer {:lines 1}]
+     [:dynamic-border {:color-fn border-fn}]
+     [:spacer {:lines 1}]
+     (line-leaf title-line)
+     (line-leaf scope-hint)
+     [:spacer {:lines 1}]
+     [:input {:ref (:search-ref screen)
+              :value (:query st)
+              :focused? (r/tracked-deref (:focused? screen))}]
+     [:spacer {:lines 1}]
+     (map line-leaf row-lines)
+     (when scroll-line (line-leaf scroll-line))
+     [:spacer {:lines 1}]
+     [:dynamic-border {:color-fn border-fn}]]))
 
 (defcomponent ResourceConfigScreen nil
-              [state-atom search-input on-close-atom rows-count project-mode? cache-atom]
+              [state-atom search-ref on-close-atom rows-count project-mode?
+               focused? root]
 
-  (render [this width]
-    (track! this width
-      (let [t (th/get-current-theme)
-            st @(:state-atom this)
-            write-scope (:write-scope st)
-            rows (:rows st)
-            item-rows (:item-rows st)
-            n (count rows)
-            item-total (count item-rows)
-            max-visible (max 5 (- (:rows-count this) chrome-lines))
-            sel (min (or (:selected st) 0) (max 0 (dec n)))
-            start-idx (max 0 (min (- sel (quot max-visible 2)) (- n max-visible)))
-            visible (subvec rows start-idx (min (+ start-idx max-visible) n))
-            border-fn #(th/fg t :accent %)
-            border (border-fn (apply str (repeat (max 1 width) "─")))
-            title (th/bold (if (= write-scope :project)
-                             "Project Local Resources"
-                             "Global Resources"))
-            sep (th/fg t :muted " · ")
-            switch-hint (when (:project-mode? this)
-                          (hint "tui.input.tab" "tab" "switch mode"))
-            action (if (= write-scope :project)
-                     "space cycle inherit/+/-"
-                     "space toggle")
-            hints (str (when switch-hint (str switch-hint sep))
-                       action sep "esc close")
-            title-line (u/truncate-to-width
-                        (str title (apply str (repeat (max 1 (- width (u/visible-width title)
-                                                                (u/visible-width hints)))
-                                                      " "))
-                             hints)
-                        width "")
-            scope-hint (th/fg t :muted
-                              (if (= write-scope :global)
-                                ;; pi: ~/.pi/agent/settings.json — the actual
-                                ;; agent-dir path (KMET_CODING_AGENT_DIR-aware)
-                                (cfg/global-settings-path)
-                                (str ".kmet/settings.edn"
-                                     (when (:project-mode? this)
-                                       " · inherited global resources are dimmed"))))
-            row-lines (vec (for [[rel row] (map-indexed vector visible)]
-                             (row-line t st width row
-                                       (and (= :item (:kind row))
-                                            (= (+ start-idx rel) sel)))))
-            clipped? (or (pos? start-idx) (< (+ start-idx max-visible) n))
-            scroll-line (when clipped?
-                          (let [cur (count (filterv #(= :item (:kind %))
-                                                    (subvec rows 0 (inc sel))))]
-                            (th/fg t :dim (str "  (" cur "/" item-total ")"))))]
-        (into []
-              (concat [""]
-                      [border "" title-line scope-hint ""]
-                      (protocols/render (:search-input this) width)
-                      [""]
-                      row-lines
-                      (when scroll-line [scroll-line])
-                      ["" border])))))
+  (render [this width] (protocols/render (:root this) width))
 
   (handle-input [this data]
     (let [kmgr (kb/get-global-keybindings)]
@@ -536,10 +577,27 @@
         (or (= data " ") (kb/matches-key kmgr data "tui.select.confirm"))
         (do (toggle-selected! this) nil)
 
+        ;; Everything else — the search field, then the unconditional
+        ;; re-filter (pi: searchInput.handleInput + filterItems); the
+        ;; materialize helper compiles the tree when the host has not
+        ;; painted yet, so a key is never dropped
         :else
-        (do (protocols/handle-input (:search-input this) data)
+        (do (protocols/handle-input
+             (hiccup/materialize-ref! this (:search-ref this)) data)
             (refresh-filter! this)
-            nil)))))
+            nil))))
+
+  ;; the root's reaction and the tag-owned search field are the screen's
+  ;; lifecycle — unwinding the tree disposes the field with it
+  (dispose [this]
+    (protocols/dispose (:root this))))
+
+;; ─── IFocusable — the panel's flag; the tree derives the field emphasis ────
+
+(extend-type ResourceConfigScreen
+  protocols/IFocusable
+  (focused [this] @(:focused? this))
+  (set-focused! [this val] (reset! (:focused? this) val)))
 
 ;; ─── Construction & test helpers ──────────────────────────────────────────
 
@@ -554,20 +612,20 @@
    :on-close        — called when the user closes the screen (escape or
                       ctrl+c)"
   [& {:keys [write-scope project-mode? rows on-close]}]
-  (let [search-input (input/make-input)
-        state-atom (atom {:write-scope (or write-scope :global)
+  (let [state-atom (atom {:write-scope (or write-scope :global)
                           :query ""
                           :selected 0
                           :rows []})
         screen (map->ResourceConfigScreen
                 {:state-atom state-atom
-                 :search-input search-input
+                 :search-ref (hiccup/ref)
                  :on-close-atom (atom on-close)
                  :rows-count (or rows 24)
                  :project-mode? (boolean project-mode?)
-                 :cache-atom (atom nil)})]
+                 :focused? (atom false)})
+        root (hiccup/root (fn [_props] (frame-tree screen)))]
     (rebuild-layout! screen)
-    screen))
+    (assoc screen :root root)))
 
 (defn screen-write-scope
   "The screen's current write scope (tests)."
@@ -591,8 +649,8 @@
   (rebuild-layout! screen))
 
 (defn screen-set-query!
-  "Set the search query and re-filter (tests)."
+  "Set the search query and re-filter (tests; typing drives the same path
+   through the tag-owned field). The tree feeds :query back into the field."
   [screen query]
-  (input/input-set-value! (:search-input screen) (str query))
   (swap! (:state-atom screen) assoc :query (str query))
   (rebuild-layout! screen))

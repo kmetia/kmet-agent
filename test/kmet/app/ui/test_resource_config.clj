@@ -9,8 +9,10 @@
             [kmet.app.packages :as pkgs]
             [kmet.app.ui.resource-config :as rc]
             [kmet.config :as cfg]
+            [kmet.tui.hiccup :as hiccup]
             [kmet.tui.keybindings :as tui-kb]
-            [kmet.tui.protocols :as protocols]))
+            [kmet.tui.protocols :as protocols]
+            [kmet.tui.utils :as u]))
 
 (defn- tmp-dir []
   (str (fs/create-temp-dir {:dir (System/getenv "TMPDIR")})))
@@ -441,3 +443,81 @@
         (t/is (not-any? #(= :project (get-in (:item %) [:metadata :scope]))
                         (item-rows screen)))))
     {}))
+
+;; ─── The search field (a tag-owned [:input]) ──────────────────────────────
+
+(t/deftest test-search-field-is-tag-owned-and-filters-on-typing
+  ;; the field is a [:input] element: state carries its text, keys are
+  ;; forwarded into it and every forwarded key re-filters (pi:
+  ;; searchInput.handleInput + filterItems)
+  (let [dir (make-package (tmp-dir))]
+    (with-settings
+      (fn [_]
+        (let [screen (rc/make-resource-config-screen :rows 40)]
+          (t/testing "typing filters through the field"
+            (doseq [k ["t" "w"]]
+              (protocols/handle-input screen k))
+            (let [items (item-rows screen)]
+              (t/is (= 1 (count items)))
+              (t/is (str/includes? (:path (:item (first items))) "two.clj")))
+            (t/is (some #(str/includes? % "tw") (render-lines screen 80))
+                  "the field renders what state holds"))
+          (let [s2 (rc/make-resource-config-screen :rows 40)]
+            (rc/screen-set-query! s2 "one")
+            (t/is (some #(str/includes? % "one") (render-lines s2 80))
+                  "state feeds the field — screen-set-query! shows up"))))
+      {:user {:packages [dir]}})))
+
+(t/deftest test-search-field-focus-and-caret
+  ;; the screen is IFocusable now (pi: ConfigSelectorComponent.setFocused
+  ;; forwards to searchInput.focused) — the tree derives the field's caret
+  ;; from that flag, and the caret survives re-renders because the field is
+  ;; fed :value/:cursor from state
+  (let [dir (make-package (tmp-dir))]
+    (with-settings
+      (fn [_]
+        (let [screen (rc/make-resource-config-screen :rows 40)]
+          (t/testing "the focus flag round-trips"
+            (t/is (false? (protocols/focused screen)))
+            (protocols/set-focused! screen true)
+            (t/is (true? (protocols/focused screen))))
+          (t/testing "a focused field renders its caret"
+            (protocols/set-focused! screen false)
+            (t/is (not-any? #(str/includes? % u/CURSOR-MARKER)
+                            (render-lines screen 80)))
+            (protocols/set-focused! screen true)
+            (t/is (some #(str/includes? % u/CURSOR-MARKER)
+                        (render-lines screen 80))))
+          (t/testing "…at the end of the typed text"
+            (doseq [k ["t" "w"]] (protocols/handle-input screen k))
+            (t/is (some #(str/includes? % (str "tw" u/CURSOR-MARKER))
+                        (render-lines screen 80))))))
+      {:user {:packages [dir]}})))
+
+(t/deftest test-frame-memoizes-idle-and-pays-one-body-per-change
+  ;; the frame is a mounted root whose body tracks the state atom: an idle
+  ;; render re-derives nothing, a state change re-derives exactly once, and
+  ;; navigation never rebuilds the chrome elements
+  (let [dir (make-package (tmp-dir))]
+    (with-settings
+      (fn [_]
+        (let [screen (rc/make-resource-config-screen :rows 40)]
+          (render-lines screen 80)
+          (hiccup/reset-counters!)
+          (render-lines screen 80)
+          (t/is (zero? (:bodies-run (hiccup/counters)))
+                "an idle frame runs no body")
+          (t/is (zero? (:constructs (hiccup/counters)))
+                "…and rebuilds no element")
+          (hiccup/reset-counters!)
+          (protocols/handle-input screen K-DOWN)
+          (render-lines screen 80)
+          (t/is (= 1 (:bodies-run (hiccup/counters)))
+                "one selection change re-derives the body once")
+          (hiccup/reset-counters!)
+          (protocols/handle-input screen K-DOWN)
+          (protocols/handle-input screen K-DOWN)
+          (render-lines screen 80)
+          (t/is (= 1 (:bodies-run (hiccup/counters)))
+                "any number of keys between frames still settles in one run")))
+      {:user {:packages [dir]}})))
