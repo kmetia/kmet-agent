@@ -621,7 +621,7 @@
    (app-kb/create-agent-keybindings-manager "target/test-interactive-ui-kb")))
 
 (deftest test-scoped-models-settings-registered
-  (testing "scoped-models and settings are real builtins (not not-implemented)"
+  (testing "scoped-models and settings are real builtins"
     (commands/clear-commands!)
     ((var inter/register-builtin-commands!) cfg/default-config)
     (let [scoped (commands/find-command "scoped-models")
@@ -633,14 +633,11 @@
       (t/is (some? (:handler settings))))))
 
 (deftest test-hotkeys-registered-with-real-handler
-  (testing "/hotkeys is a real builtin (not the not-implemented placeholder):
-            its handler mounts the hiccup view, which shows wired actions only"
+  (testing "/hotkeys is a real builtin: its handler mounts the hiccup view,
+            which shows wired actions only"
     (commands/clear-commands!)
     (install-app-keybindings!)
     ((var inter/register-builtin-commands!) cfg/default-config)
-    ;; the placeholder pass runs after the builtins (main) — it must not
-    ;; clobber the real hotkeys command
-    ((var inter/register-not-implemented-commands!))
     (let [hotkeys (commands/find-command "hotkeys")]
       (t/is (some? hotkeys) "hotkeys registered")
       (t/is (= "Show all keyboard shortcuts" (:description hotkeys)))
@@ -676,6 +673,195 @@
         (let [wired? ((var inter/make-hotkey-wired?) nil)]
           (t/is (wired? "app.quit"))
           (t/is (not (wired? "app.tools.expand"))))))))
+
+;; ─── /import (pi: handleImportCommand) ────────────────────────────────────
+
+(defn- import-test-cs
+  "CoreState for the /import tests: real chat/session/agent/footer state so
+   the resume path runs for real (pi: importFromJsonl swaps the runtime),
+   with only the dock and the render calls stubbed (no terminal in tests)."
+  [active-sess]
+  (let [ch (ui/make-chat-history)
+        prov (fdp/make-footer-data-provider :session active-sess)
+        ed (editor/make-editor)
+        ag (agent/make-agent-state :session active-sess)]
+    (inter/map->CoreState
+     {:agent-state (atom ag)
+      :chat-history ch
+      :editor ed
+      :current-editor-atom (atom ed)
+      :session-atom (atom active-sess)
+      :compaction-queued (atom [])
+      :running-turn? (atom false)
+      :footer-provider prov
+      :footer-comp (ui/make-footer :provider prov)})))
+
+(defn- last-message [ch] (select-keys (peek @(:messages-atom ch)) [:role :content]))
+
+(defn- append-message!
+  "Persist a user+assistant pair — a session file is written lazily (G4),
+   so it needs an assistant message to exist on disk."
+  [sess text]
+  (session/append-entry sess {:role :user :content [{:type :text :text text}]})
+  (session/append-entry sess {:role :assistant :content [{:type :text :text "ok"}]}))
+
+(deftest test-import-path-argument
+  (testing "pi: getPathCommandArgument (shared with /export) — quotes are
+            stripped, trailing arguments ignored, an unterminated quote is
+            no argument at all"
+    (let [parse (var inter/parse-path-argument)]
+      (t/is (nil? (parse "")))
+      (t/is (nil? (parse "   ")))
+      (t/is (= "a.ednl" (parse "a.ednl")))
+      (t/is (= "a.ednl" (parse "a.ednl extra ignored")))
+      (t/is (= "my file.ednl" (parse "  \"my file.ednl\" extra")))
+      (t/is (= "my file.ednl" (parse "'my file.ednl'")))
+      (t/is (nil? (parse "\"unterminated"))))))
+
+(deftest test-import-registered-and-path-errors
+  (testing "/import is a real builtin; pi's usage and file errors surface as
+            Error: lines before any confirmation is mounted"
+    (commands/clear-commands!)
+    (install-app-keybindings!)
+    ((var inter/register-builtin-commands!) cfg/default-config)
+    (let [cmd (commands/find-command "import")
+          dir (str (fs/absolutize (str "target/test-import-errors-" (System/currentTimeMillis))))]
+      (t/is (some? cmd) "registered — /import is no longer a placeholder")
+      (t/is (= "Import and resume a session from a file" (:description cmd)))
+      (t/is (= "<path>" (:argument-hint cmd)))
+      (try
+        (let [cs (import-test-cs (session/create-session dir))
+              ch (:chat-history cs)
+              sel-ref (atom nil)]
+          (with-redefs [tui/tui-request-render (fn [_])
+                        tui/tui-set-focus (fn [_ _])
+                        dock/mount! (capture-mount! sel-ref)]
+            (testing "no path → pi's usage error"
+              ((:handler cmd) cs "")
+              (t/is (= {:role :error :content "Usage: /import <path>"}
+                       (last-message ch)))
+              (t/is (nil? @sel-ref) "nothing is confirmed for a missing argument"))
+            (testing "a missing file fails before the confirmation (pi:
+                        SessionImportFileNotFoundError)"
+              ((:handler cmd) cs (str dir "/ghost.ednl"))
+              (t/is (= :error (:role (last-message ch))))
+              (t/is (str/includes? (:content (last-message ch))
+                                   "Failed to import session: File not found:"))
+              (t/is (nil? @sel-ref)))
+            (testing "a file that is not a kmet session fails the same way"
+              (let [junk (str dir "/junk.ednl")]
+                (spit junk "not a session\n")
+                ((:handler cmd) cs junk)
+                (t/is (str/includes? (:content (last-message ch))
+                                     "Failed to import session: Not a kmet session file"))))
+            (testing "an in-flight turn refuses — kmet's switch commands do
+                        not abort (pi: teardownCurrent does)"
+              (reset! (:running-turn? cs) true)
+              ((:handler cmd) cs (str dir "/whatever.ednl"))
+              (t/is (= "Wait for the current response to finish before importing."
+                       (:content (last-message ch)))))))
+        (finally (fs/delete-tree dir))))))
+
+(deftest test-import-confirm-flow
+  (testing "/import copies the file into the active session's directory and
+            resumes it when the Yes/No confirm is accepted"
+    (commands/clear-commands!)
+    (install-app-keybindings!)
+    ((var inter/register-builtin-commands!) cfg/default-config)
+    (let [dir (str (fs/absolutize (str "target/test-import-flow-" (System/currentTimeMillis))))]
+      (try
+        (let [src (session/create-session (str dir "/src"))]
+          (append-message! src "imported question")
+          (let [active (session/create-session (str dir "/dest"))
+                _ (append-message! active "hello")
+                cs (import-test-cs active)
+                ch (:chat-history cs)
+                cmd (commands/find-command "import")
+                sel-ref (atom nil)
+                stored (str (fs/path (str dir "/dest") (fs/file-name (:file src))))]
+            (with-redefs [tui/tui-request-render (fn [_])
+                          tui/tui-set-focus (fn [_ _])
+                          dock/mount! (capture-mount! sel-ref)]
+              ((:handler cmd) cs (:file src))
+              (let [dlg @sel-ref]
+                (t/is (some? dlg) "the confirm replaces the editor dock (pi: showSelector)")
+                (let [rendered (str/join "\n" (protocols/render dlg 200))]
+                  (t/is (str/includes? rendered "Import session"))
+                  (t/is (str/includes? rendered "Replace current session with"))
+                  (t/is (str/includes? rendered (:file src)) "the path is named")
+                  (t/is (str/includes? rendered "Yes"))
+                  (t/is (str/includes? rendered "No")))
+                ;; enter on the highlighted Yes (pi: the first option)
+                (protocols/handle-input dlg "\r"))
+              (t/is (fs/exists? stored) "the file is copied into the session dir")
+              (t/is (= (slurp (:file src)) (slurp stored)) "verbatim copy")
+              (t/is (= (:id src) (:id @(:session-atom cs)))
+                    "the imported session is active")
+              (t/is (= (:id src) (:id (:session @(:agent-state cs))))
+                    "the agent's session swapped too")
+              (t/is (= ["imported question"]
+                       (mapv :content (filter #(= :user (:role %))
+                                              @(:messages-atom ch))))
+                    "the imported transcript is replayed")
+              (t/is (= {:role :status
+                        :content (str "Session imported from: " (:file src))}
+                       (last-message ch))
+                    "pi: showStatus 'Session imported from: …'"))))
+        (finally (fs/delete-tree dir))))))
+
+(deftest test-import-cancellation-paths
+  (testing "/import leaves the session and the filesystem alone when the
+            confirmation is declined, escaped, or cancelled by an extension"
+    (commands/clear-commands!)
+    (install-app-keybindings!)
+    ((var inter/register-builtin-commands!) cfg/default-config)
+    (let [dir (str (fs/absolutize (str "target/test-import-cancel-" (System/currentTimeMillis))))]
+      (try
+        (let [src (session/create-session (str dir "/src"))]
+          (append-message! src "question")
+          (let [active (session/create-session (str dir "/dest"))
+                _ (append-message! active "hello")
+                cs (import-test-cs active)
+                ch (:chat-history cs)
+                cmd (commands/find-command "import")
+                sel-ref (atom nil)
+                stored (str (fs/path (str dir "/dest") (fs/file-name (:file src))))]
+            (with-redefs [tui/tui-request-render (fn [_])
+                          tui/tui-set-focus (fn [_ _])
+                          dock/mount! (capture-mount! sel-ref)]
+              (testing "escape shows pi's cancelled status and writes nothing"
+                (reset! sel-ref nil)
+                ((:handler cmd) cs (:file src))
+                (protocols/handle-input @sel-ref "\u001b")
+                (t/is (= {:role :status :content "Import cancelled"} (last-message ch)))
+                (t/is (not (fs/exists? stored)) "no copy")
+                (t/is (= (:id active) (:id @(:session-atom cs))) "same session"))
+              (testing "selecting No cancels the same way"
+                (reset! sel-ref nil)
+                ((:handler cmd) cs (:file src))
+                (protocols/handle-input @sel-ref "\u001b[B")  ;; down → No
+                (protocols/handle-input @sel-ref "\r")
+                (t/is (= {:role :status :content "Import cancelled"} (last-message ch)))
+                (t/is (not (fs/exists? stored))))
+              (testing "an extension cancelling :session-before-switch wins
+                          even after Yes — no copy, no switch"
+                (reset! sel-ref nil)
+                (event-bus/clear-event-listeners!)
+                (event-bus/on-event :session-before-switch (fn [_] {:cancel true}))
+                ((:handler cmd) cs (:file src))
+                (protocols/handle-input @sel-ref "\r")
+                (t/is (= {:role :status :content "Import cancelled"} (last-message ch)))
+                (t/is (not (fs/exists? stored)) "the copy is still pending")
+                (t/is (= (:id active) (:id @(:session-atom cs)))))
+              (testing "a source already in the session dir is not re-copied"
+                (reset! sel-ref nil)
+                (event-bus/clear-event-listeners!)
+                ((:handler cmd) cs (:file active))
+                (protocols/handle-input @sel-ref "\r")
+                (t/is (= 1 (count (fs/list-dir (str dir "/dest"))))
+                      "no suffixed duplicate")
+                (t/is (= (:id active) (:id @(:session-atom cs))))))))
+        (finally (fs/delete-tree dir))))))
 
 (deftest test-scoped-models-selector-initial-state
   (testing "/scoped-models opens the selector with session scoped models, then

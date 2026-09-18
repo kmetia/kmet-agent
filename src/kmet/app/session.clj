@@ -1291,3 +1291,60 @@
   [session]
   (let [f (:file session)]
     (when (fs/exists? f) (fs/delete f))))
+
+;; ─── Import (pi: agent-session-runtime importFromJsonl) ───────────────────
+
+(defn- unique-destination
+  "DEST-DIR/FILE-NAME, `-1`/`-2`/… appended to the stem while the candidate
+   is taken (pi: importFromJsonl — the exclusive create retries with a
+   suffix)."
+  [dest-dir file-name]
+  (let [stem (str/replace file-name #"(?i)\.ednl$" "")
+        ext (subs file-name (count stem))]
+    (loop [n 0]
+      (let [candidate (str (fs/path dest-dir (if (zero? n) file-name (str stem "-" n ext))))]
+        (if (fs/exists? candidate)
+          (recur (inc n))
+          candidate)))))
+
+(defn plan-session-import
+  "Resolve SOURCE-PATH for import into DEST-DIR (pi: importFromJsonl): the
+   source's basename lands in DEST-DIR, `-1`/`-2`/… suffixed when that name
+   is taken, and a source already stored there stays in place
+   (`:already-stored?` — pi: sourceAlreadyStored). Returns
+   {:source <abs path> :path <destination> :already-stored? bool} and has no
+   side effects, so the caller can confirm and let extensions cancel
+   (:session-before-switch) before anything is written.
+
+   Throws ex-info {:type :session-import/file-not-found} for a missing or
+   non-regular source (pi: SessionImportFileNotFoundError) and
+   {:type :session-import/not-a-session} for a file that is not a kmet
+   session (no :session header — the header carries the identity resume
+   lists sessions by, and kmet's sessions are EDN, not pi's JSONL)."
+  [source-path dest-dir]
+  (let [source (-> (fs/expand-home (str source-path)) fs/absolutize fs/normalize str)
+        dest-dir (-> (str dest-dir) fs/absolutize fs/normalize str)]
+    (when-not (fs/regular-file? source)
+      (throw (ex-info (str "File not found: " source)
+                      {:type :session-import/file-not-found :path source})))
+    (when-not (read-session-header source)
+      (throw (ex-info (str "Not a kmet session file (no :session header): " source)
+                      {:type :session-import/not-a-session :path source})))
+    (let [dest (-> (fs/path dest-dir (fs/file-name source)) fs/normalize str)
+          already-stored? (= source dest)]
+      {:source source
+       :path (if already-stored? dest (unique-destination dest-dir (fs/file-name source)))
+       :already-stored? already-stored?})))
+
+(defn copy-imported-session!
+  "Copy an import PLAN's source into place (pi: importFromJsonl —
+   copyFileSync + COPYFILE_EXCL): creates the destination directory and
+   fails rather than overwrite a file that appeared meanwhile; an
+   already-stored source is a no-op. Returns the stored path. Call only
+   once :session-before-switch has passed — a cancelled import leaves no
+   copy behind."
+  [plan]
+  (when-not (:already-stored? plan)
+    (fs/create-dirs (fs/parent (:path plan)))
+    (fs/copy (:source plan) (:path plan)))
+  (:path plan))

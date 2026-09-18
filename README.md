@@ -200,6 +200,7 @@ resource dirs.
 | `/name <name>` | Set the session display name |
 | `/session` | Show session info and stats |
 | `/export [path]` | Export the session to HTML |
+| `/import <path>` | Import a session file into the sessions directory and resume it (confirm first; a taken name is suffixed) |
 | `/share` | Share the session as a secret GitHub gist |
 | `/copy` | Copy the last agent message to the clipboard |
 | `/compact [instructions]` | Manually compact the session context |
@@ -207,8 +208,8 @@ resource dirs.
 | `/theme <name>` | Switch color theme |
 
 `/skill:<name>` loads a skill on demand; any other `/command args` expands a
-prompt template; `/import` is a pi-parity placeholder that reports as not
-implemented.
+prompt template. kmet's sessions are EDN (`.ednl`), so `/import` takes a kmet
+session file — pi's JSONL sessions are not importable.
 
 ### Keyboard shortcuts
 

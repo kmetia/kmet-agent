@@ -1159,6 +1159,65 @@
     (t/is (nil? (s/common-ancestor-id session nil (:id a2)))
           "no old leaf → nil")))
 
+;; ─── Import (pi: agent-session-runtime importFromJsonl) ───────────────────
+
+(t/deftest test-import-plan-and-copy
+  (let [dir (str (fs/absolutize (str test-dir "-import")))
+        src-dir (str dir "/src")
+        dest-dir (str dir "/dest")]
+    (fs/delete-tree dir)
+    (try
+      (let [sess (s/create-session src-dir)]
+        (s/append-entry sess {:role :user :content [{:type :text :text "hello"}]})
+        (s/append-entry sess {:role :assistant :content [{:type :text :text "reply"}]})
+        (let [source (:file sess)
+              dest (str (fs/normalize (fs/path dest-dir (fs/file-name source))))]
+          (t/testing "the source's basename lands in the destination dir"
+            (let [plan (s/plan-session-import source dest-dir)]
+              (t/is (= source (:source plan)))
+              (t/is (= dest (:path plan)))
+              (t/is (false? (:already-stored? plan)))))
+          (t/testing "copying creates the dir and is verbatim"
+            (t/is (= dest (s/copy-imported-session! (s/plan-session-import source dest-dir))))
+            (t/is (fs/exists? dest))
+            (t/is (= (slurp source) (slurp dest))))
+          (t/testing "a taken name is suffixed (pi: COPYFILE_EXCL retry)"
+            (let [plan (s/plan-session-import source dest-dir)]
+              (t/is (= (str (fs/path dest-dir
+                                     (str/replace (fs/file-name source) #"\.ednl$" "-1.ednl")))
+                       (:path plan)))
+              (t/is (= (:path plan) (s/copy-imported-session! plan)))
+              (t/is (fs/exists? (:path plan))))))
+        (t/testing "a source already in the destination dir is not copied again"
+          (let [same-dir (str dir "/already")
+                sess (s/create-session same-dir)
+                _ (s/append-entry sess {:role :user :content "x"})
+                _ (s/append-entry sess {:role :assistant :content "y"})
+                stored (:file sess)
+                plan (s/plan-session-import stored same-dir)]
+            (t/is (true? (:already-stored? plan)))
+            (t/is (= stored (:path plan)))
+            (t/is (= stored (s/copy-imported-session! plan)))
+            (t/is (= 1 (count (fs/list-dir same-dir))) "nothing new was written")))
+        (t/testing "a missing file throws pi's SessionImportFileNotFoundError"
+          (let [e (try (s/plan-session-import (str dir "/ghost.ednl") dest-dir) nil
+                       (catch Exception e e))]
+            (t/is (some? e))
+            (t/is (= :session-import/file-not-found (:type (ex-data e))))
+            (t/is (str/includes? (ex-message e) "File not found"))))
+        (t/testing "a file that is not a kmet session throws"
+          (let [junk (str dir "/junk.ednl")]
+            (spit junk "not a session\n")
+            (let [e (try (s/plan-session-import junk dest-dir) nil
+                         (catch Exception e e))]
+              (t/is (some? e))
+              (t/is (= :session-import/not-a-session (:type (ex-data e)))))))
+        (t/testing "a directory is not importable"
+          (let [e (try (s/plan-session-import src-dir dest-dir) nil
+                       (catch Exception e e))]
+            (t/is (= :session-import/file-not-found (:type (ex-data e)))))))
+      (finally (fs/delete-tree dir)))))
+
 ;; ─── Model & thinking changes (G6 — pi: appendModelChange /
 ;;     appendThinkingLevelChange / getSessionContextSettings) ───────────────
 

@@ -71,6 +71,7 @@
             [kmet.libs.terminal :as lib-term]))
 
 (declare clone-current-session! fork-at! restore-session! handle-new-session
+         handle-import-command
          build-extension-ui-registry ask-branch-summary
          build-loaded-resource-sections start-agent-run!
          show-status-indicator! clear-status-indicator! release-background-status!
@@ -450,10 +451,10 @@
                                     " " (th/dim (str "(" (footer/format-tokens (:tokens b)) " tokens)"))))))
                 "\n")))))
 
-(defn- parse-export-path
+(defn- parse-path-argument
   "Pi: getPathCommandArgument — strip surrounding quotes, else take the
    first whitespace-delimited token. Returns nil when there is no
-   argument."
+   argument. Shared by /export and /import."
   [args]
   (let [args (str/trim args)]
     (when (seq args)
@@ -1191,7 +1192,7 @@
     :handler (fn [cs args]
                (let [sess @(:session-atom cs)
                      chat (:chat-history cs)
-                     arg (parse-export-path args)]
+                     arg (parse-path-argument args)]
                  (cond
                    (nil? sess)
                    (ui/chat-history-add-message! chat
@@ -1220,6 +1221,14 @@
                                                      {:role :info :label "Export"
                                                       :content (str "Failed to export session: "
                                                                     (or (ex-message e) (str e)))}))))))})
+  (register-builtin-command!
+   ;; kmet keeps the path hint /export carries (pi hints neither; its usage
+   ;; error spells the syntax out). kmet sessions are EDN, hence "from a
+   ;; file" where pi says "from a JSONL file"
+   {:name "import"
+    :description "Import and resume a session from a file"
+    :argument-hint "<path>"
+    :handler (fn [cs args] (handle-import-command cs args))})
   (register-builtin-command!
    {:name "share"
     :description "Share session as a secret GitHub gist"
@@ -1357,13 +1366,6 @@
     :description "Remove provider authentication"
     :handler (fn [cs _] (handle-logout-command! cs))}))
 
-(defn- command-not-implemented
-  "In-chat reply for pi slash commands kmet does not implement yet."
-  [cs name]
-  (ui/chat-history-add-message! (:chat-history cs)
-                                {:role :assistant
-                                 :content (str "Command /" name " is not implemented in kmet yet.")}))
-
 (defn- handle-reload
   "Reload settings, extensions, skills, prompts, themes, context files, and
    rebuild the system prompt (pi: interactive-mode handleReloadCommand →
@@ -1481,22 +1483,6 @@
                                          :content (str "Reload failed: "
                                                        (or (ex-message e)
                                                            (.getName (class e))))}))))))
-
-(defn- register-not-implemented-commands!
-  "Register pi's builtin slash commands that kmet does not implement yet,
-   all bound to the command-not-implemented handler. Keeps the command list
-   in sync with pi (packages/coding-agent/src/core/slash-commands.ts) so
-   /help and autocomplete show the full surface. Like the real builtins,
-   they never clobber extension-registered commands."
-  []
-  (doseq [{:keys [name description argument-hint]}
-          [{:name "import" :description "Import and resume a session from a JSONL file"}]]
-    (register-builtin-command!
-     {:name name
-      :description description
-      :argument-hint argument-hint
-      :handler (fn [cs _]
-                 (command-not-implemented cs name))})))
 
 ;; ─── Resume session ────────────────────────────────────────────────────────
 
@@ -1878,6 +1864,101 @@
           (tui/tui-request-render (:tui cs))
           (ui/chat-history-add-message! (:chat-history cs)
                                         {:role :assistant :content "Started a new session."}))))))
+
+;; ─── Import (/import — pi: handleImportCommand) ───────────────────────────
+
+(defn- import-error!
+  "pi: showError — the Error: line in the transcript."
+  [chat message]
+  (ui/chat-history-add-message! chat {:role :error :content message}))
+
+(defn- import-failed!
+  "pi: the catch in handleImportCommand — showError with pi's prefix."
+  [chat e]
+  (import-error! chat (str "Failed to import session: "
+                           (or (ex-message e) (str e)))))
+
+(defn- show-import-confirm!
+  "pi: showExtensionConfirm — ask through a dock-mounted Yes/No selector
+   (pi: showExtensionSelector of [\"Yes\" \"No\"]): TITLE with MESSAGE as
+   its second header line. ON-CONFIRM runs on Yes; No or escape shows pi's
+   \"Import cancelled\" status."
+  [cs title message on-confirm]
+  (let [tui (:tui cs)
+        chat (:chat-history cs)
+        ;; late binding: the callbacks reach the mount's done through this
+        ;; atom (pi: done() is created by showSelector)
+        sel-atom (atom nil)
+        close! (fn []
+                 ((:done @sel-atom))
+                 (tui/tui-request-render tui))
+        cancelled! (fn []
+                     (ui/chat-history-show-status! chat "Import cancelled")
+                     (tui/tui-request-render tui))
+        dlg (dialogs/make-selector-dialog
+             (str title "\n" message)
+             ["Yes" "No"]
+             (fn [choice]
+               (close!)
+               (if (= "Yes" choice) (on-confirm) (cancelled!)))
+             (fn [] (close!) (cancelled!))
+             (th/get-current-theme))]
+    ;; pi: showSelector — the selector replaces the editor dock
+    (reset! sel-atom {:done (dock/mount! cs dlg)})
+    (tui/tui-request-render tui)))
+
+(defn- handle-import-command
+  "pi: handleImportCommand — copy a session file into the active session's
+   directory and resume it. The path may be quoted, trailing arguments are
+   ignored (pi: getPathCommandArgument, shared with /export). kmet sessions
+   are EDN and pi imports its JSONL, so the file must open with a :session
+   header. Written against kmet's session-switch path rather than pi's
+   teardownCurrent: an in-flight turn refuses the import (like /fork and
+   /clone — the switch path does not abort) and the switch emits
+   :session-before-switch, exactly as /resume does."
+  [cs args]
+  (let [chat (:chat-history cs)
+        path-arg (parse-path-argument args)]
+    (cond
+      (nil? path-arg)
+      (import-error! chat "Usage: /import <path>")
+
+      @(:running-turn? cs)
+      (ui/chat-history-add-message! chat
+                                    {:role :assistant
+                                     :content "Wait for the current response to finish before importing."})
+
+      :else
+      (let [sess @(:session-atom cs)
+            ;; pi: this.session.sessionManager.getSessionDir() — the active
+            ;; session's directory; a not-yet-persisted session still carries
+            ;; its computed :file (lazy creation)
+            dest-dir (or (some-> (:file sess) fs/parent str)
+                         (ensure-cwd-session-dir))]
+        (try
+          (let [plan (session/plan-session-import path-arg dest-dir)]
+            (show-import-confirm!
+             cs "Import session"
+             (str "Replace current session with " (:source plan) "?")
+             (fn []
+               (try
+                 ;; pi: emitBeforeSwitch (reason :resume) — extensions may
+                 ;; cancel; the copy is still pending there, so a cancelled
+                 ;; import leaves no trace
+                 (if (:cancel (event-bus/emit-event!
+                               {:type :session-before-switch
+                                :reason :resume
+                                :target-session-file (:path plan)}))
+                   (ui/chat-history-show-status! chat "Import cancelled")
+                   (do (session/copy-imported-session! plan)
+                       (restore-session! cs (session/load-session (:path plan)) true)
+                       (ui/chat-history-show-status!
+                        chat (str "Session imported from: " (:source plan)))
+                       (tui/tui-request-render (:tui cs))))
+                 (catch Exception e
+                   (import-failed! chat e))))))
+          (catch Exception e
+            (import-failed! chat e)))))))
 
 ;; ─── Session tree navigation (pi: TreeSelectorComponent) ──────────────────
 
@@ -3719,7 +3800,6 @@
 
     ;; Register builtin slash commands (autocomplete dropdown + dispatch)
     (register-builtin-commands! config)
-    (register-not-implemented-commands!)
 
     ;; Autocomplete provider: slash commands + prompt templates + skill
     ;; commands + file paths
