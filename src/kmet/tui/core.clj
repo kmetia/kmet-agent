@@ -2142,16 +2142,29 @@
                                      (position-hardware-cursor cursor new-count))
                     main-diff (fn main-diff []
                                 (let [max-lines (max new-count prev-count)
-                                      [first-changed last-changed]
+                                      shared (min new-count prev-count)
+                                      ;; The shared prefix (both vectors present) takes
+                                      ;; no per-line bounds branches — only the appended
+                                      ;; or removed tail needs the missing-line
+                                      ;; defaults. identical? first: unchanged lines are
+                                      ;; the same objects the component caches returned
+                                      ;; (nothing rewrites them per frame), so the
+                                      ;; common case is an O(1) pointer compare instead
+                                      ;; of a full string =
+                                      [prefix-first prefix-last]
                                       (loop [i 0, fc -1, lc -1]
+                                        (if (< i shared)
+                                          (let [p (nth prev i)
+                                                l (nth lines i)]
+                                            (if (or (identical? p l) (= p l))
+                                              (recur (inc i) fc lc)
+                                              (recur (inc i) (if (neg? fc) i fc) i)))
+                                          [fc lc]))
+                                      [first-changed last-changed]
+                                      (loop [i shared, fc prefix-first, lc prefix-last]
                                         (if (< i max-lines)
                                           (let [old-line (if (< i prev-count) (nth prev i) "")
                                                 new-line (if (< i new-count) (nth lines i) "")]
-                                            ;; identical? first: unchanged lines are the
-                                            ;; same objects the component caches returned
-                                            ;; (nothing rewrites them per frame), so the
-                                            ;; common case is an O(1) pointer compare
-                                            ;; instead of a full string =
                                             (if (or (identical? old-line new-line)
                                                     (= old-line new-line))
                                               (recur (inc i) fc lc)
