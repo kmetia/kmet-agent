@@ -339,9 +339,11 @@ the same asymmetry the old selectors had).
 
 ## 5. Tiers
 
-- **Tier 1** — DONE: the four selectors (Phase 1 #1–#3) and the
-  `tool_renderers` imperative legs (Phase 1 #4). Remaining: the optional
-  `chat_history` plain-msg helpers. No behavior change; assert with
+- **Tier 1** — DONE: the four selectors (Phase 1 #1–#3, their search
+  fields later converted to `[:input]` tags in the same pass that closed
+  Tier 2's input KEEPs) and the `tool_renderers` imperative legs
+  (Phase 1 #4). Remaining: the optional `chat_history` plain-msg
+  helpers. No behavior change; assert with
   `hiccup/render-lines` headless tests (no tty, `bb test` material,
   never `^:slow`); watch `hiccup/counters` (`bodies-run` climbing on
   idle frames = inline-callback trap).
@@ -394,17 +396,22 @@ One commit per file, simplest first:
    body (`r/tracked-deref` on the state atom; a stable per-instance
    border `:color-fn`); `rows-container` and the `container`/`text`
    requires are gone; the refresh call sites (up/down, ctrl+c, filter)
-   are plain state swaps; `dispose` unwinds the root reaction and the
-   foreign input, wired through `show-thinking-selector`'s close.
-   Tests render (`rows` slices the rendered lines) and pin the
-   idle-frame memoization + rebuild counts.
+   are plain state swaps; the search field was still a foreign splice here
+   and became a `[:input]` tag in the follow-up pass below (inventory row
+   says "DONE (full)"); `dispose` unwinds the root reaction, wired through
+   `show-thinking-selector`'s close. Tests render (`rows` slices the
+   rendered lines) and pin the idle-frame memoization + rebuild counts.
 2. **DONE — `model_selector`, `scoped_models_selector`**: root bodies
    with keyed `[:text]` rows; the live labels (`:scope-text`,
    `scope-hint-text`, `hint-text`, `:footer-text`) are elements now — all
-   `text-set!` setters gone; `dispose` unwinds the root reaction and the
-   foreign input through each show-*'s close. Tests render.
+   `text-set!` setters gone; `dispose` unwinds the root reaction through
+   each show-*'s close. Tests render. (Their search fields were still
+   foreign splices here; both became `[:input]` tags in the follow-up pass
+   below.)
 3. **DONE — `auth_selector`**: both selectors are root bodies
-   (`[:truncated-text]` rows, `[:text]` method rows); a new render-driven
+   (`[:truncated-text]` rows, `[:text]` method rows; the provider
+   selector's search field became a `[:input]` tag in the follow-up pass
+   below); a new render-driven
    `test_auth_selector.clj` added — it had none (rows, status indicators,
    clamped nav, search/empty states, idle-frame memoization, dispose
    unwinds); interactive mode's four auth mount sites now go through
