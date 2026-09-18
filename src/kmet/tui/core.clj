@@ -111,7 +111,7 @@
 (declare tui-request-render tui-stop set-focused-component!
          overlay-visible? overlay-handle process-input-buffer! tui-invalidate
          normalize-input-unit! trace-negotiation! trace-terminal-response!
-         ghost-restore!)
+         overlay-restore-target ghost-restore! tui-release-focus!)
 
 (defn create-tui [terminal]
   (let [tui (map->TUI {:terminal (atom terminal)
@@ -176,19 +176,47 @@
     tui))
 
 (defn tui-add-child [tui c] (swap! (:components tui) conj c))
+
 (defn tui-remove-child [tui c]
   (swap! (:components tui) (fn [v] (vec (remove #(identical? % c) v))))
   ;; a removed component is leaving the tree — release its resources
   ;; (dispose is idempotent, tui.md §5.1)
-  (protocols/dispose c))
+  (protocols/dispose c)
+  (tui-release-focus! tui c))
+
 (defn tui-clear [tui]
-  (doseq [c @(:components tui)] (protocols/dispose c))
-  (reset! (:components tui) []))
+  (let [removed @(:components tui)]
+    (doseq [c removed] (protocols/dispose c))
+    (reset! (:components tui) [])
+    (doseq [c removed] (tui-release-focus! tui c))))
 
 (defn tui-set-focus
   "Point input at COMPONENT (pi: public setFocus)."
   [tui component]
   (set-focused-component! tui component))
+
+(defn tui-focused-component
+  "The component input is currently routed to (pi: focused state) — nil
+   when nothing holds focus, in which case keys drop at the dispatch guard
+   instead of reaching a ghost. Surface owners compare against it to decide
+   whether a removal took the focus holder with it."
+  [tui]
+  @(:focused-component tui))
+
+(defn tui-release-focus!
+  "Hand input away from REMOVED if it currently holds focus: the topmost
+   visible capturing overlay, else the app's focus home (`nil` when neither
+   is live — keys then drop at the dispatch guard). A component that leaves
+   the screen while focused would silently swallow every key, so every
+   removal path that can drop a focus holder owes this call: the TUI's own
+   container ops do it, and a surface owner (the editor dock) does it from
+   a watch on the atom that holds its occupant, so no future removal path
+   can bypass the restore. Cheap and idempotent: an identity test plus the
+   existing resolver, no tree walk (walks rot with child-storage shapes)."
+  [tui removed]
+  (when (and (some? removed)
+             (identical? removed @(:focused-component tui)))
+    (tui-set-focus tui (overlay-restore-target tui nil))))
 
 (defn tui-set-focus-home!
   "Register the terminal focus fallback as a THUNK resolved lazily at

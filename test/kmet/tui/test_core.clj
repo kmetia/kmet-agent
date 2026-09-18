@@ -134,10 +134,83 @@
       (t/is (identical? (:comp a) @(:focused-component tui))
             "home resolves the restore target"))))
 
+(defn- input-leaf
+  "A focusable leaf recording every key it receives in INPUT (the input
+   counterpart of `leaf`: focus + what actually arrived)."
+  [input]
+  (let [focused? (atom false)]
+    {:comp (reify core/IComponent
+             core/IFocusable
+             (render [_ _] [""])
+             (handle-input [_ data] (swap! input conj data))
+             (dispose [_] nil)
+             (invalidate [_])
+             (focused [_] @focused?)
+             (set-focused! [_ v] (reset! focused? v)))
+     :focused? focused?}))
+
 (defn- dispatch!
   "Call the private input dispatcher (pi: TUI input routing)."
   [tui data]
   ((var kmet.tui.core/dispatch-input!) tui data))
+
+(t/deftest test-remove-child-releases-focus
+  ;; The focus-integrity invariant, container-op half: input must never stay
+  ;; on a component that left the tree — that ghost would swallow every key
+  ;; while nothing on screen reacts (the "unresponsive UI" symptom).
+  (testing "removing the component that holds input hands it to the focus home"
+    (let [tui (core/create-tui nil)
+          got-home (atom [])
+          got-ghost (atom [])
+          home (input-leaf got-home)
+          ghost (input-leaf got-ghost)]
+      (core/tui-add-child tui (:comp home))
+      (core/tui-add-child tui (:comp ghost))
+      (core/tui-set-focus-home! tui (fn [] (:comp home)))
+      (core/tui-set-focus tui (:comp ghost))
+      (core/tui-remove-child tui (:comp ghost))
+      (t/is (identical? (:comp home) @(:focused-component tui))
+            "input went to the registered home")
+      (dispatch! tui "x")
+      (t/is (= ["x"] @got-home) "the key reached the home")
+      (t/is (= [] @got-ghost) "the removed component received nothing"))))
+
+(t/deftest test-remove-child-leaves-unrelated-focus-alone
+  (testing "removing a component that did NOT hold input leaves focus alone"
+    (let [tui (core/create-tui nil)
+          home (leaf)
+          holder (leaf)
+          bystander (leaf)]
+      (core/tui-add-child tui (:comp home))
+      (core/tui-add-child tui (:comp holder))
+      (core/tui-add-child tui (:comp bystander))
+      (core/tui-set-focus-home! tui (fn [] (:comp home)))
+      (core/tui-set-focus tui (:comp holder))
+      (core/tui-remove-child tui (:comp bystander))
+      (t/is (identical? (:comp holder) @(:focused-component tui))))))
+
+(t/deftest test-clear-releases-focus
+  (testing "clearing the roots releases focus to the home (a cleared root that
+            held input is the same ghost)"
+    (let [tui (core/create-tui nil)
+          home (leaf)               ;; NOT a root child: lives inside the app frame
+          gone (leaf)]
+      (core/tui-add-child tui (:comp home))
+      (core/tui-add-child tui (:comp gone))
+      (core/tui-set-focus-home! tui (fn [] (:comp home)))
+      (core/tui-set-focus tui (:comp gone))
+      (core/tui-clear tui)
+      (t/is (identical? (:comp home) @(:focused-component tui))))))
+
+(t/deftest test-release-without-home-drops-focus
+  (testing "with no home registered, focus goes null — keys drop at the
+            dispatch guard instead of reaching a removed component"
+    (let [tui (core/create-tui nil)
+          gone (leaf)]
+      (core/tui-add-child tui (:comp gone))
+      (core/tui-set-focus tui (:comp gone))
+      (core/tui-remove-child tui (:comp gone))
+      (t/is (nil? @(:focused-component tui))))))
 
 (t/deftest test-dispatch-no-focus-drops-input
   (testing "input with no focused component is dropped (pi: no fallback)"

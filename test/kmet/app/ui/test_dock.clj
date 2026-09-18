@@ -2,7 +2,8 @@
   "Dock mount/clear lifecycle (pi: showSelector / disposeActiveSelector):
    displacement disposal, borrowed panels, the staleness gate and done()
    idempotence."
-  (:require [clojure.test :as t :refer [deftest]]
+  (:require [clojure.string :as str]
+            [clojure.test :as t :refer [deftest testing]]
             [kmet.app.ui.dock :as dock]
             [kmet.tui.components.editor :as editor]
             [kmet.tui.core :as tui]))
@@ -132,3 +133,69 @@
             "invalidate-pending! makes the pending done() inert")
       (t/is (= ["a"] @disposed)
             "disposal comes from displacement, never from a done()"))))
+
+;; ─── Focus integrity (the ::focus-guard watch) ─────────────────────────────
+;; A panel that leaves the dock while holding input would swallow every key
+;; (nothing on screen reacts) — the "lost focus after close / unresponsive
+;; UI" class. The guard, not each close path, is what makes the restore
+;; happen: it watches :dock-current like the TUI's ::ghost-guard watches the
+;; overlay stack.
+
+(defn- focus-cs
+  "A CS with a real TUI, the editor mounted as a root child, and the
+   dock-aware focus home the app registers (see interactive.clj)."
+  []
+  (let [ui (tui/create-tui nil)
+        ed (editor/make-editor)
+        cs {:tui ui
+            :dock-current (atom nil)
+            :current-editor-atom (atom ed)}]
+    (tui/tui-add-child ui ed)
+    (tui/tui-set-focus-home! ui #(or (:component (deref (:dock-current cs)))
+                                     (deref (:current-editor-atom cs))))
+    {:cs cs :ui ui :ed ed}))
+
+(defn- dispatch! [ui data] ((var tui/dispatch-input!) ui data))
+
+(deftest clear-hands-input-back-to-the-editor
+  (testing "a cleared occupant must not keep swallowing keys (ghost focus)"
+    (let [{:keys [cs ui ed]} (focus-cs)
+          p (panel (atom []) "panel")]
+      (dock/mount! cs p)
+      (t/is (identical? p (tui/tui-focused-component ui)) "the panel holds input")
+      (dock/clear! cs)
+      (t/is (identical? ed (tui/tui-focused-component ui))
+            "input went back to the active editor")
+      (dispatch! ui "k")
+      (t/is (str/includes? (editor/editor-get-text ed) "k")
+            "a key reaches the editor again"))))
+
+(deftest a-direct-dock-reset-still-restores-focus
+  (testing "the watch — not the close path — is the guarantee: a future path
+            that resets :dock-current without clear! cannot strand input"
+    (let [{:keys [cs ui ed]} (focus-cs)
+          p (panel (atom []) "panel")]
+      (dock/mount! cs p)
+      (reset! (:dock-current cs) nil)
+      (t/is (identical? ed (tui/tui-focused-component ui))))))
+
+(deftest clear-leaves-unrelated-focus-alone
+  (testing "clearing the dock does not steal input that legitimately sits
+            elsewhere (an overlay above, another panel)"
+    (let [{:keys [cs ui]} (focus-cs)
+          p (panel (atom []) "panel")
+          other (editor/make-editor)]
+      (dock/mount! cs p)
+      (tui/tui-set-focus ui other)
+      (dock/clear! cs)
+      (t/is (identical? other (tui/tui-focused-component ui))))))
+
+(deftest clear-of-a-borrowed-occupant-restores-focus-too
+  (testing "a borrowed panel (the login dialog) keeps its lifecycle but not
+            the input: the dock still hands focus back when it leaves"
+    (let [{:keys [cs ui ed]} (focus-cs)
+          dlg (panel (atom []) "dialog")]
+      (dock/mount! cs dlg nil {:borrowed? true})
+      (t/is (identical? dlg (tui/tui-focused-component ui)))
+      (dock/clear! cs)
+      (t/is (identical? ed (tui/tui-focused-component ui))))))

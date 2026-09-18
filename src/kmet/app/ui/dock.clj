@@ -28,6 +28,36 @@
   []
   (swap! dock-generation inc))
 
+(defn- install-focus-guard!
+  "Ensure the ::focus-guard watch on DOCK-CURRENT. The dock is the single
+   owner of the editor slot, so it is also the chokepoint that decides what
+   happens to input when a panel leaves it (pi: disposeActiveSelector's
+   restore). The watch — not each close path — is what makes the invariant
+   hold: a cleared or replaced occupant that still held focus gets input
+   handed to the active editor, whether clear! ran, a session reset reset
+   the atom, or some future path forgets. Same shape as the TUI's
+   ::ghost-guard on the overlay stack: a watch cannot be bypassed by
+   construction. Idempotent (a fixed watch key), never throws (it runs
+   inside swap! on the input dispatch path).
+
+   Displacement (a new occupant) is NOT handled here: mount! takes focus
+   explicitly because it also knows the focus *target* (a selector's inner
+   list), which no watch could guess."
+  [cs]
+  (add-watch (:dock-current cs) ::focus-guard
+             (fn [_ _ old new]
+               (try
+                 ;; a panel left the dock (clear!, a session reset, a future
+                 ;; path) — if it held the TUI's focus, hand input to the
+                 ;; resolver's fallback: the topmost capturing overlay, else
+                 ;; the app's focus home (dock-aware: a mounted selector
+                 ;; outranks the active editor)
+                 (when (and (nil? (:component new))
+                            (some? (:tui cs)))
+                   (tui/tui-release-focus! (:tui cs) (:component old)))
+                 (catch Throwable _ nil))))
+  nil)
+
 (defn make-dock-area
   "The editor dock as a fn component (dsl.md stage 4, pi: the editorDock
    container): renders whichever panel is recorded in DOCK-CURRENT
@@ -73,12 +103,19 @@
    unwinds its root reaction and foreign children. Pass :borrowed? true for
    a panel whose owner keeps custody and re-mounts or disposes it (the auth
    dialog a prompt selector temporarily replaces, an extension dialog the
-   registry closes): the dock then leaves it alone."
+   registry closes): the dock then leaves it alone.
+
+   The dock also owns what happens to *input* when a panel leaves it: the
+   ::focus-guard watch on :dock-current (installed here) hands focus back
+   when the departing occupant held it, so no close path has to remember a
+   restore. Mounting takes focus explicitly — it alone knows the focus
+   target (a selector's inner list, not the chrome)."
   ([cs component]
    (mount! cs component nil {}))
   ([cs component focus-target]
    (mount! cs component focus-target {}))
   ([cs component focus-target {:keys [borrowed?]}]
+   (install-focus-guard! cs)
    (displace! (:dock-current cs) component)
    (let [gen (swap! dock-generation inc)
          tui* (:tui cs)
@@ -100,8 +137,14 @@
    editorContainer.clear()): pending done()s go inert and the occupant is
    disposed unless it was mounted :borrowed?. Use when something that is
    not itself a dock mount takes the editor slot — a custom-editor swap, a
-   session reset, an extension dialog closing."
+   session reset, an extension dialog closing.
+
+   Focus needs no restoring here: the ::focus-guard watch sees the occupant
+   leave and hands input to the resolver's fallback (the active editor when
+   nothing else captures) — including for a caller that never installs the
+   guard because it never mounted anything."
   [cs]
+  (install-focus-guard! cs)
   (invalidate-pending!)
   (dispose-displaced! (deref (:dock-current cs)))
   (reset! (:dock-current cs) nil))

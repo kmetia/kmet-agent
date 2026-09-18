@@ -876,6 +876,34 @@ recoverable:
    restores, so a future removal path that forgets to cannot orphan
    input.
 
+**Focus integrity — the holder must stay alive.** The third rule, and the
+general form of the two above: *a component that leaves the screen must not
+keep the input*. A ghost holder swallows every key while nothing on screen
+reacts — the "lost focus after close / unresponsive UI" class. It is not
+enforced by each close path remembering a restore (that discipline is what
+rots); it is enforced at the two removal chokepoints, both identity tests
+(no tree walks — walks break with every child-storage shape):
+
+- **The TUI's container ops.** `tui-remove-child` / `tui-clear` call
+  `tui-release-focus!` on what they drop: if the dropped component is the
+  focus holder, input goes to the resolver's target (topmost visible
+  capturing overlay, else the focus home, else null).
+- **The app's surface owners.** Whatever atom holds a *panel* the app
+  mounts must guard its removals the same way. The editor dock does it
+  with a watch on `:dock-current` (`::focus-guard`, same shape as
+  `::ghost-guard`): a cleared or reset occupant that held focus hands
+  input back to the active editor, whether `dock/clear!` ran, a session
+  reset wrote the atom, or some future path forgets entirely. The dock
+  also *takes* focus on mount — it alone knows the focus target (a
+  selector's inner list, not its chrome).
+
+`tui-release-focus!` / `tui-focused-component` are the public halves of
+the rule: a surface owner compares the leaving component against
+`tui-focused-component` and calls `tui-release-focus!` (or relies on the
+dock's guard). Explicit `tui-set-focus` calls stay for *deliberate* moves
+(startup, a custom-editor swap, mounting a panel); they are no longer
+load-bearing for removals.
+
 The app layer registers the home once per session; interactive points it
 through the dock state and the ACTIVE editor so custom-editor swaps stay
 live:
