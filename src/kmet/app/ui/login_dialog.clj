@@ -14,7 +14,6 @@
   (:require [babashka.process :as p]
             [clojure.string :as str]
             [kmet.app.keybindings :as app-kb]
-            [kmet.tui.components.dynamic-border :as db]
             [kmet.tui.components.input :as input]
             [kmet.tui.core :as tui]
             [kmet.tui.hiccup :as hiccup]
@@ -284,28 +283,29 @@
             :on-complete-atom (atom on-complete)
             :focused? (atom false)
             :cache-atom (atom nil)})
-        ;; the whole dialog as one reactive tree: static chrome elements +
-        ;; the row descriptors spliced as a seq (dsl.md §2.1); the chrome is
-        ;; built ONCE outside the body so reconcile identity-matches the
-        ;; border records across passes (a body-built record changes identity
-        ;; every re-run → retire+reconstruct churn). The title is a tag
-        ;; element reused by equal props. The body returns a SEQ of sibling
-        ;; roots — a vector would parse its head as a tag.
+        ;; the whole dialog as one reactive tree: the row descriptors are
+        ;; spliced as a seq (dsl.md §2.1). The two border elements share one
+        ;; stable :color-fn (created here, not in the body) so their props
+        ;; stay =-equal across passes and reconcile keeps the instances
+        ;; instead of rebuilding them; the title is a tag element reused by
+        ;; equal props, and only the input is spliced foreign (its instance
+        ;; outlives the rows it moves through). The body returns a SEQ of
+        ;; sibling roots — a vector would parse its head as a tag.
         accent-fn #(theme/fg th :accent %)
-        border (db/make-dynamic-border accent-fn)
         title [:text {:text (theme/fg th :accent
                                       (theme/bold (str "Login to " provider-name)))
                       :padding-x 1 :padding-y 0}]
         root (hiccup/root
               (fn [_props]
-                (concat [border title]
+                (concat [[:dynamic-border {:color-fn accent-fn}]
+                         title]
                         (mapv #(case (:row %)
                                  :spacer [:spacer {:lines 1}]
                                  :text [:text {:text (:text %) :padding-x 1 :padding-y 0}]
                                  :submitted [:text {:text (:text %) :padding-x 0 :padding-y 0}]
                                  :input (:input-comp d))
                               (r/tracked-deref (:rows-atom d)))
-                        [border])))]
+                        [[:dynamic-border {:color-fn accent-fn}]])))]
     (input/input-set-on-submit! (:input-comp d) #(resolve-input! d %))
     (input/input-set-on-escape! (:input-comp d) #(login-dialog-cancel! d))
     (assoc d :root root)))

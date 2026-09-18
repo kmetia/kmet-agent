@@ -64,7 +64,7 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `tool_renderers.clj` | DONE | none — every renderer assembles a `h/compile-tree` (the last imperative legs, `render-edit-result`'s error branch, `render-bash-call` and `render-bash-result`, converted; the mangled token-per-line block reflowed, the collapsed output cap hoisted to `bash-result-preview-lines`) | none (Phase 1 #4) |
 | `chat_history.clj` | KEEP + Tier 1 helpers | `make-plain-msg` (204–206), `make-plain-md-msg` (213–215), `StatusLine` (249–250) | Tier 1 optional: helpers → `[:container {} [:spacer] [:text/:markdown/:truncated-text]]`; `ChatHistoryComponent` itself stays a record |
 | `session_selector.clj` | DONE (pattern) | 2× `input/make-input` — deliberate foreign splices (see Phase 2 #3) | none — the body reads state via `tracked-deref` and `hide!` disposes the root + both inputs |
-| `login_dialog.clj` | DONE | `input/make-input` as a deliberate foreign splice (see Phase 2 #4); `db/make-dynamic-border` built once outside the body | none — border-once-outside is the documented identity pattern, and the input is the dialog's long-lived prompt field (pi: `this.input`) |
+| `login_dialog.clj` | DONE | `input/make-input` as a deliberate foreign splice (see Phase 2 #4) | none — chrome is `[:dynamic-border]` / `[:text]` elements (Phase 2 #4), and the input is the dialog's long-lived prompt field (pi: `this.input`) |
 | `bash_execution.clj` | DONE | `spinner/make-spinner` (248) spliced into `hiccup/root` (256) | none — long-lived spinner identity intentional |
 | `tree_selector.clj` | DONE | `make-tree-list` ctor (937); `dialogs/make-input-dialog` (1082); panel `compile-tree` (1099) | none — `TreeList` is a string-direct `track!` leaf by design; the close path disposes the frame + the spliced list |
 | `user_message.clj` | KEEP | `container`/`box`/`md`/`spacer`/`image-block` (89–114) | none (§4) |
@@ -341,10 +341,11 @@ the same asymmetry the old selectors had).
   never `^:slow`); watch `hiccup/counters` (`bodies-run` climbing on
   idle frames = inline-callback trap).
 - **Tier 2 (one commit per file + interaction test)** — stateful leaves
-  to tags: `dialogs` (`:select-list`, `:input`) and `settings_selector`
-  (`:settings-list`) are DONE; the session-selector and login-dialog
-  inputs are documented KEEPs (Phase 2 #3/#4 — long-lived, mode-moving
-  instances, which foreign splices model better than owned elements). No
+  to tags: `dialogs` (`:select-list`, `:input`), `settings_selector`
+  (`:settings-list`) and login_dialog's borders are DONE; the session-
+  selector and login-dialog *inputs* are documented KEEPs (Phase 2 #3/#4 —
+  long-lived, mode-moving instances, which foreign splices model better
+  than owned elements). No
   component API changes were required. Where a tag does own the leaf,
   verify typing/selection/focus survive unrelated prop passes (`:apply`
   semantics, tui.md §2.3).
@@ -462,13 +463,26 @@ commit stays behavior-neutral.
    `enter-rename-mode!` into state props. pi holds both as long-lived
    fields (`this.searchInput`, `RenamePanel.renameInput`) and moves the
    *instance* between containers, which is exactly what a foreign splice
-   does here — so this file is pi-faithful as it stands. Revisit only if
-   the inputs' chord/keybindings need the tag's `:apply` semantics.
-4. **SKIPPED (documented) — `login_dialog` input.** Same shape: the input
-   is the dialog's long-lived prompt field (pi: `this.input`),
-   the rows atom adds/removes its row across prompts, and
-   `show-input-prompt!` clears it *between* renders — all instance-state
-   interactions the tag would push into props for no behavioral gain.
+   does here — so this file is pi-faithful as it stands. Measured on a
+   two-branch root body: leaving the branch clears the ref (`nil`), the
+   instance is disposed, and the rebuilt one comes back **unfocused** (the
+   cursor would vanish until the host re-focuses). The tag's `:value` prop
+   restores the text; nothing restores focus without a focus-as-data
+   extension the DSL deliberately does not have (tui.md §2.4 keeps focus
+   imperative). Revisit only if focus/`IFocusable` becomes a tag prop.
+4. **PARTIAL — `login_dialog`**: the border splices converted to two
+   `[:dynamic-border {:color-fn accent-fn}]` elements sharing the one
+   stable `accent-fn` the dialog already created — equal props keep
+   reconcile on the same instances (the tag has no `:apply`, so a
+   body-built closure would rebuild both), pinned by a counters test: 3
+   constructs on the first render, zero disposals across a rows change.
+   The `dynamic-border` require drops and the dump is 339 identical lines
+   (all seven show-* states, prompt transcript, submit, cancel). The
+   **input stays foreign**: it is the dialog's long-lived prompt field
+   (pi: `this.input`), the rows atom adds/removes its row across prompts,
+   and `show-input-prompt!` clears it *between* renders — a clearing a
+   value prop cannot express (an unchanged `:value` prop never re-applies,
+   tui.md §2.3).
 
 ### Phase 3 — only with a rewrite
 

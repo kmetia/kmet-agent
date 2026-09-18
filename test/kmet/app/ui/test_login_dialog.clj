@@ -6,6 +6,7 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kmet.app.ui.login-dialog :as ld]
+            [kmet.tui.hiccup :as h]
             [kmet.tui.protocols :as protocols]
             [kmet.libs.reakt :as r]))
 
@@ -111,12 +112,38 @@
           (is (= [false "Login cancelled"] @completed) "on-complete fired"))
         (finally (protocols/dispose d))))))
 
-(deftest test-dispose-unwinds-reaction
-  (testing "dispose disposes the root: its reaction dies and later row swaps
-            no longer re-derive (the watcher is gone)"
+(deftest test-border-elements-are-reused-not-rebuilt
+  (testing "the two border elements keep their instances across rows passes:
+            the :color-fn is created once per dialog, so the props stay
+            =-equal and reconcile reuses them — a body-built closure would
+            rebuild both (the tag has no :apply) and retire the old ones"
     (let [d (make-dialog)]
+      (try
+        (h/reset-counters!)
+        (render-plain d 40)
+        (let [first-render (h/counters)]
+          (is (= 3 (:constructs first-render)) "two borders + the title")
+          (render-plain d 40)
+          (let [idle (h/counters)]
+            (is (= (:constructs first-render) (:constructs idle))
+                "an idle re-render constructs nothing")
+            (is (= (:disposals first-render) (:disposals idle)) "and retires nothing")
+            (is (= 1 (- (:bodies-skipped idle) (:bodies-skipped first-render)))
+                "the body itself is memoized"))
+          (ld/login-dialog-show-info! d "hi")
+          (render-plain d 40)
+          (let [after (h/counters)]
+            (is (zero? (:disposals after))
+                "nothing was retired — the borders survived the rows change")
+            (is (>= (:reuses after) 3) "borders + title matched their instances")))
+        (finally (protocols/dispose d)
+                 (h/reset-counters!))))))
+
+(deftest test-dispose-unwinds-reaction  (testing "dispose disposes the root: its reaction dies and later row swaps
+            no longer re-derive (the watcher is gone)"
+                                          (let [d (make-dialog)]
       ;; first render births the wrapper's reaction
-      (render-plain d 50)
-      (protocols/dispose d)
-      (is (= :disposed (:state (r/reaction-state @(:rx (:root d)))))
-          "content reaction disposed with the dialog"))))
+                                            (render-plain d 50)
+                                            (protocols/dispose d)
+                                            (is (= :disposed (:state (r/reaction-state @(:rx (:root d)))))
+                                                "content reaction disposed with the dialog"))))
