@@ -1258,63 +1258,58 @@ kmet.libs.*     self-contained (terminal protocol lives here too)
 
 ## 13.1 Foreign component cleanup — `defcomponent` + spliced records
 
-When a `defcomponent` splices a foreign record (e.g. `:input`, `:editor`,
-`:select-list`, `:settings-list` — created via `make-*` fns, NOT the DSL
-tags), that record is **not** owned by the hiccup reconciler. Its lifecycle
-is manual:
+**First choice: let the tree own the leaf.** When the record has a tag
+(`[:input]`, `[:editor]`, `[:select-list]`, `[:settings-list]`) the DSL
+owns it, and its state belongs in props — text, caret and emphasis
+(`:focused?`, §2.4) included. Reach the instance through a `:ref` when a
+handler must forward keys or read its value (`materialize-ref!` compiles
+the tree if the host has not painted yet). Nothing to dispose, no
+callbacks to clear: both vanish with the element.
+
+Use the manual lifecycle below only for a record with **no tag** (an
+app-specific component), or one whose owner keeps custody across mounts
+(the dock's `:borrowed?` panels). Such a record is **not** owned by the
+hiccup reconciler:
 
 - **Mount**: create the foreign component once, store it in a field.
 - **Render**: splice the record into the tree (identity preserved, never
   disposed by reconcile).
-- **Focus**: forward `IFocusable.set-focused!` to the foreign component.
-- **Cleanup**: the owning component's `dispose` MUST explicitly:
-  1. Clear any callbacks on the foreign component (prevents stale firings)
-  2. Call `protocols/dispose` on the foreign component
-  3. Then dispose its own tree root
+- **Focus**: forward `IFocusable.set-focused!` to the foreign component
+  (or hold it as the dock's focus target).
+- **Cleanup**: the owning component's `dispose` owes whatever the record
+  cannot do for itself:
+  1. clear any callbacks the host installed on it — they target the
+     **old** instance after a re-mount,
+  2. `protocols/dispose` it when it owns resources (timers, watches,
+     foreign children of its own),
+  3. then dispose its own tree root.
 
-Example (from `kmet.app.ui.login-dialog`):
+Example (`kmet.app.ui.bash-execution` — a long-lived spinner, spliced
+foreign so its identity and animation start survive body re-derives). It
+needs none of 1–2: pi's spinner holds only atoms and derives its frame
+from `start-atom` at render time, so the only thing to stop is the
+component's own ticker:
 
 ```clojure
-(defcomponent LoginDialog nil
-  [root rows-atom input-comp tui ...]
+(let [sp (spinner/make-spinner :text "Running..." :active true) ; foreign
+      root (hiccup/root (bash-body state-atom now-atom expanded-atom sp))]
+  ...)
 
-  (render [this width] (protocols/render (:root this) width))
-
-  (handle-input [this data]
-    (if (kb/matches-key ... "tui.select.cancel")
-      (login-dialog-cancel! this)
-      (protocols/handle-input (:input-comp this) data)))
-
-  (dispose [this]
-    ;; 1. Clear callbacks — prevents stale firings after dialog is removed
-    (input/input-set-on-submit! (:input-comp this) nil)
-    (input/input-set-on-escape! (:input-comp this) nil)
-    ;; 2. Dispose the foreign Input component (not auto-disposed)
-    (protocols/dispose (:input-comp this))
-    ;; 3. Unwind the hiccup tree's reactions
-    (protocols/dispose (:root this))))
-
-(extend-type LoginDialog
-  protocols/IFocusable
-  (focused [this] @(:focused? this))
-  (set-focused! [this val]
-    (reset! (:focused? this) val)
-    (protocols/set-focused! (:input-comp this) val)))
+(dispose [_this]
+  (stop-tickers! _this)          ;; the component's render timers
+  (protocols/dispose @root))     ;; the tree (and what IT owns)
 ```
 
-**Critical**: `login-dialog-cancel!` (called on Escape) does NOT clear the
-input callbacks — it only rejects the prompt promise, cleans up the UI
-(rows), and fires `on-complete`. Clearing callbacks in `cancel!` would
-break Escape handling if the user presses Escape again before the dialog is
-disposed (the Input is the focused leaf and would stop responding to
-keys). The callbacks are cleared in `dispose` when the dialog is truly
-removed from the dock.
+Step 1 is what pi's login dialog used to need — it kept its Input as a
+field and wired `on-submit`/`on-escape` to it once, so clearing them on
+*cancel* would have killed Escape handling for the rest of the flow and
+they were cleared in `dispose` instead. A tag-owned input has no such
+hazard: its callbacks are props, replaced or dropped with the element —
+which is why the prompt fields in `login_dialog` and `session_selector`
+are tags now, not splices.
 
-Why this matters: without step 1 in `dispose`, a disposed dialog's Input
-callbacks could fire on a subsequent login attempt, targeting the **old**
-dialog instance. Without step 2, the Input's internal watches/timers (if
-any) would leak. The reconciler only disposes DSL-owned children; foreign
-records pass through untouched (§2.1 children rules).
+The reconciler only disposes DSL-owned children; foreign records pass
+through untouched (§2.1 children rules).
 
 ---
 

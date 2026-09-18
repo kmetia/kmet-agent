@@ -383,6 +383,29 @@
       (t/is (identical? i1 (deref iref)))
       (t/is (= 1 (:applies (h/counters))) "no re-apply on unchanged props"))))
 
+(t/deftest materialize-ref-compiles-on-demand
+  ;; an element's ref fills during a render pass; a handler that needs the
+  ;; instance before the host painted compiles the tree itself instead of
+  ;; dropping the key (the dialog/selector input-forwarding path)
+  (let [iref (h/ref)
+        root (h/root (fn [_] [:container {} [:input {:ref iref}]]))]
+    (t/is (nil? (deref iref)) "unrendered tree: the ref is empty")
+    (let [i (h/materialize-ref! root iref)]
+      (t/is (some? i) "materializing compiles the body")
+      (t/is (identical? i (deref iref)) "and fills the ref")
+      (t/is (some? (h/materialize-ref! root iref)) "second call is a plain deref")))
+  ;; an element genuinely absent from the tree stays nil — callers decide
+  (let [iref (h/ref)
+        present? (atom false)
+        root (h/root (fn [_]
+                       (if (rag/tracked-deref present?)
+                         [:container {} [:input {:ref iref}]]
+                         [:container {} [:text {:text "no field"}]])))]
+    (core/render root 40)
+    (t/is (nil? (deref iref)))
+    (t/is (nil? (h/materialize-ref! root iref)) "absent element → nil")
+    (t/is (nil? (h/materialize-ref! root iref)) "and stays nil, no crash")))
+
 (t/deftest input-tag-focus-is-data
   ;; :focused? is the element's own emphasis flag (cursor + key
   ;; eligibility) — set on construct, patched in place when it changes,

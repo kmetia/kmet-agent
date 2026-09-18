@@ -845,6 +845,7 @@
   protocols/IFocusable
   (focused [this] @(:focused? this))
   (set-focused! [this val] (reset! (:focused? this) val)))
+
 ;; ─── Construction ──────────────────────────────────────────────────────────
 
 (defn- default-rename-session!

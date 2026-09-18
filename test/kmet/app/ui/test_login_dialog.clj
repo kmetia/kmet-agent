@@ -181,4 +181,9 @@
           (ld/login-dialog-show-auth! d "https://example.com/auth" nil))
         (protocols/handle-input d "\u001b")
         (is (= [false "Login cancelled"] @done))
+        ;; the dialog matches tui.select.cancel itself, so both keys the
+        ;; Input would have accepted cancel here (escape and ctrl+c)
+        (reset! done nil)
+        (protocols/handle-input d "\u0003")
+        (is (= [false "Login cancelled"] @done))
         (finally (protocols/dispose d))))))

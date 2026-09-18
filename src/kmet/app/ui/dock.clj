@@ -33,12 +33,12 @@
    owner of the editor slot, so it is also the chokepoint that decides what
    happens to input when a panel leaves it (pi: disposeActiveSelector's
    restore). The watch — not each close path — is what makes the invariant
-   hold: a cleared or replaced occupant that still held focus gets input
-   handed to the active editor, whether clear! ran, a session reset reset
-   the atom, or some future path forgets. Same shape as the TUI's
-   ::ghost-guard on the overlay stack: a watch cannot be bypassed by
-   construction. Idempotent (a fixed watch key), never throws (it runs
-   inside swap! on the input dispatch path).
+   hold: an occupant that leaves the dock (the slot goes empty) while still
+   holding focus gets input handed to the resolver's fallback, whether
+   clear! ran, a session reset wrote the atom, or some future path forgets.
+   Same shape as the TUI's ::ghost-guard on the overlay stack: a watch
+   cannot be bypassed by construction. Idempotent (a fixed watch key),
+   never throws (it runs inside swap! on the input dispatch path).
 
    Displacement (a new occupant) is NOT handled here: mount! takes focus
    explicitly because it also knows the focus *target* (a selector's inner

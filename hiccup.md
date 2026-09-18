@@ -77,12 +77,14 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `status_indicator.clj` | KEEP | `spinner/make-spinner` host-owned (79) | none |
 | `resource_config.clj` | KEEP / Tier 3 | `input/make-input` (557); render returns string lines directly | full-screen `hiccup/root` (session_selector pattern) only if rewriting the screen anyway |
 | `footer.clj`, `pending_messages.clj`, `loaded_resources.clj` | KEEP | none | string-direct `track!` renders — no tree to migrate |
-| `dock.clj`, `subs.clj`, `model_catalog.clj`, `external_editor.clj`, `custom_dialog_adapter.clj`, `footer_data_provider.clj` | N/A | none | fn component / data / adapter — nothing to migrate; the dock owns the *displacement* half of a panel's lifecycle (`mount!`/`clear!` dispose the panel they lift out unless it was mounted `:borrowed?`) |
+| `dock.clj`, `subs.clj`, `model_catalog.clj`, `external_editor.clj`, `custom_dialog_adapter.clj`, `footer_data_provider.clj` | N/A | none | fn component / data / adapter — nothing to migrate; the dock owns the *displacement* and *input* halves of a panel's lifecycle (`mount!`/`clear!` dispose the panel they lift out unless it was mounted `:borrowed?`, and its `::focus-guard` watch hands focus back when the occupant leaves — tui.md §7) |
 
 Tier 2's former blockers (no `:on-change` on `:input`, the dialogs
-prefill cursor poke, `session_selector`'s post-construct wiring) are all
-reachable through refs (§3.2); the missing tag props are ergonomics, not
-prerequisites. Tier 1's rows work is mostly plumbing deletion plus one
+prefill cursor poke, `session_selector`'s post-construct wiring) were all
+reachable through refs (§3.2), and the props the tags gained along the way
+(`:on-change`, `:cursor`) were ergonomics — but the two input KEEPs were
+not: they turned on `:focused?`, because a rebuilt element has no way to
+restate its emphasis (§3.2). Tier 1's rows work is mostly plumbing deletion plus one
 idiom (see §3.1's "what reuse actually buys") — a wash at today's
 windowed selector sizes, real at list scale — and the transcript stays
 put for design reasons, not because a DSL container over records would
@@ -517,6 +519,18 @@ commit stays behavior-neutral.
 - Keep `tui.md` §2.3/§2.4 in lockstep: this plan leans on the `:apply`
   semantics and the ref lifecycle; a behavior change to either updates
   both docs in the same commit.
+- A converted root that forwards keys to a tag-owned input reaches it
+  through a ref + `hiccup/materialize-ref!` (the element exists only
+  after a render pass — a key arriving first must not be dropped) and
+  declares its text/caret/emphasis as props (`:value`, `:cursor`,
+  `:focused?`), mirroring the live instance into state as it forwards.
+  Never hold the instance's text in a closure: a branch switch retires
+  the element, and only the props bring it back.
+- Focus is guarded, not remembered: a removal path that can drop a focus
+  holder calls `tui-release-focus!` (the TUI's own container ops do), and
+  a surface owner guards the atom that holds its panel (the dock's
+  `::focus-guard` watch). Explicit `tui-set-focus` stays for deliberate
+  moves only — tui.md §7.
 - Root conversions dispose on their **close callbacks** *and* the dock
   disposes on **displacement**: `dock/mount!`/`dock/clear!` unwind the
   panel they lift out (pi: `disposeActiveSelector` at the top of
