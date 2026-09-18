@@ -236,7 +236,7 @@
   (let [dir "target/test-ext-prov-unload"]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/prov_unload"))
-    (spit (str dir "/extension.edn") "{:name \"prov-unload\" :entry prov-unload.main}\n")
+    (spit (str dir "/extension.edn") "{:name \"prov-unload\" :entry prov-unload.main :loader [:sci :jolt]}\n")
     (spit (str dir "/prov_unload/main.clj")
           (str "(ns prov-unload.main\n  (:require [kmet.extension :as ext]))\n"
                "(defn init [api]\n"
@@ -321,7 +321,7 @@
   (let [dir "target/test-ext-slurp"]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/slurp_ext"))
-    (spit (str dir "/extension.edn") "{:name \"slurp-ext\" :entry slurp-ext.main}\n")
+    (spit (str dir "/extension.edn") "{:name \"slurp-ext\" :entry slurp-ext.main :loader [:sci :jolt]}\n")
     (spit (str dir "/slurp_ext/main.clj")
           (str "(ns slurp-ext.main\n  (:require [kmet.extension :as ext]))\n"
                "(defn init [api]\n"
@@ -352,7 +352,7 @@
   (let [dir "target/test-ext-tools-reader"]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/tr_ext"))
-    (spit (str dir "/extension.edn") "{:name \"tr-ext\" :entry tr-ext.main}\n")
+    (spit (str dir "/extension.edn") "{:name \"tr-ext\" :entry tr-ext.main :loader [:sci :jolt]}\n")
     (spit (str dir "/tr_ext/main.clj")
           (str "(ns tr-ext.main\n  (:require [kmet.extension :as ext]\n            [clojure.tools.reader :as r]\n            [clojure.tools.reader.reader-types :as rt]))\n"
                "(defn init [api]\n"
@@ -386,7 +386,7 @@
     (fs/create-dirs (str dir "/data"))
     (spit (str dir "/data/a.clj") "x")
     (spit (str dir "/data/b.clj") "y")
-    (spit (str dir "/extension.edn") "{:name \"spec-ext\" :entry spec-ext.main}\n")
+    (spit (str dir "/extension.edn") "{:name \"spec-ext\" :entry spec-ext.main :loader [:sci :jolt]}\n")
     (spit (str dir "/spec_ext/main.clj")
           (str "(ns spec-ext.main\n"
                "  (:require [kmet.extension :as ext]\n"
@@ -444,7 +444,7 @@
   (let [dir "target/test-ext-missing-req"]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/missing_req"))
-    (spit (str dir "/extension.edn") "{:name \"missing-req\" :entry missing-req.main}\n")
+    (spit (str dir "/extension.edn") "{:name \"missing-req\" :entry missing-req.main :loader [:sci :jolt]}\n")
     (spit (str dir "/missing_req/main.clj")
           "(ns missing-req.main\n  (:require [no.such.namespace]))\n(defn init [api] nil)\n")
     (let [result (extensions/load-extension! dir)]
@@ -644,7 +644,7 @@
       (let [dir "target/test-ext-internal-ns"]
         (fs/create-dirs (str dir "/kmet/extensions/myext"))
         (spit (str dir "/extension.edn")
-              "{:name \"internal-ns\" :entry kmet.extensions.myext.core}\n")
+              "{:name \"internal-ns\" :entry kmet.extensions.myext.core :loader [:sci :jolt]}\n")
         (spit (str dir "/kmet/extensions/myext/core.clj")
               (str "(ns kmet.extensions.myext.core\n"
                    "  (:require [kmet.extension :as ext]\n"
@@ -733,7 +733,7 @@
   (extensions/clear-extensions!)
   (let [dir "target/test-ext-bad-deps"]
     (fs/create-dirs dir)
-    (spit (str dir "/extension.edn") "{:name \"bad-deps\" :entry bad-deps.main}\n")
+    (spit (str dir "/extension.edn") "{:name \"bad-deps\" :entry bad-deps.main :loader [:sci :jolt]}\n")
     (spit (str dir "/deps.edn") "{:deps {org.clojure/does-not-exist {:mvn/version \"9.9.9\"}}}\n")
     (fs/create-dirs (str dir "/bad_deps"))
     (spit (str dir "/bad_deps/main.clj")
@@ -1014,7 +1014,7 @@
     (fs/delete-tree dir)
     (fs/delete-if-exists jar)
     (fs/create-dirs (str dir "/jar_ext"))
-    (spit (str dir "/extension.edn") "{:name \"jar-ext\" :entry jar-ext.main}\n")
+    (spit (str dir "/extension.edn") "{:name \"jar-ext\" :entry jar-ext.main :loader [:sci :jolt]}\n")
     (spit (str dir "/jar_ext/main.clj")
           (str "(ns jar-ext.main\n"
                "  (:require [kmet.extension :as ext]\n"
@@ -1066,7 +1066,7 @@
           (fs/delete-tree sdir)
           (fs/delete-if-exists sjar)
           (fs/create-dirs (str sdir "/sloppy"))
-          (spit (str sdir "/extension.edn") "{:name \"jar-sloppy\" :entry sloppy.main}\n")
+          (spit (str sdir "/extension.edn") "{:name \"jar-sloppy\" :entry sloppy.main :loader [:sci :jolt]}\n")
           (spit (str sdir "/sloppy/main.clj")
                 "(ns wrong.place)\n(defn init [api] nil)\n")
           (with-open [zos (java.util.zip.ZipOutputStream. (io/output-stream sjar))]
@@ -1094,7 +1094,7 @@
   (let [dir "target/test-ext-dir-resource"]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/dir_ext"))
-    (spit (str dir "/extension.edn") "{:name \"dir-ext\" :entry dir-ext.main}\n")
+    (spit (str dir "/extension.edn") "{:name \"dir-ext\" :entry dir-ext.main :loader [:sci :jolt]}\n")
     (spit (str dir "/dir_ext/main.clj")
           (str "(ns dir-ext.main\n"
                "  (:require [kmet.extension :as ext]\n"
@@ -1128,7 +1128,7 @@
           "---\nname: selfreg-skill\ndescription: Self-registered skill\n---\nSkill body here")
     (spit (str dir "/tpl.md")
           "---\ndescription: Self-registered template\n---\nTemplate body $1")
-    (spit (str dir "/extension.edn") "{:name \"selfreg\" :entry selfreg.main}\n")
+    (spit (str dir "/extension.edn") "{:name \"selfreg\" :entry selfreg.main :loader [:sci :jolt]}\n")
     (spit (str dir "/selfreg/main.clj")
           (str "(ns selfreg.main\n"
                "  (:require [kmet.extension :as ext]\n"
@@ -1160,15 +1160,16 @@
 (t/deftest test-shipped-extensions-load-from-src
   ;; the repo's own extensions restructured to src/-as-artifact-root
   ;; (jar-ext.md §2): every shipped src/ dir loads through the real runtime.
-  ;; Jolt contexts run on the runtime's own loader, so the old SCI IVar gap
-  ;; (jolt#1031) no longer applies.
+  ;; The shipped manifests declare :loader — lsp/mcp/review/tree-sitter
+  ;; [:jolt :sci] (Jolt picks its native loader, bb the SCI backend);
+  ;; clojure declares [:sci] only.
   ;;
   ;; The clojure extension is the one content gap left on Jolt: its deps.edn
-  ;; excludes rewrite-clj (bb bundles an adapted port there) and Jolt has no
-  ;; bundled copy, so the native loader cannot serve rewrite-clj.node. It
-  ;; stays a bb-side case until the shared deps.edn can express the per-host
-  ;; closure (extensions.md § bb-bundled ports); the other four extensions
-  ;; load on both hosts.
+  ;; excludes rewrite-clj (bb bundles an adapted port there) and Jolt's SCI
+  ;; fallback has no bundled copy either, so neither backend can serve
+  ;; rewrite-clj.* there. It stays a bb-side case until the shared deps.edn
+  ;; can express the per-host closure (extensions.md § bb-bundled ports);
+  ;; the other four extensions load on both hosts.
   (extensions/clear-extensions!)
   (let [shipped ["extensions/clojure/src"
                  "extensions/lsp-adapter/src"
@@ -1179,7 +1180,9 @@
                    (remove #{"extensions/clojure/src"} shipped)
                    shipped)]
       (let [result (extensions/load-extension! path)]
-        (t/is (nil? (:error result)) (str path " loaded: " (:error result))))))
+        (t/is (nil? (:error result)) (str path " loaded: " (:error result)))
+        (t/is (contains? #{:sci :jolt} (:loader-kind result))
+              (str path " selected a backend (declares :loader)")))))
   (testing "tools + skills from the shipped extensions are live"
     (t/is (some? (tools/get-tool "lsp")))
     (t/is (some? (tools/get-tool "mcp")))
@@ -1195,6 +1198,75 @@
   (extensions/unload-all-extensions!)
   (skills/clear-skills!)
   (prompts/clear-prompt-templates!))
+
+(t/deftest test-manifest-loader-declaration
+  ;; the manifest :loader declaration + host selection: :sci on babashka,
+  ;; :jolt preferred on Jolt with the :sci fallback, skip (not failure) when
+  ;; the host offers none of the declared backends.
+  (extensions/clear-extensions!)
+  (let [mk (fn [name manifest]
+             (let [dir (str "target/test-ext-loader-" name)]
+               (fs/delete-tree dir)
+               (fs/create-dirs (str dir "/loader_probe"))
+               (spit (str dir "/extension.edn") manifest)
+               (spit (str dir "/loader_probe/main.clj")
+                     "(ns loader-probe.main)\n(defn init [api] nil)\n")
+               dir))
+        entry "loader-probe.main"
+        manifest (fn [name loader-part]
+                   (str "{:name \"" name "\" :entry " entry
+                        (when loader-part (str " :loader " loader-part)) "}\n"))]
+    (try
+      (testing ":sci loads on every host (it is Jolt's declared fallback)"
+        (let [r (extensions/load-extension! (mk "sci" (manifest "ld-sci" "[:sci]")))]
+          (t/is (nil? (:error r)) (str "loaded: " (:error r)))
+          (t/is (= :sci (:loader-kind r))))
+        (extensions/unload-all-extensions!))
+      (testing "the host's preference decides between declared backends"
+        (doseq [[n ls] [["js" "[:jolt :sci]"] ["sj" "[:sci :jolt]"]]]
+          (let [r (extensions/load-extension! (mk n (manifest (str "ld-" n) ls)))]
+            (t/is (nil? (:error r)) (str n " loaded: " (:error r)))
+            (t/is (= (if (host/jolt?) :jolt :sci) (:loader-kind r))
+                  "declaration order is not a ranking"))
+          (extensions/unload-all-extensions!)))
+      (testing ":jolt alone loads on Jolt and skips where that backend does not exist"
+        (let [r (extensions/load-extension! (mk "jolt" (manifest "ld-jolt" "[:jolt]")))]
+          (if (host/jolt?)
+            (t/is (= :jolt (:loader-kind r)))
+            (do (t/is (true? (:skipped r)))
+                (t/is (= :unsupported-loader (:reason r)))
+                (t/is (= [:jolt] (:declared-loaders r)))
+                (t/is (= [:sci] (:available-loaders r)))
+                (t/is (nil? (:error r)) "a skip is informational, not a failure"))))
+        (extensions/unload-all-extensions!))
+      (testing "a declaration with no host backend is skipped, with a note"
+        (let [dir (mk "jvm" (manifest "ld-jvm" "[:jvm]"))
+              err-w (java.io.StringWriter.)
+              [r] (binding [*err* err-w] (extensions/load-extension-paths! [dir]))]
+          (t/is (true? (:skipped r)))
+          (t/is (not-any? #(= "ld-jvm" (:name %)) (extensions/get-loaded-extensions)))
+          (t/is (str/includes? (str err-w) "skipping")))
+        (extensions/unload-all-extensions!))
+      (testing "a legacy manifest (no :loader) defaults to both backends with a warning"
+        (let [err-w (java.io.StringWriter.)
+              r (binding [*err* err-w]
+                  (extensions/load-extension! (mk "legacy" (manifest "ld-legacy" nil))))]
+          (t/is (nil? (:error r)) (str "loaded: " (:error r)))
+          (t/is (= (if (host/jolt?) :jolt :sci) (:loader-kind r)))
+          (t/is (str/includes? (str err-w) "no :loader")))
+        (extensions/unload-all-extensions!))
+      (testing "a malformed :loader is an error result, not a throw"
+        (let [r (extensions/load-extension! (mk "bad" (manifest "ld-bad" "\"sci\"")))]
+          (t/is (nil? (:extension r)))
+          (t/is (str/includes? (:error r) ":loader"))))
+      (testing "get-loaded-extensions exposes the selected backend"
+        (extensions/load-extension! (mk "expose" (manifest "ld-expose" "[:sci]")))
+        (t/is (= :sci (:loader-kind (first (filter #(= "ld-expose" (:name %))
+                                                   (extensions/get-loaded-extensions)))))))
+      (finally
+        (extensions/unload-all-extensions!)
+        (doseq [n ["sci" "js" "sj" "jolt" "jvm" "legacy" "bad" "expose"]]
+          (fs/delete-tree (str "target/test-ext-loader-" n)))))))
 
 (t/deftest ^:slow ^:bb-only test-packed-clojure-jar-roundtrip
   ;; end-to-end jar distribution for a real shipped extension: pack

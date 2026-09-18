@@ -34,7 +34,7 @@ Single-file extensions (`extensions/tools.clj`, `deepseek-peak.clj` — bare
 
 ```
 my-ext-1.0.0.jar                      ; .zip identical, loader treats both the same
-├── extension.edn                     ; {:name "my-ext" :entry my.ext.main}
+├── extension.edn                     ; {:name "my-ext" :entry my.ext.main :loader [:jolt :sci]}
 ├── deps.edn                          ; {:deps {...}} — :deps key only, :paths ignored
 ├── my/ext/main.clj                   ; (ns my.ext.main ...)
 ├── my/ext/helper.clj
@@ -43,12 +43,14 @@ my-ext-1.0.0.jar                      ; .zip identical, loader treats both the s
 ```
 
 - `extension.edn` at archive root, **required**. Shape:
-  `{:name "my-ext" :entry my.ext.main}` — `:entry` is a **namespace
-  symbol** (cutover from the current file-path string; see §3), resolved
-  through the same ns-path lookup as every other namespace. `:name`
-  defaults to the dir name / jar basename when absent, but jars should set
-  it explicitly so versioned filenames (`my-ext-1.0.0.jar`) keep a stable
-  identity.
+  `{:name "my-ext" :entry my.ext.main :loader [:jolt :sci]}` — `:entry` is
+  a **namespace symbol** (cutover from the current file-path string; see
+  §3), resolved through the same ns-path lookup as every other namespace;
+  `:loader` lists the loader backends the extension supports (`:sci` /
+  `:jolt`; the host picks its own preference — see `extensions.md` § Loader
+  compatibility). `:name` defaults to the dir name / jar basename when
+  absent, but jars should set it explicitly so versioned filenames
+  (`my-ext-1.0.0.jar`) keep a stable identity.
 - `deps.edn` at root, optional. Only `:deps` is read (via the existing
   `deps-of-dir` → `closure-jars` path); `:paths` is ignored — there is
   exactly one root. No bundled `lib/*.jar` inside the archive in v1:
@@ -265,7 +267,8 @@ the prompt per turn anyway).
   ns it requires — either way host-evaluated bb code using
   `java.util.zip.ZipOutputStream` (deterministic sorted order, no
   `META-INF`, no permission preservation needed).
-- Verify-then-zip: `extension.edn` present with `:name` + symbol `:entry`;
+- Verify-then-zip: `extension.edn` present with `:name` + symbol `:entry` +
+  a `:loader` vector of known backend kinds (`:sci` / `:jolt`);
   `:entry` ns-path file exists in the root; **every** `.clj` file's
   `(ns ...)` matches its path; `deps.edn` parses and carries only `:deps`
   (warn on `:paths`); no absolute/`..`/backslash-ambiguous names.

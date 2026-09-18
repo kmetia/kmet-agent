@@ -24,16 +24,20 @@
 
  :paths ["src"]
 
- ;; SCI for the sci backend's suite on Jolt (RFC 0014 lib: this deps.edn is
+ ;; SCI for the sci backend on Jolt (RFC 0014 lib: this deps.edn is
  ;; jolt/JVM-only, so the pin lives here rather than in the root deps.edn,
- ;; which hosts may treat as a host-vendored namespace). Extension contexts
- ;; do not go through SCI on Jolt any more — they run on the runtime's own
- ;; loader — but the sci backend is still the bb/JVM one and `jolt test`
- ;; kmet.loader.test-sci-loader proves it there, which needs the dep.
- ;; babashka bundles SCI, so only jolt/JVM resolve it — 0.13.53 is the
- ;; jolt-gated version (jolt's own vendor/sci is 0.13.53; the latest
- ;; 0.15.x needs clojure.core/Inst, absent on jolt).
- :deps {org.babashka/sci {:mvn/version "0.13.53"}}
+ ;; which hosts may treat as a host-vendored namespace). Jolt needs it at
+ ;; RUNTIME now: an extension manifest declaring :sci without a native
+ ;; alternative loads through the SCI backend — and on Jolt that hits
+ ;; jolt#1031 (defrecord/extend-type over host protocols copied with
+ ;; sci/copy-var*). The git pin is yogthos/sci @ babashka/sci#1093, the fix
+ ;; for exactly that (released SCI 0.13.53 has no model for a protocol whose
+ ;; methods aren't its own multimethods); move back to a Maven version once
+ ;; #1093 merges and a release carries it. Verified against the current jolt
+ ;; (v0.8.8, where clojure.core/Inst exists). babashka bundles SCI, so only
+ ;; jolt/JVM resolve this.
+ :deps {org.babashka/sci {:git/url "https://github.com/yogthos/sci.git"
+                          :git/sha "1295142fc29f206dd2747963548ba038077d9205"}}
 
  ;; The classes this lib installs (RFC 0014): jolt autoloads the install
  ;; namespace on the FIRST reference to one of these, whatever the registry

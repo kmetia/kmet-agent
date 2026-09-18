@@ -1437,7 +1437,16 @@
                                                               (str/join "\n"
                                                                         (map (fn [{:keys [extension path error]}]
                                                                                (str "- " (or extension path) ": " error))
-                                                                             failures)))))}))
+                                                                             failures))))
+                                                       (when-let [skipped (seq (filter :skipped ext-results))]
+                                                         (str "\n\nSkipped extension"
+                                                              (when (< 1 (count skipped)) "s")
+                                                              " (declared loaders this host does not offer):\n"
+                                                              (str/join "\n"
+                                                                        (map (fn [{:keys [extension declared-loaders available-loaders]}]
+                                                                               (str "- " extension " supports " (pr-str declared-loaders)
+                                                                                    ", " (pr-str available-loaders) " available"))
+                                                                             skipped)))))}))
         (catch Exception e
           (debug/log "reload failed: " e)
           (ui/chat-history-add-message! chat-history

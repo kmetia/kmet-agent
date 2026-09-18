@@ -98,4 +98,12 @@ so no jolt-side fix unblocks that shape. #1033 makes the extension writable
 hosts then land on `Unable to resolve symbol` — the supported sharing shape is
 the multimethod recipe in `test/chez/sci-functional-test.clj`.
 
+**Update (2026-09-17) — SCI is back as a declared fallback.** The
+manifest `:loader` key revived the SCI path on Jolt for `:sci`-only
+extensions: `jolt/deps.edn` pins yogthos/sci @ babashka/sci#1093,
+which makes the copied-host-protocol `defrecord` shape work — verified with
+the exact repro above through `kmet.app.extensions`. The native loader stays
+Jolt's preference (`:jolt` declared ⇒ native), and SCI's `*out*`/`*err*`
+need binding there (`kmet.app.extensions/with-sci-io`).
+
 

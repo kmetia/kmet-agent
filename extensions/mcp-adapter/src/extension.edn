@@ -1,1 +1,1 @@
-{:name "mcp-adapter", :entry extensions.mcp-adapter}
+{:name "mcp-adapter", :entry extensions.mcp-adapter, :loader [:jolt :sci]}

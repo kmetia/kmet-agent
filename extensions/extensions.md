@@ -134,8 +134,9 @@ underscores, dots → slashes; `.clj` → `.cljc` → `.bb` fallback):
 
 ```clojure
 ;; extension.edn
-{:name  "my-ext"
- :entry my-ext.main}
+{:name   "my-ext"
+ :entry  my-ext.main
+ :loader [:jolt :sci]}
 ```
 
 ```clojure
@@ -143,8 +144,11 @@ underscores, dots → slashes; `.clj` → `.cljc` → `.bb` fallback):
 {:deps {cheshire/cheshire {:mvn/version "11.5.3"}}} ;; or just use kmet.libs.json
 ```
 
-The manifest lists only the initial namespace — `:entry`, a namespace symbol
-whose namespace must define `init`. Everything else is required from there:
+The manifest lists the initial namespace — `:entry`, a namespace symbol
+whose namespace must define `init` — and the loader backends the extension
+supports — `:loader` (see
+[Loader compatibility](#loader-compatibility-loader)). Everything else is
+required from there:
 internal namespaces resolve by strict ns-path lookup under the extension
 root, and declared library dependencies resolve to the jars in `deps.edn`
 (see [External library dependencies](#external-library-dependencies-depsedn)).
@@ -178,6 +182,41 @@ probes the ns path under the extension root and resolves those requires
 before the shared-namespace allowlist is consulted.
 The extension name defaults to the directory name (`:name` in the manifest
 overrides it).
+
+### Loader compatibility (`:loader`)
+
+The manifest declares which loader backends the extension supports:
+
+```clojure
+{:name   "my-ext"
+ :entry  my-ext.main
+ :loader [:jolt :sci]}      ; both backends — see the table below
+```
+
+- `:jolt` — Jolt's native loader (real Jolt namespaces; Jolt's default).
+- `:sci` — the SCI backend (babashka's and the JVM's only backend; Jolt can
+  run it as a fallback).
+
+The host picks from the declared set by its own preference — **the order in
+the manifest is not a ranking**:
+
+| host | prefers | selected |
+|---|---|---|
+| babashka / JVM | `:sci` | `:sci`, when declared |
+| Jolt | `:jolt`, then `:sci` | `:jolt` when declared, else `:sci` |
+
+An extension declaring none of the host's backends is **skipped**, not
+failed: it is discovered but not loaded, with a note (and a line in the
+`/reload` summary). One artifact directory therefore stays portable across
+hosts — declare what you support and each host uses its best backend.
+
+A manifest without `:loader` (a legacy extension) is treated as
+`[:sci :jolt]` with a warning — exactly the backend it used before the key
+existed. A single-file `.clj` extension has no manifest and implicitly
+supports both. `bb pack-extension` requires `:loader` for new artifacts.
+
+What the two backends mean in practice is in
+[Host support (Jolt)](#host-support-jolt) below.
 
 ### Jar/zip extensions (no expansion)
 
@@ -256,7 +295,7 @@ a clear error unless it is babashka-bundled.
 
 ### Background work (`kmet.libs.concurrent/spawn`)
 
-Under the SCI host contexts (bb and the JVM) extension code runs without `future`/`pmap`/`pcalls` — SCI is a pure interpreter with no bundled `Executor`, while `babashka` injects `future` only at the host level (`sci/init {:namespaces {'clojure.core {'future …}}}`). `kmet` deliberately does **not** forward it; use the whitelisted helper `kmet.libs.concurrent/spawn` (the same daemon-`Thread` helper the shipped adapters already copied):
+Under the SCI host contexts (bb and the JVM, and a `:sci`-only extension on Jolt) extension code runs without `future`/`pmap`/`pcalls` — SCI is a pure interpreter with no bundled `Executor`, while `babashka` injects `future` only at the host level (`sci/init {:namespaces {'clojure.core {'future …}}}`). `kmet` deliberately does **not** forward it; use the whitelisted helper `kmet.libs.concurrent/spawn` (the same daemon-`Thread` helper the shipped adapters already copied):
 
 ```clojure
 (ns my-ext.main
@@ -266,7 +305,7 @@ Under the SCI host contexts (bb and the JVM) extension code runs without `future
 ;; => Thread (started, daemon=true); exceptions swallowed, interrupt/join via the returned Thread
 ```
 
-- Whitelisting `future` would pull in an implicit global pool, let extension work survive `unload-extension!`/`reload-extensions!` and keep `kmet` alive past shutdown, enable unbounded submission with no backpressure, and need the rest of the family (`future-call`/`future-cancel`/`pmap`/`pcalls`) for consistency. An explicit daemon `Thread` keeps the lifecycle obvious and keeps unload/reload clean. On Jolt there is no interpreter in the way — the extension runs in the runtime, so this is a convention there rather than an enforced absence; the lifecycle reasoning is the same, because `unload` still cannot stop work you started. Keep `Thread` use through `kmet.libs.concurrent/spawn` — don't construct `Thread.` directly in extensions.
+- Whitelisting `future` would pull in an implicit global pool, let extension work survive `unload-extension!`/`reload-extensions!` and keep `kmet` alive past shutdown, enable unbounded submission with no backpressure, and need the rest of the family (`future-call`/`future-cancel`/`pmap`/`pcalls`) for consistency. An explicit daemon `Thread` keeps the lifecycle obvious and keeps unload/reload clean. On Jolt's native loader there is no interpreter in the way — the extension runs in the runtime — so this is a convention there rather than an enforced absence (a `:sci` fallback context on Jolt has the same absence as bb); the lifecycle reasoning is the same, because `unload` still cannot stop work you started. Keep `Thread` use through `kmet.libs.concurrent/spawn` — don't construct `Thread.` directly in extensions.
 
 #### Limits (inherent to Babashka)
 
@@ -284,14 +323,15 @@ Under the SCI host contexts (bb and the JVM) extension code runs without `future
 
 #### Host support (Jolt)
 
-The loader runs on Jolt too, with the same contract — but natively: Jolt has
-its own loader (`jolt.loader`), so an extension's context there is a set of
-real Jolt namespaces, read by the native reader from the extension's own
-sources plus its declared deps, shared host layers coming back by reference,
-and teardown unmapping what it loaded. No SCI is involved
-(`kmet.loader.jolt-loader` adapts the runtime's loader to the same protocol
-the bb/JVM backend implements). Host differences are implementation, not
-author-visible:
+Jolt prefers its own loader: an extension's context there is a set of real
+Jolt namespaces, read by the native reader from the extension's own sources
+plus its declared deps, shared host layers coming back by reference, and
+teardown unmapping what it loaded (`kmet.loader.jolt-loader` adapts the
+runtime's loader to the same protocol the bb/JVM SCI backend implements).
+An extension declaring `:sci` without `:jolt` instead runs through the SCI
+backend on Jolt — the same one babashka uses — as a fallback for extensions
+written against the SCI environment. Host differences are implementation,
+not author-visible:
 
 - **Classes.** Classes resolve through the compiler, against the runtime's
   class graph — there is no lazily-registered class map (the SCI backend
@@ -299,10 +339,14 @@ author-visible:
   `bb-imports` covers statics/ctors/hints). A class Jolt's graph does not
   supply (e.g. some JDK classes reachable only through a type hint) fails
   the load.
-- **SCI.** Not in the extension path on Jolt. It is still the bb/JVM context
-  runtime, and `jolt/deps.edn` keeps the jolt-gated pin
-  (`org.babashka/sci` 0.13.53) so that backend's suite still runs under
-  `jolt test` — the latest SCI needs `clojure.core/Inst`, absent on Jolt.
+- **SCI.** Jolt's *fallback* backend: an extension whose manifest declares
+  `:sci` without `:jolt` evaluates through the same SCI context as on
+  babashka. `jolt/deps.edn` pins the SCI build that fixes
+  `defrecord`/`extend-type` over host protocols copied with `sci/copy-var*`
+  (jolt#1031 / babashka/sci#1093), reader features follow the host (`:jolt`
+  on Jolt, so `#?(:bb … :jolt …)` selects what the host selects natively),
+  and SCI's `*out*`/`*err*` are bound around evaluation and registered
+  callbacks.
 - **Deps.** bb resolves the closure to jars and serves them with `ZipFile`;
   Jolt uses `jolt.deps/resolve-deps` and serves the extracted source roots
   with fs probes (`extension-jars` returns roots on Jolt).
@@ -321,10 +365,10 @@ runtime (e.g. from another extension or a REPL):
 
 | Operation | Function | Effect |
 |---|---|---|
-| Load | `kmet.app.extensions/load-extension!` (path) | load one file or manifest dir; returns `{:extension name :error nil}` or `{:extension nil :error msg}` |
+| Load | `kmet.app.extensions/load-extension!` (path) | load one file or manifest dir; returns `{:extension name :error nil :loader-kind :sci\|:jolt}`, `{:extension nil :error msg}` on failure, or `{:extension name :skipped true :reason :unsupported-loader …}` when the host offers none of the declared backends |
 | Unload | `kmet.app.extensions/unload-extension!` (record) | run `shutdown`, deregister everything, remove namespaces |
 | Reload | `kmet.app.extensions/reload-extensions!` (dirs) | unload all, reload from the given container dirs |
-| List | `kmet.app.extensions/get-loaded-extensions` | `[{:name .. :path ..}]` |
+| List | `kmet.app.extensions/get-loaded-extensions` | `[{:name .. :path .. :loader-kind ..}]` |
 
 A failing `init` is rolled back: the loader unloads whatever was registered
 before the error and reports `{:extension nil :error msg}` — no partial state

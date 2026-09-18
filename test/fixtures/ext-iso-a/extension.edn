@@ -1,1 +1,1 @@
-{:name "iso-a", :entry iso-a.main}
+{:name "iso-a", :entry iso-a.main, :loader [:sci :jolt]}

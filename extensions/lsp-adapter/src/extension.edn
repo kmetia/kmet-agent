@@ -1,1 +1,1 @@
-{:name "lsp-adapter", :entry extensions.lsp-adapter}
+{:name "lsp-adapter", :entry extensions.lsp-adapter, :loader [:jolt :sci]}

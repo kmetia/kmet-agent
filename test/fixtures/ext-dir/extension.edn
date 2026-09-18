@@ -1,1 +1,1 @@
-{:name "multi-ext", :entry multi-ext.main}
+{:name "multi-ext", :entry multi-ext.main, :loader [:sci :jolt]}

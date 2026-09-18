@@ -24,7 +24,9 @@ classloader-lite request) and jolt-lang/jolt#1039 (the implementation),
 with `test/chez/loaderconf-test.clj` as its writ — the 20-case suite
 `make loaderconf` runs, baseline empty. kmet consumes it through its own
 adapter, `src/kmet/loader/jolt_loader.jolt`, and the extension system evaluates
-natively on Jolt through it (see §9 Phase 2 for what landed, on both sides,
+natively on Jolt through it when the manifest declares `:jolt` (the fallback
+to the SCI backend for `:sci`-only manifests is the Phase 1 backend, on Jolt
+too — see §9 Phase 2 for what landed, on both sides,
 and what remains of §6.1's M0–M4 plan).
 
 Not implemented yet: Phase 3 (JVM native backend + hybrid — deliberately

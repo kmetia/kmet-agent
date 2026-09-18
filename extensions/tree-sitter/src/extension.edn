@@ -1,1 +1,1 @@
-{:name "tree-sitter", :entry kmet.extensions.tree-sitter.core}
+{:name "tree-sitter", :entry kmet.extensions.tree-sitter.core, :loader [:jolt :sci]}

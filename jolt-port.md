@@ -133,15 +133,18 @@ pipe.
 
 ### B3. Extension isolation (`app/extensions.cljc` — SCI, 1668 LOC)
 
-**Superseded for Jolt (native loader, 2026-09).** Jolt's extension contexts
-do not go through SCI. `create-loader` there builds the context on the
-runtime's own loader — `kmet.loader.jolt-loader` over `jolt.loader`, a
-`.jolt` source adapting the runtime's protocol, with the shared contract
-arriving as a filtered host root instead of copied vars — and teardown
-unmaps what it loaded. SCI stays the bb/JVM backend, and the substrate work
-below is what proved it viable host-wide (it still runs there: `jolt test
-kmet.loader.test-sci-loader`). Everything past this note is the SCI-era plan
-and record.
+**Superseded for Jolt (native loader, 2026-09; SCI kept as the declared
+fallback).** Jolt's extension contexts default to the runtime's own loader —
+`kmet.loader.jolt-loader` over `jolt.loader`, a `.jolt` source adapting the
+runtime's protocol, with the shared contract arriving as a filtered host
+root instead of copied vars — and teardown unmaps what it loaded. The
+manifest `:loader` declaration decides per extension (`kmet.app.extensions`
+§ loader selection): `:jolt` when declared, else the `:sci` backend — which
+now also runs on Jolt, with the patched SCI pin (jolt#1031 /
+babashka/sci#1093: `:getRawRoot` and defrecord/extend-type over copied host
+protocols). The substrate work below is what proved SCI viable host-wide
+(it still runs there: `jolt test kmet.loader.test-sci-loader`). Everything
+past this note is the SCI-era plan and record.
 
 Each extension evaluates in its own **SCI context** (`sci/init`,
 `sci/eval-form`): private ns registry + loader serving own files, declared
@@ -175,7 +178,9 @@ deps-resolution counterpart, verified from the built binary
 `tools.reader`). **Version pin: 0.13.53** — the jolt-gated SCI; the latest
 release (0.15.58) does not load on jolt yet (`No such var: clojure.core/Inst`
 loading `sci.impl.core-protocols` — jolt's `clojure.core` lacks the 1.12
-protocol). (The `stdlib/clojure/sci/*_stubs.clj` files are only for
+protocol). *(Update 2026-09-17: current jolt provides `clojure.core/Inst`, and
+the runtime pin is now yogthos/sci @ babashka/sci#1093 — the `:sci` extension
+fallback needs it; see `jolt/deps.edn`.)* (The `stdlib/clojure/sci/*_stubs.clj` files are only for
 the pure-Chez `run-sci.ss` harness — the binary loads real SCI source.)
 
 **Interop inside interpreted code — verified on stock SCI (2026-09-11).**
@@ -268,10 +273,12 @@ keeps its slot for the sci backend's suite, not for extension contexts.
   (AOT'd into the binary) yields extracted source ROOTS; the load-fn and the
   io/resource shadow probe directories on Jolt and jars on bb (`dep-source`).
   Verified on Jolt with an extension declaring `org.clojure/tools.cli` (closure
-  recorded as a root, tool runs, unload releases it). SCI pin: `org.babashka/sci`
-  0.13.53, declared in `jolt/deps.edn` (the jolt-only slot) so the shared
-  deps.edn stays free of a host-bundled library — it is the sci backend's
-  suite's dependency on Jolt now, not the extension runtime's.
+  recorded as a root, tool runs, unload releases it). SCI pin:
+  `org.babashka/sci`, a git pin to yogthos/sci @ babashka/sci#1093 in
+  `jolt/deps.edn` (the jolt-only slot, so the shared deps.edn stays free of a
+  host-bundled library) — it is both the sci backend's Jolt dependency and
+  its suite's, and the fix that lets the `:sci` fallback run extension
+  contexts there.
 - **Core load/unload coverage on Jolt**: the whole loader test set runs there
   (single-file, manifest dir with an internal ns through the load-fn, symlinked
   root, unload/reload with no duplicates, rollback on failure, resource

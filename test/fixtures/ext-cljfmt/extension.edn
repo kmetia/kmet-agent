@@ -1,1 +1,1 @@
-{:name "cljfmt-ext", :entry cljfmt-ext.main}
+{:name "cljfmt-ext", :entry cljfmt-ext.main, :loader [:sci :jolt]}

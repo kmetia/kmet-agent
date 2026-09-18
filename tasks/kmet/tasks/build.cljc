@@ -372,21 +372,34 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" \"$@\"
               (str/replace "_" "-")
               (str/replace "/" "."))))
 
+(def ^:private extension-loader-kinds
+  "Loader backend kinds an extension manifest may declare — the runtime's
+   selection vocabulary (kmet.app.extensions/select-loader-kind)."
+  #{:sci :jolt})
+
 (defn- pack-verify!
   "Verify SRC-DIR is a packable extension artifact root; throw ex-info
    with :type ::pack-error otherwise. Checks: extension.edn present with
-   :name + symbol :entry; the :entry ns-path file exists; every .clj/.cljc/.bb
-   file's (ns ...) matches its path (strict layout); deps.edn parses and
-   carries only :deps. Returns {:name :entry-ns}."
+   :name + symbol :entry + a :loader vector of known backend kinds; the
+   :entry ns-path file exists; every .clj/.cljc/.bb file's (ns ...) matches
+   its path (strict layout); deps.edn parses and carries only :deps.
+   Returns {:name :entry-ns}."
   [src-dir]
   (let [root (fs/canonicalize src-dir)
         manifest (io/file (str root) "extension.edn")]
     (when-not (fs/regular-file? manifest)
       (throw (ex-info (str "no extension.edn in " src-dir) {:type ::pack-error})))
     (let [m (edn/read-string (slurp manifest))
-          entry-ns (:entry m)]
+          entry-ns (:entry m)
+          loaders (:loader m)]
       (when-not (and (:name m) (symbol? entry-ns))
         (throw (ex-info (str "extension.edn needs :name + symbol :entry, got: " (pr-str m))
+                        {:type ::pack-error :manifest m})))
+      (when-not (and (sequential? loaders)
+                     (seq loaders)
+                     (every? extension-loader-kinds loaders))
+        (throw (ex-info (str "extension.edn needs :loader — a non-empty vector of "
+                             (vec (sort extension-loader-kinds)) " — got: " (pr-str loaders))
                         {:type ::pack-error :manifest m})))
       (let [base (str/replace (namespace-munge (str entry-ns)) "." "/")
             entry-file (some (fn [ext]

@@ -129,7 +129,7 @@
   (testing "rejects strict-layout violations"
     (let [dir "target/test-pack-sloppy"]
       (fs/create-dirs (str dir "/sloppy"))
-      (spit (str dir "/extension.edn") "{:name \"sloppy\" :entry sloppy.main}")
+      (spit (str dir "/extension.edn") "{:name \"sloppy\" :entry sloppy.main :loader [:sci]}")
       (spit (str dir "/sloppy/main.clj") "(ns wrong.place)\n(defn init [api] nil)\n")
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"strict layout violation"
                             (build/pack-extension! dir "target/test-pack-sloppy.jar")))
@@ -137,11 +137,26 @@
   (testing "rejects string :entry manifests"
     (let [dir "target/test-pack-strentry"]
       (fs/create-dirs dir)
-      (spit (str dir "/extension.edn") "{:name \"strentry\" :entry \"main.clj\"}")
+      (spit (str dir "/extension.edn") "{:name \"strentry\" :entry \"main.clj\" :loader [:sci]}")
       (spit (str dir "/main.clj") "(ns strentry.main)\n(defn init [api] nil)\n")
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #":entry"
                             (build/pack-extension! dir "target/test-pack-str.jar")))
-      (fs/delete-tree dir))))
+      (fs/delete-tree dir)))
+  (testing "rejects a manifest without :loader and unknown loader kinds"
+    (let [dir "target/test-pack-loader"]
+      (fs/create-dirs (str dir "/ld"))
+      (spit (str dir "/ld/main.clj") "(ns ld.main)\n(defn init [api] nil)\n")
+      (spit (str dir "/extension.edn") "{:name \"ld\" :entry ld.main}")
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #":loader"
+                            (build/pack-extension! dir "target/test-pack-loader.jar")))
+      (spit (str dir "/extension.edn") "{:name \"ld\" :entry ld.main :loader [:jvm]}")
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #":loader"
+                            (build/pack-extension! dir "target/test-pack-loader.jar")))
+      (spit (str dir "/extension.edn") "{:name \"ld\" :entry ld.main :loader [:sci :jolt]}")
+      (is (= "target/test-pack-loader.jar"
+             (build/pack-extension! dir "target/test-pack-loader.jar")))
+      (fs/delete-tree dir)
+      (fs/delete-if-exists "target/test-pack-loader.jar"))))
 
 (deftest ^:bb-only pack-extension-roundtrip-loads
   (testing "packed jar of the clojure extension loads (fast: reused closure)"

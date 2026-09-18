@@ -31,9 +31,11 @@
    Layout: extensions are single .clj files, directories containing an
    extension.edn manifest, or .jar/.zip archives with the same layout at
    the archive root:
-     {:name \"my-ext\" :entry my.ext.main}
+     {:name \"my-ext\" :entry my.ext.main :loader [:jolt :sci]}
    — :entry is a namespace symbol resolved by strict ns-path lookup
-   (namespace a.b/c lives at a/b/c.clj under the root); internal namespaces
+   (namespace a.b/c lives at a/b/c.clj under the root); :loader lists the
+   loader backends the extension supports (:sci / :jolt — the host picks
+   its own preference, see kmet.app.extensions). Internal namespaces
    are required from there. An extension directory may also carry a deps.edn
    declaring library dependencies; kmet serves them to that extension only
    (each extension runs in its own isolated context, so different

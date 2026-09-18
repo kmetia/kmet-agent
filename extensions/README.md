@@ -68,11 +68,13 @@ never ship.
   stay small and self-contained; validate changes by loading the file
   against `kmet.extension/create-nullable-api` or the real runtime.
 - **Directory-based extensions** (a subdirectory with an `extension.edn`
-  manifest `{:name ... :entry my.ext.main}`) — separate projects with a
-  **strict ns-path layout** (namespace `a.b/c` at `a/b/c.clj` under the
-  root). They may carry a `deps.edn` for library dependencies (`:deps`
-  only) and their own tests (run them from inside the directory, e.g.
-  `bb test` against the extension's own deps).
+  manifest `{:name ... :entry my.ext.main :loader [:jolt :sci]}`) — separate
+  projects with a **strict ns-path layout** (namespace `a.b/c` at `a/b/c.clj`
+  under the root). `:loader` lists the loader backends the extension
+  supports (`:sci` / `:jolt`; the host picks its own preference — see
+  `extensions.md` § Loader compatibility). They may carry a `deps.edn` for
+  library dependencies (`:deps` only) and their own tests (run them from
+  inside the directory, e.g. `bb test` against the extension's own deps).
 - **Jar/zip extensions** — the same layout packed as a single archive
   (`extension.edn` + `deps.edn` at the root, code at ns paths, resources by
   exact name). The loader serves them unexpanded. See `extensions.md` for
