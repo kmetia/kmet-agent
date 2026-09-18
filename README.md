@@ -217,6 +217,7 @@ report as not implemented.
 | `Escape` | Cancel the current turn / running bash |
 | `Ctrl+C` | Clear editor (twice to quit) |
 | `Ctrl+D` | Exit when editor is empty |
+| `Ctrl+Q` | Quit kmet (works anywhere) |
 | `Ctrl+L` | Select model |
 | `Ctrl+P` / `Shift+Ctrl+P` | Cycle scoped models (`--models` / `/scoped-models`) |
 | `Shift+Tab` | Cycle thinking level |

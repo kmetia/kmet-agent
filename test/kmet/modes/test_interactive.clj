@@ -30,6 +30,8 @@
             [kmet.tui.components.expandable-text :as expandable-text]
             [kmet.libs.terminal-image :as timg]
             [kmet.tui.protocols :as protocols]
+            [kmet.tui.core :as tui]
+            [kmet.tui.keybindings :as tui-kb]
             [babashka.fs :as fs]
             [clojure.string :as str]))
 
@@ -817,3 +819,26 @@
                    (if expected " heals the dirty scrollback"
                        " must not emit the clearing redraw")))
           (is (false? @(:running-turn? cs)) (str label " ends the turn")))))))
+
+(deftest global-quit-listener
+  (testing "app.quit (ctrl+q by default) quits from anywhere and consumes the key"
+    (let [prev-global (tui-kb/get-global-keybindings)]
+      (try
+        (tui-kb/set-global-keybindings! (app-kb/make-agent-keybindings-manager))
+        (let [tui-stub {:stopped? (atom false)}
+              listener ((var inter/global-quit-listener) tui-stub)
+              stopped (atom nil)]
+          (with-redefs [tui/tui-stop (fn [t] (reset! stopped t))]
+            (is (= {:consume true} (listener "\u0011"))
+                "ctrl+q is consumed so the focused component never sees it")
+            (is (identical? tui-stub @stopped) "the TUI is stopped")
+            (reset! stopped nil)
+            (is (nil? (listener "x")) "other keys pass through untouched")
+            (is (nil? @stopped) "…and do not stop the TUI")
+            (testing "a keybindings.edn override moves the shortcut"
+              (tui-kb/set-user-bindings! (tui-kb/get-global-keybindings)
+                                         {"app.quit" "alt+x"})
+              (is (nil? (listener "\u0011")) "ctrl+q no longer quits")
+              (is (= {:consume true} (listener "\u001bx"))
+                  "the override key quits"))))
+        (finally (tui-kb/set-global-keybindings! prev-global))))))

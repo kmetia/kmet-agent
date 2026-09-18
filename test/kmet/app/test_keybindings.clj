@@ -185,7 +185,9 @@
       (t/is (= ["left"] (tui-kb/get-keys kmgr "tui.settings.cycleBackward")))
       (t/is (= ["right"] (tui-kb/get-keys kmgr "tui.settings.cycleForward")))
       (t/is (= ["ctrl+s"] (tui-kb/get-keys kmgr "app.thinking.save"))
-            "pi id kmet was missing"))
+            "pi id kmet was missing")
+      (t/is (= ["ctrl+q"] (tui-kb/get-keys kmgr "app.quit"))
+            "global quit (kmet-only id)"))
     (t/testing "user overrides replace the whole chord set"
       (tui-kb/set-user-bindings! kmgr {"tui.editor.deleteCharBackward" "ctrl+x"})
       (t/is (= ["ctrl+x"] (tui-kb/get-keys kmgr "tui.editor.deleteCharBackward")))

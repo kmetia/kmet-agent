@@ -17,6 +17,7 @@
   {"app.interrupt"              {:default-keys ["escape"]                 :description "Cancel or abort"}
    "app.clear"                  {:default-keys ["ctrl+c"]                 :description "Clear editor"}
    "app.exit"                   {:default-keys ["ctrl+d"]                 :description "Exit when editor is empty"}
+   "app.quit"                   {:default-keys ["ctrl+q"]                 :description "Quit kmet"}
    "app.suspend"                {:default-keys ["ctrl+z"]                 :description "Suspend to background"}
    "app.thinking.cycle"         {:default-keys ["shift+tab"]              :description "Cycle thinking level"}
    "app.thinking.save"          {:default-keys ["ctrl+s"]                 :description "Save thinking level"}

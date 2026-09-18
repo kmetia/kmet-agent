@@ -668,7 +668,10 @@ for each, the **last non-nil handler result wins**:
 ;; string ("ctrl+alt+x", "f5", ...). The handler receives the extension
 ;; context. Extension shortcuts are checked BEFORE every builtin app
 ;; binding (escape/app.interrupt included — pi: onExtensionShortcut runs
-;; first); the last registration of the same key wins.
+;; first); the last registration of the same key wins. One exception:
+;; app.quit (ctrl+q by default) is handled in the TUI input-listener chain
+;; before focus dispatch, so a shortcut on its chord never runs — rebind
+;; app.quit if the chord is needed.
 (ext/register-shortcut! api "ctrl+alt+x"
   {:description "Do the thing"
    :handler (fn [ctx] ...)})

@@ -261,6 +261,7 @@
                    (fmt-key-hint "app.clear" "to clear")
                    (fmt-raw-hint (str clear-key " twice") "to exit")
                    (fmt-key-hint "app.exit" "to exit (empty)")
+                   (fmt-key-hint "app.quit" "to quit anywhere")
                    (fmt-key-hint "app.thinking.cycle" "to cycle thinking level")
                    (fmt-key-hint "app.model.cycleForward" "to cycle models")
                    (fmt-key-hint "app.model.select" "to select model")
@@ -379,6 +380,7 @@
          "  Escape     — Cancel current turn / bash\n"
          "  Ctrl+C     — Clear editor (press twice to quit)\n"
          "  Ctrl+D     — Quit (when editor is empty)\n"
+         "  Ctrl+Q     — Quit kmet (from anywhere)\n"
          "  Ctrl+G     — Open external editor\n"
          "  Ctrl+O     — Cycle tool display (collapsed/expanded/quiet)\n"
          "  Ctrl+T     — Toggle thinking blocks\n"
@@ -2792,6 +2794,20 @@
   (when (streaming-free? cs)
     (tui/tui-heal-scrollback! (:tui cs))))
 
+(defn- global-quit-listener
+  "Build the TUI input listener for the global quit shortcut (app.quit,
+   ctrl+q by default). The listener chain runs before the overlay modality
+   guard and focus dispatch, so the shortcut quits from anywhere — the
+   editor, a selector, a dialog — and consumes the event so neither the
+   focused component nor an extension shortcut sees the key. The binding
+   is resolved per event through the global manager, so keybindings.edn
+   overrides apply (and /reload moves the shortcut live)."
+  [t]
+  (fn [data]
+    (when (tui-kb/matches-key (tui-kb/get-global-keybindings) data "app.quit")
+      (tui/tui-stop t)
+      {:consume true})))
+
 (defn- request-global-reflow-render!
   "Request a render after a global reflow — a discrete toggle that
    re-renders many messages at once (tool expansion, thinking visibility,
@@ -3807,6 +3823,12 @@
       (tui/tui-add-child t dock-root)
       (tui/tui-add-child t widgets-below-root)
       (tui/tui-add-child t ftr)
+
+      ;; Global quit (app.quit, ctrl+q by default): the input-listener chain
+      ;; runs before the overlay modality guard and focus dispatch, so the
+      ;; shortcut quits from anywhere — editor, selector, dialog included.
+      ;; Registered before the heal listener so a quit key skips it.
+      (tui/tui-add-input-listener t (global-quit-listener t))
 
       ;; Heal a stale scrollback on the next keystroke when idle (see
       ;; heal-stale-scrollback-when-idle!): short of a scroll event, input is
