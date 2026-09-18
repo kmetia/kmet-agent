@@ -64,7 +64,7 @@
     (theme/fg th :success (str " ✓ " (:source status)))))
 
 (defcomponent AuthSelector nil
-              [root search-input state-atom mode
+              [root search-ref state-atom mode
                on-select-atom on-cancel-atom focused? cache-atom]
 
   (render [this width] (protocols/render (:root this) width))
@@ -102,18 +102,18 @@
 
         ;; Everything else — the search input (the visible filter, pi)
         :else
-        (do (protocols/handle-input search-input data)
-            (let [value (input/input-get-value search-input)]
-              (when (not= value (:search st))
-                ;; pi filterProviders: clamp the selection to the new
-                ;; filtered count — it does not reset to the top
-                (swap! state-atom assoc :search value))
-              nil)))))
+        (let [i (h/materialize-ref! _this (:search-ref _this))]
+          (protocols/handle-input i data)
+          (let [value (input/input-get-value i)]
+            (when (not= value (:search st))
+              ;; pi filterProviders: clamp the selection to the new
+              ;; filtered count — it does not reset to the top
+              (swap! state-atom assoc :search value))
+            nil)))))
 
-  ;; the root's reaction and the foreign search input are the selector's
-  ;; lifecycle: the dock close paths unwind both
+  ;; the root's reaction and the tag-owned search field are the selector's
+  ;; lifecycle: the dock close paths unwind the root
   (dispose [this]
-    (protocols/dispose (:search-input this))
     (protocols/dispose (:root this))))
 
 ;; ─── List rendering (pi updateList) ────────────────────────────────────────
@@ -158,10 +158,11 @@
 
 (defn- auth-body
   "The selector tree as a reactive body (dsl.md): the header, the rows and
-   the scroll/empty rows re-derive from the state atom; the search input
-   splices foreign. BORDER-FN is created once per selector so the border's
-   :color-fn keeps identity across passes."
-  [state-atom search-input title mode border-fn]
+   the scroll/empty rows re-derive from the state atom; the search field is a
+   tag-owned `[:input]` whose text is the state's `:search` and whose
+   emphasis is the panel's focus flag. BORDER-FN is created once per selector
+   so the border's :color-fn keeps identity across passes."
+  [state-atom search-ref focused? title mode border-fn]
   (fn [_props]
     (let [th (theme/get-current-theme)
           st (r/tracked-deref state-atom)
@@ -178,7 +179,9 @@
        [:spacer {:lines 1}]
        [:text {:padding-x 1 :padding-y 0} (theme/fg th :accent (theme/bold title))]
        [:spacer {:lines 1}]
-       search-input
+       [:input {:ref search-ref
+                :value (:search st)
+                :focused? (r/tracked-deref focused?)}]
        [:spacer {:lines 1}]
        (row-elements th mode entries filtered selected show-types? start-idx end-idx)
        [:spacer {:lines 1}]
@@ -192,7 +195,6 @@
    filter (pi initialSearchInput)."
   [mode entries on-select on-cancel & [search]]
   (let [entries (vec entries)
-        search-input (input/make-input)
         title (if (= :login mode)
                 "Select provider to configure:"
                 "Select provider to logout:")
@@ -202,29 +204,27 @@
         st (atom {:entries entries
                   :search (or search "")
                   :selected-idx 0})
+        focused? (atom false)
         sel (map->AuthSelector
              {:root nil
-              :search-input search-input
+              :search-ref (h/ref)
               :state-atom st
               :mode mode
               :on-select-atom (atom on-select)
               :on-cancel-atom (atom on-cancel)
-              :focused? (atom false)
+              :focused? focused?
               :cache-atom (atom nil)})]
-    (when (seq search)
-      (input/input-set-value! search-input search))
     ;; rows are a tracked root body — no refresh call, the state change alone
-    ;; re-derives
-    (assoc sel :root (h/root (auth-body st search-input title mode border-fn)))))
+    ;; re-derives; the :search prefill is the state's initial value, written
+    ;; into the tag-owned field as its :value prop
+    (assoc sel :root (h/root (auth-body st (:search-ref sel) focused? title mode border-fn)))))
 
-;; ─── IFocusable — forward to the search input (IME cursor positioning) ─────
+;; ─── IFocusable — the panel's flag; the tree derives the field's emphasis ──
 
 (extend-type AuthSelector
   protocols/IFocusable
   (focused [this] @(:focused? this))
-  (set-focused! [this val]
-    (reset! (:focused? this) val)
-    (protocols/set-focused! (:search-input this) val)))
+  (set-focused! [this val] (reset! (:focused? this) val)))
 
 ;; ─── Auth-method selector (pi ExtensionSelectorComponent) ─────────────────
 ;; The plain string-option list showLoginAuthTypeSelector renders: no

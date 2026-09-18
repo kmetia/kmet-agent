@@ -56,7 +56,7 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | file | shape | remaining `make-*` | plan |
 |---|---|---|---|
 | `assistant_message.clj` | KEEP | transient `md/make-markdown` per reflow (`render-text-to-width`, `render-thinking-to-width`) | none — render-to-width helper, not a tree node |
-| `auth_selector.clj` | DONE | none — root bodies for both selectors, `[:truncated-text]` rows, inputs foreign, `dispose` unwinds both; new `test_auth_selector.clj` (render-driven) | none (Phase 1 #3) |
+| `auth_selector.clj` | DONE (full) | none — root bodies for both selectors, `[:truncated-text]` rows, the provider selector's search field a `[:input]` tag (`:value` from the mirrored `:search`; the `:search` prefill is the state's initial value), `dispose` unwinds the root; new `test_auth_selector.clj` (render-driven) | none (Phase 1 #3) |
 | `model_selector.clj` | DONE (full) | none — root body, keyed `[:text]` rows, live scope/hint labels as elements, search field a `[:input]` tag (`:value` from the mirrored `:search`, `:focused?` from the panel flag; the `:search` prefill is the state's initial value), `dispose` unwinds the root | none (Phase 1 #2) |
 | `scoped_models_selector.clj` | DONE (full) | none — root body, keyed `[:text]` rows, live footer as an element, search field a `[:input]` tag (`:value` from the mirrored `:search`, `:focused?` from the panel flag), `dispose` unwinds the root | none (Phase 1 #2) |
 | `thinking_selector.clj` | DONE (full) | none — root body, keyed `[:text]` rows, search field a `[:input]` tag (`:value` from the state's mirrored `:search`, `:focused?` from the panel flag), `dispose` unwinds the root | none (Phase 1 #1) |
