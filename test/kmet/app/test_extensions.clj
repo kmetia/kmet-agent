@@ -5,10 +5,9 @@
    Contexts are per host — SCI on bb/JVM, the runtime's own loader on Jolt —
    and the suite runs on both. ^:bb-only is what Jolt genuinely cannot do:
    the bundled clojure.spec port test (nothing loads spec.alpha there, and
-   bb's port is not injected), the cljfmt Maven-chain test (its deps.edn
+   bb's port is not injected) and the cljfmt Maven-chain test (its deps.edn
    excludes the bb-bundled rewrite-clj and Jolt has no replacement — the
-   clojure extension's gap, extensions.md § bb-bundled ports) and the two jar
-   tests (they build archives with java.util.zip)."
+   clojure extension's gap, extensions.md § bb-bundled ports)."
   (:require [clojure.test :as t :refer [testing]]
             [clojure.string :as str]
             [clojure.java.io :as io]
@@ -731,24 +730,22 @@
     (testing "valid kmet.libs.* requires load and share the real library"
       (let [result (load "lib" "(ns good-lib\n  (:require [kmet.libs.hash :as hash]\n            [kmet.libs.yaml :as yaml]))\n(defn init [api]\n  (let [s (hash/short-hash \"hi\")]\n    (when-not (string? s)\n      (throw (ex-info \"hash failed\" {})))))\n")]
         (t/is (nil? (:error result)) (str "loaded: " (:error result)))))
-    ;; java.util.zip is unshimmed on Jolt (M4) — the archive roundtrip stays bb-only.
-    (when-not (boolean (find-var 'clojure.core/*jolt-version*))
-      (testing "kmet.libs.archive loads from SCI and extracts zips (no ZipFile interop in extensions)"
-        (let [result (load "archive" (str "(ns good-archive\n  (:require [babashka.fs :as fs]\n"
-                                          "            [clojure.java.io :as io]\n"
-                                          "            [kmet.libs.archive :as archive]))\n"
-                                          "(defn init [_api]\n"
-                                          "  (let [tmpdir (or (System/getenv \"TMPDIR\") (System/getProperty \"java.io.tmpdir\"))\n"
-                                          "        zip (str (fs/path tmpdir \"arc-test.zip\"))\n"
-                                          "        out (str (fs/path tmpdir \"arc-out\"))]\n"
-                                          "    (with-open [zos (java.util.zip.ZipOutputStream. (io/output-stream zip))]\n"
-                                          "      (.putNextEntry zos (java.util.zip.ZipEntry. \"a.txt\"))\n"
-                                          "      (.write zos (.getBytes \"hi\" \"UTF-8\"))\n"
-                                          "      (.closeEntry zos))\n"
-                                          "    (let [extracted (archive/extract-zip! zip out)]\n"
-                                          "      (when-not (= \"hi\" (slurp (str (first extracted))))\n"
-                                          "        (throw (ex-info \"archive failed\" {}))))))\n"))]
-          (t/is (nil? (:error result)) (str "loaded: " (:error result))))))
+    (testing "kmet.libs.archive loads from SCI and extracts zips (no ZipFile interop in extensions)"
+      (let [result (load "archive" (str "(ns good-archive\n  (:require [babashka.fs :as fs]\n"
+                                        "            [clojure.java.io :as io]\n"
+                                        "            [kmet.libs.archive :as archive]))\n"
+                                        "(defn init [_api]\n"
+                                        "  (let [tmpdir (or (System/getenv \"TMPDIR\") (System/getProperty \"java.io.tmpdir\"))\n"
+                                        "        zip (str (fs/path tmpdir \"arc-test.zip\"))\n"
+                                        "        out (str (fs/path tmpdir \"arc-out\"))]\n"
+                                        "    (with-open [zos (java.util.zip.ZipOutputStream. (io/output-stream zip))]\n"
+                                        "      (.putNextEntry zos (java.util.zip.ZipEntry. \"a.txt\"))\n"
+                                        "      (.write zos (.getBytes \"hi\" \"UTF-8\"))\n"
+                                        "      (.closeEntry zos))\n"
+                                        "    (let [extracted (archive/extract-zip! zip out)]\n"
+                                        "      (when-not (= \"hi\" (slurp (str (first extracted))))\n"
+                                        "        (throw (ex-info \"archive failed\" {}))))))\n"))]
+        (t/is (nil? (:error result)) (str "loaded: " (:error result)))))
     (testing "the whitelisted built-in renderer namespace loads and shares direct vars"
       (let [result (load "renderer" "(ns good-renderer\n  (:require [kmet.app.ui.tool-renderers :as renderers]))\n(defn init [_api]\n  (when-not (fn? renderers/render-edit-call)\n    (throw (ex-info \"renderer failed\" {}))))\n")]
         (t/is (nil? (:error result)) (str "loaded: " (:error result)))))
@@ -1031,15 +1028,11 @@
         (prompts/clear-prompt-templates!)
         (fs/delete-tree dir)))))
 
-(t/deftest ^:bb-only test-jar-extension-load-resource-unload
+(t/deftest test-jar-extension-load-resource-unload
   ;; jar distribution (jar-ext.md §1): code served from the archive without
-  ;; expansion (per-call ZipFile), resources via the shadowed io/resource,
-  ;; :extension-dir nil, unload clean.
-  ;; ^:bb-only for the TEST MECHANICS (it builds the archive with
-  ;; java.util.zip.ZipOutputStream, which Jolt lacks) — the loader itself
-  ;; accepts jars on Jolt by materializing them with `unzip` and treating
-  ;; them as directory artifacts (verified manually: own namespaces, bundled
-  ;; io/resource, .zip suffix and container discovery all work).
+  ;; expansion — per-call ZipFile on babashka, the archive root on Jolt's
+  ;; native loader (jars load in place) — resources via the shadowed
+  ;; io/resource, :extension-dir nil, unload clean.
   (extensions/clear-extensions!)
   (let [dir "target/test-ext-jar-src"
         jar "target/test-ext-jar.jar"]
@@ -1092,6 +1085,22 @@
                   (str "jar picked up: " (pr-str results)))
             (t/is (= "jar-ok|bundled" (:content (tools/execute-tool "jar-ext-tool" {})))))
           (fs/delete-tree container)))
+      (testing "the SCI backend serves the archive too (Jolt's fallback: jar entries read per call, jar: URLs for resources)"
+        (let [sci-jar "target/test-ext-jar-sci.jar"]
+          (fs/delete-if-exists sci-jar)
+          (with-open [zos (java.util.zip.ZipOutputStream. (io/output-stream sci-jar))]
+            (doseq [rel ["extension.edn" "jar_ext/main.clj" "jar_ext/helper.clj" "data.txt"]]
+              (.putNextEntry zos (java.util.zip.ZipEntry. rel))
+              (if (= rel "extension.edn")
+                (.write zos (.getBytes "{:name \"jar-ext\" :entry jar-ext.main :loader [:sci]}\n" "UTF-8"))
+                (io/copy (io/file (str dir "/" rel)) zos))
+              (.closeEntry zos)))
+          (extensions/unload-all-extensions!)
+          (let [result (extensions/load-extension! sci-jar)]
+            (t/is (nil? (:error result)) (str "loaded: " (:error result)))
+            (t/is (= :sci (:loader-kind result)))
+            (t/is (= "jar-ok|bundled" (:content (tools/execute-tool "jar-ext-tool" {})))))
+          (fs/delete-if-exists sci-jar)))
       (testing "sloppy ns (file declares another namespace) fails with an actionable error"
         (let [sdir "target/test-ext-jar-sloppy-src"
               sjar "target/test-ext-jar-sloppy.jar"]

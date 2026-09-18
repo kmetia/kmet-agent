@@ -223,11 +223,13 @@ What the two backends mean in practice is in
 A `.jar` (or `.zip` — same bytes, either suffix) with the directory layout
 above at its root loads exactly like the directory: `extension.edn` (+
 optional `deps.edn`) on top, code at ns paths, resources by exact name.
-On babashka the archive is **never expanded** — code is served per-call from
-the zip and resources via `io/resource` (see below); nothing is written
-outside `~/.m2`/`~/.gitlibs`. On Jolt (no `java.util.zip`) the loader
-extracts the archive with `unzip` into a temp cache keyed by path + mtime
-and treats it as a directory artifact — author-visible behavior is the same.
+The archive is **never expanded on either host** — code and manifests are
+served from the zip (babashka probes entries per call through `ZipFile`; on
+Jolt the archive is the loader's source root, read through its central
+directory), and resources resolve through the archive (babashka:
+an artifact-scoped `io/resource`; Jolt: the loader's own resource
+resolution, a `jar:file:…!/entry` URL). Nothing is written outside
+`~/.m2`/`~/.gitlibs`.
 Discovery picks up top-level `*.jar`/`*.zip` files
 alongside `*.clj` files and manifest dirs. Pack one with
 `bb pack-extension <src-dir> [out.jar]` (verify-then-zip: `:entry`
@@ -348,11 +350,13 @@ not author-visible:
   and SCI's `*out*`/`*err*` are bound around evaluation and registered
   callbacks.
 - **Deps.** bb resolves the closure to jars and serves them with `ZipFile`;
-  Jolt uses `jolt.deps/resolve-deps` and serves the extracted source roots
-  with fs probes (`extension-jars` returns roots on Jolt).
-- **Jars.** Jolt materializes `.jar`/`.zip` artifacts with `unzip` into a
-  temp cache and treats them as directory artifacts; bb keeps the unexpanded
-  ZipFile path.
+  Jolt uses `jolt.deps/resolve-deps`, which returns the dependency jars
+  unexpanded (Maven/git) or `:local/root` paths — both are read in place
+  (`extension-jars` returns jars on both hosts).
+- **Jars.** Neither host expands an extension archive: babashka probes
+  entries per call with `ZipFile`; Jolt passes the archive to the native
+  loader as a source root, so a `require` reads the central directory and
+  resources answer `jar:file:…!/entry` URLs.
 - **bb-bundled ports.** `clojure.spec`, `rewrite-clj`, `edamame` and the
   `clojure.data.xml` family are bb-bundled ports injected by reference;
   Jolt has no bundled copies, so extensions needing them must declare a

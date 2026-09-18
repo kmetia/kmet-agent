@@ -1,7 +1,8 @@
 # jolt-bugs — open upstream tickets
 
 Every **open** jolt-side ticket whose fix requires a change in kmet or the
-removal of a kmet workaround. Closed and unfiled findings are not tracked
+removal of a kmet workaround — plus confirmed findings not yet in the
+tracker (the note below). Closed findings are not tracked
 here — recent closures (jolt v0.8.8-53 / http-client PR #21): #1011
 (`Object.wait`/`notify`), #1007 (streaming HTTP), #1015/#1016
 (`StringBuilder` `append`/`insert` char[]), #1017 (stream timeout), #1006
@@ -21,8 +22,28 @@ edit and both pins move to the fixed revisions. Still owed: the Windows smoke
 `jolt.exe` or on PATH) once a Windows host runs it. `jolt-port.md` /
 `jolt-tui.md` describe port state without ticket IDs.
 
+**Zip/unzip and archive loading (jolt PR #1044, merged 2026-09-18, in
+v0.8.8-150-g2e19b70f).** Closes #988 (no dependency on the `unzip`
+program), #1005 (Maven deps load from their jars in place — no extraction
+directories, no `.jolt-ok` markers) and #916 (`java.util.zip`: Inflater,
+Deflater, CRC32, Adler32, the deflate/GZIP streams, ZipInputStream,
+ZipOutputStream, ZipFile, ZipEntry, and their exceptions; `jolt.loader`
+accepted a jar root since the same wave — a `require` reads the central
+directory, `io/resource` answers `jar:file:…!/entry` URLs, `*file*` carries
+that spelling). The kmet workarounds this closed are removed alongside this
+edit: `kmet.libs.archive` is portable (`extract-zip!` no longer fails
+`::bb-only` on Jolt; the guard, its `kmet.libs.host` require and the
+`^:bb-only` test gates are gone), and extension archives stay unexpanded on
+Jolt — `kmet.app.extensions` roots a jar artifact at the archive, reads
+entries through `java.util.zip.ZipFile` (not `java.util.jar.JarFile`, which
+Jolt does not implement), and the native loader reads the jar in place; the
+`unzip` materialization cache (`materialize-jar!`) is deleted. `jolt.fs`
+exports `zip`/`unzip`/`gzip`/`gunzip` too. The packed-clojure roundtrip test
+stays `^:bb-only` for its dependency closure, not for zip mechanics.
+
 **Unfiled but confirmed blockers** (not yet in jolt tracker):
-*(none — the IVar gap is now filed as [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031))*
+**one — the `jolt.loader` classloader facade cached by `:id`** (below;
+the IVar gap is filed as [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031)).
 
 **Workarounds live next to their ticket below.** Each workaround block is the
 removal checklist: when an upstream fix lands, delete the listed code (and the
@@ -33,6 +54,72 @@ Historical labels from the deleted `bb-jolt.md` map as: `JOLT-12`→#947,
 `JOLT-13`→#944; git history has the full field reports.
 
 ## Open
+
+### (unfiled) `jolt.loader` classloader facade cached by `:id`, stale after unload
+
+**Area:** `jolt.loader/as-classloader` (`stdlib/jolt/loader.clj`).
+`facades` is an atom keyed by the loader's `:id`, and neither `unload!` nor a
+new `classpath` with the same id replaces the entry. `clojure.java.io/resource`
+under `with-loader` goes through `RT/baseLoader` → `as-classloader`, so a
+second context minted with a used id resolves through the first context's
+facade — which still wraps the first, now **unloaded** loader:
+
+```
+loader <id> is unloaded
+```
+
+The same stale-facade path hits `ClassLoader.getResource*` (the 2-arity of
+`io/resource`), since they share the facade. `find`/`open-hit` on a fresh
+loader are unaffected, and distinct ids never collide. Repro (any jar with a
+namespace and a resource):
+
+```clojure
+(require '[jolt.loader :as jl] '[clojure.java.io :as io])
+(let [r (str (System/getProperty "user.dir") "/lib.jar")]
+  (doseq [round [1 2]]
+    (let [l (jl/classpath [r] {:id "ctx"})]
+      (jl/load l {:kind :ns :name "mylib.foo"})
+      (jl/with-loader* l
+        (fn [] (println :round round
+                        (subs (slurp (io/resource "mylib/foo.clj")) 0 12))))
+      (jl/unload! l))))
+;; round 1 prints the source; round 2 throws "loader ctx is unloaded"
+;; (two distinct ids both print; a jl/find probe in round 2 also works)
+```
+
+The upstream fix is one of: key the facade cache by loader identity rather
+than id, replace/evict the entry in `make-loader` when an id is reused, or
+clear it in `unload!` (the harness-only `reset-context-state!` does clear it,
+but it drops every context).
+
+**Workaround:** `kmet.app.extensions/create-jolt-loader` appends a per-context
+counter to its loader id (`ext:<name>#N`) — the id keeps its diagnostic
+prefix and the facade cache can never serve a previous context's facade.
+`/reload` reloads the same extensions (same names), so kmet hits this on Jolt
+on every reload of an extension that read a resource before it. Remove the
+counter when the cache is fixed.
+
+### [jolt-lang/http-client#25](https://github.com/jolt-lang/http-client/pull/25) — drop the libz shims and their `java.util.zip` claims (open)
+
+**Area:** the pinned `io.github.jolt-lang/http-client` (04ebbc03). With
+`java.util.zip` in the runtime, the library's `jolt.http.platform` claims on
+`GZIPInputStream`/`GZIPOutputStream`/`InflaterInputStream`/`DeflaterInputStream`/`Inflater`
+are redundant, and every Jolt run of kmet prints
+
+```
+warning: jolt.http.platform claims java.util.zip.GZIPInputStream, …, which
+this jolt provides; the runtime's classes answers and the claim is dropped —
+upgrade io.github.jolt-lang/http-client
+```
+
+PR #25 (drops the shims, uses the runtime classes, raises the floor to
+`:jolt/min-version "0.8.9"`) is open and unmerged, and the floor is why the
+pin cannot move yet: kmet's Jolt toolchain reports `v0.8.8-150-g…`, which
+`version-parts` reads as 0.8.8, below the branch's floor. **Workaround: none
+needed** — the claim is dropped and the runtime's own classes answer, so only
+the warning is noise. When the PR merges (and the running Jolt satisfies the
+0.8.9 floor, i.e. a release past v0.8.8), move the pin to the merged SHA and
+delete this block.
 
 ### [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) — SCI `IVar` protocol missing `:getRawRoot` for `clojure.lang.Var`
 

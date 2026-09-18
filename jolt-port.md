@@ -62,9 +62,6 @@ loader, and the `:sci` backend is the declared fallback. Open:
   Jolt is open**.
 - Model generators (`generate-models` / `generate-image-models`) remain
   bb-only.
-- `libs/archive.clj`'s zip read is bb-only; jar/zip content is materialized
-  by unzipping into a temp cache (jolt's mvn-jar model). Revisit only if a
-  Jolt-side zip reader is needed.
 
 ## Verification backlog
 

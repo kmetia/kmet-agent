@@ -678,8 +678,9 @@ never a second semantics.
 `deps.edn` to roots is a host seam: `borkdude.deps` on bb/JVM (today's
 `closure-jars`/`jars-for`), `jolt.deps/resolve-deps` on jolt (which already
 returns `{:roots … :natives … :provides … :libs …}` per graph). The loader
-backend takes an injected resolve-deps fn. Version-qualified extraction dirs
-already make v1/v2 coexist on disk in both systems.
+backend takes an injected resolve-deps fn. Version-qualified dependency
+roots (the jars themselves, read in place) already make v1/v2 coexist on
+disk in both systems.
 
 ### 6.3 Cross-ctx identity rules (write down, don't discover later)
 
@@ -1028,7 +1029,8 @@ machinery) and the ambient binding. `kmet.app.extensions/create-loader` picks
 it on Jolt: the extension's own sources are read by the native reader from its
 artifact root — a single-file extension is materialized at its munged ns path
 first, and every own source is validated up front, because the native reader
-never calls back into kmet — dep roots are the `jolt.deps` extraction dirs,
+never calls back into kmet — dep roots are the `jolt.deps` resolution's
+sources (jars, read in place, plus `:local/root` directories),
 and the shared contract arrives as the filtered host root instead of copied
 vars. Every callback an extension registers, and init/shutdown themselves, run
 wrapped in `with-loader*` — every fn inside a registration *map* too
@@ -1194,6 +1196,5 @@ maps onto it without rework.
   unload needs no cleanup" is the stance throughout — and `unload!` takes
   back namespaces, not files. The caches that do exist belong to someone
   else: Jolt's host AOT cache (the host-root path) and the extension
-  system's temp dirs (`kmet-ext-jars`, keyed by jar path + mtime;
-  `kmet-ext-src`, keyed by the materialized source's content), both
-  reusable by design and left to the OS temp reaper.
+  system's single-file temp dir (`kmet-ext-src`, keyed by the materialized
+  source's content), reusable by design and left to the OS temp reaper.

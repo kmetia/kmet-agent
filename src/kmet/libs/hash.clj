@@ -37,8 +37,9 @@
          (Long/toString (bit-and h1 0xFFFFFFFF) 36))))
 
 (def ^:private crc32-table
-  "Precomputed CRC-32 table (polynomial 0xEDB88320). Pure Clojure — replaces
-   java.util.zip.CRC32 on Jolt, where that class is not shimmed."
+  "Precomputed CRC-32 table (polynomial 0xEDB88320). Pure Clojure — one
+   implementation on every host and in shared extension contexts, rather
+   than picking Jolt's java.util.zip.CRC32 vs the JDK's."
   (vec (map (fn [n]
               (loop [c n i 0]
                 (if (< i 8)
@@ -52,7 +53,8 @@
 (defn crc32
   "CRC-32 of a byte array (ISO 3309 / ITU-T V.42, the same checksum
    java.util.zip.CRC32 computes). Pure Clojure — works on both babashka
-   and Jolt. Returns an unsigned 32-bit result as a long."
+   and Jolt (and in extension SCI contexts) through one code path.
+   Returns an unsigned 32-bit result as a long."
   [ba]
   (let [len (alength ba)]
     (loop [i 0 crc 0xFFFFFFFF]

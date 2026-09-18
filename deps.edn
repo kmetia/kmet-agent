@@ -20,9 +20,10 @@
         ;; bundles them, and jolt vendors the same namespaces (built-in,
         ;; resolving ahead of any deps.edn copy). A Maven copy is redundant on
         ;; both hosts and only risks shadowing the vendored one. jolt's public
-        ;; surfaces are jolt.fs / jolt.process (the vendored impls, zip/gzip
-        ;; excluded from jolt.fs); kmet requires babashka.fs/process directly,
-        ;; which resolves to the vendored copy on jolt.
+        ;; surfaces are jolt.fs / jolt.process (the vendored impls; jolt.fs now
+        ;; carries zip/unzip/gzip on the runtime's java.util.zip); kmet
+        ;; requires babashka.fs/process directly, which resolves to the
+        ;; vendored copy on jolt.
 
         org.clojure/data.json {:mvn/version "2.5.1"}
         ;; ^ 2.5.1 for jolt/JVM only — bb.edn (babashka) pins 2.4.0 because
@@ -51,7 +52,12 @@
         org.babashka/http-client {:mvn/version "0.4.25"}
         ;; The shims behind babashka.http-client on Jolt (upstream main); its
         ;; libz candidates cover all three platforms (no project-level
-        ;; :jolt/native block).
+        ;; :jolt/native block). NOTE: with jolt providing java.util.zip, this
+        ;; revision's claims on the GZIP/Inflater classes are redundant and
+        ;; every Jolt run warns "upgrade io.github.jolt-lang/http-client" —
+        ;; harmless (the runtime's classes answer), and the pin moves to
+        ;; http-client PR #25 once it merges and the running jolt meets its
+        ;; 0.8.9 floor (see jolt-bugs.md).
         io.github.jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
                                          :git/sha "04ebbc03ac7dc6ceffdf276d7525ba3a7b05b208"}
         ;; cljfmt for the format tasks (kmet.tasks.format — one code path on

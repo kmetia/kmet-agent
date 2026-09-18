@@ -1032,11 +1032,12 @@
 (defn- jar-entry-source
   "The source string of ENTRY-NAME inside the zip at JAR-PATH, or nil.
    Opens and closes the ZipFile per call — no handles are held, so unload
-   needs no cleanup."
+   needs no cleanup. ZipFile, not JarFile: Jolt implements java.util.zip
+   and not java.util.jar."
   [jar-path entry-name]
-  (let [jar (java.util.jar.JarFile. (str jar-path))]
+  (let [jar (java.util.zip.ZipFile. (str jar-path))]
     (try
-      (when-let [entry (.getJarEntry jar ^String entry-name)]
+      (when-let [entry (.getEntry jar ^String entry-name)]
         (when-not (.isDirectory entry)
           (with-open [is (.getInputStream jar entry)]
             (slurp is))))
@@ -1045,10 +1046,10 @@
 (defn- jar-entry-names
   "The set of safe relative entry names in the zip at JAR-PATH."
   [jar-path]
-  (let [jar (java.util.jar.JarFile. (str jar-path))]
+  (let [jar (java.util.zip.ZipFile. (str jar-path))]
     (try
       (into #{}
-            (comp (map (fn [^java.util.jar.JarEntry e] (.getName e)))
+            (comp (map (fn [^java.util.zip.ZipEntry e] (.getName e)))
                   (map #(str/replace % "\\" "/"))
                   (filter entry-name-ok?))
             (enumeration-seq (.entries jar)))
@@ -1131,7 +1132,7 @@
                 (or (own rel)
                     (some (fn [entry]
                             (if (fs/directory? (str entry))
-                              ;; jolt: dep roots are extracted source dirs
+                              ;; a :local/root directory dep
                               (let [f (io/file (str entry) rel)]
                                 (when (.exists f) (io/as-url f)))
                               (when (jar-entry-source entry rel)
@@ -1262,8 +1263,8 @@
     (catch Exception _ nil)))
 
 (defn- jar-artifact?
-  "True when ARTIFACT is a jar/zip artifact (bb keeps those unexpanded; Jolt
-   materializes them to directories first — see materialize-jar!)."
+  "True when ARTIFACT is a jar/zip artifact (both hosts keep those
+   unexpanded: the archive root is the code root)."
   [artifact]
   (and artifact (= :jar (:kind artifact))))
 
@@ -1275,37 +1276,14 @@
          (or (str/ends-with? lower ".jar")
              (str/ends-with? lower ".zip")))))
 
-(defn- temp-root
-  "The platform temp dir for build-time caches: $TMPDIR first (Termux has
-   no /tmp; java.io.tmpdir is unreliable on babashka), else java.io.tmpdir."
-  []
-  (or (System/getenv "TMPDIR") (System/getProperty "java.io.tmpdir")))
-
-(def ^:private jar-cache-root
-  (delay (str (fs/path (temp-root) "kmet-ext-jars"))))
-
-(defn- materialize-jar!
-  "Extract the jar/zip at PATH into a cached directory and return it. Jolt
-   has no java.util.zip (kmet.libs.archive is bb-only), so jar artifacts
-   are materialized with the host unzip and then treated as DIRECTORY
-   artifacts — code, extension.edn, deps.edn and io/resource all use the
-   ordinary fs path. The cache is keyed by jar path + mtime, so a changed
-   jar re-extracts and reloads reuse the extraction. bb keeps the
-   unexpanded ZipFile path (jar-ext.md §1)."
-  [path]
-  (let [root (str (fs/path @jar-cache-root
-                           (str (fs/file-name (str path)) "-"
-                                (fs/last-modified-time (str path)))))
-        marker (str (fs/path root ".ok"))]
-    (when-not (fs/exists? marker)
-      (fs/create-dirs root)
-      (let [{:keys [exit err]} (proc/sh ["unzip" "-o" "-q" (str path) "-d" root])]
-        (when-not (zero? exit)
-          (throw (ex-info (str "failed to extract extension archive " path
-                               ": " (str/trim (str err)))
-                          {:path path}))))
-      (spit marker ""))
-    root))
+#?(:jolt
+   (defn- temp-root
+     "The platform temp dir for the single-file materialization cache:
+      $TMPDIR first (Termux has no /tmp and babashka hardcodes
+      java.io.tmpdir to /tmp; Jolt honors it, but the explicit lookup is
+      the shared pattern), else java.io.tmpdir."
+     []
+     (or (System/getenv "TMPDIR") (System/getProperty "java.io.tmpdir"))))
 
 (def ^:private default-loaders
   "The :loader value assumed when a manifest omits it (and the implicit
@@ -1366,30 +1344,22 @@
   (let [f (io/file path)]
     (cond
       (jar-archive? f path)
-      (let [unexpanded? (not (host/jolt?))
-            entries (when unexpanded? (jar-entry-names (str f)))]
-        ;; jolt materializes the archive to a directory (no java.util.zip) and
-        ;; continues as a :dir artifact; bb keeps the per-call ZipFile path.
-        (when (and unexpanded? (not (contains? entries "extension.edn")))
-          (throw (ex-info (str "Extension archive " path " has no extension.edn")
-                          {:path path})))
-        (let [root (if unexpanded? (str f) (materialize-jar! (str f)))
-              manifest (if unexpanded?
-                         (jar-entry-source root "extension.edn")
-                         (let [mf (io/file root "extension.edn")]
-                           (when (.exists mf) (slurp mf))))
-              _ (when-not manifest
-                  (throw (ex-info (str "Extension archive " path " has no extension.edn")
-                                  {:path path})))
-              m (edn/read-string manifest)
-              {:keys [name entry-ns declared-loaders legacy-loader?]}
-              (manifest-info path m (fs/file-name f))]
-          {:name name
-           :kind :jar
-           :artifact {:kind (if unexpanded? :jar :dir) :root root}
-           :entry-ns entry-ns
-           :declared-loaders declared-loaders
-           :legacy-loader? legacy-loader?}))
+      ;; both hosts keep the archive unexpanded: the jar path is the root
+      ;; (Jolt's loader reads it through its central directory, babashka
+      ;; probes its entries per call — see artifact-source).
+      (let [root (str f)
+            _ (when-not (contains? (jar-entry-names root) "extension.edn")
+                (throw (ex-info (str "Extension archive " path " has no extension.edn")
+                                {:path path})))
+            m (edn/read-string (jar-entry-source root "extension.edn"))
+            {:keys [name entry-ns declared-loaders legacy-loader?]}
+            (manifest-info path m (fs/file-name f))]
+        {:name name
+         :kind :jar
+         :artifact {:kind :jar :root root}
+         :entry-ns entry-ns
+         :declared-loaders declared-loaders
+         :legacy-loader? legacy-loader?})
 
       (.isDirectory f)
       (let [manifest-file (io/file f "extension.edn")]
@@ -1539,11 +1509,11 @@
    (defn- closure-jars
      "The dependency source ROOTS for DEPS-MAP on Jolt — the equivalent of
       bb's jar closure. jolt.deps/resolve-deps (the tools.deps expansion
-      engine, AOT'd into the jolt binary) fetches Maven/git deps, EXTRACTS
-      them, and returns the extraction dirs plus :local/root paths; the
-      load-fn then serves namespaces with plain fs probes instead of
-      ZipFile (see dep-source). Resolution failures throw, mirroring the bb
-      branch. Results are plain directories, so unload drops them with the
+      engine, AOT'd into the jolt binary) fetches Maven/git deps and returns
+      their jars (unexpanded — jolt loads a jar root through its central
+      directory) plus :local/root paths; the source provider and the loader
+      read both (see dep-source). Resolution failures throw, mirroring the
+      bb branch. A jar is read in place, so unload releases it with the
       context like jars on bb."
      [deps-map]
      (let [resolve-deps (requiring-resolve 'jolt.deps/resolve-deps)
@@ -1621,10 +1591,9 @@
 
 (defn- dep-source
   "The {:file :source} of NS-SYM inside one closure ENTRY of the
-   extension's deps.edn resolution, or nil. bb entries are jars (per-call
-   ZipFile probes); jolt entries are extracted source ROOTS (directories —
-   jolt.deps/resolve-deps materializes Maven/git deps to disk), so those
-   get a plain strict ns-path fs probe."
+   extension's deps.edn resolution, or nil. Jars (both hosts — jolt.deps
+   keeps Maven/git deps unexpanded) get per-call ZipFile probes; a
+   :local/root directory gets a plain strict ns-path fs probe."
   [entry ns-sym]
   (let [base (ns-path ns-sym)]
     (if (fs/directory? (str entry))
@@ -1944,32 +1913,50 @@
        dir)))
 
 #?(:jolt
-   (defn- validate-native-sources!
-     "Validate EXT-NAME's own sources before the Jolt native reader reads any:
-      it never calls back into kmet, so the checks the SCI path makes lazily in
-      its source provider (make-source-fn) happen here, up front, over the
-      artifact's own files — dep roots are deliberately skipped, they are
-      external libraries. Two checks: every declared ns must live where its
-      name munges to (otherwise the strict-layout reader can never find it —
-      the SCI path's 'strict layout violation'), and every ns form must
-      satisfy the extension contract's requires."
-     [ext-name root owns-ns? tui-namespaces libs-namespaces]
-     (doseq [f (->> (concat (fs/list-dir root) (fs/glob root "**/*"))
-                    (filter fs/regular-file?)
-                    distinct)
-             :let [rel (str (fs/normalize (fs/relativize root (str f))))
-                   ext (fs/extension rel)]
-             :when (contains? #{"clj" "cljc" "jolt"} ext)
-             :let [ns-form (ns-form-of-source (slurp (str f)))]
-             :when ns-form]
-       (let [relative (subs rel 0 (- (count rel) (inc (count ext))))]
-         (when-not (= relative (ns-path (second ns-form)))
-           (throw (ex-info (str "Extension " ext-name " strict layout violation: "
-                                f " declares " (second ns-form)
-                                ", which the loader would look for at "
-                                (ns-path (second ns-form)))
-                           {:extension ext-name :ns (second ns-form)}))))
-       (validate-entry-requires! ext-name ns-form tui-namespaces libs-namespaces owns-ns?))))
+   (do
+     (defn- own-source-entries
+       "The extension's own source files under ROOT (a directory or a jar
+        archive): maps of {:rel path-below-root :display path-for-errors
+        :source text} for every .clj/.cljc/.jolt entry the strict lookups
+        in artifact-source would serve. Dep roots are deliberately not
+        walked: they are external libraries."
+       [root]
+       (if (fs/directory? root)
+         (for [f (->> (concat (fs/list-dir root) (fs/glob root "**/*"))
+                      (filter fs/regular-file?)
+                      distinct)
+               :let [rel (str (fs/normalize (fs/relativize root (str f))))]
+               :when (contains? #{"clj" "cljc" "jolt"} (fs/extension rel))]
+           {:rel rel :display (str f) :source (slurp (str f))})
+         (for [rel (jar-entry-names root)
+               :when (contains? #{"clj" "cljc" "jolt"} (fs/extension rel))]
+           {:rel rel
+            :display (str root "!/" rel)
+            :source (jar-entry-source root rel)})))
+
+     (defn- validate-native-sources!
+       "Validate EXT-NAME's own sources before the Jolt native reader reads
+        any: it never calls back into kmet, so the checks the SCI path makes
+        lazily in its source provider (make-source-fn) happen here, up
+        front, over the artifact's own files — dep roots are deliberately
+        skipped, they are external libraries. Two checks: every declared ns
+        must live where its name munges to (otherwise the strict-layout
+        reader can never find it — the SCI path's 'strict layout
+        violation'), and every ns form must satisfy the extension
+        contract's requires. ROOT is a directory or a jar archive."
+       [ext-name root owns-ns? tui-namespaces libs-namespaces]
+       (doseq [{:keys [rel display source]} (own-source-entries root)
+               :let [ext (fs/extension rel)
+                     ns-form (ns-form-of-source source)]
+               :when ns-form]
+         (let [relative (subs rel 0 (- (count rel) (inc (count ext))))]
+           (when-not (= relative (ns-path (second ns-form)))
+             (throw (ex-info (str "Extension " ext-name " strict layout violation: "
+                                  display " declares " (second ns-form)
+                                  ", which the loader would look for at "
+                                  (ns-path (second ns-form)))
+                             {:extension ext-name :ns (second ns-form)}))))
+         (validate-entry-requires! ext-name ns-form tui-namespaces libs-namespaces owns-ns?)))))
 
 (defn- create-sci-loader
   "The SCI backend's per-extension loader: a fork of the shared base context
@@ -2003,12 +1990,24 @@
       :eval-fn eval-extension-source})))
 
 #?(:jolt
+   (defonce ^:private native-loader-seq
+     ;; jolt.loader caches each context's classloader facade by loader :id
+     ;; and does not invalidate it on unload, so a reloaded extension reusing
+     ;; the id would resolve io/resource (RT/baseLoader) through the OLD,
+     ;; unloaded context (jolt-bugs.md — facade cache keyed by id). A unique
+     ;; suffix per context keeps the cache honest; the prefix keeps the id
+     ;; diagnostic.
+     (atom 0)))
+
+#?(:jolt
    (defn- create-jolt-loader
      "The native backend's per-extension loader: own sources from the artifact
-      root (a single-file extension materialized at its munged ns path first)
-      plus the extracted dep roots, with the shared contract as the filtered
-      host root — real Jolt namespaces shared by reference. Own sources are
-      validated up front: the native reader never calls back into kmet."
+      root — a directory or a jar read through its central directory, or a
+      single-file extension materialized at its munged ns path first — plus
+      the dep roots (jars load in place), with the shared contract as the
+      filtered host root — real Jolt namespaces shared by reference. Own
+      sources are validated up front: the native reader never calls back
+      into kmet."
      [ext-name artifact owns-ns? deps-resolver literal
       tui-namespaces libs-namespaces]
      (let [root (if artifact
@@ -2018,7 +2017,7 @@
        (validate-native-sources! ext-name root owns-ns? tui-namespaces libs-namespaces)
        (loader-jolt/classpath
         (into [root] (when deps-resolver (deps-resolver)))
-        {:id (str "ext:" ext-name)
+        {:id (str "ext:" ext-name "#" (swap! native-loader-seq inc))
          :parent (loader-jolt/host-view (loader-jolt/root)
                                         (shared-namespace-names))}))))
 

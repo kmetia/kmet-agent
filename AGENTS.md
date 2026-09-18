@@ -69,8 +69,9 @@
   runner; `bb test-changed` prints a hint instead of silently skipping them.
 - **Deps**: no `deps.edn` entry for `babashka.fs` / `babashka.process` — babashka bundles them and
   jolt vendors the same namespaces (built-in, resolving ahead of any classpath copy; public
-  surfaces `jolt.fs` / `jolt.process` — `jolt.fs` excludes zip/gzip). A Maven copy would only
-  risk shadowing the vendored one, so kmet relies on both hosts' built-ins.
+  surfaces `jolt.fs` / `jolt.process` — `jolt.fs` now carries zip/unzip/gzip too, on the
+  runtime's `java.util.zip`). A Maven copy would only risk shadowing the vendored one,
+  so kmet relies on both hosts' built-ins.
   Tooling deps (`cljfmt`, plus its `org.clojure/spec.alpha` and `rewrite-clj`
   companions on jolt) in `bb.edn` `:deps` and `deps.edn`; JLine **4.4.0** bundled with Babashka (see
   babashka `deps.edn`: `org.jline/jline-terminal`, `org.jline/jline-reader`) as the
