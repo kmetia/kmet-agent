@@ -11,8 +11,14 @@ are removed from kmet alongside this edit. Further closures (jolt PR #1030,
 in v0.8.8-64-g705ac0b9): #992 (absolute FILE args), #991 (canonicalize drive
 root), #989 (native loader fallback + reconcile), #990 (`crypto`/`ssl`/`z`
 :windows candidates — closed by the loader half of PR #1030, the spelling
-fallback now resolves `crypto`/`ssl` without app-side help; the library-side
-declarations are tracked separately, see below). `jolt-port.md` /
+fallback now resolves `crypto`/`ssl` without app-side help). The library-side
+follow-through closed 2026-09-18: crypto#11 (crypto PR #10, main `8d821a9d`)
+and http-client#23 (http-client PR #22, main `04ebbc03`) — both libs declare
+their native candidates for `:darwin`/`:linux`/`:windows` themselves, so the
+project-level `:jolt/native` block in `deps.edn` is removed alongside this
+edit and both pins move to the fixed revisions. Still owed: the Windows smoke
+(`jolt -e '(println :ok)'` with the libcrypto/libssl/libz DLLs beside
+`jolt.exe` or on PATH) once a Windows host runs it. `jolt-port.md` /
 `jolt-tui.md` describe port state without ticket IDs.
 
 **Unfiled but confirmed blockers** (not yet in jolt tracker):
@@ -27,58 +33,6 @@ Historical labels from the deleted `bb-jolt.md` map as: `JOLT-12`→#947,
 `JOLT-13`→#944; git history has the full field reports.
 
 ## Open
-
-### [crypto#11](https://github.com/jolt-lang/crypto/issues/11) — declare `:windows` candidates for libcrypto and libssl
-
-**Area:** `:jolt/native` declarations in `jolt-lang/crypto` (and its
-`jolt-lang/jolt-crypto` sibling)
-
-The libraries' `deps.edn` declare OpenSSL natives under `:darwin`/`:linux`
-only — no `:windows` key. Without it, the loader on Windows tries an empty
-candidate list (`tried [] for windows`) and the crypto shims
-(`MessageDigest`, `Mac`, `Cipher`, `Signature`, `KeyPairGenerator`,
-`KeyFactory`, the `javax.net.ssl` shims TLS builds on) never load.
-
-Jolt's loader (PR #1030, in v0.8.8-64-g705ac0b9) added a spelling fallback
-that derives `crypto`/`ssl` from conventional names on Windows, so this is
-no longer a hard blocker on fixed jolts — but the library should declare its
-candidates explicitly rather than rely on a loader safety net. `z` is NOT
-covered by that fallback (see http-client#23).
-
-**Workaround** (`deps.edn`): the project-level `:jolt/native` block
-declaring `crypto`/`ssl`/`z` — the upstream `:darwin`/`:linux` candidate
-lists mirrored verbatim (still mandatory for pre-fix jolts, harmless on
-fixed ones) plus the Windows names jolt's own Maven fetcher already uses
-(`stdlib/jolt/mvn_http.clj` crypto-names / ssl-names):
-`libcrypto-3-x64.dll` (+ `-3.dll`, `-1_1-x64.dll` fallbacks),
-`libssl-3-x64.dll` (+ fallbacks), `zlib1.dll` (+ `z.dll`). The DLLs are
-environment, not repo code — Git for Windows supplies them (on PATH), and
-the loader also finds them beside `jolt.exe` (executable-directory search).
-Removal: bump the `io.github.jolt-lang/crypto` and
-`io.github.jolt-lang/http-client` git shas to revisions carrying the
-`:windows` keys (and http-client#23 landing for `z`), delete the
-`:jolt/native` block, and re-run `jolt -e '(println :ok)'` on Windows with
-the DLLs present. The verbatim `:darwin`/:`linux` mirrors stay until a
-minimum-jolt floor is set — pre-fix jolts still dedup winner-takes-all, so
-a `:windows`-only overlay there would break macOS/Linux.
-
-### [http-client#23](https://github.com/jolt-lang/http-client/issues/23) — declare `:windows` candidate for libz
-
-**Area:** `:jolt/native` declarations in `jolt-lang/http-client`
-
-The library's `deps.edn` declares libz under `:darwin`/`:linux` only — no
-`:windows` key. On Windows the candidate list is empty (`tried [] for
-windows`) and the gzip/deflate shims (`java.util.zip.*`) never load.
-
-Unlike `crypto`/`ssl`, `z` is **not** covered by jolt's loader spelling
-fallback (PR #1030) — no conventional-spelling glob can derive `zlib1.dll`
-from `z`. The only way an app gets libz on Windows today is the app-side
-`:jolt/native` override in kmet's `deps.edn`.
-
-**Workaround** (`deps.edn`): the same project-level `:jolt/native` block
-as crypto#11 — `zlib1.dll` (+ `z.dll`) declared under `:windows`.
-Removal: same as crypto#11 (both fixes land, bump both shas, drop the
-block).
 
 ### [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) — SCI `IVar` protocol missing `:getRawRoot` for `clojure.lang.Var`
 
@@ -117,6 +71,8 @@ extensions: `jolt/deps.edn` pins yogthos/sci @ babashka/sci#1093,
 which makes the copied-host-protocol `defrecord` shape work — verified with
 the exact repro above through `kmet.app.extensions`. The native loader stays
 Jolt's preference (`:jolt` declared ⇒ native), and SCI's `*out*`/`*err*`
-need binding there (`kmet.app.extensions/with-sci-io`).
-
-
+need binding there (`kmet.app.extensions/with-sci-io`). Re-confirmed
+2026-09-18: the issue was reopened after #1033 merged (the reporter's
+extension still failed) and upstream's repro on current main lands back on
+SCI as the gap — `babashka/sci#1093` (still open, no jolt-side fix). The
+`jolt/deps.edn` pin stays until it merges and a release carries it.

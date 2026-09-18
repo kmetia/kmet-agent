@@ -16,35 +16,6 @@
  ;; a direct `jolt build` gets (then the runtime falls back to git describe).
  :jolt/build {:embed ["src" "target/kmet-version"]}
 
- ;; Native shared libraries for the jolt host. Declared project-level because
- ;; the libraries that need them declare no :windows candidate: jolt-lang/crypto
- ;; (and its jolt-lang/jolt-crypto sibling) lists only :darwin/:linux, and so
- ;; does jolt-lang/http-client for libz. jolt tries the candidates under the
- ;; key its platform selects (jolt.main/current-platform) and no key means the
- ;; loader tries nothing at all — "tried [] for windows" — so their ffi
- ;; bindings never resolve. The project's own spec is first through the
- ;; native-key dedup (jolt.deps: the project's :jolt/native, then every dep's),
- ;; so the unix candidates are mirrored verbatim here: dropping them would
- ;; dedup the deps' specs away and break macOS/Linux. The Windows names are the
- ;; ones jolt's own Maven fetcher tries (jolt/mvn_http.clj crypto-names /
- ;; ssl-names); the DLLs live beside jolt.exe (the loader searches the
- ;; executable's directory) or on PATH. Remove the :windows keys — or this
- ;; block — once the upstream libs declare :windows themselves.
- :jolt/native [{:name "crypto"
-                :darwin ["/opt/homebrew/opt/openssl@3/lib/libcrypto.dylib"
-                         "/usr/lib/libcrypto.dylib" "libcrypto.dylib"]
-                :linux ["libcrypto.so.3" "libcrypto.so.1.1" "libcrypto.so"]
-                :windows ["libcrypto-3-x64.dll" "libcrypto-3.dll" "libcrypto-1_1-x64.dll"]}
-               {:name "ssl"
-                :darwin ["/opt/homebrew/opt/openssl@3/lib/libssl.dylib"
-                         "/usr/lib/libssl.dylib" "libssl.dylib"]
-                :linux ["libssl.so.3" "libssl.so.1.1" "libssl.so"]
-                :windows ["libssl-3-x64.dll" "libssl-3.dll" "libssl-1_1-x64.dll"]}
-               {:name "z"
-                :darwin ["libz.dylib" "/usr/lib/libz.dylib"]
-                :linux ["libz.so.1" "libz.so"]
-                :windows ["zlib1.dll" "z.dll"]}]
-
  :deps {        ;; babashka.fs / babashka.process are deliberately NOT deps: babashka
         ;; bundles them, and jolt vendors the same namespaces (built-in,
         ;; resolving ahead of any deps.edn copy). A Maven copy is redundant on
@@ -65,9 +36,11 @@
         ;; OpenSSL-backed javax.crypto/java.security shims on Jolt
         ;; (MessageDigest, Mac, Cipher, SecureRandom, EC + RSA
         ;; Signature/KeyPairGenerator/KeyFactory — RFC 0014; inert on bb/JVM).
-        ;; RSA (keygen + SHA*withRSA + RSA KeyFactory) comes from the library.
+        ;; RSA (keygen + SHA*withRSA + RSA KeyFactory) comes from the library,
+        ;; as do the libcrypto/libssl candidates — declared for all three
+        ;; platforms, so kmet carries no project-level :jolt/native block.
         io.github.jolt-lang/crypto {:git/url "https://github.com/jolt-lang/crypto.git"
-                                    :git/sha "83472ee2a08df16e5d7a2a99882cb20a729b9a33"}
+                                    :git/sha "8d821a9dcdca2fd909e2bedc215d523775b16073"}
         ;; babashka.http-client on Jolt: the jolt-lang/http-client library's
         ;; java.net.http shims (RFC 0014 :jolt/provides over BSD sockets +
         ;; OpenSSL + libz via jolt.ffi) run the real org.babashka/http-client
@@ -76,9 +49,11 @@
         ;; kmet.libs.http routes direct/http-proxy traffic through it on
         ;; Jolt — curl stays only for SOCKS/https-scheme proxies.
         org.babashka/http-client {:mvn/version "0.4.25"}
-        ;; The shims behind babashka.http-client on Jolt (upstream main).
+        ;; The shims behind babashka.http-client on Jolt (upstream main); its
+        ;; libz candidates cover all three platforms (no project-level
+        ;; :jolt/native block).
         io.github.jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
-                                         :git/sha "2fb8a981972b67631150e81765de58d822a99e54"}
+                                         :git/sha "04ebbc03ac7dc6ceffdf276d7525ba3a7b05b208"}
         ;; cljfmt for the format tasks (kmet.tasks.format — one code path on
         ;; both hosts; bb.edn carries the same version for babashka).
         ;; org.clojure/spec.alpha is declared explicitly: jolt's resolver

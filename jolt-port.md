@@ -348,7 +348,7 @@ crypto/oauth/http re-verified 2026-09-11 (counts below).
 | `hash` | 🟢 | 🟢 | pure, works |
 | `highlight` | 🟢 | 🟢 | tests pass (139/139) |
 | `hooks` | 🟢 | 🟢 | pure, works |
-| `http` | 🟢 | 🟢 | **ported** — Jolt runs direct/http-proxy traffic through babashka.http-client over the jolt-lang/http-client shims (deps.edn: org.babashka/http-client 0.4.24 + io.github.jolt-lang/http-client, upstream `2fb8a98`), curl for SOCKS/https-scheme proxies (see B1); the `:http-transport` setting can force curl for everything. test-http green on Jolt (every contract under both modes, Termux/bionic included). Loads on bb |
+| `http` | 🟢 | 🟢 | **ported** — Jolt runs direct/http-proxy traffic through babashka.http-client over the jolt-lang/http-client shims (deps.edn: org.babashka/http-client 0.4.25 + io.github.jolt-lang/http-client, upstream `04ebbc03`), curl for SOCKS/https-scheme proxies (see B1); the `:http-transport` setting can force curl for everything. test-http green on Jolt (every contract under both modes, Termux/bionic included). Loads on bb |
 | `json` | 🟢 | 🟢 | Jolt 2026-09-09: 4 tests/18 assertions green — data.json resolves via deps.edn (M1 closed) |
 | `jsonrpc` | 🟢 | 🟢 | Jolt 2026-09-09: 17 tests/41 assertions green (M1 closed) |
 | `markdown` | 🟢 | 🟢 | tests pass (137/137) |
