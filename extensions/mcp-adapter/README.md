@@ -94,6 +94,14 @@ the prefixed names, gate direct-tool registration), `:search-keywords`
 neither `:command` nor `:url` is skipped and shows as `misconfigured` in
 status.
 
+A stdio server **without** `:cwd` is spawned in the directory kmet was
+launched in — where its definition was read from — and keeps that working
+directory across session switches: connections persist, and `/mcp
+reconnect` re-spawns in the launch dir too. That is deliberate (server
+definitions are project configuration), but a server that resolves relative
+paths itself, or that should land in the session's own project after
+`/resume`/`/import`, must set `:cwd` explicitly.
+
 Settings keys: `:direct-tools`, `:tool-prefix`, `:disable-proxy-tool`,
 `:script-mode` (default true — gates the mcpScript tool),
 `:idle-timeout` (minutes, default 10, 0 disables reaping),

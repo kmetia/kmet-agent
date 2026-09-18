@@ -124,6 +124,13 @@
   [cs]
   (or (some-> (:footer-provider cs) fdp/fdp-get-cwd) (str (fs/cwd))))
 
+(defn- turn-running?
+  "True when a response is streaming (the CoreState turn flag) — the
+   condition the switch commands refuse on. Nil-safe: a CS without the flag
+   (test stubs, extension contexts built over reduced state) counts as idle."
+  [cs]
+  (boolean (some-> (:running-turn? cs) deref)))
+
 (defn- find-session
   "Most recent session for the current cwd (pi: continueRecent →
    findMostRecentSession — header-based discovery in the cwd-encoded dir;
@@ -471,17 +478,20 @@
 
 (defn- parse-path-argument
   "Pi: getPathCommandArgument — strip surrounding quotes, else take the
-   first whitespace-delimited token. Returns nil when there is no
-   argument. Shared by /export and /import."
+   first whitespace-delimited token. Returns nil when there is no argument —
+   a quoted but empty argument (`\"\"`) counts as none, so /export falls back
+   to its default path and /import to its usage line. Shared by /export and
+   /import."
   [args]
   (let [args (str/trim args)]
     (when (seq args)
-      (let [first-char (first args)]
-        (if (contains? #{\" \'} first-char)
-          (when-let [end (str/index-of args first-char 1)]
-            (subs args 1 end))
-          (let [ws (str/index-of args " ")]
-            (if ws (subs args 0 ws) args)))))))
+      (let [first-char (first args)
+            token (if (contains? #{\" \'} first-char)
+                    (when-let [end (str/index-of args first-char 1)]
+                      (subs args 1 end))
+                    (let [ws (str/index-of args " ")]
+                      (if ws (subs args 0 ws) args)))]
+        (when (seq (str/trim (str token))) token)))))
 
 ;; ─── Share (/share — gh gist) ───────────────────────────────────────────────
 
@@ -1067,21 +1077,27 @@
     :description "Browse past sessions"
     :handler (fn [cs _]
                (debug/log "/resume command")
-               (show-session-selector cs ensure-session-dir
-                                      (fn [path]
-                                        ;; pi: emitBeforeSwitch (reason :resume)
-                                        ;; — extensions may cancel the switch
-                                        (when-not (:cancel (event-bus/emit-event!
-                                                            {:type :session-before-switch
-                                                             :reason :resume
-                                                             :target-session-file path}))
-                                          (let [sess (session/load-session path)
-                                                short-id (subs (:id sess) 0 (min 8 (count (:id sess))))]
-                                            (restore-session! cs sess true)
-                                            (ui/chat-history-add-message! (:chat-history cs)
-                                                                          {:role :assistant
-                                                                           :content (str "Resumed session " short-id ".")})
-                                            (tui/tui-request-render (:tui cs)))))))})
+               ;; mid-turn refusal like the other switch commands (pi:
+               ;; teardownCurrent aborts the run; kmet waits instead)
+               (if (turn-running? cs)
+                 (ui/chat-history-add-message! (:chat-history cs)
+                                               {:role :assistant
+                                                :content "Wait for the current response to finish before resuming."})
+                 (show-session-selector cs ensure-session-dir
+                                        (fn [path]
+                                          ;; pi: emitBeforeSwitch (reason :resume)
+                                          ;; — extensions may cancel the switch
+                                          (when-not (:cancel (event-bus/emit-event!
+                                                              {:type :session-before-switch
+                                                               :reason :resume
+                                                               :target-session-file path}))
+                                            (let [sess (session/load-session path)
+                                                  short-id (subs (:id sess) 0 (min 8 (count (:id sess))))]
+                                              (restore-session! cs sess true)
+                                              (ui/chat-history-add-message! (:chat-history cs)
+                                                                            {:role :assistant
+                                                                             :content (str "Resumed session " short-id ".")})
+                                              (tui/tui-request-render (:tui cs))))))))})
   (register-builtin-command!
    {:name "continue"
     :description "Continue where the agent left off (e.g. after a network error)"
@@ -1142,9 +1158,15 @@
    {:name "tree"
     :description "Navigate session tree (switch branches)"
     :handler (fn [cs _]
-               (show-session-tree cs
-                                  (fn [entry]
-                                    (ask-branch-summary cs @(:session-atom cs) entry))))})
+               ;; mid-turn refusal like the other switch commands — branching
+               ;; while a run streams would leave its events in the new branch
+               (if (turn-running? cs)
+                 (ui/chat-history-add-message! (:chat-history cs)
+                                               {:role :assistant
+                                                :content "Wait for the current response to finish before navigating the tree."})
+                 (show-session-tree cs
+                                    (fn [entry]
+                                      (ask-branch-summary cs @(:session-atom cs) entry)))))})
   (register-builtin-command!
    {:name "fork"
     :description "Create a new fork from a previous user message"
@@ -1783,9 +1805,14 @@
   (let [fdp* (:footer-provider cs)
         recorded (get-in sess [:header :cwd])
         cwd (session/session-cwd sess)
-        current (when fdp* (fdp/fdp-get-cwd fdp*))]
+        current (when fdp* (fdp/fdp-get-cwd fdp*))
+        ;; the comparison is spelling-insensitive: session-cwd is normalized
+        ;; (expand-home → absolutize → normalize) while the atom may hold the
+        ;; process cwd's spelling, so a symlinked launch dir is not a switch
+        same? (and cwd current
+                   (= cwd (str (fs/normalize (str current)))))]
     (cond
-      (or (nil? fdp*) (= cwd current))
+      (or (nil? fdp*) same?)
       current
 
       cwd
@@ -2007,7 +2034,7 @@
       (nil? path-arg)
       (import-error! chat "Usage: /import <path>")
 
-      @(:running-turn? cs)
+      (turn-running? cs)
       (ui/chat-history-add-message! chat
                                     {:role :assistant
                                      :content "Wait for the current response to finish before importing."})
@@ -2287,7 +2314,7 @@
    first user message (no parent) starts an empty session linked to this
    one."
   [cs entry-id]
-  (if @(:running-turn? cs)
+  (if (turn-running? cs)
     (ui/chat-history-add-message! (:chat-history cs)
                                   {:role :assistant
                                    :content "Wait for the current response to finish before forking."})
@@ -2334,7 +2361,7 @@
   [cs]
   (let [sess @(:session-atom cs)]
     (cond
-      @(:running-turn? cs)
+      (turn-running? cs)
       (ui/chat-history-add-message! (:chat-history cs)
                                     {:role :assistant
                                      :content "Wait for the current response to finish before cloning."})
@@ -4821,31 +4848,39 @@
                                                                       custom-instructions
                                                                       replace-instructions
                                                                       label]}]]
-                                              (if-let [sess @(:session-atom cs)]
-                                                (if-let [entry (session/get-entry sess
-                                                                                  target-id)]
-                                                  (do (navigate-tree! cs sess entry
-                                                                      (boolean summarize)
-                                                                      custom-instructions
-                                                                      (boolean replace-instructions)
-                                                                      label)
-                                                      {:cancelled false})
-                                                  {:cancelled true})
-                                                {:cancelled true}))
+                                              ;; a run in flight would render its events into
+                                              ;; the new branch (the /tree command refuses too)
+                                              (if (turn-running? cs)
+                                                {:cancelled true}
+                                                (if-let [sess @(:session-atom cs)]
+                                                  (if-let [entry (session/get-entry sess
+                                                                                    target-id)]
+                                                    (do (navigate-tree! cs sess entry
+                                                                        (boolean summarize)
+                                                                        custom-instructions
+                                                                        (boolean replace-instructions)
+                                                                        label)
+                                                        {:cancelled false})
+                                                    {:cancelled true})
+                                                  {:cancelled true})))
                              :switch-session (fn [session-path & _]
-                                               (try
-                                                 (let [sess (session/load-session session-path)
-                                                       ;; pi: emitBeforeSwitch (reason :resume) —
-                                                       ;; extensions may cancel the switch
-                                                       result (event-bus/emit-event!
-                                                               {:type :session-before-switch
-                                                                :reason :resume
-                                                                :target-session-file session-path})]
-                                                   (if (:cancel result)
-                                                     {:cancelled true}
-                                                     (do (restore-session! cs sess true)
-                                                         {:cancelled false})))
-                                                 (catch Exception _ {:cancelled true})))
+                                               ;; a run in flight would render its events into the
+                                               ;; switched session (the /resume command refuses too)
+                                               (if (turn-running? cs)
+                                                 {:cancelled true}
+                                                 (try
+                                                   (let [sess (session/load-session session-path)
+                                                         ;; pi: emitBeforeSwitch (reason :resume) —
+                                                         ;; extensions may cancel the switch
+                                                         result (event-bus/emit-event!
+                                                                 {:type :session-before-switch
+                                                                  :reason :resume
+                                                                  :target-session-file session-path})]
+                                                     (if (:cancel result)
+                                                       {:cancelled true}
+                                                       (do (restore-session! cs sess true)
+                                                           {:cancelled false})))
+                                                   (catch Exception _ {:cancelled true}))))
                              :is-project-trusted (fn [] false)}))
          :reset (fn []
                   ;; pi: resetExtensionUI — dispose widgets, restore

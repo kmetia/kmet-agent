@@ -6,6 +6,7 @@
    handle-external-editor opens the editor content in $EDITOR on a temp
    file (pi: handleOpenExternalEditor)."
   (:require [kmet.app.ui :as ui]
+            [kmet.app.ui.footer-data-provider :as fdp]
             [kmet.tui.core :as tui]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.components.editor :as editor]
@@ -44,7 +45,13 @@
             _ (println "kmet will resume when the editor exits.")
             result (try
                      (let [p (proc/process (concat parts [tmp-file])
-                                           {:out :inherit :err :inherit :in :inherit})
+                                           {:out :inherit :err :inherit :in :inherit
+                                            ;; the editor opens where the session
+                                            ;; works, not the launch directory
+                                            ;; (pi: spawn cwd)
+                                            :dir (or (some-> (:footer-provider cs)
+                                                             fdp/fdp-get-cwd)
+                                                     (str (fs/cwd)))})
                            exit-code (:exit @p)]
                        (if (zero? exit-code) :ok :cancelled))
                      (catch Exception e

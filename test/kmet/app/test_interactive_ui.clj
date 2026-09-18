@@ -943,7 +943,68 @@
                     "the reported path is inside the session's project"))
             (let [files (vec (fs/list-dir project))]
               (t/is (= 1 (count files)) "one export, in the project dir")
-              (t/is (str/starts-with? (fs/file-name (first files)) "kmet-session-")))))
+              (t/is (str/starts-with? (fs/file-name (first files)) "kmet-session-"))
+              (testing "a quoted-empty path is no path: the default is used"
+                (with-redefs [tui/tui-request-render (fn [_])
+                              tui/tui-set-focus (fn [_ _])]
+                  ((:handler (commands/find-command "export")) cs "\"\""))
+                (t/is (str/includes? (str (:content (last-message ch))) project)
+                      "not a 'Failed to export session' error")))))
+        (finally (fs/delete-tree dir))))))
+
+(deftest test-path-argument-empty-is-none
+  (testing "a quoted but empty path argument reads as none (pi:
+            getPathCommandArgument) — /export falls back to its default and
+            /import to its usage line instead of resolving the process cwd"
+    (let [parse (var inter/parse-path-argument)]
+      (t/is (nil? (parse "")))
+      (t/is (nil? (parse "   ")))
+      (t/is (nil? (parse "\"\"")))
+      (t/is (nil? (parse "''")))
+      (t/is (nil? (parse "\"   \"")))
+      (t/is (= "/tmp/x.ednl" (parse "\"/tmp/x.ednl\"")))
+      (t/is (= "/tmp/x.ednl" (parse "/tmp/x.ednl extra"))))))
+
+(deftest test-switch-commands-refuse-mid-turn
+  (testing "/resume and /tree refuse while a response is streaming, like
+            /import, /fork and /clone (pi: teardownCurrent aborts the run and
+            switches; kmet waits instead)"
+    (commands/clear-commands!)
+    (install-app-keybindings!)
+    ((var inter/register-builtin-commands!) cfg/default-config)
+    (let [dir (str (fs/absolutize (str "target/test-mid-turn-guards-"
+                                       (System/currentTimeMillis))))]
+      (try
+        (let [ch (ui/make-chat-history)
+              cs (inter/map->CoreState
+                  {:running-turn? (atom true)
+                   :chat-history ch
+                   :session-atom (atom (session/create-session dir))
+                   :agent-state (atom (agent/make-agent-state))})]
+          ((:handler (commands/find-command "resume")) cs "")
+          (t/is (= "Wait for the current response to finish before resuming."
+                   (:content (last-message ch))))
+          ((:handler (commands/find-command "tree")) cs "")
+          (t/is (= "Wait for the current response to finish before navigating the tree."
+                   (:content (last-message ch)))))
+        (finally (fs/delete-tree dir))))))
+
+(deftest test-same-cwd-spelled-differently-is-not-a-switch
+  (testing "a session whose recorded cwd differs only in spelling (trailing
+            slash) leaves the runtime cwd and the prompt alone — the
+            comparison is spelling-insensitive"
+    (let [dir (str (fs/absolutize (str "target/test-cwd-spelling-" (System/currentTimeMillis))))
+          project (str dir "/project")
+          spelled (str project "/")]
+      (try
+        (fs/create-dirs project)
+        (let [sess (session/create-session (str dir "/sessions") {:cwd project})
+              fdp* (fdp/make-footer-data-provider :cwd-atom (atom spelled))
+              cs (inter/map->CoreState {:footer-provider fdp*
+                                        :agent-state (atom (agent/make-agent-state))})]
+          (t/is (= spelled ((var inter/apply-session-cwd!) cs sess))
+                "the cwd in effect is returned unchanged")
+          (t/is (= spelled @(:cwd-atom fdp*)) "and kept as spelled"))
         (finally (fs/delete-tree dir))))))
 
 (deftest test-scoped-models-selector-initial-state
