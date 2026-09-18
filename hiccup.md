@@ -63,7 +63,7 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `dialogs.clj` | DONE | none — `[:select-list]` / `[:input]` elements under a `hiccup/ref`, read back right after `compile-tree` (the record keeps its `:select-list`/`:input-comp` field); frame hint bug fixed first (see Phase 2) | none (Phase 2 #1) |
 | `settings_selector.clj` | DONE | none — `[:settings-list]` element under a `hiccup/ref`, read back right after `compile-tree`; the `:on-change` case hoisted to a named local, escape wired through the tag's `:on-escape`, one `dispose-tree!` unwinds the whole tree | none (Phase 2 #2) |
 | `tool_renderers.clj` | DONE | none — every renderer assembles a `h/compile-tree` (the last imperative legs, `render-edit-result`'s error branch, `render-bash-call` and `render-bash-result`, converted; the mangled token-per-line block reflowed, the collapsed output cap hoisted to `bash-result-preview-lines`) | none (Phase 1 #4) |
-| `chat_history.clj` | KEEP + Tier 1 helpers | `make-plain-msg` (204–206), `make-plain-md-msg` (213–215), `StatusLine` (249–250) | Tier 1 optional: helpers → `[:container {} [:spacer] [:text/:markdown/:truncated-text]]`; `ChatHistoryComponent` itself stays a record |
+| `chat_history.clj` | KEEP + DONE (Tier 1 #5) | none — `make-plain-msg`/`make-plain-md-msg` are `hiccup/root`s of `[:container]`/`[:spacer]`/`[:text]`/`[:markdown]` elements; `StatusLine` is a thin record over a root whose body tracks the text atom (the in-place status rewrite resets it); the last four component requires are gone | `ChatHistoryComponent` and the message records stay records (§4) |
 | `session_selector.clj` | DONE (full) | none — both inputs are `[:input]` tags (`:value`/`:cursor`/`:focused?` props over the state mirror; see Phase 2 #3) | none — the body reads state via `tracked-deref` and `hide!` disposes the root (which cascades to the tag-owned inputs) |
 | `login_dialog.clj` | DONE (full) | none — the prompt field is a `[:input]` tag whose row descriptor carries its text/caret and whose emphasis is the dialog's focus flag (Phase 2 #4) | none — chrome is `[:dynamic-border]` / `[:text]` elements and the input is tag-owned |
 | `bash_execution.clj` | DONE | `spinner/make-spinner` (248) spliced into `hiccup/root` (256) | none — long-lived spinner identity intentional |
@@ -324,9 +324,9 @@ the same asymmetry the old selectors had).
   measures on par-or-slightly-better than the record (2400 messages: 6.9
   vs 7.4 ms per streaming pass; 6.2 vs 6.6 idle). It stays a non-target
   anyway — it buys a few percent and costs the persistence/lifecycle
-  clarity that is the record's reason to exist. Helpers under
-  `chat_history` (§2, Tier 1 optional) are the only transcript-adjacent
-  exception.
+  clarity that is the record's reason to exist. The plain-entry helpers
+  under `chat_history` (§2 — now DSL roots, Tier 1 #5) are the only
+  transcript-adjacent exception.
 - **String-direct `track!` leaves** — `footer`, `pending_messages`,
   `loaded_resources`, `ForkMessageList`, `TreeList`, `TreeSearchLine` /
   `TreeHelpLine`, `ResourceConfigScreen` render, `Retry` / `Compaction` /
@@ -341,9 +341,9 @@ the same asymmetry the old selectors had).
 
 - **Tier 1** — DONE: the four selectors (Phase 1 #1–#3, their search
   fields later converted to `[:input]` tags in the same pass that closed
-  Tier 2's input KEEPs) and the `tool_renderers` imperative legs
-  (Phase 1 #4). Remaining: the optional `chat_history` plain-msg
-  helpers. No behavior change; assert with
+  Tier 2's input KEEPs), the `tool_renderers` imperative legs
+  (Phase 1 #4) and the `chat_history` plain-entry helpers (Phase 1 #5).
+  Nothing in this tier remains. No behavior change; assert with
   `hiccup/render-lines` headless tests (no tty, `bb test` material,
   never `^:slow`); watch `hiccup/counters` (`bodies-run` climbing on
   idle frames = inline-callback trap).
@@ -430,8 +430,17 @@ One commit per file, simplest first:
    footers, timing) plus new render-driven tests for the two result
    legs (`test-bash-result`, `test-edit-result-error-leg`,
    `test-edit-result-preview-state`).
-5. `chat_history` helpers (`make-plain-msg`, `make-plain-md-msg`,
-   `StatusLine`) — optional, no behavior change, no measurable win.
+5. **DONE — `chat_history` helpers**: `make-plain-msg` and
+   `make-plain-md-msg` are one-line `hiccup/root`s of element trees;
+   `StatusLine` is a record over a root whose body reads its text atom
+   (the in-place status rewrite is a `reset!`). No behavior change and no
+   measurable win — it rides the reconciliation machinery for
+   consistency and drops the file's last four component requires
+   (`container`, `spacer`, `text`, `md`) plus the `track-deps` dance.
+   Pinned by a HEAD-vs-new render dump (160 identical lines: three
+   widths incl. wrap, the trailing-status rewrite, invalidate, the
+   output-pad walk, clear) and new/strengthened `test_chat_history`
+   cases (plain-entry lines, cached-status invalidation).
 
 Acceptance per file: interaction behavior identical (existing tests),
 state changes re-derive only what changed, idle frames flat.

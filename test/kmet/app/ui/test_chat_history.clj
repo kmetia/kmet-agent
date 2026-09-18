@@ -2,7 +2,9 @@
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.tui.core :as core]
+            [kmet.tui.hiccup :as hiccup]
             [kmet.tui.macros :as macros]
+            [kmet.tui.protocols :as protocols]
             [kmet.libs.terminal-image :as timg]
             [kmet.app.ui :as ui]
             [kmet.app.ui.tool-execution :as te]
@@ -477,16 +479,62 @@
           "status must not appear in persisted messages")
       (is (= ["hello"] (mapv :content (ch/chat-history-get-messages ch)))))))
 
+(deftest test-render-plain-entries
+  (testing "error/warning/notice/unknown-role entries render as plain lines"
+    (let [ch (ch/make-chat-history)]
+      (ch/chat-history-add-message! ch {:role :error :content "boom"})
+      (ch/chat-history-add-message! ch {:role :warning :content "careful"})
+      (ch/chat-history-add-message! ch {:role :notice :content "fyi"})
+      (ch/chat-history-add-message! ch {:role :notice :content "styled" :style :error})
+      (ch/chat-history-add-message! ch {:role :mystery :content "**unknown body**"})
+      (let [lines (plain-lines ch 40)]
+        (is (some #(re-find #"^ Error: boom\s*$" %) lines) "error line")
+        (is (some #(re-find #"^ Warning: careful\s*$" %) lines) "warning line")
+        (is (some #(re-find #"^ fyi\s*$" %) lines)
+            "notice line, default :warning style")
+        (is (some #(re-find #"^ styled\s*$" %) lines)
+            "notice line with an explicit :style")
+        (is (some #(re-find #"^unknown body\s*$" %) lines)
+            "unknown roles fall back to the unpadded markdown helper")))))
+
 (deftest test-show-status-updates-in-place
   (testing "repeated status updates replace the line instead of appending"
     (let [ch (ch/make-chat-history)
           _ (ch/chat-history-add-message! ch {:role :user :content "hi"})]
       (ch/chat-history-show-status! ch "Tool output: expanded")
+      ;; render first: the update below must invalidate the status entry's
+      ;; root cache, not just render correctly because nothing was cached yet
+      (is (some #(re-find #"Tool output: expanded" %) (plain-lines ch 40)))
       (ch/chat-history-show-status! ch "Tool output: collapsed")
       (let [lines (plain-lines ch 40)]
         (is (some #(re-find #"Tool output: collapsed" %) lines))
         (is (not-any? #(re-find #"Tool output: expanded" %) lines)
             "old status text should be replaced, not accumulated")))))
+
+(deftest test-plain-entries-run-no-idle-bodies
+  (testing "a plain entry's root is a constant tree — an idle frame rebuilds nothing"
+    ;; the trivial body still runs (no tracked deref to memoize on), but every
+    ;; element is reused: constructs and disposals stay at zero
+    (let [ch (ch/make-chat-history)]
+      (ch/chat-history-add-message! ch {:role :error :content "boom"})
+      (protocols/render ch 40)
+      (hiccup/reset-counters!)
+      (protocols/render ch 40)
+      (is (zero? (:constructs (hiccup/counters))) "no element rebuilt")
+      (is (zero? (:disposals (hiccup/counters))) "nothing disposed")))
+  (testing "an in-place status rewrite re-derives exactly one body"
+    (let [ch (ch/make-chat-history)
+          _ (ch/chat-history-add-message! ch {:role :user :content "hi"})]
+      (ch/chat-history-show-status! ch "one")
+      (protocols/render ch 40)
+      (hiccup/reset-counters!)
+      (protocols/render ch 40)
+      (is (zero? (:bodies-run (hiccup/counters))) "idle status frame runs no bodies")
+      (hiccup/reset-counters!)
+      (ch/chat-history-show-status! ch "two")
+      (protocols/render ch 40)
+      (is (= 1 (:bodies-run (hiccup/counters))) "the rewrite re-derives once")
+      (is (some #(re-find #"two" %) (plain-lines ch 40))))))
 
 (deftest test-info-collapsible
   (testing "collapsible info banner toggles with the tool-expand action"

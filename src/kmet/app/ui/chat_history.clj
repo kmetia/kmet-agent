@@ -6,12 +6,10 @@
    component caches. There is no parallel children bookkeeping and no
    child→message reverse-engineering — persistence reads the atom directly."
   (:require [clojure.string :as str]
+            [kmet.libs.reakt :as r]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.theme :as theme]
-            [kmet.tui.components.spacer :as spacer]
-            [kmet.tui.components.text :as text]
-            [kmet.tui.components.markdown :as md]
-            [kmet.tui.components.container :as container]
+            [kmet.tui.hiccup :as h]
             [kmet.app.ui.subs :as subs]
             [kmet.app.ui.user-message :as um]
             [kmet.app.ui.assistant-message :as am]
@@ -22,7 +20,7 @@
             [kmet.app.ui.skill-message :as skill-message]
             [kmet.app.skills :as skills]
             [kmet.app.tools.core :as tools]
-            [kmet.tui.macros :refer [track! track-deps defcomponent]]))
+            [kmet.tui.macros :refer [defcomponent]]))
 
 ;; ─── Info component at top ─────────────────────────────────────────────────
 
@@ -198,57 +196,51 @@
                            (or (:content b) (:text b) "")))))
 
 (defn- make-plain-msg
-  "Create a Spacer(1) + plain Text pair — pi's showError/showWarning: a
+  "Spacer(1) + plain Text pair — pi's showError/showWarning: a
    dim/error/warning line with no background box."
   [text]
-  (let [c (container/make-container)]
-    (container/container-add-child c (spacer/make-spacer 1))
-    (container/container-add-child c (text/make-text text 1 0))
-    c))
+  (h/root [:container {}
+           [:spacer {:lines 1}]
+           [:text {:text text :padding-x 1 :padding-y 0}]]))
 
 (defn- make-plain-md-msg
   "Spacer(1) + Markdown tinted with DEFAULT-STYLE-FN — pi's compaction
    summaries and unknown-role content render as Markdown."
   [text theme default-style-fn]
-  (let [c (container/make-container)]
-    (container/container-add-child c (spacer/make-spacer 1))
-    (container/container-add-child c
-                                   (md/make-markdown text
-                                                     :theme (theme/get-markdown-theme theme)
-                                                     :default-style default-style-fn
-                                                     :padding-x 0))
-    c))
+  (h/root [:container {}
+           [:spacer {:lines 1}]
+           [:markdown {:text text
+                       :theme (theme/get-markdown-theme theme)
+                       :default-style default-style-fn
+                       :padding-x 0}]]))
 
 ;; ─── Status line (pi: showStatus) ──────────────────────────────────────────
 
 ;; StatusLine — a dim status entry appended to the chat (pi: showStatus
 ;; appends Spacer(1) + Text to the chat container). Like pi's Text, long
 ;; statuses wrap instead of truncating. No component kind — kind-based
-;; dispatch (toggles, theme application) returns nil for it.
-(defcomponent StatusLine nil [spacer-atom text-atom cache-atom]
-  (render [this width]
-    (track! this width
-      (let [sp @spacer-atom
-            tt @text-atom]
-        ;; The inner Text's text atom changes on status updates
-        ;; (text/text-set!) — track it so the cache invalidates.
-        (track-deps @(:text-atom tt))
-        (into [] (concat (protocols/render sp width)
-                         (protocols/render tt width))))))
-  (invalidate [_this]
-    (protocols/invalidate @spacer-atom)
-    (protocols/invalidate @text-atom))
-  (dispose [_this]
-    (protocols/dispose @spacer-atom)
-    (protocols/dispose @text-atom)))
+;; dispatch (toggles, theme application) returns nil for it. TEXT-ATOM holds
+;; the styled string: show-status rewrites the trailing entry by reset!ting
+;; it and the root body re-derives the tag (the in-place update the inner
+;; Text's atom used to carry).
+(defcomponent StatusLine nil [text-atom root]
+  (render [this width] (protocols/render (:root this) width))
+  (invalidate [_this] (protocols/invalidate (:root _this)))
+  (dispose [_this] (protocols/dispose (:root _this))))
 
 (defn- make-status-line
   "Create a StatusLine for a status message (pi: showStatus — a Spacer(1)
    plus a dim, wrapping line)."
   [message]
-  (map->StatusLine {:spacer-atom (atom (spacer/make-spacer 1))
-                    :text-atom (atom (text/make-text (theme/dim message) 1 0))
-                    :cache-atom (atom nil)}))
+  (let [text-atom (atom (theme/dim message))]
+    (map->StatusLine
+     {:text-atom text-atom
+      :root (h/root (fn [_]
+                      [:container {}
+                       [:spacer {:lines 1}]
+                       [:text {:text (r/tracked-deref text-atom)
+                               :padding-x 1
+                               :padding-y 0}]]))})))
 
 (defn- make-user-msg
   "The component for a :user message. A message whose content is an expanded
@@ -723,8 +715,8 @@
   [ch message]
   (let [last-msg (peek @(:messages-atom ch))]
     (if (and last-msg (= :status (:role last-msg)))
-      (text/text-set! @(:text-atom (:component last-msg))
-                      (theme/dim message))
+      (reset! (:text-atom (:component last-msg))
+              (theme/dim message))
       (chat-history-add-message! ch {:role :status :content message})))
   nil)
 
