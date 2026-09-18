@@ -52,7 +52,36 @@
     (t/is (contains? all "read"))
     (t/is (contains? all "write"))
     (t/is (contains? all "edit"))
-    (t/is (contains? all "bash"))))
+    (t/is (contains? all "bash"))
+    ;; T0 (script.md): the paved search path — previously disabled
+    (t/is (contains? all "grep"))
+    (t/is (contains? all "find"))))
+
+(t/deftest test-tools-grep-find
+  (t/testing "grep/find return matches only (T0) and resolve relative paths
+              against the bound runtime cwd"
+    (let [dir (str (fs/absolutize (str "target/test-tools-search-"
+                                       (System/currentTimeMillis))))]
+      (fs/create-dirs dir)
+      (try
+        (spit (str (fs/path dir "a.clj")) "hello\nworld\n")
+        (spit (str (fs/path dir "b.clj")) "nothing\n")
+        (binding [tool-util/*cwd* dir]
+          (let [g (tools/execute-tool "grep" {:pattern "world"})]
+            (t/is (not (:is-error g)))
+            (t/is (str/includes? (:content g) "a.clj"))
+            (t/is (str/includes? (:content g) "world"))
+            (t/is (not (str/includes? (:content g) "nothing"))))
+          (let [g-file (tools/execute-tool "grep" {:pattern "world"
+                                                   :path (str (fs/path dir "a.clj"))})]
+            (t/is (str/includes? (:content g-file) "target/test-tools-search-")
+                  "single-file search reports the path, not just the basename")
+            (t/is (str/includes? (:content g-file) "world")))
+          (let [f (tools/execute-tool "find" {:pattern "b\\.clj"})]
+            (t/is (not (:is-error f)))
+            (t/is (str/includes? (:content f) "b.clj"))
+            (t/is (not (str/includes? (:content f) "a.clj")))))
+        (finally (fs/delete-tree dir))))))
 
 (t/deftest test-tools-get
   (let [t (tools/get-tool "read")]
@@ -352,8 +381,12 @@
                    ((:execute tool) {:command "echo id=[$KMET_SESSION_ID]"}))]
       (t/is (not (:is-error result)))
       (t/is (str/includes? (:content result) "id=[]"))
-      (t/is (nil? (:prompt-guidelines tool))
-            "the guideline is gated on exposure (pi: exposeSessionEnvironment)"))))
+      (t/is (not-any? #(str/includes? % "KMET_* environment variables")
+                      (:prompt-guidelines tool))
+            "the session-env guideline is gated on exposure (pi: exposeSessionEnvironment)")
+      (t/is (some #(str/includes? % "prefer one command or embedded script")
+                  (:prompt-guidelines tool))
+            "the batching guideline is not gated (kmet T0 — script.md)"))))
 
 (t/deftest test-tool-bash-create-tool-defaults
   (t/testing "create-tool is pi's createBashTool — the built-in tool with defaults"
@@ -363,7 +396,8 @@
       (t/is (= "Execute command" (:label tool)))
       (t/is (= (:description builtin) (:description tool)))
       (t/is (= (:parameters tool) (:parameters builtin)))
-      (t/is (= ["You can inspect KMET_* environment variables for current model and session details."]
+      (t/is (= ["To gather information from many files or filter large outputs, prefer one command or embedded script that prints only the relevant lines over many separate read calls."
+                "You can inspect KMET_* environment variables for current model and session details."]
                (:prompt-guidelines tool)))
       (t/is (:streams? tool)))))
 

@@ -7,7 +7,9 @@
 (def ^:private max-traverse-files 10000)
 
 (defn safe-file-seq
-  "Like file-seq but with symlink cycle protection and a max-files limit."
+  "Like file-seq but with symlink cycle protection and a max-files limit.
+   Skips `.git` directories — a repo's object store is never source-search
+   material."
   [dir-path]
   (let [visited (atom #{})]
     (take max-traverse-files
@@ -15,6 +17,7 @@
                   (tree-seq
                    (fn [f]
                      (and (fs/directory? f)
+                          (not= ".git" (fs/file-name f))
                           (let [cp (fs/canonicalize f)]
                             (when-not (contains? @visited cp)
                               (swap! visited conj cp)

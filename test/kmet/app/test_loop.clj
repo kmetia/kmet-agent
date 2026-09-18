@@ -100,19 +100,25 @@
                :model "m"
                :system prompt
                :system-prompt-opts opts)]
-    ;; initial prompt advertises bash
+    ;; initial prompt advertises bash and the re-enabled search tools (T0)
     (t/is (str/includes? @(:system agent) "- bash:"))
-    (t/is (str/includes? @(:system agent) "Use bash for file operations"))
+    (t/is (str/includes? @(:system agent) "- grep:"))
+    ;; the pi bash-exploration rule only fires when bash is the sole such tool
+    (t/is (not (str/includes? @(:system agent) "Use bash for file operations")))
     ;; disable bash
     (loop/set-active-tools! agent (mapv :name (remove #(= "bash" (:name %)) all-tools)))
-    (t/is (= #{"read" "edit" "write"} @(:enabled-tools agent)))
+    (t/is (= #{"read" "edit" "write" "grep" "find"} @(:enabled-tools agent)))
     (t/is (not (str/includes? @(:system agent) "- bash:")))
     (t/is (not (str/includes? @(:system agent) "Use bash for file operations")))
+    ;; bash alone with read restores the rule (no grep/find/ls active)
+    (loop/set-active-tools! agent ["bash" "read"])
+    (t/is (str/includes? @(:system agent) "- bash:"))
+    (t/is (str/includes? @(:system agent) "Use bash for file operations"))
     ;; restore all
     (loop/set-active-tools! agent nil)
     (t/is (nil? @(:enabled-tools agent)))
     (t/is (str/includes? @(:system agent) "- bash:"))
-    (t/is (str/includes? @(:system agent) "Use bash for file operations"))
+    (t/is (not (str/includes? @(:system agent) "Use bash for file operations")))
     ;; unknown tool names are filtered out of the enabled set (pi)
     (loop/set-active-tools! agent ["read" "nonexistent-tool"])
     (t/is (= #{"read"} @(:enabled-tools agent)))

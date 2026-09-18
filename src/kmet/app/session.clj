@@ -295,15 +295,47 @@
                    :leaf-id (atom leaf-id)
                    :lock (java.util.concurrent.locks.ReentrantLock.)})))
 
+;; ─── Tool result token attribution (script.md T0) ──────────────────────────
+;; Every tool-result entry carries an estimated :result-tokens (chars/4, the
+;; compaction convention). The totals are DERIVED from the entries, so loaded
+;; and forked sessions report without extra bookkeeping.
+
+(defn- tool-result-chars
+  "Character count of a tool entry's result content — a string, or a block
+   vector of tool_result/text blocks."
+  [entry]
+  (let [content (:content entry)]
+    (cond
+      (string? content) (count content)
+      (vector? content) (reduce + 0
+                                (for [b content]
+                                  (cond
+                                    (string? b) (count b)
+                                    (map? b) (count (str (or (:content b) (:text b) "")))
+                                    :else 0)))
+      :else 0)))
+
+(defn- estimate-result-tokens
+  "Estimated tokens (chars/4) of a tool entry's result."
+  [entry]
+  (quot (+ (tool-result-chars entry) 3) 4))
+
 (defn append-entry
   "Append an entry to the session atom, persisting it to the file (pi:
    storage.appendEntry is enqueued; _persist defers the file write until the
    first assistant message — lazy creation G4). Serialized per session so
    concurrent appends (bash-result future + agent loop) can't produce
-   orphaned sibling entries."
+   orphaned sibling entries.
+
+   Tool-result entries get an estimated :result-tokens stamped onto them
+   (script.md T0 — see tool-usage)."
   [session entry]
   (with-session-lock session
     (let [entry (build-entry @(:entries session) @(:leaf-id session) entry)
+          entry (if (and (= :tool (:role entry))
+                         (not (contains? entry :result-tokens)))
+                  (assoc entry :result-tokens (estimate-result-tokens entry))
+                  entry)
           file (:file session)]
       (swap! (:entries session) conj entry)
       (reset! (:leaf-id session) (:id entry))
@@ -311,6 +343,44 @@
         (spit file (prn-str entry) :append true)
         (persist-if-needed! session))
       entry)))
+
+(defn tool-usage
+  "Estimated tool-result tokens per tool over the session:
+   {tool-name {:calls n :tokens t}, :total {:calls n :tokens t}}. Derived
+   from the entries' result content — :result-tokens (stamped by
+   append-entry) when present, else estimated on the spot, so loaded,
+   forked, and context-replaced sessions report too. Tool names are strings;
+   \"unknown\" covers a malformed entry without :tool-name."
+  [session]
+  (let [grouped (reduce (fn [acc e]
+                          (if (= :tool (:role e))
+                            (let [tokens (long (or (:result-tokens e)
+                                                   (estimate-result-tokens e)))
+                                  tool (or (:tool-name e) "unknown")]
+                              (-> acc
+                                  (update-in [tool :calls] (fnil inc 0))
+                                  (update-in [tool :tokens] (fnil + 0) tokens)))
+                            acc))
+                        {}
+                        @(:entries session))]
+    (assoc grouped :total
+           {:calls (reduce + 0 (map :calls (vals grouped)))
+            :tokens (reduce + 0 (map :tokens (vals grouped)))})))
+
+(defn tool-usage-report
+  "Per-tool token summary, highest first, with a TOTAL line — for debug.log
+   and inspection (kmet has no /usage command yet)."
+  [session]
+  (let [{:keys [total] :as usage} (tool-usage session)]
+    (if (zero? (:calls total 0))
+      "no tool results"
+      (str (str/join "\n"
+                     (for [[tool stats] (sort-by (comp - :tokens val)
+                                                 (dissoc usage :total))]
+                       (format "  %-10s calls=%-4d tokens=%d"
+                               (name tool) (:calls stats) (:tokens stats))))
+           (format "\n  %-10s calls=%-4d tokens=%d"
+                   "TOTAL" (:calls total) (:tokens total))))))
 
 (defn replace-entries!
   "Atomically replace the session with a fresh linear branch built from raw

@@ -9,14 +9,14 @@
   "Search file contents with a pattern."
   [{:keys [pattern path]}]
   (try
-    (let [f (if path (io/file path) (io/file "."))
+    (let [f (io/file (util/resolve-tool-path (or path ".")))
           results (volatile! [])
           skipped (volatile! [])]
       (if (fs/regular-file? f)
         (with-open [rdr (io/reader f)]
           (doseq [[idx line] (map-indexed vector (line-seq rdr))]
             (when (re-find (re-pattern pattern) line)
-              (vswap! results conj (str (fs/file-name f) ":" (inc idx) ": " line)))))
+              (vswap! results conj (str f ":" (inc idx) ": " line)))))
         (doseq [file (util/safe-file-seq f)]
           (try
             (with-open [rdr (io/reader (str file))]

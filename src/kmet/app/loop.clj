@@ -2035,6 +2035,11 @@ Be precise and concise in your responses."}}]
             (let [msg-count-before (count @(:messages agent))
                   text-buf (atom "")
                   agent-end (fn [& [error]]
+                              (when-let [s (:session agent)]
+                                (when (pos? (get-in (session/tool-usage s)
+                                                    [:total :calls] 0))
+                                  (debug/log "tool usage (estimated result tokens):\n"
+                                             (session/tool-usage-report s))))
                               (emit agent {:type :agent-end
                                            :messages (subvec @(:messages agent) msg-count-before)
                                            :error error})

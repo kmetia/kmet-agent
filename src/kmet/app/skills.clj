@@ -414,8 +414,9 @@
    The skills section is appended only when the read tool is available, since
    skills are loaded on demand via read (pi: hasRead check). Deviations from
    pi: no pi-docs section (kmet ships no bundled docs); the bash-exploration
-   guideline fires whenever bash is active (grep/find/ls are not built into
-   kmet)."
+   guideline fires only when bash is active and none of grep/find/ls is — as
+   of T0 grep/find are built in, so it fires only when they are disabled
+   (script.md)."
   [& {:keys [custom-prompt append-prompt cwd context-files tools
              prompt-guidelines skills]
       :or {cwd (str (fs/cwd))}}]

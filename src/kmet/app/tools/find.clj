@@ -9,7 +9,7 @@
   "Find files matching a pattern."
   [{:keys [pattern path]}]
   (try
-    (let [dir (if path (io/file path) (io/file "."))
+    (let [dir (io/file (util/resolve-tool-path (or path ".")))
           results (volatile! [])]
       (doseq [file (util/safe-file-seq dir)]
         (let [name (fs/file-name file)]

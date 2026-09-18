@@ -1576,3 +1576,45 @@
                    {:role :assistant :usage {:input_tokens 10000 :output_tokens 100
                                              :input_tokens_details {:cached_tokens 0}}}]]
       (t/is (true? (:model-changed (s/detect-cache-miss entries)))))))
+
+;; ─── Tool-result token attribution (script.md T0) ─────────────────────────
+
+(t/deftest test-session-tool-usage
+  (let [session (s/create-session test-dir)]
+    (s/append-entry session {:role :user :content "hi"})
+    (s/append-entry session {:role :tool
+                             :tool-name "read"
+                             :content [{:type :tool_result
+                                        :tool_use_id "t1"
+                                        :content (pad-string 400 \a)}]})
+    (s/append-entry session {:role :tool
+                             :tool-name "grep"
+                             :content [{:type :tool_result
+                                        :tool_use_id "t2"
+                                        :content "ab"}]})
+    ;; an assistant entry publishes the file (lazy creation G4)
+    (s/append-entry session {:role :assistant :content "ok"})
+    (t/testing "tool results carry an estimated :result-tokens (chars/4)"
+      (let [read-entry (first (filter #(= "read" (:tool-name %))
+                                      @(:entries session)))]
+        (t/is (= 100 (:result-tokens read-entry)))))
+    (t/testing "tool-usage derives per-tool totals + a :total"
+      (let [u (s/tool-usage session)]
+        (t/is (= {:calls 1 :tokens 100} (get u "read")))
+        (t/is (= {:calls 1 :tokens 1} (get u "grep")))
+        (t/is (= {:calls 2 :tokens 101} (:total u)))))
+    (t/testing "the report names the tools and totals"
+      (let [report (s/tool-usage-report session)]
+        (t/is (str/includes? report "read"))
+        (t/is (str/includes? report "TOTAL"))))
+    (t/testing "loaded sessions report from the persisted entries"
+      (let [loaded (s/load-session (:file session))]
+        (t/is (= {:calls 2 :tokens 101} (:total (s/tool-usage loaded))))))
+    (t/testing "unstamped tool entries (rebuilt contexts, legacy files) estimate on the fly"
+      (let [rebuilt (s/create-session test-dir)]
+        (s/replace-entries! rebuilt [{:role :tool
+                                      :tool-name "bash"
+                                      :content [{:type :tool_result
+                                                 :tool_use_id "t3"
+                                                 :content (pad-string 40 \b)}]}])
+        (t/is (= {:calls 1 :tokens 10} (get (s/tool-usage rebuilt) "bash")))))))
