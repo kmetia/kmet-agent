@@ -25,7 +25,7 @@
    cannot be toggled; top-level settings entries and auto-dir items toggle
    via the scope's settings resource array instead of a package entry.
 
-   The frame is a mounted hiccup root (hiccup.md): the two borders are
+   The frame is a mounted hiccup root (tui.md §14.1): the two borders are
    [:dynamic-border] elements, the header/hint/row lines are [:truncated-text]
    leaves over the already-styled strings, and the search field is a tag-owned
    [:input] whose text lives in state and whose emphasis and caret follow

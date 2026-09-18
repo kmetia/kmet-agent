@@ -163,7 +163,7 @@
 (t/deftest test-kmet-deltas-and-extension-ids-on-pi-tables
   ;; The TUI table mirrors pi's TUI_KEYBINDINGS plus a fixed set of kmet
   ;; deltas (chords folded onto pi ids) and kmet-only ids. Pinned here so a
-  ;; rename or drop fails loudly at the manager level; tui.md §7/§14 lists
+  ;; rename or drop fails loudly at the manager level; tui.md §7 lists
   ;; the same set.
   (let [kmgr (kb/make-agent-keybindings-manager)]
     (t/testing "folded kmet chords on pi ids"

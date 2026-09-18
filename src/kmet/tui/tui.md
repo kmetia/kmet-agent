@@ -5,8 +5,9 @@
 It knows nothing about chat, LLMs or sessions — the app layer (`kmet.app.ui.*`)
 builds on it, and extensions consume the same namespaces.
 
-This document is the authoritative usage reference for the package. Keep it
-up to date whenever the described behavior changes.
+This document is the authoritative usage and development reference for the
+package: how `kmet.tui.*` works, and how `kmet.app.ui.*` builds on it. Keep
+it up to date whenever the described behavior changes.
 
 ## Contents
 
@@ -23,7 +24,8 @@ up to date whenever the described behavior changes.
 11. [Debugging rendering](#11-debugging-rendering)
 12. [Testing & performance invariants](#12-testing--performance-invariants)
 13. [Layer boundaries](#13-layer-boundaries)
-14. [Roadmap](#14-roadmap)
+14. [Building app UI — DSL first](#14-building-app-ui--dsl-first)
+15. [Design non-goals and rationale](#15-design-non-goals-and-rationale)
 
 ---
 
@@ -679,12 +681,14 @@ cursor (§3.1) — the same pure-data story with a setter instead of a
 
 **Hot-path carve-out**: message *content* is never re-derived as DSL data
 inside a body — a token append would re-run the body and rebuild
-O(transcript) elements per token (superlinear; hiccup.md §4 has the
-numbers). The transcript stays records with instance storage; screens
-reference it as a splice/tag. A DSL container that only splices those
-records and tracks the messages vector is a different animal — its body
-re-runs on add/remove, not per token, and it measures perf-neutral — but
-not a required migration.
+O(transcript) elements per token, worsening as the transcript grows
+(measured: 4× the record tree at 300 messages, 16× at 2400). The transcript
+stays records with instance storage; screens reference it as a splice/tag.
+A DSL container that only splices those records and tracks the messages
+vector is a different animal — its body re-runs on add/remove, not per
+token, and it is at parity with the record (±20%, ahead on idle at 1200;
+2400 messages: 9.5 vs 8.8 ms streaming and 8.8 vs 7.4 idle, container vs
+record) — but not a required migration.
 
 ---
 
@@ -1313,55 +1317,114 @@ through untouched (§2.1 children rules).
 
 ---
 
-## 14. Roadmap
+## 14. Building app UI — DSL first
 
-Sections 1–13 describe current behavior. **The items below are not
-implemented** — this is a plan record, kept so the analysis behind the
-decisions is not lost. When an item lands, fold its behavior into the
-relevant section, add it to the Done table and strike it from the plan; a
-declined item moves to "Deliberately not borrowing" with its rationale.
+`kmet.app.ui.*` is the reference consumer of the DSL. These are the
+composition rules for new UI — how a screen is built so it behaves like the
+rest of the app. The migration has landed: dialogs, selectors, settings and
+the tool renderers are trees; the imperative sites that remain are the
+measured keeps in §14.4.
 
-Sources: the R items are ideas borrowed from glimmer (R1–R6 landed, R3b
-and R7 declined 2026-09-11); the P items are pi parity (P1–P3 landed). The
-remaining kmet↔pi gaps are tracked in `alignment.md` (§2, §6), and the
-rendering-shaped ones are postponed below.
+### 14.1 New UI is a tree
 
-- **R items — ideas borrowed from [glimmer](https://github.com/jolt-lang/glimmer)**
-  (a reactive core + reagent-style component model targeting Jolt) and
-  [glimmer-tui](https://github.com/jolt-lang/glimmer-tui), its ncursesw
-  terminal backend. Both MIT; neither is a dependency. Glimmer's layer is
-  not adoptable wholesale: it has no width, no input/focus, no disposal and
-  no render cache, and a parent re-render re-invokes every child body —
-  whereas kmet's narrower layer already runs on both bb and Jolt. So the
-  R items are idea-level borrows only.
+New screens, dialogs, selectors and chrome are fn components + hiccup trees
+over the closed tag set (§2.2): `hiccup/root` for mounted reactive roots,
+`hiccup/compile-tree` for a static frame built once and held (disposed via
+`hiccup/dispose-tree!`, §2.7). Do not extend the legacy imperative style
+(`make-*` + `container-add-child` / `container-replace-children!`); when a
+file mixing both is edited anyway, migrate the rows/frame being touched.
 
-### Done
+Reference patterns:
 
-| # | idea | landed as |
-|---|---|---|
-| R4 | loop-owned timer registry | `kmet.tui.timers` (§6.1) — `after!`/`every!`/`cancel!`/`cancel-all!`, pumped by the frame loop, cancelled by `tui-stop`; the bash driver + elapsed tick, the running-tool repaint, the scrollbar-hide debounce, flash expiry and the selector status auto-hide all ride it |
-| R5 | border sets as data | `kmet.tui.border` (§2.8) — `:border` on `:dynamic-border`, `:markdown` (table glyphs), `:editor`; `make-bash-execution :border` |
-| R6 | `^{:key}` metadata | keys read from element metadata as well as the `:key` prop (§2.1) |
-| R3a | key labels | `keys/key-label` + `keybindings/key-label-text` (§7.1) — hints and the tree help render `pgup`/`↑`, replacing the private `prettify-keys` regex pass |
-| R1 | prop→state apply path | a `:apply (fn [comp prev-props props])` spec on the tag table + the apply branch in `reuse-or-build` (§2.3): all seven stateful tags patch the live instance on a changed prop (state and focus survive) and decline to rebuild only when the tag cannot express the prop (`:border`/`:keybindings`, `:enable-search`, `:frames`/`:interval-ms`, a loader's `:spinner` child); state-carrying props are written only when THAT prop changed (live edits survive unrelated changes) and coerce like construction (nil ⇒ default); new `select-list`/`settings-list` setters (`-set-height!`, `-set-on-select!`, `-set-items!`, …) back the patch paths, and `cancellable-loader`'s protocol dispose now stops its spinner (pi: dispose → stop). The §4 props/state migration landed with it: `:box` (`:padding-x`/`:padding-y`/`:bg-fn`), `:v-stack`/`:h-stack` (`:gap`, `:align`) and `:scroll-view` (all six props, via new setters) declare TOTAL applys — containers never rebuild (a fresh construct would lose the subtree), so their structural props are live instead of create-time |
-| R2 | writable cursor | `kmet.libs.reakt/writable-cursor` + `cursor-reset!`/`cursor-swap!` (§3.1): a tracked-read lens that writes back through its source with `assoc-in`, `=`-gated, nested lenses composing, inert once disposed; read-only `cursor` stays the derivation primitive |
-| P1 | skill invocation message | `kmet.app.skills/parse-skill-block` (the inverse of the expander) + `kmet.app.ui.skill-message` — a `/skill:name` block renders as a collapsible `[skill] name (ctrl+o to expand)` message instead of dumping its body into the transcript |
-| P2 | images in chat (TUI half) | `kmet.app.ui.image_block` + the live `ui.subs/image-settings-sub`: tool-result and user/custom-message images render inline, or as the `imageFallback` text indicator when `:show-images` is off / the terminal lacks support; `:terminal {:show-images :image-width-cells}` in `config.clj` + terminal-support-gated `/settings` rows. The wire half landed separately: `images.blockImages` = `app/loop.clj` (`convertToLlmWithBlockImages`) + an ungated `/settings` row; `images.autoResize` stays provider work (tracked in `alignment.md` §2) |
-| P3 | widget keys through the manager | `kmet.tui.keybindings/global-match?` + the editor's injected-manager `kb-match?` (§7): SelectList, Input, SettingsList and the editor resolve their own ids through the KeybindingsManager, so a user override moves the widget; the editor resolves `tui.editor.historyPrevious/Next` between interrupt/exit and the other app actions (pi: custom-editor order). The TUI definition table was aligned to pi's `TUI_KEYBINDINGS` (`historyPrevious/Next`, `jumpForward/Backward`, `yankPop`, `ctrl+left/right`, `ctrl+home/end`, `ctrl+pageUp/Down`). Follow-ups (same day): kmet extension ids `tui.editor.redo`/`tui.editor.killLine`/`tui.select.first`/`tui.select.last`/`tui.settings.cycleBackward`/`tui.settings.cycleForward`; folded alias chords on pi ids (`ctrl+h`, `ctrl+i`, `ctrl+p`/`ctrl+n`, `ctrl+enter`/`alt+enter`, `ctrl+shift+]`, the tree's legacy `L`); the thinking selector's `app.thinking.save` (a pi id kmet was missing) and the config screen's `tui.select.*`/`tui.input.tab` legs (pi's raw space/ctrl+c kept). §7 lists the remaining raw matches and why each stays raw |
+- `session_selector` — `hiccup/root` whose body re-derives rows as
+  `[:text …]` data from a state atom; the search `Input` is spliced foreign;
+  focus/dispose stay imperative.
+- `login_dialog` — `hiccup/root` + `r/tracked-deref` on a row-descriptor
+  atom; the title is built once outside the body so its identity is stable
+  across passes, the borders are `[:dynamic-border]` elements.
+- `fork_selector` — `compile-tree` frame + a `track!` list returning strings.
+- `bash_execution` — `hiccup/root` + a long-lived `Spinner` spliced foreign
+  (animation identity).
+- `dock`, `status_indicator/make-status-area` — plain fn components over
+  app-owned atoms.
 
-### Plan
+### 14.2 Rows are data-derived
 
-Nothing tracked. The `kmet.app.ui` hiccup migration is inventoried and
-planned in `hiccup.md` (§6) — outside this roadmap. The two glimmer
-borrows that were pending here — R3b (focus-derived help line) and R7
-(declarative `:overlay`) — were re-evaluated and declined 2026-09-11;
-the analysis is recorded under
-"Deliberately not borrowing" so it is not redone.
+A list (selector rows, dialog rows) is a keyed seq of leaf elements
+re-derived from the state atom inside the tree body — never a rebuilt
+`Container` of `make-text` records:
 
-### Postponed indefinitely
+- **key every spliced row** (`^{:key …}` or a `:key` prop): unkeyed siblings
+  are consumed in order, so a prepend rebuilds every row after it (§2.1);
+- **`:text` takes the pre-styled string** — truncate with
+  `u/truncate-to-width` against a known panel width, or read
+  `hiccup/*width*` inside a root body;
+- **live labels are elements** — a match counter, `scope-text`,
+  `footer-text` go in the same seq, not through a `text-set!` target.
 
-Decided 2026-09-10: not planned, not tracked further. Recorded so the
-analysis is not redone — revisit only on a concrete user request.
+**Why rows first.** `container-replace-children!` rebuilds and disposes every
+row per refresh; reconcile reuses unchanged keyed children and returns cache
+hits. Measured on this tree with one row changing:
+
+| rows | imperative rebuild | hiccup rows | hiccup, idle frame |
+|---|---|---|---|
+| 120 | 0.99 ms | 1.04 ms | 0.12 ms |
+| 500 | 13.1 ms | 4.0 ms | 0.51 ms |
+| 1000 | 47.0 ms | 8.7 ms | 1.36 ms |
+
+A wash at small selector sizes, 3–5× on list-sized content — and the manual
+refresh wiring (`*-refresh!`, `container-replace-children!`) disappears with
+it. The refresh fn becomes a pure state→elements fn, or collapses into a
+`hiccup/root` body reacting to the state atom.
+
+### 14.3 Stateful leaves — tag or foreign splice
+
+Two ways to embed a stateful leaf, both keep its state across passes:
+
+- **As a tag** (`[:input {:ref r :on-change f}]`, `[:select-list …]`,
+  `[:settings-list …]`, `[:spinner …]`): while the props stay `=`-equal the
+  instance (and its text, cursor, selection, undo history, animation clock)
+  is kept; a changed prop takes the tag's apply path, patching the live
+  record through its setters (§2.2/§2.3). A prop the tag cannot express on
+  the live instance (`:border`/`:keybindings`, `:enable-search`,
+  `:frames`/`:interval-ms`, a loader's `:spinner` child) rebuilds — and a
+  fresh fn literal per pass defeats the equal-props fast path, so hoist
+  callbacks to named fns or stable values (§2.5).
+- **As a foreign record** created once and spliced into the tree — the
+  hybrid rule. Reconcile preserves the record's identity and never disposes
+  it (§2.1); the wrapper forwards `handle-input` and
+  `IFocusable.set-focused!` to it and disposes it in its own `dispose`
+  (§13.1).
+
+A wrapper reaches a DSL-owned instance through a `hiccup/ref` (§2.4) — deref
+only in handlers/effects, never a render body. Forwarding input to a ref'd
+leaf is the canonical second case: input is delivered to the focused leaf
+only (§7), so the wrapper keeps focus and pushes each keystroke into the
+embedded field.
+
+### 14.4 What stays imperative
+
+- **Transcript message content** — `ChatHistory` and the message components
+  keep instance storage, `track!` caches, streaming reflow, renderer-state
+  dedup and persistence reading the message maps directly; §4's hot-path
+  carve-out has the numbers and why a DSL container is not a target either.
+- **String-direct `track!` leaves** — `footer`, `pending_messages`,
+  `loaded_resources`, `ForkMessageList`, `TreeList`, the tree help lines,
+  retry/compaction/branch indicators: they return plain string lines, not
+  child trees. Wrapping them in hiccup adds reconcile cost for zero benefit.
+- **Intentional foreign splices** — `bash_execution`'s spinner (animation
+  identity), `image_block` (transient image per render), `assistant_message`
+  (transient markdown per reflow).
+
+---
+
+## 15. Design non-goals and rationale
+
+Deliberate boundaries, recorded so the analysis behind them is not redone.
+This is not the gap tracker — kmet↔pi follow-ups live in `alignment.md`;
+anything listed here changes only on an explicit request.
+
+### 15.1 Features deliberately out of scope
 
 | feature | pi ref | why not |
 |---|---|---|
@@ -1370,9 +1433,16 @@ analysis is not redone — revisit only on a concrete user request.
 | Alt-screen search | `alt-screen-search.ts` | needs a fullscreen/alt-screen mode (below) and the transcript model here is the native scrollback, not an owned viewport |
 | Fullscreen (alt-screen) TUI mode | `--tui-mode` | the opposite of the deliberate inline model (§1: transcript in the native scrollback, `\u001b[3J`-based full redraws); an alt-screen mode would fork the renderer, the scroll model and every overlay/scroll assumption |
 
-### Deliberately not borrowing
+### 15.2 Deliberately not borrowed
 
-Recorded so the analysis is not redone:
+These come from evaluating [glimmer](https://github.com/jolt-lang/glimmer)
+(a reactive core + reagent-style component model targeting Jolt) and
+[glimmer-tui](https://github.com/jolt-lang/glimmer-tui), its ncursesw
+terminal backend. Both MIT; neither is a dependency. Glimmer's layer is not
+adoptable wholesale: it has no width, no input/focus, no disposal and no
+render cache, and a parent re-render re-invokes every child body — whereas
+kmet's narrower layer already runs on both bb and Jolt. Ideas are considered
+individually:
 
 - **Two-pass box layout** (`measure`/`arrange`, per-node `:natural`/`:min`,
   `:hexpand`/`:halign`, margin/padding shorthand, proportional
@@ -1396,50 +1466,37 @@ Recorded so the analysis is not redone:
   `watch-ref` is already kmet's seam, and Babashka seals
   `IWatchable`/`IReset`, so a drop-in atom cannot exist anyway (§3.1).
 - **Focus ring recomputed from the tree + `:autofocus`** — kmet focus is
-  imperative and dialog-scoped (§7). The one idea to revisit is
-  `:autofocus`: it exists so a focused text field does not swallow the
-  app's single-key bindings before the user presses Tab.
-- **Mouse hit-testing / wheel-under-pointer** — kmet parses mouse
-  sequences only to keep the input buffer clean (§7) and has no owned
-  viewport to hit-test. A feature (alt-screen region), not a transplant.
+  imperative and dialog-scoped (§7). One idea from it remains worth noting:
+  `:autofocus` — it solves a focused text field swallowing the app's
+  single-key bindings before the user presses Tab.
+- **Mouse hit-testing / wheel-under-pointer** — kmet parses mouse sequences
+  only to keep the input buffer clean (§7) and has no owned viewport to
+  hit-test. A feature (alt-screen region), not a transplant.
 - **`reload!` / `run-async` / `usable-terminal?`** — kmet's dev loop is
   nREPL + `tui-invalidate`, and it owns its terminal adapter
-  (`kmet.tui.terminal`: JLine on bb/JVM, termios/kernel32 FFI on Jolt —
-  both behind the `ITerminal` protocol).
-- **Focus-derived help line (R3b)** — glimmer-tui derives a help bar from
-  the focused widget's `:bindings`. Declined as specced 2026-09-11:
-  "focus-derived" is nearly vacuous here (focus is imperative and every
-  dialog has exactly one focusable child, so a declaration would just
-  name that child), and hint choreography is dynamic per dialog
-  (delete-confirm rows, expand↔collapse, filter modes). Key text cannot
-  drift already — hints read the shared chord table (§7.1) — so only the
-  per-dialog item lists stay hand-written, which is where they belong.
-  One piece stays opportunistic, untracked: the tree selector's chunk
-  renderer (`compact-raw-keys`/`format-help-keys` plus wrapping) is the
-  only wrapped hint composition — extract it into a shared help-line
-  helper if a third dialog needs one.
-- **Declarative `:overlay` (R7)** — glimmer-tui declares an overlay in the
-  tree: no space at its declaration site, painted last and never clipped,
-  modal focus capture, Esc closes. Declined 2026-09-11. The pain is real
-  but small: dialogs are shown imperatively (`tui-show-overlay`), so
-  declaration site ≠ owner, yet only ~4 flows float — tree label-edit
-  input, the branch-summary asks, custom-summary input, extension
-  `ui-custom` overlays; every other panel docks in the editor like pi's
-  `showSelector`, which the dock already renders declaratively. The
-  imperative stack would stay underneath regardless (placement, sizing,
-  z-order and focus restore are session-owned; kmet renders lines, with no
-  screen coordinates to anchor to, so "painted last, never clipped" is
-  moot), and keeping overlay identity and focus order stable across
-  re-rendered declarations is the real work — the tree→session hook is
-  the spike. Esc-closes conflicts with per-dialog escape semantics (tree
-  back-navigation, login cancel); pi is imperative (`showOverlay`), so a
-  declarative path would fork every future dialog port, and extension
-  overlays must stay imperative anyway. If dialog-chaining ownership ever
-  bites, the 80% is an app-level flow helper in `app/ui` (a small state
-  stack + `next!`/`back!` over `tui-show-overlay`) — no core changes.
-
-### Suggested order
-
-Nothing tracked. The R3b extraction stays opportunistic (only if a third
-dialog needs wrapped chunks); R7 is declined.
-
+  (`kmet.tui.terminal`: JLine on bb/JVM, termios/kernel32 FFI on Jolt — both
+  behind the `ITerminal` protocol).
+- **Focus-derived help line** — glimmer-tui derives a help bar from the
+  focused widget's `:bindings`. Not planned: "focus-derived" is nearly
+  vacuous here (focus is imperative and every dialog has exactly one
+  focusable child, so a declaration would just name that child), and hint
+  choreography is dynamic per dialog (delete-confirm rows,
+  expand↔collapse, filter modes). Key text cannot drift already — hints
+  read the shared chord table (§7.1) — so only the per-dialog item lists
+  stay hand-written, which is where they belong.
+- **Declarative `:overlay`** — glimmer-tui declares an overlay in the tree:
+  no space at its declaration site, painted last and never clipped, modal
+  focus capture, Esc closes. Not planned: dialogs are shown imperatively
+  (`tui-show-overlay`), so declaration site ≠ owner, yet only ~4 flows
+  float — tree label-edit input, the branch-summary asks, custom-summary
+  input, extension `ui-custom` overlays; every other panel docks in the
+  editor like pi's `showSelector`, which the dock already renders
+  declaratively. The imperative stack would stay underneath regardless
+  (placement, sizing, z-order and focus restore are session-owned; kmet
+  renders lines, with no screen coordinates to anchor to, so "painted last,
+  never clipped" is moot), and keeping overlay identity and focus order
+  stable across re-rendered declarations is the real work. Esc-closes
+  conflicts with per-dialog escape semantics (tree back-navigation, login
+  cancel); pi is imperative (`showOverlay`), so a declarative path would
+  fork every future dialog port, and extension overlays must stay
+  imperative anyway.

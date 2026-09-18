@@ -1,6 +1,6 @@
 (ns kmet.app.ui.hotkeys
-  "The /hotkeys view — pi: handleHotkeysCommand. A hiccup tree (hiccup.md
-   §0): the frame (borders, title) and the spacers are hiccup nodes, and the
+  "The /hotkeys view — pi: handleHotkeysCommand. A hiccup tree
+   (tui.md §14.1): the frame (borders, title) and the spacers are hiccup nodes, and the
    key/action data rides one :markdown node as pi's GFM tables — a
    `**Section**` header per group plus `| Key | Action |` rows, the key
    column resolved through the live keybindings manager (keybindings.edn

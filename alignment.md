@@ -133,7 +133,7 @@ list/config` dispatch from `core.clj` to `kmet.package-manager` (pi
 | `--prompt-template` | use a prompt template for one run |
 | `--skill` | invoke a skill for one run |
 | `--theme` | theme for one run |
-| `--tui-mode` | `regular` vs experimental `fullscreen` TUI — **postponed indefinitely** (the inline-scrollback model is deliberate; `tui.md` §14) |
+| `--tui-mode` | `regular` vs experimental `fullscreen` TUI — **postponed indefinitely** (the inline-scrollback model is deliberate; `tui.md` §15.1) |
 | `--verbose` | verbose logging |
 | `--version` | print version |
 
@@ -141,10 +141,10 @@ list/config` dispatch from `core.clj` to `kmet.package-manager` (pi
 
 | Feature | pi ref | kmet status |
 |---|---|---|
-| **Mermaid diagram rendering** | `modes/interactive/components/mermaid.ts` + `markdown.mermaid` setting (`off`/`final`/`streaming`) | **Postponed indefinitely** (2026-09-10; rationale in `src/kmet/tui/tui.md` §14) |
+| **Mermaid diagram rendering** | `modes/interactive/components/mermaid.ts` + `markdown.mermaid` setting (`off`/`final`/`streaming`) | **Postponed indefinitely** (2026-09-10; rationale in `src/kmet/tui/tui.md` §15.1) |
 | **LaTeX rendering** (`$…$`, `$$…$$`) | `packages/tui/src/latex.ts`, wired in `tui/src/components/markdown.ts` | **Postponed indefinitely** (same) |
 | **Alt-screen search** (search overlay over the transcript) | `packages/tui/src/alt-screen-search.ts`, `tui-alt-screen.ts` | **Postponed indefinitely** (same — needs an alt-screen mode) |
-| **Images in chat** | `terminal.showImages`, `terminal.imageWidthCells`, `images.autoResize`, `images.blockImages` settings; `show-images-selector.ts` | **Partial** — `tui.md` §14 P2 done: `:terminal {:show-images :image-width-cells}` settings, terminal-support-gated `/settings` rows, and inline images (or the `imageFallback` text indicator when off/unsupported) in tool results and user/custom messages. `images.blockImages` done: `:images {:block-images}` setting + ungated `/settings` row, stripped per request in `app/loop.clj/call-llm` (pi: convertToLlmWithBlockImages — placeholder text, consecutive dedupe, stored context untouched). **Missing**: `images.autoResize` (pi runs a Photon WASM resize pipeline; babashka has no ImageIO/AWT — needs a resizer backend decision, see `app/tools/read.clj`)
+| **Images in chat** | `terminal.showImages`, `terminal.imageWidthCells`, `images.autoResize`, `images.blockImages` settings; `show-images-selector.ts` | **Partial** — the TUI half done (`tui.md` §10): `:terminal {:show-images :image-width-cells}` settings, terminal-support-gated `/settings` rows, and inline images (or the `imageFallback` text indicator when off/unsupported) in tool results and user/custom messages. `images.blockImages` done: `:images {:block-images}` setting + ungated `/settings` row, stripped per request in `app/loop.clj/call-llm` (pi: convertToLlmWithBlockImages — placeholder text, consecutive dedupe, stored context untouched). **Missing**: `images.autoResize` (pi runs a Photon WASM resize pipeline; babashka has no ImageIO/AWT — needs a resizer backend decision, see `app/tools/read.clj`)
 | **Cache-miss notices** | `showCacheMissNotices` setting | Done — `:show-cache-miss-notices` setting, `session/detect-cache-miss` (pi detectMiss), notice at agent-end (≥ 20k tokens) |
 | **Skill invocation presentation** | `components/skill-invocation-message.ts` | **Done** — `kmet.app.skills/parse-skill-block` + `kmet.app.ui.skill-message`: a `/skill:name` block renders as `[skill] name (ctrl+o to expand)` (collapsed) or the name + body as Markdown (expanded), with the trailing args as a normal user message below. Live and replay share the parse; the session still stores the expanded text |
 | **Custom entry rendering** | `registerEntryRenderer` + `components/custom-entry.ts` | Done — `extensions/register-entry-renderer!` + live entry sink; rendered at replay and on append (pi registerEntryRenderer + CustomEntryComponent) |
@@ -228,7 +228,7 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
 - **Widget keys through the keybindings manager** — pi's generic components
   (`select-list.ts`, `input.ts`, `settings-list.ts`, editor navigation) call
   `getKeybindings()` for `tui.select.*`/`tui.input.*`/`tui.editor.*` — **done**
-  (`tui.md` §14 P3, §7): SelectList, Input, SettingsList and the editor resolve
+  (`tui.md` §7): SelectList, Input, SettingsList and the editor resolve
   their ids through the manager (the editor prefers an injected one), the
   editor's `tui.editor.historyPrevious/Next` sit between interrupt/exit and the
   remaining app actions (pi: custom-editor), and the TUI definition table was
@@ -249,8 +249,8 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
 - **`/settings` menu breadth** — kmet `/settings` covers thinking/hide-thinking/retry only;
   **done (theme)**: a theme row (name switch + persist) was added; **done (images)**: the
   Show images / Image width rows (pi: show-images-selector, gated on terminal image
-  support) landed with `tui.md` §14 P2. The mermaid and tui-mode rows are postponed
-  indefinitely with their features (`tui.md` §14)
+  support) landed with the inline-images work (`tui.md` §10). The mermaid and tui-mode
+  rows are postponed indefinitely with their features (`tui.md` §15.1)
 - **Auth selector/dialog components** — pi `login-dialog.ts`, `oauth-selector.ts`,
   `session-selector-search.ts`; kmet's terminal `/login` covers the flows
 - **`packages/agent` (`@earendil-works/pi-agent-core`)** — general-purpose agent library

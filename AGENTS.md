@@ -193,7 +193,7 @@ src/kmet/
 │   ├── tools/  — Tool implementations (one file per tool)
 │   └── ui/     — App-specific TUI components (Pi's coding-agent layer)
 └── tui/      — Generic TUI library (Pi's @earendil-works/pi-tui)
-    │           Usage docs: src/kmet/tui/tui.md — MUST be kept up to date
+    │           Usage + development docs: src/kmet/tui/tui.md — MUST be kept up to date
     │           with any behavior change they describe
     │           terminal.clj = the ITerminal protocol + shared ANSI/query
     │           logic + host dispatch; terminal_jline.clj (bb/JVM) and
@@ -450,8 +450,8 @@ protocol — retired in DSL stage 2, see tui.md §8).
 - **Do NOT rewrite for its own sake**: the transcript records
   (`chat_history`, message / tool-execution components) and string-direct
   `track!` leaves (`footer`, `pending_messages`, `loaded_resources`, list
-  / row builders) stay as they are — see `hiccup.md` for the tiered plan
-  and non-goals.
+  / row builders) stay as they are — see `src/kmet/tui/tui.md` §14 for the
+  composition rules and §15 for the non-goals.
 
 ### Reactive render cache (track!)
 - **Default**: wrap a component's render body with `(track! this width ...)`
@@ -525,12 +525,10 @@ protocol — retired in DSL stage 2, see tui.md §8).
 - **Loader docs**: `src/kmet/loader/loader.md` — the Loader design,
   resolution semantics, conformance cases and phase status. It lives with the
   library so it can be extracted with it; keep it up to date.
-- **TUI package docs**: `src/kmet/tui/tui.md` is the usage reference for
-  `kmet.tui.*` (Hiccup DSL, fn components, reactivity/track!, state model,
-  lifecycle, scheduling, input boundary). It must be kept up to date: a
-  change to TUI behavior described there updates the doc in the same
-  change.
-- **Hiccup migration inventory**: `hiccup.md` — which `app/ui` files are
-  still imperative, which pattern replaces each case, and what stays
-  imperative. Read it before migrating a selector/dialog/renderer.
+- **TUI package docs**: `src/kmet/tui/tui.md` is the usage and development
+  reference for `kmet.tui.*` (Hiccup DSL, fn components, reactivity/track!,
+  state model, lifecycle, scheduling, input boundary) and for building UI
+  on it in `kmet.app.ui.*` (§14 composition rules, §15 design non-goals).
+  It must be kept up to date: a change to TUI behavior described there
+  updates the doc in the same change.
 - Consult `~/src/cvstree/pi/` for implementation patterns before building new features — e.g., study its TUI component model before adding new components, or its diff rendering approach before implementing a diff view.
