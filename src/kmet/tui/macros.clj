@@ -57,14 +57,43 @@
   [component]
   (or (:cache-atom component) (:cache component)))
 
+(defn- atoms-unchanged?
+  "reduce-kv hit check over a cache's plain refs: true while ATOM still
+   holds the value it was read with. identical? first (an untouched atom
+   IS the recorded object), structural = for fresh-but-equal persistent
+   copies."
+  [_acc a v]
+  (let [cur (deref a)]
+    (if (or (identical? cur v) (= cur v))
+      true
+      (reduced false))))
+
+(defn- rx-unchanged?
+  "reduce-kv hit check over a cache's reactive cells (CELL is a reaction's
+   state atom — see track-render). True while the reaction is settled
+   (:idle/:busy/:disposed) and still holds the recorded value. :unrun and
+   :dirty must run — the re-render's deref settles them — and :failed must
+   rethrow there, so those miss. Reads the cell directly: derefing the
+   reaction would settle the batch queue on every cache hit, and this check
+   runs once per component per frame."
+  [_acc cell v]
+  (let [{:keys [state value]} @cell]
+    (if (and (case state (:idle :busy :disposed) true false)
+             (or (identical? value v) (= value v)))
+      true
+      (reduced false))))
+
 (defn track-render
   "Runtime implementation of track!. Runs RENDER-FN within a tracking scope
    and caches the result under WIDTH. Returns the cached result while every
-   tracked atom still holds the value it was read with — watches invalidate
-   on actual value changes (equal-value resets are no-ops), and the cache
-   records the values AS READ (not a post-body snapshot), so an atom that
-   changed mid-render makes the stored values disagree with the current
-   ones on the next hit check and forces a re-render.
+   tracked ref still holds the value it was read with: plain atoms/vars
+   re-deref (atoms-unchanged?), library reactions read their cell's cached
+   value (rx-unchanged?) — never the reaction's own deref, which would
+   settle the batch queue on every hit. Watches invalidate on actual value
+   changes (equal-value resets are no-ops), and the cache records the
+   values AS READ (not a post-body snapshot), so an atom that changed
+   mid-render makes the stored values disagree with the current ones on the
+   next hit check and forces a re-render.
    Requires COMPONENT to have a :cache-atom (or legacy :cache) field.
    A body that invalidates itself mid-run (a render fn calling :invalidate)
    is not cached — the next render re-runs it with the fresh state."
@@ -72,27 +101,20 @@
   (let [cache-atom (component-cache-atom component)
         cache @cache-atom]
     (if (and cache
+             ;; New-shape caches only: a cache written before this shape
+             ;; existed (an nREPL session reloading this namespace) has
+             ;; neither half, and `reduce-kv` over nil is vacuously true —
+             ;; without this guard it would serve unverified. Rebuild it
+             ;; once instead.
+             (contains? cache :atoms)
              (= (:width cache) width)
-             ;; reduce-kv, not every? over the entry seq: this hit check runs
-             ;; once per component per frame, and the per-entry MapEntry
-             ;; destructuring (plus the seq walk) measured ~2.4x the cost of
-             ;; reduce-kv on a multi-thousand-component transcript. reduce-kv
-             ;; hands key/value straight to the fn — same comparisons, same
-             ;; short-circuit, no per-entry allocation.
-             (reduce-kv (fn [_ a v]
-                          (let [cur (deref a)]
-                            ;; identical? first: O(1) positive filter — the
-                            ;; common case is an atom untouched since caching,
-                            ;; whose current value IS the recorded object.
-                            ;; Structural = only runs for atoms actually
-                            ;; written in between (persistent collections give
-                            ;; fresh roots on every update).
-                            (if (or (identical? cur v)
-                                    (= cur v))
-                              true
-                              (reduced false))))
-                        true
-                        (:values cache)))
+             ;; Two reduce-kv passes (plain refs / reactive cells), not one
+             ;; every? over the entry seq: this hit check runs once per
+             ;; component per frame, and reduce-kv hands key/value straight
+             ;; to the fn — same comparisons, same short-circuit, no
+             ;; per-entry allocation.
+             (reduce-kv atoms-unchanged? true (:atoms cache))
+             (reduce-kv rx-unchanged? true (:rx cache)))
       (:result cache)
       (let [tracked (atom {})]
         (binding [reakt/*tracking-scope* tracked]
@@ -108,6 +130,20 @@
             (try
               (let [result (render-fn)
                     tracked-map @tracked
+                    ;; Classify the tracked refs ONCE per body run (the miss
+                    ;; path): plain IRefs into :atoms (verify by deref),
+                    ;; library reactions into :rx keyed by their cell
+                    ;; (verify by cell read). The classification is the
+                    ;; expensive satisfies? call — it must not run per hit.
+                    [atom-vals rx-vals] (reduce-kv
+                                         (fn [acc ref v]
+                                           (let [[atom-vals rx-vals] acc]
+                                             (if (reakt/reaction? ref)
+                                               [atom-vals (assoc rx-vals
+                                                                 (reakt/-cell ref) v)]
+                                               [(assoc atom-vals ref v) rx-vals])))
+                                         [{} {}]
+                                         tracked-map)
                     watch-key (tracker-key component)
                     handler (fn [_ _ old new]
                               ;; Skip invalidation when the value didn't actually
@@ -136,7 +172,8 @@
                        {:component component :atoms atoms})
                 (when-not @invalidated?
                   (reset! cache-atom {:width width
-                                      :values tracked-map
+                                      :atoms atom-vals
+                                      :rx rx-vals
                                       :result result}))
                 result)
               (finally

@@ -2398,8 +2398,13 @@
                 (reset! (:previous-lines tui) lines)
                 (reset! (:previous-width tui) w)
                 (reset! (:previous-height tui) h)
+                ;; Image lines only exist when the terminal supports
+                ;; images — components gate on the capabilities. Without
+                ;; support the whole-document scan (and the collect walk)
+                ;; is pure overhead, so skip it.
                 (reset! (:previous-kitty-image-ids tui)
-                        (if (some img/is-image-line lines)
+                        (if (and (:images (img/get-capabilities))
+                                 (some img/is-image-line lines))
                           (collect-kitty-image-ids lines)
                           #{})))))
 

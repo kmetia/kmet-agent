@@ -100,10 +100,12 @@
 
 ;; ─── Image line detection ────────────────────────────────────────────────
 
-(defn is-image-line [line]
-  (or (str/starts-with? line kitty-prefix)
-      (str/starts-with? line "\u001b]1337;File=")
-      (str/includes? line kitty-prefix)
+(defn is-image-line
+  "True when LINE carries a Kitty or iTerm2 inline-image sequence. Both
+   markers can appear mid-line (continuation chunks), so includes? is the
+   test; it subsumes the starts-with? case, scanning each marker once."
+  [line]
+  (or (str/includes? line kitty-prefix)
       (str/includes? line "\u001b]1337;File=")))
 
 (defn parse-kitty-image-header

@@ -229,9 +229,13 @@
    error AFTER the batch finished draining — the rest of the batch still
    runs, so no reaction is left dirty but dequeued. Reactions dirtied by
    batch entries running later stay queued and settle at the next flush.
-   Reentrant calls are no-ops; the outer drain wins."
+   Reentrant calls are no-ops; the outer drain wins. An empty queue
+   short-circuits before the CAS: non-reactive derefs settle the queue on
+   every read (reaction deref-fn), and the empty case is the common one —
+   the swap machinery must not be its price."
   []
-  (when (compare-and-set! flushing? false true)
+  (when (and (pos? (count @queue))
+             (compare-and-set! flushing? false true))
     (try
       (loop [round 0]
         (let [batch (take-batch!)]
