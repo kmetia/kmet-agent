@@ -8,17 +8,17 @@
    kmet.tui.* and mount them via ui-custom (kmet.extension docstring).
 
    The frame is a compiled hiccup tree (dsl.md): the border/spacer/title/
-   hint chrome is DSL-owned and disposed with the frame; the interactive
-   content (SelectList/Input) splices foreign — the dialog disposes the
-   frame, whose cascade reaches the inner comp."
+   hint chrome AND the interactive content (the `[:select-list]` /
+   `[:input]` element) are DSL-owned, so the dialog disposes the frame
+   once. The tree constructs the content record — the dialog reaches it
+   through the `hiccup/ref` handle it declared, read right after
+   `compile-tree` (tui.md §2.4)."
   (:require [clojure.string :as str]
             [kmet.tui.hiccup :as h]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.theme :as theme]
-            [kmet.tui.keybindings :as kb]
-            [kmet.tui.components.select-list :as select-list]
-            [kmet.tui.components.input :as input]))
+            [kmet.tui.keybindings :as kb]))
 
 ;; ─── Shared frame helpers ──────────────────────────────────────────────────
 
@@ -40,23 +40,19 @@
 
 (defn- frame
   "The dialog frame as a compiled hiccup tree: a top/bottom DynamicBorder,
-   a bold accent title, the interactive CONTENT spliced foreign (a
-   SelectList/Input record the dialog owns), and a dim keybinding hint.
-   Returns the frame's root component (a Container) — its dispose cascades
-   to the DSL-owned chrome AND the spliced content, so the dialog disposes
-   the frame once and the inner comp goes with it.
-
-   HINT-KEYS is the call sites' keyword arg (`:hint-keys [[id desc] ...]`) —
-   the pair list `hint-str` renders. Destructuring it as a map (the rest
-   arg is the `:hint-keys` keyword, not a map) silently rendered it empty."
-  [th title content & {:keys [hint-keys]}]
+   a bold accent title, the interactive CONTENT-EL (a `[:select-list]` /
+   `[:input]` element whose `:ref` the caller holds) and a dim keybinding
+   hint. Returns the frame's root component (a Container) — its dispose
+   cascades to the DSL-owned chrome AND the content, so the dialog
+   disposes the frame once."
+  [th title content-el & {:keys [hint-keys]}]
   (h/compile-tree
    [:container {}
     [:dynamic-border {:color-fn #(theme/fg th :accent %)}]
     [:spacer {:lines 1}]
     [:text {:padding-x 1 :padding-y 0} (title-str th title)]
     [:spacer {:lines 1}]
-    content
+    content-el
     [:spacer {:lines 1}]
     [:text {:padding-x 1 :padding-y 0} (theme/fg th :dim (hint-str hint-keys))]
     [:spacer {:lines 1}]
@@ -83,18 +79,22 @@
    the chosen string; ON-CANCEL fires on escape. TH — theme map."
   [title options on-select on-cancel th]
   (let [items (mapv (fn [o] {:value o :label o}) options)
-        sl (select-list/make-select-list
-            items
-            :height (min (count options) 10)
-            :theme (theme/get-select-list-theme th)
-            :on-select (fn [item] (on-select (:label item)))
-            :on-escape on-cancel)]
+        sl-ref (h/ref)
+        container (frame th title
+                         [:select-list {:ref sl-ref
+                                        :items items
+                                        :height (min (count options) 10)
+                                        :theme (theme/get-select-list-theme th)
+                                        :on-select (fn [item]
+                                                     (on-select (:label item)))
+                                        :on-escape on-cancel}]
+                         :hint-keys [["tui.select.up" "navigate"]
+                                     ["tui.select.down" "navigate"]
+                                     ["tui.select.confirm" "select"]
+                                     ["tui.select.cancel" "cancel"]])]
     (map->SelectorDialog
-     {:container (frame th title sl :hint-keys [["tui.select.up" "navigate"]
-                                                ["tui.select.down" "navigate"]
-                                                ["tui.select.confirm" "select"]
-                                                ["tui.select.cancel" "cancel"]])
-      :select-list sl
+     {:container container
+      :select-list @sl-ref
       :focused?-atom (atom false)})))
 
 ;; ─── Input (pi: ExtensionInputComponent) ───────────────────────────────────
@@ -118,16 +118,20 @@
    theme map. PREFILL — optional initial text (default \"\") with the
    cursor placed after it (pi: LabelInput)."
   [title on-submit on-cancel th & [prefill]]
-  (let [inp (input/make-input)
-        _ (when (seq prefill)
-            (input/input-set-value! inp prefill)
-            ;; pi: LabelInput places the cursor after the prefilled text
-            (reset! (:cursor-atom inp) (count prefill)))
-        _ (input/input-set-on-submit! inp (fn [v] (on-submit (str/trim v))))
-        _ (input/input-set-on-escape! inp on-cancel)]
+  (let [inp-ref (h/ref)
+        container (frame th title
+                         ;; :value/:cursor are construction inputs here —
+                         ;; the frame is compiled once, never re-applied
+                         [:input {:ref inp-ref
+                                  :value (or prefill "")
+                                  ;; pi: LabelInput places the cursor after
+                                  ;; the prefilled text
+                                  :cursor (count (or prefill ""))
+                                  :on-submit (fn [v] (on-submit (str/trim v)))
+                                  :on-escape on-cancel}]
+                         :hint-keys [["tui.select.confirm" "submit"]
+                                     ["tui.select.cancel" "cancel"]])]
     (map->InputDialog
-     {:container (frame th title inp
-                        :hint-keys [["tui.select.confirm" "submit"]
-                                    ["tui.select.cancel" "cancel"]])
-      :input-comp inp
+     {:container container
+      :input-comp @inp-ref
       :focused?-atom (atom false)})))

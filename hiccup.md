@@ -59,7 +59,7 @@ frame + `track!` list returning strings), `bash_execution.clj`
 | `model_selector.clj` | DONE | none — root body, keyed `[:text]` rows, live scope/hint labels as elements, input foreign, `dispose` unwinds both | none (Phase 1 #2) |
 | `scoped_models_selector.clj` | DONE | none — root body, keyed `[:text]` rows, live footer as an element, input foreign, `dispose` unwinds both | none (Phase 1 #2) |
 | `thinking_selector.clj` | DONE | none — root body, keyed `[:text]` rows, input foreign, `dispose` unwinds both | none (Phase 1 #1) |
-| `dialogs.clj` | HYBRID | frame `compile-tree` (49); `select-list/make-select-list` (82); `input/make-input` (117) | Tier 2: `[:select-list]` / `[:input]` (the input via `:ref`, §3.2) — `:apply` covers all props used; keep `defcomponent` shell for `IFocusable` + `handle-input` forwarding |
+| `dialogs.clj` | DONE | none — `[:select-list]` / `[:input]` elements under a `hiccup/ref`, read back right after `compile-tree` (the record keeps its `:select-list`/`:input-comp` field); frame hint bug fixed first (see Phase 2) | none (Phase 2 #1) |
 | `settings_selector.clj` | HYBRID | `settings-list/make-settings-list` (229); frame `compile-tree` (354) | Tier 2: `[:settings-list]`; close path disposes the compiled frame (`dispose-tree!`) + the spliced list |
 | `tool_renderers.clj` | DONE | none — every renderer assembles a `h/compile-tree` (the last imperative legs, `render-edit-result`'s error branch, `render-bash-call` and `render-bash-result`, converted; the mangled token-per-line block reflowed, the collapsed output cap hoisted to `bash-result-preview-lines`) | none (Phase 1 #4) |
 | `chat_history.clj` | KEEP + Tier 1 helpers | `make-plain-msg` (204–206), `make-plain-md-msg` (213–215), `StatusLine` (249–250) | Tier 1 optional: helpers → `[:container {} [:spacer] [:text/:markdown/:truncated-text]]`; `ChatHistoryComponent` itself stays a record |
@@ -421,10 +421,24 @@ state changes re-derive only what changed, idle frames flat.
 
 ### Phase 2 — Tier 2 via refs
 
-One commit per file, each with its interaction test (§3.2):
+One commit per file, each with its interaction test (§3.2). Note: the
+`dialogs` leg also surfaced a real bug — `frame` destructured its rest
+arg as a map while both call sites passed `:hint-keys [...]` keywords, so
+the hint line was always empty; fixed first as its own commit
+(`fix(ui): dialog key hints were never rendered`) so the conversion
+commit stays behavior-neutral.
 
-1. `dialogs` — `:select-list` + `:input` tags; prefill cursor through
-   the deref'd input right after `compile-tree`.
+1. **DONE — `dialogs`**: `frame` takes the content *element* instead of a
+   pre-built foreign record — the tree constructs `[:select-list {...}]`
+   / `[:input {...}]` under a `hiccup/ref`, and the dialog reads the
+   instance back right after `compile-tree` to keep its `:select-list` /
+   `:input-comp` field (so `handle-input`, `IFocusable` forwarding and
+   `dispose` are unchanged). The `select-list`/`input` requires are gone;
+   the input's prefill is the tag's construction inputs `:value` + `:cursor
+   (count prefill)` (pi: LabelInput). Pinned by a commit-A-vs-new dump
+   (130 identical lines: renders at 3 widths, nav/select/cancel, focus
+   forwarding, typing/submit/trim/escape, prefill cursor) and the new
+   render-driven tests (`test-input-dialog-prefill`, hint tests).
 2. `settings_selector` — `[:settings-list]`; the large `:on-change`
    closure hoists to a named fn over the existing atoms. If the frame
    stays a `compile-tree`, items remain construction-time — make the

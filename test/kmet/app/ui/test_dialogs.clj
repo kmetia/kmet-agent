@@ -57,6 +57,26 @@
       (core/handle-input comp "\r")
       (t/is (= "abc" @result)))))
 
+(deftest test-input-dialog-prefill
+  (testing "prefill seeds the value, cursor after it (pi: LabelInput)"
+    (let [comp (d/make-input-dialog "Name" (fn [_] nil) (fn []) theme/dark-theme "hello")
+          inp (:input-comp comp)]
+      (t/is (= "hello" @(:value-atom inp)))
+      (t/is (= 5 @(:cursor-atom inp)) "cursor sits after the prefilled text")
+      (core/set-focused! comp true)
+      (core/handle-input comp "!")
+      (t/is (= "hello!" @(:value-atom inp)) "typing appends at the end")
+      (core/handle-input comp "\r") ;; submit uses the same instance
+      (t/is (= 1 (count (filter #(re-find #"hello!" %) (render-plain comp 40))))))
+    (testing "no prefill starts empty with the cursor at 0 (and stays editable)"
+      (let [comp (d/make-input-dialog "Name" (fn [_] nil) (fn []) theme/dark-theme)
+            inp (:input-comp comp)]
+        (t/is (= "" @(:value-atom inp)))
+        (t/is (zero? @(:cursor-atom inp)))
+        (core/set-focused! comp true)
+        (core/handle-input comp "x")
+        (t/is (= "x" @(:value-atom inp)))))))
+
 (deftest test-selector-hint-keys
   (testing "the frame renders the dialog's keybinding hint (pi: keyHint line)"
     (let [lines (render-plain (d/make-selector-dialog "Pick" ["A" "B"]
