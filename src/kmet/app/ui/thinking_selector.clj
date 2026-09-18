@@ -76,7 +76,7 @@
 ;; ─── Component ─────────────────────────────────────────────────────────────
 
 (defcomponent ThinkingSelector nil
-              [root search-input state-atom
+              [root search-ref state-atom
                on-select-atom on-persist-atom on-cancel-atom focused? cache-atom]
 
   (render [this width] (protocols/render (:root this) width))
@@ -131,7 +131,6 @@
         (if (str/blank? (:search st))
           (do (when-let [cb @on-cancel-atom] (cb)) nil)
           (do (swap! state-atom assoc :search "" :selected-idx 0)
-              (input/input-set-value! search-input "")
               nil))
 
         ;; Escape — cancel (pi tui.select.cancel; the ctrl+c half is handled
@@ -141,16 +140,16 @@
 
         ;; Everything else — the search input (the visible filter, pi)
         :else
-        (do (protocols/handle-input search-input data)
-            (let [value (input/input-get-value search-input)]
-              (when (not= value (:search st))
-                (swap! state-atom assoc :search value :selected-idx 0))
-              nil)))))
+        (let [i (h/materialize-ref! _this (:search-ref _this))]
+          (protocols/handle-input i data)
+          (let [value (input/input-get-value i)]
+            (when (not= value (:search st))
+              (swap! state-atom assoc :search value :selected-idx 0))
+            nil)))))
 
-  ;; the root's reaction and the foreign search input are the selector's
-  ;; lifecycle: show-thinking-selector unwinds both when the panel closes
+  ;; the root's reaction and the tag-owned search field are the selector's
+  ;; lifecycle: show-thinking-selector unwinds the root when the panel closes
   (dispose [this]
-    (protocols/dispose (:search-input this))
     (protocols/dispose (:root this))))
 
 ;; ─── Rendering helpers (pi updateList / SelectList rows) ──────────────────
@@ -193,11 +192,12 @@
 
 (defn- thinking-body
   "The selector tree as a reactive body (dsl.md): chrome and rows re-derive
-   from the state atom; the search input splices foreign. BORDER-FN is
-   created once per selector so the border's :color-fn prop keeps identity
-   across passes (a fresh closure would decline the patch, rebuilding the
-   border on every body run)."
-  [state-atom search-input border-fn]
+   from the state atom; the search field is a tag-owned `[:input]` whose text
+   is the state's `:search` and whose emphasis is the panel's focus flag.
+   BORDER-FN is created once per selector so the border's :color-fn prop
+   keeps identity across passes (a fresh closure would decline the patch,
+   rebuilding the border on every body run)."
+  [state-atom search-ref focused? border-fn]
   (fn [_props]
     (let [th (theme/get-current-theme)
           st (r/tracked-deref state-atom)
@@ -214,7 +214,9 @@
                   (str (key-or "app.thinking.cycle" "Shift+Tab")
                        " cycles thinking levels in-session"))]
        [:spacer {:lines 1}]
-       search-input
+       [:input {:ref search-ref
+                :value (:search st)
+                :focused? (r/tracked-deref focused?)}]
        [:spacer {:lines 1}]
        (row-elements th st filtered selected)
        [:spacer {:lines 1}]
@@ -242,18 +244,18 @@
                   :default default
                   :selected-idx 0
                   :search ""})
-        search-input (input/make-input)
         ;; stable identity across passes — a fresh color-fn per body run
         ;; would decline the border patch and rebuild it every time
         border-fn (fn [s] (theme/fg (theme/get-current-theme) :accent s))
+        focused? (atom false)
         sel (map->ThinkingSelector
              {:root nil
-              :search-input search-input
+              :search-ref (h/ref)
               :state-atom st
               :on-select-atom (atom on-select)
               :on-persist-atom (atom on-persist)
               :on-cancel-atom (atom on-cancel)
-              :focused? (atom false)
+              :focused? focused?
               :cache-atom (atom nil)})]
     ;; initial selection: the active level when present, else the top row
     ;; (pi preselects the current level in the SelectList). The rows are a
@@ -261,16 +263,14 @@
     (let [idx (first (keep-indexed (fn [i l] (when (= l current) i))
                                    levels))]
       (swap! st assoc :selected-idx (or idx 0)))
-    (assoc sel :root (h/root (thinking-body st search-input border-fn)))))
+    (assoc sel :root (h/root (thinking-body st (:search-ref sel) focused? border-fn)))))
 
-;; ─── IFocusable — forward to the search input (IME cursor positioning) ─────
+;; ─── IFocusable — the panel's flag; the tree derives the field's emphasis ──
 
 (extend-type ThinkingSelector
   protocols/IFocusable
   (focused [this] @(:focused? this))
-  (set-focused! [this val]
-    (reset! (:focused? this) val)
-    (protocols/set-focused! (:search-input this) val)))
+  (set-focused! [this val] (reset! (:focused? this) val)))
 
 ;; ─── Public helpers ────────────────────────────────────────────────────────
 
