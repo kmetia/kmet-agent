@@ -5,6 +5,7 @@
    error text)."
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
+            [babashka.fs :as fs]
             [kmet.tui.core :as core]
             [kmet.tui.utils :as utils]
             [kmet.app.ui.tool-renderers :as r]
@@ -152,6 +153,28 @@
       (let [content (str/join "\n" (mapv #(str "d-" %) (range 9)))
             lines (plain (r/render-default-result content false th 60 true) 60)]
         (is (= 10 (count lines)))))))
+
+(deftest test-edit-preview-follows-the-runtime-cwd
+  (testing "a relative edit path previews the file in the render context's
+            cwd — the edit tool resolves there (resolve-tool-path), so the
+            preview must too, or a switched session previews the launch
+            directory's file (or reports File not found)"
+    (let [dir (str (fs/absolutize (str "target/test-edit-preview-" (System/currentTimeMillis))))]
+      (try
+        (fs/create-dirs dir)
+        (spit (str dir "/note.txt") "one\n")
+        (let [comp (r/render-edit-call "edit"
+                                       {:path "note.txt"
+                                        :edits [{:oldText "one" :newText "two"}]}
+                                       th 60
+                                       {:cwd dir :args-complete true :state {}
+                                        :set-state! (fn [_])})
+              lines (plain comp 60)]
+          (is (some #(str/includes? % "two") lines)
+              "the diff is computed from the cwd's file")
+          (is (not-any? #(str/includes? % "File not found") lines)
+              "no spurious not-found from the process cwd"))
+        (finally (fs/delete-tree dir))))))
 
 (deftest test-edit-box-bg-states
   ;; build-edit-box is private; exercise via render-edit-call with a

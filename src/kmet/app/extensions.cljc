@@ -485,9 +485,12 @@
 
 (defn- exec
   "Execute a shell command and return {:exit n :out str :err str}
-   (extension api: exec). Options: :dir :env :timeout-ms."
+   (extension api: exec). Options: :dir :env :timeout-ms. The child runs in
+   the runtime cwd unless :dir overrides it (pi: options?.cwd ?? cwd) — the
+   session's project after a switch; headless falls back to the process cwd."
   [command args & [{:keys [dir env timeout-ms]}]]
-  (let [p (proc/process (concat [command] args)
+  (let [dir (or dir (:cwd (build-extension-context)))
+        p (proc/process (concat [command] args)
                         (cond-> {:out :string :err :string}
                           dir (assoc :dir dir)
                           env (assoc :env env)

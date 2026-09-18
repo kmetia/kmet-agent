@@ -1,6 +1,7 @@
 (ns kmet.app.ui.test-footer-data-provider
   (:require [clojure.test :as t :refer [deftest is testing]]
             [babashka.fs :as fs]
+            [babashka.process :as proc]
             [kmet.app.session :as session]
             [kmet.app.ui.footer-data-provider :as fdp]))
 
@@ -20,6 +21,47 @@
       (is (nil? (fdp/fdp-get-session p)))
       (is (= 1 (fdp/fdp-get-provider-count p)))
       (is (nil? (fdp/fdp-get-context-window p))))))
+
+(deftest test-git-branch-follows-the-cwd
+  (testing "the branch resolves in the provider's cwd — fdp-set-cwd! clears
+            the cache because the answer depends on the directory (a session
+            switch moves it; pi: setCwd recomputes gitPaths)"
+    (let [p (fdp/make-footer-data-provider :cwd "/one")
+          seen (atom [])
+          resolver #'fdp/resolve-git-branch]
+      (with-redefs-fn {resolver (fn [cwd]
+                                  (swap! seen conj cwd)
+                                  (str "branch@" cwd))}
+        (fn []
+          (is (= "branch@/one" (fdp/fdp-get-git-branch p)))
+          (is (= "branch@/one" (fdp/fdp-get-git-branch p)) "resolved once per cwd")
+          (fdp/fdp-set-cwd! p "/two")
+          (is (= "branch@/two" (fdp/fdp-get-git-branch p))
+              "re-resolved with the new cwd after the swap")))
+      (is (= ["/one" "/two"] @seen) "one resolution per cwd"))))
+
+(deftest ^:slow test-git-branch-resolves-in-the-given-dir
+  (testing "resolve-git-branch runs git in CWD, not the process cwd — before
+            the cwd was threaded through, both dirs answered with a branch
+            of the launch directory's repository"
+    (let [base (str (or (System/getenv "TMPDIR")
+                        (System/getProperty "java.io.tmpdir"))
+                    "/kmet-fdp-git-" (System/currentTimeMillis))
+          repo (str base "/repo")
+          plain (str base "/plain")
+          git-in (fn [dir & args]
+                   @(apply proc/shell (assoc {:out :string :err :string} :dir dir)
+                           "git" args))
+          resolver #'fdp/resolve-git-branch]
+      (try
+        (fs/create-dirs repo)
+        (fs/create-dirs plain)
+        (git-in repo "init")
+        (git-in repo "checkout" "-b" "kmet-fdp-test")
+        (is (= "kmet-fdp-test" (resolver repo)) "the repository's own branch")
+        (is (not= "kmet-fdp-test" (resolver plain))
+            "a directory outside the repository does not answer with its branch")
+        (finally (fs/delete-tree base))))))
 
 (deftest test-cwd-swap
   (testing "cwd swaps for a session switch (pi: setCwd), and an injected

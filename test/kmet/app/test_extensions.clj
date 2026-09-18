@@ -13,6 +13,7 @@
             [clojure.string :as str]
             [clojure.java.io :as io]
             [babashka.fs :as fs]
+            [babashka.process :as proc]
             [kmet.extension :as ext]
             [kmet.libs.host :as host]
             [kmet.config :as cfg]
@@ -26,6 +27,37 @@
             [kmet.app.tools.core :as tools]
             [kmet.ai.hooks :as ai-hooks]
             [kmet.tui.theme :as theme]))
+
+;; ─── Extension exec (extension api: exec) ────────────────────────────────
+
+(t/deftest ^:slow test-exec-runs-in-the-runtime-cwd
+  (testing "exec defaults to the runtime cwd (pi: options?.cwd ?? cwd) — the
+            injected context's cwd, which a session switch moves; :dir still
+            overrides it"
+    (let [base (str (or (System/getenv "TMPDIR")
+                        (System/getProperty "java.io.tmpdir"))
+                    "/kmet-exec-cwd-" (System/currentTimeMillis))
+          dir (str base "/runtime")
+          other (str base "/override")
+          exec-fn #'extensions/exec]
+      (try
+        (fs/create-dirs dir)
+        (fs/create-dirs other)
+        @(proc/shell {:dir dir :out :string :err :string} "git" "init")
+        @(proc/shell {:dir other :out :string :err :string} "git" "init")
+        (extensions/set-ui-registry! {:build-context (fn [] {:cwd dir})})
+        (let [r (exec-fn "git" ["rev-parse" "--show-toplevel"])]
+          (t/is (zero? (:exit r)))
+          (t/is (= (str (fs/canonicalize dir))
+                   (str (fs/canonicalize (str/trim (:out r)))))
+                "the child ran in the context's cwd, not the process cwd"))
+        (let [r (exec-fn "git" ["rev-parse" "--show-toplevel"] {:dir other})]
+          (t/is (= (str (fs/canonicalize other))
+                   (str (fs/canonicalize (str/trim (:out r)))))
+                "an explicit :dir still wins"))
+        (finally
+          (extensions/clear-ui-registry!)
+          (fs/delete-tree base))))))
 
 ;; ─── Nullable api (extension tests in isolation) ──────────────────────────
 

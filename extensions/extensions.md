@@ -918,6 +918,11 @@ outlive branch jumps (the review extension's custom instructions do).
 ;; => {:exit 0 :out "hi\n" :err ""}
 ```
 
+The child runs in the runtime working directory unless `:dir` overrides it
+(pi: `options?.cwd ?? cwd`) — the active session's project after a switch,
+so a session imported from elsewhere does not leak the launch directory into
+extension shell commands. Headless runs fall back to the process cwd.
+
 ## Testing extensions
 
 Extensions are testable in isolation with the **nullable API** — a test fixture

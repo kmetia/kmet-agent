@@ -14,11 +14,15 @@
                                model-atom provider-atom thinking-atom reasoning-atom])
 
 (defn- resolve-git-branch
-  "Resolve the current git branch via `git branch --show-current`; nil
-   outside a git repository."
-  []
+  "Resolve the git branch for CWD via `git branch --show-current`; nil
+   outside a git repository. CWD is the runtime working directory — a
+   session switch moves it — so the branch belongs to the session's project,
+   not the directory kmet was launched in (pi: resolveGitBranchSync reads
+   this.gitPaths, which setCwd recomputes from the new cwd)."
+  [cwd]
   (try
-    (let [r (proc/shell {:out :string :err :string}
+    (let [r (proc/shell (cond-> {:out :string :err :string}
+                          cwd (assoc :dir cwd))
                         "git" "branch" "--show-current")]
       (when (and r (str/blank? (:err r)))
         (let [b (str/trim (:out r))]
@@ -68,12 +72,14 @@
   nil)
 
 (defn fdp-get-git-branch
-  "Resolve the git branch once, then return the cached value (pi:
-   FooterDataProvider.getGitBranch)."
+  "Resolve the git branch once per cwd, then return the cached value (pi:
+   FooterDataProvider.getGitBranch). fdp-set-cwd! clears the cache because
+   the branch depends on the cwd."
   [provider]
   (when-not @(:git-branch-resolved?-atom provider)
     (reset! (:git-branch-resolved?-atom provider) true)
-    (reset! (:git-branch-atom provider) (resolve-git-branch)))
+    (reset! (:git-branch-atom provider)
+            (resolve-git-branch (fdp-get-cwd provider))))
   @(:git-branch-atom provider))
 
 (defn fdp-get-session [provider] @(:session-atom provider))

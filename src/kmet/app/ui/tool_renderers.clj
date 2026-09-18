@@ -223,15 +223,17 @@
 
 (defn- compute-edit-preview
   "Try to apply edits in memory and return a pi-format diff.
-   Args: path, edits — vector of {:old-text str :new-text str}
+   Args: path (raw, for messages — must match the edit tool's error text),
+   resolved-path (absolute: the file the tool will actually touch), edits —
+   vector of {:old-text str :new-text str}.
    Uses the same BOM/line-ending normalization and exact-then-fuzzy matching
    as the edit tool (kmet.libs.edit-diff) so preview and result are
    byte-comparable and error messages match.
    Returns {:success? bool :diff str :diff-lines [\"+123 content\" ...] :error str?}
    with :diff-lines [] when the edit produces no visible diff (whitespace-only change)."
-  [path edits]
+  [path resolved-path edits]
   (try
-    (let [f (io/file path)]
+    (let [f (io/file resolved-path)]
       (if-not (fs/exists? f)
         {:success? false :error (str "File not found: " path)}
         (let [content (slurp f)
@@ -259,11 +261,17 @@
                 (str "Error editing " path ": " (ex-message e)))})))
 
 (defn- edit-preview
-  "Compute the edit preview, failing on missing/empty edits (pi: validateEditInput)."
-  [path edits]
+  "Compute the edit preview, failing on missing/empty edits (pi: validateEditInput).
+   PATH is the raw argument (kept for the error message, which must match
+   the edit tool's); CWD — the render context's runtime cwd — resolves a
+   relative path to the file the tool will actually touch, since the tool
+   resolves against the session's cwd too (:cwd nil leaves the path as-is)."
+  [path cwd edits]
   (if (or (nil? edits) (empty? edits))
     {:success? false :error "Edit tool input is invalid. edits must contain at least one replacement."}
-    (compute-edit-preview path edits)))
+    (compute-edit-preview path
+                          (if (and cwd (string? path)) (resolve-path path cwd) path)
+                          edits)))
 
 (defn- normalize-edit-args
   "Pi: prepareEditArguments — normalize edit tool args into a vector of
@@ -695,7 +703,7 @@
                   (contains? state :edit-preview) (:edit-preview state)
                   (and (:args-complete context)
                        (renderable-edit-input raw-path edits))
-                  (let [p (edit-preview raw-path edits)]
+                  (let [p (edit-preview raw-path (:cwd context) edits)]
                     (when set-state! (set-state! (assoc state :edit-preview p)))
                     p)
                   :else nil)]
