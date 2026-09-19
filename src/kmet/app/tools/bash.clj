@@ -68,11 +68,6 @@
   ;; Pi: bashToolSystemPromptContribution.guidelines (PI_* → KMET_*)
   "You can inspect KMET_* environment variables for current model and session details.")
 
-(def ^:private batching-guideline
-  ;; kmet T0 (script.md): steer the model to batch/distill instead of reading
-  ;; file after file — the output that never enters context is the saving.
-  "To gather information from many files or filter large outputs, prefer one command or embedded script that prints only the relevant lines over many separate read calls.")
-
 (defn- run-bash
   "Execute through the shared executor with the tool's spawn options (pi: the
    BashToolOptions an execute closure closes over)."
@@ -201,8 +196,9 @@
       :label (or label "Execute command")
       :description (or description default-description)
       :prompt-snippet "Execute bash commands (ls, grep, find, etc.)"
-      :prompt-guidelines (cond-> [batching-guideline]
-                           expose-session-env? (conj session-env-guideline))
+      ;; pi: promptGuidelines are the contribution's, gated on
+      ;; exposeSessionEnvironment (bashToolConfig.promptGuidelines)
+      :prompt-guidelines (when expose-session-env? [session-env-guideline])
       :params {:command {:type :string :description "Shell command to execute"}
                :timeout {:type :number :description "Timeout in seconds (optional, no default timeout)" :optional? true}}
       :execute (fn [args & [on-update]]

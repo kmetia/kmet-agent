@@ -100,25 +100,33 @@
                :model "m"
                :system prompt
                :system-prompt-opts opts)]
-    ;; initial prompt advertises bash and the re-enabled search tools (T0)
-    (t/is (str/includes? @(:system agent) "- bash:"))
-    (t/is (str/includes? @(:system agent) "- grep:"))
-    ;; the pi bash-exploration rule only fires when bash is the sole such tool
-    (t/is (not (str/includes? @(:system agent) "Use bash for file operations")))
-    ;; disable bash
-    (loop/set-active-tools! agent (mapv :name (remove #(= "bash" (:name %)) all-tools)))
-    (t/is (= #{"read" "edit" "write" "grep" "find"} @(:enabled-tools agent)))
-    (t/is (not (str/includes? @(:system agent) "- bash:")))
-    (t/is (not (str/includes? @(:system agent) "Use bash for file operations")))
-    ;; bash alone with read restores the rule (no grep/find/ls active)
-    (loop/set-active-tools! agent ["bash" "read"])
+    ;; initial prompt advertises the builtin tools; the bash-exploration rule
+    ;; is emitted whenever bash is selected
     (t/is (str/includes? @(:system agent) "- bash:"))
     (t/is (str/includes? @(:system agent) "Use bash for file operations"))
+    ;; disable bash
+    (loop/set-active-tools! agent (mapv :name (remove #(= "bash" (:name %)) all-tools)))
+    (t/is (= #{"read" "edit" "write"} @(:enabled-tools agent)))
+    (t/is (not (str/includes? @(:system agent) "- bash:")))
+    (t/is (not (str/includes? @(:system agent) "Use bash for file operations")))
+    ;; a search tool in the active set does not suppress the rule: kmet's
+    ;; grep/find/ls are opt-in extensions, so the builtin prompt text stays
+    ;; independent of what is loaded — a stand-in for the grep extension
+    (try
+      (tools-registry/register-tool! {:name "grep"
+                                      :description "stand-in for the grep extension"
+                                      :prompt-snippet "stand-in for the grep extension"
+                                      :execute (fn [_] {:content ""})})
+      (loop/set-active-tools! agent ["bash" "read" "grep"])
+      (t/is (str/includes? @(:system agent) "- grep:"))
+      (t/is (str/includes? @(:system agent) "Use bash for file operations"))
+      (finally
+        (tools-registry/unregister-tool! "grep")))
     ;; restore all
     (loop/set-active-tools! agent nil)
     (t/is (nil? @(:enabled-tools agent)))
     (t/is (str/includes? @(:system agent) "- bash:"))
-    (t/is (not (str/includes? @(:system agent) "Use bash for file operations")))
+    (t/is (str/includes? @(:system agent) "Use bash for file operations"))
     ;; unknown tool names are filtered out of the enabled set (pi)
     (loop/set-active-tools! agent ["read" "nonexistent-tool"])
     (t/is (= #{"read"} @(:enabled-tools agent)))

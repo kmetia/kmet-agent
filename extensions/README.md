@@ -62,7 +62,9 @@ never ship.
 - **Single-file extensions** (`*.clj` at the top level of the directory) —
   one namespace defining `(defn init [api])`. They cannot carry a
   `deps.edn`, so they may only use `kmet.extension` plus the shared
-  `kmet.tui.*` / `kmet.libs.*` library layers and `clojure.*` /
+  `kmet.tui.*` / `kmet.libs.*` library layers, the shared renderer
+  namespaces (`kmet.app.ui.tool-renderers`, `kmet.app.keybindings`) and
+  `clojure.*` /
   `babashka.*` builtins. They have
   **no tests** — the code is expected to
   stay small and self-contained; validate changes by loading the file
@@ -124,6 +126,9 @@ contract changes.
 
 | Extension | Description |
 |-----------|-------------|
+| `grep-tool.clj` | Opt-in `grep` tool — regex search over file contents, matching lines only (`file:line: text`, 100-match cap), runtime-cwd resolution, bash-style result rendering (not a builtin) |
+| `find-tool.clj` | Opt-in `find` tool — regex match against file names/paths, path-only results (200 cap), runtime-cwd resolution, bash-style result rendering |
+| `ls-tool.clj` | Opt-in `ls` tool — directory listing sorted by name, long form with type/size, runtime-cwd resolution, bash-style result rendering |
 | `tools.clj` | Interactive `/tools` command to enable/disable tools, with selection persisted across session reloads and branch navigation (port of pi's example tools extension) |
 | `deepseek-peak.clj` | `/deepseek-peak` — DeepSeek API peak/off-peak hours in your local time zone, shown as a `/session`-style chat info panel (flash fallback in headless mode) |
 | `clojure/` | Clojure-aware editing tools ported from clojure-mcp: `clojure_edit`, `clojure_edit_replace_sexp`, `clojure_paren_repair`, plus the `clojure-edit` skill — see `clojure/README.md` |

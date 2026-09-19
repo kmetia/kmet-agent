@@ -1,12 +1,18 @@
-# script.md — script execution & tool-token measurement
+# script.md — the script tool (design + measurement)
 
 Question this file answers: **should kmet add a "code execution" tool (à la
 maki's `code_execution`) so the model can scan/filter many files and put only
 the distilled result in context — and if so, how?**
 
-Status: **T0 landed** (guidance + grep/find re-enabled + per-tool token
-attribution). T1/T2 are documented contingencies, not scheduled. The next step
-is measuring — see [Measuring](#measuring).
+Scope: this file is about a **new** tool only. Existing tools and their
+instructions are pi-aligned and are not modified by this plan (kmet's builtin
+set is read/write/edit/bash; the grep/find/ls search tools ship as separate
+opt-in extensions). The one thing already in place is measurement — per-tool
+result-token attribution — so the build/no-build decision can be made on data.
+
+Status: design investigation done, measurement in place. T1/T2 are documented
+contingencies, not scheduled. The next step is collecting data — see
+[Measuring](#measuring).
 
 ## The idea and the economics (maki.sh)
 
@@ -17,10 +23,11 @@ files inside a sandbox and prints only the lines that matter; the rest never
 enters the context window. Their reported split: read results were ~65% of all
 billed tokens, bash ~12%. The script tool was built to compete with *reads*.
 
-A simpler observation from the same source: the model can already batch via
-`bash` + python/awk/jq, but it doesn't *reliably choose to*. maki's claim is
-that tool descriptions that "nag" change that choice. That claim is what T0
-tests — cheaply.
+Their second observation: the model can already batch via `bash` + python/awk/
+jq, but it doesn't *reliably choose to*. That is an argument for a dedicated
+tool with a description that "nags" — but only if the data says kmet's context
+is actually being eaten that way. kmet's distribution may differ, so the
+question is measured before anything is built.
 
 ## What kmet already has
 
@@ -32,13 +39,13 @@ tests — cheaply.
 | partial output on interrupt | ✅ bash returns streamed output + "Command aborted" |
 | compaction | ✅ `kmet.app.compaction` (LLM summarization) |
 | visibility (tokens/cost) | ✅ footer: ↑in ↓out R/W cache, $cost, context % |
-| `code_execution` (script + distilled output) | ❌ — and **the paved search path was missing too: `grep`/`find` were disabled in `registry.clj`** |
-| per-tool token attribution | ❌ (T0 adds it) |
+| `code_execution` (script + distilled output) | ❌ — the candidate change |
+| per-tool token attribution | ✅ measurement: every tool-result entry carries `:result-tokens`, `/session` shows the per-tool breakdown |
 
-So the real gap was two-fold: no paved "search, don't read" tools, and no data
-on where kmet's tokens actually go. maki's 65%-reads number is *their* usage;
-kmet ships structural navigation and truncation, so the distribution may
-differ. Measure before building a script engine.
+So the open question is data, not features: do reads dominate kmet's context
+tokens? maki's 65%-reads number is *their* usage; kmet ships structural
+navigation and truncation, so the distribution may differ. Measure before
+building a script engine.
 
 ## Design investigation (what was verified, not assumed)
 
@@ -82,44 +89,23 @@ on jolt if a script evaluator wants `:interrupt-fn` uniformly.
 
 ## Tiers
 
-- **T0 — steer existing tools + measure (this change).** Re-enable `grep`/
-  `find`, add batching/navigation guidance, record per-tool result tokens.
-  Answers: do reads dominate in kmet, and does guidance change behavior?
+- **T0 — measure (landed, tool-agnostic).** Record estimated result tokens per
+  tool-result session entry; derive per-tool totals; show them in `/session`
+  and log them to `debug.log` with `--debug`. No existing tool behavior or
+  instruction changes — the measurement works for whatever tools are
+  installed. Answers: do reads dominate in kmet?
 - **T1 — thin script tool (~a day).** One in-process SCI context per call,
   tools injected as fns, eval on a daemon thread, `:interrupt-fn` + timeout +
   output guard. No process, no daemon, no protocol. Known limitation:
   host-native runaway code can't be aborted (abandoned daemon thread; the
-  agent survives).
+  agent survives). Only built if T0 shows the need.
 - **T2 — `kmet --script` (self-exec) and/or `--mode rpc`.** Only with a
   measured need (boot cost/call frequency) or a second consumer. The tool
   contract (description/skill/API) should survive T1→T2 untouched.
 
-Default plan: **do T0, measure, and only then decide.** If guidance alone
-moves the read share, T1 may be unnecessary; if it doesn't, T1's justification
-is exactly that measurement.
-
-## T0 changes (landed)
-
-- **`grep`/`find` re-enabled** (`kmet.app.tools.registry`). Both now resolve
-  relative paths against the runtime cwd (`tool-util/resolve-tool-path`, the
-  same rule read/write/edit use) instead of the process cwd, and
-  `util/safe-file-seq` skips `.git` (a repo's object store is never
-  source-search material). `ls` stays disabled.
-- **Guidance**: bash gains a batching guideline ("prefer one command or
-  embedded script that prints only the relevant lines over many separate read
-  calls"); grep's description/guideline pushes "locate first, read only what
-  you need"; read's description says to use grep to locate things across
-  files. The existing pi rule ("Use bash for file operations…") now fires only
-  when bash is the sole exploration tool, which is what pi does.
-- **Attribution**: every tool-result session entry carries `:result-tokens`
-  (chars/4, the compaction convention). `session/tool-usage` derives
-  `{tool-name {:calls n :tokens t}, :total {...}}` from the entries
-  (unstamped entries — legacy files, rebuilt contexts — are estimated on the
-  fly); `session/tool-usage-report` formats it. The `/session` command shows
-  the same per-tool numbers in its **Tool Results** section (calls +
-  estimated tokens, highest first, TOTAL — omitted when the session has no
-  tool results). With `--debug`, the agent-end
-  path logs the report to `debug.log`, once per run.
+Default plan: **measure, and only then decide.** If reads are a small share of
+context, no script tool is needed and the investigation stops at T0; if they
+dominate, T1's justification is exactly that measurement.
 
 ## Measuring
 
@@ -152,17 +138,18 @@ Three channels, no separate `/usage` command needed:
    ```
 
 **Decision criteria** (after a few real sessions with T0):
-- reads still dominate results → build **T1** (script tool), with the T1
-  design above.
-- reads dropped / bash-script batching took over → **stop**; T0 was the win.
-- some other tool dominates (e.g. bash output or MCP) → optimize that
-  instead; maki's 65%-reads did not transfer.
+- reads dominate results → build **T1** (script tool), with the T1 design
+  above.
+- reads are a small share / bash-script batching already takes the load →
+  **stop**; no script tool.
+- some other tool dominates (e.g. bash output or MCP) → look there instead;
+  maki's 65%-reads did not transfer.
 
 ## References
 
-- `src/kmet/app/tools/registry.clj` — built-in tool set + descriptions/guidelines.
-- `src/kmet/app/tools/grep.clj`, `find.clj` — re-enabled implementations.
 - `src/kmet/app/session.clj` — `:result-tokens`, `tool-usage`, `tool-usage-report`.
+- `src/kmet/modes/interactive.clj` — the `/session` **Tool Results** section.
+- `src/kmet/app/loop.clj` — the `--debug` per-tool report at agent end.
 - `src/kmet/app/event_bus.clj` — event vocabulary shared with the TUI (the
   serialization seam a future RPC mode would use).
 - `kmet.loader.sci-loader` — `:base` fork (per-call contexts for T2's daemon),

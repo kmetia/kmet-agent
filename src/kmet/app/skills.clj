@@ -384,13 +384,14 @@
 
 (defn- build-guidelines
   "Assemble the de-duplicated Guidelines list (pi: buildSystemPrompt): the
-   bash file-exploration rule when bash is the only such tool, then the tool
-   and config guidelines, then the always-on ones."
+   bash file-exploration rule whenever bash is selected, then the tool and
+   config guidelines, then the always-on ones. The rule is not suppressed by
+   other tools: kmet's grep/find/ls are opt-in extensions, so the builtin
+   prompt text must not depend on what a user happens to have loaded."
   [selected-tools guidelines]
   (let [tool-set (set selected-tools)]
     (-> []
-        (cond-> (and (contains? tool-set "bash")
-                     (not (some tool-set ["grep" "find" "ls"])))
+        (cond-> (contains? tool-set "bash")
           (conj "Use bash for file operations like ls, rg, find"))
         (into (map (fn [g] (str/trim (str g)))
                    (filter (fn [g] (seq (str/trim (str g)))) guidelines)))
@@ -414,9 +415,8 @@
    The skills section is appended only when the read tool is available, since
    skills are loaded on demand via read (pi: hasRead check). Deviations from
    pi: no pi-docs section (kmet ships no bundled docs); the bash-exploration
-   guideline fires only when bash is active and none of grep/find/ls is — as
-   of T0 grep/find are built in, so it fires only when they are disabled
-   (script.md)."
+   guideline fires whenever bash is active — kmet's grep/find/ls are opt-in
+   extensions, so the builtin prompt does not depend on what is loaded."
   [& {:keys [custom-prompt append-prompt cwd context-files tools
              prompt-guidelines skills]
       :or {cwd (str (fs/cwd))}}]

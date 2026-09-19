@@ -286,7 +286,8 @@ src/kmet/
 │   │                     slash commands, keymap, package + extension loading
 │   ├── model_resolver.clj — model pattern/CLI resolution
 │   ├── tools/          — built-in tools: read, write, edit, bash
-│   │                     (the ported grep/find/ls stay disabled)
+│   │                     (grep/find/ls ship as opt-in extensions in
+│   │                     extensions/grep-tool.clj, find-tool.clj, ls-tool.clj)
 │   └── ui/             — app TUI components (chat history, footer, ...)
 ├── tui/                — Generic TUI library (pi: @earendil-works/pi-tui;
 │   │                     usage docs in src/kmet/tui/tui.md)

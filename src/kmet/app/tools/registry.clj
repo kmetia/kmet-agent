@@ -5,8 +5,6 @@
             [kmet.app.tools.read :as read]
             [kmet.app.tools.write :as write]
             [kmet.app.tools.edit :as edit]
-            [kmet.app.tools.grep :as grep]
-            [kmet.app.tools.find :as find]
             [kmet.app.tools.bash :as bash]))
 
 ;; ─── Built-in tools ─────────────────────────────────────────────────────────
@@ -16,7 +14,7 @@
   {"read"  (tool/make-tool
             :name "read"
             :label "Read file"
-            :description "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete. To locate something across files, use grep first and read only what you need."
+            :description "Read the contents of a file. Supports text files and images (jpg, png, gif, webp, bmp). Images are sent as attachments. For text files, output is truncated to 2000 lines or 50KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete."
             :prompt-snippet "Read file contents"
             :prompt-guidelines ["Use read to examine files instead of cat or sed."]
             :params {:path   {:type :string :description "Path to the file to read (relative or absolute)"}
@@ -37,7 +35,7 @@
    "edit"  (tool/make-tool
             :name "edit"
             :label "Edit file"
-            :description "Make precise file edits with exact text replacement. When changing multiple separate locations in one file, use one edit call with multiple entries."
+            :description "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes."
             :prompt-snippet "Make precise file edits with exact text replacement, including multiple disjoint edits in one call"
             :prompt-guidelines ["Use edit for precise changes (edits[].oldText must match exactly)"
                                 "When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls"
@@ -59,26 +57,10 @@
                          :required ["path" "edits"]}
             :execute edit/execute
             :title edit/title)
-   "grep"  (tool/make-tool
-            :name "grep"
-            :label "Grep"
-            :description "Search file contents for a pattern (regex). Returns matching lines as file:line: text — matching lines only, never whole files. Prefer over read when locating code. Output is capped at 100 matches."
-            :prompt-snippet "Search files for a pattern, returning matching lines only"
-            :prompt-guidelines ["Use grep to locate code across files, then read only the file or range you need."]
-            :params {:pattern {:type :string :description "Search pattern (regex)"}
-                     :path    {:type :string :description "Directory or file to search (default: current directory)" :optional? true}}
-            :execute grep/execute)
-   "find"  (tool/make-tool
-            :name "find"
-            :label "Find files"
-            :description "Find files whose name or path matches a pattern (regex). Returns matching file paths. Prefer over listing directories by hand."
-            :prompt-snippet "Find files by name/path pattern"
-            :params {:pattern {:type :string :description "Pattern (regex) matched against file names and paths"}
-                     :path    {:type :string :description "Directory to search (default: current directory)" :optional? true}}
-            :execute find/execute)
    ;; Pi: createBashTool(cwd) with default options
    "bash"  (bash/create-tool)}
-   ;; ls — disabled (grep/find re-enabled for T0 — see script.md)
+   ;; grep/find/ls are not builtins — they ship as opt-in extensions
+   ;; (extensions/grep-tool.clj, find-tool.clj, ls-tool.clj)
   )
 
 ;; ─── Tool schema helpers ────────────────────────────────────────────────────

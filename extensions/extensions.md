@@ -453,7 +453,10 @@ return the same one back (read it from `:last-component` and return it
 unchanged); a renderer that returns a fresh component each pass gets the
 previous one cleaned up automatically. The supported reusable built-in
 renderer vars are in `kmet.app.ui.tool-renderers`, including
-`render-edit-call` and `render-edit-result`; the namespace is explicitly
+`render-edit-call`, `render-edit-result` and `render-bash-result` (a
+plain-text output body: styled lines, a collapsed line window with an expand
+hint, truncation and elapsed lines — the opt-in grep/find/ls tools use it);
+the namespace is explicitly
 shared with extensions. Path display helpers are public too:
 `render-tool-path` (shortened, accent, hyperlinked path) and `link-path`
 (wrap any styled text in a terminal hyperlink), for tools that render

@@ -5,6 +5,7 @@
             [babashka.fs :as fs]
             [kmet.app.tools.core :as tools]
             [kmet.app.tools.util :as tool-util]
+            [kmet.app.extensions :as extensions]
             [kmet.ai.api.shared :as schema-shared]
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.bash-executor :as bash-exec]))
@@ -53,35 +54,67 @@
     (t/is (contains? all "write"))
     (t/is (contains? all "edit"))
     (t/is (contains? all "bash"))
-    ;; T0 (script.md): the paved search path — previously disabled
-    (t/is (contains? all "grep"))
-    (t/is (contains? all "find"))))
+    ;; grep/find/ls are opt-in extensions, not builtins (the shipped
+    ;; extensions/ files register them)
+    (t/is (not (contains? all "grep")))
+    (t/is (not (contains? all "find")))
+    (t/is (not (contains? all "ls")))))
 
-(t/deftest test-tools-grep-find
-  (t/testing "grep/find return matches only (T0) and resolve relative paths
-              against the bound runtime cwd"
+(t/deftest test-search-tools-extensions
+  (t/testing "grep/find/ls ship as opt-in extensions: loading the shipped
+              files registers the tools; results are matches only and
+              relative paths resolve against the ctx cwd"
     (let [dir (str (fs/absolutize (str "target/test-tools-search-"
                                        (System/currentTimeMillis))))]
-      (fs/create-dirs dir)
+      (fs/create-dirs (str (fs/path dir ".git")))
       (try
         (spit (str (fs/path dir "a.clj")) "hello\nworld\n")
         (spit (str (fs/path dir "b.clj")) "nothing\n")
-        (binding [tool-util/*cwd* dir]
-          (let [g (tools/execute-tool "grep" {:pattern "world"})]
+        ;; a repo's object store is never source-search material
+        (spit (str (fs/path dir ".git" "obj")) "world\n")
+        (doseq [path ["extensions/grep-tool.clj"
+                      "extensions/find-tool.clj"
+                      "extensions/ls-tool.clj"]]
+          (let [r (extensions/load-extension! path)]
+            (t/is (nil? (:error r)) (str path ": " (:error r)))))
+        (doseq [tool-name ["grep" "find" "ls"]]
+          ;; the extensions pass renderers/render-bash-result (:render-result);
+          ;; identity is only comparable on bb — on Jolt the loader wraps
+          ;; registered fns in the extension's ambient binding
+          (t/is (fn? (:render-result (tools/get-tool tool-name)))
+                (str tool-name " carries a result renderer")))
+        (let [ctx {:cwd dir}]
+          (let [g (tools/execute-tool "grep" {:pattern "world"} {:ctx ctx})]
             (t/is (not (:is-error g)))
             (t/is (str/includes? (:content g) "a.clj"))
             (t/is (str/includes? (:content g) "world"))
-            (t/is (not (str/includes? (:content g) "nothing"))))
+            (t/is (not (str/includes? (:content g) "nothing")))
+            (t/is (not (str/includes? (:content g) ".git"))
+                  ".git is skipped"))
           (let [g-file (tools/execute-tool "grep" {:pattern "world"
-                                                   :path (str (fs/path dir "a.clj"))})]
+                                                   :path (str (fs/path dir "a.clj"))}
+                                           {:ctx ctx})]
             (t/is (str/includes? (:content g-file) "target/test-tools-search-")
                   "single-file search reports the path, not just the basename")
             (t/is (str/includes? (:content g-file) "world")))
-          (let [f (tools/execute-tool "find" {:pattern "b\\.clj"})]
+          (let [f (tools/execute-tool "find" {:pattern "b\\.clj"} {:ctx ctx})]
             (t/is (not (:is-error f)))
             (t/is (str/includes? (:content f) "b.clj"))
-            (t/is (not (str/includes? (:content f) "a.clj")))))
-        (finally (fs/delete-tree dir))))))
+            (t/is (not (str/includes? (:content f) "a.clj"))))
+          (let [l (tools/execute-tool "ls" {:path dir} {:ctx ctx})]
+            (t/is (not (:is-error l)))
+            (t/is (str/includes? (:content l) "a.clj"))
+            (t/is (str/includes? (:content l) "b.clj")))
+          (let [ll (tools/execute-tool "ls" {:path dir :long true} {:ctx ctx})]
+            (t/is (re-find #"(?m)^- +\d+ a\.clj$" (:content ll))
+                  "long form carries type and size")))
+        (extensions/unload-all-extensions!)
+        (t/is (nil? (tools/get-tool "grep")) "unload deregisters the tool")
+        (t/is (nil? (tools/get-tool "find")))
+        (t/is (nil? (tools/get-tool "ls")))
+        (finally
+          (extensions/unload-all-extensions!)
+          (fs/delete-tree dir))))))
 
 (t/deftest test-tools-get
   (let [t (tools/get-tool "read")]
@@ -384,9 +417,8 @@
       (t/is (not-any? #(str/includes? % "KMET_* environment variables")
                       (:prompt-guidelines tool))
             "the session-env guideline is gated on exposure (pi: exposeSessionEnvironment)")
-      (t/is (some #(str/includes? % "prefer one command or embedded script")
-                  (:prompt-guidelines tool))
-            "the batching guideline is not gated (kmet T0 — script.md)"))))
+      (t/is (nil? (:prompt-guidelines tool))
+            "exposure off leaves the contribution's guidelines empty (pi)"))))
 
 (t/deftest test-tool-bash-create-tool-defaults
   (t/testing "create-tool is pi's createBashTool — the built-in tool with defaults"
@@ -396,8 +428,7 @@
       (t/is (= "Execute command" (:label tool)))
       (t/is (= (:description builtin) (:description tool)))
       (t/is (= (:parameters tool) (:parameters builtin)))
-      (t/is (= ["To gather information from many files or filter large outputs, prefer one command or embedded script that prints only the relevant lines over many separate read calls."
-                "You can inspect KMET_* environment variables for current model and session details."]
+      (t/is (= ["You can inspect KMET_* environment variables for current model and session details."]
                (:prompt-guidelines tool)))
       (t/is (:streams? tool)))))
 
