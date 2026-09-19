@@ -49,9 +49,11 @@ io.github.jolt-lang/http-client` warning is gone; its `:jolt/min-version` is
 (v0.8.9-7-gc6086cf5) meets. No kmet workaround to delete — the `deps.edn`
 pin simply moves to the merge.
 
-**Unfiled but confirmed blockers** (not yet in jolt tracker):
-**one — the `jolt.loader` classloader facade cached by `:id`** (below;
-the IVar gap is filed as [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031)).
+**Upstream status:** the IVar gap is filed as
+[jolt#1031](https://github.com/jolt-lang/jolt/issues/1031); the
+`jolt.loader` classloader facade cache — the one confirmed blocker without a
+thread — now has a fix submitted:
+[jolt#1053](https://github.com/jolt-lang/jolt/pull/1053) (open, `loader-id`).
 
 **Workarounds live next to their ticket below.** Each workaround block is the
 removal checklist: when an upstream fix lands, delete the listed code (and the
@@ -63,7 +65,7 @@ Historical labels from the deleted `bb-jolt.md` map as: `JOLT-12`→#947,
 
 ## Open
 
-### (unfiled) `jolt.loader` classloader facade cached by `:id`, stale after unload
+### jolt-lang/jolt#1053 — `jolt.loader` classloader facade cached by `:id`, stale after unload
 
 **Area:** `jolt.loader/as-classloader` (`stdlib/jolt/loader.clj`).
 `facades` is an atom keyed by the loader's `:id`, and neither `unload!` nor a
@@ -99,7 +101,16 @@ The upstream fix is one of: key the facade cache by loader identity rather
 than id, replace/evict the entry in `make-loader` when an id is reused, or
 clear it in `unload!` (the harness-only `reset-context-state!` does clear it,
 but it drops every context). Re-checked 2026-09-19 against main @ `c6086cf5`
-(v0.8.9-7): `facades` is still keyed by `:id`.
+(v0.8.9-7): `facades` is still keyed by `:id` at that revision.
+
+**Fix submitted 2026-09-19:**
+[jolt#1053](https://github.com/jolt-lang/jolt/pull/1053) (`loader-id` @
+`ad463030`) moves the facade to a `compare-and-set!` slot on the loader
+itself, deletes the id-keyed `facades` table (and its retention of every
+loader ever constructed), leaves `reset-context-state!` simply without a side
+table to clear, and adds `loaderconf` case 31 for the reload shape. Keyed by
+loader identity, not id, so a reused id can never serve a previous context's
+facade.
 
 **Workaround:** `kmet.app.extensions/create-jolt-loader` appends a per-context
 counter to its loader id (`ext:<name>#N`) — the id keeps its diagnostic
