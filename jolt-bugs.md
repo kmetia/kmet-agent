@@ -1,8 +1,8 @@
 # jolt-bugs — open upstream tickets
 
 Every **open** jolt-side ticket whose fix requires a change in kmet or the
-removal of a kmet workaround — plus confirmed findings not yet in the
-tracker (the note below). Closed findings are not tracked
+removal of a kmet workaround — plus the findings that needed neither, kept
+as status notes below. Closed findings are not tracked
 here — recent closures (jolt v0.8.8-53 / http-client PR #21): #1011
 (`Object.wait`/`notify`), #1007 (streaming HTTP), #1015/#1016
 (`StringBuilder` `append`/`insert` char[]), #1017 (stream timeout), #1006
@@ -49,11 +49,30 @@ io.github.jolt-lang/http-client` warning is gone; its `:jolt/min-version` is
 (v0.8.9-7-gc6086cf5) meets. No kmet workaround to delete — the `deps.edn`
 pin simply moves to the merge.
 
+**Bionic build (jolt PR #1054, submitted 2026-09-19, `bionic` @ `bc909004`).**
+Three Android/Termux gaps found building the toolchain there, all fixed by
+the PR: a built app ran with **no heap ceiling** (physical-memory detection
+tried only the glibc and Darwin `sysconf` name pairs; bionic's are 39/98),
+leaving the kernel-kill failure mode the ceiling exists to prevent; `jolt
+build` app links died on `libiconv_open`/`libiconv_close` (the Linux link
+line never named `-liconv`, and bionic has no iconv in libc), which is why
+Termux app builds needed a `cc` shim appending it; and jolt's own Chez
+provisioning could not run at all — makes' xPack GCC is a glibc binary the
+bionic loader cannot exec, and Chez's `make install` hard-links
+petite/scheme-script, which app data refuses — so `make` now builds the
+pinned release with the host compiler and stages the install itself, static
+`libz.a`/`liblz4.a` beside the kernel. No kmet workaround is tied to any of
+the three (the local Termux build wrapper's shim and hand-rolled
+provisioning become redundant once a release carries the PR).
+
 **Upstream status:** the IVar gap is filed as
 [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031); the
 `jolt.loader` classloader facade cache — the one confirmed blocker without a
 thread — now has a fix submitted:
-[jolt#1053](https://github.com/jolt-lang/jolt/pull/1053) (open, `loader-id`).
+[jolt#1053](https://github.com/jolt-lang/jolt/pull/1053) (open, `loader-id`),
+and the bionic build fixes are
+[jolt#1054](https://github.com/jolt-lang/jolt/pull/1054) (open, `bionic`,
+above).
 
 **Workarounds live next to their ticket below.** Each workaround block is the
 removal checklist: when an upstream fix lands, delete the listed code (and the
