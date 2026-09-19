@@ -236,6 +236,44 @@
               "no spurious not-found from the process cwd"))
         (finally (fs/delete-tree dir))))))
 
+(deftest test-edit-call-prefers-the-recorded-result-diff
+  (testing "a call already carrying the result's :details diff renders that
+            diff on the first pass: no filesystem preview computation, and
+            render-edit-result agrees with the cached preview (no correction
+            frame). Replayed sessions hit this — the filesystem preview would
+            read today's file and settle one frame later, marking the
+            scrollback dirty"
+    (let [dir (str (fs/absolutize (str "target/test-edit-recorded-diff-"
+                                       (System/currentTimeMillis))))]
+      (try
+        (fs/create-dirs dir)
+        ;; the current file would preview a lowercase "two"
+        (spit (str dir "/note.txt") "one\n")
+        (let [st (atom {})
+              invalidated (atom 0)
+              context {:cwd dir :args-complete true
+                       :details {:diff "-1 one\n+1 TWO"}
+                       :state @st
+                       :set-state! (fn [s] (reset! st s))
+                       :invalidate (fn [] (swap! invalidated inc))}
+              lines (plain (r/render-edit-call "edit"
+                                               {:path "note.txt"
+                                                :edits [{:oldText "one" :newText "two"}]}
+                                               th 60 context) 60)
+              recorded {:success? true :diff "-1 one\n+1 TWO"
+                        :diff-lines ["-1 one" "+1 TWO"]}]
+          (is (some #(str/includes? % "TWO") lines)
+              "the recorded result diff renders")
+          (is (not-any? #(str/includes? % "two") lines)
+              "the filesystem preview is not used")
+          (is (= recorded (:edit-preview @st))
+              "the recorded diff is cached as the preview")
+          (r/render-edit-result "ok" false th 60 false nil nil nil (assoc context :state @st))
+          (is (= recorded (:edit-preview @st)) "no correction rewrites state")
+          (is (zero? @invalidated)
+              "the result agrees with the recorded preview — no settle frame"))
+        (finally (fs/delete-tree dir))))))
+
 (deftest test-edit-box-bg-states
   ;; build-edit-box is private; exercise via render-edit-call with a
   ;; complete-args context that skips preview (unrenderable path → pending bg)

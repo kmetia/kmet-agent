@@ -680,6 +680,19 @@
          trim-trailing-empty-lines
          (mapv #(theme/fg theme :tool-output %)))))
 
+(defn- recorded-edit-preview
+  "The result-recorded edit diff as a preview map, or nil when the result
+   carries none. The recorded diff is authoritative over the call-time
+   filesystem preview (pi: updateResult replaces the preview with the actual
+   diff) — a replayed edit renders the real diff on its first pass instead
+   of computing a preview from the file's current content and correcting it
+   one frame later."
+  [context]
+  (when-let [diff (get-in context [:details :diff])]
+    {:success? true
+     :diff diff
+     :diff-lines (vec (str/split-lines diff))}))
+
 (defn render-edit-call
   [name args theme _width context]
   (let [name (if (seq name) name "edit")
@@ -696,7 +709,16 @@
                   (when set-state! (set-state! s'))
                   s')
                 state)
+        recorded (recorded-edit-preview context)
         preview (cond
+                  ;; A finished result's diff wins over the call-time preview:
+                  ;; it is exactly what render-edit-result installs a frame
+                  ;; later, so seeding it here removes that settle frame (and
+                  ;; the filesystem preview computation it was correcting).
+                  recorded
+                  (do (when (and set-state! (not= recorded (:edit-preview state)))
+                        (set-state! (assoc state :edit-preview recorded)))
+                      recorded)
                   (contains? state :edit-preview) (:edit-preview state)
                   (and (:args-complete context)
                        (renderable-edit-input raw-path edits))
@@ -725,10 +747,7 @@
                                 (not is-error)
                                 preview
                                 (not (:success? preview)))
-            corrected-preview (when result-diff
-                                {:success? true
-                                 :diff result-diff
-                                 :diff-lines (vec (str/split-lines result-diff))})
+            corrected-preview (recorded-edit-preview context)
             next-preview (cond
                            (and corrected-preview (not= result-diff preview-diff))
                            corrected-preview

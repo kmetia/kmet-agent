@@ -657,20 +657,21 @@ run).
 
 Two real sessions, both ~3.8 MB on disk:
 
-| session | context messages (after compaction) | first render lines | old: replay | old: render #1 | old: render #2 | new: replay | new: render #1 | new: render #2 |
+| session | context messages (after compaction) | final lines | old: replay | old: render #1 | old: render #2 | new: replay | new: render #1 | new: render #2 |
 |---|---|---|---|---|---|---|---|---|
-| A `1a0060c8776` | 224 (110 tools) | 3,355 | 4.0 s | 3.4 s | 1.57 s | **17 ms** | 4.7 s | **0.21 s** |
-| B `1a099712492` | 636 (591 tools) | 16,543 | 14.7 s | 18.7 s | 0.35 s | **19 ms** | 17.6 s | **0.41 s** |
+| A `1a0060c8776` | 224 (110 tools) | 3,620 | 4.0 s | 3.4 s | 1.57 s | **15 ms** | 3.2 s | **2 ms** |
+| B `1a099712492` | 636 (591 tools) | 17,339 | 14.7 s | 18.7 s | 0.35 s | **19 ms** | 13.7 s | **3 ms** |
 
-"Old/new" = before/after the two fixes below. To a stable first frame:
-session A **9.0 s → 4.9 s**, session B **33.4 s → 18.0 s**. Steady-state
-frames after that: **2–6 ms** (session B), so streaming/typing is unaffected —
-the cost is concentrated in the first full render and in any invalidation that
-drops the whole tree. Session B's per-role cold split: assistant markdown
-11.0 s / 10,068 lines / **1.50 MB** of text, tools 6.7 s / 6,216 lines /
-0.91 MB (cold per-tool on session A: edit 552 ms / 19 calls, bash 461 ms /
-91 calls), compaction summary 0.39 s, user 4 ms — i.e. ~7 µs per character of
-markdown source, dominated by parse + style + syntax highlighting.
+"Old/new" = before/after the three fixes below. To a stable first frame
+(replay + the first content-stable render): session A **9.0 s → 3.2 s**,
+session B **33.4 s → 13.7 s**. Steady-state frames after that: **2–6 ms**
+(session B), so streaming/typing is unaffected — the cost is concentrated in
+the first full render and in any invalidation that drops the whole tree.
+Session B's per-role cold split: assistant markdown 11.0 s / 10,068 lines /
+**1.50 MB** of text, tools 6.7 s / 6,216 lines / 0.91 MB (cold per-tool on
+session A, before 10.3: edit 552 ms / 19 calls, bash 461 ms / 91 calls),
+compaction summary 0.39 s, user 4 ms — i.e. ~7 µs per character of markdown
+source, dominated by parse + style + syntax highlighting.
 
 Cheap follow-up interactions, once the transcript is warm (session B):
 
@@ -707,19 +708,37 @@ parsed 1.5 MB of markdown at 80 — and the first frame at the terminal's real
 width could not reuse a line of it, parsing everything again. Lines are now
 built lazily by the first render at the width it is actually given (the
 `track!` stale check can see they are empty). Session B replay:
-**14.7 s → 19 ms**; combined with 10.1, resume-to-stable **33.4 s → 18.0 s**.
+**14.7 s → 19 ms**; combined with 10.1, the first render became content-stable
+(previously it produced 16,543 lines and a second pass grew the document).
 
-### 10.3 What is left
+### 10.3 Fix: replayed edits render the recorded diff on the first pass
+
+`render-edit-call` computed its preview from the *current* file (slurp + fuzzy
+apply + diff + highlight), then `render-edit-result` compared that against the
+session-recorded `:details :diff`, installed the recorded one when they
+differed, and called `:invalidate` — a forced second frame. On replay the
+filesystem is the wrong source of truth anyway (the file has changed since),
+and the settle frame changed lines **above** the 30-line viewport: the diff
+clamped to the window and set `scrollback-dirty?`, so the next idle input ran
+`tui-heal-scrollback!` and re-emitted the whole document with `\u001b[3J`
+(the "screen redraws again on the first key press after resume" report). The
+call renderer now prefers the recorded diff when the result already carries
+one (live streaming is unaffected: `:details` only exists after the result),
+and `render-edit-result` agrees with the cached preview, so it neither
+rewrites state nor invalidates. Session A first render **4.7 s → 3.2 s** and
+content-stable; cold edit tools **552 ms → 258 ms** (19 calls); session B
+first render **17.6 s → 13.7 s**. The regression test
+(`test-edit-call-prefers-the-recorded-result-diff`) fails on the old code.
+
+### 10.4 What is left
 
 - **§6.3 (incremental markdown) is the lever that matters here.** The first
-  full render is ~7 µs/char of markdown; a 1.5 MB transcript is 18 s and a
+  full render is ~7 µs/char of markdown; a 1.5 MB transcript is 14 s and a
   theme switch or pad change re-pays it. Block-level parse reuse by text would
   cut both the first render and the global reflow.
-- **Edit tool previews** (552 ms / 19 calls on session A) slurp the (current)
-  file and run the fuzzy diff + syntax highlight per call; the result is
-  recomputed once more when `render-edit-result` installs the corrected
-  preview and invalidates (that settle is visible as a 1-pass lag, ~154 ms
-  warm on session A).
+- **Live edit previews** still compute the filesystem preview while args
+  stream (inherent — the result does not exist yet); the replay half is now
+  free.
 - **Virtualization** (rendering only the visible components) would remove the
   first-render cliff entirely, but the scroll view's height math and the
   track!-cached-tree model make it a design change, not a local fix.
