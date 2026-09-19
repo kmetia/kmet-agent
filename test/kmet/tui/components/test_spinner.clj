@@ -30,7 +30,9 @@
   (testing "set-indicator! renders custom frames verbatim (no color fn)"
     (let [sp (sp/make-spinner :text "msg" :active true :prefix ""
                               :spinner-color-fn (fn [_] "COLORED"))
-          _ (sp/spinner-set-indicator! sp {:frames ["●" "○"] :interval-ms 1})]
+          ;; a long interval pins the first frame for the whole test — 1ms
+          ;; raced the full jolt run (an interruption advanced it to "○")
+          _ (sp/spinner-set-indicator! sp {:frames ["●" "○"] :interval-ms 60000})]
       (t/is (re-find #"●" (second (render-lines sp 20)))
             "custom frame appears verbatim"))))
 

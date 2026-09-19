@@ -107,7 +107,12 @@
                       rows))
           (t/is (every? :enabled items))
           (t/testing "header renders"
-            (let [lines (render-lines screen 80)]
+            ;; the scope hint is frame-truncated, and a Termux TMPDIR path
+            ;; is wider than 80 columns: render wide enough that the whole
+            ;; settings path is on screen
+            (let [path (cfg/global-settings-path)
+                  w (max 80 (inc (u/visible-width path)))
+                  lines (render-lines screen w)]
               (t/is (some #(str/includes? % "Global Resources") lines))
               (t/is (some #(str/includes? % "settings.edn") lines))
               (t/is (some #(str/includes? % "space toggle") lines))))
