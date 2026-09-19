@@ -691,9 +691,10 @@ but `reflow-all!` *writes* those atoms on a cache miss. track! stores the
 values **as read**, so the write landed after the read and the frame was
 discarded ("a body that invalidates itself mid-run is not cached") — the next
 render re-ran the body, and for a thinking-only/tool-call message (text `nil`
-vs the stored `""`) it reflowed and re-parsed the whole markdown again. Every
-width change therefore cost **two** full parses per message: the terminal's
-first paint at a width other than 80 always paid it. The output atoms are the
+vs the stored `""`) it reflowed and re-parsed the whole markdown again. So a
+width change paid the reflow twice — a second parse for the empty-text
+messages, a second body run for every message; the terminal's first paint at
+a width other than 80 always did. The output atoms are the
 body's own products, not inputs — read them through untracked helpers (the
 same pattern tool_execution uses for `last-call-component`), leaving
 text/thinking/streaming/hide/label/pad/theme as the tracked input set. Session
@@ -704,8 +705,8 @@ A render #2: **1.57 s → 0.15–0.21 s**; the width-change test
 
 `make-assistant-message` reflowed the whole message at a hardcoded width 80 at
 construction. Replay constructs every message, so resuming a large session
-parsed 1.5 MB of markdown at 80 — and the first frame at the terminal's real
-width could not reuse a line of it, parsing everything again. Lines are now
+parsed 1.5 MB of markdown at 80 — and a first frame at any other width could
+not reuse a line of it, parsing everything again. Lines are now
 built lazily by the first render at the width it is actually given (the
 `track!` stale check can see they are empty). Session B replay:
 **14.7 s → 19 ms**; combined with 10.1, the first render became content-stable

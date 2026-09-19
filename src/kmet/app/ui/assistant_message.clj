@@ -67,11 +67,11 @@
         (mapv #(str left-pad %) md-lines)))))
 
 ;; The rendered-* atoms are the render body's OWN outputs — reflow-all!
-;; writes them on a cache miss. Read them WITHOUT tracking: a tracked read
-;; can never equal the value the miss path stored (the write happens after
-;; the read), so track! would discard the frame it just built and the next
-;; render would re-parse the markdown all over again. The tracked inputs
-;; (text/thinking/streaming/tool-calls/hide/label/pad/theme) already
+;; writes them on a cache miss, after the values the cache recorded. A
+;; tracked read therefore goes stale against them whenever the reflow
+;; changed them (a width change always does), track! discards the frame it
+;; just built, and the next render re-parses the markdown. The tracked
+;; inputs (text/thinking/streaming/tool-calls/hide/label/pad/theme) already
 ;; invalidate the cache whenever a reflow is due; these readers only feed
 ;; the stale check and the result.
 (defn- rendered-text [c] @(:rendered-text-atom c))
@@ -249,8 +249,8 @@
                                               :cache-atom (atom nil)})]
     ;; Lines are built lazily on the first render, at the width it is given:
     ;; eagerly reflowing here parsed every message at a fixed width 80 that
-    ;; the first render (at the terminal's real width) cannot reuse, so
-    ;; replaying a large session paid two full markdown parses per message.
+    ;; a first render at any other width cannot reuse, so replaying a large
+    ;; session paid two full markdown parses per message.
     comp))
 
 ;; ─── Public API ────────────────────────────────────────────────────────
