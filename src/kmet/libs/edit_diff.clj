@@ -153,26 +153,36 @@
    four. A plain character class: no anchor, so it stays fast on every host."
   #"[\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u00A0\u2002-\u200A\u202F\u205F\u3000]")
 
+(def ^:private ascii-only-re
+  "Full-match ASCII. NFKC is the identity on ASCII and the quote/dash/space
+   replaces below cannot match it either, so one scan makes a pure-ASCII text
+   skip both the Normalizer and all four replaces."
+  #"[\x00-\x7F]*")
+
 (defn- normalize-for-fuzzy-match
   "Pi: normalizeForFuzzyMatch — NFKC normalize, strip trailing whitespace per
    line, and normalize smart quotes/dashes/spaces to ASCII."
   [text]
-  (-> (java.text.Normalizer/normalize text java.text.Normalizer$Form/NFKC)
-      (as-> s (->> (str/split-lines s)
-                   ;; str/trimr, not a per-line (str/replace line #"\s+$" ""):
-                   ;; an anchored-regex scan costs ~0.26 ms per line on jolt
-                   ;; (tracked in jolt-bugs.md) and trims the same ASCII
-                   ;; whitespace, plus the Unicode trailing whitespace pi's JS
-                   ;; \s covers.
-                   (map str/trimr)
-                   (str/join "\n")))
-      (as-> s (if (re-find fuzzy-normalize-chars s)
-                (-> s
-                    (str/replace #"[\u2018\u2019\u201A\u201B]" "'")
-                    (str/replace #"[\u201C\u201D\u201E\u201F]" "\"")
-                    (str/replace #"[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]" "-")
-                    (str/replace #"[\u00A0\u2002-\u200A\u202F\u205F\u3000]" " "))
-                s))))
+  (let [ascii? (boolean (re-matches ascii-only-re text))
+        text (if ascii?
+               text
+               (java.text.Normalizer/normalize text java.text.Normalizer$Form/NFKC))]
+    (-> text
+        (as-> s (->> (str/split-lines s)
+                     ;; str/trimr, not a per-line (str/replace line #"\s+$" ""):
+                     ;; an anchored-regex scan costs ~0.26 ms per line on jolt
+                     ;; (tracked in jolt-bugs.md) and trims the same ASCII
+                     ;; whitespace, plus the Unicode trailing whitespace pi's JS
+                     ;; \s covers.
+                     (map str/trimr)
+                     (str/join "\n")))
+        (as-> s (if (and (not ascii?) (re-find fuzzy-normalize-chars s))
+                  (-> s
+                      (str/replace #"[\u2018\u2019\u201A\u201B]" "'")
+                      (str/replace #"[\u201C\u201D\u201E\u201F]" "\"")
+                      (str/replace #"[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]" "-")
+                      (str/replace #"[\u00A0\u2002-\u200A\u202F\u205F\u3000]" " "))
+                  s)))))
 
 (defn- fuzzy-find-text-with
   "FIND-TEXT over an injected NORMALIZE: a caller applying several edits may

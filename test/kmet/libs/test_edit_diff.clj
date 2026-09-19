@@ -48,6 +48,16 @@
     (t/is (= "x" (#'ed/normalize-for-fuzzy-match "x\u2028")))
     (t/is (= "x\u2028" (normalize-for-fuzzy-match-regex "x\u2028")))))
 
+(t/deftest test-normalize-for-fuzzy-match-nfkc
+  (t/testing "non-ASCII text still gets NFKC — full-width forms fold to
+              ASCII, ligatures expand — while pure-ASCII text skips the
+              Normalizer (the guard)"
+    (t/is (= "fullwidth"
+             (#'ed/normalize-for-fuzzy-match
+              "\uFF46\uFF55\uFF4C\uFF4C\uFF57\uFF49\uFF44\uFF54\uFF48")))
+    (t/is (= "fi" (#'ed/normalize-for-fuzzy-match "\uFB01")))
+    (t/is (= "plain ascii" (#'ed/normalize-for-fuzzy-match "plain ascii")))))
+
 (t/deftest test-fuzzy-find-text-ignores-trailing-whitespace
   (t/testing "the user-facing contract the normalization exists for: a file
             whose lines picked up trailing spaces still matches the exact

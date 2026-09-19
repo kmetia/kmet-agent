@@ -192,10 +192,11 @@ one call is the entire jolt/bb tool-render gap (perf.md §10.4).
 
 **Workaround (kmet, landed 2026-09-19):** `normalize-for-fuzzy-match` uses
 `clojure.string/trimr`, the fuzzy pass memoizes one normalization per apply,
-and a single char-class scan skips the four quote/dash/space replaces for
-pure-ASCII text; the trimr equivalence is pinned against the regex form in
-`test/kmet/libs/test_edit_diff.clj`. The failing preview call dropped from
-**2,851 ms to 136 ms** on jolt (bb 196 → 90 ms) and the edit tool from
+and a single `re-matches [\x00-\x7F]*` scan lets pure-ASCII text skip both
+NFKC and the four quote/dash/space replaces (a 248 KB ASCII text normalizes in
+11 ms bb / 9 ms jolt); the trimr equivalence is pinned against the regex form
+in `test/kmet/libs/test_edit_diff.clj`. The failing preview call dropped from
+**2,851 ms to 138 ms** on jolt (bb 196 → 72 ms) and the edit tool from
 3,339 ms to 456 ms. Nothing in kmet waits on the upstream fix — this is a
 status note, not a removal checklist. `src/kmet/tui/components/editor.clj:248,260`
 and `editing.clj:528` still use the same pattern on one line per keystroke

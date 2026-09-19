@@ -787,12 +787,17 @@ jolt 741).
 
 **After the workarounds (landed 2026-09-19):** `str/trimr` in place of the
 per-line regex, one memoized normalization per apply pass, and a single
-char-class scan that skips the four quote/dash/space replaces for pure-ASCII
-text. The same failing preview call: **bb 90 ms (was 196), jolt 136 ms (was
-2,851)** — 21x on jolt. The jolt edit tool in the roles profile: 3,339 → 744
-(trimr) → **456 ms** (bb 522 → 417), so the hosts are within ~10 % now. What
-remains on jolt is NFKC (~43 ms per 275 KB pass) — the last big primitive in
-this path.
+`re-matches [\x00-\x7F]*` scan that lets pure-ASCII text skip both NFKC and
+the four quote/dash/space replaces — a 248 KB ASCII text normalizes in **11 ms
+bb / 9 ms jolt** (was 76 / 47). The failing preview call is on
+`interactive.clj`, which has 4,175 non-ASCII chars (box drawing, em dashes),
+so its guard fails fast and the replaces still run: **bb ~72 ms, jolt
+~138 ms** (was 196 / 2,851). The jolt edit tool in the roles profile:
+3,339 → 744 (trimr) → **456 ms** (bb 522 → 417), the hosts now within ~10 %.
+For non-ASCII content the four whole-text replaces dominate (53 ms bb /
+103 ms jolt); selective per-class replaces (the detection scans cost as much
+as the passes) and one alternation with a callback (60 / 96 ms) both measured
+no better.
 
 ### 10.5 What is left
 
