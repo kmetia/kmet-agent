@@ -775,7 +775,9 @@ to computing a preview from the *current* file — `interactive.clj`, 275 KB /
 5,140 lines, changed since the session — through
 `kmet.libs.edit-diff/apply-edits-to-normalized-content`, which fails the exact
 match and scans for the fuzzy one. One call: **bb 196 ms, jolt 2,851 ms**
-(slurp + normalize are ~2 ms on both). Excluding it, the 34 recorded diffs
+(slurp + normalize are ~2 ms on both); the regex behind it is filed as the
+`jolt-bugs.md` perf ticket — per-line `$`-anchored patterns are 10–70x slower
+on jolt, and the fix is `str/trimr`. Excluding it, the 34 recorded diffs
 render *faster* on jolt than on bb (edit tool ≈54 ms vs ≈330 ms); bash and
 read are within 10 % (`bash` bb 1,481 ms / 140, jolt 1,616; `read` bb 640 / 25,
 jolt 741).

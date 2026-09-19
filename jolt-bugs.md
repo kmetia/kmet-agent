@@ -146,3 +146,51 @@ SCI as the gap — `babashka/sci#1093` (still open, no jolt-side fix). The
 Re-checked 2026-09-19: both still open — #1031 now carries the `deferred`
 label, and PR #1093's head is still `1295142f`, so the pin is unchanged.
 
+## To file upstream — performance (2026-09-19)
+
+### jolt: `$`-anchored regexes are 10–70x slower than the JVM, and a multiline
+`$` replace over a whole file does not finish
+
+**Area:** jolt's `java.util.regex` shim (irregex) — `re-find` / `str/replace`
+with a `$` anchor; secondary: `java.text.Normalizer` NFKC (7.6x).
+
+**Repro (self-contained; jolt v0.8.10, Termux/aarch64):**
+
+```clojure
+(require '[clojure.string :as str])
+(def lines (mapv (fn [i] (str "some sample line of source code number " i
+                              " with text" (if (zero? (mod i 3)) "   " "")))
+                 (range 5000)))
+(def content (str/join "\n" lines))          ; 274 KB, ~55-char lines
+(doseq [l lines] (re-find #"\s+$" l))        ; jolt ~73 ms, bb ~7 ms
+(doseq [l lines] (re-find #"$" l))           ; jolt ~235 ms, bb ~3 ms
+(str/replace content #"(?m)\s+$" "")         ; jolt >256 s (aborted), bb ~6 ms
+```
+
+**Measured** (babashka v1.13.222 vs jolt v0.8.10, same phone, same corpus):
+
+| expression | bb | jolt |
+|---|---|---|
+| per-line `(re-find #"\s+$" l)` | 7.0 ms | 73 ms |
+| per-line `(re-find #"[ \t]+$" l)` | 7.1 ms | 49 ms |
+| per-line `(re-find #"\s$" l)` | 5.9 ms | 70 ms |
+| per-line `(re-find #"x$" l)` | 5.2 ms | 12 ms |
+| per-line `(re-find #"$" l)` | 3.3 ms | 235 ms |
+| per-line `(re-find #"\s+" l)` (no anchor) | 2.4 ms | 7.4 ms |
+| `(str/replace content #"(?m)\s+$" "")` (whole file) | 6.3 ms | **>256 s, aborted** |
+
+On a real 275 KB / 5,140-line source file, `(str/replace l #"\s+$" "")` per
+line is bb 31 ms / jolt 1,345 ms — the cost grows with line length, so the
+`$` scan looks at least quadratic in the line. No anchor is fine (7 ms), so
+`$` handling is the trigger; the bare `$` (235 ms) is worst per match.
+
+**Impact on kmet:** `kmet.libs.edit-diff/normalize-for-fuzzy-match` strips
+trailing whitespace per line that way, twice per failed fuzzy match. One
+replayed edit preview: **196 ms bb vs 2,851 ms jolt** for identical work; that
+one call is the entire jolt/bb tool-render gap (perf.md §10.4).
+
+**Workaround (kmet, pending):** use `clojure.string/trimr` instead of the
+regex — byte-identical output on the 5,140-line corpus, 0.8 ms on jolt (vs
+1,345 ms) and 0.6 ms on bb (vs 31 ms); also closer to pi's JS `\s` (Unicode
+aware). `src/kmet/tui/components/editor.clj:248,260` and `editing.clj:528`
+use the same pattern on one line per keystroke (0.26 ms — harmless).
