@@ -891,3 +891,32 @@
               (is (= {:consume true} (listener "\u001bx"))
                   "the override key quits"))))
         (finally (tui-kb/set-global-keybindings! prev-global))))))
+
+(deftest session-info-shows-per-tool-usage
+  (testing "/session's Tool Results section: per-tool calls + estimated result tokens, highest first, with a TOTAL (script.md T0)"
+    (let [sess-dir (str "target/test-interactive-session-info-" (System/currentTimeMillis))
+          sess (session/create-session sess-dir)
+          pad (fn [n] (apply str (repeat n \a)))]
+      (session/append-entry sess {:role :user :content "hi"})
+      (session/append-entry sess {:role :tool :tool-name "bash"
+                                  :content [{:type :tool_result :tool_use_id "t1"
+                                             :content "ab"}]})
+      (session/append-entry sess {:role :tool :tool-name "read"
+                                  :content [{:type :tool_result :tool_use_id "t2"
+                                             :content (pad 400)}]})
+      (session/append-entry sess {:role :assistant :content "ok"})
+      (let [text ((var inter/session-info-text) sess)]
+        (is (str/includes? text "Tool Results")
+            "the section names itself (omitted only when there are no tool results)")
+        (is (str/includes? text "read:") "read's row is present")
+        (is (str/includes? text "1 calls, 100 tokens")
+            "read's row carries its call count and estimated tokens (400 chars/4)")
+        (is (str/includes? text "Total:") "and a total line")
+        (is (str/includes? text "2 calls, 101 tokens")
+            "the total covers both tools (400+2 chars → 100+1 tokens)")
+        (is (< (str/index-of text "read") (str/index-of text "bash"))
+            "rows sort highest token count first"))
+      (testing "the section is omitted when the session has no tool results"
+        (let [bare (session/create-session (str sess-dir "-bare"))]
+          (session/append-entry bare {:role :user :content "hi"})
+          (is (not (str/includes? ((var inter/session-info-text) bare) "Tool Results"))))))))

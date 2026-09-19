@@ -369,7 +369,7 @@
 
 (defn tool-usage-report
   "Per-tool token summary, highest first, with a TOTAL line — for debug.log
-   and inspection (kmet has no /usage command yet)."
+   and inspection (/session formats the same numbers via tool-usage)."
   [session]
   (let [{:keys [total] :as usage} (tool-usage session)]
     (if (zero? (:calls total 0))

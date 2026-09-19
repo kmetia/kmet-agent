@@ -437,16 +437,37 @@
 
 ;; ─── Session info (/session) ────────────────────────────────────────────────
 
+(defn- tool-usage-text
+  "Per-tool result-token attribution for /session (script.md T0): each tool's
+   call count and estimated result tokens (chars/4), highest token count
+   first, with a total line — the same numbers as session/tool-usage-report.
+   nil when the session has no tool results, so the section is omitted."
+  [sess]
+  (let [{:keys [total] :as usage} (session/tool-usage sess)]
+    (when (pos? (:calls total 0))
+      (let [rows (sort-by (comp - :tokens val) (dissoc usage :total))
+            width (apply max (map (fn [[tool _]] (count (name tool))) rows))
+            cell (fn [label]
+                   (th/dim (format (str "%-" (+ width 2) "s") (str label ":"))))
+            row (fn [label {:keys [calls tokens]}]
+                  (str "  " (cell label) calls " calls, "
+                       (footer/format-tokens tokens) " tokens"))]
+        (str (th/bold "Tool Results") " " (th/dim "(estimated)") "\n"
+             (str/join "\n" (map (fn [[tool stats]] (row tool stats)) rows))
+             "\n" (row "Total" total) "\n")))))
+
 (defn- session-info-text
-  "Pi: handleSessionCommand — stats + name + token/cost breakdown. Plain
-   text with theme styling, rendered as an assistant message."
+  "Pi: handleSessionCommand — stats + name + token/cost breakdown, plus
+   per-tool result-token attribution (script.md T0, see tool-usage-text).
+   Plain text with theme styling, rendered as an assistant message."
   [sess]
   (let [stats (session/get-session-stats sess)
         name (session/get-session-name sess)
         {:keys [input output cache-read cache-write]} (:tokens stats)
         prompt-tokens (+ input cache-read cache-write)
         cache-total (+ cache-read cache-write)
-        breakdown (session/usage-breakdown sess)]
+        breakdown (session/usage-breakdown sess)
+        tool-usage (tool-usage-text sess)]
     (str (th/bold "Session Info") "\n\n"
          (when (seq name) (str (th/dim "Name:") " " name "\n"))
          (th/dim "File:") " " (:file stats) "\n"
@@ -466,6 +487,7 @@
                 "\n"))
          (th/dim "Output:") " " output "\n"
          (th/dim "Total:") " " (:total (:tokens stats)) "\n"
+         (when tool-usage (str "\n" tool-usage))
          (when (pos? (:cost stats))
            (str "\n" (th/bold "Cost") "\n"
                 (th/dim "Total:") " $" (format "%.3f" (:cost stats))

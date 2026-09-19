@@ -115,16 +115,23 @@ is exactly that measurement.
   (chars/4, the compaction convention). `session/tool-usage` derives
   `{tool-name {:calls n :tokens t}, :total {...}}` from the entries
   (unstamped entries — legacy files, rebuilt contexts — are estimated on the
-  fly); `session/tool-usage-report` formats it. With `--debug`, the agent-end
+  fly); `session/tool-usage-report` formats it. The `/session` command shows
+  the same per-tool numbers in its **Tool Results** section (calls +
+  estimated tokens, highest first, TOTAL — omitted when the session has no
+  tool results). With `--debug`, the agent-end
   path logs the report to `debug.log`, once per run.
 
 ## Measuring
 
-Two channels, no `/usage` command needed:
+Three channels, no separate `/usage` command needed:
 
-1. **`debug.log`** — run `kmet --debug`; each run appends an estimated
+1. **`/session`** — the **Tool Results** section is the live per-tool view:
+   each tool's call count and estimated result tokens, highest first, with a
+   total. The tokens are context-volume estimates (chars/4), not billed
+   tokens; the **Tokens** section above it is the billed truth.
+2. **`debug.log`** — run `kmet --debug`; each run appends an estimated
    per-tool token report (highest first, with TOTAL).
-2. **Session files** — each tool entry has `:result-tokens` and `:tool-name`.
+3. **Session files** — each tool entry has `:result-tokens` and `:tool-name`.
    A quick aggregate over the default session dir (`~/.kmet/sessions`;
    `--session-dir` overrides it). `**.ednl` is the recursive glob — sessions
    live in per-cwd subdirectories:
