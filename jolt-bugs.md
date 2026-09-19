@@ -41,6 +41,14 @@ Jolt does not implement), and the native loader reads the jar in place; the
 exports `zip`/`unzip`/`gzip`/`gunzip` too. The packed-clojure roundtrip test
 stays `^:bb-only` for its dependency closure, not for zip mechanics.
 
+**libz claims (http-client PR #25, merged 2026-09-19, main `f517b2d4`).**
+The library drops its libz shims and the stale `:jolt/provides` claims on the
+`java.util.zip` GZIP/Inflater classes, so the per-run `upgrade
+io.github.jolt-lang/http-client` warning is gone; its `:jolt/min-version` is
+`0.8.9` (where java.util.zip entered the runtime), which the toolchain
+(v0.8.9-7-gc6086cf5) meets. No kmet workaround to delete — the `deps.edn`
+pin simply moves to the merge.
+
 **Unfiled but confirmed blockers** (not yet in jolt tracker):
 **one — the `jolt.loader` classloader facade cached by `:id`** (below;
 the IVar gap is filed as [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031)).
@@ -90,7 +98,8 @@ namespace and a resource):
 The upstream fix is one of: key the facade cache by loader identity rather
 than id, replace/evict the entry in `make-loader` when an id is reused, or
 clear it in `unload!` (the harness-only `reset-context-state!` does clear it,
-but it drops every context).
+but it drops every context). Re-checked 2026-09-19 against main @ `c6086cf5`
+(v0.8.9-7): `facades` is still keyed by `:id`.
 
 **Workaround:** `kmet.app.extensions/create-jolt-loader` appends a per-context
 counter to its loader id (`ext:<name>#N`) — the id keeps its diagnostic
@@ -98,28 +107,6 @@ prefix and the facade cache can never serve a previous context's facade.
 `/reload` reloads the same extensions (same names), so kmet hits this on Jolt
 on every reload of an extension that read a resource before it. Remove the
 counter when the cache is fixed.
-
-### [jolt-lang/http-client#25](https://github.com/jolt-lang/http-client/pull/25) — drop the libz shims and their `java.util.zip` claims (open)
-
-**Area:** the pinned `io.github.jolt-lang/http-client` (04ebbc03). With
-`java.util.zip` in the runtime, the library's `jolt.http.platform` claims on
-`GZIPInputStream`/`GZIPOutputStream`/`InflaterInputStream`/`DeflaterInputStream`/`Inflater`
-are redundant, and every Jolt run of kmet prints
-
-```
-warning: jolt.http.platform claims java.util.zip.GZIPInputStream, …, which
-this jolt provides; the runtime's classes answers and the claim is dropped —
-upgrade io.github.jolt-lang/http-client
-```
-
-PR #25 (drops the shims, uses the runtime classes, raises the floor to
-`:jolt/min-version "0.8.9"`) is open and unmerged, and the floor is why the
-pin cannot move yet: kmet's Jolt toolchain reports `v0.8.8-150-g…`, which
-`version-parts` reads as 0.8.8, below the branch's floor. **Workaround: none
-needed** — the claim is dropped and the runtime's own classes answer, so only
-the warning is noise. When the PR merges (and the running Jolt satisfies the
-0.8.9 floor, i.e. a release past v0.8.8), move the pin to the merged SHA and
-delete this block.
 
 ### [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) — SCI `IVar` protocol missing `:getRawRoot` for `clojure.lang.Var`
 
@@ -163,3 +150,5 @@ need binding there (`kmet.app.extensions/with-sci-io`). Re-confirmed
 extension still failed) and upstream's repro on current main lands back on
 SCI as the gap — `babashka/sci#1093` (still open, no jolt-side fix). The
 `jolt/deps.edn` pin stays until it merges and a release carries it.
+Re-checked 2026-09-19: both still open — #1031 now carries the `deferred`
+label, and PR #1093's head is still `1295142f`, so the pin is unchanged.
