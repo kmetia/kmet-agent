@@ -4,7 +4,7 @@
    per line on jolt — jolt-bugs.md #1062), so the regex form stays here as the
    equivalence oracle."
   (:require [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :as t]
             [kmet.libs.edit-diff :as ed]))
 
 (defn- normalize-for-fuzzy-match-regex
@@ -19,8 +19,8 @@
       (str/replace #"[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]" "-")
       (str/replace #"[\u00A0\u2002-\u200A\u202F\u205F\u3000]" " ")))
 
-(deftest test-normalize-for-fuzzy-match-equivalent-to-the-regex
-  (testing "the str/trimr strip is output-equivalent to the per-line \\s+$
+(t/deftest test-normalize-for-fuzzy-match-equivalent-to-the-regex
+  (t/testing "the str/trimr strip is output-equivalent to the per-line \\s+$
             regex it replaced on a source-like corpus (ASCII whitespace,
             smart quotes/dashes, Unicode spaces the later replace handles)"
     (let [corpus ["(defn f [x]  "
@@ -38,21 +38,47 @@
                   "  mixed \t  "
                   "no-trail"]
           text (str/join "\n" corpus)]
-      (is (= (normalize-for-fuzzy-match-regex text)
-             (#'ed/normalize-for-fuzzy-match text))))))
+      (t/is (= (normalize-for-fuzzy-match-regex text)
+               (#'ed/normalize-for-fuzzy-match text))))))
 
-(deftest test-normalize-for-fuzzy-match-unicode-trailing-whitespace
-  (testing "trimr also strips the Unicode trailing whitespace Java's regex \\s
+(t/deftest test-normalize-for-fuzzy-match-unicode-trailing-whitespace
+  (t/testing "trimr also strips the Unicode trailing whitespace Java's regex \\s
             misses — pi's JS \\s covers it, and the old regex left it in"
-    (is (= "x" (#'ed/normalize-for-fuzzy-match "x\u1680")))
-    (is (= "x" (#'ed/normalize-for-fuzzy-match "x\u2028")))
-    (is (= "x\u2028" (normalize-for-fuzzy-match-regex "x\u2028")))))
+    (t/is (= "x" (#'ed/normalize-for-fuzzy-match "x\u1680")))
+    (t/is (= "x" (#'ed/normalize-for-fuzzy-match "x\u2028")))
+    (t/is (= "x\u2028" (normalize-for-fuzzy-match-regex "x\u2028")))))
 
-(deftest test-fuzzy-find-text-ignores-trailing-whitespace
-  (testing "the user-facing contract the normalization exists for: a file
+(t/deftest test-fuzzy-find-text-ignores-trailing-whitespace
+  (t/testing "the user-facing contract the normalization exists for: a file
             whose lines picked up trailing spaces still matches the exact
             oldText through the fuzzy pass"
     (let [content "alpha   \nbeta\t\ngamma"
           match (ed/fuzzy-find-text content "alpha\nbeta\ngamma")]
-      (is (true? (:found match)))
-      (is (true? (:used-fuzzy? match))))))
+      (t/is (true? (:found match)))
+      (t/is (true? (:used-fuzzy? match))))))
+
+(t/deftest test-apply-edits-to-normalized-content
+  (t/testing "exact apply keeps the content's trailing newline"
+    (t/is (= "alpha\nBETA\n"
+             (:new-content (ed/apply-edits-to-normalized-content
+                            "alpha\nbeta\n"
+                            [{:old-text "beta" :new-text "BETA"}] "f")))))
+  (t/testing "fuzzy apply: trailing-whitespace differences still match; the
+            replacement is written into the normalized (trimmed) base"
+    (t/is (= "A\nB"
+             (:new-content (ed/apply-edits-to-normalized-content
+                            "alpha   \nbeta\n"
+                            [{:old-text "alpha\nbeta" :new-text "A\nB"}] "f")))))
+  (t/testing "fuzzy apply over smart punctuation (the char-class replace path)"
+    (t/is (= "done"
+             (:new-content (ed/apply-edits-to-normalized-content
+                            "\u201Cquoted\u201D \u2014 text\nrest\n"
+                            [{:old-text "\"quoted\" - text\nrest" :new-text "done"}]
+                            "f")))))
+  (t/testing "a miss on pure-ASCII content still errors (the char-class scan
+            skips the replaces, the error is unchanged)"
+    (t/is (thrown-with-msg?
+           clojure.lang.ExceptionInfo #"Could not find the exact text"
+           (ed/apply-edits-to-normalized-content
+            (apply str (repeat 3 "line of ascii text\n"))
+            [{:old-text "absent" :new-text "x"}] "f")))))

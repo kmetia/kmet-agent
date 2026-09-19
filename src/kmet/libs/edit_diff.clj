@@ -147,6 +147,12 @@
 
 ;; ─── Fuzzy matching (pi: normalizeForFuzzyMatch + fuzzyFindText) ───────────
 
+(def ^:private fuzzy-normalize-chars
+  "One scan for every character the quote/dash/space replaces below rewrite
+   (smart quotes, dashes/minus, Unicode spaces) — a pure-ASCII file skips all
+   four. A plain character class: no anchor, so it stays fast on every host."
+  #"[\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u00A0\u2002-\u200A\u202F\u205F\u3000]")
+
 (defn- normalize-for-fuzzy-match
   "Pi: normalizeForFuzzyMatch — NFKC normalize, strip trailing whitespace per
    line, and normalize smart quotes/dashes/spaces to ASCII."
@@ -160,21 +166,24 @@
                    ;; \s covers.
                    (map str/trimr)
                    (str/join "\n")))
-      (str/replace #"[\u2018\u2019\u201A\u201B]" "'")
-      (str/replace #"[\u201C\u201D\u201E\u201F]" "\"")
-      (str/replace #"[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]" "-")
-      (str/replace #"[\u00A0\u2002-\u200A\u202F\u205F\u3000]" " ")))
+      (as-> s (if (re-find fuzzy-normalize-chars s)
+                (-> s
+                    (str/replace #"[\u2018\u2019\u201A\u201B]" "'")
+                    (str/replace #"[\u201C\u201D\u201E\u201F]" "\"")
+                    (str/replace #"[\u2010\u2011\u2012\u2013\u2014\u2015\u2212]" "-")
+                    (str/replace #"[\u00A0\u2002-\u200A\u202F\u205F\u3000]" " "))
+                s))))
 
-(defn fuzzy-find-text
-  "Pi: fuzzyFindText — exact match first; falls back to matching in the
-   fuzzy-normalized space. Returns {:found bool :index int :match-length int
-   :used-fuzzy? bool :content-for-replacement str}."
-  [content old-text]
+(defn- fuzzy-find-text-with
+  "FIND-TEXT over an injected NORMALIZE: a caller applying several edits may
+   memoize the normalizer so the same content is normalized once per pass
+   (the fuzzy path otherwise re-normalizes the whole content per edit)."
+  [normalize content old-text]
   (if-let [idx (str/index-of content old-text)]
     {:found true :index idx :match-length (count old-text)
      :used-fuzzy? false :content-for-replacement content}
-    (let [fuzzy-content (normalize-for-fuzzy-match content)
-          fuzzy-old (normalize-for-fuzzy-match old-text)
+    (let [fuzzy-content (normalize content)
+          fuzzy-old (normalize old-text)
           idx (str/index-of fuzzy-content fuzzy-old)]
       (if (nil? idx)
         {:found false :index -1 :match-length 0
@@ -182,11 +191,18 @@
         {:found true :index idx :match-length (count fuzzy-old)
          :used-fuzzy? true :content-for-replacement fuzzy-content}))))
 
+(defn fuzzy-find-text
+  "Pi: fuzzyFindText — exact match first; falls back to matching in the
+   fuzzy-normalized space. Returns {:found bool :index int :match-length int
+   :used-fuzzy? bool :content-for-replacement str}."
+  [content old-text]
+  (fuzzy-find-text-with normalize-for-fuzzy-match content old-text))
+
 (defn- count-occurrences
   "Pi: countOccurrences — number of (fuzzy) matches of old-text in content."
-  [content old-text]
-  (let [fuzzy-content (normalize-for-fuzzy-match content)
-        fuzzy-old (normalize-for-fuzzy-match old-text)]
+  [normalize content old-text]
+  (let [fuzzy-content (normalize content)
+        fuzzy-old (normalize old-text)]
     (- (count (str/split fuzzy-content
                          (re-pattern (java.util.regex.Pattern/quote fuzzy-old))
                          -1))
@@ -305,6 +321,15 @@
   [normalized-content edits path]
   (let [total (count edits)
         single? (= total 1)
+        ;; One normalizer per apply pass: the fuzzy path probes every edit
+        ;; against the content, then re-checks the winning base, and would
+        ;; otherwise re-normalize the whole content each time (NFKC + the
+        ;; char-class replaces are the cost — jolt-bugs.md tracks it).
+        normalize (memoize normalize-for-fuzzy-match)
+        fuzzy-find (fn [content old-text]
+                     (fuzzy-find-text-with normalize content old-text))
+        count-fuzzy (fn [content old-text]
+                      (count-occurrences normalize content old-text))
         normalized-edits (mapv (fn [e]
                                  {:old-text (normalize-to-lf (:old-text e))
                                   :new-text (normalize-to-lf (:new-text e))})
@@ -319,16 +344,16 @@
                 {:type :edit-error}))))
     (let [used-fuzzy? (boolean
                        (some :used-fuzzy?
-                             (map #(fuzzy-find-text normalized-content (:old-text %))
+                             (map #(fuzzy-find normalized-content (:old-text %))
                                   normalized-edits)))
           replacement-base (if used-fuzzy?
-                             (normalize-for-fuzzy-match normalized-content)
+                             (normalize normalized-content)
                              normalized-content)
           matched (loop [i 0 acc []]
                     (if (>= i total)
                       (vec (sort-by :match-index acc))
                       (let [edit (nth normalized-edits i)
-                            match (fuzzy-find-text replacement-base (:old-text edit))]
+                            match (fuzzy-find replacement-base (:old-text edit))]
                         (if-not (:found match)
                           ;; Pi: getNotFoundError
                           (throw (ex-info
@@ -338,7 +363,7 @@
                                     (str "Could not find edits[" i "] in " path
                                          ". The oldText must match exactly including all whitespace and newlines."))
                                   {:type :edit-error}))
-                          (let [occurrences (count-occurrences replacement-base (:old-text edit))]
+                          (let [occurrences (count-fuzzy replacement-base (:old-text edit))]
                             (when (> occurrences 1)
                               ;; Pi: getDuplicateError
                               (throw (ex-info

@@ -785,14 +785,14 @@ render *faster* on jolt than on bb (edit tool ≈54 ms vs ≈330 ms); bash and
 read are within 10 % (`bash` bb 1,481 ms / 140, jolt 1,616; `read` bb 640 / 25,
 jolt 741).
 
-**After the workaround (str/trimr, landed 2026-09-19):** the same failing
-preview call is **bb 176 ms (was 196), jolt 333 ms (was 2,851)** — jolt's
-edit tool drops from 3,339 ms to 744 ms in the roles profile and render #1
-from 11.5 s to 10.4 s. bb's render #1 moved 13.9 → 16.7 s in the same pair of
-runs, so treat the full-render deltas as ambient (±20 % on this phone); the
-per-call numbers are the clean signal. The residual jolt cost is NFKC (43 ms
-per 275 KB pass, and the fuzzy path runs it twice) plus the whole-text
-character replaces.
+**After the workarounds (landed 2026-09-19):** `str/trimr` in place of the
+per-line regex, one memoized normalization per apply pass, and a single
+char-class scan that skips the four quote/dash/space replaces for pure-ASCII
+text. The same failing preview call: **bb 90 ms (was 196), jolt 136 ms (was
+2,851)** — 21x on jolt. The jolt edit tool in the roles profile: 3,339 → 744
+(trimr) → **456 ms** (bb 522 → 417), so the hosts are within ~10 % now. What
+remains on jolt is NFKC (~43 ms per 275 KB pass) — the last big primitive in
+this path.
 
 ### 10.5 What is left
 
@@ -803,9 +803,10 @@ character replaces.
 - **Live edit previews** still compute the filesystem preview while args
   stream (inherent — the result does not exist yet); the replay half is now
   free. A *finished* call with no recorded diff (an errored edit) still
-  recomputes that preview from today's file on replay — the one 14x-jolt hot
-  spot in §10.4; either skip it for completed calls or memoize it by
-  (path, mtime, edits).
+  recomputes that preview from today's file on replay — the remaining jolt
+  hot spot in §10.4 (memoizing normalization and skipping the ASCII replaces
+  cut it to 136 ms / bb 90 ms); the next step is to skip it for completed
+  calls entirely, or memoize it by (path, mtime, edits).
 - **Virtualization** (rendering only the visible components) would remove the
   first-render cliff entirely, but the scroll view's height math and the
   track!-cached-tree model make it a design change, not a local fix.

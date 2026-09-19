@@ -190,11 +190,13 @@ trailing whitespace per line that way, twice per failed fuzzy match. One
 replayed edit preview: **196 ms bb vs 2,851 ms jolt** for identical work; that
 one call is the entire jolt/bb tool-render gap (perf.md §10.4).
 
-**Workaround (kmet, landed 2026-09-19):** `normalize-for-fuzzy-match` now
-uses `clojure.string/trimr`; the equivalence is pinned against the regex form
-in `test/kmet/libs/test_edit_diff.clj`. The failing preview call dropped from
-**2,851 ms to 333 ms** on jolt (bb 196 → 176 ms) and the edit tool from
-3,339 ms to 744 ms. Nothing in kmet waits on the upstream fix — this is a
+**Workaround (kmet, landed 2026-09-19):** `normalize-for-fuzzy-match` uses
+`clojure.string/trimr`, the fuzzy pass memoizes one normalization per apply,
+and a single char-class scan skips the four quote/dash/space replaces for
+pure-ASCII text; the trimr equivalence is pinned against the regex form in
+`test/kmet/libs/test_edit_diff.clj`. The failing preview call dropped from
+**2,851 ms to 136 ms** on jolt (bb 196 → 90 ms) and the edit tool from
+3,339 ms to 456 ms. Nothing in kmet waits on the upstream fix — this is a
 status note, not a removal checklist. `src/kmet/tui/components/editor.clj:248,260`
 and `editing.clj:528` still use the same pattern on one line per keystroke
 (0.26 ms — harmless).
