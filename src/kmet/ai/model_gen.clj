@@ -1238,7 +1238,7 @@
                :thinking-level-map ant-ling-ring-thinking-level-map)
     nil)])
 
-;; ─── kimi-coding (pi: the kimi-for-coding catalog, Anthropic-compatible) ───
+;; ─── kimi-coding (pi: the kimi-code-plan-global catalog, Anthropic-compatible) ─
 
 (def ^:private kimi-static-headers (array-map "User-Agent" "KimiCLI/1.5"))
 (def ^:private kimi-coding-implied-costs
@@ -1249,11 +1249,11 @@
 (def ^:private kimi-aliases #{"k2p5" "k2p6" "k2p7"})
 
 (defn- process-kimi-coding
-  "pi: the kimi-for-coding catalog → anthropic-messages with adaptive
+  "pi: the kimi-code-plan-global catalog → anthropic-messages with adaptive
    thinking compat, static headers and the subscription implied costs;
    versioned aliases normalize to the canonical id."
   [data]
-  (let [models (get-in data ["kimi-for-coding" "models"] {})
+  (let [models (get-in data ["kimi-code-plan-global" "models"] {})
         canonical? (contains? models "kimi-for-coding")]
     (doall
      (for [[mid m] models
