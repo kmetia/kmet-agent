@@ -743,7 +743,44 @@ dropped with it (session B: Ctrl+O expanded 3.7 s → 2.9 s, theme switch
 17.5 s → 13.9 s). The regression test
 (`test-edit-call-prefers-the-recorded-result-diff`) fails on the old code.
 
-### 10.4 What is left
+### 10.4 bb vs jolt: the profiles invert by subsystem
+
+Same harness (`scripts/kmet_render_bench.clj`), same phone, width 100, one run
+each at HEAD (±10–20 %):
+
+| metric | A bb | A jolt | B bb | B jolt |
+|---|---|---|---|---|
+| replay | 15 ms | 16 ms | 19 ms | 20 ms |
+| render #1 (cold) | 3.09 s | 2.69 s | 13.88 s | 11.50 s |
+| render #2 (warm) | 1.6 ms | 1.4 ms | 3.4 ms | 4.3 ms |
+| Ctrl+O → collapsed | 0.57 s | 0.84 s | 1.33 s | 1.65 s |
+| Ctrl+O → expanded | 1.09 s | 1.16 s | 2.93 s | 2.99 s |
+| theme switch | 2.97 s | 2.06 s | 13.72 s | 8.31 s |
+| output-pad change | 3.00 s | 2.04 s | 13.98 s | 8.36 s |
+
+Per-role cold split of B (`roles` mode; two runs where they disagreed):
+
+| role | bb | jolt | |
+|---|---|---|---|
+| assistant markdown | 10.7 / 11.2 s | 5.5 / 6.1 s | jolt ~1.9x faster |
+| tools | 2.6 s | 5.7 / 6.8 s | jolt ~2.3x slower |
+| compaction | 0.41 / 0.51 s | 0.17 s | jolt ~2.6x faster |
+
+So §9.3's "jolt ~1.6x slower" is not a single factor: the markdown-heavy work
+(assistant render, the theme/pad global reflows, the compaction summary) is
+~2x **faster** on jolt, while tool rendering is ~2.3x slower. The whole tool
+gap is one call pair. On session B two `edit` calls carry no recorded
+`:details :diff` (their results were errors), so `render-edit-call` falls back
+to computing a preview from the *current* file — `interactive.clj`, 275 KB /
+5,140 lines, changed since the session — through
+`kmet.libs.edit-diff/apply-edits-to-normalized-content`, which fails the exact
+match and scans for the fuzzy one. One call: **bb 196 ms, jolt 2,851 ms**
+(slurp + normalize are ~2 ms on both). Excluding it, the 34 recorded diffs
+render *faster* on jolt than on bb (edit tool ≈54 ms vs ≈330 ms); bash and
+read are within 10 % (`bash` bb 1,481 ms / 140, jolt 1,616; `read` bb 640 / 25,
+jolt 741).
+
+### 10.5 What is left
 
 - **§6.3 (incremental markdown) is the lever that matters here.** The first
   full render is ~7 µs/char of markdown; the 1.5 MB session is 13.7 s and a
@@ -751,7 +788,10 @@ dropped with it (session B: Ctrl+O expanded 3.7 s → 2.9 s, theme switch
   cut both the first render and the global reflow.
 - **Live edit previews** still compute the filesystem preview while args
   stream (inherent — the result does not exist yet); the replay half is now
-  free.
+  free. A *finished* call with no recorded diff (an errored edit) still
+  recomputes that preview from today's file on replay — the one 14x-jolt hot
+  spot in §10.4; either skip it for completed calls or memoize it by
+  (path, mtime, edits).
 - **Virtualization** (rendering only the visible components) would remove the
   first-render cliff entirely, but the scroll view's height math and the
   track!-cached-tree model make it a design change, not a local fix.
