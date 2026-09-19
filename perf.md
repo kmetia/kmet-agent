@@ -659,29 +659,37 @@ Two real sessions, both ~3.8 MB on disk:
 
 | session | context messages (after compaction) | final lines | old: replay | old: render #1 | old: render #2 | new: replay | new: render #1 | new: render #2 |
 |---|---|---|---|---|---|---|---|---|
-| A `1a0060c8776` | 224 (110 tools) | 3,620 | 4.0 s | 3.4 s | 1.57 s | **15 ms** | 3.2 s | **2 ms** |
-| B `1a099712492` | 636 (591 tools) | 17,339 | 14.7 s | 18.7 s | 0.35 s | **19 ms** | 13.7 s | **3 ms** |
+| A `1a0060c8776` | 224 (110 tools) | 3,620 | 1.9 s | 3.4 s | 1.5 s | **15 ms** | 3.2 s | **2 ms** |
+| B `1a099712492` | 636 (591 tools) | 17,339 | 10.3 s | 17.5 s | 6.8 s | **19 ms** | 13.7 s | **3 ms** |
 
-"Old/new" = before/after the three fixes below. To a stable first frame
-(replay + the first content-stable render): session A **9.0 s → 3.2 s**,
-session B **33.4 s → 13.7 s**. Steady-state frames after that: **2–6 ms**
-(session B), so streaming/typing is unaffected — the cost is concentrated in
-the first full render and in any invalidation that drops the whole tree.
-Session B's per-role cold split: assistant markdown 11.0 s / 10,068 lines /
-**1.50 MB** of text, tools 6.7 s / 6,216 lines / 0.91 MB (cold per-tool on
-session A, before 10.3: edit 552 ms / 19 calls, bash 461 ms / 91 calls),
-compaction summary 0.39 s, user 4 ms — i.e. ~7 µs per character of markdown
-source, dominated by parse + style + syntax highlighting.
+"Old/new" = before/after the three fixes below, old files checked out
+(`6be6ae2`) and re-measured back to back on 2026-09-19. To a stable first
+frame (replay + the first content-stable render): session A **6.7 s → 3.2 s**,
+session B **34.6 s → 13.7 s**. Replay and the old render #2 carry the most
+run-to-run noise: B's replay measured 10.3–14.7 s across runs, and the old
+render #2 depends on the worktree — the pre-10.3 call preview read the
+*current* files, so it forced a settle frame for every edit whose file had
+changed since, and the same old code measured 6.8 s here against 0.35 s in an
+earlier run where it needed few corrections. Steady-state frames after that:
+**2–6 ms** (session B), so streaming/typing is unaffected — the cost is
+concentrated in the first full render and in any invalidation that drops the
+whole tree. Session B's per-role cold split at HEAD: assistant markdown
+10.5 s / 10,068 lines / **1.50 MB** of text (~7 µs/char), tools 2.7 s /
+7,012 lines / 1.03 MB (~2.6 µs/char — §10.3 renders the recorded diffs on the
+first pass, so more lines than the pre-10.3 6,216 and less than half the
+time), compaction summary 0.40 s, user 3 ms.
 
-Cheap follow-up interactions, once the transcript is warm (session B):
+Cheap follow-up interactions, once the transcript is warm (session B,
+re-measured at HEAD; the pre-10.3 table read 1.9 / 3.7 / 17.5 / 18.9 s — the
+edit settle fired again inside every global reflow):
 
 | action | cost | note |
 |---|---|---|
-| Ctrl+O → collapsed | 1.9 s | tool components re-render only |
-| Ctrl+O → expanded | 3.7 s | full tool output re-render |
-| theme switch | 17.5 s | every markdown message re-parses (colors are baked in) |
-| output-pad change | 18.9 s | every boxed message re-wraps |
-| ordinary frame | 5 ms | caches warm |
+| Ctrl+O → collapsed | 1.3 s | tool components re-render only |
+| Ctrl+O → expanded | 2.9 s | full tool output re-render |
+| theme switch | 13.6–13.9 s | every markdown message re-parses (colors are baked in) |
+| output-pad change | 13.9–14.3 s | every boxed message re-wraps |
+| ordinary frame | 4–5 ms | caches warm |
 
 ### 10.1 Fix: the assistant render body tracked its own output atoms
 
@@ -709,7 +717,8 @@ parsed 1.5 MB of markdown at 80 — and a first frame at any other width could
 not reuse a line of it, parsing everything again. Lines are now
 built lazily by the first render at the width it is actually given (the
 `track!` stale check can see they are empty). Session B replay:
-**14.7 s → 19 ms**; combined with 10.1, the first render became content-stable
+**10–15 s → 19 ms** (the first runs measured 14.7 s; replay varies with load),
+combined with 10.1, the first render became content-stable
 (previously it produced 16,543 lines and a second pass grew the document).
 
 ### 10.3 Fix: replayed edits render the recorded diff on the first pass
@@ -726,15 +735,18 @@ clamped to the window and set `scrollback-dirty?`, so the next idle input ran
 call renderer now prefers the recorded diff when the result already carries
 one (live streaming is unaffected: `:details` only exists after the result),
 and `render-edit-result` agrees with the cached preview, so it neither
-rewrites state nor invalidates. Session A first render **4.7 s → 3.2 s** and
-content-stable; cold edit tools **552 ms → 258 ms** (19 calls); session B
-first render **17.6 s → 13.7 s**. The regression test
+rewrites state nor invalidates. With 10.1/10.2 already in: session A first
+render **4.7 s → 3.2 s** and content-stable; cold edit tools **552 ms →
+258 ms** (19 calls); session B first render **17.6 s → 13.7 s**. Because the
+settle also fired inside every global reflow, the warm interactions above
+dropped with it (session B: Ctrl+O expanded 3.7 s → 2.9 s, theme switch
+17.5 s → 13.9 s). The regression test
 (`test-edit-call-prefers-the-recorded-result-diff`) fails on the old code.
 
 ### 10.4 What is left
 
 - **§6.3 (incremental markdown) is the lever that matters here.** The first
-  full render is ~7 µs/char of markdown; a 1.5 MB transcript is 14 s and a
+  full render is ~7 µs/char of markdown; the 1.5 MB session is 13.7 s and a
   theme switch or pad change re-pays it. Block-level parse reuse by text would
   cut both the first render and the global reflow.
 - **Live edit previews** still compute the filesystem preview while args
