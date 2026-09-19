@@ -90,8 +90,8 @@ re-diagnosed upstream in jolt PR #1033 — with its fix at
 [babashka/sci#1093](https://github.com/babashka/sci/pull/1093) (open, head
 `1295142f`, unchanged), so the `jolt/deps.edn` SCI pin stays — and the
 `$`-anchor regex perf issue, filed as
-[jolt#1062](https://github.com/jolt-lang/jolt/issues/1062) (2026-09-19, no
-fix yet). Every other ticket this file tracked is closed.
+[jolt#1062](https://github.com/jolt-lang/jolt/issues/1062) (2026-09-19; kmet
+side closed via `str/trimr`). Every other ticket this file tracked is closed.
 
 **Workarounds live next to their ticket below.** Each workaround block is the
 removal checklist: when an upstream fix lands, delete the listed code (and the
@@ -190,8 +190,11 @@ trailing whitespace per line that way, twice per failed fuzzy match. One
 replayed edit preview: **196 ms bb vs 2,851 ms jolt** for identical work; that
 one call is the entire jolt/bb tool-render gap (perf.md §10.4).
 
-**Workaround (kmet, pending):** use `clojure.string/trimr` instead of the
-regex — byte-identical output on the 5,140-line corpus, 0.8 ms on jolt (vs
-1,345 ms) and 0.6 ms on bb (vs 31 ms); also closer to pi's JS `\s` (Unicode
-aware). `src/kmet/tui/components/editor.clj:248,260` and `editing.clj:528`
-use the same pattern on one line per keystroke (0.26 ms — harmless).
+**Workaround (kmet, landed 2026-09-19):** `normalize-for-fuzzy-match` now
+uses `clojure.string/trimr`; the equivalence is pinned against the regex form
+in `test/kmet/libs/test_edit_diff.clj`. The failing preview call dropped from
+**2,851 ms to 333 ms** on jolt (bb 196 → 176 ms) and the edit tool from
+3,339 ms to 744 ms. Nothing in kmet waits on the upstream fix — this is a
+status note, not a removal checklist. `src/kmet/tui/components/editor.clj:248,260`
+and `editing.clj:528` still use the same pattern on one line per keystroke
+(0.26 ms — harmless).

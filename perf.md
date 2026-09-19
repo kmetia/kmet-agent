@@ -758,7 +758,8 @@ each at HEAD (±10–20 %):
 | theme switch | 2.97 s | 2.06 s | 13.72 s | 8.31 s |
 | output-pad change | 3.00 s | 2.04 s | 13.98 s | 8.36 s |
 
-Per-role cold split of B (`roles` mode; two runs where they disagreed):
+Per-role cold split of B (`roles` mode; two runs where they disagreed;
+pre-workaround):
 
 | role | bb | jolt | |
 |---|---|---|---|
@@ -777,11 +778,21 @@ to computing a preview from the *current* file — `interactive.clj`, 275 KB /
 match and scans for the fuzzy one. One call: **bb 196 ms, jolt 2,851 ms**
 (slurp + normalize are ~2 ms on both); the regex behind it is filed upstream
 as [jolt#1062](https://github.com/jolt-lang/jolt/issues/1062) — per-line
-`$`-anchored patterns are 10–70x slower on jolt, and the fix is `str/trimr`.
+`$`-anchored patterns are 10–70x slower on jolt, and the fix is `str/trimr`
+(landed, below).
 Excluding it, the 34 recorded diffs
 render *faster* on jolt than on bb (edit tool ≈54 ms vs ≈330 ms); bash and
 read are within 10 % (`bash` bb 1,481 ms / 140, jolt 1,616; `read` bb 640 / 25,
 jolt 741).
+
+**After the workaround (str/trimr, landed 2026-09-19):** the same failing
+preview call is **bb 176 ms (was 196), jolt 333 ms (was 2,851)** — jolt's
+edit tool drops from 3,339 ms to 744 ms in the roles profile and render #1
+from 11.5 s to 10.4 s. bb's render #1 moved 13.9 → 16.7 s in the same pair of
+runs, so treat the full-render deltas as ambient (±20 % on this phone); the
+per-call numbers are the clean signal. The residual jolt cost is NFKC (43 ms
+per 275 KB pass, and the fuzzy path runs it twice) plus the whole-text
+character replaces.
 
 ### 10.5 What is left
 

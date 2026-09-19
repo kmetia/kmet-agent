@@ -153,7 +153,12 @@
   [text]
   (-> (java.text.Normalizer/normalize text java.text.Normalizer$Form/NFKC)
       (as-> s (->> (str/split-lines s)
-                   (map #(str/replace % #"\s+$" ""))
+                   ;; str/trimr, not a per-line (str/replace line #"\s+$" ""):
+                   ;; an anchored-regex scan costs ~0.26 ms per line on jolt
+                   ;; (tracked in jolt-bugs.md) and trims the same ASCII
+                   ;; whitespace, plus the Unicode trailing whitespace pi's JS
+                   ;; \s covers.
+                   (map str/trimr)
                    (str/join "\n")))
       (str/replace #"[\u2018\u2019\u201A\u201B]" "'")
       (str/replace #"[\u201C\u201D\u201E\u201F]" "\"")
