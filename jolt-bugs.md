@@ -72,7 +72,9 @@ thread — now has a fix submitted:
 [jolt#1053](https://github.com/jolt-lang/jolt/pull/1053) (open, `loader-id`),
 and the bionic build fixes are
 [jolt#1054](https://github.com/jolt-lang/jolt/pull/1054) (open, `bionic`,
-above).
+above). The http-client timeout divergence is filed as
+[http-client#26](https://github.com/jolt-lang/http-client/issues/26) (open;
+its kmet workaround is below).
 
 **Workarounds live next to their ticket below.** Each workaround block is the
 removal checklist: when an upstream fix lands, delete the listed code (and the
@@ -182,3 +184,37 @@ SCI as the gap — `babashka/sci#1093` (still open, no jolt-side fix). The
 `jolt/deps.edn` pin stays until it merges and a release carries it.
 Re-checked 2026-09-19: both still open — #1031 now carries the `deferred`
 label, and PR #1093's head is still `1295142f`, so the pin is unchanged.
+
+### [jolt-lang/http-client#26](https://github.com/jolt-lang/http-client/issues/26) — `HttpRequest.timeout` cuts streamed body reads (`SO_RCVTIMEO`)
+
+**Area:** `src/jolt/http/jdk.clj` `net-http-send` — the request timeout
+becomes both the request `deadline` and the connection's `:read-timeout`
+(`net/set-read-timeout!` → `SO_RCVTIMEO`) — with the body bound documented
+as intentional in `src/jolt/http/core.clj`'s streaming section. The JDK does
+not apply `HttpRequest.timeout` to a body already in flight: with
+`BodyHandlers.ofInputStream` the timeout stops at the response headers.
+
+Repro (server sends headers + `Content-Length: 100`, then stalls 5s; client
+timeout 800ms, `ofInputStream`, one read): babashka v1.13.222 (real
+`java.net.http`) blocks past the timeout and returns after the server closes
+(~5011ms, `IOException "closed"`); jolt v0.8.9-11 + http-client `f517b2d4`
+throws `SocketTimeoutException "Read timed out"` at ~802ms.
+
+**Impact in kmet:** provider streams pass `:timeout` as
+`SDK timeoutMs ?? httpIdleTimeoutMs` (`src/kmet/ai/api/*.clj`), so a stalled
+SSE body surfaced as `Stream error: Read timed out` where bb reports the SSE
+idle message — commit 13a842d's un-gating of
+`test-llm-body-stall-idle-timeout-completes` assumed a parity the shim's
+socket read timeout does not provide.
+
+**Workaround:** `kmet.libs.sse/make-idle-reader` classifies transport read
+timeouts (`SocketTimeoutException`/`HttpTimeoutException`, by simple class
+name in `read-timeout-exception-classes` via `read-timeout-exception?`) as
+the idle arm, so a jolt body stall reports the idle-timeout message like bb;
+genuine read failures (RST_STREAM, …) still surface as `Stream error:`.
+Regression test: `test-openai-stream-transport-read-timeout-takes-the-idle-arm`
+in `test/kmet/libs/test_sse.clj`. Remove the classification (and its test)
+when the shim stops applying `HttpRequest.timeout` to the streamed body, or
+makes the body bound an explicit opt-in.
+
+Filed 2026-09-19 against http-client main `f517b2d4` (this project's pin).

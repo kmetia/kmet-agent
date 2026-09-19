@@ -532,6 +532,28 @@
     (t/is (= [{:type :error :message "Stream error: Received RST_STREAM: Protocol error"}]
              @events))))
 
+(t/deftest test-openai-stream-transport-read-timeout-takes-the-idle-arm
+  ;; On Jolt the jolt-lang/http-client shim maps HttpRequest.timeout to the
+  ;; streamed body socket's SO_RCVTIMEO, so a body that stalls for the
+  ;; configured timeout throws SocketTimeoutException("Read timed out") where
+  ;; the JDK's request timeout does not cut a body in flight. It is the same
+  ;; inactivity stall the idle arm reports — not a stream error.
+  (let [events (atom [])
+        timeout-reader
+        (proxy [java.io.Reader] []
+          (read
+            ([] (throw (java.net.SocketTimeoutException. "Read timed out")))
+            ([cbuf off len] (throw (java.net.SocketTimeoutException. "Read timed out")))))
+        f (future
+            (sse/process-openai-stream {:body timeout-reader}
+                                       (fn [e] (swap! events conj e))
+                                       nil
+                                       100)
+            :done)]
+    (t/is (= :done (deref f 3000 :timeout)))
+    (t/is (= [{:type :error :message "Stream idle timeout after 100 ms (no data received)"}]
+             @events))))
+
 (t/deftest ^:slow test-openai-stream-idle-resets-on-flow
   ;; Data arriving well within the idle window over a total duration longer
   ;; than the timeout must not stall — the clock resets per byte (undici
