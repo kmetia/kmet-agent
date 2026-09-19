@@ -743,6 +743,18 @@ dropped with it (session B: Ctrl+O expanded 3.7 s → 2.9 s, theme switch
 17.5 s → 13.9 s). The regression test
 (`test-edit-call-prefers-the-recorded-result-diff`) fails on the old code.
 
+A follow-up closes the replay case the recorded diff cannot cover — a
+*finished errored* edit has no `:details :diff`, so the call renderer still
+computed the preview from today's file (a slurp + fuzzy apply that can only
+re-derive the failure; on session B's two errored calls this was the whole
+jolt-vs-bb gap). It now skips computation when the render context carries
+`:is-error`, placed *after* the cached-preview branch so a live pass keeps the
+preview its result dedups against; the recorded error then renders on the
+result side. Cold edit tools, session B: **bb 417 → 321 ms, jolt 456 →
+309 ms** (the hosts are now at parity). The regression test
+(`test-edit-call-skips-the-preview-for-an-errored-result`) fails on the old
+code.
+
 ### 10.4 bb vs jolt: the profiles invert by subsystem
 
 Same harness (`scripts/kmet_render_bench.clj`), same phone, width 100, one run
@@ -793,7 +805,8 @@ bb / 9 ms jolt** (was 76 / 47). The failing preview call is on
 `interactive.clj`, which has 4,175 non-ASCII chars (box drawing, em dashes),
 so its guard fails fast and the replaces still run: **bb ~72 ms, jolt
 ~138 ms** (was 196 / 2,851). The jolt edit tool in the roles profile:
-3,339 → 744 (trimr) → **456 ms** (bb 522 → 417), the hosts now within ~10 %.
+3,339 → 744 (trimr) → 456 (memoized normalization) → **309 ms** (§10.3's
+errored-preview skip; bb 522 → 417 → 321), the hosts now at parity.
 For non-ASCII content the four whole-text replaces dominate (53 ms bb /
 103 ms jolt); selective per-class replaces (the detection scans cost as much
 as the passes) and one alternation with a callback (60 / 96 ms) both measured
@@ -806,12 +819,11 @@ no better.
   theme switch or pad change re-pays it. Block-level parse reuse by text would
   cut both the first render and the global reflow.
 - **Live edit previews** still compute the filesystem preview while args
-  stream (inherent — the result does not exist yet); the replay half is now
-  free. A *finished* call with no recorded diff (an errored edit) still
-  recomputes that preview from today's file on replay — the remaining jolt
-  hot spot in §10.4 (memoizing normalization and skipping the ASCII replaces
-  cut it to 136 ms / bb 90 ms); the next step is to skip it for completed
-  calls entirely, or memoize it by (path, mtime, edits).
+  stream (inherent — the result does not exist yet). The replay half is now
+  free: a finished result's diff wins over the preview (§10.3) and a finished
+  *errored* edit — which records no diff — skips the computation entirely.
+  What remains is repeated live previews of the same file (memoize by path +
+  mtime + edits) and the non-ASCII normalization cost (§10.4).
 - **Virtualization** (rendering only the visible components) would remove the
   first-render cliff entirely, but the scroll view's height math and the
   track!-cached-tree model make it a design change, not a local fix.

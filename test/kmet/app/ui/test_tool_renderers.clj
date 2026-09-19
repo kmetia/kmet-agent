@@ -274,6 +274,39 @@
               "the result agrees with the recorded preview — no settle frame"))
         (finally (fs/delete-tree dir))))))
 
+(deftest test-edit-call-skips-the-preview-for-an-errored-result
+  (testing "a finished errored edit (no recorded diff) renders without the
+            filesystem preview: it could only re-derive the failure, and a
+            replayed call would read a file from today's worktree. The error
+            then renders on the result side (no preview error to dedup)"
+    (let [dir (str (fs/absolutize (str "target/test-edit-errored-preview-"
+                                       (System/currentTimeMillis))))]
+      (try
+        (fs/create-dirs dir)
+        ;; today's file would preview a lowercase "two"
+        (spit (str dir "/note.txt") "one\n")
+        (let [st (atom {})
+              context {:cwd dir :args-complete true :is-partial false
+                       :is-error true
+                       :state {}
+                       :set-state! (fn [s] (reset! st s))}
+              lines (plain (r/render-edit-call "edit"
+                                               {:path "note.txt"
+                                                :edits [{:oldText "one" :newText "two"}]}
+                                               th 60 context) 60)]
+          (is (nil? (:edit-preview @st))
+              "no filesystem preview is computed or cached")
+          (is (not-any? #(str/includes? % "two") lines)
+              "the file's would-be diff never reaches the render")
+          (let [err-lines (plain (r/render-edit-result
+                                  "Could not find the exact text in note.txt."
+                                  true th 60 false nil nil nil
+                                  (assoc context :state @st)) 60)]
+            (is (some #(str/includes? % "Could not find") err-lines)
+                "the recorded error renders on the result side")
+            (is (nil? (:edit-preview @st)) "and no preview state is written")))
+        (finally (fs/delete-tree dir))))))
+
 (deftest test-edit-box-bg-states
   ;; build-edit-box is private; exercise via render-edit-call with a
   ;; complete-args context that skips preview (unrenderable path → pending bg)

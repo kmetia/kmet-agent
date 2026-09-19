@@ -710,6 +710,12 @@
                   s')
                 state)
         recorded (recorded-edit-preview context)
+        ;; An errored result has no diff to be corrected by, and the preview
+        ;; cannot succeed where the tool failed: computing it from today's
+        ;; file only re-derives the failure on a replayed call (the session no
+        ;; longer owns that file). A cached preview from the live pass is
+        ;; still honored above — the result side dedups against it.
+        result-error? (:is-error context)
         preview (cond
                   ;; A finished result's diff wins over the call-time preview:
                   ;; it is exactly what render-edit-result installs a frame
@@ -720,6 +726,7 @@
                         (set-state! (assoc state :edit-preview recorded)))
                       recorded)
                   (contains? state :edit-preview) (:edit-preview state)
+                  result-error? nil
                   (and (:args-complete context)
                        (renderable-edit-input raw-path edits))
                   (let [p (edit-preview raw-path (:cwd context) edits)]
