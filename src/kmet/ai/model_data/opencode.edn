@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-16T18:28:51Z"
+ :generated-at "2026-09-19T20:36:00Z"
  :provider {:id :opencode
             :name "OpenCode (Zen)"
             :env-vars ["OPENCODE_API_KEY"]
@@ -184,16 +184,16 @@
     :cost {:input 0.5 :output 3 :cache-read 0.05 :cache-write 0.625}
     :context-window 262144
     :max-tokens 65536}
-   "union-alpha"
-   {:id "union-alpha"
-    :name "Union Alpha Free"
+   "qwen3.8-flash"
+   {:id "qwen3.8-flash"
+    :name "Qwen3.8 Flash"
     :provider :opencode
     :api :anthropic-messages
     :base-url "https://opencode.ai/zen"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
-    :context-window 262144
+    :cost {:input 0.15 :output 0.47 :cache-read 0.016 :cache-write 0.2}
+    :context-window 1000000
     :max-tokens 131072}}
   :google-generative-ai
   {"gemini-3-flash"
@@ -363,6 +363,28 @@
                          :xhigh nil}
     :input [:text]
     :cost {:input 1.74 :output 3.84 :cache-read 0.145 :cache-write 0}
+    :context-window 1000000
+    :max-tokens 384000
+    :compat {:supports-store false
+             :supports-developer-role false
+             :requires-reasoning-content-on-assistant-messages true
+             :max-tokens-field :max-tokens}}
+   "deepseek-v4.1-flash"
+   {:id "deepseek-v4.1-flash"
+    :name "DeepSeek V4.1 Flash"
+    :provider :opencode
+    :api :openai-completions
+    :base-url "https://opencode.ai/zen/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low nil
+                         :max "max"
+                         :medium nil
+                         :minimal nil
+                         :off nil
+                         :xhigh nil}
+    :input [:text :image]
+    :cost {:input 0.3 :output 1.2 :cache-read 0.006 :cache-write 0}
     :context-window 1000000
     :max-tokens 384000
     :compat {:supports-store false
@@ -978,7 +1000,7 @@
              :supports-openai-grammar-tools true}}
    "gpt-5.6-sol"
    {:id "gpt-5.6-sol"
-    :name "GPT-5.6 Sol (50% Off)"
+    :name "GPT-5.6 Sol"
     :provider :opencode
     :api :openai-responses
     :base-url "https://opencode.ai/zen/v1"
@@ -991,11 +1013,11 @@
                          :off nil
                          :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 2
-           :tiers [{:input 4 :input-tokens-above 272000 :output 15 :cache-read 0.4 :cache-write 5}]
-           :output 10
-           :cache-read 0.2
-           :cache-write 2.5}
+    :cost {:input 4
+           :tiers [{:input 8 :input-tokens-above 272000 :output 30 :cache-read 0.8 :cache-write 10}]
+           :output 20
+           :cache-read 0.4
+           :cache-write 5}
     :context-window 1050000
     :max-tokens 128000
     :compat {:session-affinity-format :openai-nosession
@@ -1155,7 +1177,7 @@
     :reasoning true
     :thinking-level-map {:high "high"
                          :low "low"
-                         :max "max"
+                         :max nil
                          :medium "medium"
                          :minimal "minimal"
                          :off nil
