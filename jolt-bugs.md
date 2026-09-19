@@ -84,12 +84,14 @@ kernel. No kmet workaround is tied to any of the three; the local Termux
 build wrapper's `cc` shim and hand-rolled provisioning are redundant now
 that the checkout carries the PR.
 
-**Upstream status:** the only open item is the SCI IVar gap — filed as
+**Upstream status:** two open items — the SCI IVar gap, filed as
 [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) (`deferred`),
 re-diagnosed upstream in jolt PR #1033 — with its fix at
 [babashka/sci#1093](https://github.com/babashka/sci/pull/1093) (open, head
-`1295142f`, unchanged), so the `jolt/deps.edn` SCI pin stays. Every other
-ticket this file tracked is closed.
+`1295142f`, unchanged), so the `jolt/deps.edn` SCI pin stays — and the
+`$`-anchor regex perf issue, filed as
+[jolt#1062](https://github.com/jolt-lang/jolt/issues/1062) (2026-09-19, no
+fix yet). Every other ticket this file tracked is closed.
 
 **Workarounds live next to their ticket below.** Each workaround block is the
 removal checklist: when an upstream fix lands, delete the listed code (and the
@@ -146,10 +148,9 @@ SCI as the gap — `babashka/sci#1093` (still open, no jolt-side fix). The
 Re-checked 2026-09-19: both still open — #1031 now carries the `deferred`
 label, and PR #1093's head is still `1295142f`, so the pin is unchanged.
 
-## To file upstream — performance (2026-09-19)
+### [jolt#1062](https://github.com/jolt-lang/jolt/issues/1062) — `$`-anchored regexes are 10–70x slower than the JVM, and a multiline `$` replace over a whole file does not finish
 
-### jolt: `$`-anchored regexes are 10–70x slower than the JVM, and a multiline
-`$` replace over a whole file does not finish
+**Status:** filed 2026-09-19 (perf; no fix yet).
 
 **Area:** jolt's `java.util.regex` shim (irregex) — `re-find` / `str/replace`
 with a `$` anchor; secondary: `java.text.Normalizer` NFKC (7.6x).
