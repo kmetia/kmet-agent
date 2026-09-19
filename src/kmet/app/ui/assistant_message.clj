@@ -66,6 +66,25 @@
             md-lines (protocols/render mc cw)]
         (mapv #(str left-pad %) md-lines)))))
 
+;; The rendered-* atoms are the render body's OWN outputs — reflow-all!
+;; writes them on a cache miss. Read them WITHOUT tracking: a tracked read
+;; can never equal the value the miss path stored (the write happens after
+;; the read), so track! would discard the frame it just built and the next
+;; render would re-parse the markdown all over again. The tracked inputs
+;; (text/thinking/streaming/tool-calls/hide/label/pad/theme) already
+;; invalidate the cache whenever a reflow is due; these readers only feed
+;; the stale check and the result.
+(defn- rendered-text [c] @(:rendered-text-atom c))
+(defn- rendered-thinking [c] @(:rendered-thinking-atom c))
+(defn- rendered-streaming? [c] @(:rendered-streaming-atom c))
+(defn- rendered-hide? [c] @(:rendered-hide?-atom c))
+(defn- rendered-hidden-label [c] @(:rendered-hidden-label-atom c))
+(defn- rendered-pad [c] @(:rendered-pad-atom c))
+(defn- rendered-theme [c] @(:rendered-theme-atom c))
+(defn- rendered-text-lines [c] @(:rendered-text-lines-atom c))
+(defn- rendered-thinking-lines [c] @(:rendered-thinking-lines-atom c))
+(defn- last-render-width [c] @(:last-render-width-atom c))
+
 (declare reflow-all!)
 
 ;; ─── Record ────────────────────────────────────────────────────────────────
@@ -91,7 +110,7 @@
                cache-atom]
   (render [this width]
     (track! this width
-      (let [prev-width @last-render-width-atom
+      (let [prev-width (last-render-width this)
             ;; Pi trims each content block (content.text.trim()); whitespace-only
             ;; blocks render nothing (and get no Spacer(1)).
             text (let [t (str/trim (or @text-atom ""))] (when (seq t) t))
@@ -117,16 +136,16 @@
             ;; (finalize must re-run transformers with is-streaming false)
             ;; since the cached lines.
             stale? (or (and prev-width (not= prev-width width))
-                       (not= text @rendered-text-atom)
-                       (not= thinking @rendered-thinking-atom)
-                       (not= streaming? @rendered-streaming-atom)
-                       (not= hide? @rendered-hide?-atom)
-                       (not= hidden-label @rendered-hidden-label-atom)
-                       (not= pad @rendered-pad-atom)
-                       (not= theme @rendered-theme-atom))
+                       (not= text (rendered-text this))
+                       (not= thinking (rendered-thinking this))
+                       (not= streaming? (rendered-streaming? this))
+                       (not= hide? (rendered-hide? this))
+                       (not= hidden-label (rendered-hidden-label this))
+                       (not= pad (rendered-pad this))
+                       (not= theme (rendered-theme this)))
             _ (when stale? (reflow-all! this width))
-            text-lines @rendered-text-lines-atom
-            thinking-lines @rendered-thinking-lines-atom]
+            text-lines (rendered-text-lines this)
+            thinking-lines (rendered-thinking-lines this)]
         ;; Pi-style: no visible content → render nothing while STREAMING (the
         ;; working indicator covers the wait) and render nothing for a FINALIZED
         ;; response that carried tool calls — its ToolExecutionComponents are
@@ -228,9 +247,10 @@
                                               :rendered-theme-atom (atom nil)
                                               :last-render-width-atom (atom nil)
                                               :cache-atom (atom nil)})]
-    ;; Do the initial render so lines are ready immediately (records the
-    ;; theme-sub snapshot the lines were built with)
-    (reflow-all! comp 80)
+    ;; Lines are built lazily on the first render, at the width it is given:
+    ;; eagerly reflowing here parsed every message at a fixed width 80 that
+    ;; the first render (at the terminal's real width) cannot reuse, so
+    ;; replaying a large session paid two full markdown parses per message.
     comp))
 
 ;; ─── Public API ────────────────────────────────────────────────────────

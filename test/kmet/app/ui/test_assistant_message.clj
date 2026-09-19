@@ -140,6 +140,23 @@
       (is (not-any? #(re-find #"^ {2}hello" %) lines)
           "no leading spaces survive"))))
 
+(deftest test-width-change-reflows-once
+  (testing "a width change reflows ONCE: the frame that reflowed is cached.
+            The body must not track its own rendered-* output atoms — a
+            tracked read can never equal the value written mid-body, so
+            track! would drop the frame and the next render would re-parse
+            the markdown again (regression: the doubled cost of resuming a
+            large session at a new width)"
+    (let [c (am/make-assistant-message :thinking "why")
+          reflows (atom 0)]
+      (add-watch (:rendered-text-atom c) :test-reflow-count
+                 (fn [_ _ _ _] (swap! reflows inc)))
+      (core/render c 60)
+      (is (= 1 @reflows) "one reflow on the width change")
+      (is (some? @(:cache-atom c)) "the reflowing frame is cached")
+      (core/render c 60)
+      (is (= 1 @reflows) "the next render serves the cache — no second reflow"))))
+
 (deftest test-shared-thinking-hidden-atom
   (testing "messages sharing the chat history's hide-thinking atom flip together —
             one reset! is enough, reflow happens lazily on the next render"

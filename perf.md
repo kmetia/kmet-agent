@@ -640,3 +640,86 @@ Corrections to §3/§6:
 - **§6.3 is now the top algorithmic lever**: `Markdown` re-parses the whole text
   per render (`text-atom` ticks, so `track!` cannot cache it) — 2.4 ms/frame at
   2 KB, **25 ms at 16.8 KB** on jolt (13 ms bb).
+
+---
+
+## 10. Full expanded render of a large session (2026-09-19)
+
+Resume path: `session/load-session` → `replay-branch!` → the first
+`core/render` of the whole chat, tool display mode `:expanded` (every tool and
+thinking block at full size). This is the expensive end of the frame path —
+the scroll view renders the *entire* child document every pass ("render itself
+never clips", `scroll_view.clj`) and windows it afterwards; `track!` makes the
+follow-up frames cheap, but the first one pays for every message. Measured on
+the Termux/aarch64 phone with `bb` (same tree, same sessions in
+`~/.kmet/sessions/`); A/B runs of the same tree (numbers vary ±10–20 % run to
+run).
+
+Two real sessions, both ~3.8 MB on disk:
+
+| session | context messages (after compaction) | first render lines | old: replay | old: render #1 | old: render #2 | new: replay | new: render #1 | new: render #2 |
+|---|---|---|---|---|---|---|---|---|
+| A `1a0060c8776` | 224 (110 tools) | 3,355 | 4.0 s | 3.4 s | 1.57 s | **17 ms** | 4.7 s | **0.21 s** |
+| B `1a099712492` | 636 (591 tools) | 16,543 | 14.7 s | 18.7 s | 0.35 s | **19 ms** | 17.6 s | **0.41 s** |
+
+"Old/new" = before/after the two fixes below. To a stable first frame:
+session A **9.0 s → 4.9 s**, session B **33.4 s → 18.0 s**. Steady-state
+frames after that: **2–6 ms** (session B), so streaming/typing is unaffected —
+the cost is concentrated in the first full render and in any invalidation that
+drops the whole tree. Session B's per-role cold split: assistant markdown
+11.0 s / 10,068 lines / **1.50 MB** of text, tools 6.7 s / 6,216 lines /
+0.91 MB (cold per-tool on session A: edit 552 ms / 19 calls, bash 461 ms /
+91 calls), compaction summary 0.39 s, user 4 ms — i.e. ~7 µs per character of
+markdown source, dominated by parse + style + syntax highlighting.
+
+Cheap follow-up interactions, once the transcript is warm (session B):
+
+| action | cost | note |
+|---|---|---|
+| Ctrl+O → collapsed | 1.9 s | tool components re-render only |
+| Ctrl+O → expanded | 3.7 s | full tool output re-render |
+| theme switch | 17.5 s | every markdown message re-parses (colors are baked in) |
+| output-pad change | 18.9 s | every boxed message re-wraps |
+| ordinary frame | 5 ms | caches warm |
+
+### 10.1 Fix: the assistant render body tracked its own output atoms
+
+`AssistantMessageComponent/render` reads `rendered-text-atom` /
+`rendered-*-lines-atom` / `last-render-width-atom` inside the `track!` body,
+but `reflow-all!` *writes* those atoms on a cache miss. track! stores the
+values **as read**, so the write landed after the read and the frame was
+discarded ("a body that invalidates itself mid-run is not cached") — the next
+render re-ran the body, and for a thinking-only/tool-call message (text `nil`
+vs the stored `""`) it reflowed and re-parsed the whole markdown again. Every
+width change therefore cost **two** full parses per message: the terminal's
+first paint at a width other than 80 always paid it. The output atoms are the
+body's own products, not inputs — read them through untracked helpers (the
+same pattern tool_execution uses for `last-call-component`), leaving
+text/thinking/streaming/hide/label/pad/theme as the tracked input set. Session
+A render #2: **1.57 s → 0.15–0.21 s**; the width-change test
+(`test-width-change-reflows-once`) fails on the old code.
+
+### 10.2 Fix: no eager width-80 reflow in the assistant constructor
+
+`make-assistant-message` reflowed the whole message at a hardcoded width 80 at
+construction. Replay constructs every message, so resuming a large session
+parsed 1.5 MB of markdown at 80 — and the first frame at the terminal's real
+width could not reuse a line of it, parsing everything again. Lines are now
+built lazily by the first render at the width it is actually given (the
+`track!` stale check can see they are empty). Session B replay:
+**14.7 s → 19 ms**; combined with 10.1, resume-to-stable **33.4 s → 18.0 s**.
+
+### 10.3 What is left
+
+- **§6.3 (incremental markdown) is the lever that matters here.** The first
+  full render is ~7 µs/char of markdown; a 1.5 MB transcript is 18 s and a
+  theme switch or pad change re-pays it. Block-level parse reuse by text would
+  cut both the first render and the global reflow.
+- **Edit tool previews** (552 ms / 19 calls on session A) slurp the (current)
+  file and run the fuzzy diff + syntax highlight per call; the result is
+  recomputed once more when `render-edit-result` installs the corrected
+  preview and invalidates (that settle is visible as a 1-pass lag, ~154 ms
+  warm on session A).
+- **Virtualization** (rendering only the visible components) would remove the
+  first-render cliff entirely, but the scroll view's height math and the
+  track!-cached-tree model make it a design change, not a local fix.
