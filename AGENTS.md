@@ -84,7 +84,7 @@
   re-enter itself forever).
   - babashka (`kmet.tasks.build`): `bb uberjar` → `target/kmet.jar` (the src/ tree
     + resolved dep jars — the non-bb-builtin Maven jars are `data.json` (JSON
-    seam) and `cljfmt` (format task)); `bb dist [platforms|--all] [--force] [--smoke]`
+    seam) and `cljfmt` (format task)); `bb dist [platforms|--all] [--force] [--smoke] [--test]`
     → self-contained executables in `dist/` (official bb release binary + appended uberjar,
     fresh uberjar always rebuilt first; artifacts `kmet-<ver>-bb<bb-ver>-<platform>`,
     version = jolt's checkout rule (`kmet.libs.version`: nearest `v<digit>` tag via
@@ -92,7 +92,12 @@
     git; the uberjar bakes it as kmet/version.txt for `kmet --version`); platforms
     linux-aarch64, linux-amd64, macos-aarch64, macos-amd64, windows-amd64 — the
     linux ones from babashka's static release assets, the same platform
-    vocabulary the jolt packager stamps). Termux: a `.sh` launcher next to the
+    vocabulary the jolt packager stamps). `--test` swaps in the test-runner artifact
+    (`kmet-test-<ver>-bb<bb-ver>-<platform>`, Main-Class `kmet.tasks.test-main`): its jar
+    carries src/ plus tasks/ + test/ + the generated entry under `target/kmet-test-entry/`
+    (`kmet.tasks.build/generate-test-main!`), and the binary's `--test` / `--test-ext`
+    flags run the packaged suite. Test classes exist only in that artifact — a plain build
+    is src/ and nothing else. Termux: a `.sh` launcher next to the
     binary (glibc linker exec + `--jar <self>`; auto-detection breaks because `/proc/self/exe`
     resolves to `ld-linux`). Downloads cached + sha256-checked in `target/build-cache/`.
   - jolt (`kmet.tasks.build-jolt`): AOT-compiles via a `jolt build -m kmet.core` subprocess (no jar
@@ -106,10 +111,19 @@
     JOLT_PWD-relative source roots, so a run from the checkout would pass without the
     `deps.edn :jolt/build {:embed ["src" "target/kmet-version"]}` that bakes the model
     catalogs and the version in — neither root is tasks/, so nothing under tasks/
-    rides in the binary even though it is on the classpath). Termux gets a
+    rides in the binary even though it is on the classpath). `--test` builds the compiled
+    test runner instead: the entry is the generated `kmet.tasks.test-main`, selected with
+    `-A:kmet-test` (deps.edn: test/ plus the generated entry root), which statically
+    requires every `kmet.tasks.runner/all-namespaces` namespace — the whole suite is
+    AOT-compiled into `dist/kmet-test-<ver>-jolt<jv>-<platform>[-dev][.exe]`, whose
+    `--test` / `--test-ext` flags run it (its `--smoke` runs `--test kmet.libs.test-num`
+    from the empty dir); a plain app build never selects those roots. Build `--test`
+    in the default release mode — a dev build's uncompressed fasl image can push the
+    full suite's boot over Chez's LZ4 ceiling into a very slow gzip re-encode. Termux gets a
     `.sh` launcher through the glibc linker, like the bb one minus `--jar`. Flags:
     `--dev|--opt`, `--closed-world`, `--dynamic`, `--boot fast|small|plain`,
-    `--target MACHINE --target-pack DIR`, `-o PATH`, `--force`, `--smoke`, `--jolt PATH`.
+    `--target MACHINE --target-pack DIR`, `-o PATH`, `--force`, `--smoke`, `--test`,
+    `--jolt PATH`.
 
 ### API Preferences (avoid Java interop)
 - **`babashka.fs`** over `java.io.File` for all file operations

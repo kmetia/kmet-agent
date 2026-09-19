@@ -3,7 +3,8 @@
   ;; `dist` task): platform/naming rules and the CLI parser. The compile itself is
   ;; jolt's CLI in a subprocess and is not unit-tested here; only the host's
   ;; own artifact can smoke-test, which the packager does as part of the build.
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [babashka.fs :as fs]
+            [clojure.test :refer [deftest is testing]]
             [kmet.tasks.build :as build]
             [kmet.tasks.build-jolt :as jbuild]))
 
@@ -50,13 +51,20 @@
   (testing "a dev build cannot be mistaken for a release artifact"
     (is (= "kmet-1.2.3-jolt0.8.6-linux-amd64-dev"
            (jbuild/artifact-base "1.2.3" "0.8.6" "linux-amd64" {:dev? true}))))
+  (testing "a --test build is named kmet-test-*"
+    (is (= "kmet-test-1.2.3-jolt0.8.6-linux-amd64"
+           (jbuild/artifact-base "1.2.3" "0.8.6" "linux-amd64" {:test? true})))
+    (is (= "kmet-test-1.2.3-jolt0.8.6-linux-amd64-dev"
+           (jbuild/artifact-base "1.2.3" "0.8.6" "linux-amd64"
+                                 {:test? true :dev? true}))))
   (testing "no jolt version (babashka, where the var is absent) still names"
     (is (= "kmet-1.2.3-joltdev-linux-amd64"
            (jbuild/artifact-base "1.2.3" nil "linux-amd64" {})))))
 
 (deftest parse-args-defaults-to-a-release-host-build
   (is (= {:mode "release" :flags [] :boot nil :target nil :target-pack nil
-          :out nil :jolt nil :force? false :no-smoke? true :help? false}
+          :out nil :jolt nil :force? false :no-smoke? true :test? false
+          :help? false}
          (jbuild/parse-args []))))
 
 (deftest parse-args-reads-modes-and-passthrough-flags
@@ -75,7 +83,10 @@
   (is (true? (:help? (jbuild/parse-args ["-h"]))))
   (is (= "/tmp/kmet" (:out (jbuild/parse-args ["-o" "/tmp/kmet"]))))
   (is (= "/tmp/kmet" (:out (jbuild/parse-args ["--out" "/tmp/kmet"]))))
-  (is (= "/opt/jolt" (:jolt (jbuild/parse-args ["--jolt" "/opt/jolt"])))))
+  (is (= "/opt/jolt" (:jolt (jbuild/parse-args ["--jolt" "/opt/jolt"]))))
+  (testing "--test builds the compiled test runner"
+    (is (true? (:test? (jbuild/parse-args ["--test"]))))
+    (is (true? (:test? (jbuild/parse-args ["--test" "--dev"]))))))
 
 (deftest parse-args-reads-cross-builds
   (let [opts (jbuild/parse-args ["--target" "tarm64le" "--target-pack" "/tmp/pack"])]
@@ -107,7 +118,20 @@
       (is (= "dist/kmet-1.2.3-jolt0.8.6-linux-amd64-dev"
              (str (artifact "1.2.3" "0.8.6" "linux-amd64" "dev"))))
       (is (= "dist/kmet-1.2.3-jolt0.8.6-windows-amd64-dev.exe"
-             (str (artifact "1.2.3" "0.8.6" "windows-amd64" "dev")))))))
+             (str (artifact "1.2.3" "0.8.6" "windows-amd64" "dev")))))
+    (testing "--test names the test artifact"
+      (is (= "dist/kmet-test-1.2.3-jolt0.8.6-linux-amd64"
+             (str (artifact "1.2.3" "0.8.6" "linux-amd64" "release" {:test? true}))))
+      (is (= "dist/kmet-test-1.2.3-jolt0.8.6-windows-amd64-dev.exe"
+             (str (artifact "1.2.3" "0.8.6" "windows-amd64" "dev" {:test? true})))))))
+
+(deftest scratch-bin-separates-test-builds
+  (is (= "kmet" (str (fs/file-name (@#'jbuild/scratch-bin "linux-amd64" "dev")))))
+  (is (= "kmet-test"
+         (str (fs/file-name (@#'jbuild/scratch-bin "linux-amd64" "dev" {:test? true})))))
+  (testing "a test build gets its own incremental dir"
+    (is (not= (str (@#'jbuild/scratch-bin "linux-amd64" "dev"))
+              (str (@#'jbuild/scratch-bin "linux-amd64" "dev" {:test? true}))))))
 
 (deftest build-argv-pins-the-entry-and-output
   (let [argv #'jbuild/build-argv]
@@ -121,4 +145,10 @@
     (testing "cross builds carry the target and its pack"
       (is (= ["build" "-m" "kmet.core" "-o" "/o" "--target" "tarm64le" "--target-pack" "/p"]
              (argv {:mode "release" :flags [] :out "/o"
-                    :target "tarm64le" :target-pack "/p"}))))))
+                    :target "tarm64le" :target-pack "/p"}))))
+    (testing "--test selects the generated test entry and its source roots"
+      (is (= ["-A:kmet-test" "build" "-m" "kmet.tasks.test-main" "-o" "/o" "--dev"]
+             (argv {:mode "dev" :flags [] :out "/o" :test? true}))))
+    (testing "a plain app build never sees the test roots"
+      (is (not-any? #{"-A:kmet-test" "kmet.tasks.test-main"}
+                    (argv {:mode "release" :flags [] :out "/o"}))))))

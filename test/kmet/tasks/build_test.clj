@@ -6,6 +6,7 @@
   ;; kmet.tasks.build-jolt (see kmet.tasks.build-jolt-test).
   (:require [babashka.fs :as fs]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kmet.libs.version :as version-lib]
             [kmet.tasks.build :as build]))
@@ -40,19 +41,24 @@
       (is (string? (:asset (get targets platform)))))))
 
 (deftest ^:bb-only parse-args-collects-targets-and-flags
-  (is (= {:targets [] :all? false :force? false :no-smoke? true :help? false}
+  (is (= {:targets [] :all? false :force? false :no-smoke? true :test? false :help? false}
          (build/parse-args [])))
-  (is (= {:targets ["linux-aarch64"] :all? true :force? true :no-smoke? true :help? false}
+  (is (= {:targets ["linux-aarch64"] :all? true :force? true :no-smoke? true
+          :test? false :help? false}
          (build/parse-args ["linux-aarch64" "--all" "--force"])))
   (is (= {:targets ["macos-aarch64" "windows-amd64"]
-          :all? false :force? false :no-smoke? true :help? true}
+          :all? false :force? false :no-smoke? true :test? false :help? true}
          (build/parse-args ["macos-aarch64" "--help" "windows-amd64"])))
   (testing "a babashka release asset slug is accepted as its platform"
-    (is (= {:targets ["linux-amd64"] :all? false :force? false :no-smoke? true :help? false}
+    (is (= {:targets ["linux-amd64"] :all? false :force? false :no-smoke? true
+            :test? false :help? false}
            (build/parse-args ["linux-amd64-static"]))))
   (testing "the smoke test is opt-in"
     (is (false? (:no-smoke? (build/parse-args ["--smoke"]))))
-    (is (true? (:no-smoke? (build/parse-args ["--no-smoke"]))))))
+    (is (true? (:no-smoke? (build/parse-args ["--no-smoke"])))))
+  (testing "--test builds the test-runner artifact"
+    (is (true? (:test? (build/parse-args ["--test"]))))
+    (is (true? (:test? (build/parse-args ["linux-aarch64" "--test"]))))))
 
 (deftest ^:bb-only parse-args-rejects-bad-input
   (is (thrown-with-msg? Exception #"unknown target"
@@ -74,7 +80,53 @@
   (is (= "kmet-1.2.3-bb1.13.219-linux-aarch64"
          (build/artifact-base "1.2.3" "1.13.219" "linux-aarch64")))
   (is (= "kmet-20260903-abc1234-bb1.13.219-windows-amd64"
-         (build/artifact-base "20260903-abc1234" "1.13.219" "windows-amd64"))))
+         (build/artifact-base "20260903-abc1234" "1.13.219" "windows-amd64")))
+  (testing "a --test build is named kmet-test-*"
+    (is (= "kmet-test-1.2.3-bb1.13.219-linux-aarch64"
+           (build/artifact-base "1.2.3" "1.13.219" "linux-aarch64" {:test? true})))))
+
+(deftest ^:bb-only generate-test-main-requires-the-suite-under-jolt
+  (let [f (build/generate-test-main!)
+        text (slurp (str f))
+        nss (var-get (requiring-resolve 'kmet.tasks.runner/all-namespaces))]
+    (is (fs/regular-file? f))
+    (testing "the static requires are jolt-only: babashka keeps the tolerant dynamic load"
+      (is (str/includes? text "#?@(:jolt ["))
+      (is (str/includes? text ":default []")))
+    (testing "every registered test namespace is statically required"
+      (is (every? #(str/includes? text (str %)) nss)))
+    (testing "the entry dispatches both suites onto the runner"
+      (is (str/includes? text "--test\") (apply runner/-main false"))
+      (is (str/includes? text "--test-ext\") (apply runner/-main true")))))
+
+(deftest ^:bb-only test-uberjar-carries-the-suite-and-the-runner-main
+  (let [jar (build/test-uberjar*)]
+    (is (fs/regular-file? jar))
+    (with-open [zf (java.util.zip.ZipFile. (fs/file jar))]
+      (let [entries (set (map (fn [e] (.getName ^java.util.zip.ZipEntry e))
+                              (enumeration-seq (.entries zf))))
+            manifest (with-open [in (.getInputStream zf (.getEntry zf "META-INF/MANIFEST.MF"))]
+                       (slurp in))]
+        (testing "the jar has the generated entry, the runner and the tests"
+          (is (contains? entries "kmet/tasks/test_main.clj"))
+          (is (contains? entries "kmet/tasks/runner.clj"))
+          (is (contains? entries "kmet/libs/test_num.clj"))
+          (is (contains? entries "kmet/core.clj")))
+        (testing "the entry point is the test runner"
+          (is (str/includes? manifest "Main-Class: kmet.tasks.test-main")))))))
+
+(deftest ^:bb-only test-classes-are-only-in-a-test-build
+  ;; the app artifact is src/ and only src/ — test/ and tasks/ (the runner and
+  ;; the generated entry) exist solely in a --test build
+  (let [app (build/uberjar*)]
+    (with-open [zf (java.util.zip.ZipFile. (fs/file app))]
+      (let [entries (set (map (fn [e] (.getName ^java.util.zip.ZipEntry e))
+                              (enumeration-seq (.entries zf))))]
+        (is (contains? entries "kmet/core.clj"))
+        (is (not-any? #(str/starts-with? % "kmet/tasks/") entries))
+        (is (not-any? #(str/starts-with? % "kmet/libs/test_") entries))
+        (is (not-any? #(str/starts-with? % "kmet/test_") entries))
+        (is (not (contains? entries "kmet/tasks/test_main.clj")))))))
 
 (deftest ^:bb-only extract-archive-zip-slip-guard
   ;; The containment check must reject entries that escape the destination
