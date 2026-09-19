@@ -429,21 +429,6 @@
       (catch Exception e
         [{:type :error :message (str "Parse error: " (ex-message e))}]))))
 
-(def ^:private read-timeout-exception-classes
-  "Transport read-timeout exception classes (matched by simple class name;
-   jolt creates them via throw-typed). On Jolt the jolt-lang/http-client
-   shim maps HttpRequest.timeout to the streamed body socket's SO_RCVTIMEO,
-   so a stalled body throws SocketTimeoutException instead of reaching the
-   SSE idle arm — the JDK's request timeout does not cut a body in flight.
-   Both describe the same inactivity stall, so the idle arm reports it."
-  #{"SocketTimeoutException" "HttpTimeoutException"})
-
-(defn- read-timeout-exception?
-  "True when E is the transport's own read (inactivity) timeout rather than
-   a transport read failure (RST_STREAM, connection reset, ...)."
-  [e]
-  (contains? read-timeout-exception-classes (some-> (class e) .getSimpleName)))
-
 (defn- make-idle-reader
   "Idle-timeout int reader over a no-arg read fn (undici bodyTimeout
    semantics — the clock measures time between received values and resets on
@@ -485,10 +470,6 @@
          (loop []
            (let [v (.poll q 100 java.util.concurrent.TimeUnit/MILLISECONDS)]
              (cond
-               ;; The transport's own read timeout is the same inactivity
-               ;; stall the idle arm exists to report (see
-               ;; read-timeout-exception-classes).
-               (and (instance? Exception v) (read-timeout-exception? v)) :timeout
                (instance? Exception v) v
                (some? v) (int v)
                (and signal @signal) :aborted

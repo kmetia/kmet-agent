@@ -296,7 +296,7 @@ demand — so the native backend maps onto it without rework.
 
 ```clojure
 (status l)
-;=> {:loader-id "ext:foo#3" :roots ["/w/foo/src"] :parent-loaded? true
+;=> {:loader-id "ext:foo" :roots ["/w/foo/src"] :parent-loaded? true
 ;    :loaded-namespaces 12 :in-flight 1 :unloaded? false
 ;    :delegate <the parent's status, one level>}
 ```
@@ -951,7 +951,7 @@ mark survives `remove-ns`, so a plain `require` does not restore it and
 `:reload` does), a host-side in-place reload of a context-owned name
 reuses that context's object and cells, and the per-name claim orders
 writers, not readers. Two more are deliberate and recorded here because a
-review will ask: `loaders-by-id` (plus each loader's facade) keeps every
+review will ask: `loaders-by-id` keeps every
 loader ever constructed reachable — evaluated source finds its owning loader
 by id, including after close, so `:loader/unloaded` stays answerable — which
 is fine at one loader per extension and would want a closed-marker if a host
@@ -1008,7 +1008,7 @@ anywhere in the host); the only `jolt.host/load-namespace` call is the
 host-root path (private sources read source, so nothing is AOT-keyed);
 `run-case-isolation.ss` rolls back the host's `loaded-ns` dedup
 (`ldr-unmark-loaded!`) and knows nothing of the loader's own
-`loaders-by-id`/`private-ns-owners`/claims/facades (it now calls the
+`loaders-by-id`/`private-ns-owners`/claims (it now calls the
 loader's `reset-context-state!`, which is what retires them between rows);
 and `Thread/getContextClassLoader` answers with the ambient loader's facade
 (io.ss, case 22).

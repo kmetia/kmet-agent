@@ -49,32 +49,47 @@ io.github.jolt-lang/http-client` warning is gone; its `:jolt/min-version` is
 (v0.8.9-7-gc6086cf5) meets. No kmet workaround to delete — the `deps.edn`
 pin simply moves to the merge.
 
-**Bionic build (jolt PR #1054, submitted 2026-09-19, `bionic` @ `bc909004`).**
-Three Android/Termux gaps found building the toolchain there, all fixed by
-the PR: a built app ran with **no heap ceiling** (physical-memory detection
-tried only the glibc and Darwin `sysconf` name pairs; bionic's are 39/98),
-leaving the kernel-kill failure mode the ceiling exists to prevent; `jolt
-build` app links died on `libiconv_open`/`libiconv_close` (the Linux link
-line never named `-liconv`, and bionic has no iconv in libc), which is why
-Termux app builds needed a `cc` shim appending it; and jolt's own Chez
-provisioning could not run at all — makes' xPack GCC is a glibc binary the
-bionic loader cannot exec, and Chez's `make install` hard-links
-petite/scheme-script, which app data refuses — so `make` now builds the
-pinned release with the host compiler and stages the install itself, static
-`libz.a`/`liblz4.a` beside the kernel. No kmet workaround is tied to any of
-the three (the local Termux build wrapper's shim and hand-rolled
-provisioning become redundant once a release carries the PR).
+**Loader facade (jolt PR #1053, merged 2026-09-19, in
+v0.8.9-17-g73e0bd4a).** A loader's classloader facade moves to a
+`compare-and-set!` slot on the loader itself, so a reused `:id` can never
+serve a previous context's facade; the id-keyed `facades` table (and its
+retention of every loader ever constructed) is deleted, `reset-context-state!`
+is left without a side table to clear, and `loaderconf` case 31 pins the
+reload shape. The per-context `ext:<name>#N` counter workaround in
+`kmet.app.extensions/create-jolt-loader` is removed alongside this edit (the
+loader id carries only its diagnostic prefix again), and
+`kmet.loader/loader.md` drops its stale `facades` references.
 
-**Upstream status:** the IVar gap is filed as
-[jolt#1031](https://github.com/jolt-lang/jolt/issues/1031); the
-`jolt.loader` classloader facade cache — the one confirmed blocker without a
-thread — now has a fix submitted:
-[jolt#1053](https://github.com/jolt-lang/jolt/pull/1053) (open, `loader-id`),
-and the bionic build fixes are
-[jolt#1054](https://github.com/jolt-lang/jolt/pull/1054) (open, `bionic`,
-above). The http-client timeout divergence is filed as
-[http-client#26](https://github.com/jolt-lang/http-client/issues/26) (open;
-its kmet workaround is below).
+**http-client#26 (PR #27, merged 2026-09-19, main `281689c9`).**
+`HttpRequest.timeout` no longer cuts a body already in flight, so a stalled
+SSE body reaches the idle arm on both hosts. kmet's pin moves to the merge
+and the `read-timeout-exception?` classification in
+`kmet.libs.sse/make-idle-reader`, with its regression test, is removed
+alongside this edit.
+
+**Bionic build (jolt PR #1054, merged 2026-09-19, in
+v0.8.9-17-g73e0bd4a).** Three Android/Termux gaps found building the
+toolchain there, all fixed by the PR: a built app ran with **no heap
+ceiling** (physical-memory detection tried only the glibc and Darwin
+`sysconf` name pairs; bionic's are 39/98), leaving the kernel-kill failure
+mode the ceiling exists to prevent; `jolt build` app links died on
+`libiconv_open`/`libiconv_close` (the Linux link line never named `-liconv`,
+and bionic has no iconv in libc), which is why Termux app builds needed a
+`cc` shim appending it; and jolt's own Chez provisioning could not run at
+all — makes' xPack GCC is a glibc binary the bionic loader cannot exec, and
+Chez's `make install` hard-links petite/scheme-script, which app data
+refuses — so `make` now builds the pinned release with the host compiler
+and stages the install itself, static `libz.a`/`liblz4.a` beside the
+kernel. No kmet workaround is tied to any of the three; the local Termux
+build wrapper's `cc` shim and hand-rolled provisioning are redundant now
+that the checkout carries the PR.
+
+**Upstream status:** the only open item is the SCI IVar gap — filed as
+[jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) (`deferred`),
+re-diagnosed upstream in jolt PR #1033 — with its fix at
+[babashka/sci#1093](https://github.com/babashka/sci/pull/1093) (open, head
+`1295142f`, unchanged), so the `jolt/deps.edn` SCI pin stays. Every other
+ticket this file tracked is closed.
 
 **Workarounds live next to their ticket below.** Each workaround block is the
 removal checklist: when an upstream fix lands, delete the listed code (and the
@@ -85,60 +100,6 @@ Historical labels from the deleted `bb-jolt.md` map as: `JOLT-12`→#947,
 `JOLT-13`→#944; git history has the full field reports.
 
 ## Open
-
-### jolt-lang/jolt#1053 — `jolt.loader` classloader facade cached by `:id`, stale after unload
-
-**Area:** `jolt.loader/as-classloader` (`stdlib/jolt/loader.clj`).
-`facades` is an atom keyed by the loader's `:id`, and neither `unload!` nor a
-new `classpath` with the same id replaces the entry. `clojure.java.io/resource`
-under `with-loader` goes through `RT/baseLoader` → `as-classloader`, so a
-second context minted with a used id resolves through the first context's
-facade — which still wraps the first, now **unloaded** loader:
-
-```
-loader <id> is unloaded
-```
-
-The same stale-facade path hits `ClassLoader.getResource*` (the 2-arity of
-`io/resource`), since they share the facade. `find`/`open-hit` on a fresh
-loader are unaffected, and distinct ids never collide. Repro (any jar with a
-namespace and a resource):
-
-```clojure
-(require '[jolt.loader :as jl] '[clojure.java.io :as io])
-(let [r (str (System/getProperty "user.dir") "/lib.jar")]
-  (doseq [round [1 2]]
-    (let [l (jl/classpath [r] {:id "ctx"})]
-      (jl/load l {:kind :ns :name "mylib.foo"})
-      (jl/with-loader* l
-        (fn [] (println :round round
-                        (subs (slurp (io/resource "mylib/foo.clj")) 0 12))))
-      (jl/unload! l))))
-;; round 1 prints the source; round 2 throws "loader ctx is unloaded"
-;; (two distinct ids both print; a jl/find probe in round 2 also works)
-```
-
-The upstream fix is one of: key the facade cache by loader identity rather
-than id, replace/evict the entry in `make-loader` when an id is reused, or
-clear it in `unload!` (the harness-only `reset-context-state!` does clear it,
-but it drops every context). Re-checked 2026-09-19 against main @ `c6086cf5`
-(v0.8.9-7): `facades` is still keyed by `:id` at that revision.
-
-**Fix submitted 2026-09-19:**
-[jolt#1053](https://github.com/jolt-lang/jolt/pull/1053) (`loader-id` @
-`ad463030`) moves the facade to a `compare-and-set!` slot on the loader
-itself, deletes the id-keyed `facades` table (and its retention of every
-loader ever constructed), leaves `reset-context-state!` simply without a side
-table to clear, and adds `loaderconf` case 31 for the reload shape. Keyed by
-loader identity, not id, so a reused id can never serve a previous context's
-facade.
-
-**Workaround:** `kmet.app.extensions/create-jolt-loader` appends a per-context
-counter to its loader id (`ext:<name>#N`) — the id keeps its diagnostic
-prefix and the facade cache can never serve a previous context's facade.
-`/reload` reloads the same extensions (same names), so kmet hits this on Jolt
-on every reload of an extension that read a resource before it. Remove the
-counter when the cache is fixed.
 
 ### [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) — SCI `IVar` protocol missing `:getRawRoot` for `clojure.lang.Var`
 
@@ -185,36 +146,3 @@ SCI as the gap — `babashka/sci#1093` (still open, no jolt-side fix). The
 Re-checked 2026-09-19: both still open — #1031 now carries the `deferred`
 label, and PR #1093's head is still `1295142f`, so the pin is unchanged.
 
-### [jolt-lang/http-client#26](https://github.com/jolt-lang/http-client/issues/26) — `HttpRequest.timeout` cuts streamed body reads (`SO_RCVTIMEO`)
-
-**Area:** `src/jolt/http/jdk.clj` `net-http-send` — the request timeout
-becomes both the request `deadline` and the connection's `:read-timeout`
-(`net/set-read-timeout!` → `SO_RCVTIMEO`) — with the body bound documented
-as intentional in `src/jolt/http/core.clj`'s streaming section. The JDK does
-not apply `HttpRequest.timeout` to a body already in flight: with
-`BodyHandlers.ofInputStream` the timeout stops at the response headers.
-
-Repro (server sends headers + `Content-Length: 100`, then stalls 5s; client
-timeout 800ms, `ofInputStream`, one read): babashka v1.13.222 (real
-`java.net.http`) blocks past the timeout and returns after the server closes
-(~5011ms, `IOException "closed"`); jolt v0.8.9-11 + http-client `f517b2d4`
-throws `SocketTimeoutException "Read timed out"` at ~802ms.
-
-**Impact in kmet:** provider streams pass `:timeout` as
-`SDK timeoutMs ?? httpIdleTimeoutMs` (`src/kmet/ai/api/*.clj`), so a stalled
-SSE body surfaced as `Stream error: Read timed out` where bb reports the SSE
-idle message — commit 13a842d's un-gating of
-`test-llm-body-stall-idle-timeout-completes` assumed a parity the shim's
-socket read timeout does not provide.
-
-**Workaround:** `kmet.libs.sse/make-idle-reader` classifies transport read
-timeouts (`SocketTimeoutException`/`HttpTimeoutException`, by simple class
-name in `read-timeout-exception-classes` via `read-timeout-exception?`) as
-the idle arm, so a jolt body stall reports the idle-timeout message like bb;
-genuine read failures (RST_STREAM, …) still surface as `Stream error:`.
-Regression test: `test-openai-stream-transport-read-timeout-takes-the-idle-arm`
-in `test/kmet/libs/test_sse.clj`. Remove the classification (and its test)
-when the shim stops applying `HttpRequest.timeout` to the streamed body, or
-makes the body bound an explicit opt-in.
-
-Filed 2026-09-19 against http-client main `f517b2d4` (this project's pin).

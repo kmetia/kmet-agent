@@ -1990,16 +1990,6 @@
       :eval-fn eval-extension-source})))
 
 #?(:jolt
-   (defonce ^:private native-loader-seq
-     ;; jolt.loader caches each context's classloader facade by loader :id
-     ;; and does not invalidate it on unload, so a reloaded extension reusing
-     ;; the id would resolve io/resource (RT/baseLoader) through the OLD,
-     ;; unloaded context (jolt-bugs.md — facade cache keyed by id). A unique
-     ;; suffix per context keeps the cache honest; the prefix keeps the id
-     ;; diagnostic.
-     (atom 0)))
-
-#?(:jolt
    (defn- create-jolt-loader
      "The native backend's per-extension loader: own sources from the artifact
       root — a directory or a jar read through its central directory, or a
@@ -2017,7 +2007,7 @@
        (validate-native-sources! ext-name root owns-ns? tui-namespaces libs-namespaces)
        (loader-jolt/classpath
         (into [root] (when deps-resolver (deps-resolver)))
-        {:id (str "ext:" ext-name "#" (swap! native-loader-seq inc))
+        {:id (str "ext:" ext-name)
          :parent (loader-jolt/host-view (loader-jolt/root)
                                         (shared-namespace-names))}))))
 
