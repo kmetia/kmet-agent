@@ -84,29 +84,73 @@ kernel. No kmet workaround is tied to any of the three; the local Termux
 build wrapper's `cc` shim and hand-rolled provisioning are redundant now
 that the checkout carries the PR.
 
-**`set!` on a root-bound dynamic var (unfiled).** Jolt's `set!` refuses a
-dynamic var whose only binding is the root — `(set! *warn-on-reflection*
-true)` throws "Can't change/establish root binding … with set" where the
-JVM and bb set the root — and `jolt -m` / `run FILE` evaluates user code
-with exactly that binding state (`jolt -e` pre-binds the var, which masked
-this in script harnesses). Every non-trivial library source opens with that
-set!, so any extension with source deps failed to load on Jolt under `-m`.
-Workaround: `kmet.app.extensions/load-extension!` wraps the load in a no-op
-`(binding [*warn-on-reflection* *warn-on-reflection*])` — a dep's `set!`
+**`set!` on a compiler-flag var outside a load frame — filed as
+[jolt#1074](https://github.com/jolt-lang/jolt/issues/1074).**
+`clojure.main` wraps every entry — repl, `-e`, `-m`, a script — in
+`with-bindings` for the vars sources commonly `set!` (`*warn-on-reflection*`
+and friends; main.clj:78-83), so a dependency loaded at runtime from `-main`
+still has a frame. Jolt binds them for `-e` and around its compiled loads
+(0012f725), but not for `-m`/`run -m`, so code running *after* the load sees
+the root-only state:
+
+```
+$ cat src/app.clj
+(ns app)
+(defn -main [& _]
+  (set! *warn-on-reflection* true)
+  (println :ok))
+$ jolt -m app          # same with: jolt run -m app
+Unhandled exception (IllegalStateException): Can't change/establish root
+binding of: *warn-on-reflection* with set
+```
+
+This is not about `Var.set` semantics — the JVM refuses a root-only `set!`
+identically (`(def ^:dynamic *d* 1) (set! *d* 2)` throws on both hosts), and
+a top-level `(set! *warn-on-reflection* true)` works on jolt because the
+load frame binds it. The gap is the missing entry binding, and it reaches
+the loader too: kmet's extension deps load through `jolt.loader` from
+`-main`, where a source dep opening with that set! throws (a plain `require`
+from `-main` does not — jolt's load path binds the flags itself, 0012f725;
+the loader's source-eval path does not).
+
+Minimal loader repro: `dep.clj` = `(ns dep) (set! *warn-on-reflection* true)
+(def v 42)`; `app2.clj` = `(ns app2 (:require [jolt.loader :as jl])) (defn
+-main [& _] (jl/load (jl/classpath ["src"]) {:kind :ns :name "dep"}))` —
+`jolt -m app2` throws the same exception, while the JVM `clojure.main -m`
+with a runtime `(require 'dep)` prints on. Workaround:
+`kmet.app.extensions/load-extension!` wraps the load in a no-op
+`(binding [*warn-on-reflection* *warn-on-reflection*])` — the dep's `set!`
 writes the thread frame and the pop leaves the root untouched. Remove the
-binding when Jolt's `set!` sets the root like Clojure's.
+binding when `-m`/loader evaluation carries clojure.main's entry bindings.
 
 **`jl/classpath` misresolves syntax quotes (unfiled).** A syntax-quoted
-symbol in a macro that is read through a `jolt.loader/classpath` context
-resolves against `user` instead of the defining namespace, so expansion
-fails at call time with `No such var: user/<sym>`. Minimal repro: `b.clj`
-`(ns b) (def v 42) (defmacro m [] `v)` and `a.clj`
-`(ns a (:require [b])) (defn f [] (b/m))` — `(jolt.loader/classpath [root])`
-+ load `a` + call `a/f` throws, while `jolt.host/set-source-roots!` +
-`require 'a` on the same root returns 42 (the host root reads correctly;
-so does the root serving the jars in the same classpath-load probe when
-asked to). Fresh AOT cache, no parent, qualified or `:refer`'d macro — all
-the same. Impact: `rewrite-clj`'s `custom-zipper.switchable` macros poison
+symbol in a source loaded through a `jolt.loader/classpath` context resolves
+against the caller's ambient `*ns*` instead of the namespace the file
+declares, so the macro expands to the wrong var and the call fails with
+`No such var: <ambient-ns>/<sym>`. Reader aliases fare no better: a
+syntax-quoted alias (`(ns c (:require [b :as bb])) (defmacro mc [] `bb/v)`)
+loads, but a dependent ns calling it dies at analysis with
+`No such namespace: bb`.
+
+Cause: `stdlib/jolt/loader.clj`'s `read-forms` bulk-reads every form
+*before* any is evaluated, under whatever `*ns*` the caller had — the
+`(ns …)` form never switches the reader's namespace, and the file's
+`:require … :as` aliases are not installed for the read. The host loader
+(`load-jolt-file`) reads form-by-form, switching as it goes, like
+`Compiler.load` — which is why the host root works.
+
+Minimal repro: `b.clj` `(ns b) (def v 42) (defmacro m [] `v)`; `a.clj`
+`(ns a (:require [b])) (defn f [] (b/m))`; `(jolt.loader/classpath [root])`
++ load `a` + call `a/f` → `No such var: user/v`. The expansion is the
+evidence: resolving `b/m` through the loader yields the form `user/v`;
+binding `*ns*` to another ns (`b2`) around the load yields `b2/v`; and
+`jolt.host/set-source-roots!` + `require 'a` on the same root returns 42.
+Fresh AOT cache, no parent, qualified or `:refer`'d macro — all the same.
+
+Fix sketch: read the file's `ns` form first, bind `*ns*` (with its aliases)
+to that namespace for the rest of the read, or move the loader to
+form-by-form read/eval like the host loader. Impact: `rewrite-clj`'s
+`custom-zipper.switchable` macros poison
 `rewrite-clj.custom-zipper.core`'s generated fns, so the clojure
 *extension*'s rewrite-clj tools (`clojure_edit`,
 `clojure_edit_replace_sexp`) fail on Jolt with `user/custom-zipper?`
@@ -116,14 +160,18 @@ catch). The extension still *loads* (kmet's loader workarounds above), and
 workaround: the loader constructor itself is the broken piece; the host
 root cannot be substituted without giving up extension isolation.
 
-**Upstream status:** two open items — the SCI IVar gap, filed as
+**Upstream status:** five open items — the SCI IVar gap, filed as
 [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) (`deferred`),
 re-diagnosed upstream in jolt PR #1033 — with its fix at
 [babashka/sci#1093](https://github.com/babashka/sci/pull/1093) (re-checked
 2026-09-20: open, head `1295142f`, unchanged), so the `jolt/deps.edn` SCI pin
-stays — and the Normalizer perf ticket,
+stays — the Normalizer perf ticket,
 [jolt#1066](https://github.com/jolt-lang/jolt/issues/1066) (filed 2026-09-20;
-no kmet change waits on it). Every other ticket this file tracked is closed.
+no kmet change waits on it) — the `set!`/entry-binding gap, filed as
+[jolt#1074](https://github.com/jolt-lang/jolt/issues/1074) (filed 2026-09-21;
+the `load-extension!` binding workaround waits on it) — and the two unfiled
+findings below: `jl/classpath`'s syntax-quote resolution and the Windows
+runtime seams. Every other ticket this file tracked is closed.
 
 **Workarounds live next to their ticket below.** Each workaround block is the
 removal checklist: when an upstream fix lands, delete the listed code (and the
@@ -205,4 +253,80 @@ independently useful, so this is a status note, not a removal checklist. No
 kmet change waits on the fix. The issue also records a Unicode-16/17 skew
 (U+A7F1 normalizes to `"S"` on jolt; the JDK's older tables leave it alone) —
 upstream's policy call, no kmet concern.
+
+### Windows runtime seams: atomic `spit`, `path.separator`, and program resolution (unfiled)
+
+**Area:** `host/chez/java/io.ss` (`jolt-spit`, the `File` statics),
+`host/chez/java/host-static-methods.ss` (`path.separator`/`file.separator`),
+`host/chez/java/process.ss` (`proc-on-path?`, `proc-program-resolvable?`,
+`proc-path-join`).
+
+All three verified on the official v0.8.10 Windows build, and all three are
+still on `main` (`9786b7fa`, 2026-09-21). Jolt's CI is `ubuntu-latest`-only,
+so no gate covers them: a Jolt/Windows process cannot overwrite an existing
+file or spawn anything but a `/`-rooted child. kmet's curl transport (temp
+config + `spit` + spawn of `curl`) hits all three in one request.
+
+**1. `spit` over an existing file throws.** `jolt-spit` (atomic since
+8ff1644a) writes `<target>.spit-tmp-<ms>-<n>` and renames it over the
+target. Chez's `rename-file` on Windows refuses an existing destination
+where POSIX `rename(2)` replaces, so the second spit to any path fails:
+
+```
+$ jolt -e "(do (spit \"t.txt\" \"a\") (spit \"t.txt\" \"b\"))"
+Unhandled exception (IOException): rename-file: cannot rename
+  "…\t.txt.spit-tmp-108-2" to "…\t.txt": file exists
+```
+
+A target freshly created by `File/createTempFile` fails on the *first*
+spit. `spit :append true` and `java.io.FileOutputStream` work (they open
+the target in place); `io/writer` does not — jolt's file writer spits at
+close. Fix: on Windows delete the target before the rename, or
+`MoveFileEx(..., MOVEFILE_REPLACE_EXISTING)`. The same replace-rename
+pattern in `loader.ss` (`rename-file tmp-scm scm` / `tmp-so so` in the
+AOT/publish paths) fails identically whenever the artifact already exists.
+
+**2. `path.separator` answers `":"` on Windows.** `host-static-methods.ss`
+hardcodes `"path.separator" ":"` and `"file.separator" "/"`, and the
+`File` statics (`io.ss`: `separatorChar`/`separator`/`pathSeparator`/
+`pathSeparatorChar`) are POSIX values too. `babashka.fs` reads them:
+
+```
+$ jolt -e '(require (quote [babashka.fs :as fs])) (println (pr-str (fs/split-paths "C:/a;C:/b")))'
+[#object[java.nio.file.Path "C"] #object[java.nio.file.Path "/a;C"] #object[java.nio.file.Path "/b"]]
+$ jolt -e '(require (quote [babashka.fs :as fs])) (println (pr-str (fs/which "curl")))'
+nil           ;; curl.exe is on PATH
+```
+
+`fs/exec-paths`/`split-paths` return garbage and `fs/which` never finds
+anything — which is also why `babashka.process`'s Windows resolver throws
+`Cannot resolve program: …` before a spawn is even attempted. Fix: answer
+per `sa-os-family`, with `path.separator*` `";"` on Windows.
+`File/separator*` can stay `"/"` if the tree relies on it (Windows accepts
+it); the PATH separator cannot.
+
+**3. `ProcessBuilder` cannot start a Windows program.** `proc-on-path?`
+splits PATH with `(str-literal-split path ":")`,
+`proc-program-resolvable?` treats only a leading `/` as absolute, and
+`proc-path-join` only knows `/`:
+
+```
+$ jolt -e '(require (quote [babashka.process :as proc])) (proc/process ["curl" "--version"])'
+Unhandled exception: Cannot resolve program: curl
+$ jolt -e '(require (quote [babashka.process :as proc])) (proc/process ["C:/Windows/System32/curl.exe" "--version"])'
+Unhandled exception (IOException): Cannot run program "C:/Windows/System32/curl.exe": error=2, No such file or directory
+$ jolt -e '(require (quote [babashka.process :as proc])) (proc/process ["/Windows/System32/curl.exe" "--version"])'
+… exit 0
+```
+
+Bare names and drive-letter paths are rejected; only `/`-rooted (current
+drive) and slash-bearing relative programs pass. Fix: split `;` (and try
+PATHEXT) on Windows, accept `X:/` and `X:\` as absolute, and let
+`proc-path-join` keep the separator style it is given.
+
+**kmet workaround:** `kmet.libs.http/curl-available?` splits PATH itself
+(`path-dirs`) and calls `babashka.fs/which` with explicit `:paths`; once
+finding 2 is fixed that collapses back to `(fs/which "curl")`. Findings 1
+and 3 have no kmet workaround — the jolt fixes are what let the curl
+transport (or any child process) run on Windows.
 
