@@ -372,16 +372,72 @@
       :else
       [w j])))
 
+(def ^:private cjk-ranges
+  "`cjk?'s ranges as data — the class builder below must agree with it."
+  [[CJK-START CJK-END] [0xAC00 0xD7AF] [0xFE30 0xFE4F] [0xFF00 0xFF60]
+   [0xFFE0 0xFFE6]])
+
+(def ^:private zero-width-ranges
+  "The explicitly zero-width characters `char-width' returns 0 for."
+  [[0x200B 0x200F] [0x2060 0x2064] [0xFE00 0xFE0F] [0xE0100 0xE01EF]])
+
+(defn- ranges->char-class
+  "Java regex character class matching any code point in the [start end]
+   RANGES (astral ranges use \\x{…}, which Java accepts as a code point)."
+  [ranges]
+  (str "["
+       (str/join "" (map (fn [[a b]]
+                           (if (= a b)
+                             (format "\\x{%X}" a)
+                             (format "\\x{%X}-\\x{%X}" a b)))
+                         ranges))
+       "]"))
+
+(def ^:private grapheme-complex-re
+  "Code points the grapheme walker decides beyond a per-character width:
+   CJK/wide-emoji glyphs (2 columns), the zero-width set and variation
+   selectors (0), and every non-BMP code point — the walker steps by code
+   point, so on a UTF-16 host an astral character is one grapheme the
+   arithmetic path would count as two. Generated from the same tables the
+   walker branches on."
+  (re-pattern (ranges->char-class (concat cjk-ranges
+                                          wide-emoji-ranges
+                                          zero-width-ranges
+                                          [[0x10000 0x10FFFF]]))))
+
+(def ^:private plain-control-re
+  "Control characters `char-width' gives 0 (tab is handled separately — 3)."
+  #"[\u0000-\u0008\u000a-\u001f]")
+
+(defn- plain-char-width
+  "Sum of `char-width' when S has no grapheme-complex code point: 1 per
+   printable character, 0 per control, 3 per tab."
+  [s]
+  (+ (- (count s) (count (re-seq plain-control-re s)))
+     (if (str/includes? s "\t") (* 2 (count (re-seq #"\t" s))) 0)))
+
+(defn- grapheme-width-plain
+  "Grapheme-aware width of an ANSI-free string, walked one code point at a
+   time. ~8 µs per code point under babashka/SCI — only for strings that
+   actually contain a grapheme-complex code point."
+  [s]
+  (loop [i 0, n (count s), total 0, prev-w 0]
+    (if (>= i n) total
+        (let [[w next-i] (grapheme-width-and-next s i n prev-w)]
+          (recur next-i n (+ total w) w)))))
+
 (defn- visible-width-plain
   "Visible width of a string that has NO ANSI escape codes.
-   Skips the ANSI-stripping step for efficiency."
+   Skips the ANSI-stripping step for efficiency. Strings with nothing the
+   grapheme walker would treat specially (box drawing, punctuation, accents,
+   …) skip it for the arithmetic sum — the class comes from the walker's own
+   range tables, so the two agree by construction."
   [s]
   (if (empty? s) 0
       (if (re-find #"[^\u0020-\u007e]" s)
-        (loop [i 0, n (count s), total 0, prev-w 0]
-          (if (>= i n) total
-              (let [[w next-i] (grapheme-width-and-next s i n prev-w)]
-                (recur next-i n (+ total w) w))))
+        (if (re-find grapheme-complex-re s)
+          (grapheme-width-plain s)
+          (plain-char-width s))
         (count s))))
 (defn visible-width
   "Calculate the visible display width of a string in terminal columns.

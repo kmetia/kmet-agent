@@ -125,6 +125,7 @@
     kmet.tui.test-terminal-response
     kmet.tui.test-render-loop
     kmet.tui.test-terminal-native
+    kmet.tui.test-utils
     kmet.libs.test-self-contained
     kmet.loader.test-self-contained
     kmet.loader.test-core

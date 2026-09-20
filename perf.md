@@ -659,25 +659,24 @@ Two real sessions, both ~3.8 MB on disk:
 
 | session | context messages (after compaction) | final lines | old: replay | old: render #1 | old: render #2 | new: replay | new: render #1 | new: render #2 |
 |---|---|---|---|---|---|---|---|---|
-| A `1a0060c8776` | 224 (110 tools) | 3,620 | 1.9 s | 3.4 s | 1.5 s | **15 ms** | 3.2 s | **2 ms** |
-| B `1a099712492` | 636 (591 tools) | 17,339 | 10.3 s | 17.5 s | 6.8 s | **19 ms** | 13.7 s | **3 ms** |
+| A `1a0060c8776` | 224 (110 tools) | 3,620 | 1.9 s | 3.4 s | 1.5 s | **15 ms** | **0.93 s** | **2 ms** |
+| B `1a099712492` | 636 (591 tools) | 17,339 | 10.3 s | 17.5 s | 6.8 s | **19 ms** | **4.8 s** | **3 ms** |
 
-"Old/new" = before/after the three fixes below, old files checked out
-(`6be6ae2`) and re-measured back to back on 2026-09-19. To a stable first
-frame (replay + the first content-stable render): session A **6.7 s → 3.2 s**,
-session B **34.6 s → 13.7 s**. Replay and the old render #2 carry the most
-run-to-run noise: B's replay measured 10.3–14.7 s across runs, and the old
-render #2 depends on the worktree — the pre-10.3 call preview read the
-*current* files, so it forced a settle frame for every edit whose file had
-changed since, and the same old code measured 6.8 s here against 0.35 s in an
-earlier run where it needed few corrections. Steady-state frames after that:
-**2–6 ms** (session B), so streaming/typing is unaffected — the cost is
+"Old/new" = before/after the fixes below, old files checked out
+(`6be6ae2`) and re-measured back to back on 2026-09-19; the `new` columns are
+the current tree (§10.5's grapheme fast path included). To a stable first
+frame (replay + the first content-stable render): session A **6.7 s →
+0.95 s**, session B **34.6 s → 4.8 s**. Replay and the old render #2 carry
+the most run-to-run noise: B's replay measured 10.3–14.7 s across runs, and
+the old render #2 depends on the worktree — the pre-10.3 call preview read
+the *current* files, so it forced a settle frame for every edit whose file
+had changed since, and the same old code measured 6.8 s here against 0.35 s
+in an earlier run where it needed few corrections. Steady-state frames after
+that: **2–6 ms** (session B), so streaming/typing is unaffected — the cost is
 concentrated in the first full render and in any invalidation that drops the
-whole tree. Session B's per-role cold split at HEAD: assistant markdown
-10.5 s / 10,068 lines / **1.50 MB** of text (~7 µs/char), tools 2.7 s /
-7,012 lines / 1.03 MB (~2.6 µs/char — §10.3 renders the recorded diffs on the
-first pass, so more lines than the pre-10.3 6,216 and less than half the
-time), compaction summary 0.40 s, user 3 ms.
+whole tree. Session B's per-role cold split at HEAD (bb): assistant markdown
+2.9 s / 10,068 lines / **1.50 MB** of text (~1.9 µs/char), tools 1.2 s /
+7,012 lines / 1.03 MB, compaction summary 0.09 s, user 3 ms.
 
 Cheap follow-up interactions, once the transcript is warm (session B,
 re-measured at HEAD; the pre-10.3 table read 1.9 / 3.7 / 17.5 / 18.9 s — the
@@ -685,11 +684,11 @@ edit settle fired again inside every global reflow):
 
 | action | cost | note |
 |---|---|---|
-| Ctrl+O → collapsed | 1.3 s | tool components re-render only |
-| Ctrl+O → expanded | 2.9 s | full tool output re-render |
-| theme switch | 13.6–13.9 s | every markdown message re-parses (colors are baked in) |
-| output-pad change | 13.9–14.3 s | every boxed message re-wraps |
-| ordinary frame | 4–5 ms | caches warm |
+| Ctrl+O → collapsed | 0.6 s | tool components re-render only |
+| Ctrl+O → expanded | 1.4 s | full tool output re-render |
+| theme switch | 4.2 s | every markdown message re-parses (colors are baked in) |
+| output-pad change | 4.0–4.2 s | every boxed message re-wraps |
+| ordinary frame | 3–5 ms | caches warm |
 
 ### 10.1 Fix: the assistant render body tracked its own output atoms
 
@@ -812,12 +811,38 @@ For non-ASCII content the four whole-text replaces dominate (53 ms bb /
 as the passes) and one alternation with a callback (60 / 96 ms) both measured
 no better.
 
-### 10.5 What is left
+### 10.5 Fix: `visible-width` skipped the grapheme walker for plain code points
 
-- **§6.3 (incremental markdown) is the lever that matters here.** The first
-  full render is ~7 µs/char of markdown; the 1.5 MB session is 13.7 s and a
-  theme switch or pad change re-pays it. Block-level parse reuse by text would
-  cut both the first render and the global reflow.
+After 10.1–10.3 the cold render was still ~14 s on bb, and instrumenting the
+primitives showed why: `visible-width-plain` walked **every non-ASCII code
+point** one at a time through the grapheme-aware
+`grapheme-width-and-next` — ~8 µs per character under SCI, 41,519 calls /
+10.4 s inside a 13.8 s render. The bulk was box drawing and punctuation
+(`───`, `⎿`, `⏺`, `…`, `—`), which the walker treats exactly like any other
+width-1 character. The walker's special cases (CJK ranges,
+`wide-emoji-ranges`, the zero-width set and variation selectors, and every
+non-BMP code point) are now a regex class **generated from the same range
+tables the walker branches on**; a string that misses the class takes the
+arithmetic sum instead (`plain-char-width`: 1 per printable character, 0 per
+control, 3 per tab). `kmet.tui.test-utils` pins the two paths equal over a
+hand-picked corpus plus 400 randomised mixes of every range boundary ±1, and
+asserts a box-drawing line never enters the walker.
+
+bb, session B: cold render **13.7 → 4.76 s**, theme switch 13.6 → 4.2 s,
+Ctrl+O expanded 2.9 → 1.4 s, output-pad 13.9 → 4.0 s; roles total 14.4 →
+4.2 s (tools 2.57 → 1.21 s: bash 1.58 → 0.69, read 0.67 → 0.40, edit 0.32 →
+0.12); session A cold render 3.2 → 0.93 s. jolt: roles total 8.2 → 6.55 s
+(its walker is ~2.2 µs/char and its ANSI strip dominates), cold render
+7.06 s.
+
+### 10.6 What is left
+
+- **§6.3 (incremental markdown) is now the biggest remaining share.** After
+  §10.5 the assistant markdown role is 2.9 s of the 4.2 s cold render, and
+  `md/parse` (~0.8 s) plus `parse-inline` (~1.4 s) are ~2.2 s of that — every
+  block is parsed once per render, and a theme switch or pad change re-pays
+  it. Block-level parse reuse by text would cut both the first render and the
+  global reflow.
 - **Live edit previews** still compute the filesystem preview while args
   stream (inherent — the result does not exist yet). The replay half is now
   free: a finished result's diff wins over the preview (§10.3) and a finished
