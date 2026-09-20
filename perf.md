@@ -4,28 +4,32 @@ Why `jolt run` burns more CPU than `bb run` on the same tree, what was measured,
 and what to do about it. Numbers from a Termux/aarch64 phone (100x30 tmux pty,
 `jolt v0.8.6-83-g3de3e02b`, bb 1.12.x), 2026-09-11.
 
-**Re-verified on the installed `jolt v0.8.6-86-g234f460b` (x86_64 WSL2) — §9 is
-the current state.** Every µs figure in §3/§5/§7 predates that build and is
-stale in absolute terms; the orderings and the §5 decisions all still hold.
+**Re-verified on `jolt v0.8.10-10-g9c439021` (Termux/aarch64 phone, bb
+1.13.222) — §11 is the current state.** §9 (v0.8.6-86, x86_64 WSL2) and §10
+(the first phone pass at v0.8.6-83) are kept as history. The v0.8.10 upgrade
+inverted the host comparison: jolt's primitives are no longer 2–5x slower on
+the frame path (§11.1).
 
 **TL;DR** — it is not a busy loop and not the terminal backend. Idle CPU is
-*lower* on jolt than on bb. The gap is that (a) every keystroke/frame re-renders
-the whole component tree + re-normalizes every line + diffs/emits, and (b) jolt's
-*runtime primitives* are 2–5x slower than bb's on exactly the operations that
-path is made of: `java.util.regex` (→ irregex on jolt), per-call string helpers
-(`str/replace`, small-string overhead), and collection/seq allocation. It is not
-interpretation: jolt already compiles every top-level form to native Scheme
-(§6.2). Jolt is *faster* on numeric/compute-heavy code (fib 27: 5.5 ms vs bb
-121 ms) and on `subs`/`index-of`, so this is a per-op profile mismatch, not a
-uniformly slow runtime.
+*lower* on jolt than on bb. The frame gap was (a) every keystroke/frame
+re-renders the whole component tree + re-normalizes every line + diffs/emits,
+and (b) jolt's *runtime primitives* being 2–5x slower on exactly the operations
+that path is made of (`java.util.regex` → irregex, per-call string helpers,
+collection/seq allocation). **At v0.8.10, (b) no longer holds** (§11.1): jolt
+now wins the width/string/regex/`md/parse` primitives; what still loses is
+seq/allocation-heavy work (`mapv` 2.7x, the editor's 20-line render 2.7x, the
+tool renderers 1.8–3x — §11.2) and the per-line `normalize-terminal-output`
+early-out (§11.3). On a 3.7k-line live transcript a frame is ~20 ms on bb /
+~25 ms on jolt, split differently per host (bb: render-stack; jolt: normalize)
+— and until cb763f6 the whole-transcript kitty-image walk was 6–7 ms of it on
+both (§11.3). `jolt build` is still *not* a lever (§6.2).
 
-The quick wins in §5 are applied and measured: **`jolt run` typing CPU dropped
-~28 %** on that workload (§7), with bb unchanged. Parity with `bb run` held on
-the phone but **not on x86_64** (~1.6x there — §9.3): the improvement is
-host-independent, the ratio is not. The next levers are §6.3 (incremental
-markdown) and §6.6 (extend the ANSI scanner carve-out to the remaining
-per-escape sites); §6.1's normalize guard is dead (§9.4). `jolt build` is *not*
-a lever (§6.2).
+The §5 wins are applied; §5.4 re-verifies cleanly at v0.8.10 (jolt regex
+17.05 µs vs scanner 1.79 — §11.1) and typing CPU is back at parity on the
+phone (§11.4). The next levers are §6.3 (incremental markdown), the jolt
+normalize guard (revisit — §11.1/§11.3) and §6.6 (scanner for `ansi-code-at`);
+§6.1's line-work items are applied and the SEGMENT-RESET concat it worried
+about is gone (§11.5).
 
 ---
 
@@ -132,6 +136,10 @@ collection/seq allocation loses 1.4–6x. The TUI frame path is made almost
 entirely of the latter, so the frame is ~2x slower on jolt while idle is
 cheaper. (Jolt compiles user code natively — see §6.2 — so this is the
 *primitive* layer, not interpretation.)
+
+**Superseded at v0.8.10 — see §11.1**: jolt now wins most of these primitives;
+the remaining losses are seq/allocation-heavy work (and the tool renderers,
+§11.2).
 
 Two Jolt quirks behind the numbers:
 
@@ -309,6 +317,11 @@ The styled-line 3x gap is gone (jolt 1.26x bb on that input, was 3.0x).
 Ordered by expected effect on `jolt run` typing/streaming CPU.
 
 ### 6.1 Cut per-frame line work (the reset concat remains)
+
+> **Status (2026-09-21, §11):** both items below are applied — the emit-time
+> `SEGMENT-RESET` (4240e45) removed the per-line mapv this section proposed,
+> and the normalize early-out (b9408c5) is in the tree; §11.1 re-measures the
+> latter as a wash on bb and a ~0.3 µs/line loss on jolt.
 
 Per frame every line is re-normalized and re-reset. Of the proposals below,
 **one is dead and one stands** (§9.4):
@@ -618,6 +631,10 @@ box commits the same key work in fewer ticks); read the ratios, not the counts.
 
 ### 9.4 Frame attribution (200 frames, 23-line doc, instrumented per §4)
 
+> **Superseded by §11.3** (phone, v0.8.10). Note the `applyLineResets` row
+> predates 4240e45, which moved the resets to emit time — that phase no
+> longer exists.
+
 | phase | jolt | bb | ratio | §3.1 ratio |
 |---|---|---|---|---|
 | render-stack | ~760 µs | ~375 | 2.0x | 1.7x |
@@ -860,3 +877,207 @@ stay pixel-for-pixel in step.
 - **Virtualization** (rendering only the visible components) would remove the
   first-render cliff entirely, but the scroll view's height math and the
   track!-cached-tree model make it a design change, not a local fix.
+
+---
+
+## 11. Re-measurement on `jolt v0.8.10-10-g9c439021` (Termux/aarch64, 2026-09-20/21)
+
+Fresh sweep on the phone, after upgrading jolt from v0.8.6-83 to
+**v0.8.10-10-g9c439021** (`bb` 1.13.222). Two things moved the comparison:
+upstream's regex/perf work (shipped across v0.8.7–v0.8.10; the `$`-anchor fix
+jolt#1062 is in this toolchain) and kmet's own §10.5 + `parse-inline` work.
+The harnesses are committed: `scripts/kmet_render_bench.clj` (§10's),
+`scripts/kmet_perf_bench.clj` (primitive sweep + `cold-regex` / `md-session` /
+`kitty-scan` modes) and `scripts/perf_typing.sh` (§7/§9.3's recipe, settle
+default 30 s — see §11.4). All µs figures are steady-state medians with warmups
+(§6.2b), reported as same-process host ratios; absolutes are phone-specific like
+every phone table here.
+
+### 11.1 The primitive profile inverted
+
+Steady-state medians (bb / jolt; µs unless noted):
+
+| op | bb | jolt | jolt/bb | §3.3 (-83) |
+|---|---|---|---|---|
+| `visible-width` plain 100 | 2.99 | 2.82 | 0.94 | 1.6x |
+| `visible-width` 1-char | 0.354 | 0.293 | 0.83 | 6.0x |
+| `visible-width` styled 100 | 7.75 | 5.38 | 0.69 | 3.1x |
+| `visible-width` md-styled | 15.7 | 9.11 | 0.58 | — |
+| `visible-width` box-drawing line | 108.8 | 9.42 | **0.09** | — |
+| `visible-width` emoji line | 104.3 | 9.20 | **0.09** | — |
+| `visible-width` CJK line | 941 | 266 | 0.28 | — |
+| `strip-ansi-codes` styled (host path) | 4.52 | 1.79 | 0.40 | — |
+| `strip-ansi-native` styled (scanner) | 7.43 | 1.79 | 0.24 | — |
+| `str/replace ANSI-CODE-RE` styled | 4.42 | 17.05 | 3.9x | 3.8x |
+| `ansi-code-at` hit | 2.41 | 3.40 | 1.4x | — |
+| `re-find` ASCII class, plain 100 | 2.88 | 2.79 | 0.97 | 1.6x |
+| `normalize-terminal-output` plain, guarded | 0.314 | 0.982 | 3.1x | — |
+| … two Thai replaces only (unguarded) | 0.280 | 0.686 | 2.4x | — |
+| `SEGMENT-RESET` concat alone | 0.307 | 0.129 | 0.42 | — |
+| `mapv identity` 100 lines | 3.11 | 8.39 | 2.7x | ~10x (§9.1) |
+| `mapv (str line reset)` 100 | 23.1 | 19.4 | 0.84 | — |
+| `keys/matches-key?` | 1.20 | 0.495 | 0.41 | 3.0x |
+| one keystroke, 40 chord checks | 49.9 | 27.2 | 0.55 | — |
+| editor render, 500-char line | 1.42 ms | 1.07 ms | 0.75 | 1.9x |
+| editor render, 20 lines | 195 µs | 523 µs | 2.7x | 5.0x |
+| `md/parse` 2KB | 1.45 ms | 0.861 ms | 0.59 | — |
+| `md/parse` 21.6KB | 16.25 ms | 9.53 ms | 0.59 | 1.9x (§9.1) |
+| markdown render 2KB (cache miss) | 2.76 ms | 2.86 ms | 1.04 | 2.7x |
+| fib 27 | 98.6 ms | 4.69 ms | 0.05 | 0.05x |
+| keyword lookup ×1e6 | 107 ms | 15.97 ms | 0.15 | 0.2x |
+| `subs` ×1e5 | 18.0 ms | 10.37 ms | 0.58 | 0.4x |
+| `assoc-in` ×1e5 | 24.9 ms | 40.1 ms | 1.61 | 1.45x |
+| `swap!` ×1e5 | 18.0 ms | 8.88 ms | 0.49 | 1.4x |
+| `mapv inc` ×1e5 | 51.0 ms | 62.9 ms | 1.23 | 4.6x |
+
+Reading: §3.3's "jolt's primitives lose 2–5x on the operations the frame path
+is made of" no longer holds — jolt now wins the width/string/regex/parse
+primitives; what still loses is seq/allocation-heavy work (`mapv identity`
+2.7x, editor 20-line render 2.7x) plus `assoc-in`/`mapv inc`. Host carve-outs:
+
+- **§5.4 holds and widened**: jolt's regex strip is 17.05 µs styled against the
+  scanner's 1.79 (9.5x; 5x at -86), while bb keeps the regex (4.42 vs 7.43).
+- **§5.1 holds** (ASCII test first, 2.99 plain). The new cost centre is
+  §10.5's `grapheme-complex-re` miss test: ~1.2 µs/char on bb but ~0.1 µs/char
+  on jolt, so a box-drawing line is **108.8 vs 9.42** — the widest gap in the
+  table, now *against bb*. (It still replaced the ~8 µs/char SCI walker, so
+  §10.5's bb win stands; the 11x jolt edge is why §11.2's assistant role is no
+  longer jolt-favored.)
+- **The normalize early-out (b9408c5) no longer pays**: guarded 0.314/0.982 vs
+  unguarded 0.280/0.686 per plain 100-char line — a wash on bb, ~0.3 µs/line
+  on jolt, where `str/includes?` is the expensive primitive and the two
+  replaces are near-free. The "dead guard" of §6.1/§9.4 now measures as a
+  real jolt loss; live frames pay it (§11.3).
+
+`retryable-error-regex` (the 873-char, 49-alternation union; fresh process,
+1,880-char miss; `cold-regex` mode):
+
+| | bb | jolt |
+|---|---|---|
+| cold first `re-find` (group-free → DFA build) | 1.30 ms | **122.0 ms** |
+| cold first `re-find` (one capture group → backtracker) | 1.31 ms | 65.1 ms |
+| steady `re-find` | 1.32 ms | 3.55 ms (grouped 3.82) |
+
+§9.1's x86 story (29.4 ms DFA build, steady-state wash) has drifted on the
+phone: the DFA build is 122 ms and the grouped variant halves it, but steady
+state is now 2.7x bb. The classifier runs once per error path, so this stays a
+status note.
+
+### 11.2 The render bench at v0.8.10
+
+Session B (`1a099712492`, 17,335 harness lines; medians of 3–5 runs; §10.5's
+values alongside):
+
+| metric | bb | jolt | §10.5 bb | §10.5 jolt |
+|---|---|---|---|---|
+| replay | 19 ms | 21 ms | 19 | 19 |
+| render #1 (cold) | 3.87 s | 5.5 s | 4.18 | 6.44 |
+| render #2 (warm) | 3.4 ms | 4.4 ms | — | — |
+| Ctrl+O collapsed | 644 ms | 1.46 s | 0.65 | — |
+| Ctrl+O expanded | 1.42 s | 2.8 s | 1.40 | — |
+| theme switch | 3.89 s | 5.5 s | 4.56 | 8.05 |
+| output-pad | 3.8 s | 5.4 s | 4.19 | — |
+| warm frame | 3.9 ms | 3.6 ms | 3.5 | — |
+
+Both hosts improved (jolt mostly upstream, bb from `parse-inline`), but jolt
+still pays ~1.4x on the full render and ~2x on the Ctrl+O re-renders. Run
+shape matters: jolt's first run after a cold cache measured 11.3 s cold render
+vs 5.3 s once warm — discard the first run per boot.
+
+Roles B (cold per-role, one pass):
+
+| role | bb | jolt |
+|---|---|---|
+| assistant markdown | 2.86 s | 3.15 s |
+| tools | 1.64 s | 2.96 s |
+| compaction | 0.10 s | 0.09 s |
+| total | 4.60 s | 6.21 s |
+| — per tool (bash / read / edit) | 992 / 511 / 133 ms | 1886 / 825 / 250 ms |
+
+The pre-§10.5 jolt-favored assistant role is gone (bb 2.86 vs jolt 3.15): the
+§10.5 width fast path and `parse-inline` cut bb harder than jolt, consistent
+with the `grapheme-complex-re` gap above. The tool renderers remain jolt's
+biggest deficit (1.8–1.9x on bash/edit).
+
+Session A (`1a0060c8776`, 3,617 lines): cold bb 857 ms / jolt 1268 ms; roles
+bb 852 ms (assistant 434, tools 313, compaction 104) vs jolt 1376 ms
+(assistant 352, tools 949, compaction 74) — same shape: jolt wins markdown,
+loses the tools ~3x (bash 259→642, edit 54→308).
+
+### 11.3 Live frame phases (and the kitty scan that dominated them)
+
+The §4 instrumentation was re-applied (render-stack / normalize /
+composite-flashes / diff+emit / write) and reverted. Two scenarios: 300 keys
+into a fresh session, and 200 keys into a resumed session B (`--session`).
+**The live resumed document is 3,739 lines, not the harness's 17,335** — the
+app collapses/compacts what the harness replays expanded — so these are the
+frames a user actually gets:
+
+| phase (per frame) | fresh bb | fresh jolt | B bb | B jolt |
+|---|---|---|---|---|
+| render-stack | 1.68 ms | 2.27 ms | 7.8 ms | 6.0 ms |
+| normalize | 0.25 ms | 0.42 ms | 3.9 ms | 11.3 ms |
+| composite-flashes | 0.08 ms | 0.08 ms | 0.08 ms | 0.09 ms |
+| diff+emit | 0.13 ms | 0.10 ms | 8.1 ms | 7.6 ms |
+| — kitty expand walk | — | — | 6.3 ms | 7.1 ms |
+| write | 0.17 ms | 0.25 ms | 0.09 ms | 0.15 ms |
+| **total** | **~2.3 ms** | **~3.1 ms** | **~20 ms** | **~25 ms** |
+
+- **The kitty scan was the biggest removable item**:
+  `expand-changed-range-for-kitty-images` (core.clj) walked every line of
+  `prev` and `lines` on every changed frame (48/50 of them) with no
+  capabilities check — 11.7 ms/pass on bb and 15.8 on jolt over the harness's
+  17,335 lines (0.68 µs/line bb), and 6.3/7.1 ms on the live 3.7k-line doc.
+  Fixed in **cb763f6** by guarding on `(:images (img/get-capabilities))` (the
+  cached read the loop's `previous-kitty-image-ids` reset already uses):
+  diff+emit 8.07 → **1.95 ms** (bb) and 7.62 → **0.54 ms** (jolt), ~20–30% of
+  the frame, proportional to transcript length.
+- **Per-host bottleneck split**: jolt's frame is normalize-bound (11.3 vs 3.9
+  ms, ~2.9x, matching the primitive table), bb's is render-stack-bound; the
+  diff is cheap on both after cb763f6. Per-line normalize (~1 µs bb, ~3 µs
+  jolt on live lines) still matches §9.4's ratio; §9.4's `applyLineResets` row
+  no longer exists (resets moved to emit time in 4240e45).
+- `md-session` over B's assistant sources: visible text 210 msgs / 21.7k chars
+  = 24.7 ms bb (1.14 µs/char) / 36.1 ms jolt (1.67); **thinking** 155 msgs /
+  **485k chars** = 524 ms bb (1.08) / 640 ms jolt (1.32) — ~22x the visible
+  text. Many small documents cost ~2x the per-char rate of the 21.6 KB
+  fixture, and jolt's per-call overhead is what puts it behind there. That is
+  §6.3's target surface.
+
+### 11.4 Typing CPU: parity on the phone
+
+`scripts/perf_typing.sh` (300 keys @ 20 ms, net of an equal idle window, fresh
+session per round; 8 runs bb / 7 jolt):
+
+| host | runs (net ticks) | median |
+|---|---|---|
+| bb | 168, 180, 173, 276, 135, 266, 167, 239 | 177 |
+| jolt | 163, 140, 240, 184, 272, 210, 195 | 195 |
+
+**~1.1x — parity within the run-to-run noise** (§6.2b: ±40 % per round).
+Idle is ~2–3 % of a core on both.
+
+Method caveat learned here: **jolt no longer settles in ~3 s.** With the
+current extension set jolt burns ~100 % of a core for ~22–25 s after launch
+(bb: ~4 s) before the idle loop parks; bisected to the user-level `clojure`
+extension failing under jolt (spec.alpha `jolt-vaget` — ~14 s of work, then
+the error); in a sandbox without user extensions jolt idles at ~4 s. The
+earlier per-key runs (settle 14 s) measured part of that burn as typing; the
+30 s settle above is the fix, and the harness now defaults to it.
+
+### 11.5 What this changes in this file
+
+- **§3.3's reading is superseded** (§11.1): the jolt primitive deficit on the
+  frame path is gone. The remaining per-host gap lives in seq/allocation work
+  and the tool renderers (§11.2), plus jolt's per-line normalize.
+- **§6.1 is fully applied and partly stale**: the emit-time `SEGMENT-RESET`
+  (4240e45) removed the line-work item it proposes, and the normalize
+  early-out (b9408c5) now measures as a jolt loss (§11.1). Revisit the guard:
+  either host-branch it or drop it.
+- **§6.3 stands and is the top lever**: the cold render is still dominated by
+  assistant markdown (2.9–3.2 s of 4.6–6.2 s), and thinking markdown alone is
+  485 KB on session B.
+- **§6.6 stands, smaller than it looked**: `ansi-code-at` is 2.41/3.40 µs
+  (regex on both); the big jolt regex loss is `str/replace ANSI-CODE-RE`
+  (17.05 µs), already carved out by §5.4.
+- **cb763f6** closed the last of §6.1's siblings (the kitty walk).
