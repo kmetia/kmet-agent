@@ -99,24 +99,35 @@
    extension contract, and a plain filter would answer it with the
    misleading miss a typo gets.
 
+   OPTS :also is a predicate over the requested name; :ns/:var names it
+   accepts pass through as well. It exists for host-owned families a caller
+   cannot enumerate up front (Jolt's stdlib: `clojure.zip` arrives with a
+   dependency, after the loaded-namespace scan), whose root answers a miss —
+   an empty hit — for anything it does not own, so the context's own roots
+   still get their turn. The caller owns that policy: a name the host root
+   serves wins over the context's own roots, so :also must not admit names a
+   context may provide itself.
+
    `allow` is the policy combinator (a denial propagates, by design); this
    is a view, which is what a caller needs when its own roots may serve a
    name the host also has."
-  [l names]
-  (let [inner (jolt-of l)]
-    (->JoltLoader
-     (jl/->loader
-      (fn [req]
-        (if (not (contains? #{:ns :var} (:kind req)))
-          (jl/find inner req)
-          (let [nm (:name req)]
-            (when (name-allowed? #{"kmet.loader"} nm)
-              (throw (ex-info (str "extension requires " nm
-                                   " — the loader is host machinery and is not"
-                                   " part of the extension contract")
-                              {:type :loader/denied :kind (:kind req) :name nm})))
-            (when (name-allowed? names nm)
-              (jl/find inner req)))))))))
+  ([l names] (host-view l names nil))
+  ([l names {:keys [also]}]
+   (let [inner (jolt-of l)]
+     (->JoltLoader
+      (jl/->loader
+       (fn [req]
+         (if (not (contains? #{:ns :var} (:kind req)))
+           (jl/find inner req)
+           (let [nm (:name req)]
+             (when (name-allowed? #{"kmet.loader"} nm)
+               (throw (ex-info (str "extension requires " nm
+                                    " — the loader is host machinery and is not"
+                                    " part of the extension contract")
+                               {:type :loader/denied :kind (:kind req) :name nm})))
+             (when (or (name-allowed? names nm)
+                       (and also (also nm)))
+               (jl/find inner req))))))))))
 
 (defn with-loader*
   "Run THUNK with L ambient — `clojure.java.io/resource` (1-arity) and

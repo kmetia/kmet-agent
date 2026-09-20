@@ -84,6 +84,38 @@ kernel. No kmet workaround is tied to any of the three; the local Termux
 build wrapper's `cc` shim and hand-rolled provisioning are redundant now
 that the checkout carries the PR.
 
+**`set!` on a root-bound dynamic var (unfiled).** Jolt's `set!` refuses a
+dynamic var whose only binding is the root — `(set! *warn-on-reflection*
+true)` throws "Can't change/establish root binding … with set" where the
+JVM and bb set the root — and `jolt -m` / `run FILE` evaluates user code
+with exactly that binding state (`jolt -e` pre-binds the var, which masked
+this in script harnesses). Every non-trivial library source opens with that
+set!, so any extension with source deps failed to load on Jolt under `-m`.
+Workaround: `kmet.app.extensions/load-extension!` wraps the load in a no-op
+`(binding [*warn-on-reflection* *warn-on-reflection*])` — a dep's `set!`
+writes the thread frame and the pop leaves the root untouched. Remove the
+binding when Jolt's `set!` sets the root like Clojure's.
+
+**`jl/classpath` misresolves syntax quotes (unfiled).** A syntax-quoted
+symbol in a macro that is read through a `jolt.loader/classpath` context
+resolves against `user` instead of the defining namespace, so expansion
+fails at call time with `No such var: user/<sym>`. Minimal repro: `b.clj`
+`(ns b) (def v 42) (defmacro m [] `v)` and `a.clj`
+`(ns a (:require [b])) (defn f [] (b/m))` — `(jolt.loader/classpath [root])`
++ load `a` + call `a/f` throws, while `jolt.host/set-source-roots!` +
+`require 'a` on the same root returns 42 (the host root reads correctly;
+so does the root serving the jars in the same classpath-load probe when
+asked to). Fresh AOT cache, no parent, qualified or `:refer`'d macro — all
+the same. Impact: `rewrite-clj`'s `custom-zipper.switchable` macros poison
+`rewrite-clj.custom-zipper.core`'s generated fns, so the clojure
+*extension*'s rewrite-clj tools (`clojure_edit`,
+`clojure_edit_replace_sexp`) fail on Jolt with `user/custom-zipper?`
+(cljfmt's formatter then silently no-ops behind `format-source-string`'s
+catch). The extension still *loads* (kmet's loader workarounds above), and
+`clojure_paren_repair` — edamame/parinferish only — works. No kmet
+workaround: the loader constructor itself is the broken piece; the host
+root cannot be substituted without giving up extension isolation.
+
 **Upstream status:** two open items — the SCI IVar gap, filed as
 [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) (`deferred`),
 re-diagnosed upstream in jolt PR #1033 — with its fix at

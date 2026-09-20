@@ -5,8 +5,8 @@
 
 (ns edit-util
   (:require [babashka.fs :as fs]
-            [cljfmt.config :as config]
             [cljfmt.core :as fmt]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [edamame.core :as e]
             [kmet.libs.edit-diff :as edit-diff]
@@ -290,18 +290,49 @@
 ;; Formatting (cljfmt, honoring the project's cljfmt.edn)
 ;; ═══════════════════════════════════════════════════════════════════════════════
 
+(def ^:private fmt-config-files
+  "Config file names cljfmt discovers at each directory, in its order. The
+   .clj variants are absent: cljfmt's safe mode does not read executable
+   configs unless explicitly asked, and nothing here ever asks."
+  [".cljfmt.edn" "cljfmt.edn"])
+
+(defn- find-fmt-config
+  "The nearest cljfmt config file at DIR or one of its ancestors, or nil."
+  [dir]
+  (loop [d (fs/absolutize dir)]
+    (when d
+      (or (some (fn [n]
+                  (let [f (fs/file d n)]
+                    (when (fs/exists? f) f)))
+                fmt-config-files)
+          (recur (fs/parent d))))))
+
+(defn- read-fmt-config
+  "EDN config with cljfmt's `#re` reader."
+  [f]
+  (edn/read-string {:readers {'re re-pattern}} (slurp f)))
+
+(defn- convert-legacy-fmt-keys
+  "cljfmt's `:legacy/merge-indents?` rename."
+  [config]
+  (cond-> config
+    (:legacy/merge-indents? config)
+    (-> (assoc :extra-indents (:indents config))
+        (dissoc :legacy/merge-indents? :indents))))
+
 (defn project-fmt-opts
   "cljfmt options for FILE-PATH mirroring cljfmt.tool/fix (what `bb format`
-   produces): the project's cljfmt.edn — walked up from the file's directory —
-   merged over cljfmt's defaults, so :extra-indents/:indents/:alias-map etc.
-   apply to custom macros (defcomponent, with-let, ...). Falls back to plain
-   defaults when no config file exists or the file's directory does not exist
-   (load-config cannot search a nonexistent directory)."
+   produces): the project's cljfmt.edn — walked up from the file's directory,
+   .clj configs not read (cljfmt's safe mode) — merged over cljfmt's
+   defaults, so :extra-indents/:indents/:alias-map etc. apply to custom
+   macros (defcomponent, with-let, ...). Falls back to plain defaults when no
+   config file exists or the file's directory does not exist."
   [file-path]
-  (let [parent (when file-path (fs/parent file-path))]
-    (if (and parent (fs/exists? parent))
-      (config/load-config (str parent))
-      (config/load-config "."))))
+  (let [parent (when file-path (fs/parent file-path))
+        start  (if (and parent (fs/exists? parent)) parent ".")]
+    (-> (merge fmt/default-options
+               (some-> (find-fmt-config start) read-fmt-config))
+        (convert-legacy-fmt-keys))))
 
 (defn format-source-string
   "Format a complete Clojure source string.  Returns formatted string,

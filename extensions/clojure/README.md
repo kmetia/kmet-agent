@@ -115,11 +115,14 @@ Editing guidelines pulled on demand when working with Clojure files. Covers:
 
 Declared in `deps.edn`, resolved per-extension in an isolated context:
 
-- cljfmt 0.16.5 — code formatting (Maven rewrite-clj excluded; the
-  bb-bundled adapted copy is used)
+- cljfmt 0.16.5 — code formatting (rewrite-clj 1.2.57 pinned to the
+  version Babashka bundles: bb serves its adapted port, Jolt loads the
+  Maven jar; `cljfmt.edn` discovery and its `#re` reader live in edit-util,
+  so cljfmt.config — and with it spec.alpha — is not a dependency)
 - parinferish 0.8.0 — delimiter repair (pure Clojure; parinfer is a JVM lib
   and can't run in SCI contexts)
-- edamame — delimiter error detection; bundled with Babashka
+- edamame 1.5.39 — delimiter error detection (Babashka's bundled version:
+  bb serves its adapted port, Jolt loads the Maven jar)
 
 ## Skills
 
