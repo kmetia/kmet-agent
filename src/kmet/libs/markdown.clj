@@ -202,95 +202,103 @@
    append instead of a per-char token + peek/pop/conj merge (~3x on bb,
    ~1.4x on jolt for prose lines). Every branch ends in (recur (inc i)) or
    (recur next-i) — a single loop arg, so SCI never has to reason about
-   tail position of a multi-arg recur inside if-let."
+   tail position of a multi-arg recur inside if-let.
+
+   Per-iteration cost is the whole game here (~1.5 us/char on bb, measured):
+   the loop reads a Character with (nth line i) and compares characters —
+   never building a 1-char string; the `remaining' substring is built only
+   in the branches that feed it to a regex; the closing-delimiter searches
+   run str/index-of on LINE with an absolute start index (equivalent offsets
+   to searching the remainder); the bare-email regex is reachable only when
+   the line holds an @ at all (an @ before I fails the anchored regex
+   anyway). Each of those was 0.2-0.6 us per character."
   ([line]
    (parse-inline line false))
   ([line in-link?]
    (if (or (empty? line) (nil? line))
      []
      (let [n (count line)
+           at? (some? (str/index-of line "@"))
            out (volatile! (transient []))
            sb (StringBuilder.)]
        (loop [i 0]
          (if (>= i n)
            (do (flush-text out sb)
                (persistent! @out))
-           (let [c (subs line i (inc i))
-                 remaining (subs line i)]
+           (let [ch (nth line i)]
              (cond
-               (and (not in-link?) (= c "<"))
-               (if-let [[raw target] (re-find angle-url-re remaining)]
-                 (do (push-token out sb (link-token target target))
-                     (recur (+ i (count raw))))
-                 (if-let [[raw email] (re-find angle-email-re remaining)]
-                   (do (push-token out sb (link-token email (str "mailto:" email)))
+               (and (not in-link?) (= ch \<))
+               (let [remaining (subs line i)]
+                 (if-let [[raw target] (re-find angle-url-re remaining)]
+                   (do (push-token out sb (link-token target target))
                        (recur (+ i (count raw))))
-                   (do (.append sb c) (recur (inc i)))))
+                   (if-let [[raw email] (re-find angle-email-re remaining)]
+                     (do (push-token out sb (link-token email (str "mailto:" email)))
+                         (recur (+ i (count raw))))
+                     (do (.append sb ch) (recur (inc i))))))
 
-               (and (not in-link?) (= c "["))
+               (and (not in-link?) (= ch \[))
                (if-let [{:keys [token end]} (explicit-link line i)]
                  (do (push-token out sb token)
                      (recur end))
-                 (do (.append sb c) (recur (inc i))))
+                 (do (.append sb ch) (recur (inc i))))
 
-               (= c "\\")
+               (= ch \\)
                (if (and (< (inc i) n) (escaped-punctuation? (nth line (inc i))))
                  (do (.append sb ^String (str (nth line (inc i))))
                      (recur (+ i 2)))
-                 (do (.append sb c) (recur (inc i))))
+                 (do (.append sb ch) (recur (inc i))))
 
-               (= c "`")
-               (let [end (or (str/index-of remaining "`" 1) -1)]
-                 (if (>= end 0)
+               (= ch \`)
+               (let [end (str/index-of line "`" (inc i))]
+                 (if end
                    (do (push-token out sb {:type :code
-                                           :s (subs line (inc i) (+ i end))})
-                       (recur (+ i end 1)))
-                   (do (.append sb c) (recur (inc i)))))
+                                           :s (subs line (inc i) end)})
+                       (recur (inc end)))
+                   (do (.append sb ch) (recur (inc i)))))
 
-               (and (= c "*") (< (inc i) n) (= (nth line (inc i)) \*))
-               (let [end (or (str/index-of remaining "**" 2) -1)]
-                 (if (> end 2)
+               (and (= ch \*) (< (inc i) n) (= (nth line (inc i)) \*))
+               (let [end (str/index-of line "**" (+ i 2))]
+                 (if (and end (> end (+ i 2)))
                    (do (push-token out sb {:type :strong
                                            :content (parse-inline
-                                                     (subs line (+ i 2) (+ i end))
+                                                     (subs line (+ i 2) end)
                                                      in-link?)})
-                       (recur (+ i end 2)))
-                   (do (.append sb c) (recur (inc i)))))
+                       (recur (+ end 2)))
+                   (do (.append sb ch) (recur (inc i)))))
 
-               (= c "*")
-               (let [end (or (str/index-of remaining "*" 1) -1)]
-                 (if (> end 1)
+               (= ch \*)
+               (let [end (str/index-of line "*" (inc i))]
+                 (if (and end (> end (inc i)))
                    (do (push-token out sb {:type :em
                                            :content (parse-inline
-                                                     (subs line (inc i) (+ i end))
+                                                     (subs line (inc i) end)
                                                      in-link?)})
-                       (recur (+ i end 1)))
-                   (do (.append sb c) (recur (inc i)))))
+                       (recur (inc end)))
+                   (do (.append sb ch) (recur (inc i)))))
 
-               (and (= c "~")
+               (and (= ch \~)
                     (>= n (+ i 2))
-                    (= (subs line (inc i) (+ i 2)) "~"))
-               (let [end (or (str/index-of remaining "~~" 2) -1)]
-                 (if (> end 2)
+                    (= (nth line (inc i)) \~))
+               (let [end (str/index-of line "~~" (+ i 2))]
+                 (if (and end (> end (+ i 2)))
                    (do (push-token out sb {:type :del
                                            :content (parse-inline
-                                                     (subs line (+ i 2) (+ i end))
+                                                     (subs line (+ i 2) end)
                                                      in-link?)})
-                       (recur (+ i end 2)))
-                   (do (.append sb c) (recur (inc i)))))
+                       (recur (+ end 2)))
+                   (do (.append sb ch) (recur (inc i)))))
 
                (not in-link?)
                ;; Perf gates (jolt irregex is ~25x bb on a miss): the email
-               ;; regex still decides, but only runs when the line holds @
-               ;; past here and the first char can start its local part; the
-               ;; url regex only runs on h/H/f/F/w/W (all its schemes' first
-               ;; chars, (?i)). Both gates fail only calls the regex would.
-               (if-let [matched (let [c0 (nth line i)]
-                                  (or (when (and (str/index-of line "@" i)
-                                                 (contains? bare-email-start-chars c0))
-                                        (re-find bare-email-re remaining))
-                                      (when (contains? bare-url-start-chars c0)
-                                        (re-find bare-url-re remaining))))]
+               ;; regex only runs when the line holds an @ anywhere and the
+               ;; first char can start its local part; the url regex only
+               ;; runs on h/H/f/F/w/W (all its schemes' first chars, (?i)).
+               ;; Both gates fail only calls the regex would.
+               (if-let [matched (or (when (and at? (contains? bare-email-start-chars ch))
+                                      (re-find bare-email-re (subs line i)))
+                                    (when (contains? bare-url-start-chars ch)
+                                      (re-find bare-url-re (subs line i))))]
                  (let [raw (loop [s matched]
                              (if (or (re-find #"[!?.,:;*_~]$" s)
                                      (and (str/ends-with? s ")")
@@ -310,10 +318,10 @@
                    (push-token out sb (with-meta (link-token label url)
                                         {:raw-label raw}))
                    (recur (+ i (count raw))))
-                 (do (.append sb c) (recur (inc i))))
+                 (do (.append sb ch) (recur (inc i))))
 
                :else
-               (do (.append sb c) (recur (inc i)))))))))))
+               (do (.append sb ch) (recur (inc i)))))))))))
 
 ;; ─── List nesting state ──────────────────────────────────────────────────────
 ;; Lists are built on an indent-based stack: each entry is {:indent n
