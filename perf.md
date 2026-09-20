@@ -828,12 +828,20 @@ control, 3 per tab). `kmet.tui.test-utils` pins the two paths equal over a
 hand-picked corpus plus 400 randomised mixes of every range boundary ±1, and
 asserts a box-drawing line never enters the walker.
 
-bb, session B: cold render **13.7 → 4.76 s**, theme switch 13.6 → 4.2 s,
-Ctrl+O expanded 2.9 → 1.4 s, output-pad 13.9 → 4.0 s; roles total 14.4 →
-4.2 s (tools 2.57 → 1.21 s: bash 1.58 → 0.69, read 0.67 → 0.40, edit 0.32 →
-0.12); session A cold render 3.2 → 0.93 s. jolt: roles total 8.2 → 6.55 s
-(its walker is ~2.2 µs/char and its ANSI strip dominates), cold render
-7.06 s.
+bb, session B, **back-to-back A/B** (parent `ac42577` in a worktree vs
+HEAD, same command, one after the other): cold render **14.30 → 4.18 s**,
+Ctrl+O collapsed 1.41 → 0.65 s, Ctrl+O expanded 3.53 → 1.40 s, theme switch
+13.77 → 4.56 s, output-pad 13.69 → 4.19 s, warm frame 3.6 → 3.5 ms; roles
+total 14.4 → 4.2 s (tools 2.57 → 1.21 s: bash 1.58 → 0.69, read 0.67 →
+0.40, edit 0.32 → 0.12). Session A the same way: cold render **3.16 →
+0.91 s**, theme 3.10 → 0.89 s. The rendered document is **identical** —
+17,335 lines / 2,594,760 chars, `hash` 2126486799 in both trees, and the
+same hash again under jolt.
+
+jolt gains less — the full render went **8.64 → 6.44 s** (1.34×; its walker
+is ~2.2 µs/char, and its ANSI strip and regex engine dominate what is left),
+theme switch 8.87 → 8.05 s — but the same document hash means the two hosts
+stay pixel-for-pixel in step.
 
 ### 10.6 What is left
 
