@@ -837,10 +837,15 @@ from the api.
 ;; receives (tui theme keybindings close); close delivers its result to the
 ;; returned promise and dismisses the dialog. Opts: {:overlay bool
 ;; :overlay-options {...} :on-handle fn}; {:anchor :center :width 82} is a
-;; typical overlay-options map. The factory may return the component OR a
-;; promise of one (deref'd with a 5s timeout); when the component carries a
-;; :dispose fn, it is called when the dialog closes (pi: dispose?()) — same
-;; for widgets, custom footer/header and the :reset path (extension reload).
+;; typical overlay-options map. Floating overlays get a full border and a
+;; themed background fill by default (kmet, not pi) so they are never
+;; transparent over the transcript: :border :none and :background false
+;; turn them off, :padding-x/:padding-y inset the content (see
+;; kmet.tui.core/tui-show-overlay for the full option set). The factory may
+;; return the component OR a promise of one (deref'd with a 5s timeout);
+;; when the component carries a :dispose fn, it is called when the dialog
+;; closes (pi: dispose?()) — same for widgets, custom footer/header and the
+;; :reset path (extension reload).
 (ext/ui-custom api (fn [tui theme kb close] (my-selector comp close))
                 {:overlay true :overlay-options {:anchor :center :width 82}})
 ```

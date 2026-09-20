@@ -527,7 +527,9 @@
                  (fn [_tui _th _kb close]
                    (panel/make-text-dialog title text close))
                  {:overlay true
-                  :overlay-options {:anchor :center :width 82}}))
+                  ;; the dialog draws its own titled frame — skip the host
+                  ;; overlay's default border
+                  :overlay-options {:anchor :center :width 82 :border :none}}))
 
 (defn- notify-or-print
   "Output a command result: the transient flash (ui-notify) for
@@ -824,7 +826,8 @@
         (close result))
       kb))
    {:overlay true
-    :overlay-options {:anchor :center :width 82}}))
+    ;; the panel draws its own frame — skip the host overlay's default border
+    :overlay-options {:anchor :center :width 82 :border :none}}))
 
 (defn- handle-mcp-command
   [state args ctx]
@@ -988,7 +991,8 @@
                              (fn [_result] (close nil))
                              kb))
    {:overlay true
-    :overlay-options {:anchor :center :width 82}}))
+    ;; the panel draws its own frame — skip the host overlay's default border
+    :overlay-options {:anchor :center :width 82 :border :none}}))
 
 (defn- handle-import
   "/mcp import — adopt ALL discovered host configs into the project file

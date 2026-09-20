@@ -247,8 +247,12 @@
     (t/is (= 2 (:width s)) "second 2-wide char would cross col 3 → excluded")))
 
 (t/deftest test-composite-line-plain
-  (t/is (= "...X......" (u/composite-line ".........." "X" 3 1 10)))
-  (t/is (= "ab cd" (str/trim (u/composite-line "ab        " "cd" 3 2 10)))))
+  ;; the overlay region is SGR-isolated from the base (SEGMENT-RESET before
+  ;; and after it, pi: compositeTuiLine), so the raw output carries resets
+  (t/is (= (str "..." u/SEGMENT-RESET "X" u/SEGMENT-RESET "......")
+           (u/composite-line ".........." "X" 3 1 10)))
+  (t/is (= (str "ab " u/SEGMENT-RESET "cd" u/SEGMENT-RESET)
+           (str/trim (u/composite-line "ab        " "cd" 3 2 10)))))
 
 (t/deftest test-composite-line-ansi-overlay
   (let [out (u/composite-line ".........." (str "\u001b[31m" "XX" "\u001b[39m") 3 2 10)]

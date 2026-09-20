@@ -116,7 +116,11 @@ host layout/editor/status/theme-controller state. Theme lookups come from
 `kmet.tui.theme` directly (`get-theme` / `get-all-themes` /
 `get-theme-by-name` / `get-current-theme`). `ui-custom` forwards its opts
 map untouched — `{:overlay ... :overlay-options {:anchor :center :width
-82}}` matches pi's overlay placement.
+82}}` matches pi's overlay placement. Floating overlays get a full
+border and a themed background fill by default (kmet, not pi), so a
+component renders opaque over the transcript; a component that draws its
+own frame passes `:border :none` (and `:background false` to keep the
+terminal background).
 
 ## Shipped extensions
 

@@ -193,7 +193,9 @@ errors.")
                                         (runtime/set-config! st (load-config))
                                         (runtime/clear-all-broken! st))}))
      {:overlay true
-      :overlay-options {:anchor :center :width 64}})
+      ;; the panel draws its own titled frame (╭─ LSP ─╮), so opt out of
+      ;; the host overlay's default border
+      :overlay-options {:anchor :center :width 64 :border :none}})
     (report ctx "LSP" (status-report st))))
 
 (defn- list-report [st]

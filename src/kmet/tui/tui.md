@@ -760,6 +760,30 @@ Footguns:
 
 ---
 
+### 5.3 Floating overlays — `tui-show-overlay`
+
+`tui-show-overlay` pushes a component onto the TUI's overlay stack
+(position, size, z-order, modality and focus restore — §7). Overlays are
+for flows that must float *above the transcript*; full-panel selectors and
+dialogs dock in the editor instead (the app's `showSelector` pattern), so
+only extension `ui-custom` overlays float in practice.
+
+Floating overlays get chrome **by default** so they can never read as text
+over text (pi leaves this to the component; kmet makes it the default):
+
+- `:border` — a `kmet.tui.border` style (default `:normal`), `:none` off;
+- `:background` — a theme background token (default `:custom-message-bg`)
+  filled across the whole inner region, `:none`/`false` off;
+- `:padding-x` / `:padding-y` — inner padding (default 0).
+
+The component renders inside the chrome (its width is the resolved overlay
+width minus the frame). `composite-line` additionally resets SGR at the
+overlay boundary, so the base line's active style (a user-message
+background) cannot bleed into overlay cells the component itself does not
+style (pi: `SEGMENT_RESET` in `compositeTuiLine`).
+
+---
+
 ## 6. Frame scheduling
 
 **A dependency change schedules the render** — the other half of the
@@ -1515,11 +1539,10 @@ individually:
 - **Declarative `:overlay`** — glimmer-tui declares an overlay in the tree:
   no space at its declaration site, painted last and never clipped, modal
   focus capture, Esc closes. Not planned: dialogs are shown imperatively
-  (`tui-show-overlay`), so declaration site ≠ owner, yet only ~4 flows
-  float — tree label-edit input, the branch-summary asks, custom-summary
-  input, extension `ui-custom` overlays; every other panel docks in the
-  editor like pi's `showSelector`, which the dock already renders
-  declaratively. The imperative stack would stay underneath regardless
+  (`tui-show-overlay`), so declaration site ≠ owner, yet only extension
+  `ui-custom` overlays float; every other panel docks in the editor like
+  pi's `showSelector` (the tree label editor swaps inline in the panel),
+  which the dock already renders declaratively. The imperative stack would stay underneath regardless
   (placement, sizing, z-order and focus restore are session-owned; kmet
   renders lines, with no screen coordinates to anchor to, so "painted last,
   never clipped" is moot), and keeping overlay identity and focus order

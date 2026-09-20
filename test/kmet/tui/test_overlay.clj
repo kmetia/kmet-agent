@@ -2,7 +2,8 @@
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [testing]]
             [kmet.tui.core :as core]
-            [kmet.tui.terminal :as term]))
+            [kmet.tui.terminal :as term]
+            [kmet.tui.theme :as theme]))
 
 (defn- leaf
   "A focusable leaf component with a focused?-atom (like the editor)."
@@ -49,11 +50,27 @@
 (defn- composite [tui lines w h]
   ((var kmet.tui.core/composite-overlays) tui lines w h))
 
+(defn- strip-ansi
+  "Visible text of a line (composite-line isolates the overlay region with
+   SEGMENT-RESETs; the compositing tests assert placement and content, not
+   styling)."
+  [s]
+  (-> s
+      (str/replace #"\u001b\[[0-9;?]*[a-zA-Z]" "")
+      (str/replace "\u001b]8;;\u0007" "")))
+
 (defn- line-at
   "Trim trailing padding from a composited line (composite-line pads the
-   after-region to the terminal width, pi: compositeLineAt)."
+   after-region to the terminal width, pi: compositeLineAt) and drop SGR."
   [lines i]
-  (clojure.string/trimr (nth lines i)))
+  (clojure.string/trimr (strip-ansi (nth lines i))))
+
+(defn- show-raw-overlay!
+  "Show an overlay with the default chrome off, so compositor-mechanics
+   tests see the raw component (the chrome defaults have their own tests)."
+  [tui component & kvs]
+  (apply core/tui-show-overlay tui component
+         (concat [:border :none :background false] kvs)))
 
 (defn- resolve-layout [options overlay-height w h]
   ((var kmet.tui.core/resolve-overlay-layout) options overlay-height w h))
@@ -139,7 +156,7 @@
   (testing "overlay composited at its resolved position over the base"
     (let [tui (core/create-tui nil)]
       (core/tui-add-child tui (line-comp "base"))
-      (core/tui-show-overlay tui (line-comp "XXXX") :anchor :top-left :width 4)
+      (show-raw-overlay! tui (line-comp "XXXX") :anchor :top-left :width 4)
       (let [lines (composite tui ["base" "base2" "base3"] 20 10)]
         (t/is (= "XXXX" (line-at lines 0)) "overlay replaces the base at its position")
         (t/is (= "base2" (second lines)))
@@ -149,7 +166,7 @@
   (testing "default center anchor with width 4 → col 8 on a 20-wide terminal"
     (let [tui (core/create-tui nil)]
       (core/tui-add-child tui (line-comp "base"))
-      (core/tui-show-overlay tui (line-comp "XXXX") :width 4)
+      (show-raw-overlay! tui (line-comp "XXXX") :width 4)
       (let [lines (composite tui (vec (repeat 10 "--------------------")) 20 10)]
         (t/is (= "--------XXXX--------" (line-at lines 4)) "row 4 = (10-1)/2 floor")))))
 
@@ -157,8 +174,8 @@
   (testing "overlays stack by focus order — later focus() on top"
     (let [tui (core/create-tui nil)
           _ (core/tui-add-child tui (line-comp "base"))
-          h1 (core/tui-show-overlay tui (line-comp "AAAA") :anchor :top-left :width 4)
-          _ (core/tui-show-overlay tui (line-comp "BB") :anchor :top-left :width 2)
+          h1 (show-raw-overlay! tui (line-comp "AAAA") :anchor :top-left :width 4)
+          _ (show-raw-overlay! tui (line-comp "BB") :anchor :top-left :width 2)
           lines (composite tui ["base"] 20 10)]
       (t/is (= "BBAA" (line-at lines 0)) "later overlay wins the left columns")
       ;; Bring the first overlay to the front
@@ -170,8 +187,8 @@
   (testing "max-height slices the rendered overlay lines"
     (let [tui (core/create-tui nil)]
       (core/tui-add-child tui (line-comp "base"))
-      (core/tui-show-overlay tui (lines-comp "a" "b" "c") :anchor :top-left
-                             :width 3 :max-height 2)
+      (show-raw-overlay! tui (lines-comp "a" "b" "c") :anchor :top-left
+                         :width 3 :max-height 2)
       (let [lines (composite tui ["ba" "b2" "b3"] 20 10)]
         (t/is (= "a" (line-at lines 0)))
         (t/is (= "b" (line-at lines 1)))
@@ -189,8 +206,8 @@
 (t/deftest test-composite-visible-callback
   (testing ":visible callback controls rendering by terminal size"
     (let [tui (core/create-tui (fake-terminal 100 30))]
-      (core/tui-show-overlay tui (line-comp "XXXX") :anchor :top-left :width 4
-                             :visible (fn [w _h] (>= w 80)))
+      (show-raw-overlay! tui (line-comp "XXXX") :anchor :top-left :width 4
+                         :visible (fn [w _h] (>= w 80)))
       (core/tui-add-child tui (line-comp "base"))
       (t/is (= "XXXX" (line-at (composite tui ["base"] 20 10) 0)) "wide enough")
       ;; Shrink the terminal: overlay disappears
@@ -201,8 +218,68 @@
   (testing "overlay lines wider than the resolved width are truncated"
     (let [tui (core/create-tui nil)]
       (core/tui-add-child tui (line-comp "base"))
-      (core/tui-show-overlay tui (line-comp "1234567890") :anchor :top-left :width 4)
+      (show-raw-overlay! tui (line-comp "1234567890") :anchor :top-left :width 4)
       (t/is (= "1234" (line-at (composite tui ["base"] 20 10) 0))))))
+
+(t/deftest test-overlay-defaults-frame-and-fill
+  (testing "an overlay with no chrome options gets a full border and a
+            themed background fill; content renders inside the border"
+    (let [tui (core/create-tui nil)
+          bg-ansi (theme/get-bg-ansi (theme/get-current-theme) :custom-message-bg)]
+      (core/tui-add-child tui (line-comp "base"))
+      (core/tui-show-overlay tui (line-comp "hello") :anchor :top-left :width 9)
+      (let [lines (composite tui ["base"] 30 5)]
+        (t/is (= "┌───────┐" (line-at lines 0)) "top border, outer width")
+        (t/is (= "│hello  │" (line-at lines 1)) "content inside the side borders")
+        (t/is (= "└───────┘" (line-at lines 2)) "bottom border")
+        (t/is (str/includes? (nth lines 1) bg-ansi)
+              "the themed background fill wraps the inner region")))))
+
+(t/deftest test-overlay-default-background-is-opaque
+  (testing "the base's active SGR (a red background) does not bleed into
+            the overlay region — the overlay fills its own background"
+    (let [tui (core/create-tui nil)
+          red "\u001b[48;2;200;0;0m"
+          reset "\u001b[49m"
+          base (str red (apply str (repeat 30 \b)) reset)]
+      (core/tui-add-child tui (line-comp base))
+      (core/tui-show-overlay tui (line-comp "hi") :anchor :top-left :width 8)
+      (let [line (nth (composite tui [base] 30 5) 1)]
+        (t/is (str/starts-with? (strip-ansi line) "│hi    │")
+              "frame content, not the red base text")
+        (t/is (not (str/includes? line (str "\u001b[0m" red "\u001b[0m")))
+              "no raw red state opened inside the overlay region")))))
+
+(t/deftest test-overlay-chrome-opt-outs
+  (testing ":border :none / :background false restore the raw overlay"
+    (let [tui (core/create-tui nil)]
+      (core/tui-add-child tui (line-comp "base"))
+      (core/tui-show-overlay tui (line-comp "XX") :anchor :top-left
+                             :width 4 :border :none :background false)
+      (t/is (= "XX" (line-at (composite tui ["base"] 20 5) 0))
+            "no chrome → the bare component at its declared width"))
+    (let [tui (core/create-tui nil)
+          bg-ansi (theme/get-bg-ansi (theme/get-current-theme) :custom-message-bg)]
+      (core/tui-add-child tui (line-comp "base"))
+      (core/tui-show-overlay tui (line-comp "XX") :anchor :top-left
+                             :width 4 :border :none)
+      (let [lines (composite tui ["base"] 20 5)
+            line (nth lines 0)]
+        (t/is (= "XX" (line-at lines 0)) "background without border")
+        (t/is (str/includes? line bg-ansi) "the fill is still applied")))))
+
+(t/deftest test-overlay-default-padding
+  (testing ":padding-x / :padding-y inset the content inside the border"
+    (let [tui (core/create-tui nil)]
+      (core/tui-add-child tui (line-comp "base"))
+      (core/tui-show-overlay tui (line-comp "hi") :anchor :top-left :width 10
+                             :padding-x 2 :padding-y 1)
+      (let [lines (composite tui ["base"] 30 8)]
+        (t/is (= "┌────────┐" (line-at lines 0)))
+        (t/is (= "│        │" (line-at lines 1)) "top vertical padding row")
+        (t/is (= "│  hi    │" (line-at lines 2)) "content inset by padding-x")
+        (t/is (= "│        │" (line-at lines 3)))
+        (t/is (= "└────────┘" (line-at lines 4)))))))
 
 ;; ─── OverlayHandle ─────────────────────────────────────────────────────────
 

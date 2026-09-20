@@ -4,6 +4,8 @@
    from this namespace for convenience."
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
+            [kmet.tui.border :as border]
+            [kmet.tui.theme :as theme]
             [kmet.tui.macros :as macros]
             [kmet.tui.protocols :as protocols]
             [kmet.libs.reakt :as reakt]
@@ -383,6 +385,12 @@
      :margin — number (all sides) or {:top :right :bottom :left}
      :visible — (fn [term-width term-height]) responsive visibility
      :non-capturing — true to render without taking keyboard focus
+   kmet chrome keys (defaults make an overlay opaque, never text over text):
+     :border — kmet.tui.border style (default :normal), :none/false off
+       (the frame is drawn around the component: width includes it)
+     :background — theme bg token fill (default :custom-message-bg),
+       :none/false off; blocks the base's active SGR from bleeding through
+     :padding-x / :padding-y — inner padding (default 0)
    Legacy kmet keys :x / :y / :height map to :col / :row / :max-height.
    Returns an OverlayHandle map (pi: OverlayHandle): :hide, :set-hidden!,
    :is-hidden?, :focus, :unfocus (with {:target comp} or nil), :is-focused?."
@@ -538,12 +546,63 @@
   [tui]
   (boolean (some #(overlay-visible? tui %) @(:overlays tui))))
 
+;; ─── Default overlay chrome (opaque background + border) ───────────────────
+
+(defn- overlay-chrome
+  "Resolve an overlay's chrome options. Floating overlays default to a full
+   border and a themed background fill so they can never read as text over
+   text; pi leaves both to the component, kmet makes them the default:
+     :border      kmet.tui.border style (default :normal), :none/false off
+     :background  theme bg token (default :custom-message-bg), :none/false off
+     :padding-x   inner horizontal padding (default 0)
+     :padding-y   inner vertical padding (default 0)"
+  [options]
+  (let [b (if (contains? options :border) (:border options) :normal)
+        bg (if (contains? options :background) (:background options) :custom-message-bg)]
+    {:border (when-not (or (nil? b) (= :none b) (false? b)) (border/resolve b))
+     :bg (when-not (or (nil? bg) (= :none bg) (false? bg)) bg)
+     :padding-x (max 0 (long (or (:padding-x options) 0)))
+     :padding-y (max 0 (long (or (:padding-y options) 0)))}))
+
+(defn- overlay-frame-rows
+  "The vertical rows the chrome costs: two border edge lines plus padding."
+  [{:keys [border padding-y]}]
+  (+ (if border 2 0) (* 2 padding-y)))
+
+(defn- frame-overlay-lines
+  "Wrap CONTENT-LINES (rendered at CONTENT-WIDTH) in CHROME, returning
+   lines exactly WIDTH cells wide: a themed background fill on the inner
+   region and a full border box when configured. Always-full-width rows
+   mean the compositor's own padding never reopens the background to the
+   base style inside the overlay rectangle."
+  [chrome width content-width content-lines]
+  (let [{:keys [border bg padding-x padding-y]} chrome
+        theme-current (theme/get-current-theme)
+        bg-fn (if bg #(theme/bg theme-current bg %) identity)
+        edge (if border #(theme/fg theme-current :border %) identity)
+        side-pad (apply str (repeat padding-x \space))
+        fill (fn [line]
+               (let [slice (utils/slice-with-width line 0 content-width :strict? true)
+                     vis (:width slice)
+                     pad (apply str (repeat (max 0 (- content-width vis)) \space))]
+                 (bg-fn (str side-pad (:text slice) pad side-pad))))
+        content-rows (concat (repeat padding-y (fill ""))
+                             (map fill content-lines)
+                             (repeat padding-y (fill "")))]
+    (if border
+      (into [(edge (border/top-line border width))]
+            (concat (map #(str (edge (:left border)) % (edge (:right border)))
+                         content-rows)
+                    [(edge (border/bottom-line border width))]))
+      (vec content-rows))))
+
 (defn- composite-overlays
   "Composite all visible overlays (sorted by focus order, later = on top)
    onto the rendered base LINES (pi: TUI.compositeOverlays). Each overlay is
    positioned by resolve-overlay-layout; content rows are padded so overlay
    rows land in the terminal viewport; overlay lines are truncated to their
-   declared width before compositing."
+   declared width before compositing. The component renders inside the
+   overlay chrome (border + background) when the options don't opt out."
   [tui lines term-width term-height]
   (let [visible-entries (->> @(:overlays tui)
                              (filter #(overlay-visible? tui %))
@@ -555,7 +614,18 @@
                                    layout0 (resolve-overlay-layout options 0 term-width term-height)
                                    width (:width layout0)
                                    max-height (:max-height layout0)
-                                   overlay-lines (vec (render (:component entry) width))
+                                   chrome (overlay-chrome options)
+                                   frame-rows (overlay-frame-rows chrome)
+                                   content-width (max 1 (- width
+                                                           (if (:border chrome) 2 0)
+                                                           (* 2 (:padding-x chrome))))
+                                   content (vec (render (:component entry) content-width))
+                                   content (if (and max-height
+                                                    (> (count content)
+                                                       (max 1 (- max-height frame-rows))))
+                                             (subvec content 0 (max 1 (- max-height frame-rows)))
+                                             content)
+                                   overlay-lines (frame-overlay-lines chrome width content-width content)
                                    overlay-lines (if (and max-height (> (count overlay-lines) max-height))
                                                    (subvec overlay-lines 0 max-height)
                                                    overlay-lines)

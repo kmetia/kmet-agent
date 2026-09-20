@@ -1034,10 +1034,19 @@
           actual-overlay-w (max overlay-width (:width overlay-slice))
           after-target (max 0 (- total-width actual-before-w actual-overlay-w))
           after-pad (max 0 (- after-target (:width base-after)))]
+      ;; The SEGMENT-RESET before the overlay region isolates it from the
+      ;; base's active SGR — without it a base background (user messages,
+      ;; tool boxes) bleeds into every overlay cell the overlay itself does
+      ;; not style, and the overlay looks transparent (pi: compositeTuiLine
+      ;; inserts SEGMENT_RESET before the overlay and before the after
+      ;; segment; the reset before the after segment stops the overlay's
+      ;; trailing state leaking back onto the base).
       (str (:text base-before)
            (apply str (repeat before-pad \space))
+           SEGMENT-RESET
            (:text overlay-slice)
            (apply str (repeat overlay-pad \space))
+           SEGMENT-RESET
            (sgr-state-at base after-start)
            (:text base-after)
            (apply str (repeat after-pad \space))))))

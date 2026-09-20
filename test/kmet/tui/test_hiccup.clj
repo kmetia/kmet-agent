@@ -22,6 +22,7 @@
             [kmet.tui.macros :as macros :refer [with-let defcomponent]]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.components.stack :as stack]
+            [kmet.tui.utils :as u]
             [kmet.libs.reakt :as rag]
             [kmet.libs.terminal-image :as timg]))
 
@@ -1293,9 +1294,12 @@
         hroot (h/root (fn [_] [:h-stack {:gap 1 :align (rag/tracked-deref align)}
                                [:text {:padding-x 0 :padding-y 0} "a"]
                                [:text {:padding-x 0 :padding-y 0} "b\nb2"]]))]
-    (t/is (= ["a   b     " "    b2    "] (core/render hroot 10)))
+    ;; HStack isolates each child region with SEGMENT-RESETs (composite-line)
+    (t/is (= ["a   b     " "    b2    "]
+             (mapv u/strip-ansi-codes (core/render hroot 10))))
     (reset! align :end)
-    (t/is (= ["    b     " "a   b2    "] (core/render hroot 10))
+    (t/is (= ["    b     " "a   b2    "]
+             (mapv u/strip-ansi-codes (core/render hroot 10)))
           "the changed align re-laid the row")))
 
 (t/deftest scroll-view-props-are-live
