@@ -18,6 +18,14 @@
 
 (defn- now-ms [] (System/currentTimeMillis))
 
+(def ^:private info-base-ms
+  "Frozen 'now' for default :modified values: two sessions built without an
+   explicit :modified must TIE, so the listing keeps construction order.
+   Clamping to the call-time clock made them differ by a stray millisecond
+   now and then, flipping the sort and moving the selection out from under
+   order-sensitive tests (a real flake, not a hypothetical one)."
+  (now-ms))
+
 (defn- info
   "A session-info map like kmet.app.session/build-session-info returns."
   [path & {:keys [name first-message modified count cwd parent]}]
@@ -28,18 +36,26 @@
      :name name
      :parent-session-path parent
      :created now
-     :modified (or modified (- now 3600000))
+     :modified (or modified (- info-base-ms 3600000))
      :message-count (or count 3)
      :first-message (or first-message "hello world")
      :all-messages-text (or first-message "hello world")}))
+
+(defn- install-keybindings!
+  "Install the global manager — make-session-selector reads it for every key,
+   so a test that builds its own selector (not via new-sel) must install it
+   too, or ctrl+d/ctrl+r silently match nothing when the namespace runs
+   alone."
+  []
+  (let [dir (str (fs/create-dirs (fs/path "target" "test-session-selector-keybindings")))]
+    (tui-kb/set-global-keybindings! (kb/create-agent-keybindings-manager dir))))
 
 (defn- new-sel
   "Build a selector over canned listings; loads are fed synchronously via
    session-selector-set-listing! (the async half is exercised separately)."
   [& {:keys [current all current-session-file on-select on-cancel
              rename-session delete-session]}]
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-session-selector-keybindings")))]
-    (tui-kb/set-global-keybindings! (kb/create-agent-keybindings-manager dir)))
+  (install-keybindings!)
   (let [loader (fn [infos] (fn [_] infos))
         sel (ss/make-session-selector
              :loaders {:current (loader (or current []))
@@ -360,6 +376,7 @@
 ;; ─── Delete ─────────────────────────────────────────────────────────────────
 
 (t/deftest delete-confirmation-flow
+  (install-keybindings!)
   (let [deleted (atom [])
         backing (atom nil)
         a (info "/tmp/s/a.ednl" :first-message "keep me")
