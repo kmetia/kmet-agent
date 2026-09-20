@@ -1525,6 +1525,10 @@
                   {:show-images (cfg/get-show-images config)
                    :image-width-cells (cfg/get-image-width-cells config)})
           (agent/set-block-images! agent-state (cfg/get-block-images config))
+          ;; pi: settingsManager.reload() — re-apply the clear-on-shrink knob
+          ;; (the /settings row writes both the flag and the runtime)
+          (when (:tui cs)
+            (tui/tui-set-clear-on-shrink! (:tui cs) (cfg/get-clear-on-shrink config)))
           (update-footer! cs)
           ;; pi: reload re-emits session_start so extensions re-register UI.
           ;; Runs on a future — handlers may block on dialog promises, which
@@ -2810,13 +2814,19 @@
       (str "Auto-compacting..." cancel))))
 
 (defn- set-terminal-progress!
-  "Show/clear the OSC 9;4 terminal progress indicator when the
-   show-terminal-progress setting is on (pi: showTerminalProgress —
-   getShowTerminalProgress gates setProgress; default off)."
+  "Show/clear the OSC 9;4 terminal progress indicator. Activation is gated
+   on the show-terminal-progress setting (pi: showTerminalProgress —
+   getShowTerminalProgress gates setProgress; default off); the CLEAR always
+   passes: pi gates both ends, so disabling the setting mid-turn leaves its
+   keepalive interval asserting the indicator forever — kmet cancels it on
+   the turn end regardless (the terminal's clear is a no-op when nothing is
+   active; see kmet.tui.terminal/apply-progress!)."
   [cs active?]
-  (when (and cs (cfg/get-show-terminal-progress (:config cs)))
-    (when-let [term @(:terminal (:tui cs))]
-      (term/set-progress! term active?))))
+  (when cs
+    (when-let [term (some-> cs :tui :terminal deref)]
+      (when (or (not active?)
+                (cfg/get-show-terminal-progress (:config cs)))
+        (term/set-progress! term active?)))))
 
 ;; ─── Agent response handler ────────────────────────────────────────────────
 
@@ -3967,6 +3977,10 @@
     ;; default (pi: showHardwareCursor)
     (tui/tui-set-show-hardware-cursor! t (cfg/get-show-hardware-cursor config))
 
+    ;; clear-on-shrink: the setting wins over the KMET_CLEAR_ON_SHRINK env
+    ;; default (pi: terminal.clearOnShrink)
+    (tui/tui-set-clear-on-shrink! t (cfg/get-clear-on-shrink config))
+
     ;; Register builtin slash commands (autocomplete dropdown + dispatch)
     (register-builtin-commands! config)
 
@@ -3976,7 +3990,11 @@
                                               (ac/make-combined-provider
                                                :commands-fn #(vec (concat (commands/get-commands)
                                                                           (prompts/as-command-maps (prompts/get-prompt-templates))
-                                                                          (skills/as-command-maps (skills/get-skills))))
+                                                                          ;; pi: enableSkillCommands — read live,
+                                                                          ;; so a /settings toggle takes effect on
+                                                                          ;; the next autocomplete open
+                                                                          (when (cfg/get-enable-skill-commands config)
+                                                                            (skills/as-command-maps (skills/get-skills)))))
                                                ;; a fn: path completion follows a session switch's cwd
                                                :base-path #(fdp/fdp-get-cwd fdp)))
     (editor/editor-set-autocomplete-theme! ed (th/get-select-list-theme (cfg/get-theme config)))
@@ -4443,7 +4461,10 @@
                                                      :commands-fn #(vec (concat
                                                                          (commands/get-commands)
                                                                          (prompts/as-command-maps (prompts/get-prompt-templates))
-                                                                         (skills/as-command-maps (skills/get-skills))))
+                                                                         ;; pi: enableSkillCommands — read live at
+                                                                         ;; autocomplete open
+                                                                         (when (cfg/get-enable-skill-commands (:config cs))
+                                                                           (skills/as-command-maps (skills/get-skills)))))
                                                      :base-path #(fdp/fdp-get-cwd fdp))
                                                provider (reduce (fn [prov factory]
                                                                   (or (normalize-autocomplete-provider

@@ -547,14 +547,65 @@
         (finally (fs/delete-tree tmp))))))
 
 (t/deftest test-show-terminal-progress-setting
-  (t/testing "show-terminal-progress defaults off (pi: showTerminalProgress
+  ;; the getter live-reads the global settings file — pin the path so a
+  ;; developer's own settings.edn cannot flip the expectation
+  (let [missing (str (fs/absolutize (fs/file "target" (str "test-show-terminal-progress-missing-"
+                                                           (System/currentTimeMillis))))
+                     "/settings.edn")]
+    (with-redefs [cfg/global-settings-path (fn [] missing)]
+      (t/testing "show-terminal-progress defaults off (pi: showTerminalProgress
              default false), env-overridable, and settable"
-    (t/is (false? (cfg/get-show-terminal-progress
-                   (assoc cfg/default-config :show-terminal-progress nil)))
-          "unset → false")
-    (t/is (true? (cfg/get-show-terminal-progress
-                  (assoc cfg/default-config :show-terminal-progress true)))
-          "explicit true")
-    (t/is (false? (cfg/get-show-terminal-progress
-                   (assoc cfg/default-config :show-terminal-progress false)))
-          "explicit false")))
+        (t/is (false? (cfg/get-show-terminal-progress
+                       (assoc cfg/default-config :show-terminal-progress nil)))
+              "unset → false")
+        (t/is (true? (cfg/get-show-terminal-progress
+                      (assoc cfg/default-config :show-terminal-progress true)))
+              "explicit true")
+        (t/is (false? (cfg/get-show-terminal-progress
+                       (assoc cfg/default-config :show-terminal-progress false)))
+              "explicit false")))))
+
+(t/deftest test-clear-on-shrink-setting
+  (let [tmp (str (fs/absolutize (fs/file "target" (str "test-clear-on-shrink-" (System/currentTimeMillis)))))
+        settings-file (str tmp "/settings.edn")]
+    (fs/create-dirs tmp)
+    (try
+      (with-redefs [cfg/global-settings-path (fn [] settings-file)]
+        (t/testing "defaults off (pi: terminal.clearOnShrink), env-overridable"
+          (t/is (false? (cfg/get-clear-on-shrink cfg/default-config))))
+        (t/testing "the config snapshot seeds the value"
+          (t/is (true? (cfg/get-clear-on-shrink {:terminal {:clear-on-shrink true}}))))
+        (t/testing "the persisted setting wins over the snapshot"
+          (spit settings-file "{:terminal {:clear-on-shrink false}}\n")
+          (t/is (false? (cfg/get-clear-on-shrink {:terminal {:clear-on-shrink true}}))))
+        (t/testing "a sibling :terminal key does not shadow the snapshot"
+          (spit settings-file "{:terminal {:show-images false}}\n")
+          (t/is (true? (cfg/get-clear-on-shrink {:terminal {:clear-on-shrink true}}))))
+        (t/testing "the setter persists under [:terminal :clear-on-shrink]"
+          (spit settings-file "{:terminal {:show-images false}}\n")
+          (cfg/set-clear-on-shrink! true)
+          (t/is (true? (get-in (edn/read-string (slurp settings-file))
+                               [:terminal :clear-on-shrink])))
+          (t/is (false? (get-in (edn/read-string (slurp settings-file))
+                                [:terminal :show-images]))
+                "sibling :terminal keys survive the nested merge")))
+      (finally (fs/delete-tree tmp)))))
+
+(t/deftest test-enable-skill-commands-setting
+  (let [tmp (str (fs/absolutize (fs/file "target" (str "test-enable-skill-commands-" (System/currentTimeMillis)))))
+        settings-file (str tmp "/settings.edn")]
+    (fs/create-dirs tmp)
+    (try
+      (with-redefs [cfg/global-settings-path (fn [] settings-file)]
+        (t/testing "defaults on (pi: enableSkillCommands default true)"
+          (t/is (true? (cfg/get-enable-skill-commands cfg/default-config))))
+        (t/testing "the persisted setting wins"
+          (spit settings-file "{:enable-skill-commands false}\n")
+          (t/is (false? (cfg/get-enable-skill-commands cfg/default-config))))
+        (t/testing "config snapshot fallback (project override)"
+          (spit settings-file "{:provider :opencode-go}\n")
+          (t/is (false? (cfg/get-enable-skill-commands {:enable-skill-commands false}))))
+        (t/testing "the setter persists"
+          (cfg/set-enable-skill-commands! false)
+          (t/is (false? (:enable-skill-commands (edn/read-string (slurp settings-file)))))))
+      (finally (fs/delete-tree tmp)))))

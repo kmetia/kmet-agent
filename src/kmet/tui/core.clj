@@ -1913,6 +1913,12 @@
 (defn tui-stop [tui]
   (reset! (:stopped? tui) true)
   (reset! (:running? tui) false)
+  ;; pi: stop → terminal.setProgress(false) — cancel an active OSC 9;4
+  ;; indicator, so quitting mid-turn cannot leave a progress bar (and its
+  ;; keepalive) behind. apply-progress!'s clear is a no-op when nothing is
+  ;; active, so this is safe on stop paths that never showed progress.
+  (when-let [term @(:terminal tui)]
+    (terminal/set-progress! term false))
   ;; Detach the §3.4 scheduler hook before anything else unwinds: disposed
   ;; components' reactions may still fire watches during teardown. The reakt
   ;; enqueue hook is detached with it — a late dep change must not poke a

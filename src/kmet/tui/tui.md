@@ -205,6 +205,12 @@ extensions never add host elements. Tags and props:
 `:primary` names the positional shorthand: `[:text "hi"]` compiles to props
 `{:text "hi"}` merged over defaults.
 
+A `:settings-list` item follows pi's `SettingItem`: `:submenu` is a fn
+`(current-value done) → component` opened by Enter/Space — the submenu
+renders in place of the list and receives input until `done` closes it;
+`done` with a value updates the row and fires `:on-change`. A `:submenu`
+item is not cyclable (`:values` is ignored for it).
+
 **Stateful leaves** (`:input` `:select-list` `:settings-list` `:editor`
 `:spinner` `:cancellable-loader` `:expandable-text` `:alt-screen-flash`):
 while their props stay `=`-equal the instance (and its state) is kept. A

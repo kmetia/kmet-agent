@@ -162,9 +162,10 @@ http-idle-timeout-ms/system-prompt/append-system-prompt/retry
 (enabled/max-retries/base-delay-ms)/enabled-models/hide-thinking-block/
 auto-compact/show-cache-miss-notices/steering-mode/follow-up-mode/
 tree-filter-mode/output-pad/editor-padding-x/autocomplete-max-visible/
-show-hardware-cursor/extensions/skills/prompts/themes dirs, compaction
-thresholds, terminal image display (`:terminal` — show-images/
-image-width-cells), provider image blocking (`:images` — block-images),
+show-hardware-cursor/enable-skill-commands/extensions/skills/prompts/themes dirs,
+compaction thresholds, terminal display (`:terminal` — show-images /
+image-width-cells / clear-on-shrink), terminal progress
+(`:show-terminal-progress`), provider image blocking (`:images` — block-images),
 shell customization (`:shell-path` / `:shell-command-prefix` — applied to
 every bash execution: tool, `!` commands, and factory-built tools),
 `.kmet/SYSTEM.md` + `APPEND_SYSTEM.md` discovery, `KMET_PROVIDER`/
@@ -181,12 +182,20 @@ Missing (pi `docs/settings.md`):
 | `warnings.anthropicExtraUsage` | Anthropic subscription extra-usage warning |
 | `branchSummary.reserveTokens`, `branchSummary.skipPrompt` | branch summarization config |
 | `retry.provider.timeoutMs` / `maxRetries` / `maxRetryDelayMs` | provider/SDK retry tuning |
-| `transport`, `websocketConnectTimeoutMs` | provider transport selection (`sse` / `websocket` / `auto`) |
-| `terminal.clearOnShrink` | clear-on-shrink is TUI machinery only (`tui-set-clear-on-shrink!`, the `KMET_CLEAR_ON_SHRINK` env), not a settings key (the `terminal.showImages` / `terminal.imageWidthCells` rows are done — see §2) |
+| `transport`, `websocketConnectTimeoutMs` | provider transport selection (`sse` / `websocket` / `auto`) — kmet's `/settings` "HTTP transport" row is a different axis (`http-client`/`curl`) |
 | `images.autoResize` | image resize before sending (needs a resizer backend — babashka has no ImageIO/AWT; `images.blockImages` is done — see §2) |
 | `markdown.codeBlockIndent`, `markdown.mermaid` | markdown rendering |
-| `enableSkillCommands` | register skills as `/skill:name` commands |
 | `thinkingBudgets` | per-level thinking token budgets |
+
+Done (previously missing): `terminal.clearOnShrink` (`:terminal :clear-on-shrink` setting +
+row, live `tui-set-clear-on-shrink!`, env default preserved),
+`terminal.showTerminalProgress` (row + live read; the indicator also clears
+when the setting is disabled mid-turn and on `tui-stop`, like pi's `stop`),
+`enableSkillCommands` (`:enable-skill-commands` + row, gates the
+`/skill:name` autocomplete entries), and the theme row's pi shape (a
+`ThemeSubmenu`: single names + the Automatic `light/dark` mode with
+light/dark pickers and live preview — enabled by `SettingItem.submenu`
+support in `kmet.tui.components.settings-list`).
 
 ### 5. Extension API
 
@@ -244,11 +253,18 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
   scoped escape, auth `j`/`k`) or order-dependent kmet extras (SelectList's
   shift+pageUp/Down, the thinking selector's clear-then-cancel ctrl+c, the
   editor's late ctrl+p/ctrl+n history fallback) — `tui.md` §7
-- **`/settings` menu breadth** — kmet `/settings` covers thinking/hide-thinking/retry only;
-  **done (theme)**: a theme row (name switch + persist) was added; **done (images)**: the
-  Show images / Image width rows (pi: show-images-selector, gated on terminal image
-  support) landed with the inline-images work (`tui.md` §10). The mermaid and tui-mode
-  rows are postponed indefinitely with their features (`tui.md` §15.1)
+- **`/settings` menu breadth** — the panel now carries pi's current row
+  vocabulary minus the missing features above: auto-compact, show
+  images / image width (terminal-gated), block images, skill commands,
+  steering/follow-up mode, HTTP idle/timeout/transport, cache-miss
+  notices, tree filter, thinking, hide thinking, clear on shrink, terminal
+  progress, editor/output padding, autocomplete max items, hardware
+  cursor, theme (pi's ThemeSubmenu — single names + Automatic light/dark),
+  plus the kmet-only rows (tool display, retry, repeat guards, HTTP total
+  timeout). Rows carry pi's `:description` lines. pi's remaining selector
+  submenus (warnings, per-model thinking) are still missing with their
+  features. The mermaid and tui-mode rows are postponed indefinitely with
+  their features (`tui.md` §15.1)
 - **Auth selector/dialog components** — pi `login-dialog.ts`, `oauth-selector.ts`,
   `session-selector-search.ts`; kmet's terminal `/login` covers the flows
 - **`packages/agent` (`@earendil-works/pi-agent-core`)** — general-purpose agent library

@@ -123,6 +123,7 @@
     kmet.tui.test-overlay
     kmet.tui.test-negotiation
     kmet.tui.test-terminal-response
+    kmet.tui.test-terminal
     kmet.tui.test-render-loop
     kmet.tui.test-terminal-native
     kmet.tui.test-utils
@@ -157,6 +158,7 @@
     kmet.app.ui.test-tool-execution
     kmet.app.ui.test-custom-message
     kmet.app.ui.test-settings-selector
+    kmet.app.ui.test-theme-submenu
     kmet.app.ui.test-skill-message
     kmet.app.ui.test-summary-message
     kmet.app.ui.test-bash-execution

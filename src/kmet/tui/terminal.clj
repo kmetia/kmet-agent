@@ -52,7 +52,10 @@
   "Shared OSC 9;4 body for a backend's set-progress! method: writes the
    active/clear sequence and owns the keepalive future held in
    INTERVAL-ATOM (some terminals drop the indicator without periodic
-   re-assertion — pi: setInterval keepalive)."
+   re-assertion — pi: setInterval keepalive). A clear is only written when
+   an active indicator existed — the interval IS the active-state marker,
+   so an unconditional clear would emit an OSC on every turn end while the
+   feature is off."
   [terminal interval-atom active]
   (if active
     (do (write-output terminal lib/TERMINAL-PROGRESS-ACTIVE-SEQUENCE)
@@ -66,10 +69,10 @@
                           (write-output terminal lib/TERMINAL-PROGRESS-ACTIVE-SEQUENCE)
                           (recur)))
                       (catch InterruptedException _))))))
-    (do (when-let [f @interval-atom]
-          (future-cancel f)
-          (reset! interval-atom nil))
-        (write-output terminal lib/TERMINAL-PROGRESS-CLEAR-SEQUENCE))))
+    (when-let [f @interval-atom]
+      (future-cancel f)
+      (reset! interval-atom nil)
+      (write-output terminal lib/TERMINAL-PROGRESS-CLEAR-SEQUENCE))))
 
 ;; ─── Backend dispatch ──────────────────────────────────────────────────────
 

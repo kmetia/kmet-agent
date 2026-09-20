@@ -87,6 +87,35 @@
       (t/is (= "<in-memory>" (tc/get-active-theme-name ctrl)))
       (t/is (true? @(:force-redraw? tui)) "an instance swap forces the rebuild too"))))
 
+(t/deftest test-get-theme-selection
+  (t/testing "the raw :theme setting is exposed (pi: getThemeSelection)"
+    (let [{:keys [ctrl]} (make-ctrl {:theme "light"})]
+      (t/is (= "light" (tc/get-theme-selection ctrl)))))
+  (t/testing "an absent setting falls back to the active theme name"
+    (let [{:keys [ctrl]} (make-ctrl {:theme nil})]
+      (t/is (= (tc/get-active-theme-name ctrl) (tc/get-theme-selection ctrl))))))
+
+(t/deftest test-set-theme-name-updates-the-selection
+  (t/testing "pi: setThemeName records currentThemeSetting on success"
+    (let [{:keys [ctrl]} (make-ctrl {:theme "dark"})]
+      (tc/set-theme-name! ctrl "light")
+      (t/is (= "light" (tc/get-theme-selection ctrl))))))
+
+(t/deftest test-set-theme-setting-explicit
+  (t/testing "an explicit setting records and applies it (pi: setThemeSetting)"
+    (let [{:keys [ctrl]} (make-ctrl {:theme "dark"})]
+      (tc/set-theme-setting! ctrl "light")
+      (t/is (= "light" (tc/get-theme-selection ctrl)))
+      (t/is (= "light" (tc/get-active-theme-name ctrl))))))
+
+(t/deftest ^:slow test-set-theme-setting-automatic
+  (t/testing "an automatic setting is recorded and enables sync"
+    (let [{:keys [ctrl]} (make-ctrl {:theme "dark"})]
+      (tc/set-theme-setting! ctrl "light/dark")
+      (t/is (= "light/dark" (tc/get-theme-selection ctrl)))
+      (t/is (true? @(:auto-sync-enabled-atom ctrl)))
+      (t/is (contains? #{"light" "dark"} (tc/get-active-theme-name ctrl))))))
+
 (t/deftest test-get-terminal-theme
   (t/testing "the env-detected terminal theme is exposed"
     (let [{:keys [ctrl]} (make-ctrl {:theme "dark"})]

@@ -6,11 +6,13 @@
             [clojure.test :as t :refer [deftest testing]]
             [kmet.tui.autocomplete :as ac]
             [kmet.tui.components.editor :as editor]
+            [kmet.tui.components.settings-list :as settings-list]
             [kmet.tui.components.spinner :as spinner]
             [kmet.tui.hiccup :as hiccup]
             [kmet.tui.macros :as macros]
             [kmet.tui.theme :as theme]
             [kmet.tui.protocols :as protocols]
+            [kmet.tui.terminal :as terminal]
             [kmet.tui.core :as tui]
             [kmet.modes.interactive :as inter]
             [kmet.app.commands :as commands]
@@ -1146,11 +1148,8 @@
         ((:handler (commands/find-command "settings")) cs "")
         (let [sl @sl-ref]
           (t/is (some? sl) "settings list shown")
-          ;; row order: auto-compact block-images steering follow-up
-          ;; http-idle http-total http-transport cache-miss tree-filter
-          ;; thinking … — navigate to the thinking row
-          (dotimes [_ 9]
-            (protocols/handle-input sl "\u001b[B"))
+          ;; select the thinking row by id (row order is data, not stable)
+          (settings-list/settings-list-select-item! sl :thinking)
           ;; Enter (pi: activateItem) cycles the selected row
           (protocols/handle-input sl "\r")
           (t/is (not= :off @(:thinking ag)) "thinking row cycles the session level")
@@ -1183,9 +1182,9 @@
         (t/is (false? (:block-images @(:cfg ag))) "default off at startup")
         ((:handler (commands/find-command "settings")) cs "")
         (let [sl @sl-ref]
-          ;; row 1: block-images (right after auto-compact; the terminal
-          ;; image rows are stubbed away via no-image-caps)
-          (protocols/handle-input sl "\u001b[B")
+          ;; select the block-images row by id (the terminal image rows are
+          ;; stubbed away via no-image-caps; the skill-commands row follows)
+          (settings-list/settings-list-select-item! sl :block-images)
           (protocols/handle-input sl "\r")  ;; enter — false -> true
           (t/is (true? (:block-images @(:cfg ag))) "row toggles the agent knob")
           (t/is (= [[:images :block-images] true] @saved) "blocked persisted")
@@ -1220,25 +1219,46 @@
         (t/is (= 3 (:max-retries @(:cfg ag))) "default retry wired at startup")
         ((:handler (commands/find-command "settings")) cs "")
         (let [sl @sl-ref]
-          ;; rows 0..17: auto-compact block-images steering follow-up
-          ;; http-idle http-total http-transport cache-miss tree-filter
-          ;; thinking hide-thinking tool-display editor-pad output-pad
-          ;; autocomplete auto-retry max-retries base-delay
-          (dotimes [_ 15]
-            (protocols/handle-input sl "\u001b[B")) ;; down → auto-retry
+          ;; select rows by id (row order is data, not stable): retry block
+          (settings-list/settings-list-select-item! sl :auto-retry)
           (protocols/handle-input sl "\r") ;; enter — auto-retry true -> false
           (t/is (= 0 (:max-retries @(:cfg ag))) "disabled retry gates max-retries to 0")
           (t/is (= [[:retry :enabled] false] @saved) "auto-retry persisted")
           (protocols/handle-input sl "\r") ;; enter — auto-retry back on
           (t/is (= 3 (:max-retries @(:cfg ag))) "re-enabled retry restores max-retries")
-          (protocols/handle-input sl "\u001b[B") ;; down → max-retries
+          (settings-list/settings-list-select-item! sl :max-retries)
           (protocols/handle-input sl "\r") ;; enter — 3 -> 5
           (t/is (= 5 (:max-retries @(:cfg ag))) "max-retries applies live")
           (t/is (= [[:retry :max-retries] 5] @saved) "max-retries persisted")
-          (protocols/handle-input sl "\u001b[B") ;; down → base-delay
+          (settings-list/settings-list-select-item! sl :base-delay-ms)
           (protocols/handle-input sl "\r") ;; enter — 2000 -> 4000
           (t/is (= 4000 (:base-delay-ms @(:cfg ag))) "base delay applies live")
           (t/is (= [[:retry :base-delay-ms] 4000] @saved) "base delay persisted"))))))
+
+(deftest test-set-terminal-progress-clears-when-disabled
+  (testing "a turn end clears even while the setting is off; activation
+            stays gated (pi gates both ends, leaving its keepalive asserting
+            after a mid-turn disable)"
+    (let [missing (str (fs/absolutize (fs/file "target" (str "test-progress-missing-"
+                                                             (System/currentTimeMillis))))
+                       "/settings.edn")
+          calls (atom [])
+          term (reify terminal/ITerminal
+                 (start! [_ _ _] nil)
+                 (stop! [_] nil)
+                 (started? [_] true)
+                 (write-output [_ _] nil)
+                 (read-input [_ _] -1)
+                 (columns [_] 80)
+                 (rows [_] 24)
+                 (set-progress! [_ active] (swap! calls conj active)))
+          cs {:config {:show-terminal-progress false}
+              :tui {:terminal (atom term)}}]
+      (with-redefs [cfg/global-settings-path (fn [] missing)]
+        ((var inter/set-terminal-progress!) cs false)
+        (t/is (= [false] @calls) "the clear passes while disabled")
+        ((var inter/set-terminal-progress!) cs true)
+        (t/is (= [false] @calls) "activation is still settings-gated")))))
 
 (deftest test-settings-http-transport-row
   (testing "/settings HTTP transport row switches the runtime transport
@@ -1267,11 +1287,8 @@
           (http/set-transport! :platform)
           ((:handler (commands/find-command "settings")) cs "")
           (let [sl @sl-ref]
-            ;; rows 0..6: auto-compact block-images steering follow-up
-            ;; http-idle http-total http-transport — navigate to the
-            ;; transport row
-            (dotimes [_ 6]
-              (protocols/handle-input sl "\u001b[B"))
+            ;; select the transport row by id (row order is data, not stable)
+            (settings-list/settings-list-select-item! sl :http-transport)
             (protocols/handle-input sl "\r") ;; platform -> curl
             (t/is (= :curl (http/get-transport))
                   "row switches the runtime transport")

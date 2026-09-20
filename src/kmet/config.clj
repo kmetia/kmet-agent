@@ -417,18 +417,57 @@
 
 (defn get-show-terminal-progress
   "Whether to show the OSC 9;4 terminal progress indicator (pi:
-   showTerminalProgress — default false). An unset setting falls back to
-   the KMET_TERMINAL_PROGRESS=1 env default."
+   showTerminalProgress — default false). Read live from the global settings
+   file so a /settings toggle takes effect immediately; an unset setting
+   falls back to the CONFIG snapshot, then the KMET_TERMINAL_PROGRESS=1 env
+   default."
   [config]
-  (if (nil? (:show-terminal-progress config))
-    (= (System/getenv "KMET_TERMINAL_PROGRESS") "1")
-    (boolean (:show-terminal-progress config))))
+  (let [v (get-setting-live config :show-terminal-progress)]
+    (if (nil? v)
+      (= (System/getenv "KMET_TERMINAL_PROGRESS") "1")
+      (boolean v))))
 
 (defn set-show-terminal-progress!
   "Persist the terminal-progress flag (pi: settingsManager
    setShowTerminalProgress)."
   [enabled?]
   (save-setting! [:show-terminal-progress] (boolean enabled?)))
+
+(defn get-clear-on-shrink
+  "Whether empty rows are cleared when content shrinks (pi:
+   terminal.clearOnShrink — default false). Read live from the global
+   settings file so a /settings toggle takes effect immediately; an unset
+   setting falls back to the CONFIG snapshot, then the
+   KMET_CLEAR_ON_SHRINK=1 env default (the TUI's historical default)."
+  [config]
+  (let [v (if-let [settings (read-global-settings)]
+            (if (contains? (:terminal settings) :clear-on-shrink)
+              (get-in settings [:terminal :clear-on-shrink])
+              (get-in config [:terminal :clear-on-shrink]))
+            (get-in config [:terminal :clear-on-shrink]))]
+    (if (nil? v)
+      (= (System/getenv "KMET_CLEAR_ON_SHRINK") "1")
+      (boolean v))))
+
+(defn set-clear-on-shrink!
+  "Persist the clear-on-shrink flag (pi: settingsManager
+   setClearOnShrink)."
+  [enabled?]
+  (save-setting! [:terminal :clear-on-shrink] (boolean enabled?)))
+
+(defn get-enable-skill-commands
+  "Whether skills register as /skill:name commands (pi: enableSkillCommands
+   — default true). Read live from the global settings file so a /settings
+   toggle takes effect the next time the autocomplete opens; falls back to
+   the CONFIG snapshot."
+  [config]
+  (boolean (get-setting-live config :enable-skill-commands true)))
+
+(defn set-enable-skill-commands!
+  "Persist the skill-commands flag (pi: settingsManager
+   setEnableSkillCommands)."
+  [enabled?]
+  (save-setting! [:enable-skill-commands] (boolean enabled?)))
 
 (defn get-enabled-models-live
   "Live :enabled-models patterns from the global settings file (pi: the

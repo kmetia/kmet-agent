@@ -163,11 +163,35 @@
   (theme/set-custom-themes-dir! (str (fs/path (cfg/get-agent-dir) "themes"))))
 
 (defn set-theme-name!
-  "pi: setThemeName — switch to a named theme, disabling auto-sync.
-   SHOW-ERROR? reports failures via the error callback."
+  "pi: setThemeName — switch to a named theme, disabling auto-sync and
+   updating the controller's theme SETTING so get-theme-selection reflects
+   it (pi: currentThemeSetting = themeName on success). SHOW-ERROR? reports
+   failures via the error callback."
   [ctrl theme-name & [show-error?]]
   (set-auto-sync! ctrl false)
-  (apply-theme-name! ctrl theme-name (boolean show-error?)))
+  (let [result (apply-theme-name! ctrl theme-name (boolean show-error?))]
+    (when (:success result)
+      (swap! (:config-atom ctrl) assoc :theme
+             (if (keyword? theme-name) (name theme-name) (str theme-name))))
+    result))
+
+(defn get-theme-selection
+  "The current :theme setting — a name or an automatic light/dark
+   string — falling back to the active theme name (pi: getThemeSelection:
+   currentThemeSetting ?? settings.theme ?? activeThemeName)."
+  [ctrl]
+  (or (:theme @(:config-atom ctrl))
+      @(:active-theme-name-atom ctrl)))
+
+(defn set-theme-setting!
+  "pi: setThemeSetting — record SETTING (a name or the automatic
+   light-theme/dark-theme string) as the controller's theme setting and
+   re-apply it: auto settings detect the terminal theme and enable
+   color-scheme sync; explicit names apply directly (failures report through
+   the error callback)."
+  [ctrl setting]
+  (swap! (:config-atom ctrl) assoc :theme setting)
+  (apply-from-settings! ctrl))
 
 (defn set-theme-instance!
   "pi: setThemeInstance — switch to an in-memory Theme instance."

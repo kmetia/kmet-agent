@@ -18,6 +18,7 @@
             [kmet.app.ui.subs :as subs]
             [kmet.app.ui.dock :as dock]
             [kmet.app.ui.model-selector :as model-selector]
+            [kmet.app.ui.theme-submenu :as theme-submenu]
             [kmet.config :as cfg]
             [kmet.libs.http :as http]
             [kmet.libs.terminal-image :as timg]
@@ -70,11 +71,14 @@
       (apply! cur))))
 
 (defn- bool-row
-  "A true/false toggle row (pi: values [\"true\" \"false\"])."
-  [id label v]
-  {:id id :label label
-   :value (if v "true" "false")
-   :values ["true" "false"]})
+  "A true/false toggle row (pi: values [\"true\" \"false\"]).
+   DESCRIPTION is the muted line pi shows under the selected row."
+  ([id label v] (bool-row id label v nil))
+  ([id label v description]
+   (cond-> {:id id :label label
+            :value (if v "true" "false")
+            :values ["true" "false"]}
+     description (assoc :description description))))
 
 (defn- image-rows
   "Settings rows for inline images (pi: only shown when the terminal
@@ -84,10 +88,12 @@
   (when (:images (timg/get-capabilities))
     [{:id :show-images
       :label "Show images"
+      :description "Render images inline in terminal"
       :value (if (:show-images @subs/image-settings-atom) "true" "false")
       :values ["true" "false"]}
      {:id :image-width-cells
       :label "Image width"
+      :description "Preferred inline image width in terminal cells"
       :value (str (:image-width-cells @subs/image-settings-atom))
       :values ["60" "80" "120"]}]))
 
@@ -129,50 +135,71 @@
                       (apply-retry!))
         ;; image rows (pi: after autocompact, only with terminal support)
         img-rows (image-rows)
+        ;; the clear-on-shrink row needs the live tui (tests build a cs
+        ;; without one; pi: clearOnShrink after autocomplete-max-visible)
+        clear-on-shrink-row (when (:tui cs)
+                              (bool-row :clear-on-shrink "Clear on shrink"
+                                        (tui/tui-get-clear-on-shrink (:tui cs))
+                                        "Clear empty rows when content shrinks (may cause flicker)"))
         base-items (into []
-                         (concat [(bool-row :auto-compact "Auto-compact" (:auto-compact @(:cfg ag)))]
+                         (concat [(bool-row :auto-compact "Auto-compact" (:auto-compact @(:cfg ag))
+                                            "Automatically compact context when it gets too large")]
                                  img-rows
-                                 [(bool-row :block-images "Block images" (:block-images @(:cfg ag)))
+                                 [(bool-row :block-images "Block images" (:block-images @(:cfg ag))
+                                            "Prevent images from being sent to LLM providers")
+                                  (bool-row :skill-commands "Skill commands"
+                                            (cfg/get-enable-skill-commands config)
+                                            "Register skills as /skill:name commands")
                                   {:id :steering-mode
                                    :label "Steering mode"
+                                   :description "Enter while streaming queues steering messages. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once."
                                    :value (name (:steering-mode @(:cfg ag)))
                                    :values ["one-at-a-time" "all"]}
                                   {:id :follow-up-mode
                                    :label "Follow-up mode"
+                                   :description "Ctrl+Enter queues follow-up messages until the agent stops. 'one-at-a-time': deliver one, wait for response. 'all': deliver all at once."
                                    :value (name (:follow-up-mode @(:cfg ag)))
                                    :values ["one-at-a-time" "all"]}
                                   {:id :http-idle-timeout
                                    :label "HTTP idle timeout"
+                                   :description "Maximum idle gap while waiting for HTTP headers or body chunks. Disable for local models that pause longer than five minutes."
                                    :value (format-idle-timeout idle-ms)
                                    :values (mapv :label http-idle-timeout-choices)}
                                   {:id :http-total-timeout
                                    :label "HTTP total timeout"
+                                   :description "Whole-request deadline; 'use idle' follows the idle timeout."
                                    :value (format-total-timeout total-ms)
                                    :values (mapv :label http-total-timeout-choices)}
                                   {:id :http-transport
                                    :label "HTTP transport"
+                                   :description "Outbound HTTP transport: platform (http-client, curl fallback) or curl for every request"
                      ;; the runtime knob is the truth (applied at config
                      ;; load and on change) — not the settings file
                                    :value (name (http/get-transport))
                                    :values (mapv name http/transport-modes)}
                                   (bool-row :cache-miss-notices "Cache miss notices"
-                                            (cfg/get-show-cache-miss-notices config))
+                                            (cfg/get-show-cache-miss-notices config)
+                                            "Show transcript notices for cache costs and provider recovery diagnostics")
                                   {:id :tree-filter-mode
                                    :label "Tree filter mode"
+                                   :description "Default filter when opening /tree"
                                    :value (name (cfg/get-tree-filter-mode config))
                                    :values ["default" "no-tools" "user-only" "labeled-only" "all"]}
                                   {:id :thinking
                                    :label "Thinking level"
+                                   :description "Thinking level for the current model"
                                    :value current
                                    :values levels}
                                   {:id :hide-thinking
                                    :label "Hide thinking"
+                                   :description "Hide thinking blocks in assistant responses"
                      ;; the live chat-history flag, not the startup config
                      ;; snapshot — Ctrl+T toggles it at runtime
                                    :value (if (ui/chat-history-get-thinking-hidden (:chat-history cs)) "on" "off")
                                    :values ["off" "on"]}
                                   {:id :tool-display-mode
                                    :label "Tool display"
+                                   :description "How tool calls render: collapsed, expanded, or quiet"
                      ;; the live chat-history mode, not a startup snapshot
                      ;; — ctrl+o cycles it at runtime
                                    :value (name (or (when (:chat-history cs)
@@ -181,38 +208,52 @@
                                    :values ["collapsed" "expanded" "quiet"]}
                                   {:id :editor-padding
                                    :label "Editor padding"
+                                   :description "Horizontal padding for input editor (0-3)"
                                    :value (cfg/get-editor-padding-x config)
                                    :values [0 1 2 3]}
                                   {:id :output-padding
                                    :label "Output padding"
+                                   :description "Horizontal padding for user messages, assistant messages, and thinking"
                                    :value (cfg/get-output-pad config)
                                    :values [0 1]}
                                   {:id :autocomplete-max-visible
                                    :label "Autocomplete max items"
+                                   :description "Max visible items in autocomplete dropdown (3-20)"
                                    :value (cfg/get-autocomplete-max-visible config)
-                                   :values [3 5 7 10 15 20]}
+                                   :values [3 5 7 10 15 20]}]
+                                 (when clear-on-shrink-row
+                                   [clear-on-shrink-row])
+                                 [(bool-row :terminal-progress "Terminal progress"
+                                            (cfg/get-show-terminal-progress config)
+                                            "Show OSC 9;4 progress indicators in the terminal tab bar")
                                   {:id :auto-retry
                                    :label "Auto retry"
+                                   :description "Retry failed provider calls automatically"
                                    :value (:enabled @retry-atom)
                                    :values [true false]}
                                   {:id :max-retries
                                    :label "Max retries"
+                                   :description "Maximum retry attempts"
                                    :value (:max-retries @retry-atom)
                                    :values [0 1 2 3 5 8 10]}
                                   {:id :base-delay-ms
                                    :label "Base delay (ms)"
+                                   :description "Initial retry delay (exponential backoff)"
                                    :value (:base-delay-ms @retry-atom)
                                    :values [500 1000 2000 4000 8000]}
                                   {:id :loop-guard-enabled
                                    :label "Repeat guard"
+                                   :description "Abort repeated identical tool calls (repeat-loop guard)"
                                    :value (:loop-guard-enabled @(:cfg ag))
                                    :values [true false]}
                                   {:id :loop-guard-threshold
                                    :label "Repeat threshold"
+                                   :description "Repeated calls before the guard fires"
                                    :value (:loop-guard-threshold @(:cfg ag))
                                    :values [2 3 4 5]}
                                   {:id :thinking-loop-guard-enabled
                                    :label "Thinking repeat guard"
+                                   :description "Also abort repeated identical thinking"
                                    :value (:thinking-loop-guard-enabled @(:cfg ag))
                                    :values [true false]}]))
         ;; hardware-cursor row needs the live tui, theme row the theme
@@ -220,13 +261,23 @@
         items (cond-> (if (:tui cs)
                         (conj base-items
                               (bool-row :show-hardware-cursor "Show hardware cursor"
-                                        (tui/tui-get-show-hardware-cursor (:tui cs))))
+                                        (tui/tui-get-show-hardware-cursor (:tui cs))
+                                        "Show the terminal cursor while still positioning it for IME support"))
                         base-items)
                 (:theme-controller cs)
                 (conj {:id :theme
                        :label "Theme"
-                       :value (theme-ctrl/get-active-theme-name (:theme-controller cs))
-                       :values (sort (keys (th/get-all-themes)))}))
+                       :description "Color theme for the interface"
+                       :value (theme-ctrl/get-theme-selection (:theme-controller cs))
+                       ;; pi: the Theme row opens the ThemeSubmenu (single
+                       ;; names + the Automatic light/dark mode)
+                       :submenu (fn [current-value done]
+                                  (theme-submenu/make-theme-submenu
+                                   current-value
+                                   (theme-ctrl/get-terminal-theme (:theme-controller cs))
+                                   (sort (keys (th/get-all-themes)))
+                                   done
+                                   :on-preview #(theme-ctrl/preview (:theme-controller cs) %)))}))
         ;; pi: SettingsSelector's onChange — one branch per row id, each
         ;; applying live and persisting (hoisted so the [:settings-list]
         ;; element below stays readable)
@@ -250,6 +301,16 @@
                       (let [blocked? (= value "true")]
                         (agent/set-block-images! ag blocked?)
                         (cfg/save-setting! [:images :block-images] blocked?))
+                      :skill-commands
+                      ;; the autocomplete provider reads the setting live when
+                      ;; it opens (pi: setupAutocompleteProvider on change)
+                      (cfg/set-enable-skill-commands! (= value "true"))
+                      :clear-on-shrink
+                      (let [on? (= value "true")]
+                        (tui/tui-set-clear-on-shrink! (:tui cs) on?)
+                        (cfg/set-clear-on-shrink! on?))
+                      :terminal-progress
+                      (cfg/set-show-terminal-progress! (= value "true"))
                       :steering-mode
                       (let [mode (keyword value)]
                         (swap! (:cfg ag) assoc :steering-mode mode)
@@ -278,15 +339,11 @@
                       :tree-filter-mode
                       (cfg/save-setting! [:tree-filter-mode] (keyword value))
                       :theme
-                      (let [result (theme-ctrl/set-theme-name!
-                                    (:theme-controller cs) value)]
-                        (if (:success result)
-                          (cfg/save-setting! [:theme] value)
-                          (ui/chat-history-add-message!
-                           (:chat-history cs)
-                           {:role :info :label "Theme"
-                            :content (str "Failed to load theme \"" value
-                                          "\": " (:error result))})))
+                      ;; pi: onThemeChange — persist the setting (a name or
+                      ;; the automatic "light/dark" string) and apply it;
+                      ;; auto settings enable color-scheme sync
+                      (do (theme-ctrl/set-theme-setting! (:theme-controller cs) value)
+                          (cfg/save-setting! [:theme] value))
                       :thinking
                       (let [level (keyword value)]
                         (agent/set-thinking-level! ag level)
