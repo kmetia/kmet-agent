@@ -739,20 +739,25 @@
 
 (defn- expand-changed-range-for-kitty-images
   "Port of pi's expandChangedRangeForKittyImages: widen the changed range so it
-   covers every image block that touches it in either prev or new lines."
+   covers every image block that touches it in either prev or new lines.
+   Terminals without image support produce no image lines (components gate on
+   the capabilities), so short-circuit to the unchanged range instead of
+   walking the whole transcript on every changed frame."
   [first-changed last-changed prev lines]
-  (let [expanded (volatile! [first-changed last-changed])
-        expand-for (fn [ls]
-                     (doseq [i (range (count ls))]
-                       (when (seq (img/extract-kitty-image-ids (nth ls i)))
-                         (let [block-end (+ i (kitty-image-reserved-rows ls i) -1)]
-                           (when (or (>= i first-changed)
-                                     (and (<= i last-changed) (>= block-end first-changed)))
-                             (vswap! expanded
-                                     (fn [[f l]] [(min f i) (max l block-end)])))))))]
-    (expand-for prev)
-    (expand-for lines)
-    @expanded))
+  (if-not (:images (img/get-capabilities))
+    [first-changed last-changed]
+    (let [expanded (volatile! [first-changed last-changed])
+          expand-for (fn [ls]
+                       (doseq [i (range (count ls))]
+                         (when (seq (img/extract-kitty-image-ids (nth ls i)))
+                           (let [block-end (+ i (kitty-image-reserved-rows ls i) -1)]
+                             (when (or (>= i first-changed)
+                                       (and (<= i last-changed) (>= block-end first-changed)))
+                               (vswap! expanded
+                                       (fn [[f l]] [(min f i) (max l block-end)])))))))]
+      (expand-for prev)
+      (expand-for lines)
+      @expanded)))
 
 (defn- delete-changed-kitty-images
   "Port of pi's deleteChangedKittyImages: the delete sequence for all image ids
