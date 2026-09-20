@@ -57,6 +57,7 @@
    "Input"                      :focused-input
    "Editor"                     :focused-input
    "DynamicBorder"              :stateless-ephemeral
+   "TreeLabelArea"               :transparent-parent
    "BashExecutionComponent"     :transparent-parent})
 
 (def ^:private component-dirs
@@ -139,7 +140,7 @@
    when components are added or removed; a mismatch means the scan below
    silently lost forms (a scanner regression), so the convention checks
    would otherwise pass vacuously."
-  50)
+  51)
 
 (deftest caching-conventions
   (let [checked (atom [])]

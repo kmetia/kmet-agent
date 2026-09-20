@@ -19,10 +19,10 @@
             [kmet.app.keybindings :as app-kb]
             [kmet.app.session :as session]
             [kmet.app.ui :as ui]
-            [kmet.app.ui.dialogs :as dialogs]
             [kmet.app.ui.dock :as dock]
             [kmet.config :as cfg]
             [kmet.libs.clipboard :as clipboard]
+            [kmet.tui.components.input :as input]
             [kmet.tui.hiccup :as h]
             [kmet.tui.core :as tui]
             [kmet.tui.keys :as keys]
@@ -932,6 +932,45 @@
   (focused [this] @(:focused? this))
   (set-focused! [this val] (reset! (:focused? this) val)))
 
+;; ─── Inline label editor (pi: TreeSelectorComponent + LabelInput) ───────────
+
+(defcomponent TreeLabelArea nil [tree-list label-input-atom focused?]
+  (render [_this width]
+    ;; No track! — the output is whatever the active child renders, and a
+    ;; child's internal state is invisible to the deref tracker. The tree
+    ;; list / input caches carry the detail; this delegate renders fresh.
+    (if-let [in @label-input-atom]
+      (let [theme-current (th/get-current-theme)
+            kmgr (or (tui-kb/get-global-keybindings)
+                     (app-kb/create-agent-keybindings-manager
+                      "target/tree-label-keybindings"))
+            hint (str (format-help-keys kmgr ["tui.select.confirm"]) " save"
+                      "  " (format-help-keys kmgr ["tui.select.cancel"]) " cancel")]
+        (into [(u/truncate-to-width
+                (th/fg theme-current :muted "  Label (empty to remove):") width)]
+              (concat
+               (mapv #(u/truncate-to-width (str "  " %) width)
+                     (protocols/render in (max 1 (- width 2))))
+               [(u/truncate-to-width
+                 (th/fg theme-current :dim (str "  " hint)) width)])))
+      (protocols/render tree-list width)))
+
+  (handle-input [_this data]
+    (if-let [in @label-input-atom]
+      (protocols/handle-input in data)
+      (protocols/handle-input tree-list data))))
+
+(extend-type TreeLabelArea
+  protocols/IFocusable
+  (focused [this] @(:focused? this))
+  (set-focused! [this val]
+    (reset! (:focused? this) val)
+    ;; The active child owns the real focus (the input's cursor marker, the
+    ;; tree's focused? flag) — forward to whichever is showing.
+    (protocols/set-focused!
+     (if-let [in @(:label-input-atom this)] in (:tree-list this))
+     val)))
+
 ;; ─── Construction ───────────────────────────────────────────────────────────
 
 (defn make-tree-list
@@ -1071,34 +1110,49 @@
                                                 {:role :assistant
                                                  :content "No clipboard tool available on this system."}))))
                                 :on-label-edit nil)
+             ;; The inline label editor (pi: TreeSelectorComponent's
+             ;; LabelInput): the panel body swaps the tree list for an Input
+             ;; instead of floating an overlay over the panel.
+             label-input-atom (atom nil)
+             area (map->TreeLabelArea {:tree-list tl
+                                       :label-input-atom label-input-atom
+                                       :focused? (atom false)})
+             end-label-edit! (fn []
+                               (reset! label-input-atom nil)
+                               (protocols/set-focused! tl @(:focused? area))
+                               (tui/tui-request-render (:tui cs)))
              reload-and-render! (fn []
                                   ;; labels resolve from the appended :label
                                   ;; entry, so a fresh snapshot shows them
                                   (tree-list-reload! tl (selector-tree sess))
                                   (tui/tui-request-render (:tui cs)))
-             ;; late-bound: the label dialog needs RELOAD-AND-RENDER!, which
-             ;; needs TL — attach after construction (pi: onLabelEdit wiring)
+             ;; late-bound: the editor needs END-LABEL-EDIT! and
+             ;; RELOAD-AND-RENDER!, which need TL/AREA — attach after
+             ;; construction (pi: onLabelEdit wiring)
              _ (reset! (:on-label-edit-atom tl)
                        (fn [entry-id current-label]
-                         (tui/tui-show-overlay
-                          (:tui cs)
-                          (dialogs/make-input-dialog
-                           "Edit tree label"
-                           (fn [label]
-                             (tui/tui-hide-overlay (:tui cs))
-                             (let [label (str/trim label)
-                                   label' (when (seq label) label)]
-                               ;; empty submit clears (pi LabelInput)
-                               (session/set-label! sess entry-id label')
-                               (reload-and-render!)))
-                           (fn []
-                             (tui/tui-hide-overlay (:tui cs))
-                             (tui/tui-request-render (:tui cs)))
-                           (th/get-current-theme)
-                           current-label))))
+                         (let [in (input/make-input)]
+                           (when current-label
+                             (input/input-set-value! in current-label)
+                             ;; pi: LabelInput places the cursor after the
+                             ;; prefilled text
+                             (input/input-set-cursor! in (count current-label)))
+                           (input/input-set-on-submit!
+                            in (fn [value]
+                                 (let [label (str/trim value)
+                                       label' (when (seq label) label)]
+                                   ;; empty submit clears (pi LabelInput)
+                                   (session/set-label! sess entry-id label')
+                                   (end-label-edit!)
+                                   (reload-and-render!))))
+                           (input/input-set-on-escape! in end-label-edit!)
+                           (reset! label-input-atom in)
+                           (protocols/set-focused! in @(:focused? area))
+                           (tui/tui-request-render (:tui cs)))))
              ;; The panel is a compiled hiccup tree (dsl.md): the
              ;; spacer/border/title/help/search chrome is DSL-owned; the
-             ;; session tree (TreeList) splices foreign (the focus target).
+             ;; body (TreeLabelArea: tree list or inline label editor)
+             ;; splices foreign (the focus target).
              panel (h/compile-tree
                     [:container {}
                      [:spacer {:lines 1}]
@@ -1109,7 +1163,7 @@
                                            :cache-atom (atom nil)})
                      [:dynamic-border {:color-fn #(th/fg panel-theme :accent %)}]
                      [:spacer {:lines 1}]
-                     tl
+                     area
                      [:spacer {:lines 1}]
                      [:dynamic-border {:color-fn #(th/fg panel-theme :accent %)}]])]
          (reset! close-ref
@@ -1120,5 +1174,5 @@
                    ((:done @sel-ref))
                    (h/dispose-tree! panel)
                    (protocols/dispose tl)))
-         (reset! sel-ref {:done (dock/mount! cs panel tl)})
+         (reset! sel-ref {:done (dock/mount! cs panel area)})
          (tui/tui-request-render (:tui cs)))))))

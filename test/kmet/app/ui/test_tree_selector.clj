@@ -10,6 +10,7 @@
             [clojure.test :as t]
             [kmet.app.keybindings :as kb]
             [kmet.app.ui.tree-selector :as ts]
+            [kmet.tui.components.input :as input]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.theme :as th]
@@ -302,6 +303,37 @@
       (t/is (some? @seen) "the new chord edits")
       (finally
         (tui-kb/set-user-bindings! (tui-kb/get-global-keybindings) {})))))
+
+(t/deftest tree-label-area-swaps-in-an-inline-editor
+  ;; pi: TreeSelectorComponent showLabelInput — the label input replaces the
+  ;; list inside the panel; it is not a floating overlay.
+  (let [tl (new-list)
+        submitted (atom nil)
+        in (input/make-input)
+        _ (input/input-set-on-submit! in (fn [v] (reset! submitted v)))
+        area (ts/map->TreeLabelArea {:tree-list tl
+                                     :label-input-atom (atom nil)
+                                     :focused? (atom false)})
+        lines (fn [] (mapv #(u/strip-ansi-codes %)
+                           (protocols/render area 80)))]
+    (t/is (some #(str/includes? % "hello") (lines))
+          "without an editor the tree list renders")
+    (reset! (:label-input-atom area) in)
+    (input/input-set-value! in "keep")
+    (input/input-set-cursor! in (count "keep"))
+    (t/is (some #(str/includes? % "Label (empty to remove):") (lines)))
+    (t/is (some #(str/includes? % "> keep") (lines)))
+    (t/is (some #(str/includes? % "save") (lines)))
+    ;; keys route to the editor, not the list
+    (protocols/handle-input area "x")
+    (protocols/handle-input area "\r")
+    (t/is (= "keepx" @submitted) "the input receives typing and enter")
+    ;; focus forwards to the active child
+    (protocols/set-focused! area true)
+    (t/is (true? (protocols/focused in)))
+    (reset! (:label-input-atom area) nil)
+    (protocols/set-focused! area true)
+    (t/is (true? (protocols/focused tl)) "back to the list: focus follows")))
 
 ;; ─── Horizontal panning ─────────────────────────────────────────────────────
 
