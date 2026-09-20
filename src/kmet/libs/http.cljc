@@ -42,7 +42,8 @@
    through curl with full status/headers parity. Proxy selection is
    transparent — callers never see the transport. `:proxy :none` forces a
    direct connection; the env seam is testable via a map (proxy-for-url)."
-  (:require [babashka.http-client :as http]
+  (:require [babashka.fs :as fs]
+            [babashka.http-client :as http]
             [babashka.process :as proc]
             [kmet.libs.json :as json]
             [clojure.string :as str]
@@ -361,15 +362,26 @@
 
 (def ^:private curl-timeout-seconds 120)
 
+(defn- path-dirs
+  "PATH entries split on the OS separator. Jolt answers
+   java.io.File/pathSeparator as \":\" even on Windows (its File surface
+   is POSIX-shaped), so babashka.fs/exec-paths — and the default `which`
+   lookup — are wrong there; key off the OS instead."
+  []
+  (remove str/blank? (str/split (or (System/getenv "PATH") "")
+                                (if process/windows-os? #";" #":"))))
+
 (def curl-available?
   "Resolved once: true when curl is on PATH (the curl transport needs it
    — every request in :curl mode, SOCKS/https-scheme proxies and Jolt
    streams in :platform mode)."
   (delay
     (try
-      (let [r @(proc/process ["sh" "-c" "command -v curl"]
-                             {:out :discard :err :discard})]
-        (zero? (:exit r)))
+      ;; fs/which honors Windows' PATHEXT (exe/com/bat/cmd) and the
+      ;; executable bit elsewhere; explicit :paths because exec-paths is
+      ;; jolt-broken on Windows (see path-dirs). No shell: Jolt on Windows
+      ;; cannot spawn one either.
+      (some? (fs/which "curl" {:paths (path-dirs)}))
       (catch Exception _ false))))
 
 (defn- watch-cancel!
