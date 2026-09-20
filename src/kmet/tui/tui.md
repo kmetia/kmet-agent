@@ -800,6 +800,23 @@ path that bypasses `tui-request-render`. `tui-request-render` sets the flag
 before it wakes the loop, and the loop re-checks the flag inside the park:
 a request is consumed, never lost to the park.
 
+**Render and input never overlap.** The input reader, the flush timers and
+the render loop are separate threads, but component state is not
+thread-safe by contract: they run under one mutex (`dispatch-lock`,
+§7), so the loop's whole iteration — due timers, the reaction flush and
+the frame, props application included — cannot interleave with a
+keystroke. Without it a frame whose body read a state snapshot before a
+keystroke could apply that snapshot after it, writing the older value
+back over a field the user had just edited (the `/scoped-models`
+backspace freeze), and a render could read a component mid-edit. This is
+pi's single-threaded model; the lock is a `ReentrantLock` because the
+loop must back out of the acquisition when its holder (the reader,
+joining the loop from `tui-suspend!` for the external editor) is waiting
+on it. The park/sleep and the frame's terminal write stay outside the
+lock: writing is blocking tty I/O, and a stalled terminal must not stall
+input dispatch — the frame's bytes are staged under the lock and written
+once it is released.
+
 ### 6.1 Timers — `kmet.tui.timers`
 
 The one place UI timing lives. The frame loop calls `pump!` on every wake
@@ -836,7 +853,9 @@ that renders — and may touch widgets and component state directly:
 
 Input goes to the **focused leaf only** (`tui/tui-set-focus`; pi parity —
 Kitty release events, IME and focus routing are machinery the tree never
-sees). Consequences:
+sees). Input dispatch runs under `dispatch-lock` (§6) — the same mutex the
+render pass holds — so a keystroke can never interleave with a frame.
+Consequences:
 
 - **No declarative input props, ever**: a `:on-key` prop in a tree is a
   design error, not a missing feature. Interactivity = focus + widget

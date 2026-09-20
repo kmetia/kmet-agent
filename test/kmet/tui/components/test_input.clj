@@ -309,3 +309,59 @@
     (t/is (= ["a" "ab" "" "X"] @seen)
           "undo and paste both report the resulting value")))
 
+;; ─── Pair consistency under concurrent readers ─────────────────────────────
+;; Input dispatch and the render loop are serialized by the TUI's
+;; dispatch-lock, but the value/cursor atoms are also read (and written) by
+;; code outside that lock — host setters, extensions. The pair must never be
+;; observably inconsistent: a torn read (short value, old longer cursor)
+;; made render-line's (subs value 0 cursor) throw, which tears down the whole
+;; TUI (a throwing render body stops the render loop).
+
+(defn- record-pairs!
+  "Watch the input's value/cursor atoms, recording the pair every writer
+   leaves behind: the value watch sees (new value, live cursor), the cursor
+   watch (live value, new cursor) — exactly what a concurrent render could
+   read between the two resets."
+  [inp]
+  (let [pairs (atom [])]
+    (add-watch (:value-atom inp) ::value
+               (fn [_ _ _ new] (swap! pairs conj [new @(:cursor-atom inp)])))
+    (add-watch (:cursor-atom inp) ::cursor
+               (fn [_ _ _ new] (swap! pairs conj [@(:value-atom inp) new])))
+    pairs))
+
+(t/deftest test-input-pair-writes-keep-the-cursor-in-bounds
+  (let [inp (input/make-input)
+        pairs (record-pairs! inp)]
+    (doseq [c "hello world"] (core/handle-input inp (str c)))
+    ;; every value-changing edit, shrinking and growing
+    (core/handle-input inp "\u007f")                                 ;; backspace
+    (core/handle-input inp "\u001b[3~")                              ;; forward delete
+    (core/handle-input inp "\u001b[H")                               ;; home
+    (core/handle-input inp (str (char 11)))                          ;; ctrl+k kill to end
+    (core/handle-input inp (str (char 25)))                          ;; ctrl+y yank
+    (core/handle-input inp (str (char 23)))                          ;; ctrl+w a second kill
+    (core/handle-input inp (str (char 25)))                          ;; ctrl+y yank again
+    (core/handle-input inp "\u001b[121;3u")                          ;; alt+y yank-pop
+    (core/handle-input inp (str (char 31)))                          ;; ctrl+- undo
+    (core/handle-input inp "\u001b[F")                               ;; end
+    (core/handle-input inp (str (char 21)))                          ;; ctrl+u delete to start
+    (core/handle-input inp (str "\u001b[200~" "xy" "\u001b[201~")) ;; paste
+    (input/input-set-value! inp "shrink")
+    (input/input-set-value! inp "s")
+    (t/is (seq @pairs) "the writer watches recorded pairs")
+    (t/is (every? (fn [[v c]] (<= c (count v))) @pairs)
+          (str "a writer exposed cursor past end: "
+               (pr-str (remove (fn [[v c]] (<= c (count v))) @pairs))))
+    (t/is (= "s" (input/input-get-value inp)))))
+
+(t/deftest test-input-render-tolerates-a-torn-cursor
+  ;; an external writer (extension poking :cursor-atom) can still leave a
+  ;; cursor past the value's end — render must clamp, not throw: a throwing
+  ;; render body stops the whole TUI (the render-crash contract)
+  (let [inp (input/make-input)]
+    (doseq [c "ab"] (core/handle-input inp (str c)))
+    (reset! (:cursor-atom inp) 5)
+    (t/is (some? (core/render inp 20)) "torn cursor renders")
+    (t/is (str/includes? (first (core/render inp 20)) "ab")
+          "the value renders despite the torn cursor")))

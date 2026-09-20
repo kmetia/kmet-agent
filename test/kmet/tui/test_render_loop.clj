@@ -60,6 +60,19 @@
   (rows [_] (:rows @size))
   (set-progress! [_ _] nil))
 
+(defrecord LockProbeTerminal [size writes lock-held]
+  term/ITerminal
+  (start! [this _ _] this)
+  (stop! [_] nil)
+  (started? [_] true)
+  (write-output [_ s]
+    (swap! lock-held conj (.isHeldByCurrentThread @(var core/dispatch-lock)))
+    (swap! writes conj s))
+  (read-input [_ _] -1)
+  (columns [_] (:cols @size))
+  (rows [_] (:rows @size))
+  (set-progress! [_ _] nil))
+
 (defn- make-virtual-terminal
   "A virtual terminal: protocol stub at 80x24 with every write recorded in
    an atom and a mutable size (resize the test by swapping the size atom)."
@@ -477,5 +490,127 @@
               (Thread/sleep 5)
               (recur))))
         (t/is (= 30 @(:previous-height tui)) "height change detected and rendered")
+        (finally
+          (stop-loop tui))))))
+
+;; ─── Render vs input serialization (dispatch-lock) ─────────────────────────
+;; The render loop and the input reader mutate/read component state on
+;; separate threads; pi is single-threaded and has no interleaving. The
+;; dispatch-lock mutex is what makes a frame's props application and a
+;; keystroke non-overlapping (the /scoped-models backspace freeze).
+
+(deftest ^:slow render-pass-holds-the-dispatch-lock
+  (testing "the frame pass runs under dispatch-lock — the same mutex input
+            dispatch takes — so no keystroke can interleave with it"
+    (let [held (atom [])
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))
+          lock @(var core/dispatch-lock)]
+      (try
+        (core/tui-add-child
+         tui
+         (reify core/IComponent
+           (render [_ _]
+             (swap! held conj (.isHeldByCurrentThread lock))
+             ["frame"])
+           (handle-input [_ _] nil)
+           (invalidate [_] nil)))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 2000)
+        (t/is (seq @held) "the component rendered")
+        (t/is (every? true? @held)
+              "every render ran with dispatch-lock held by the loop thread")
+        (finally
+          (stop-loop tui))))))
+
+(deftest ^:slow input-dispatch-waits-for-an-in-flight-frame
+  (testing "a key dispatched from another thread blocks on dispatch-lock while
+            the frame pass is running (pi: single-threaded, no interleaving)"
+    (let [entered (promise)
+          release (promise)
+          frames (atom 0)
+          handled (atom [])
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))
+          lock @(var core/dispatch-lock)
+          comp (reify core/IComponent
+                 (render [_ _]
+                   (when (= 1 (swap! frames inc))
+                     (deliver entered true)
+                     (deref release))
+                   ["frame"])
+                 (handle-input [_ data] (swap! handled conj data))
+                 (invalidate [_] nil))]
+      (try
+        (core/tui-add-child tui comp)
+        (core/tui-set-focus tui comp)
+        (start-loop tui)
+        (t/is (deref entered 2000 false) "the first frame started")
+        (t/is (some? @(:focused-component tui)) "the component is focused")
+        ;; the loop holds the lock for the in-flight frame
+        (let [locked? (.tryLock lock 100 java.util.concurrent.TimeUnit/MILLISECONDS)]
+          (when locked? (.unlock lock))
+          (t/is (false? locked?) "dispatch-lock is held while rendering"))
+        ;; an input pass from another thread cannot get in
+        (let [buf (atom "x")
+              attempted (promise)
+              input-future (future
+                             (deliver attempted true)
+                             ((var core/process-input-buffer!) tui nil buf))]
+          (t/is (deref attempted 1000 false) "the input pass reached dispatch")
+          (Thread/sleep 150)
+          (t/is (empty? @handled)
+                "the key waits for the in-flight frame, not the other way around")
+          (deliver release true)
+          (t/is (wait-until #(seq @handled) 2000) "the key dispatches once the frame releases")
+          (t/is (not= ::timeout (deref input-future 2000 ::timeout))
+                "the input pass finished"))
+        (finally
+          (deliver release true)
+          (stop-loop tui))))))
+
+(deftest ^:slow suspend-while-holding-the-dispatch-lock
+  (testing "tui-suspend! called while holding dispatch-lock (the reader's
+            external-editor path) still lets the loop exit — a plain
+            blocking acquire would deadlock its join of the render loop"
+    (let [vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))
+          lock @(var core/dispatch-lock)]
+      (try
+        (core/tui-add-child tui (test-component (atom ["frame"])))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 2000)
+        ;; the reader dispatches under this lock; suspend joins the loop
+        (.lock lock)
+        ;; wake the loop into its next acquisition and let it block there
+        ;; (a plain blocking acquire would now wait on the lock this thread
+        ;; holds, deadlocking the join below)
+        (core/tui-request-render tui)
+        (Thread/sleep 100)
+        (let [started (System/currentTimeMillis)]
+          (core/tui-suspend! tui)
+          (t/is (< (- (System/currentTimeMillis) started) 2000)
+                "the loop backed out of the acquisition instead of waiting out
+                 the join timeout"))
+        (finally
+          (.unlock lock)
+          (stop-loop tui))))))
+
+(deftest ^:slow terminal-write-runs-outside-the-dispatch-lock
+  (testing "the frame's bytes are written after dispatch-lock is released —
+            a stalled terminal must not stall input dispatch"
+    (let [writes (atom [])
+          lock-held (atom [])
+          tui (core/create-tui (map->LockProbeTerminal
+                                {:size (atom {:cols 80 :rows 24})
+                                 :writes writes
+                                 :lock-held lock-held}))]
+      (try
+        (core/tui-add-child tui (test-component (atom ["frame"])))
+        (start-loop tui)
+        (wait-for-frames writes 1 2000)
+        (t/is (seq @lock-held) "the frame was written")
+        (t/is (every? false? @lock-held)
+              "every terminal write ran with dispatch-lock free")
         (finally
           (stop-loop tui))))))

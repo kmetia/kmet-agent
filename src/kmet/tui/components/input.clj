@@ -48,73 +48,119 @@
 ;; ─── Word navigation helpers ────────────────────────────────────────────────
 ;; Imported from kmet.tui.components.editing
 
-;; ─── Input action helpers ───────────────────────────────────────────────────
+;; ─── Input action helpers ─────────────────────────────────────────────────
 ;; Defined before defrecord so method bodies can reference them.
+;;
+;; The value/cursor pair is written through write-value!/edit-value! and read
+;; through read-pair/clamp-cursor: the two atoms are read separately by a
+;; render (and by host code), so a write must never expose a cursor past the
+;; value's end — render-line's (subs value 0 cursor) would throw, and a
+;; throwing render body tears down the whole TUI. Input dispatch and the
+;; render loop are serialized by the TUI's dispatch-lock, but writers outside
+;; that lock (an extension poking :value-atom/:cursor-atom, an app future)
+;; can still land between a render's two reads, so the ordering invariant and
+;; the render clamp stay load-bearing.
+
+(defn- clamp-cursor
+  "POS kept inside [0, (count value)] — the one invariant render-line and
+   every subs/word walk rely on. Nil POS (an ancient writer) means 0."
+  [value pos]
+  (max 0 (min (count value) (or pos 0))))
+
+(defn- write-value!
+  "Reset the input's value/cursor pair in the one order that keeps a
+   concurrent reader sane: a shrinking edit writes the cursor first (the
+   new cursor is inside the new value; the old, longer value only makes it
+   safer), a growing edit writes the value first (the old cursor is inside
+   the old value, hence inside the longer new one).
+
+   The cursor is clamped to the value first, so every writer that goes
+   through here leaves a valid pair regardless of what it computed. Pair
+   writers outside this ns (extensions poking :value-atom/:cursor-atom)
+   bypass the ordering; render clamps as a last line of defence."
+  [input value cursor]
+  (let [value (or value "")
+        cursor (clamp-cursor value cursor)]
+    (if (< (count value) (count @(:value-atom input)))
+      (do (reset! (:cursor-atom input) cursor)
+          (reset! (:value-atom input) value))
+      (do (reset! (:value-atom input) value)
+          (reset! (:cursor-atom input) cursor)))))
+
+(defn- edit-value!
+  "write-value! plus the :on-change notification — the tail of a user edit."
+  [input value cursor]
+  (write-value! input value cursor)
+  (notify-input-change! input))
+
+(defn- set-cursor-clamped!
+  "Move the cursor, clamped against the value's CURRENT length — a stale
+   value read (the value shrank concurrently) must not push the cursor
+   past the end."
+  [input pos]
+  (reset! (:cursor-atom input)
+          (clamp-cursor @(:value-atom input) pos)))
+
+(defn- read-pair
+  "The (value, cursor) pair as one consistent snapshot: value coerced and
+   the cursor clamped to it, so subs/word walks never run past the end (or
+   over nil) even when an outside writer left the atoms torn."
+  [input]
+  (let [value (or @(:value-atom input) "")]
+    [value (clamp-cursor value @(:cursor-atom input))]))
 
 (defn- insert-character [input char]
-  (let [value @(:value-atom input)
-        cursor @(:cursor-atom input)]
+  (let [[value cursor] (read-pair input)]
     (when (or (re-find #"^\s" char)
               (not= @(:last-action input) :type-word))
       (undo-push (:undo-stack input) {:value value :cursor cursor}))
     (reset! (:last-action input) :type-word)
     (let [new-val (str (subs value 0 cursor) char (subs value cursor))
           new-cursor (+ cursor (count char))]
-      (reset! (:value-atom input) new-val)
-      (reset! (:cursor-atom input) new-cursor)
-      (notify-input-change! input))))
+      (edit-value! input new-val new-cursor))))
 
 (defn- handle-backspace [input]
-  (let [value @(:value-atom input)
-        cursor @(:cursor-atom input)]
+  (let [[value cursor] (read-pair input)]
     (reset! (:last-action input) nil)
     (when (> cursor 0)
       (undo-push (:undo-stack input) {:value value :cursor cursor})
       (let [glen (edit/grapheme-left value cursor)]
-        (reset! (:value-atom input)
-                (str (subs value 0 glen) (subs value cursor)))
-        (reset! (:cursor-atom input) glen)
-        (notify-input-change! input)))))
+        (edit-value! input
+                     (str (subs value 0 glen) (subs value cursor))
+                     glen)))))
 
 (defn- handle-forward-delete [input]
-  (let [value @(:value-atom input)
-        cursor @(:cursor-atom input)]
+  (let [[value cursor] (read-pair input)]
     (reset! (:last-action input) nil)
     (when (< cursor (count value))
       (undo-push (:undo-stack input) {:value value :cursor cursor})
       (let [nxt (edit/grapheme-right value cursor)]
-        (reset! (:value-atom input)
-                (str (subs value 0 cursor) (subs value nxt)))
-        (notify-input-change! input)))))
+        (edit-value! input
+                     (str (subs value 0 cursor) (subs value nxt))
+                     cursor)))))
 
 (defn- delete-to-line-start [input]
-  (let [value @(:value-atom input)
-        cursor @(:cursor-atom input)]
+  (let [[value cursor] (read-pair input)]
     (when (pos? cursor)
       (undo-push (:undo-stack input) {:value value :cursor cursor})
       (let [deleted (subs value 0 cursor)]
         (edit/kill-ring-push (:kill-ring input) deleted :prepend true
                              :accumulate (= @(:last-action input) :kill))
         (reset! (:last-action input) :kill)
-        (reset! (:value-atom input) (subs value cursor))
-        (reset! (:cursor-atom input) 0)
-        (notify-input-change! input)))))
+        (edit-value! input (subs value cursor) 0)))))
 
 (defn- delete-to-line-end [input]
-  (let [value @(:value-atom input)
-        cursor @(:cursor-atom input)]
+  (let [[value cursor] (read-pair input)]
     (when (< cursor (count value))
       (undo-push (:undo-stack input) {:value value :cursor cursor})
       (let [deleted (subs value cursor)]
         (edit/kill-ring-push (:kill-ring input) deleted :prepend false
                              :accumulate (= @(:last-action input) :kill))
         (reset! (:last-action input) :kill)
-        (reset! (:value-atom input) (subs value 0 cursor))
-        (notify-input-change! input)))))
+        (edit-value! input (subs value 0 cursor) cursor)))))
 
 (defn- delete-word-backwards [input]
-  (let [value @(:value-atom input)
-        cursor @(:cursor-atom input)]
+  (let [[value cursor] (read-pair input)]
     (when (pos? cursor)
       (let [was-kill (= @(:last-action input) :kill)]
         (undo-push (:undo-stack input) {:value value :cursor cursor})
@@ -124,14 +170,12 @@
           (edit/kill-ring-push (:kill-ring input) deleted :prepend true
                                :accumulate was-kill)
           (reset! (:last-action input) :kill)
-          (reset! (:value-atom input)
-                  (str (subs value 0 new-cursor) (subs value old-cursor)))
-          (reset! (:cursor-atom input) new-cursor)
-          (notify-input-change! input))))))
+          (edit-value! input
+                       (str (subs value 0 new-cursor) (subs value old-cursor))
+                       new-cursor))))))
 
 (defn- delete-word-forward [input]
-  (let [value @(:value-atom input)
-        cursor @(:cursor-atom input)]
+  (let [[value cursor] (read-pair input)]
     (when (< cursor (count value))
       (let [was-kill (= @(:last-action input) :kill)]
         (undo-push (:undo-stack input) {:value value :cursor cursor})
@@ -141,25 +185,21 @@
           (edit/kill-ring-push (:kill-ring input) deleted :prepend false
                                :accumulate was-kill)
           (reset! (:last-action input) :kill)
-          (reset! (:value-atom input)
-                  (str (subs value 0 old-cursor) (subs value new-cursor)))
-          (notify-input-change! input))))))
+          (edit-value! input
+                       (str (subs value 0 old-cursor) (subs value new-cursor))
+                       old-cursor))))))
 
 (defn- yank-action [input]
-  (let [value @(:value-atom input)
-        cursor @(:cursor-atom input)
+  (let [[value cursor] (read-pair input)
         text (edit/kill-ring-peek (:kill-ring input))]
     (when text
       (undo-push (:undo-stack input) {:value value :cursor cursor})
       (let [new-val (str (subs value 0 cursor) text (subs value cursor))]
-        (reset! (:value-atom input) new-val)
-        (reset! (:cursor-atom input) (+ cursor (count text)))
         (reset! (:last-action input) :yank)
-        (notify-input-change! input)))))
+        (edit-value! input new-val (+ cursor (count text)))))))
 
 (defn- yank-pop-action [input]
-  (let [value @(:value-atom input)
-        cursor @(:cursor-atom input)
+  (let [[value cursor] (read-pair input)
         kr (:kill-ring input)]
     (when (and (= @(:last-action input) :yank)
                (> (edit/kill-ring-length kr) 1))
@@ -171,10 +211,8 @@
         (edit/kill-ring-rotate kr)
         (let [text (or (edit/kill-ring-peek kr) "")
               new-val (str stripped text after-remove)]
-          (reset! (:value-atom input) new-val)
-          (reset! (:cursor-atom input) (+ new-cursor (count text)))
           (reset! (:last-action input) :yank)
-          (notify-input-change! input))))))
+          (edit-value! input new-val (+ new-cursor (count text))))))))
 
 ;; ─── Render helper ──────────────────────────────────────────────────────────
 
@@ -203,8 +241,14 @@
           available (- width prompt-len)]
       (if (<= available 0)
         [prompt]
-        (let [value @value-atom
-              cursor @cursor-atom
+        (let [value (or @value-atom "")
+              ;; Clamped against the value just read: pair writes keep the
+              ;; atoms consistent (write-value!), but a writer outside the
+              ;; pair path (an extension poking :value-atom/:cursor-atom)
+              ;; can still be mid-write — a cursor outside the value here
+              ;; would make render-line's (subs value 0 cursor) throw, and a
+              ;; throwing render body tears down the whole TUI.
+              cursor (clamp-cursor value @cursor-atom)
               total-width (u/visible-width value)]
           (if (< total-width available)
             ;; Everything fits
@@ -233,8 +277,7 @@
                   [(str prompt line padding)]))))))))
 
   (handle-input [this data]
-    (let [value @value-atom
-          cursor @cursor-atom]
+    (let [[value cursor] (read-pair this)]
       (cond
         ;; Paste start marker. A nested START while already buffering is
         ;; literal paste content (pi treats everything between the first
@@ -265,9 +308,9 @@
                       clean (clojure.string/replace clean "\t" "    ")]
                   (undo-push undo-stack {:value value :cursor cursor})
                   (reset! last-action nil)
-                  (reset! value-atom (str (subs value 0 cursor) clean (subs value cursor)))
-                  (reset! cursor-atom (+ cursor (count clean)))
-                  (notify-input-change! this)
+                  (edit-value! this
+                               (str (subs value 0 cursor) clean (subs value cursor))
+                               (+ cursor (count clean)))
                   ;; Only leave buffering once the end marker arrives
                   (reset! paste-state :idle)
                   (reset! paste-buffer "")
@@ -282,10 +325,8 @@
         ;; Undo
         (match? data "tui.editor.undo")
         (do (when-let [snapshot (undo-pop undo-stack)]
-              (reset! value-atom (:value snapshot))
-              (reset! cursor-atom (:cursor snapshot))
               (reset! last-action nil)
-              (notify-input-change! this))
+              (edit-value! this (:value snapshot) (:cursor snapshot)))
             nil)
 
         ;; Submit
@@ -327,37 +368,37 @@
         ;; Cursor left
         (match? data "tui.editor.cursorLeft")
         (do (reset! last-action nil)
-            (reset! cursor-atom (edit/grapheme-left value cursor))
+            (set-cursor-clamped! this (edit/grapheme-left value cursor))
             nil)
 
         ;; Cursor right
         (match? data "tui.editor.cursorRight")
         (do (reset! last-action nil)
-            (reset! cursor-atom (edit/grapheme-right value cursor))
+            (set-cursor-clamped! this (edit/grapheme-right value cursor))
             nil)
 
         ;; Cursor line start
         (match? data "tui.editor.cursorLineStart")
         (do (reset! last-action nil)
-            (reset! cursor-atom 0)
+            (set-cursor-clamped! this 0)
             nil)
 
         ;; Cursor line end
         (match? data "tui.editor.cursorLineEnd")
         (do (reset! last-action nil)
-            (reset! cursor-atom (count @value-atom))
+            (set-cursor-clamped! this (count @value-atom))
             nil)
 
         ;; Cursor word left
         (match? data "tui.editor.cursorWordLeft")
         (do (reset! last-action nil)
-            (reset! cursor-atom (edit/word-boundary-left @value-atom @cursor-atom))
+            (set-cursor-clamped! this (edit/word-boundary-left @value-atom @cursor-atom))
             nil)
 
         ;; Cursor word right
         (match? data "tui.editor.cursorWordRight")
         (do (reset! last-action nil)
-            (reset! cursor-atom (edit/word-boundary-right @value-atom @cursor-atom))
+            (set-cursor-clamped! this (edit/word-boundary-right @value-atom @cursor-atom))
             nil)
 
         ;; Kitty CSI-u printable character (e.g. \u001b[97u for 'a'):
@@ -392,11 +433,11 @@
                :undo-stack (make-undo-stack)}))
 
 (defn input-set-value! [input value]
-  (reset! (:value-atom input) value)
-  (reset! (:cursor-atom input) (min (count value) @(:cursor-atom input))))
+  ;; the cursor goes through as-is: write-value! clamps it to the new value
+  (write-value! input value @(:cursor-atom input)))
 
 (defn input-set-cursor! [input pos]
-  (reset! (:cursor-atom input) (max 0 (min (count @(:value-atom input)) pos))))
+  (set-cursor-clamped! input pos))
 
 (defn input-get-value [input]
   @(:value-atom input))
