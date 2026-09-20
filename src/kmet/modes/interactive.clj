@@ -36,7 +36,6 @@
             [kmet.app.ui.footer-data-provider :as fdp]
             [kmet.app.ui.hotkeys :as hotkeys-ui]
             [kmet.app.theme-controller :as theme-ctrl]
-            [kmet.tui.components.select-list :as select-list]
             [kmet.app.loop :as agent]
             [kmet.ai.models :as models]
             [kmet.ai.auth :as auth]
@@ -2297,52 +2296,52 @@
 
 (defn- prompt-custom-summary!
   "Ask for custom summarization instructions, then navigate with them
-   (pi: 'Summarize with custom prompt'). Escape loops back to the summarize
-   choice."
+   (pi: showExtensionEditor — a dock-mounted editor, not an overlay).
+   Escape loops back to the summarize choice."
   [cs sess entry]
-  (tui/tui-show-overlay
-   (:tui cs)
-   (dialogs/make-input-dialog
-    "Custom branch summarization instructions"
-    (fn [instructions]
-      (tui/tui-hide-overlay (:tui cs))
-      (navigate-tree! cs sess entry true (str/trim instructions) false nil))
-    (fn []
-      (tui/tui-hide-overlay (:tui cs))
-      (ask-branch-summary cs sess entry))
-    (th/get-current-theme)))
-  (tui/tui-request-render (:tui cs)))
+  (let [sel-atom (atom nil)
+        dlg (dialogs/make-input-dialog
+             "Custom branch summarization instructions"
+             (fn [instructions]
+               (close-selector! sel-atom)
+               (tui/tui-request-render (:tui cs))
+               (navigate-tree! cs sess entry true (str/trim instructions) false nil))
+             (fn []
+               (close-selector! sel-atom)
+               (ask-branch-summary cs sess entry))
+             (th/get-current-theme))]
+    (mount-selector! cs sel-atom dlg)
+    (tui/tui-request-render (:tui cs))))
 
 (defn- ask-branch-summary
-  "Ask whether to summarize the abandoned branch before branching (pi: the
-   Summarize branch? selector), then navigate. Escape re-opens the tree."
+  "Ask whether to summarize the abandoned branch before branching (pi:
+   showExtensionSelector of the Summarize branch? options — mounted in the
+   editor dock like pi, not an overlay, so the framed dialog renders over
+   clean chrome). Escape re-opens the tree with the entry still selected."
   [cs sess entry]
-  (let [items [{:value "none" :label "No summary"}
-               {:value "summarize" :label "Summarize"}
-               {:value "custom" :label "Summarize with custom prompt"}]
-        sl-ref (atom nil)
-        on-select (fn [_]
-                    (when-let [sel (select-list/select-list-get-selected @sl-ref)]
-                      (tui/tui-hide-overlay (:tui cs))
-                      (case (:value sel)
-                        "none" (navigate-tree! cs sess entry false nil false nil)
-                        "summarize" (navigate-tree! cs sess entry true nil false nil)
-                        "custom" (prompt-custom-summary! cs sess entry))))
+  (let [sel-atom (atom nil)
+        on-select (fn [choice]
+                    (close-selector! sel-atom)
+                    (tui/tui-request-render (:tui cs))
+                    (case choice
+                      "No summary" (navigate-tree! cs sess entry false nil false nil)
+                      "Summarize" (navigate-tree! cs sess entry true nil false nil)
+                      "Summarize with custom prompt" (prompt-custom-summary! cs sess entry)))
         on-escape (fn []
-                    (tui/tui-hide-overlay (:tui cs))
+                    (close-selector! sel-atom)
                     ;; re-open with the highlight on the entry being
                     ;; navigated to (pi showTreeSelector initialSelectedId)
                     (show-session-tree cs
                                        (fn [entry]
                                          (ask-branch-summary cs @(:session-atom cs) entry))
                                        (:id entry)))
-        sl (select-list/make-select-list items
-                                         :height 3
-                                         :header "Summarize branch?"
-                                         :on-select on-select
-                                         :on-escape on-escape)]
-    (reset! sl-ref sl)
-    (tui/tui-show-overlay (:tui cs) sl :width 42 :height 3)
+        dlg (dialogs/make-selector-dialog
+             "Summarize branch?"
+             ["No summary" "Summarize" "Summarize with custom prompt"]
+             on-select
+             on-escape
+             (th/get-current-theme))]
+    (mount-selector! cs sel-atom dlg)
     (tui/tui-request-render (:tui cs))))
 
 ;; ─── Fork / clone (pi: /fork, /clone) ─────────────────────────────────────

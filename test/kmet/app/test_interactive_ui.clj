@@ -989,6 +989,42 @@
                    (:content (last-message ch)))))
         (finally (fs/delete-tree dir))))))
 
+(deftest test-tree-summarize-prompt-uses-the-editor-dock
+  (testing "the /tree summarize prompt and custom-instruction editor mount in
+            the editor dock (pi: showExtensionSelector / showExtensionEditor),
+            not as floating overlays — the old overlay path rendered over the
+            chat when the tree closed and the document shrank"
+    (let [dir (str (fs/absolutize (str "target/test-tree-summary-dock-"
+                                       (System/currentTimeMillis))))
+          sel-ref (atom nil)
+          strip-ansi #(str/replace % #"\u001b\[[0-9;]*[a-zA-Z]" "")]
+      (try
+        (let [sess (session/create-session dir)
+              entry (session/append-entry sess
+                                          {:role :user
+                                           :content [{:type :text :text "q"}]})
+              cs {:tui {:render-requested? (atom false)}
+                  :session-atom (atom sess)}]
+          (with-redefs [dock/mount! (capture-mount! sel-ref)
+                        tui/tui-request-render (fn [_])]
+            (testing "Summarize branch? selector is framed in the dock with all options"
+              ((var inter/ask-branch-summary) cs sess entry)
+              (let [text (str/join "\n" (map strip-ansi
+                                             (protocols/render @sel-ref 80)))]
+                (t/is (str/includes? text "Summarize branch?") "framed title")
+                (t/is (str/includes? text "No summary"))
+                (t/is (str/includes? text "Summarize with custom prompt")
+                      "all three options render (a bare overlay with :height 3 cut the third)")
+                (t/is (str/includes? text "─") "border drawn")))
+            (testing "custom instructions open a framed input in the dock"
+              ((var inter/prompt-custom-summary!) cs sess entry)
+              (let [text (str/join "\n" (map strip-ansi
+                                             (protocols/render @sel-ref 80)))]
+                (t/is (str/includes? text "Custom branch summarization instructions"))
+                (t/is (str/includes? text "submit")
+                      "the input dialog's keybinding hint renders")))))
+        (finally (fs/delete-tree dir))))))
+
 (deftest test-same-cwd-spelled-differently-is-not-a-switch
   (testing "a session whose recorded cwd differs only in spelling (trailing
             slash) leaves the runtime cwd and the prompt alone — the
