@@ -1,8 +1,8 @@
 (ns kmet.libs.test-edit-diff
   "The fuzzy-match normalization's trailing-whitespace strip: str/trimr
-   replaced a per-line #\"\\s+$\" regex (an anchored-regex scan costs ~0.26 ms
-   per line on jolt — jolt-bugs.md #1062), so the regex form stays here as the
-   equivalence oracle."
+   replaced a per-line #\"\\s+$\" regex (jolt#1062's anchored-regex scan was
+   the pre-fix cost — fixed upstream 2026-09-20), so the regex form stays here
+   as the equivalence oracle."
   (:require [clojure.string :as str]
             [clojure.test :as t]
             [kmet.libs.edit-diff :as ed]))

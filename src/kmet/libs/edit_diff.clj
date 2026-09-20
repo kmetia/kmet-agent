@@ -170,10 +170,10 @@
     (-> text
         (as-> s (->> (str/split-lines s)
                      ;; str/trimr, not a per-line (str/replace line #"\s+$" ""):
-                     ;; an anchored-regex scan costs ~0.26 ms per line on jolt
-                     ;; (tracked in jolt-bugs.md) and trims the same ASCII
-                     ;; whitespace, plus the Unicode trailing whitespace pi's JS
-                     ;; \s covers.
+                     ;; jolt's anchored-regex scan was quadratic on the
+                     ;; look-behind (jolt#1062, fixed upstream after this
+                     ;; landed) and trimr trims the same ASCII whitespace, plus
+                     ;; the Unicode trailing whitespace pi's JS \s covers.
                      (map str/trimr)
                      (str/join "\n")))
         (as-> s (if (and (not ascii?) (re-find fuzzy-normalize-chars s))
