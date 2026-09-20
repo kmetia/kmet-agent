@@ -614,3 +614,33 @@
               "every terminal write ran with dispatch-lock free")
         (finally
           (stop-loop tui))))))
+
+(deftest ^:slow cursor-marker-never-reaches-the-terminal
+  (testing "a CURSOR-MARKER line above the viewport is stripped, not emitted:
+            the marker is an APC (ESC _ ... BEL) that strict terminals consume
+            through the next ST, swallowing every following frame — the
+            /scoped-models freeze on short terminals"
+    (let [marker utils/CURSOR-MARKER
+          ;; 30 lines at 24 rows: the marker line (index 0) is above the
+          ;; bottom-24 scan window, so the viewport scan cannot see it — and
+          ;; it must still be stripped from the emitted frame
+          lines (atom (into [(str "top" marker "line")]
+                            (map #(str "line-" %) (range 29))))
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child tui (test-component lines))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 2000)
+        (t/is (not-any? #(str/includes? % marker) @(:writes vt))
+              "no emitted frame contains the marker's APC sequence")
+        ;; and again on a diff pass: only line 15 changes, so the marker line
+        ;; (index 0) rides along in previous-lines and must stay stripped
+        (swap! lines assoc 15 "line-CHANGED")
+        (core/tui-request-render tui)
+        (wait-for-frames (:writes vt) 2 2000)
+        (t/is (not-any? #(str/includes? % marker)
+                        (second (frame-writes (:writes vt))))
+              "neither does the diff frame")
+        (finally
+          (stop-loop tui))))))

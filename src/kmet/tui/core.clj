@@ -60,24 +60,31 @@
 ;; ═══════════════════════════════════════════════════════════════════════════
 
 (defn- extract-cursor-position
-  "Find CURSOR-MARKER in rendered lines (viewport only), strip it from output,
-   and return {:lines cleared-lines :cursor {:row r :col c}}.
-   Returns {:lines original-lines :cursor nil} when no marker found.
-   Only scans the bottom `height` lines (visible viewport), matching Pi's approach."
+  "Find CURSOR-MARKER in rendered lines (viewport only), strip every marker
+   from the output, and return {:lines cleared-lines :cursor {:row r :col c}}.
+   The cursor position comes from the marker in the visible viewport (a
+   bottom-up scan); a marker OUTSIDE the viewport is still stripped, it just
+   yields no cursor. Stripping must be unconditional: a marker is an internal
+   signal, and one that leaks into the terminal stream is an APC sequence
+   (ESC _ ... BEL) whose parser runs to ST (ESC \\) on strict terminals —
+   Termux then swallows every following byte and the display freezes at the
+   last painted frame while the app keeps rendering. The scan window is the
+   bottom HEIGHT lines, so a document that grows past the panel height (a
+   short terminal) can push the focused field's line just above it."
   [lines height]
-  (let [viewport-top (max 0 (- (count lines) height))]
-    (loop [i (dec (count lines))]
-      (if (>= i viewport-top)
-        (let [line (nth lines i)]
-          (if-let [marker-idx (clojure.string/index-of line utils/CURSOR-MARKER)]
-            (let [before (subs line 0 marker-idx)
-                  after (subs line (+ marker-idx (count utils/CURSOR-MARKER)))
-                  col (utils/visible-width before)
-                  new-line (str before after)
-                  new-lines (assoc lines i new-line)]
-              {:lines new-lines :cursor {:row i :col col}})
-            (recur (dec i))))
-        {:lines lines :cursor nil}))))
+  (let [viewport-top (max 0 (- (count lines) height))
+        any-marker? (boolean (some #(clojure.string/includes? % utils/CURSOR-MARKER) lines))
+        cursor (loop [i (dec (count lines))]
+                 (if (>= i viewport-top)
+                   (let [line (nth lines i)]
+                     (if-let [marker-idx (clojure.string/index-of line utils/CURSOR-MARKER)]
+                       {:row i :col (utils/visible-width (subs line 0 marker-idx))}
+                       (recur (dec i))))
+                   nil))]
+    {:lines (if any-marker?
+              (mapv #(clojure.string/replace % utils/CURSOR-MARKER "") lines)
+              lines)
+     :cursor cursor}))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; CSI 2026 sync

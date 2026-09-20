@@ -7,7 +7,8 @@
             [kmet.tui.keys :as keys]
             [kmet.tui.terminal :as term]
             [kmet.tui.components.editor :as editor]
-            [kmet.tui.components.input :as input]))
+            [kmet.tui.components.input :as input]
+            [kmet.tui.utils :as utils]))
 
 (defn- leaf
   "A focusable leaf component with a focused?-atom (like the editor)."
@@ -22,6 +23,26 @@
              (focused [_] @focused?)
              (set-focused! [_ v] (reset! focused? v)))
      :focused? focused?}))
+
+(t/deftest test-extract-cursor-position-strips-every-marker
+  (let [marker utils/CURSOR-MARKER
+        extract (var core/extract-cursor-position)]
+    (testing "a marker inside the viewport positions the cursor and is stripped"
+      (let [{:keys [lines cursor]} (extract ["aaaa" (str "bb" marker "cc")] 10)]
+        (t/is (= {:row 1 :col 2} cursor) "the marker's position is reported")
+        (t/is (not-any? #(str/includes? % marker) lines) "and stripped from the lines")))
+    (testing "a marker ABOVE the viewport is stripped without a cursor"
+      ;; the reported freeze: on a short terminal the document can grow past
+      ;; the window, pushing the focused field's marker line above the scan
+      ;; range. The leaked marker is an APC (ESC _ ... BEL) that strict
+      ;; terminals consume through the next ST, swallowing every following
+      ;; frame — the display froze while the app kept rendering.
+      (let [lines (into [(str "top" marker "line")]
+                        (map #(str "line-" %) (range 26)))
+            {:keys [lines cursor]} (extract lines 26)]
+        (t/is (nil? cursor) "no cursor outside the viewport")
+        (t/is (not-any? #(str/includes? % marker) lines)
+              "but every marker is stripped from the emitted lines")))))
 
 (t/deftest test-work-pending-sees-render-and-batch-work
   (testing "a requested render pends"
