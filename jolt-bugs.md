@@ -111,15 +111,15 @@ skips NFKC on its own merits. The Unicode-16/17 table skew the issue also
 recorded (U+A7F1 → `"S"` on jolt; the JDK's older tables leave it alone) is
 not part of the fix and remains upstream's policy call.
 
-**`set!` on a compiler-flag var outside a load frame — fix in review as
-[jolt PR #1079](https://github.com/jolt-lang/jolt/pull/1079) (filed
-2026-09-21).** The number this finding was earlier recorded under, #1074,
+**`set!` on a compiler-flag var outside a load frame — fixed (jolt PR
+#1079, merged `70133c55`; the nested-load follow-up
+[jolt PR #1085](https://github.com/jolt-lang/jolt/pull/1085), merged
+`7223b36d`).** The number this finding was earlier recorded under, #1074,
 went to the Windows runtime seams issue below — no set! ticket existed until
-this one. The PR runs every user entry — `-m`/`run -m`, `-X`/`-T`, code
+this one. The fix runs every user entry — `-m`/`run -m`, `-X`/`-T`, code
 tasks, and a built binary's launcher — under clojure.main's compiler-flag
 frame, and brackets `jolt.loader`'s source eval per file like the host
-loader, so the `load-extension!` workaround below is removable once it
-merges.
+loader.
 `clojure.main` wraps every entry — repl, `-e`, `-m`, a script — in
 `with-bindings` for the vars sources commonly `set!` (`*warn-on-reflection*`
 and friends; main.clj:78-83), so a dependency loaded at runtime from `-main`
@@ -154,24 +154,20 @@ Minimal loader repro: `dep.clj` = `(ns dep) (set! *warn-on-reflection* true)
 with a runtime `(require 'dep)` prints on. Workaround:
 `kmet.app.extensions/load-extension!` wraps the load in a no-op
 `(binding [*warn-on-reflection* *warn-on-reflection*])` — the dep's `set!`
-writes the thread frame and the pop leaves the root untouched. Remove the
-binding when `-m`/loader evaluation carries clojure.main's entry bindings.
-Re-verified 2026-09-21 on the installed v0.8.10-34-gf2ee1dd7: `jolt -m app`
-and the loader repro both still throw the IllegalStateException, `-e` still
-works. The #1079 branch fixes them (both repros, the task/`-X` entries and a
-built binary verified in it); the installed build predates it.
+writes the thread frame and the pop leaves the root untouched. The binding
+is removable now: the installed v0.8.10-62-g923ad46a carries the fixes and
+both repros (`jolt -m app`, the loader dep) print (re-verified 2026-09-21).
 
-**Upstream status:** three open items — the SCI IVar gap, filed as
+**Upstream status:** one filed open item — the SCI IVar gap, filed as
 [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) (`deferred`),
 re-diagnosed upstream in jolt PR #1033 — with its fix at
 [babashka/sci#1093](https://github.com/babashka/sci/pull/1093) (re-checked
 2026-09-21: open, head `1295142f`, unchanged), so the `jolt/deps.edn` SCI pin
-stays — the `set!`/entry-binding gap, fix in review as
-[jolt PR #1079](https://github.com/jolt-lang/jolt/pull/1079) (filed
-2026-09-21; the `load-extension!` binding workaround is removable once it
-merges) — and the Windows runtime seams, filed 2026-09-21 as
-[jolt#1074](https://github.com/jolt-lang/jolt/issues/1074). Every other
-ticket this file tracked is closed.
+stays. The `set!`/entry-binding gap (#1079/#1085) and the Windows runtime
+seams (#1074/#1077) are fixed upstream; the workaround removals are
+the only kmet changes left on them. The unfiled findings (`fs/glob` separator
+patterns, `ProcessHandle`) are still open. Every other ticket this file
+tracked is closed.
 
 **Workarounds live next to their ticket below.** Each workaround block is the
 removal checklist: when an upstream fix lands, delete the listed code (and the
@@ -234,86 +230,23 @@ Re-checked 2026-09-21: unchanged — same state (the issue's last activity is
 
 ### [jolt#1074](https://github.com/jolt-lang/jolt/issues/1074) — Windows runtime seams: atomic `spit`, `path.separator`, and program resolution
 
-**Area:** `host/chez/java/io.ss` (`jolt-spit`, the `File` statics),
-`host/chez/java/host-static-methods.ss` (`path.separator`/`file.separator`),
-`host/chez/java/process.ss` (`proc-on-path?`, `proc-program-resolvable?`,
-`proc-path-join`).
+**Fixed upstream** by jolt PR #1077 (merged 2026-09-21, `bb25317d`,
+commit `a1e524a9`): `spit` replaces through `rename-replace!`,
+`path.separator` answers per `sa-os-family` (the `File` statics and
+`java.class.path` included), and `ProcessBuilder` resolves drive-rooted,
+UNC and PATHEXT programs. Verified on the official v0.8.10 Windows build;
+CI-gated by `win-platform-test.ss` and the `windows-deps` job; present in
+the installed v0.8.10-62-g923ad46a.
 
-All three verified on the official v0.8.10 Windows build, filed 2026-09-21,
-and all three are still on `main` at the re-check (`f2ee1dd7`, the PR #1075
-merge, 2026-09-21). Jolt's CI is `ubuntu-latest`-only, so no gate covers
-them: a Jolt/Windows process cannot overwrite an existing file or spawn
-anything but a `/`-rooted child. kmet's curl transport (temp
-config + `spit` + spawn of `curl`) hits all three in one request.
+**Owed in kmet: retire the workaround.** `kmet.libs.http/curl-available?`
+splits PATH itself (`path-dirs`) and calls `babashka.fs/which` with explicit
+`:paths`; once the supported floor carries the fix it collapses back to
+`(fs/which "curl")`. The other two seams had no kmet workaround.
 
-**1. `spit` over an existing file throws.** `jolt-spit` (atomic since
-8ff1644a) writes `<target>.spit-tmp-<ms>-<n>` and renames it over the
-target. Chez's `rename-file` on Windows refuses an existing destination
-where POSIX `rename(2)` replaces, so the second spit to any path fails:
-
-```
-$ jolt -e "(do (spit \"t.txt\" \"a\") (spit \"t.txt\" \"b\"))"
-Unhandled exception (IOException): rename-file: cannot rename
-  "…\t.txt.spit-tmp-108-2" to "…\t.txt": file exists
-```
-
-A target freshly created by `File/createTempFile` fails on the *first*
-spit. `spit :append true` and `java.io.FileOutputStream` work (they open
-the target in place); `io/writer` does not — jolt's file writer spits at
-close. Fix: on Windows delete the target before the rename, or
-`MoveFileEx(..., MOVEFILE_REPLACE_EXISTING)`. The same replace-rename
-pattern in `loader.ss` (`rename-file tmp-scm scm` / `tmp-so so` in the
-AOT/publish paths) fails identically whenever the artifact already exists.
-
-**2. `path.separator` answers `":"` on Windows.** `host-static-methods.ss`
-hardcodes `"path.separator" ":"` and `"file.separator" "/"`, and the
-`File` statics (`io.ss`: `separatorChar`/`separator`/`pathSeparator`/
-`pathSeparatorChar`) are POSIX values too. `babashka.fs` reads them:
-
-```
-$ jolt -e '(require (quote [babashka.fs :as fs])) (println (pr-str (fs/split-paths "C:/a;C:/b")))'
-[#object[java.nio.file.Path "C"] #object[java.nio.file.Path "/a;C"] #object[java.nio.file.Path "/b"]]
-$ jolt -e '(require (quote [babashka.fs :as fs])) (println (pr-str (fs/which "curl")))'
-nil           ;; curl.exe is on PATH
-```
-
-`fs/exec-paths`/`split-paths` return garbage and `fs/which` never finds
-anything — which is also why `babashka.process`'s Windows resolver throws
-`Cannot resolve program: …` before a spawn is even attempted. Fix: answer
-per `sa-os-family`, with `path.separator*` `";"` on Windows.
-`File/separator*` can stay `"/"` if the tree relies on it (Windows accepts
-it); the PATH separator cannot.
-
-**3. `ProcessBuilder` cannot start a Windows program.** `proc-on-path?`
-splits PATH with `(str-literal-split path ":")`,
-`proc-program-resolvable?` treats only a leading `/` as absolute, and
-`proc-path-join` only knows `/`:
-
-```
-$ jolt -e '(require (quote [babashka.process :as proc])) (proc/process ["curl" "--version"])'
-Unhandled exception: Cannot resolve program: curl
-$ jolt -e '(require (quote [babashka.process :as proc])) (proc/process ["C:/Windows/System32/curl.exe" "--version"])'
-Unhandled exception (IOException): Cannot run program "C:/Windows/System32/curl.exe": error=2, No such file or directory
-$ jolt -e '(require (quote [babashka.process :as proc])) (proc/process ["/Windows/System32/curl.exe" "--version"])'
-… exit 0
-```
-
-Bare names and drive-letter paths are rejected; only `/`-rooted (current
-drive) and slash-bearing relative programs pass. Fix: split `;` (and try
-PATHEXT) on Windows, accept `X:/` and `X:\` as absolute, and let
-`proc-path-join` keep the separator style it is given.
-
-**kmet workaround:** `kmet.libs.http/curl-available?` splits PATH itself
-(`path-dirs`) and calls `babashka.fs/which` with explicit `:paths`; once
-finding 2 is fixed that collapses back to `(fs/which "curl")`. Findings 1
-and 3 have no kmet workaround — the jolt fixes are what let the curl
-transport (or any child process) run on Windows.
-
-### More Windows seams: `fs/glob` separator patterns and `ProcessHandle` (unfiled)
+### Unfiled findings: `fs/glob` separator patterns and `ProcessHandle`
 
 **Area:** the vendored `babashka.fs` glob primitive,
-`host/chez/java/process.ss`. Both verified on the official v0.8.10 Windows
-build (2026-09-21); both are Windows-only.
+`host/chez/java/process.ss`.
 
 **4. `fs/glob` patterns that spell a `/` match nothing.** The `**` in the
 vendored glob never crosses the platform separator on Windows, so `*`,
@@ -335,7 +268,8 @@ separator-bearing patterns — `kmet.tasks.lint`'s `*.{…}` + `**/*.{…}` pair
 tree on Jolt/Windows, so a Jolt/Windows `lint`/`clean` needs this fixed (or
 the patterns rewritten) before it can be trusted.
 
-**5. `java.lang.ProcessHandle` is absent.**
+**5. `java.lang.ProcessHandle` is absent — on every platform, not just
+Windows.**
 
 ```
 $ jolt -e '(println (.pid (java.lang.ProcessHandle/current)))'
@@ -343,10 +277,12 @@ Unhandled exception (IllegalArgumentException): No dependency provides java.lang
 ```
 
 `kmet.libs.terminal/capture-log-path` builds `<prefix>-<timestamp>-<pid>.log`
-when `KMET_TUI_WRITE_LOG` / `KMET_TUI_INPUT_LOG` points at a directory, so
-that path crashes the app at namespace load on Jolt/Windows (pointing the
-env var at a file works — the timestamped name is only built for a
-directory). Fix: a `ProcessHandle` shim in `process.ss` (jolt-port.md listed
-one at `process.ss:1009`; it is not reachable on this build), kmet
-workaround: avoid the pid in log names on Windows.
+when `KMET_TUI_WRITE_LOG` / `KMET_TUI_INPUT_LOG` names a directory, so that
+path kills the namespace load — re-confirmed on Termux/aarch64 with the
+installed v0.8.10-62-g923ad46a: `KMET_TUI_WRITE_LOG=target jolt
+-e "(require 'kmet.libs.terminal)"` throws at `src/kmet/libs/terminal.clj:36`
+(pointing the env var at a file works — the timestamped name is only built
+for a directory). Fix: a `ProcessHandle` shim in `process.ss` (a `.pid`
+method the terminal/exec paths can call). **No kmet workaround is in the
+tree yet** — the directory branch still builds the pid name unconditionally.
 

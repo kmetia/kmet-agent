@@ -12,35 +12,16 @@ M5, …) are the original port report's ids.
 
 ## Windows — the last platform (M2)
 
-- **Terminal backend**: done (2026-09-21, `jolt v0.8.10` x64) —
-  `src/kmet/tui/terminal_native_win.jolt` has the pi-style kernel32 backend
-  (the Unix one is `terminal_native_unix.jolt`; the two share no FFI
-  surface):
-  `GetStdHandle`/`GetConsoleMode`/`SetConsoleMode` +
-  `ENABLE_VIRTUAL_TERMINAL_INPUT` (input) / `ENABLE_VIRTUAL_TERMINAL_PROCESSING`
-  (output), `WaitForSingleObject` + `ReadConsoleW`/`ReadFile` for bounded
-  reads, `GetConsoleScreenBufferInfo` for the size, `WriteConsoleW`/`WriteFile`
-  for output; setup degrades instead of failing without a console. Verified
-  with injected key records, mode restore, the real TUI, and the
-  `windows-console-raw-mode-roundtrip` test (`jolt test-ext`). Details:
-  `jolt-tui.md` §0/§6.
 - **Process** (B2): Windows falls back to Chez `open-process-ports`, where
   ^C cannot interrupt the child; `destroy-tree` behavior needs a Windows
-  test. This also means the pty/ConPTY-driven app smoke cannot spawn a
-  nested jolt on Windows yet.
-- **Native libs**: the upstream crypto / http-client libraries now declare
-  their own `:jolt/native` candidates (`:darwin`/`:linux`/`:windows`), so
-  kmet's project-level mirror block in `deps.edn` is gone (crypto#11,
-  http-client#23 closed — see `jolt-bugs.md`). Still owed: the Windows
-  smoke (`jolt -e '(println :ok)'` with the libcrypto/libssl/libz DLLs
-  beside `jolt.exe` or on PATH).
-- **Dev loop on Jolt/Windows**: the `*-changed` tasks cannot spawn `git`
-  (the process seams above), so `jolt test-changed` / `jolt lint-changed`
-  throw before they scan; `bb` runs them normally. `kmet.tasks.changed`
-  now normalizes separators and uses a separator-free glob (the vendored
-  `fs/glob` gap, `jolt-bugs.md` findings 4–5), but `kmet.tasks.lint`'s
-  target enumeration still needs the same treatment before a Jolt/Windows
-  `lint` can be trusted. None of this touches the terminal backend.
+  test.
+- **Native libs**: still owed: the Windows smoke (`jolt -e '(println :ok)'`
+  with the libcrypto/libssl/libz DLLs beside `jolt.exe` or on PATH).
+- **Dev loop on Jolt/Windows**: `kmet.tasks.lint`'s target enumeration and
+  `kmet.tasks.clean`'s `extensions/*/target` still spell `/`-separated glob
+  patterns, which the vendored `fs/glob` misses on Windows (`jolt-bugs.md`
+  finding 4), so a Jolt/Windows `lint`/`clean` cannot be trusted until those
+  patterns are rewritten. None of this touches the terminal backend.
 - Windows is the last platform to light up, after Unix parity.
 
 ## Process edges (B2)
@@ -51,11 +32,8 @@ M5, …) are the original port report's ids.
   OSes.
 - Compare the vendored `babashka.process` surface against kmet's use by file
   — the vendored sources carry no version constants.
-- Landed context: the bash-tool path is green (stdin redirected to
-  NUL//dev/null; `ProcessBuilder.redirectInput(File)` reaches the child as
-  of `v0.8.6-98`, jolt#947). If `jolt.process` falls short, the fallback is
-  direct `posix_spawn`/`waitpid`/`kill` FFI (the calls `process.ss` itself
-  uses).
+- If `jolt.process` falls short, the fallback is direct
+  `posix_spawn`/`waitpid`/`kill` FFI (the calls `process.ss` itself uses).
 
 ## Extension content on Jolt (B3)
 
@@ -65,13 +43,11 @@ loader, and the `:sci` backend is the declared fallback. Open:
 - **bb-port gap**: Jolt bundles no ports, so an extension needing
   `clojure.spec` or `clojure.data.xml` declares a Maven dep; a SCI context
   still cannot load spec.alpha (M11 below), a native context can.
-  `rewrite-clj` and `edamame` are declared and load the Maven jars: the
-  shipped `clojure` extension loads on the native loader and its tools work
-  on both hosts — the classpath loader's syntax-quote misresolution that was
-  its last blocker is fixed by jolt PR #1075.
 - **Class graph (sci contexts)**: classes Jolt's class graph does not supply
   (e.g. a `^StringBuilder` hint) fail the load there — upstream.
 - **M11**: `clojure.spec.alpha` injection for a SCI context.
+- **SCI pin**: `jolt/deps.edn` pins yogthos/sci @ babashka/sci#1093 — move
+  back to a Maven release once #1093 merges and a release carries it.
 - **Upstream**: jolt#1031 (SCI `IVar` `:getRawRoot`) is open in
   `jolt-bugs.md`.
 
@@ -85,10 +61,6 @@ loader, and the `:sci` backend is the declared fallback. Open:
 
 ## Verification backlog
 
-- **Session lock (M14)**: `app/session.clj`'s `ReentrantLock` file-mutation
-  lock is assumed shimmed but has not been run on Jolt — exercise the lock
-  path (the `Callable` site becomes a fn; `locking` covers the session
-  lock).
 - **JVM-surface audit (M15)**: per-site check of `java.net.URI`/`URL`/
   `URLEncoder`, `Normalizer`, `Charset`, `HexFormat`, `Instant`/
   `DateTimeFormatter`/`ZoneId`, `PushbackReader`, `StringReader`/`Writer`
@@ -96,8 +68,6 @@ loader, and the `:sci` backend is the declared fallback. Open:
 - **Termux**: no `/tmp`, `~` expansion, IME paste paths. Jolt's
   `java.io.tmpdir` honors `$TMPDIR` (unlike bb) — keep the explicit-dir
   pattern anyway.
-- **Perf**: measure the TUI frame loop and token streaming on a compiled
-  `jolt build`.
 - **On each Jolt upgrade**: re-run `jolt test` / `jolt test-ext`; the
   vendored `babashka.fs` / `babashka.process` carry no pins, so re-verify
   the surface kmet uses.
@@ -115,3 +85,8 @@ loader, and the `:sci` backend is the declared fallback. Open:
 - **`modes.test-overlay-input-smoke`** is `^:bb-only` (its driver spawns
   `bb run`, so on Jolt it would exercise bb's TUI); a Jolt-host pty variant
   is the follow-up.
+- **Stale `^:bb-only` gates**: `test-curl-compression` (its comment still
+  says java.util.zip is Jolt-unavailable; jolt PR #1044 landed it) and
+  `test-extension-gets-bundled-spec-port-and-file-seq` (the fixed bundled
+  set loads the Maven spec.alpha, and the fixture's `:jolt` loader runs it)
+  both pass under `jolt test` — drop the gates.
