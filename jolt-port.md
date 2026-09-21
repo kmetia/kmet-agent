@@ -45,10 +45,13 @@ item labels (B2, M5, …) are the original port report's ids.
 The loader side is done: extension contexts default to the runtime's native
 loader, and the `:sci` backend is the declared fallback. Open:
 
-- **bb-port gap**: Jolt has no bundled `clojure.spec` / `rewrite-clj` /
-  `edamame` / `data.xml`; an extension requiring them fails the load with
-  the actionable load-fn error (the shipped `clojure` extension stays
-  bb-side — its deps.edn excludes rewrite-clj).
+- **bb-port gap**: Jolt bundles no ports, so an extension needing
+  `clojure.spec` or `clojure.data.xml` declares a Maven dep; a SCI context
+  still cannot load spec.alpha (M11 below), a native context can.
+  `rewrite-clj` and `edamame` are declared and load the Maven jars: the
+  shipped `clojure` extension loads on the native loader and its tools work
+  on both hosts — the classpath loader's syntax-quote misresolution that was
+  its last blocker is fixed by jolt PR #1075.
 - **Class graph (sci contexts)**: classes Jolt's class graph does not supply
   (e.g. a `^StringBuilder` hint) fail the load there — upstream.
 - **M11**: `clojure.spec.alpha` injection for a SCI context.

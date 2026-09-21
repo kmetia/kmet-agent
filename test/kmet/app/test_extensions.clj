@@ -5,9 +5,9 @@
    Contexts are per host — SCI on bb/JVM, the runtime's own loader on Jolt —
    and the suite runs on both. ^:bb-only is what Jolt genuinely cannot do:
    the bundled clojure.spec port test (nothing loads spec.alpha there, and
-   bb's port is not injected) and the cljfmt Maven-chain test (its deps.edn
-   excludes the bb-bundled rewrite-clj and Jolt has no replacement — the
-   clojure extension's gap, extensions.md § bb-bundled ports)."
+   bb's port is not injected) and the cljfmt Maven-chain test (the fixture's
+   deps.edn excludes the bb-bundled rewrite-clj, leaving Jolt's closure
+   without it — a fixture-local gap, extensions.md § bb-bundled ports)."
   (:require [clojure.test :as t :refer [testing]]
             [clojure.string :as str]
             [clojure.java.io :as io]
@@ -450,8 +450,8 @@
   ;;
   ;; Stays ^:bb-only: the fixture's deps.edn excludes rewrite-clj for the
   ;; bundled port, which leaves Jolt's closure without rewrite-clj.node and
-  ;; no bundled copy to fall back on — the same content gap as the shipped
-  ;; clojure extension (extensions.md § bb-bundled ports).
+  ;; no bundled copy to fall back on (extensions.md § bb-bundled ports; the
+  ;; shipped clojure extension declares the Maven jar on Jolt instead).
   (extensions/clear-extensions!)
   (let [result (extensions/load-extension! "test/fixtures/ext-cljfmt")]
     (t/is (nil? (:error result)) (str "loaded: " (:error result)))
@@ -1202,24 +1202,21 @@
   ;; the repo's own extensions restructured to src/-as-artifact-root
   ;; (jar-ext.md §2): every shipped src/ dir loads through the real runtime.
   ;; The shipped manifests declare :loader — lsp/mcp/review/tree-sitter
-  ;; [:jolt :sci] (Jolt picks its native loader, bb the SCI backend);
-  ;; clojure declares [:sci] only.
+  ;; [:jolt :sci], clojure [:sci :jolt]: Jolt picks its native loader when
+  ;; :jolt is declared whatever the order, bb the SCI backend.
   ;;
-  ;; The clojure extension is the one content gap left on Jolt: its deps.edn
-  ;; excludes rewrite-clj (bb bundles an adapted port there) and Jolt's SCI
-  ;; fallback has no bundled copy either, so neither backend can serve
-  ;; rewrite-clj.* there. It stays a bb-side case until the shared deps.edn
-  ;; can express the per-host closure (extensions.md § bb-bundled ports);
-  ;; the other four extensions load on both hosts.
+  ;; The clojure extension loads and its tools work on both hosts too: its
+  ;; rewrite-clj/edamame deps are declared for Jolt (bb's closure drops the
+  ;; Maven jars for its bundled ports), and the classpath loader's
+  ;; syntax-quote misresolution — which poisoned rewrite-clj's generated fns
+  ;; with `<ns>/custom-zipper?` — is fixed by jolt PR #1075.
   (extensions/clear-extensions!)
   (let [shipped ["extensions/clojure/src"
                  "extensions/lsp-adapter/src"
                  "extensions/mcp-adapter/src"
                  "extensions/review/src"
                  "extensions/tree-sitter/src"]]
-    (doseq [path (if (host/jolt?)
-                   (remove #{"extensions/clojure/src"} shipped)
-                   shipped)]
+    (doseq [path shipped]
       (let [result (extensions/load-extension! path)]
         (t/is (nil? (:error result)) (str path " loaded: " (:error result)))
         (t/is (contains? #{:sci :jolt} (:loader-kind result))
@@ -1228,14 +1225,12 @@
     (t/is (some? (tools/get-tool "lsp")))
     (t/is (some? (tools/get-tool "mcp")))
     (t/is (some? (skills/get-skill "mcp")))
-    (when-not (host/jolt?)
-      (t/is (some? (tools/get-tool "clojure_edit")))
-      (t/is (some? (skills/get-skill "clojure-edit")))))
+    (t/is (some? (tools/get-tool "clojure_edit")))
+    (t/is (some? (skills/get-skill "clojure-edit"))))
   (testing "extension skills disclose from memory"
     (t/is (str/includes? (skills/expand-skill-command "/skill:mcp") "mcp"))
-    (when-not (host/jolt?)
-      (t/is (str/includes? (skills/expand-skill-command "/skill:clojure-edit")
-                           "clojure_edit"))))
+    (t/is (str/includes? (skills/expand-skill-command "/skill:clojure-edit")
+                         "clojure_edit")))
   (extensions/unload-all-extensions!)
   (skills/clear-skills!)
   (prompts/clear-prompt-templates!))

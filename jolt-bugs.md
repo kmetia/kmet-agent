@@ -84,6 +84,20 @@ kernel. No kmet workaround is tied to any of the three; the local Termux
 build wrapper's `cc` shim and hand-rolled provisioning are redundant now
 that the checkout carries the PR.
 
+**`jl/classpath` syntax quotes (jolt PR #1075, pending merge).**
+`eval-namespace-source` bulk-read every form before evaluating any, so a
+syntax quote in a source-loaded macro resolved in the CALLER's namespace
+(`user/v`, `No such namespace: bb`) — rewrite-clj's
+`custom-zipper.switchable` macros poisoned its generated fns, and the
+clojure extension's `clojure_edit` / `clojure_edit_replace_sexp` failed on
+Jolt with `<ns>/custom-zipper?`. The loader now reads form by form, after
+the file's `ns` form has run, in the file's own namespace and aliases
+(loaderconf case 32). The clojure extension loads and all three tools work
+on Jolt; `test-shipped-extensions-load-from-src` no longer excludes it,
+and a Maven `spec.alpha` loads through the loader too — the circular
+spec.alpha/spec.gen.alpha require that pushed kmet off `cljfmt.config`. No
+kmet workaround — the loader constructor was the broken piece.
+
 **`set!` on a compiler-flag var outside a load frame — filed as
 [jolt#1074](https://github.com/jolt-lang/jolt/issues/1074).**
 `clojure.main` wraps every entry — repl, `-e`, `-m`, a script — in
@@ -123,44 +137,7 @@ with a runtime `(require 'dep)` prints on. Workaround:
 writes the thread frame and the pop leaves the root untouched. Remove the
 binding when `-m`/loader evaluation carries clojure.main's entry bindings.
 
-**`jl/classpath` misresolves syntax quotes (unfiled).** A syntax-quoted
-symbol in a source loaded through a `jolt.loader/classpath` context resolves
-against the caller's ambient `*ns*` instead of the namespace the file
-declares, so the macro expands to the wrong var and the call fails with
-`No such var: <ambient-ns>/<sym>`. Reader aliases fare no better: a
-syntax-quoted alias (`(ns c (:require [b :as bb])) (defmacro mc [] `bb/v)`)
-loads, but a dependent ns calling it dies at analysis with
-`No such namespace: bb`.
-
-Cause: `stdlib/jolt/loader.clj`'s `read-forms` bulk-reads every form
-*before* any is evaluated, under whatever `*ns*` the caller had — the
-`(ns …)` form never switches the reader's namespace, and the file's
-`:require … :as` aliases are not installed for the read. The host loader
-(`load-jolt-file`) reads form-by-form, switching as it goes, like
-`Compiler.load` — which is why the host root works.
-
-Minimal repro: `b.clj` `(ns b) (def v 42) (defmacro m [] `v)`; `a.clj`
-`(ns a (:require [b])) (defn f [] (b/m))`; `(jolt.loader/classpath [root])`
-+ load `a` + call `a/f` → `No such var: user/v`. The expansion is the
-evidence: resolving `b/m` through the loader yields the form `user/v`;
-binding `*ns*` to another ns (`b2`) around the load yields `b2/v`; and
-`jolt.host/set-source-roots!` + `require 'a` on the same root returns 42.
-Fresh AOT cache, no parent, qualified or `:refer`'d macro — all the same.
-
-Fix sketch: read the file's `ns` form first, bind `*ns*` (with its aliases)
-to that namespace for the rest of the read, or move the loader to
-form-by-form read/eval like the host loader. Impact: `rewrite-clj`'s
-`custom-zipper.switchable` macros poison
-`rewrite-clj.custom-zipper.core`'s generated fns, so the clojure
-*extension*'s rewrite-clj tools (`clojure_edit`,
-`clojure_edit_replace_sexp`) fail on Jolt with `user/custom-zipper?`
-(cljfmt's formatter then silently no-ops behind `format-source-string`'s
-catch). The extension still *loads* (kmet's loader workarounds above), and
-`clojure_paren_repair` — edamame/parinferish only — works. No kmet
-workaround: the loader constructor itself is the broken piece; the host
-root cannot be substituted without giving up extension isolation.
-
-**Upstream status:** five open items — the SCI IVar gap, filed as
+**Upstream status:** four open items — the SCI IVar gap, filed as
 [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) (`deferred`),
 re-diagnosed upstream in jolt PR #1033 — with its fix at
 [babashka/sci#1093](https://github.com/babashka/sci/pull/1093) (re-checked
@@ -169,9 +146,8 @@ stays — the Normalizer perf ticket,
 [jolt#1066](https://github.com/jolt-lang/jolt/issues/1066) (filed 2026-09-20;
 no kmet change waits on it) — the `set!`/entry-binding gap, filed as
 [jolt#1074](https://github.com/jolt-lang/jolt/issues/1074) (filed 2026-09-21;
-the `load-extension!` binding workaround waits on it) — and the two unfiled
-findings below: `jl/classpath`'s syntax-quote resolution and the Windows
-runtime seams. Every other ticket this file tracked is closed.
+the `load-extension!` binding workaround waits on it) — and the unfiled
+Windows runtime seams below. Every other ticket this file tracked is closed.
 
 **Workarounds live next to their ticket below.** Each workaround block is the
 removal checklist: when an upstream fix lands, delete the listed code (and the
