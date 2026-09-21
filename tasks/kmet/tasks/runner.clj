@@ -349,11 +349,15 @@
               (pos? n-error) (conj (plural n-error "error" "errors")))))
 
 (defn- fmt-duration
-  "Format elapsed milliseconds as a compact duration (ms or s)."
-  [ms]
-  (if (< ms 1000)
-    (str (long ms) " ms")
-    (format "%.1f s" (/ ms 1000.0))))
+  "Format elapsed MICROSECONDS as a compact duration (µs, ms or s)."
+  [us]
+  (cond
+    (< us 1000) (str (long us) " µs")
+    (< us 1000000) (let [ms (/ us 1000.0)]
+                     (if (< ms 10)
+                       (format "%.1f ms" ms)
+                       (str (long ms) " ms")))
+    :else (format "%.1f s" (/ us 1000000.0))))
 
 (defn- capture-streams!
   "Point System/out and System/err at fresh byte streams; returns the
@@ -412,7 +416,7 @@
   [ns-sym vars]
   (let [ns-obj (find-ns ns-sym)
         before @t/*report-counters*
-        start-ms (System/currentTimeMillis)
+        start-ns (System/nanoTime)
         once-fx (t/join-fixtures (:clojure.test/once-fixtures (meta ns-obj)))
         each-fx (t/join-fixtures (:clojure.test/each-fixtures (meta ns-obj)))]
     (println "\nTesting" (ns-name ns-obj))
@@ -426,9 +430,9 @@
           n-pass (- (:pass after) (:pass before))
           n-fail (- (:fail after) (:fail before))
           n-error (- (:error after) (:error before))
-          elapsed-ms (- (System/currentTimeMillis) start-ms)]
+          elapsed-us (quot (- (System/nanoTime) start-ns) 1000)]
       (println (str "  " (fmt-summary n-test n-pass n-fail n-error)
-                    " (" (fmt-duration elapsed-ms) ")")))))
+                    " (" (fmt-duration elapsed-us) ")")))))
 
 (def ^:private jolt-ns-timeout-ms
   "Per-namespace cap for the Jolt engine. Jolt runs are slower and burstier
@@ -455,7 +459,7 @@
   [ns-sym vars]
   (let [counters (var-get (requiring-resolve (quote clojure.test/counters)))
         before @counters
-        start-ms (System/currentTimeMillis)
+        start-ns (System/nanoTime)
         _ (println "\nTesting" (ns-name (find-ns ns-sym)))
         ;; future + deref-with-timeout so a hung namespace can't block forever.
         ;; deref returns the future's value (::ok or a Throwable) or ::timeout.
@@ -472,16 +476,16 @@
           n-pass (- (:pass after) (:pass before))
           n-fail (- (:fail after) (:fail before))
           n-error (- (:error after) (:error before))
-          elapsed-ms (- (System/currentTimeMillis) start-ms)]
+          elapsed-us (quot (- (System/nanoTime) start-ns) 1000)]
       (cond
         (= ::timeout deref-result)
-        (println (str "  TIMED OUT after " (fmt-duration jolt-ns-timeout-ms)
+        (println (str "  TIMED OUT after " (fmt-duration (* 1000 jolt-ns-timeout-ms))
                       " — test infrastructure hung (likely a JDK class gap on Jolt)"))
         (instance? Throwable deref-result)
         (println (str "  ERROR: " (.getMessage deref-result)))
         :else
         (println (str "  " (fmt-summary n-test n-pass n-fail n-error)
-                      " (" (fmt-duration elapsed-ms) ")"))))))
+                      " (" (fmt-duration elapsed-us) ")"))))))
 
 (defn- run-selected
   "Run selected test vars, grouped by namespace so fixtures apply per ns.
@@ -537,7 +541,7 @@
    When MARK-VALIDATED? and everything passed, records
    the changed-files baseline (kmet.tasks.changed — bb only)."
   [{:keys [vars unloaded filters]} mark-validated?]
-  (let [start-ms (System/currentTimeMillis)
+  (let [start-ns (System/nanoTime)
         models-var (try (requiring-resolve 'kmet.ai.models/*use-models-cache*)
                         (catch Throwable _ nil))
         results (if (and (not jolt?) models-var)
@@ -545,7 +549,7 @@
                   (run-selected vars))
         n-tests (:test results)
         n-assertions (+ (:pass results) (:fail results) (:error results))
-        total-ms (- (System/currentTimeMillis) start-ms)
+        total-us (quot (- (System/nanoTime) start-ns) 1000)
         fails (:fail results)
         errs (:error results)]
     (when (or (empty? filters) (seq vars))
@@ -553,7 +557,7 @@
     (when (and (seq filters) (empty? vars))
       (report-no-match unloaded filters))
     (println (str "\nRan " n-tests " tests containing " n-assertions " assertions in "
-                  (fmt-duration total-ms) "."))
+                  (fmt-duration total-us) "."))
     (when (pos? (+ fails errs))
       (println (str (str/join ", " [(plural fails "failure" "failures")
                                     (plural errs "error" "errors")]) ".")))
