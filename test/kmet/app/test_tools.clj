@@ -723,3 +723,16 @@
       (t/is (some? (:images result)))
       (t/is (.contains (:content result) "Read image file"))
       (t/is (.contains (:content result) "image/png")))))
+
+(t/deftest test-tool-read-gif-signature
+  ;; Regression (pi 47a18e37b): only the complete GIF87a/GIF89a header is an
+  ;; image — a text file merely starting with "GIF" is text.
+  (spit "target/test-tools-read-gif.txt" "GIF is an image format, not this file")
+  (let [result (tools/execute-tool "read" {:path "target/test-tools-read-gif.txt"})]
+    (t/is (nil? (:images result)))
+    (t/is (.contains (:content result) "GIF is an image format")))
+  (doseq [signature ["GIF87a" "GIF89a"]]
+    (spit "target/test-tools-read-gif.gif" (str signature " fake image bytes"))
+    (let [result (tools/execute-tool "read" {:path "target/test-tools-read-gif.gif"})]
+      (t/is (= "image/gif" (-> result :images first :mime-type)))
+      (t/is (.contains (:content result) "image/gif")))))

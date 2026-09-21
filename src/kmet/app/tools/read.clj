@@ -196,7 +196,8 @@
     (when (and (is-png? buf) (not (is-animated-png? buf)))
       "image/png")
 
-    (starts-with-ascii? buf 0 "GIF")
+    (or (starts-with-ascii? buf 0 "GIF87a")
+        (starts-with-ascii? buf 0 "GIF89a"))
     "image/gif"
 
     (and (starts-with-ascii? buf 0 "RIFF")
