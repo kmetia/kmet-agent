@@ -442,7 +442,8 @@
    has no per-var ref counters and no host output capture; clojure.test/
    test-vars applies the ns's :once/:each fixtures and test-var through
    jolt's own process-wide counters atom. Prints the same per-namespace
-   header/summary as the bb engine.
+   header/summary as the bb engine — header first, so the namespace's own
+   (uncaptured here) output reads under its header.
 
    Jolt-specific: test-vars runs on a future with a per-namespace timeout.
    A namespace whose test infrastructure hangs on Jolt (JDK classes with
@@ -455,6 +456,7 @@
   (let [counters (var-get (requiring-resolve (quote clojure.test/counters)))
         before @counters
         start-ms (System/currentTimeMillis)
+        _ (println "\nTesting" (ns-name (find-ns ns-sym)))
         ;; future + deref-with-timeout so a hung namespace can't block forever.
         ;; deref returns the future's value (::ok or a Throwable) or ::timeout.
         f (future
@@ -465,7 +467,6 @@
         deref-result (deref f jolt-ns-timeout-ms ::timeout)]
     (when (= ::timeout deref-result)
       (future-cancel f))
-    (println "\nTesting" (ns-name (find-ns ns-sym)))
     (let [after @counters
           n-test (- (:test after) (:test before))
           n-pass (- (:pass after) (:pass before))
