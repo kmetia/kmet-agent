@@ -158,6 +158,41 @@
 (t/deftest test-load-prompt-templates-from-dir-non-existent
   (t/is (= [] (prompts/load-prompt-templates-from-dir "/nonexistent/prompts"))))
 
+(t/deftest test-load-prompt-templates-warns-on-unreadable-file
+  (prompts/clear-prompt-templates!)
+  (let [tmp-dir (str "target/test-prompts-warn-" (System/currentTimeMillis))
+        good (str tmp-dir "/good.md")
+        missing (str tmp-dir "/missing.md")
+        err (java.io.StringWriter.)]
+    (try
+      (io/make-parents good)
+      (spit good "---\ndescription: Loads fine.\n---\nGood body.")
+      (binding [*err* err]
+        (prompts/load-prompt-template-files! [good missing]))
+      (t/testing "the valid template still loads"
+        (t/is (= "Loads fine." (:description (prompts/get-prompt-template "good")))))
+      (t/testing "the unreadable template is reported, not silently skipped"
+        (t/is (str/includes? (str err) (str "Warning: prompt template at " missing))))
+      (finally
+        (prompts/clear-prompt-templates!)
+        (fs/delete-tree tmp-dir)))))
+
+(t/deftest test-load-prompt-templates-non-string-frontmatter
+  (prompts/clear-prompt-templates!)
+  (let [tmp-dir (str "target/test-prompts-types-" (System/currentTimeMillis))]
+    (try
+      (io/make-parents (str tmp-dir "/typed.md"))
+      (spit (str tmp-dir "/typed.md")
+            "---\ndescription: true\nargument-hint: 42\n---\nReal first line.")
+      (prompts/load-prompt-templates-from-dir tmp-dir)
+      (let [tpl (prompts/get-prompt-template "typed")]
+        (t/testing "non-string frontmatter values are ignored (pi: typeof checks)"
+          (t/is (= "Real first line." (:description tpl)))
+          (t/is (nil? (:argument-hint tpl)))))
+      (finally
+        (prompts/clear-prompt-templates!)
+        (fs/delete-tree tmp-dir)))))
+
 ;; ─── Autocomplete shape (pi: interactive-mode templateCommands) ────────────
 
 (t/deftest test-as-command-maps

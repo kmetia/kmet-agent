@@ -96,17 +96,21 @@
 
 ;; ─── Loading (pi: loadTemplateFromFile / loadTemplatesFromDir) ────────────
 
-(defn- make-template-from-content
-  "Build a prompt template map from RAW .md content. LOCATION is the display
-   locator (a file path, or an `ext-name:relative/path` locator for extension
-   templates). EXTENSION is the owning extension name, or nil. Description =
-   frontmatter description, else the first non-empty body line truncated to
-   60 chars with \"...\" (pi: loadTemplateFromFile). Returns the template
-   map, or nil on parse failure."
+(defn- parse-template-content
+  "Parse RAW .md content into a prompt template (pi: loadTemplateFromFile
+   body). LOCATION is the display locator (a file path, or an
+   `ext-name:relative/path` locator for extension templates); EXTENSION is
+   the owning extension name, or nil. Description = a string frontmatter
+   description, else the first non-empty body line truncated to 60 chars
+   with \"...\" (pi: only string frontmatter values count). Returns
+   {:template map-or-nil :diagnostics [warning-maps]}."
   [raw name location extension]
   (try
     (let [{:keys [frontmatter body]} (yaml/parse-frontmatter raw)
-          fm-desc (some-> (get frontmatter "description") str str/trim)
+          fm-desc (let [d (get frontmatter "description")]
+                    (when (string? d) (str/trim d)))
+          fm-hint (let [h (get frontmatter "argument-hint")]
+                    (when (string? h) h))
           first-line (first (filter #(seq (str/trim %)) (str/split-lines body)))
           description (cond
                         (seq fm-desc) fm-desc
@@ -114,29 +118,44 @@
                                      (str (subs first-line 0 60) "...")
                                      first-line)
                         :else "")]
-      (cond-> {:name name
-               :description description
-               :content body
-               :location (str location)
-               :extension extension
-               :file-path (when (nil? extension) (str location))}
-        (seq (str (get frontmatter "argument-hint")))
-        (assoc :argument-hint (str (get frontmatter "argument-hint")))))
-    (catch Exception _
-      ;; pi: loadTemplateFromFile returns null on read/parse failure (silent)
-      nil)))
+      {:template
+       (cond-> {:name name
+                :description description
+                :content body
+                :location (str location)
+                :extension extension
+                :file-path (when (nil? extension) (str location))}
+         (seq fm-hint) (assoc :argument-hint fm-hint))
+       :diagnostics []})
+    (catch Exception e
+      {:template nil
+       :diagnostics [{:type "warning"
+                      :message (or (ex-message e) "failed to parse prompt template file")
+                      :path (str location)}]})))
+
+(defn- make-template-from-content
+  "Build a prompt template map from RAW .md content (extension templates).
+   Returns the template map, or nil on parse failure — registration skips a
+   bad template; the file loading path reports diagnostics instead."
+  [raw name location extension]
+  (:template (parse-template-content raw name location extension)))
 
 (defn- load-template-from-file
-  "Load a prompt template from a .md file. Name = filename without .md.
-   Returns the template map, or nil on read/parse failure."
+  "Load a prompt template from a .md file (name = filename without .md).
+   Returns {:template map-or-nil :diagnostics [warning-maps]} — an
+   unreadable file or malformed frontmatter is reported, not silently
+   skipped (pi: loadTemplateFromFile)."
   [file-path]
   (try
-    (make-template-from-content (slurp file-path)
-                                (str/replace (fs/file-name file-path) #"\.md$" "")
-                                (str file-path)
-                                nil)
-    (catch Exception _
-      nil)))
+    (parse-template-content (slurp file-path)
+                            (str/replace (fs/file-name file-path) #"\.md$" "")
+                            (str file-path)
+                            nil)
+    (catch Exception e
+      {:template nil
+       :diagnostics [{:type "warning"
+                      :message (or (ex-message e) "failed to read prompt template file")
+                      :path (str file-path)}]})))
 
 (defn register-prompt-template!
   "Register a prompt template from an extension's bundled .md content string
@@ -167,14 +186,21 @@
 
 (defn load-prompt-template-files!
   "Load prompt templates from explicit .md file paths (the package-resource
-   unit, pi: package prompts load). Adds them to the registry and returns the
-   loaded templates."
+   unit, pi: package prompts load). Adds them to the registry, reports load
+   failures as warnings on stderr (pi: prompt resource diagnostics), and
+   returns the loaded templates."
   [file-paths]
-  (let [loaded (volatile! [])]
+  (let [loaded (volatile! [])
+        warnings (volatile! [])]
     (doseq [f file-paths]
       (when (str/ends-with? (fs/file-name (str f)) ".md")
-        (when-let [t (load-template-from-file (str f))]
-          (vswap! loaded conj t))))
+        (let [result (load-template-from-file (str f))]
+          (when-let [t (:template result)]
+            (vswap! loaded conj t))
+          (vswap! warnings into (:diagnostics result)))))
+    (doseq [{:keys [message path]} @warnings]
+      (binding [*out* *err*]
+        (println (str "Warning: prompt template at " path ": " message))))
     (let [ts @loaded]
       (swap! templates into ts)
       ts)))
