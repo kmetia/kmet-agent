@@ -8,8 +8,7 @@ A kmet extension providing Clojure-aware tools, ported from [clojure-mcp](https:
 
 ```
 extensions/clojure/
-├── deps.edn              — rewrite-clj, cljfmt, edamame, parinferish (SCI-safe, not parinfer JVM)
-├── bb.edn                — mirrors deps.edn + `bb test` task (4 namespaces)
+├── bb.edn                — standalone `bb test` task (4 namespaces)
 ├── extension.edn         — {:name "clojure" :entry "src/kmet/extensions/clojure/core.clj"}
 ├── README.md             — usage info with examples
 ├── skills/
@@ -29,7 +28,7 @@ extensions/clojure/
     └── paren_repair_test.clj — repair + hooks (write reject, edit warn)
 ```
 
-Each extension runs in an isolated SCI context. `deps.edn` declares per-extension dependencies resolved by `borkdude.deps` in-process. The shared library layers `kmet.tui.*` and `kmet.libs.*` are injected by reference.
+Each extension runs in an isolated SCI context. Dependencies are declared per-extension in a `deps.edn`, resolved by `borkdude.deps` in-process — this extension needs none: rewrite-clj, cljfmt, edamame and parinferish are all in kmet's fixed bundled set (extensions.md § Bundled extension libraries), shared by reference on both hosts. The shared library layers `kmet.tui.*` and `kmet.libs.*` are likewise injected by reference.
 
 Tool namespaces use the tool name (e.g. `clojure_edit` → ns `edit-tool`). The entry point `kmet.extensions.clojure.core` requires tool namespaces and calls their `register!` functions.
 
@@ -201,13 +200,16 @@ Delimiter repair tool. Port of clojure-mcp `paren_repair/{core,tool}.clj` (file-
 
 ## Dependencies
 
-| Library | Version | Purpose |
-|---|---|---|
-| rewrite-clj | 1.1.47 | Zipper-based Clojure code parsing and transformation |
-| cljfmt | 0.13.1 | Clojure code formatting |
-| edamame | 1.5.35 | Delimiter error detection (parser) |
-| parinferish | 0.8.0 | Delimiter repair (indent-mode; pure Clojure, SCI-compatible) |
-| bencode | bundled in bb | nREPL wire encoding (clojure-nrepl-eval) |
+All provided by kmet's fixed bundled set (no extension `deps.edn`):
+
+| Library | Purpose |
+|---|---|
+| rewrite-clj 1.2.57 | Zipper-based Clojure code parsing and transformation |
+| cljfmt 0.16.5 | Clojure code formatting |
+| edamame | Delimiter error detection (parser) |
+| parinferish 0.8.0 | Delimiter repair (indent-mode; pure Clojure, SCI-compatible) |
+| clojure.spec.alpha | injected: `cljfmt.config`'s require |
+| bencode (bundled in bb) | nREPL wire encoding (clojure-nrepl-eval) |
 
 Note: `parinfer 0.4.0` (com.oakmac/parinfer, the JVM lib clojure-mcp uses) is NOT usable — extension contexts serve jar sources under SCI and only expose bb-bundled classes. parinferish is the drop-in pure-Clojure replacement (same as clojure-mcp-light).
 

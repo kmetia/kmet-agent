@@ -113,16 +113,19 @@ Editing guidelines pulled on demand when working with Clojure files. Covers:
 
 ## Dependencies
 
-Declared in `deps.edn`, resolved per-extension in an isolated context:
+No `deps.edn` — everything is served by kmet's fixed bundled set
+(`extensions.md` § Bundled extension libraries), shared by reference on both
+hosts:
 
-- cljfmt 0.16.5 — code formatting (rewrite-clj 1.2.57 pinned to the
-  version Babashka bundles: bb serves its adapted port, Jolt loads the
-  Maven jar; `cljfmt.edn` discovery and its `#re` reader live in edit-util,
-  so cljfmt.config — and with it spec.alpha — is not a dependency)
+- cljfmt 0.16.5 — code formatting (`cljfmt.edn` discovery and its `#re`
+  reader live in edit-util, so `cljfmt.config` is only loaded for its
+  `default-config` var)
+- rewrite-clj 1.2.57 — form parsing/zippers
+- edamame — delimiter error detection
 - parinferish 0.8.0 — delimiter repair (pure Clojure; parinfer is a JVM lib
   and can't run in SCI contexts)
-- edamame 1.5.39 — delimiter error detection (Babashka's bundled version:
-  bb serves its adapted port, Jolt loads the Maven jar)
+- clojure.spec.alpha — injected because `cljfmt.config` requires it
+  (port on bb, the pinned Maven lib on Jolt)
 
 ## Skills
 

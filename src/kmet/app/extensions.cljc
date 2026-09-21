@@ -62,6 +62,11 @@
             [kmet.libs.host :as host]
             [kmet.loader.core :as loader]
             [kmet.loader.sci-loader :as loader-sci]
+            ;; Jolt only: pulls the fixed bundled extension set into the
+            ;; app's require closure (jolt dist AOT-compiles it). bb/JVM
+            ;; load the same namespace in host-requires! on the first
+            ;; extension load (its requires resolve to the bb ports there).
+            #?(:jolt [kmet.app.extension-libs])
             #?(:jolt [kmet.loader.jolt-loader :as loader-jolt])
             [kmet.extension]))
 
@@ -840,19 +845,21 @@
     UnsupportedOperationException java.lang.UnsupportedOperationException})
 
 (def ^:private bb-bundled-libs
-  "Libraries babashka ships adapted (SCI implementations baked into the
-   binary) whose raw Maven versions generally fail in bb. Extensions should
-   omit them from deps.edn and use the bundled copy. Plain-bundled libs
-   whose Maven copies run fine (tools.cli, data.json, ...) are not listed —
-   they resolve to declared versions normally."
-  #{"org.clojure/core.async"
-    "org.clojure/core.cache"
-    "org.clojure/core.memoize"
-    "org.clojure/core.rrb-vector"
-    "potemkin/potemkin"
-    "rewrite-clj/rewrite-clj"
-    "borkdude/edamame"
-    "ring/ring-core"
+  "Libraries babashka bundles whose evaluated Maven copy fails in an SCI
+   extension context on bb — a native implementation backed by classes the
+   GraalVM image does not register for reflection, or an SCI representation
+   limit. Verified on bb 1.13.222: cheshire (Jackson reflection),
+   clj-commons/clj-yaml (flatland defrecord over a protocol), http-kit
+   (unregistered org.httpkit classes), selmer (java.sql.Time). Extensions
+   should omit them from deps.edn and use the bundled copy — JSON, YAML and
+   HTTP have the kmet.libs.json/yaml/http seams. Plain Maven libs bb happens
+   to preload whose copies run fine, and libs injected as bundled ports
+   under clojure.*/rewrite-clj/edamame (shared-namespace? handles those, see
+   bundled-artifacts for the closure exclusion), are deliberately not
+   listed."
+  #{"cheshire/cheshire"
+    "clj-commons/clj-yaml"
+    "http-kit/http-kit"
     "selmer/selmer"})
 
 (def ^:private bundled-port-namespaces
@@ -1007,6 +1014,7 @@
     kmet.libs.terminal
     kmet.libs.terminal-image
     kmet.libs.usage
+    kmet.libs.version
     kmet.libs.yaml])
 
 (defn- ns-path
@@ -1181,6 +1189,23 @@
   [n]
   (str/starts-with? n "kmet.libs."))
 
+(def ^:private bundled-extension-lib-prefixes
+  "The third-party roots of the fixed bundled extension set
+   (kmet.app.extension-libs) that are not already covered by the
+   clojure.*/babashka.* clauses or the bb port sets. Shared by reference on
+   both hosts: the SCI path injects them into the base context, the Jolt
+   host view passes them through."
+  ["cljfmt" "edamame" "parinferish" "rewrite-clj"])
+
+(defn- bundled-extension-lib?
+  "Is namespace name N part of the fixed bundled extension set? (The set's
+   clojure.* members — spec.alpha, tools.reader, core.async, rrb-vector —
+   are admitted by shared-namespace?'s host clauses and port sets; see
+   bundled-extension-lib-prefixes for the rest.)"
+  [n]
+  (boolean (some #(or (= n %) (str/starts-with? n (str % ".")))
+                 bundled-extension-lib-prefixes)))
+
 (defn- shared-namespace?
   "Is NS-OBJ a host namespace extension contexts share? The scan's rule,
    used by the SCI path (which copies the vars into its context) and by the
@@ -1191,17 +1216,17 @@
   (let [n (str (ns-name ns-obj))]
     (and (not (str/starts-with? n "sci."))
          (not= n "clojure.core")
-         ;; bundled libraries whose Maven versions run under
-         ;; SCI (clojure.tools.cli, data.json, data.csv,
-         ;; ...) are NOT injected — they resolve through
-         ;; the load-fn, so a declared Maven version wins
-         ;; over the bundled copy. The adapted libs
-         ;; (core.async, data.json, ...), the custom ports
-         ;; (bundled-port-namespaces), bb-shared-namespaces
-         ;; and the data.xml family stay injected: their
-         ;; Maven copies fail under SCI (data.xml uses
-         ;; definline), so the bundled copy is the only
-         ;; working one.
+         ;; plain-bundled libraries whose Maven versions run
+         ;; under SCI (data.json, tools.cli, data.csv, ...)
+         ;; are NOT injected — they resolve through the
+         ;; load-fn, so a declared Maven version wins over
+         ;; the host classpath. The adapted ports
+         ;; (core.async, bundled-port-namespaces,
+         ;; bb-shared-namespaces, the data.xml family), the
+         ;; fixed bundled extension set
+         ;; (bundled-extension-lib?) and the kmet layers stay
+         ;; injected: their Maven copies fail under SCI, so
+         ;; the bundled copy is the only working one.
          (not (or (and (str/starts-with? n "clojure.data.")
                        (not (or (= n "clojure.data.xml")
                                 (str/starts-with? n "clojure.data.xml."))))
@@ -1211,6 +1236,7 @@
          (or (str/starts-with? n "clojure.")
              (str/starts-with? n "babashka.")
              (contains? bb-shared-namespaces (ns-name ns-obj))
+             (bundled-extension-lib? n)
              (tui-layer? n)
              (libs-layer? n)))))
 
@@ -1757,14 +1783,16 @@
 (defn- host-requires!
   "Require the shared library layers before a per-extension context is
    built, so the all-ns scan in build-context-namespaces finds them.
-   bb-only ports (clojure.spec, rewrite-clj, tools.reader, data.xml —
-   SCI-incompatible Maven sources with bb-bundled replacements) are
-   required only on bb: Jolt has no bundled copies (its require fails),
-   and their namespaces stay absent from Jolt contexts — extensions
-   requiring them there get the actionable provider error."
+   kmet.app.extension-libs is the fixed bundled extension set (see there):
+   on Jolt it is already loaded (statically required for the build
+   closure), on bb/JVM this first extension load pulls it in. bb-only ports
+   (clojure.spec, rewrite-clj, tools.reader, data.xml — SCI-incompatible
+   Maven sources with bb-bundled replacements) are required only on bb:
+   Jolt uses the Maven copies from the fixed set instead."
   []
   (require 'clojure.core.async)
   (apply require (concat tui-library-namespaces libs-library-namespaces))
+  (require 'kmet.app.extension-libs)
   (when-not (host/jolt?)
     (apply require (concat spec-port-namespaces bb-shared-namespaces)))
   nil)
@@ -2034,9 +2062,18 @@
        (loader-jolt/classpath
         (into [root] (when deps-resolver (deps-resolver)))
         {:id (str "ext:" ext-name)
-         :parent (loader-jolt/host-view (loader-jolt/root)
-                                        (shared-namespace-names)
-                                        {:also jolt-host-builtin?})}))))
+         :parent (loader-jolt/host-view
+                  (loader-jolt/root)
+                  (shared-namespace-names)
+                  ;; the stdlib families resolve lazily; the fixed bundled
+                  ;; extension set loads eagerly (extension-libs), so this
+                  ;; net only catches a set sub-namespace outside its
+                  ;; require chain (cljfmt.main, rewrite-clj.paredit) — the
+                  ;; host copy still wins over a context's own roots,
+                  ;; which is the set's contract
+                  {:also (fn [nm]
+                           (or (jolt-host-builtin? nm)
+                               (bundled-extension-lib? nm)))})}))))
 
 (defn- host-loader-preference
   "Loader backends available on this host, most preferred first: Jolt has
@@ -2206,10 +2243,13 @@
                       l (create-loader loader-kind name artifact owns-ns? deps-resolver
                                        (when-not artifact
                                          {file-ns {:file (str file) :source file-source}}))]
-                ;; bb-only: a bb-bundled lib's Maven copy is served to SCI
-                ;; contexts unless the closure dropped it (bundled-artifacts);
-                ;; on Jolt nothing is bundled, and declaring the Maven copy is
-                ;; exactly how such a lib is made available.
+                ;; bb-only: a native bb-bundled lib's Maven copy is served to
+                ;; SCI contexts (dep-source wins over the host classpath) and
+                ;; fails there on classes the GraalVM image does not expose;
+                ;; the bundled implementation is not injected either — use a
+                ;; kmet.libs.* seam or a pure-Clojure alternative. Libs whose
+                ;; bundled port replaces the artifact wholesale were dropped
+                ;; from the closure already (bundled-artifacts).
                   #?(:bb
                      (doseq [lib (keys deps)
                              :let [lib (str lib)]
@@ -2217,8 +2257,10 @@
                                         (not (contains? bundled-artifacts lib)))]
                        (binding [*out* *err*]
                          (println "Warning: extension" (:name ext) "pins" lib
-                                  "which babashka bundles — the Maven copy may not run;"
-                                  "omit it from deps.edn to use the bundled version."))))
+                                  "which babashka bundles natively — its Maven copy"
+                                  "cannot run under SCI and the bundled one is not"
+                                  "shared with extension contexts; use the relevant"
+                                  "kmet.libs.* seam."))))
                   (reset! (:loader ext) l)
                   (if artifact
                     (do

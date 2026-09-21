@@ -293,7 +293,44 @@ Dep resolution happens **in-process** (via `clojure.tools.deps`, bundled
 with babashka — no extra dependency, no JVM) — no subprocess, and nothing
 is written outside the normal Maven/Git caches (`~/.m2`, `~/.gitlibs`). A
 library an extension requires without declaring it in `deps.edn` fails with
-a clear error unless it is babashka-bundled.
+a clear error unless it is part of the fixed bundled set below.
+
+### Bundled extension libraries (fixed set)
+
+kmet ships a fixed set of libraries in **both** artifacts and shares them by
+reference with every extension context: bb's bundled ports serve the names on
+babashka, and `jolt dist` AOT-compiles kmet's pinned Maven deps into the Jolt
+binary — on both hosts the library is already loaded, so it costs nothing per
+extension and keeps `identical?`/protocol identity. Requiring a set member
+needs **no `deps.edn`** and no host-conditional code. The set is enumerated in
+`kmet.app.extension-libs`:
+
+| Library | Namespaces | Notes |
+|---|---|---|
+| rewrite-clj | `rewrite-clj.*` | bb's bundled port; the pinned Maven jar on Jolt |
+| edamame | `edamame.core` | reader-error/delimiter detection |
+| clojure.tools.reader | `clojure.tools.reader*` | bb's reduced port; the Maven lib on Jolt |
+| clojure.spec | `clojure.spec.alpha` | bb's port; the Maven lib on Jolt |
+| cljfmt | `cljfmt.core`, `cljfmt.config` | 0.16.5 on both |
+| parinferish | `parinferish.core` | pure Clojure, 0.8.0 on both |
+
+Plus the libraries shared from the host itself: `clojure.*` (`core.async`
+and `rrb-vector` included), `babashka.fs`, `babashka.process`, and the kmet
+layers (`kmet.extension`, `kmet.tui.*`, `kmet.libs.*` and the shared
+renderer namespaces).
+
+The **guarantee is the namespace surface, not the version**: on babashka a
+bundled port decides its own edition, while Jolt uses the version kmet pins
+in `deps.edn`. Pinning a set member in an extension's `deps.edn` therefore
+does **not** override the shared copy — declare only libraries **outside**
+the set.
+
+Everything else babashka bundles (cheshire, clj-yaml, http-kit, selmer,
+transit, hiccup, timbre, nextjournal.markdown, bencode, …) is **not** part of
+the portable surface: those are neither injected nor source-evaluable under
+SCI — Java-backed copies fail on classes the native image does not expose —
+and Jolt has no copies at all. Use `kmet.libs.json`, `kmet.libs.yaml`,
+`kmet.libs.markdown` and `kmet.libs.http` instead.
 
 ### Background work (`kmet.libs.concurrent/spawn`)
 
@@ -314,14 +351,17 @@ Under the SCI host contexts (bb and the JVM, and a `:sci`-only extension on Jolt
 - Babashka only runs libraries it supports: pure-Clojure code using classes
   it exposes. Libraries needing `definterface`, `deftype` with non-protocol
   interfaces, or unexposed Java classes fail to load — in plain bb too.
-- Libraries babashka ships adapted (`core.async`, `data.json`,
-  `tools.reader`, ..., and the whole `clojure.data.xml` family, whose Maven
-  copy uses `definline` — unsupported by SCI) usually cannot be replaced by
-  their raw Maven versions; kmet warns when an extension pins one. Omit them
-  from `deps.edn` to use the bundled copy — it is injected into your context
-  by reference.
+- The fixed bundled set (see Bundled extension libraries) is injected by
+  reference: omit those libs from `deps.edn` (a declared copy is ignored).
+- Libraries babashka implements natively (cheshire, clj-yaml, http-kit,
+  selmer, ...) usually cannot be replaced by their raw Maven versions — the
+  Java classes are missing or not registered for reflection — and are not
+  in the set; kmet warns when an extension pins one. Use the `kmet.libs.*`
+  seams instead. The `clojure.data.xml` family is bb-only: the port is
+  shared there, Jolt needs a declared Maven dep if you want it.
 - Single-file extensions (plain `.clj` files, no directory) cannot carry a
-  `deps.edn`.
+  `deps.edn` — they can use the fixed set and the shared libraries, and
+  nothing else.
 
 #### Host support (Jolt)
 
@@ -357,10 +397,12 @@ not author-visible:
   entries per call with `ZipFile`; Jolt passes the archive to the native
   loader as a source root, so a `require` reads the central directory and
   resources answer `jar:file:…!/entry` URLs.
-- **bb-bundled ports.** `clojure.spec`, `rewrite-clj`, `edamame` and the
-  `clojure.data.xml` family are bb-bundled ports injected by reference;
-  Jolt has no bundled copies, so extensions needing them must declare a
-  Maven/git dep there.
+- **Bundled libraries.** The fixed bundled set (Bundled extension
+  libraries) is shared on both hosts: bb's ports serve the namespaces
+  there, Jolt compiles kmet's pinned Maven deps into the binary and the
+  host view shares them. `clojure.data.xml` stays bb-only — Jolt has no
+  copy and it is not in the set, so an extension needing it declares a
+  Maven dep there (on bb the port still serves the require).
 
 ## Runtime lifecycle
 

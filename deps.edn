@@ -60,8 +60,13 @@
         ;; the runtime there (see jolt-bugs.md).
         io.github.jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
                                          :git/sha "281689c9b6b54f3b09bb0fd3ca05dba4e54c6953"}
-        ;; cljfmt for the format tasks (kmet.tasks.format — one code path on
-        ;; both hosts; bb.edn carries the same version for babashka).
+        ;; cljfmt / spec.alpha / rewrite-clj serve the format tasks
+        ;; (kmet.tasks.format — one code path on both hosts) AND the fixed
+        ;; bundled extension set (kmet.app.extension-libs, extensions.md §
+        ;; Bundled extension libraries): jolt dist AOT-compiles them in,
+        ;; and extension contexts share the loaded namespaces by reference.
+        ;; bb.edn carries the same cljfmt version for babashka; bb's
+        ;; bundled ports serve spec.alpha/rewrite-clj there.
         ;; org.clojure/spec.alpha is declared explicitly: jolt's resolver
         ;; drops cljfmt's org.clojure/clojure dep (vendored core), and
         ;; cljfmt.config requires clojure.spec.alpha. rewrite-clj is pinned
@@ -70,10 +75,16 @@
         ;; on the same parser — no longer a workaround, just parity.
         dev.weavejester/cljfmt {:mvn/version "0.16.5"}
         ;; 0.5.238, not 0.6.249: the newer line updates to Clojure 1.12.4 and
-        ;; jolt vendors Clojure 1.11.0-jolt. All this pin feeds is cljfmt's
-        ;; clojure.spec.alpha require.
+        ;; jolt vendors Clojure 1.11.0-jolt. Feeds cljfmt's config require
+        ;; and the fixed extension set.
         org.clojure/spec.alpha {:mvn/version "0.5.238"}
         rewrite-clj/rewrite-clj {:mvn/version "1.2.57"}
+        ;; the two remaining fixed-set roots: parinferish (delimiter repair,
+        ;; pure Clojure) and edamame (reader-error detection). edamame would
+        ;; arrive transitively via the jolt/ sci pin; declared so dropping
+        ;; that pin cannot silently drop it from the set.
+        parinferish/parinferish {:mvn/version "0.8.0"}
+        borkdude/edamame {:mvn/version "1.6.44"}
         ;; kmet's own RFC 0014 provider lib (jolt/ dir): the JDK classes the
         ;; jolt ecosystem lacks. Empty by design — v0.8.6-98 supplies every
         ;; gap it was built for, so :jolt/provides is {} and install! is a

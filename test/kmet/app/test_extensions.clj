@@ -439,7 +439,7 @@
         (extensions/unload-all-extensions!)
         (fs/delete-tree dir)))))
 
-(t/deftest ^:slow ^:bb-only test-extension-cljfmt-deps-load
+(t/deftest ^:slow test-extension-cljfmt-deps-load
   ;; regression: an extension pinning cljfmt failed to load with "Unable to
   ;; resolve symbol: monitor-enter" — the Maven spec.alpha/core.specs.alpha
   ;; jars leaked into the closure (bundled-artifact? slash-munged dots in
@@ -448,14 +448,15 @@
   ;; clojure.spec.alpha had no working source. The bundled ports are now
   ;; injected and the bundled jars excluded.
   ;;
-  ;; Stays ^:bb-only: the fixture's deps.edn excludes rewrite-clj for the
-  ;; bundled port, which leaves Jolt's closure without rewrite-clj.node and
-  ;; no bundled copy to fall back on (extensions.md § bb-bundled ports; the
-  ;; shipped clojure extension declares the Maven jar on Jolt instead).
+  ;; Runs on both hosts: the fixture's deps.edn excludes rewrite-clj for the
+  ;; bb port, and the fixed bundled set (kmet.app.extension-libs) provides
+  ;; it where the declaration's gap would otherwise be — the closure
+  ;; assertions below stay meaningful on both (the declared cljfmt is in the
+  ;; closure, the host-provided ports are not).
   (extensions/clear-extensions!)
   (let [result (extensions/load-extension! "test/fixtures/ext-cljfmt")]
     (t/is (nil? (:error result)) (str "loaded: " (:error result)))
-    (testing "bb-bundled artifacts are excluded from the closure"
+    (testing "the closure carries the declared cljfmt, not the bundled ports"
       (let [jars (extensions/extension-jars "cljfmt-ext")]
         (t/is (some #(str/includes? % "cljfmt-0.16.5.jar") jars))
         (t/is (not-any? #(str/includes? % "spec.alpha-") jars))
@@ -466,6 +467,51 @@
                (:content (tools/execute-tool "cljfmt-fmt"
                                              {:code "(defn foo [x]\n  (if x\n   1\n   2))"})))))
     (extensions/unload-all-extensions!)))
+
+(t/deftest test-extension-fixed-bundled-set
+  ;; the fixed bundled set (kmet.app.extension-libs; extensions.md § Bundled
+  ;; extension libraries) needs no deps.edn: a single-file extension requires
+  ;; every third-party member and calls each one — same result on both hosts.
+  (extensions/clear-extensions!)
+  (let [dir "target/test-ext-fixed-set"
+        f (str dir "/fixed_set.clj")]
+    (fs/delete-tree dir)
+    (fs/create-dirs dir)
+    (spit f
+          (str/join
+           "\n"
+           ["(ns fixed-set-probe"
+            "  (:require [kmet.extension :as ext]"
+            "            [cljfmt.config :as config]"
+            "            [cljfmt.core :as fmt]"
+            "            [clojure.spec.alpha :as s]"
+            "            [clojure.tools.reader :as r]"
+            "            [edamame.core :as e]"
+            "            [parinferish.core :as pf]"
+            "            [rewrite-clj.zip :as z]))"
+            ""
+            "(defn- probe []"
+            "  (let [formatted (fmt/reformat-string \"(defn f [x]\\n(+ x 1))\" config/default-config)"
+            "        spec-ok (s/valid? int? 3)"
+            "        read (r/read-string \"42\")"
+            "        z-str (z/string (z/of-string \"(a b)\"))"
+            "        edn (e/parse-string \"1 2\")"
+            "        parsed (pf/parse \"(defn f [x] (+ x 1\" {:mode :indent})]"
+            "    (str formatted \"|\" spec-ok \"|\" read \"|\" z-str \"|\" edn \"|\" (count parsed))))"
+            ""
+            "(defn init [api]"
+            "  (ext/register-tool! api"
+            "                      {:name \"fixed-set-tool\""
+            "                       :description \"uses the fixed bundled extension set\""
+            "                       :execute (fn [_] {:content (probe)})}))"]))
+    (try
+      (let [result (extensions/load-extension! f)]
+        (t/is (nil? (:error result)) (str "loaded: " (:error result)))
+        (t/is (= "(defn f [x]\n  (+ x 1))|true|42|(a b)|1|1"
+                 (:content (tools/execute-tool "fixed-set-tool" {})))))
+      (finally
+        (extensions/unload-all-extensions!)
+        (fs/delete-tree dir)))))
 
 (t/deftest test-load-missing-require-error
   ;; a require the loader cannot serve must surface an actionable message,

@@ -63,10 +63,11 @@ never ship.
   one namespace defining `(defn init [api])`. They cannot carry a
   `deps.edn`, so they may only use `kmet.extension` plus the shared
   `kmet.tui.*` / `kmet.libs.*` library layers, the shared renderer
-  namespaces (`kmet.app.ui.tool-renderers`, `kmet.app.keybindings`) and
-  `clojure.*` /
-  `babashka.*` builtins. They have
-  **no tests** — the code is expected to
+  namespaces (`kmet.app.ui.tool-renderers`, `kmet.app.keybindings`),
+  `clojure.*` / `babashka.*` builtins and the fixed bundled set
+  (rewrite-clj, edamame, clojure.tools.reader, clojure.spec.alpha, cljfmt,
+  parinferish — see `extensions.md` § Bundled extension libraries). They
+  have **no tests** — the code is expected to
   stay small and self-contained; validate changes by loading the file
   against `kmet.extension/create-nullable-api` or the real runtime.
 - **Directory-based extensions** (a subdirectory with an `extension.edn`
