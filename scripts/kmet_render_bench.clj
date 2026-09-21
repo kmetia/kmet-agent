@@ -8,7 +8,7 @@
 ;;
 ;; The session file is a `~/.kmet/sessions/` .ednl (or its path); width
 ;; defaults to 100. Numbers are wall-clock and single-run by design — this is
-;; the harness perf.md §10's tables were measured with, not a test.
+;; the harness perf.md §10/§12's tables were measured with, not a test.
 (ns kmet-render-bench
   (:require [clojure.string :as str]
             [kmet.app.session :as session]

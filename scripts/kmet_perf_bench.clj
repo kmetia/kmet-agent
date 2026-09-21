@@ -1,5 +1,5 @@
 ;; Primitive microbenchmarks behind perf.md's tables (§3.3, §5, §9.1, §9.2,
-;; §6.6, §11). Same script on both hosts:
+;; §6.6, §11, §12). Same script on both hosts:
 ;;
 ;;   bb   scripts/kmet_perf_bench.clj              # full sweep
 ;;   jolt scripts/kmet_perf_bench.clj

@@ -98,6 +98,18 @@ and a Maven `spec.alpha` loads through the loader too — the circular
 spec.alpha/spec.gen.alpha require that pushed kmet off `cljfmt.config`. No
 kmet workaround — the loader constructor was the broken piece.
 
+**`java.text.Normalizer` perf (#1066, closed by jolt PR #1067).**
+`normalize` now answers ASCII runs from a quick check instead of delegating
+every string to Chez, and `isNormalized` checks the Unicode quick-check
+tables instead of normalizing and comparing: NFKC over 1.09M ASCII chars
+went 155.52 ms → **1.9 ms** (bb 2.0 ms, same box), and `isNormalized` on a
+decomposed 200k-char string ~10 ms → **0.43 ms**. Verified on `9786b7fa`
+(main 2026-09-21; 16 commits past the merge `0e2bcc2`, 0 behind). No kmet
+workaround waited on it — the `edit-diff` `[\x00-\x7F]*` guard stays, it
+skips NFKC on its own merits. The Unicode-16/17 table skew the issue also
+recorded (U+A7F1 → `"S"` on jolt; the JDK's older tables leave it alone) is
+not part of the fix and remains upstream's policy call.
+
 **`set!` on a compiler-flag var outside a load frame — filed as
 [jolt#1074](https://github.com/jolt-lang/jolt/issues/1074).**
 `clojure.main` wraps every entry — repl, `-e`, `-m`, a script — in
@@ -137,14 +149,12 @@ with a runtime `(require 'dep)` prints on. Workaround:
 writes the thread frame and the pop leaves the root untouched. Remove the
 binding when `-m`/loader evaluation carries clojure.main's entry bindings.
 
-**Upstream status:** four open items — the SCI IVar gap, filed as
+**Upstream status:** three open items — the SCI IVar gap, filed as
 [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) (`deferred`),
 re-diagnosed upstream in jolt PR #1033 — with its fix at
 [babashka/sci#1093](https://github.com/babashka/sci/pull/1093) (re-checked
 2026-09-20: open, head `1295142f`, unchanged), so the `jolt/deps.edn` SCI pin
-stays — the Normalizer perf ticket,
-[jolt#1066](https://github.com/jolt-lang/jolt/issues/1066) (filed 2026-09-20;
-no kmet change waits on it) — the `set!`/entry-binding gap, filed as
+stays — the `set!`/entry-binding gap, filed as
 [jolt#1074](https://github.com/jolt-lang/jolt/issues/1074) (filed 2026-09-21;
 the `load-extension!` binding workaround waits on it) — and the unfiled
 Windows runtime seams below. Every other ticket this file tracked is closed.
@@ -205,30 +215,6 @@ Re-checked 2026-09-19: both still open — #1031 now carries the `deferred`
 label, and PR #1093's head is still `1295142f`, so the pin is unchanged.
 Re-checked 2026-09-20: unchanged — #1031 still `deferred`, PR #1093 still open
 at the same head `1295142f`, so the pin stays.
-
-### [jolt#1066](https://github.com/jolt-lang/jolt/issues/1066) — `java.text.Normalizer` is 2.7–33x the JVM, and `isNormalized` normalizes instead of checking
-
-**Area:** `java.text.Normalizer` — `host/chez/java/host-static-methods.ss`
-(`normalizer-normalize` delegating to Chez's `string-normalize-*`; and
-`isNormalized` implemented as `(string=? str (normalizer-normalize str form))`).
-Every call is a full normalization at ~145 ns/char on jolt — pure ASCII pays
-the same as compatibility-heavy text — where the JVM quick-checks: NFKC over
-1.09M ASCII chars is 155.52 ms vs 4.78 ms, and `isNormalized` on a
-non-normalized string returns instantly on the JVM (the first non-normalized
-code point ends the scan) versus a full pass on jolt. Filed from #1062's
-secondary NFKC row.
-
-**Impact on kmet:** `kmet.libs.edit-diff/normalize-for-fuzzy-match`
-NFKC-normalizes non-ASCII edit content on every fuzzy pass — at ~145 ns/char
-a 275 KB non-ASCII file pays ~40 ms per application on jolt. Pure-ASCII text
-skips NFKC and the char replaces through the `[\x00-\x7F]*` guard (the #1062
-work), so the common source file is unaffected.
-
-**Workaround:** none separate from that ASCII guard — the guard is
-independently useful, so this is a status note, not a removal checklist. No
-kmet change waits on the fix. The issue also records a Unicode-16/17 skew
-(U+A7F1 normalizes to `"S"` on jolt; the JDK's older tables leave it alone) —
-upstream's policy call, no kmet concern.
 
 ### Windows runtime seams: atomic `spit`, `path.separator`, and program resolution (unfiled)
 

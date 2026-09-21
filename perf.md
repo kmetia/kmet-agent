@@ -5,7 +5,9 @@ and what to do about it. Numbers from a Termux/aarch64 phone (100x30 tmux pty,
 `jolt v0.8.6-83-g3de3e02b`, bb 1.12.x), 2026-09-11.
 
 **Re-verified on `jolt v0.8.10-10-g9c439021` (Termux/aarch64 phone, bb
-1.13.222) — §11 is the current state.** §9 (v0.8.6-86, x86_64 WSL2) and §10
+1.13.222) — §11 is the phone baseline; §12 re-runs the same harnesses on
+x86_64 WSL2 at `jolt v0.8.10-32-g9786b7fa` (typing parity, ~1.8x cold
+render).** §9 (v0.8.6-86, x86_64 WSL2) and §10
 (the first phone pass at v0.8.6-83) are kept as history. The v0.8.10 upgrade
 inverted the host comparison: jolt's primitives are no longer 2–5x slower on
 the frame path (§11.1).
@@ -1081,3 +1083,148 @@ earlier per-key runs (settle 14 s) measured part of that burn as typing; the
   (regex on both); the big jolt regex loss is `str/replace ANSI-CODE-RE`
   (17.05 µs), already carved out by §5.4.
 - **cb763f6** closed the last of §6.1's siblings (the kitty walk).
+
+---
+
+## 12. Re-measurement on x86_64 WSL2 at `jolt v0.8.10-32-g9786b7fa` (2026-09-21)
+
+The §11 harnesses re-run on this box (x86_64 WSL2, 14 cores, `bb` 1.13.222,
+`jolt v0.8.10-32-g9786b7fa`; §9's host class, 16 commits past the #1067
+Normalizer fix). Absolute µs are phone-vs-desktop incomparable like §9's —
+read the ratios. The fixture is the largest local session,
+`19fdb60dc61-b305.ednl` (8,793 lines expanded), not §11's A/B phone sessions.
+
+### 12.1 Primitives — §11.1's shape reproduces
+
+Steady-state medians (µs unless noted; jolt/bb here vs §11.1's phone ratio):
+
+| op | bb | jolt | jolt/bb | §11.1 |
+|---|---|---|---|---|
+| `visible-width` plain 100 | 1.247 | 1.236 | 0.99 | 0.94 |
+| `visible-width` 1-char | 0.111 | 0.089 | 0.80 | 0.83 |
+| `visible-width` styled 100 | 3.127 | 2.444 | 0.78 | 0.69 |
+| `visible-width` box-drawing | 38.257 | 5.481 | **0.14** | 0.09 |
+| `visible-width` CJK | 303.1 | 105.2 | 0.35 | 0.28 |
+| `strip-ansi-codes` styled (host path) | 1.869 | 0.798 | 0.43 | 0.40 |
+| `strip-ansi-native` styled (scanner) | 2.731 | 0.729 | 0.27 | 0.24 |
+| `str/replace ANSI-CODE-RE` styled | 1.757 | 7.963 | **4.5** | 3.9 |
+| `ansi-code-at` hit | 0.830 | 1.374 | 1.7 | 1.4 |
+| `normalize-terminal-output` plain (guarded) | 0.102 | 0.487 | **4.8** | 3.1 |
+| … two Thai replaces only (unguarded) | 0.080 | 0.339 | 4.2 | 2.4 |
+| `SEGMENT-RESET` concat alone | 0.116 | 0.049 | 0.42 | 0.42 |
+| `mapv identity` 100 lines | 1.073 | 3.031 | 2.8 | 2.7 |
+| `keys/matches-key?` | 0.420 | 0.195 | 0.46 | 0.41 |
+| one keystroke, 40 chord checks | 16.76 | 8.55 | 0.51 | 0.55 |
+| editor render, 500-char line | 452.1 | 384.2 | 0.85 | 0.75 |
+| editor render, 20 lines | 62.0 | 169.5 | 2.7 | 2.7 |
+| `md/parse` 2KB | 411.8 | 309.6 | 0.75 | 0.59 |
+| `md/parse` 21.6KB (ms) | 4.48 | 3.62 | 0.81 | 0.59 |
+| markdown render 2KB (cache miss) | 798.6 | 1030.4 | 1.29 | 1.04 |
+| fib 27 (ms) | 33.40 | 1.89 | 0.06 | 0.05 |
+| keyword lookup ×1e6 (ms) | 30.14 | 5.83 | 0.19 | 0.15 |
+| `subs` ×1e5 (ms) | 6.87 | 3.83 | 0.56 | 0.58 |
+| `assoc-in` ×1e5 (ms) | 6.71 | 12.22 | 1.82 | 1.61 |
+| `swap!` ×1e5 (ms) | 5.14 | 2.95 | 0.57 | 0.49 |
+| `mapv inc` ×1e5 (ms) | 14.38 | 19.64 | 1.37 | 1.23 |
+
+Same conclusions as the phone: jolt wins widths/strings/parse/keys;
+seq/allocation (`mapv identity` 2.8x, editor 20-line 2.7x) and the
+`grapheme-complex-re` miss still favour bb; the normalize guard is a jolt
+loss (0.102 vs 0.487 µs, the widest ratio in the table); §5.4's carve-out is
+confirmed again (`str/replace ANSI-CODE-RE` 7.96 vs scanner 0.73).
+
+`cold-regex` (fresh process): group-free DFA first `re-find` bb 0.48 ms /
+jolt **67.89 ms**, steady 0.458 / 1.796; grouped (backtracker) cold 0.44 /
+**25.40**, steady 0.504 / 1.593 — the DFA build is cheaper here than the
+phone's 122 ms and the grouped variant still halves it.
+
+### 12.2 Render bench — ~1.8x cold, ~2x reflows
+
+`19fdb60dc61-b305.ednl` (8,793 lines, width 100; single run; pre-§12.5):
+
+| metric | bb | jolt | jolt/bb |
+|---|---|---|---|
+| replay | 4.2 ms | 3.7 ms | — |
+| render #1 (cold) | 619.0 ms | 1132.9 ms | 1.83 |
+| render #2 (warm) | 0.9 ms | 1.3 ms | — |
+| Ctrl+O → collapsed | 185.7 ms | 470.1 ms | 2.53 |
+| Ctrl+O → expanded | 565.7 ms | 1133.7 ms | 2.00 |
+| theme switch | 613.7 ms | 1239.4 ms | 2.02 |
+| theme switch back | 656.4 ms | 1380.5 ms | 2.10 |
+| output-pad 1 → 2 | 628.0 ms | 1233.7 ms | 1.96 |
+| output-pad 2 → 1 | 634.6 ms | 1288.6 ms | 2.03 |
+| warm frame | 1.0 ms | 1.6 ms | — |
+
+Roles (cold per-role): tools bb 661.6 / jolt 1292.3 ms (bash 335/758 n=156,
+read 272/525 n=31, write 54.0/9.6 n=1), assistant 20.3/46.1, total
+684.7/1345.4 — the same ~2x tools gap as §11.2.
+
+`md-session` over this session's small texts (160 msgs, 5.7k chars):
+bb 2.1 ms / jolt 2.8 ms (0.365 / 0.485 µs/char; no thinking messages in this
+fixture, unlike §11.3's 485 KB). `kitty-scan`: 8,793 lines, bb 1.11 /
+jolt 3.57 ms per pass — and skipped entirely without image support (cb763f6).
+
+### 12.3 Typing CPU — parity reproduces
+
+`scripts/perf_typing.sh` (300 keys @ 20 ms, 30 s settle, fresh session per
+round; net ticks):
+
+| host | runs | median |
+|---|---|---|
+| bb | 39, 41, 44 | 41 |
+| jolt | 46, 41, 42 | 42 |
+
+**~1.0x** — the §9.3 x86 gap (1.6x at v0.8.6-86) is closed, as on the phone
+(§11.4). Idle is 5 ticks/6 s on both, and jolt's post-launch extension burn
+(§11.4) does not show with a 30 s settle.
+
+### 12.4 The Normalizer fix in this build
+
+This toolchain carries the `java.text.Normalizer` fix tracked as #1066: NFKC
+over 1.09M ASCII chars is **1.9 ms** on jolt (bb 2.0; was 155.52 ms) and
+`isNormalized` on decomposed 200k chars is 0.43 ms (was a full
+normalize+compare). No kmet path changes — `edit-diff`'s ASCII guard already
+skips NFKC for ASCII and is independent of the fix.
+
+### 12.5 Applied follow-ups (2026-09-21)
+
+Two of §12's improvement candidates landed:
+
+1. **One `[:text]` node per tool-output block** — the bash/read/write/default
+   renderers emitted one node per output line; they now emit a single joined
+   node (`kmet.app.ui.tool-renderers/tool-text-lines`). Node work alone, on
+   the synthetic 6,438-line body: 259 → 76 ms (bb) and 570 → 172 ms (jolt).
+2. **Normalize memo** — `run-render-loop!` reuses the previous frame's
+   normalized string for every line `identical?` to its previous raw line
+   (`kmet.tui.core/normalize-reusing`), so streaming/typing frames stop
+   re-scanning the whole document (§12.1's ~6.4 ms/frame on jolt at 8.8k
+   lines). Unit-tested by call counting; full redraws still normalize all.
+
+Same fixture, before → after (bb / jolt):
+
+| metric | bb | jolt |
+|---|---|---|
+| render #1 (cold) | 619 → **402** ms | 1133 → **918** ms |
+| Ctrl+O → expanded | 566 → **343** ms | 1134 → **707** ms |
+| Ctrl+O → collapsed | 186 → **139** ms | 470 → **399** ms |
+| theme switch | 614 → **398** ms | 1239 → **829** ms |
+| output-pad change | 628 → **376** ms | 1234 → **725** ms |
+| roles TOTAL | 685 → **400** ms | 1345 → **891** ms |
+| — bash role | 335 → **162** ms | 758 → **370** ms |
+| — read role | 272 → **214** ms | 525 → **461** ms |
+
+The rendered document grew 8,793 → 9,040 lines: a blank line rendered as its
+own per-line `[:text]` node produced zero lines, silently dropping blank
+lines from syntax-highlighted read/write output (bash's blank lines were
+already ANSI-wrapped and are unchanged). The single node preserves them; the
+output is byte-identical across hosts before and after. Read improves least
+because its cost is `theme/render-highlighted`, not the node fan-out.
+
+Still open from §12's list: the kitty-walk gate (item 3), incremental
+markdown (§6.3, item 4) and virtualization (item 5). One more whole-document
+per-frame pass found while checking for the same pattern, not in §12.1's
+table: `extract-cursor-position`'s marker strip re-scans every line whenever
+the focused editor carries a cursor marker — 0.9 ms bb / 5.3 ms jolt per
+frame on this document (measured), ~half of it the `some` + full `mapv`
+pair. It is a candidate for the same identity-memo treatment, not applied.
+
