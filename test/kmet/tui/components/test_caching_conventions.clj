@@ -47,6 +47,9 @@
    ;; transparent delegate over foreign dialog closures — nothing the
    ;; deref tracker could see; lifetime owned by ui-custom's bookkeeping
    "CustomDialogAdapter"        :transparent-parent
+   ;; transparent delegate over a submenu child (select/theme menus) — the
+   ;; child owns its render cache and invalidates independently
+   "ThemeSubmenu"               :transparent-parent
    "Spinner"                    :time-animated
    "StatusIndicator"            :time-animated
    "RetryStatusIndicator"       :time-animated
@@ -140,7 +143,7 @@
    when components are added or removed; a mismatch means the scan below
    silently lost forms (a scanner regression), so the convention checks
    would otherwise pass vacuously."
-  51)
+  53)
 
 (deftest caching-conventions
   (let [checked (atom [])]
