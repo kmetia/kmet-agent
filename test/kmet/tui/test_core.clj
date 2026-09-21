@@ -44,6 +44,32 @@
         (t/is (not-any? #(str/includes? % marker) lines)
               "but every marker is stripped from the emitted lines")))))
 
+(t/deftest test-normalize-reusing-reuses-unchanged-lines
+  (let [normalize (var core/normalize-reusing)
+        calls (atom 0)
+        norm (fn [s] (swap! calls inc) (str s "!"))]
+    (with-redefs [utils/normalize-terminal-output norm]
+      (let [a "a" b "b" c "c"
+            in [a b]
+            out (normalize [] [] in)]
+        (testing "the first pass normalizes every line"
+          (t/is (= ["a!" "b!"] out))
+          (t/is (= 2 @calls) "one call per line"))
+        (testing "an unchanged frame reuses the previous outputs"
+          (reset! calls 0)
+          (t/is (= out (normalize in out in)))
+          (t/is (zero? @calls) "no normalization calls at all"))
+        (testing "only changed or appended lines are normalized"
+          (reset! calls 0)
+          (t/is (= ["a!" "B!" "c!"] (normalize in out [a "B" c])))
+          (t/is (= 2 @calls) "one changed line + one append"))
+        (testing "a content-equal but fresh string is not reused"
+          ;; identity, not equality: a new object goes through normalize even
+          ;; when its text matches the previous frame's line
+          (reset! calls 0)
+          (t/is (= ["a!" "b!"] (normalize in out [a (subs "xb" 1 2)])))
+          (t/is (= 1 @calls) "the fresh object is normalized"))))))
+
 (t/deftest test-work-pending-sees-render-and-batch-work
   (testing "a requested render pends"
     (reakt/flush!)  ; isolate from anything a previous test left queued

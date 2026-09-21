@@ -88,6 +88,24 @@
               lines)
      :cursor cursor}))
 
+(defn- normalize-reusing
+  "NORMALIZE every line, reusing PREV-OUT's value for lines that are
+   `identical?` to their PREV-IN entry. Unchanged lines are the same string
+   objects the component caches returned (the identity fast path the diff
+   scan relies on: unchanged lines stay the objects the caches produced), so
+   a frame that changed k lines normalizes only those k instead of
+   re-scanning the whole document per frame (perf.md §12: ~6 ms on jolt for
+   an 8.8k-line transcript). PREV-IN and PREV-OUT are the previous frame's
+   inputs and outputs, written together."
+  [prev-in prev-out lines]
+  (let [pcount (count prev-in)]
+    (into []
+          (map-indexed (fn [i l]
+                         (if (and (< i pcount) (identical? (nth prev-in i) l))
+                           (nth prev-out i)
+                           (utils/normalize-terminal-output l))))
+          lines)))
+
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; CSI 2026 sync
 ;; ═══════════════════════════════════════════════════════════════════════════
@@ -101,6 +119,7 @@
 
 (defrecord TUI [terminal components focused-component
                 input-listeners previous-lines
+                previous-normalized-in previous-normalized-out
                 previous-width render-requested? force-redraw? waker
                 running? stopped? overlays
                 render-loop input-reader current-reader
@@ -128,6 +147,8 @@
                        :focused-component (atom nil)
                        :input-listeners (atom [])
                        :previous-lines (atom [])
+                       :previous-normalized-in (atom [])
+                       :previous-normalized-out (atom [])
                        :previous-width (atom 0)
                        :render-requested? (atom false)
                        :force-redraw? (atom false)
@@ -2168,7 +2189,7 @@
                       raw-lines (composite-overlays tui base-lines w h)
                       cursor-result (extract-cursor-position raw-lines h)
                       cursor (:cursor cursor-result)
-                      lines (:lines cursor-result)
+                      cursor-lines (:lines cursor-result)
                       ;; pi: normalizeTerminalOutput — Thai/Lao AM decomposition +
                       ;; tab expansion — runs before applyLineResets (pi
                       ;; normalizes in applyLineResets, after cursor extraction).
@@ -2179,7 +2200,10 @@
                       ;; kitty-image-reserved-rows, whose blank-row walk must run
                       ;; on raw unpadded lines (padded spaces terminated it
                       ;; immediately, collapsing every image block to one row).
-                      lines (mapv utils/normalize-terminal-output lines)
+                      normalized (normalize-reusing @(:previous-normalized-in tui)
+                                                    @(:previous-normalized-out tui)
+                                                    cursor-lines)
+                      lines normalized
                       ;; pi: applyLineResets — every non-image line ends with a
                       ;; full SGR + OSC 8 reset (SEGMENT_RESET) so a truncated
                       ;; line can never leave active attributes or an open
@@ -2561,6 +2585,10 @@
                     ;; it past this point
                     (reset! pending-write @sb))
                   (reset! (:previous-lines tui) lines)
+                  ;; normalize memo: raw in / normalized out (pre-flash, matching
+                  ;; what the next frame's extract-cursor-position returns)
+                  (reset! (:previous-normalized-in tui) cursor-lines)
+                  (reset! (:previous-normalized-out tui) normalized)
                   (reset! (:previous-width tui) w)
                   (reset! (:previous-height tui) h)
                   ;; Image lines only exist when the terminal supports

@@ -27,6 +27,16 @@
   [s]
   [:text {:padding-x 0 :padding-y 0} s])
 
+(defn- tool-text-lines
+  "A block of pre-styled output lines as ONE [:text] node (joined with
+   newlines; the Text component splits on them itself). One node renders the
+   same lines as one node per line without paying the per-node hiccup
+   compile + component render — measured ~3.3x on a 6.4k-line bash body
+   (perf.md §12). Returns a node vector (empty for no lines) to concat."
+  [lines]
+  (when (seq lines)
+    [(tool-text (str/join "\n" lines))]))
+
 (defn- tool-path-str
   "Pi: str() — string passes through, missing → \"\", non-string → null."
   [raw-path]
@@ -519,7 +529,7 @@
           kids (concat
                 (when (seq lines)
                   (concat
-                   (mapv tool-text (if lang show (mapv #(theme/fg theme :tool-output %) show)))
+                   (tool-text-lines (if lang show (mapv #(theme/fg theme :tool-output %) show)))
                    (when (pos? more)
                      [(tool-text
                        (str (theme/fg theme :muted (str "... (" more " more lines,"))
@@ -565,7 +575,7 @@
                        remaining (- total max-lines)]
                    (into [title [:spacer {:lines 1}] [:spacer {:lines 1}]]
                          (concat
-                          (mapv tool-text show)
+                          (tool-text-lines show)
                           (when (pos? remaining)
                             [(tool-text
                               (str (theme/fg theme :muted
@@ -871,7 +881,7 @@
                                 (str/join "\n"))]
                 (if expanded?
                   (concat [[:spacer {:lines 1}]]
-                          (mapv tool-text (str/split-lines styled)))
+                          [(tool-text styled)])
                   (let [{:keys [visual-lines skipped-count]}
                         (utils/truncate-to-visual-lines styled
                                                         bash-result-preview-lines
@@ -888,7 +898,7 @@
                                (theme/fg theme :muted ")"))
                           width
                           "..."))])
-                     (mapv tool-text visual-lines))))))
+                     (tool-text-lines visual-lines))))))
             (when truncation
               (let [{:keys [total-lines shown-lines truncated-by max-bytes]} truncation
                     size-str (when (= truncated-by :bytes)
@@ -952,7 +962,7 @@
         kids (concat
               (when (seq lines)
                 (concat
-                 (mapv #(tool-text (theme/fg theme :tool-output %)) show)
+                 (tool-text-lines (mapv #(theme/fg theme :tool-output %) show))
                  (when (and (not expanded?) (pos? more))
                    [(tool-text
                      (str (theme/fg theme :muted (str "... (" more " more lines,"))
