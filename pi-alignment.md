@@ -178,13 +178,16 @@ Missing (pi `docs/settings.md`):
 | setting | purpose |
 |---|---|
 | `enableInstallTelemetry`, `enableAnalytics`, `trackingId` | anonymous install/analytics pings (pi.dev infrastructure) |
+| `collapseChangelog` | show a condensed changelog after updates — kmet has no changelog surface |
+| `quietStartup` | disable verbose printing at startup |
 | `doubleEscapeAction` | double-escape behavior: `tree` / `fork` / `none` |
-| `tuiMode`, `fullscreenExitOutput`, `fullscreenScrollbar` | fullscreen TUI mode |
+| `tuiMode`, `fullscreenExitOutput`, `fullscreenScrollbar`, `fullscreenCopyOnSelect` | fullscreen TUI mode |
 | `httpProxy` | proxy URL applied as HTTP(S)_PROXY (kmet reads proxy env vars only — `libs/http.cljc`) |
 | `warnings.anthropicExtraUsage` | Anthropic subscription extra-usage warning |
 | `branchSummary.reserveTokens`, `branchSummary.skipPrompt` | branch summarization config |
 | `retry.provider.timeoutMs` / `maxRetries` / `maxRetryDelayMs` | provider/SDK retry tuning |
-| `transport`, `websocketConnectTimeoutMs` | provider transport selection (`sse` / `websocket` / `auto`) — kmet's `/settings` "HTTP transport" row is a different axis (`http-client`/`curl`) |
+| `transport`, `websocketConnectTimeoutMs` | provider transport selection (`sse` / `websocket` / `websocket-cached` / `auto`) — kmet's `/settings` "HTTP transport" row is a different axis (`http-client`/`curl`) |
+| `cacheWarming` | prompt cache warming (`off` / `streaming` / `idle`, pi #9668 / `core/cache-warmer.ts`) — no kmet counterpart |
 | `images.autoResize` | image resize before sending (needs a resizer backend — babashka has no ImageIO/AWT; `images.blockImages` is done — see §2) |
 | `markdown.codeBlockIndent`, `markdown.mermaid` | markdown rendering |
 | `thinkingBudgets` | per-level thinking token budgets |
@@ -266,8 +269,8 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
   plus the kmet-only rows (tool display, retry, repeat guards, HTTP total
   timeout). Rows carry pi's `:description` lines. pi's remaining selector
   submenus (warnings, per-model thinking) are still missing with their
-  features. The mermaid and tui-mode rows are postponed indefinitely with
-  their features (`tui.md` §15.1)
+  features. The mermaid and fullscreen (TUI mode) rows are postponed
+  indefinitely with their features (`tui.md` §15.1)
 - **Auth selector/dialog components** — pi `login-dialog.ts`, `oauth-selector.ts`,
   `session-selector-search.ts`; kmet's terminal `/login` covers the flows
 - **`packages/agent` (`@earendil-works/pi-agent-core`)** — general-purpose agent library
