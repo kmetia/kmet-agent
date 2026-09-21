@@ -4,8 +4,9 @@
 ;; "<n> tests ... (<time>)" pairs and prints the joined table. Each
 ;; namespace shows two measures per host: the time the runner itself reports
 ;; and the wall time measured here from the output line arrival (Testing
-;; header -> summary); the totals add both per-namespace sums and each run's
-;; process wall clock (which also carries namespace loading).
+;; header -> summary), both at µs resolution for sub-millisecond runs; the
+;; totals add both per-namespace sums and each run's process wall clock
+;; (which also carries namespace loading).
 ;;
 ;; Usage:
 ;;   bb scripts/test_time_compare.clj [options] [test-filter ...]
@@ -38,29 +39,30 @@
 ;; ─── runner-log parsing ────────────────────────────────────────────────────
 
 (def ^:private testing-re #"^Testing (.+)$")
-(def ^:private summary-re #"^  (\d+) tests?.* \((\d+(?:\.\d+)?) (ms|s)\)$")
-(def ^:private timeout-re #"^  TIMED OUT after (\d+(?:\.\d+)?) (ms|s)")
+(def ^:private summary-re #"^  (\d+) tests?.* \((\d+(?:\.\d+)?) (µs|ms|s)\)$")
+(def ^:private timeout-re #"^  TIMED OUT after (\d+(?:\.\d+)?) (µs|ms|s)")
 (def ^:private error-re #"^  ERROR: (.*)$")
 (def ^:private unloaded-re #"^  ([A-Za-z][\w.\-]*) — (.*)$")
 (def ^:private total-re #"^Ran (\d+) tests containing (\d+) assertions in (.+)\.$")
-(def ^:private duration-re #"(\d+(?:\.\d+)?) (ms|s)")
+(def ^:private duration-re #"(\d+(?:\.\d+)?) (µs|ms|s)")
 
 (defn- parse-duration
-  "Runner-formatted \"123 ms\" / \"1.2 s\" to milliseconds."
+  "Runner-formatted \"234 µs\" / \"12 ms\" / \"1.2 s\" to microseconds."
   [n unit]
-  (long (* (Double/parseDouble n) (if (= "s" unit) 1000.0 1.0))))
+  (long (* (Double/parseDouble n)
+           (case unit "s" 1000000.0 "ms" 1000.0 1.0))))
 
 (defn- parse-lines
-  "Walk the runner output as [at-ms line] pairs (AT nil when parsing a
+  "Walk the runner output as [at-us line] pairs (AT nil when parsing a
    saved log). Returns
-   {:nss {ns {:status :ran|:timeout|:error :ms int :tests int :message str
-              :wall-ms int}}
+   {:nss {ns {:status :ran|:timeout|:error :us int :tests int :message str
+              :wall-us int}}
     :unloaded {ns reason}
-    :total {:tests int :assertions int :ms int}|nil}.
-   :wall-ms on a namespace is the arrival gap between its Testing header
-   and its summary — the externally measured run of that namespace, next to
-   :ms, the time the runner itself reports (both engines print the header
-   before running the namespace)."
+    :total {:tests int :assertions int :us int}|nil}, all times in
+   microseconds. :wall-us on a namespace is the arrival gap between its
+   Testing header and its summary — the externally measured run of that
+   namespace, next to :us, the time the runner itself reports (both engines
+   print the header before running the namespace)."
   [pairs]
   (reduce
    (fn [acc [at line]]
@@ -69,7 +71,7 @@
                   (-> acc
                       (assoc-in [:nss cur] (cond-> entry
                                              (and at (:cur-at acc))
-                                             (assoc :wall-ms (- at (:cur-at acc)))))
+                                             (assoc :wall-us (- at (:cur-at acc)))))
                       (assoc :cur-at nil)))]
        (cond
          (re-matches testing-re line)
@@ -82,13 +84,13 @@
            (let [[_ tests n unit] (re-matches summary-re line)]
              (done {:status :ran
                     :tests (parse-long tests)
-                    :ms (parse-duration n unit)}))
+                    :us (parse-duration n unit)}))
            acc)
 
          (re-matches timeout-re line)
          (if cur
            (let [[_ n unit] (re-matches timeout-re line)]
-             (done {:status :timeout :ms (parse-duration n unit)}))
+             (done {:status :timeout :us (parse-duration n unit)}))
            acc)
 
          (re-matches error-re line)
@@ -105,7 +107,7 @@
                [_ n unit] (re-matches duration-re dur)]
            (assoc acc :total {:tests (parse-long tests)
                               :assertions (parse-long assertions)
-                              :ms (when n (parse-duration n unit))}))
+                              :us (when n (parse-duration n unit))}))
 
          :else acc)))
    {:nss {} :unloaded {} :total nil :cur nil :cur-at nil}
@@ -119,19 +121,25 @@
 
 ;; ─── formatting ────────────────────────────────────────────────────────────
 
-(defn- fmt-ms
-  "Compact duration like the runner's (nil → em dash)."
-  [ms]
+(defn- fmt-us
+  "Compact duration from microseconds (nil → em dash), mirroring the
+   runner's fmt-duration: µs below 1 ms, ms below 1 s (one decimal under
+   10 ms), else seconds."
+  [us]
   (cond
-    (nil? ms) "—"
-    (< ms 1000) (str (long ms) " ms")
-    :else (format "%.1f s" (/ ms 1000.0))))
+    (nil? us) "—"
+    (< us 1000) (str (long us) " µs")
+    (< us 1000000) (let [ms (/ us 1000.0)]
+                     (if (< ms 10)
+                       (format "%.1f ms" ms)
+                       (str (long ms) " ms")))
+    :else (format "%.1f s" (/ us 1000000.0))))
 
 (defn- fmt-cell
   "Table cell for one host column: time, TIMEOUT/ERROR, or em dash."
   [entry]
   (case (:status entry)
-    :ran (fmt-ms (:ms entry))
+    :ran (fmt-us (:us entry))
     :timeout "TIMEOUT"
     :error "ERROR"
     "—"))
@@ -164,17 +172,17 @@
 
 (defn- run-host!
   "Run CMD, echo (unless QUIET?) and tee its combined output to LOG-FILE.
-   Lines are timestamped as they arrive, which yields each namespace's
-   externally measured wall time (the gap between its Testing header and its
-   summary — both engines print the header before running the namespace).
-   Returns {:cmd :exit :wall-ms :wall-ns {ns ms}}."
+   Lines are timestamped (nanoTime, µs) as they arrive, which yields each
+   namespace's externally measured wall time (the gap between its Testing
+   header and its summary — both engines print the header before running the
+   namespace). Returns {:cmd :exit :wall-us :wall-ns-us {ns us}}."
   [cmd log-file quiet?]
-  (let [t0 (System/currentTimeMillis)
+  (let [t0 (System/nanoTime)
         proc (p/process cmd {:in :inherit :out :pipe :err :out})
         pairs (with-open [w (io/writer log-file)]
                 (into []
                       (keep (fn [line]
-                              (let [at (- (System/currentTimeMillis) t0)]
+                              (let [at (quot (- (System/nanoTime) t0) 1000)]
                                 (when-not quiet?
                                   (println line)
                                   (flush))
@@ -182,12 +190,26 @@
                                 [at line])))
                       (line-seq (io/reader (:out proc)))))
         {:keys [exit]} @proc
-        wall-ms (- (System/currentTimeMillis) t0)
+        wall-us (quot (- (System/nanoTime) t0) 1000)
         parsed (parse-lines pairs)]
-    {:cmd (vec cmd) :exit exit :wall-ms wall-ms
-     :wall-ns (into {} (keep (fn [[ns entry]]
-                               (when-let [w (:wall-ms entry)] [ns w])))
-                    (:nss parsed))}))
+    {:cmd (vec cmd) :exit exit :wall-us wall-us
+     :wall-ns-us (into {} (keep (fn [[ns entry]]
+                                  (when-let [w (:wall-us entry)] [ns w])))
+                       (:nss parsed))}))
+
+(defn- run-wall-us
+  "RUN's total wall microseconds, accepting pre-µs metadata (ms × 1000)."
+  [run]
+  (or (:wall-us run)
+      (when-let [ms (:wall-ms run)] (* 1000 ms))))
+
+(defn- run-wall-ns
+  "RUN's per-namespace wall microseconds, accepting pre-µs metadata."
+  [run]
+  (or (:wall-ns-us run)
+      (when-let [m (:wall-ns run)]
+        (into {} (map (fn [[ns ms]] [ns (* 1000 ms)])) m))
+      {}))
 
 (defn- read-meta
   "Load the run metadata, or nil when absent/unreadable."
@@ -208,7 +230,7 @@
   [parsed runs]
   (let [bb (get-in parsed [:bb :nss] {})
         jolt (get-in parsed [:jolt :nss] {})
-        wall (fn [host ns] (get-in runs [host :wall-ns ns]))]
+        wall (fn [host ns] (get (run-wall-ns (get runs host)) ns))]
     (mapv (fn [ns]
             [ns {:bb (get bb ns)
                  :jolt (get jolt ns)
@@ -216,23 +238,23 @@
                  :jolt-wall (wall :jolt ns)}])
           (sort (distinct (concat (keys bb) (keys jolt)))))))
 
-(defn- row-ratio [[_ {:keys [bb jolt]}]] (ratio (:ms bb) (:ms jolt)))
+(defn- row-ratio [[_ {:keys [bb jolt]}]] (ratio (:us bb) (:us jolt)))
 
 (defn- sort-rows [rows sort-k]
   (case sort-k
-    :bb (sort-by (fn [[_ {:keys [bb]}]] (- (or (:ms bb) -1))) rows)
+    :bb (sort-by (fn [[_ {:keys [bb]}]] (- (or (:us bb) -1))) rows)
     :ratio (sort-by (fn [row] (- (or (row-ratio row) -1.0))) rows)
     :name (sort-by first rows)
-    (sort-by (fn [[_ {:keys [jolt]}]] (- (or (:ms jolt) -1))) rows)))
+    (sort-by (fn [[_ {:keys [jolt]}]] (- (or (:us jolt) -1))) rows)))
 
 (defn- host-stats [host parsed runs]
   (let [{:keys [nss total]} (get parsed host)
         ran (filter #(= :ran (:status (val %))) nss)]
     {:n (count ran)
-     :sum-ms (reduce + 0 (map (comp :ms val) ran))
-     :sum-wall (reduce + 0 (vals (get-in runs [host :wall-ns])))
-     :reported-ms (:ms total)
-     :wall-ms (get-in runs [host :wall-ms])
+     :sum-us (reduce + 0 (map (comp :us val) ran))
+     :sum-wall (reduce + 0 (vals (run-wall-ns (get runs host))))
+     :reported-us (:us total)
+     :wall-us (run-wall-us (get runs host))
      :exit (get-in runs [host :exit])}))
 
 (defn- print-ratio-line
@@ -253,10 +275,10 @@
         col (fn [f] (str/join " | " (map #(str/join " " [(name %) (f (get stats %))]) hosts)))]
     (println "\ntotals")
     (println (str "  namespaces ran      : " (col :n)))
-    (println (str "  self-reported sum   : " (col #(fmt-ms (:sum-ms %)))))
-    (println (str "  self-reported total : " (col #(fmt-ms (:reported-ms %)))))
-    (println (str "  wall sum of ns      : " (col #(fmt-ms (:sum-wall %)))))
-    (println (str "  wall clock (task)   : " (col #(fmt-ms (:wall-ms %)))))
+    (println (str "  self-reported sum   : " (col #(fmt-us (:sum-us %)))))
+    (println (str "  self-reported total : " (col #(fmt-us (:reported-us %)))))
+    (println (str "  wall sum of ns      : " (col #(fmt-us (:sum-wall %)))))
+    (println (str "  wall clock (task)   : " (col #(fmt-us (:wall-us %)))))
     (println (str "  exit code           : " (col :exit)))
     (when (= 2 (count hosts))
       (print-ratio-line "(self)" row-ratio rows)
@@ -314,14 +336,14 @@
             (println (format "  %-4s %s  — wall %s, exit %s"
                              (name h)
                              (str/join " " (or (:cmd r) [(name h) (:task meta)]))
-                             (fmt-ms (:wall-ms r)) (:exit r)))))
+                             (fmt-us (run-wall-us r)) (:exit r)))))
         (println)
         (println (format row-fmt "namespace" "bb" "jolt" "jolt/bb" "wall bb" "wall jolt"))
         (println (apply str (repeat (+ width 1 10 1 10 1 9 1 10 1 10) "─")))
         (doseq [[ns {:keys [bb jolt bb-wall jolt-wall]}] rows]
           (println (format row-fmt ns (fmt-cell bb) (fmt-cell jolt)
-                           (fmt-ratio (ratio (:ms bb) (:ms jolt)))
-                           (fmt-ms bb-wall) (fmt-ms jolt-wall))))
+                           (fmt-ratio (ratio (:us bb) (:us jolt)))
+                           (fmt-us bb-wall) (fmt-us jolt-wall))))
         (print-totals hosts parsed runs rows)
         (print-notes hosts parsed rows)))))
 
