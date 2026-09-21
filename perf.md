@@ -1220,11 +1220,31 @@ already ANSI-wrapped and are unchanged). The single node preserves them; the
 output is byte-identical across hosts before and after. Read improves least
 because its cost is `theme/render-highlighted`, not the node fan-out.
 
-Still open from §12's list: the kitty-walk gate (item 3), incremental
-markdown (§6.3, item 4) and virtualization (item 5). One more whole-document
-per-frame pass found while checking for the same pattern, not in §12.1's
-table: `extract-cursor-position`'s marker strip re-scans every line whenever
-the focused editor carries a cursor marker — 0.9 ms bb / 5.3 ms jolt per
-frame on this document (measured), ~half of it the `some` + full `mapv`
-pair. It is a candidate for the same identity-memo treatment, not applied.
+Still open from §12's list: incremental markdown (§6.3) and
+virtualization. One more whole-document per-frame pass found while
+checking for the same pattern, not in §12.1's table:
+`extract-cursor-position`'s marker strip re-scans every line whenever the
+focused editor carries a cursor marker — 0.9 ms bb / 5.3 ms jolt per frame on
+this document (measured), ~half of it the `some` + full `mapv` pair. It is a
+candidate for the same identity-memo treatment, not applied.
+
+A second pass landed the kitty-walk gate and the `ansi-code-at` scanner:
+
+- **Kitty-walk gate.** `expand-changed-range-for-kitty-images` skips both
+  whole-document walks when the previous frame had no image ids and LINES
+  carries no image line from `first-changed` on (a suffix scan;
+  `is-image-line` is the conservative over-approximation of the walk's
+  extract-ids test — an image line below `first-changed` would itself be a
+  change, contradicting it). The post-frame `(some is-image-line lines)` +
+  collect walk now runs only on full redraws: the diff path reports image
+  presence through the same gate (`::unchanged` = no diff, keep the
+  previous ids). On the 9,040-line doc, image-capable capabilities, no
+  images: typing-range calls 14.7 → **0.002 ms** (jolt) / 3.5 → **0.001 ms**
+  (bb), mid-doc reflows 14.7 → 3.3 / 3.5 → 0.5 ms, and the 7.5 ms jolt /
+  0.6 ms bb post-frame scan is gone from the diff path.
+- **`ansi-code-at` scanner (§6.6).** Jolt now takes the hand-rolled scanner
+  (`ansi-code-at-native`); bb/JVM keep the anchored regex matcher:
+  1.374 → **0.378 µs** on jolt, bb unchanged at 0.830. The two are pinned
+  against each other at every index of a corpus on both hosts
+  (`kmet.test-utils/test-ansi-code-at-host-equivalence`).
 

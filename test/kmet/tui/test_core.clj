@@ -4,6 +4,7 @@
             [kmet.tui.core :as core]
             [kmet.libs.reakt :as reakt]
             [kmet.libs.terminal :as lib]
+            [kmet.libs.terminal-image :as img]
             [kmet.tui.keys :as keys]
             [kmet.tui.terminal :as term]
             [kmet.tui.components.editor :as editor]
@@ -69,6 +70,23 @@
           (reset! calls 0)
           (t/is (= ["a!" "b!"] (normalize in out [a (subs "xb" 1 2)])))
           (t/is (= 1 @calls) "the fresh object is normalized"))))))
+
+(t/deftest test-kitty-expand-gate-skips-the-walks
+  (let [expand (var core/expand-changed-range-for-kitty-images)
+        image-line (str "\u001b_Ga=T,f=100,i=7;AAAA" "\u001b\\")
+        plain (vec (repeat 10 "line"))
+        with-image (assoc plain 3 image-line)]
+    (with-redefs [img/get-capabilities (fn [] {:images true})]
+      (testing "no image line at/after the change and prev clean: range passes through"
+        (t/is (= [2 4 false] (expand 2 4 plain plain false))))
+      (testing "an image line at/after the change widens the range and reports it"
+        (t/is (= [1 3 true] (expand 1 2 plain with-image false))))
+      (testing "an image line only above the change does not widen it"
+        (t/is (= [6 7 false] (expand 6 7 with-image with-image false))))
+      (testing "a previous frame with images keeps the full walk"
+        (t/is (= [1 3 true] (expand 1 2 with-image with-image true)))))
+    (testing "terminals without image support always pass the range through"
+      (t/is (= [2 4 false] (expand 2 4 with-image with-image true))))))
 
 (t/deftest test-work-pending-sees-render-and-batch-work
   (testing "a requested render pends"

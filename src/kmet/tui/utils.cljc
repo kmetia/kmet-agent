@@ -854,12 +854,23 @@
 
 ;; ─── ANSI-aware window slicing ──────────────────────────────────────────────
 
+(defn ansi-code-at-native
+  "ANSI escape starting at I as [code length] via the hand-rolled scanner —
+   the Jolt side of ansi-code-at (its regex engine makes the anchored
+   re-matcher setup the slow primitive). Accepts exactly ANSI-CODE-RE's
+   language; the utils test suite pins the two against each other at every
+   index of a corpus on both hosts."
+  [s i]
+  (when-let [end (ansi-sequence-end s i)]
+    [(subs s i end) (- end i)]))
+
 (defn ansi-code-at
   "Return [code length] when an ANSI escape sequence starts at index I of S."
   [s i]
-  (when (and (< i (count s)) (= \u001b (nth s i)))
-    (when-let [[code end] (match-at ANSI-CODE-RE s i)]
-      [code (- end i)])))
+  #?(:jolt (ansi-code-at-native s i)
+     :default (when (and (< i (count s)) (= \u001b (nth s i)))
+                (when-let [[code end] (match-at ANSI-CODE-RE s i)]
+                  [code (- end i)]))))
 
 (defn slice-with-width
   "Slice LINE's visible columns [start-col, start-col+length), ANSI-aware.

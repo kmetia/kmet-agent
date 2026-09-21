@@ -11,6 +11,25 @@
   (t/is (= 6 (u/visible-width "中文🍎")))   ;; 2+2+2=6
   (t/is (= 6 (u/visible-width "ab\tc"))))   ;; tab expands to 3 spaces (pi)
 
+(def ^:private ansi-corpus
+  "Strings the scanner/regex equivalence tests walk at every index: matched
+   CSI/OSC, private-parameter CSI, unterminated OSC, a lone ESC, CJK, tabs."
+  ["" "plain" "a\tb" "中文"
+   "\u001b[31mred\u001b[0m"
+   "\u001b[38;5;196mx\u001b[39m"
+   "\u001b[?25lprivate\u001b[?25h"
+   "\u001b]8;;https://x.example/\u0007link\u001b]8;;\u0007"
+   "\u001b]0;title\u001b\\after"
+   "\u001b]0;unterminated"
+   "\u001b["
+   "\u001b"
+   "\u001bX"
+   "\u001b[1;31"
+   "\u001b[1;31m"
+   "pre\u001b[1moops\u001b[m\u001b[?25l"
+   "\u001b[?2026h\u001b[1;1H\u001b[?2026l"
+   (str "你好" "\u001b[31m" "你好")])
+
 (t/deftest test-strip-ansi-host-equivalence
   ;; The Jolt path strips ANSI with a hand-rolled scanner (strip-ansi-native)
   ;; while bb/JVM keep the regex strip. The scanner must accept exactly the
@@ -23,21 +42,7 @@
                                    #"\u001b\[[0-9;]*[a-zA-Z]|\u001b\][^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)"
                                    ""))
         native-strip (var-get #'u/strip-ansi-native)
-        corpus ["" "plain" "a\tb" "中文"
-                "\u001b[31mred\u001b[0m"
-                "\u001b[38;5;196mx\u001b[39m"
-                "\u001b[?25lprivate\u001b[?25h"
-                "\u001b]8;;https://x.example/\u0007link\u001b]8;;\u0007"
-                "\u001b]0;title\u001b\\after"
-                "\u001b]0;unterminated"
-                "\u001b["
-                "\u001b"
-                "\u001bX"
-                "\u001b[1;31"
-                "\u001b[1;31m"
-                "pre\u001b[1moops\u001b[m\u001b[?25l"
-                "\u001b[?2026h\u001b[1;1H\u001b[?2026l"
-                (str "你好" "\u001b[31m" "你好")]]
+        corpus ansi-corpus]
     (doseq [s corpus]
       (t/is (= (regex-strip s) (native-strip s)) (pr-str s))))
   ;; and the public width path agrees on strip-needing input
@@ -45,6 +50,23 @@
   ;; private-parameter CSI is NOT ANSI-CODE-RE: ESC measures 0, the rest
   ;; sorts as literal text (the documented quirk both strippers share)
   (t/is (= 5 (u/visible-width "\u001b[?25l"))))
+
+(t/deftest test-ansi-code-at-host-equivalence
+  ;; ansi-code-at's Jolt side is the hand-rolled scanner
+  ;; (ansi-code-at-native); bb/JVM keep the anchored regex matcher (match-at +
+  ;; ANSI-CODE-RE). Both must agree at every index of every corpus string —
+  ;; including the indices where neither matches.
+  (let [ansi-re #"\u001b\[[0-9;]*[a-zA-Z]|\u001b\][^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)"
+        regex-code (fn [s i]
+                     (when (and (< i (count s)) (= \u001b (nth s i)))
+                       (let [m (re-matcher ansi-re s)]
+                         (when (and (.find m i) (= i (.start m)))
+                           [(.group m) (- (.end m) i)]))))
+        native-code (var-get #'u/ansi-code-at-native)]
+    (doseq [s ansi-corpus
+            i (range (inc (count s)))]
+      (t/is (= (regex-code s i) (native-code s i))
+            (str (pr-str s) " @" i)))))
 
 (t/deftest test-visible-width-narrow-dingbats
   ;; Regression: the coarse emoji block ranges (0x2600-0x27BF etc.) counted

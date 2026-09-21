@@ -763,22 +763,44 @@
    covers every image block that touches it in either prev or new lines.
    Terminals without image support produce no image lines (components gate on
    the capabilities), so short-circuit to the unchanged range instead of
-   walking the whole transcript on every changed frame."
-  [first-changed last-changed prev lines]
+   walking the whole transcript on every changed frame.
+
+   PREV-HAD-IMAGES? (the previous frame's ids were non-empty) is the cheap
+   discriminator that skips both walks when it is false and LINES carries no
+   image line from FIRST-CHANGED on: PREV then has no image lines at all, and
+   of the walk's two expansion conditions only `(>= i first-changed)` can
+   fire in LINES (an image line below FIRST-CHANGED would itself be a change
+   — PREV had none there — contradicting FIRST-CHANGED). The suffix test is
+   `is-image-line`, a conservative over-approximation of the walk's
+   extract-ids test.
+
+   Returns [first-changed last-changed lines-have-images?]; the third value
+   feeds the post-frame id update."
+  [first-changed last-changed prev lines prev-had-images?]
   (if-not (:images (img/get-capabilities))
-    [first-changed last-changed]
-    (let [expanded (volatile! [first-changed last-changed])
-          expand-for (fn [ls]
-                       (doseq [i (range (count ls))]
-                         (when (seq (img/extract-kitty-image-ids (nth ls i)))
-                           (let [block-end (+ i (kitty-image-reserved-rows ls i) -1)]
-                             (when (or (>= i first-changed)
-                                       (and (<= i last-changed) (>= block-end first-changed)))
-                               (vswap! expanded
-                                       (fn [[f l]] [(min f i) (max l block-end)])))))))]
-      (expand-for prev)
-      (expand-for lines)
-      @expanded)))
+    [first-changed last-changed false]
+    (let [suffix-has-image? (loop [i first-changed]
+                              (if (< i (count lines))
+                                (if (img/is-image-line (nth lines i))
+                                  true
+                                  (recur (inc i)))
+                                false))]
+      (if-not (or prev-had-images? suffix-has-image?)
+        [first-changed last-changed false]
+        (let [expanded (volatile! [first-changed last-changed])
+              lines-have-images? (volatile! false)
+              expand-for (fn [ls track-lines?]
+                           (doseq [i (range (count ls))]
+                             (when (seq (img/extract-kitty-image-ids (nth ls i)))
+                               (when track-lines? (vreset! lines-have-images? true))
+                               (let [block-end (+ i (kitty-image-reserved-rows ls i) -1)]
+                                 (when (or (>= i first-changed)
+                                           (and (<= i last-changed) (>= block-end first-changed)))
+                                   (vswap! expanded
+                                           (fn [[f l]] [(min f i) (max l block-end)])))))))]
+          (expand-for prev false)
+          (expand-for lines true)
+          (conj @expanded @lines-have-images?))))))
 
 (defn- delete-changed-kitty-images
   "Port of pi's deleteChangedKittyImages: the delete sequence for all image ids
@@ -2313,6 +2335,13 @@
                                          (reset! (:max-lines-rendered tui) new-count)
                                          (swap! (:max-lines-rendered tui) max new-count))
                                        (position-hardware-cursor cursor new-count))
+                      ;; The diff path records whether LINES carries kitty image
+                      ;; lines: nil means the diff did not run (full redraw /
+                      ;; first render), ::unchanged means it ran and found no
+                      ;; change, true/false is the kitty gate's answer. The
+                      ;; post-frame id update reads it instead of scanning the
+                      ;; whole document every frame.
+                      kitty-frame-lines (volatile! nil)
                       main-diff (fn main-diff []
                                   (let [max-lines (max new-count prev-count)
                                         shared (min new-count prev-count)
@@ -2351,9 +2380,14 @@
                                           [first-changed last-changed])
                                         [first-changed last-changed]
                                         (if (not (neg? first-changed))
-                                          (expand-changed-range-for-kitty-images
-                                           first-changed last-changed prev lines)
-                                          [first-changed last-changed])
+                                          (let [[f l lines-have-images?]
+                                                (expand-changed-range-for-kitty-images
+                                                 first-changed last-changed prev lines
+                                                 (boolean (seq @(:previous-kitty-image-ids tui))))]
+                                            (vreset! kitty-frame-lines lines-have-images?)
+                                            [f l])
+                                          (do (vreset! kitty-frame-lines ::unchanged)
+                                              [first-changed last-changed]))
                                         append-start? (and appended?
                                                            (= first-changed prev-count)
                                                            (pos? first-changed))
@@ -2594,12 +2628,20 @@
                   ;; Image lines only exist when the terminal supports
                   ;; images — components gate on the capabilities. Without
                   ;; support the whole-document scan (and the collect walk)
-                  ;; is pure overhead, so skip it.
+                  ;; is pure overhead, so skip it. The diff path reports
+                  ;; whether LINES carries image lines (::unchanged = no
+                  ;; change, so the previous ids still describe LINES); only
+                  ;; a full redraw (nil) falls back to the scan.
                   (reset! (:previous-kitty-image-ids tui)
-                          (if (and (:images (img/get-capabilities))
-                                   (some img/is-image-line lines))
-                            (collect-kitty-image-ids lines)
-                            #{}))))))
+                          (let [frame-images @kitty-frame-lines]
+                            (cond
+                              (true? frame-images) (collect-kitty-image-ids lines)
+                              (false? frame-images) #{}
+                              (= ::unchanged frame-images) @(:previous-kitty-image-ids tui)
+                              :else (if (and (:images (img/get-capabilities))
+                                             (some img/is-image-line lines))
+                                      (collect-kitty-image-ids lines)
+                                      #{}))))))))
 
           ;; The frame's buffer leaves the lock with it: the write is the
           ;; only blocking tty I/O in the iteration (even the string
