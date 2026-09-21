@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-19T20:36:00Z"
+ :generated-at "2026-09-21T17:19:24Z"
  :provider {:id :opencode-go
             :name "OpenCode Go"
             :env-vars ["OPENCODE_API_KEY"]
@@ -55,7 +55,8 @@
              :supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :deepseek
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "deepseek-v4-flash-vision-exp"
    {:id "deepseek-v4-flash-vision-exp"
     :name "DeepSeek V4 Flash Vision Exp"
@@ -78,7 +79,8 @@
              :supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :deepseek
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "deepseek-v4-pro"
    {:id "deepseek-v4-pro"
     :name "DeepSeek V4 Pro (New)"
@@ -101,7 +103,8 @@
              :supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :deepseek
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "deepseek-v4.1-flash"
    {:id "deepseek-v4.1-flash"
     :name "DeepSeek V4.1 Flash"
@@ -124,7 +127,8 @@
              :supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :deepseek
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "glm-5.1"
    {:id "glm-5.1"
     :name "GLM-5.1"
@@ -138,7 +142,8 @@
     :max-tokens 32768
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "glm-5.2"
    {:id "glm-5.2"
     :name "GLM-5.2"
@@ -159,7 +164,8 @@
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "glm-5.3"
    {:id "glm-5.3"
     :name "GLM-5.3"
@@ -180,7 +186,8 @@
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "glm-5.3-flash"
    {:id "glm-5.3-flash"
     :name "GLM-5.3-Flash"
@@ -201,7 +208,8 @@
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "hy3"
    {:id "hy3"
     :name "Hy3"
@@ -222,7 +230,8 @@
     :max-tokens 128000
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "hy4-preview"
    {:id "hy4-preview"
     :name "Hy4 preview"
@@ -243,7 +252,8 @@
     :max-tokens 64000
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "kimi-k2.6"
    {:id "kimi-k2.6"
     :name "Kimi K2.6"
@@ -260,7 +270,8 @@
              :supports-developer-role false
              :supports-reasoning-effort false
              :thinking-format :deepseek
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "kimi-k2.7-code"
    {:id "kimi-k2.7-code"
     :name "Kimi K2.7 Code"
@@ -274,7 +285,8 @@
     :max-tokens 262144
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "kimi-k3"
    {:id "kimi-k3"
     :name "Kimi K3"
@@ -295,7 +307,8 @@
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "longcat-2.0"
    {:id "longcat-2.0"
     :name "LongCat-2.0"
@@ -309,7 +322,8 @@
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "mimo-v2.5"
    {:id "mimo-v2.5"
     :name "MiMo V2.5"
@@ -323,7 +337,8 @@
     :max-tokens 128000
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "mimo-v2.5-pro"
    {:id "mimo-v2.5-pro"
     :name "MiMo V2.5 Pro"
@@ -337,7 +352,8 @@
     :max-tokens 128000
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "minimax-m2.7"
    {:id "minimax-m2.7"
     :name "MiniMax-M2.7"
@@ -346,12 +362,13 @@
     :base-url "https://opencode.ai/zen/go/v1"
     :reasoning true
     :input [:text]
-    :cost {:input 0.3 :output 1.2 :cache-read 0.06 :cache-write 0}
+    :cost {:input 0.3 :output 1.2 :cache-read 0.06 :cache-write 0.375}
     :context-window 204800
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "qwen3.6-plus"
    {:id "qwen3.6-plus"
     :name "Qwen3.6 Plus"
@@ -370,7 +387,8 @@
     :compat {:supports-store false
              :supports-developer-role false
              :thinking-format :qwen
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "qwen3.7-max"
    {:id "qwen3.7-max"
     :name "Qwen3.7 Max"
@@ -384,7 +402,8 @@
     :max-tokens 65536
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "qwen3.7-plus"
    {:id "qwen3.7-plus"
     :name "Qwen3.7 Plus"
@@ -402,7 +421,8 @@
     :max-tokens 65536
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "qwen3.8-max"
    {:id "qwen3.8-max"
     :name "Qwen3.8 Max"
@@ -423,7 +443,8 @@
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}}
   :openai-responses
   {"gpt-5.6-luna"
    {:id "gpt-5.6-luna"
@@ -451,6 +472,29 @@
    "grok-4.6"
    {:id "grok-4.6"
     :name "Grok 4.6"
+    :provider :opencode-go
+    :api :openai-responses
+    :base-url "https://opencode.ai/zen/go/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max nil
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 2
+           :tiers [{:input 4 :input-tokens-above 200000 :output 12 :cache-read 1 :cache-write 0}]
+           :output 6
+           :cache-read 0.5
+           :cache-write 0}
+    :context-window 500000
+    :max-tokens 500000
+    :compat {:session-affinity-format :openai-nosession}}
+   "grok-4.7"
+   {:id "grok-4.7"
+    :name "Grok 4.7"
     :provider :opencode-go
     :api :openai-responses
     :base-url "https://opencode.ai/zen/go/v1"

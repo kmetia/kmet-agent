@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-17T08:38:36Z"
+ :generated-at "2026-09-21T17:19:24Z"
  :provider {:id :fireworks
             :name "Fireworks AI"
             :env-vars ["FIREWORKS_API_KEY"]
@@ -463,6 +463,7 @@
     :compat {:supports-store false
              :supports-developer-role false
              :supports-long-cache-retention false
+             :supports-strict-mode true
              :send-session-affinity-headers true}}
    "accounts/fireworks/models/kimi-k3"
    {:id "accounts/fireworks/models/kimi-k3"
@@ -487,6 +488,7 @@
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openai
              :supports-long-cache-retention false
+             :supports-strict-mode true
              :send-session-affinity-headers true
              :deferred-tools-mode :kimi}}
    "accounts/fireworks/routers/glm-5p2-fast"
@@ -510,6 +512,7 @@
     :compat {:supports-store false
              :supports-developer-role false
              :supports-long-cache-retention false
+             :supports-strict-mode true
              :send-session-affinity-headers true}}
    "accounts/fireworks/routers/kimi-k3-fast"
    {:id "accounts/fireworks/routers/kimi-k3-fast"
@@ -534,5 +537,6 @@
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openai
              :supports-long-cache-retention false
+             :supports-strict-mode true
              :send-session-affinity-headers true
              :deferred-tools-mode :kimi}}}}}

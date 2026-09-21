@@ -424,3 +424,26 @@
     ;; NVIDIA NIM dropped inkling: Baseten still serves it.
     (check "thinkingmachines/inkling" :baseten "thinkingmachines/inkling")))
 
+(t/deftest test-openai-completions-strict-metadata
+  ;; pi 890f92088 + af7359b90: strict tools are explicit metadata — capable
+  ;; providers get :supports-strict-mode true against the generator's
+  ;; conservative false default, Cerebras is excluded (mixed strict/unstrict
+  ;; tool usage 400s there).
+  (let [detect @#'mg/detect-openai-completions-compat
+        delta @#'mg/compat-delta
+        model (fn [provider base-url]
+                {:provider provider :base-url base-url :id "m" :api :openai-completions})]
+    (t/is (false? (:supports-strict-mode @#'mg/openai-completions-default-compat)))
+    (t/testing "capable providers keep an explicit true delta"
+      (let [m (model :openrouter "https://openrouter.ai/api/v1")]
+        (t/is (true? (:supports-strict-mode (detect m))))
+        (t/is (true? (:supports-strict-mode (delta (detect m)))))))
+    (t/testing "excluded providers stay on the conservative default"
+      (doseq [[p url] [[:cerebras "https://api.cerebras.ai/v1"]
+                       [:moonshotai "https://api.moonshot.cn/v1"]
+                       [:together "https://api.together.xyz/v1"]
+                       [:nvidia "https://integrate.api.nvidia.com/v1"]
+                       [:cloudflare-ai-gateway "https://gateway.ai.cloudflare.com"]]]
+        (t/is (nil? (:supports-strict-mode (delta (detect (model p url)))))
+              (str p " must not emit strict tools"))))))
+

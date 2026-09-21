@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-02T23:43:15Z"
+ :generated-at "2026-09-21T17:19:24Z"
  :provider {:id :ant-ling
             :name "Ant Ling"
             :env-vars ["ANT_LING_API_KEY"]
@@ -22,7 +22,8 @@
              :supports-reasoning-effort false
              :thinking-format :ant-ling
              :max-tokens-field :max-tokens
-             :supports-long-cache-retention false}}
+             :supports-long-cache-retention false
+             :supports-strict-mode true}}
    "Ling-2.6-flash"
    {:id "Ling-2.6-flash"
     :name "Ling 2.6 Flash"
@@ -39,7 +40,8 @@
              :supports-reasoning-effort false
              :thinking-format :ant-ling
              :max-tokens-field :max-tokens
-             :supports-long-cache-retention false}}
+             :supports-long-cache-retention false
+             :supports-strict-mode true}}
    "Ring-2.6-1T"
    {:id "Ring-2.6-1T"
     :name "Ring 2.6 1T"
@@ -62,4 +64,5 @@
              :supports-reasoning-effort false
              :thinking-format :ant-ling
              :max-tokens-field :max-tokens
-             :supports-long-cache-retention false}}}}}
+             :supports-long-cache-retention false
+             :supports-strict-mode true}}}}}

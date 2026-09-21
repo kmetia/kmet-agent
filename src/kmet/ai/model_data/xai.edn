@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-02T23:43:15Z"
+ :generated-at "2026-09-21T17:19:24Z"
  :provider {:id :xai
             :name "xAI"
             :env-vars ["XAI_API_KEY"]
@@ -23,7 +23,8 @@
     :max-tokens 30000
     :compat {:supports-store false
              :supports-developer-role false
-             :supports-reasoning-effort false}}
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
    "grok-4.6"
    {:id "grok-4.6"
     :name "Grok 4.6"
@@ -41,7 +42,27 @@
     :max-tokens 500000
     :compat {:supports-store false
              :supports-developer-role false
-             :supports-reasoning-effort false}}
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
+   "grok-4.7"
+   {:id "grok-4.7"
+    :name "Grok 4.7"
+    :provider :xai
+    :api :openai-completions
+    :base-url "https://api.x.ai/v1"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 2
+           :tiers [{:input 4 :input-tokens-above 200000 :output 12 :cache-read 1 :cache-write 0}]
+           :output 6
+           :cache-read 0.5
+           :cache-write 0}
+    :context-window 500000
+    :max-tokens 500000
+    :compat {:supports-store false
+             :supports-developer-role false
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
    "grok-build-0.1"
    {:id "grok-build-0.1"
     :name "Grok Build 0.1"
@@ -59,7 +80,8 @@
     :max-tokens 256000
     :compat {:supports-store false
              :supports-developer-role false
-             :supports-reasoning-effort false}}}
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}}
   :openai-responses
   {"grok-4.5"
    {:id "grok-4.5"

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-02T23:43:15Z"
+ :generated-at "2026-09-21T17:19:24Z"
  :provider {:id :xiaomi-token-plan-cn
             :name "Xiaomi MiMo Token Plan (CN)"
             :env-vars ["XIAOMI_TOKEN_PLAN_CN_API_KEY"]
@@ -18,7 +18,8 @@
     :context-window 1048576
     :max-tokens 131072
     :compat {:requires-reasoning-content-on-assistant-messages true
-             :thinking-format :deepseek}}
+             :thinking-format :deepseek
+             :supports-strict-mode true}}
    "mimo-v2.5"
    {:id "mimo-v2.5"
     :name "MiMo-V2.5"
@@ -31,7 +32,8 @@
     :context-window 1048576
     :max-tokens 131072
     :compat {:requires-reasoning-content-on-assistant-messages true
-             :thinking-format :deepseek}}
+             :thinking-format :deepseek
+             :supports-strict-mode true}}
    "mimo-v2.5-pro"
    {:id "mimo-v2.5-pro"
     :name "MiMo-V2.5-Pro"
@@ -44,4 +46,5 @@
     :context-window 1048576
     :max-tokens 131072
     :compat {:requires-reasoning-content-on-assistant-messages true
-             :thinking-format :deepseek}}}}}
+             :thinking-format :deepseek
+             :supports-strict-mode true}}}}}

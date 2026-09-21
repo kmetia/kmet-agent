@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-04T07:41:13Z"
+ :generated-at "2026-09-21T17:19:24Z"
  :provider {:id :zai-coding-cn
             :name "Z.AI (CN)"
             :env-vars ["ZAI_CODING_CN_API_KEY"]
@@ -22,6 +22,7 @@
              :supports-reasoning-effort false
              :thinking-format :zai
              :max-tokens-field :max-tokens
+             :supports-strict-mode true
              :zai-tool-stream true}}
    "glm-5-turbo"
    {:id "glm-5-turbo"
@@ -39,6 +40,7 @@
              :supports-reasoning-effort false
              :thinking-format :zai
              :max-tokens-field :max-tokens
+             :supports-strict-mode true
              :zai-tool-stream true}}
    "glm-5.2"
    {:id "glm-5.2"
@@ -62,6 +64,7 @@
              :supports-reasoning-effort true
              :thinking-format :zai
              :max-tokens-field :max-tokens
+             :supports-strict-mode true
              :zai-tool-stream true}}
    "glm-5.2-highspeed"
    {:id "glm-5.2-highspeed"
@@ -79,6 +82,7 @@
              :supports-reasoning-effort false
              :thinking-format :zai
              :max-tokens-field :max-tokens
+             :supports-strict-mode true
              :zai-tool-stream true}}
    "glm-5.3"
    {:id "glm-5.3"
@@ -96,6 +100,7 @@
              :supports-reasoning-effort false
              :thinking-format :zai
              :max-tokens-field :max-tokens
+             :supports-strict-mode true
              :zai-tool-stream true}}
    "glm-5.3-flash"
    {:id "glm-5.3-flash"
@@ -113,6 +118,7 @@
              :supports-reasoning-effort false
              :thinking-format :zai
              :max-tokens-field :max-tokens
+             :supports-strict-mode true
              :zai-tool-stream true}}
    "glm-5.3-highspeed"
    {:id "glm-5.3-highspeed"
@@ -130,4 +136,5 @@
              :supports-reasoning-effort false
              :thinking-format :zai
              :max-tokens-field :max-tokens
+             :supports-strict-mode true
              :zai-tool-stream true}}}}}

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-19T20:36:00Z"
+ :generated-at "2026-09-21T17:19:24Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -2379,6 +2379,17 @@
     :reasoning true
     :input [:text :image]
     :cost {:input 2 :output 6 :cache-read 0.5 :cache-write 0}
+    :context-window 500000
+    :max-tokens 500000}
+   "spacexai/grok-4.7"
+   {:id "spacexai/grok-4.7"
+    :name "Grok 4.7"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 1.2 :output 3.6 :cache-read 0.3 :cache-write 0}
     :context-window 500000
     :max-tokens 500000}
    "spacexai/grok-build-0.1"

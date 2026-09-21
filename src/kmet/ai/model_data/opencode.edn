@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-19T20:36:00Z"
+ :generated-at "2026-09-21T17:19:24Z"
  :provider {:id :opencode
             :name "OpenCode (Zen)"
             :env-vars ["OPENCODE_API_KEY"]
@@ -302,7 +302,8 @@
     :max-tokens 32000
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "deepseek-v4-flash"
    {:id "deepseek-v4-flash"
     :name "DeepSeek V4 Flash"
@@ -324,7 +325,8 @@
     :compat {:supports-store false
              :supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "deepseek-v4-flash-vision-exp"
    {:id "deepseek-v4-flash-vision-exp"
     :name "DeepSeek V4 Flash Vision Exp"
@@ -346,7 +348,8 @@
     :compat {:supports-store false
              :supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "deepseek-v4-pro"
    {:id "deepseek-v4-pro"
     :name "DeepSeek V4 Pro"
@@ -368,7 +371,8 @@
     :compat {:supports-store false
              :supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "deepseek-v4.1-flash"
    {:id "deepseek-v4.1-flash"
     :name "DeepSeek V4.1 Flash"
@@ -390,7 +394,8 @@
     :compat {:supports-store false
              :supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "glm-5"
    {:id "glm-5"
     :name "GLM-5"
@@ -404,7 +409,8 @@
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "glm-5.1"
    {:id "glm-5.1"
     :name "GLM-5.1"
@@ -418,7 +424,8 @@
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "glm-5.2"
    {:id "glm-5.2"
     :name "GLM-5.2"
@@ -439,7 +446,8 @@
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "glm-5.3"
    {:id "glm-5.3"
     :name "GLM-5.3"
@@ -460,7 +468,8 @@
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "glm-5.3-flash"
    {:id "glm-5.3-flash"
     :name "GLM-5.3-Flash"
@@ -481,7 +490,8 @@
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "kimi-k2.5"
    {:id "kimi-k2.5"
     :name "Kimi K2.5"
@@ -495,7 +505,8 @@
     :max-tokens 65536
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "kimi-k2.6"
    {:id "kimi-k2.6"
     :name "Kimi K2.6"
@@ -511,7 +522,8 @@
              :supports-developer-role false
              :supports-reasoning-effort false
              :thinking-format :deepseek
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "kimi-k2.7-code"
    {:id "kimi-k2.7-code"
     :name "Kimi K2.7 Code"
@@ -525,7 +537,8 @@
     :max-tokens 262144
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "kimi-k3"
    {:id "kimi-k3"
     :name "Kimi K3"
@@ -546,7 +559,8 @@
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "ling-3.0-flash-fin-free"
    {:id "ling-3.0-flash-fin-free"
     :name "Ling 3.0 Flash Fin Free"
@@ -560,7 +574,8 @@
     :max-tokens 32768
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "mimo-v2.5-free"
    {:id "mimo-v2.5-free"
     :name "MiMo V2.5 Free"
@@ -574,7 +589,8 @@
     :max-tokens 32000
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "minimax-m2.5"
    {:id "minimax-m2.5"
     :name "MiniMax-M2.5"
@@ -588,7 +604,8 @@
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "minimax-m2.7"
    {:id "minimax-m2.7"
     :name "MiniMax-M2.7"
@@ -602,7 +619,8 @@
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "minimax-m3"
    {:id "minimax-m3"
     :name "MiniMax-M3"
@@ -616,7 +634,8 @@
     :max-tokens 128000
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "nemotron-3-ultra-free"
    {:id "nemotron-3-ultra-free"
     :name "Nemotron 3 Ultra Free"
@@ -630,7 +649,8 @@
     :max-tokens 128000
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "nemotron-3.5-lightning-free"
    {:id "nemotron-3.5-lightning-free"
     :name "Nemotron 3.5 Lightning Free"
@@ -644,7 +664,8 @@
     :max-tokens 262144
     :compat {:supports-store false
              :supports-developer-role false
-             :max-tokens-field :max-tokens}}}
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}}
   :openai-responses
   {"gpt-5"
    {:id "gpt-5"

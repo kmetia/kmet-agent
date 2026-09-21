@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-17T20:57:18Z"
+ :generated-at "2026-09-21T17:19:24Z"
  :provider {:id :github-copilot
             :name "GitHub Copilot"
             :env-vars ["COPILOT_GITHUB_TOKEN"]
@@ -125,7 +125,8 @@
               "User-Agent" "GitHubCopilotChat/0.35.0"}
     :compat {:supports-store false
              :supports-developer-role false
-             :supports-reasoning-effort false}}
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
    "claude-fable-5.1"
    {:id "claude-fable-5.1"
     :name "Claude Fable 5.1"
@@ -144,7 +145,8 @@
               "User-Agent" "GitHubCopilotChat/0.35.0"}
     :compat {:supports-store false
              :supports-developer-role false
-             :supports-reasoning-effort false}}
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
    "gemini-3.5-flash"
    {:id "gemini-3.5-flash"
     :name "Gemini 3.5 Flash"
@@ -163,7 +165,8 @@
               "User-Agent" "GitHubCopilotChat/0.35.0"}
     :compat {:supports-store false
              :supports-developer-role false
-             :supports-reasoning-effort false}}
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
    "gemini-3.6-flash"
    {:id "gemini-3.6-flash"
     :name "Gemini 3.6 Flash"
@@ -182,7 +185,8 @@
               "User-Agent" "GitHubCopilotChat/0.35.0"}
     :compat {:supports-store false
              :supports-developer-role false
-             :supports-reasoning-effort false}}
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
    "gemini-3.7-flash"
    {:id "gemini-3.7-flash"
     :name "Gemini 3.7 Flash"
@@ -201,7 +205,8 @@
               "User-Agent" "GitHubCopilotChat/0.35.0"}
     :compat {:supports-store false
              :supports-developer-role false
-             :supports-reasoning-effort false}}
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
    "gemini-3.8-flash"
    {:id "gemini-3.8-flash"
     :name "Gemini 3.8 Flash"
@@ -220,7 +225,8 @@
               "User-Agent" "GitHubCopilotChat/0.35.0"}
     :compat {:supports-store false
              :supports-developer-role false
-             :supports-reasoning-effort false}}
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
    "gpt-6-astra"
    {:id "gpt-6-astra"
     :name "GPT-6 Astra"
@@ -243,7 +249,8 @@
               "User-Agent" "GitHubCopilotChat/0.35.0"}
     :compat {:supports-store false
              :supports-developer-role false
-             :supports-reasoning-effort false}}
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
    "grok-4.6"
    {:id "grok-4.6"
     :name "Grok 4.6"
@@ -265,7 +272,8 @@
               "User-Agent" "GitHubCopilotChat/0.35.0"}
     :compat {:supports-store false
              :supports-developer-role false
-             :supports-reasoning-effort false}}
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
    "kimi-k2.7-code"
    {:id "kimi-k2.7-code"
     :name "Kimi K2.7 Code"
@@ -283,7 +291,8 @@
               "User-Agent" "GitHubCopilotChat/0.35.0"}
     :compat {:supports-store false
              :supports-developer-role false
-             :supports-reasoning-effort false}}
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
    "kimi-k3"
    {:id "kimi-k3"
     :name "Kimi K3"
@@ -301,7 +310,8 @@
               "User-Agent" "GitHubCopilotChat/0.35.0"}
     :compat {:supports-store false
              :supports-developer-role false
-             :supports-reasoning-effort false}}}
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}}
   :openai-responses
   {"gpt-5-mini"
    {:id "gpt-5-mini"

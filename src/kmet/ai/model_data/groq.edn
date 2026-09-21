@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-04T07:41:13Z"
+ :generated-at "2026-09-21T17:19:24Z"
  :provider {:id :groq
             :name "Groq"
             :env-vars ["GROQ_API_KEY"]
@@ -16,7 +16,8 @@
     :input [:text]
     :cost {:input 0.05 :output 0.08 :cache-read 0 :cache-write 0}
     :context-window 131072
-    :max-tokens 131072}
+    :max-tokens 131072
+    :compat {:supports-strict-mode true}}
    "llama-3.3-70b-versatile"
    {:id "llama-3.3-70b-versatile"
     :name "Llama 3.3 70B"
@@ -27,7 +28,8 @@
     :input [:text]
     :cost {:input 0.59 :output 0.79 :cache-read 0 :cache-write 0}
     :context-window 131072
-    :max-tokens 32768}
+    :max-tokens 32768
+    :compat {:supports-strict-mode true}}
    "openai/gpt-oss-120b"
    {:id "openai/gpt-oss-120b"
     :name "GPT OSS 120B"
@@ -45,7 +47,8 @@
     :input [:text]
     :cost {:input 0.15 :output 0.6 :cache-read 0.075 :cache-write 0}
     :context-window 131072
-    :max-tokens 65536}
+    :max-tokens 65536
+    :compat {:supports-strict-mode true}}
    "openai/gpt-oss-20b"
    {:id "openai/gpt-oss-20b"
     :name "GPT OSS 20B"
@@ -63,7 +66,8 @@
     :input [:text]
     :cost {:input 0.075 :output 0.3 :cache-read 0.0375 :cache-write 0}
     :context-window 131072
-    :max-tokens 65536}
+    :max-tokens 65536
+    :compat {:supports-strict-mode true}}
    "openai/gpt-oss-safeguard-20b"
    {:id "openai/gpt-oss-safeguard-20b"
     :name "Safety GPT OSS 20B"
@@ -81,7 +85,8 @@
     :input [:text]
     :cost {:input 0.075 :output 0.3 :cache-read 0 :cache-write 0}
     :context-window 131072
-    :max-tokens 65536}
+    :max-tokens 65536
+    :compat {:supports-strict-mode true}}
    "qwen/qwen3.6-27b"
    {:id "qwen/qwen3.6-27b"
     :name "Qwen3.6 27B"
@@ -99,7 +104,8 @@
     :input [:text :image]
     :cost {:input 0.6 :output 3 :cache-read 0.3 :cache-write 0}
     :context-window 131072
-    :max-tokens 16384}
+    :max-tokens 16384
+    :compat {:supports-strict-mode true}}
    "qwen/qwen3.8-27b"
    {:id "qwen/qwen3.8-27b"
     :name "Qwen3.8 27B"
@@ -117,4 +123,5 @@
     :input [:text :image]
     :cost {:input 0.8 :output 4 :cache-read 0 :cache-write 0}
     :context-window 131042
-    :max-tokens 16384}}}}
+    :max-tokens 16384
+    :compat {:supports-strict-mode true}}}}}

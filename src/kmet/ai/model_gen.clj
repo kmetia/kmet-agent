@@ -1416,11 +1416,14 @@
 ;;     compat leaves (data parity with pi's catalogs) ────────────────────────
 
 (def ^:private openai-completions-default-compat
+  ;; :supports-strict-mode defaults to false, not pi's older true (pi
+  ;; 890f92088) — the generator emits an explicit true for capable models
+  ;; below, and the runtime detection keeps the same conservative default.
   {:supports-store true :supports-developer-role true
    :supports-reasoning-effort true :max-tokens-field :max-completion-tokens
    :requires-reasoning-content-on-assistant-messages false
    :thinking-format :openai :zai-tool-stream false
-   :supports-strict-mode true :send-session-affinity-headers false
+   :supports-strict-mode false :send-session-affinity-headers false
    :supports-long-cache-retention true})
 
 (defn- detect-openai-completions-compat
@@ -1445,12 +1448,12 @@
                                       (str/includes? base-url "gateway.ai.cloudflare.com"))
         is-nvidia? (or (= :nvidia provider) (str/includes? base-url "integrate.api.nvidia.com"))
         is-ant-ling? (or (= :ant-ling provider) (str/includes? base-url "api.ant-ling.com"))
+        is-cerebras? (or (= :cerebras provider) (str/includes? base-url "cerebras.ai"))
         together-reasoning-only? (and is-together?
                                       (contains? together-reasoning-only-models id))
         is-deepseek? (or (= :deepseek provider)
                          (str/includes? (str/lower-case base-url) "deepseek.com"))
-        is-non-standard? (or is-nvidia? (= :cerebras provider)
-                             (str/includes? base-url "cerebras.ai")
+        is-non-standard? (or is-nvidia? is-cerebras?
                              (= :xai provider) (str/includes? base-url "api.x.ai")
                              is-together? (str/includes? base-url "chutes.ai")
                              is-deepseek? is-zai? is-moonshot?
@@ -1480,7 +1483,7 @@
      :thinking-format thinking-format
      :zai-tool-stream false
      :supports-strict-mode (not (or is-moonshot? is-together?
-                                    is-cloudflare-ai-gateway? is-nvidia?))
+                                    is-cloudflare-ai-gateway? is-nvidia? is-cerebras?))
      :send-session-affinity-headers false
      :supports-long-cache-retention (not (or is-together? is-cloudflare-workers-ai?
                                              is-cloudflare-ai-gateway? is-nvidia? is-ant-ling?))}))

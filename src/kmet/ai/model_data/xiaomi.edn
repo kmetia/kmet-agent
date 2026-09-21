@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-02T23:43:15Z"
+ :generated-at "2026-09-21T17:19:24Z"
  :provider {:id :xiaomi
             :name "Xiaomi MiMo"
             :env-vars ["XIAOMI_API_KEY"]
@@ -18,7 +18,8 @@
     :context-window 262144
     :max-tokens 65536
     :compat {:requires-reasoning-content-on-assistant-messages true
-             :thinking-format :deepseek}}
+             :thinking-format :deepseek
+             :supports-strict-mode true}}
    "mimo-v2-omni"
    {:id "mimo-v2-omni"
     :name "MiMo-V2-Omni"
@@ -31,7 +32,8 @@
     :context-window 262144
     :max-tokens 131072
     :compat {:requires-reasoning-content-on-assistant-messages true
-             :thinking-format :deepseek}}
+             :thinking-format :deepseek
+             :supports-strict-mode true}}
    "mimo-v2-pro"
    {:id "mimo-v2-pro"
     :name "MiMo-V2-Pro"
@@ -44,7 +46,8 @@
     :context-window 1048576
     :max-tokens 131072
     :compat {:requires-reasoning-content-on-assistant-messages true
-             :thinking-format :deepseek}}
+             :thinking-format :deepseek
+             :supports-strict-mode true}}
    "mimo-v2.5"
    {:id "mimo-v2.5"
     :name "MiMo-V2.5"
@@ -57,7 +60,8 @@
     :context-window 1048576
     :max-tokens 131072
     :compat {:requires-reasoning-content-on-assistant-messages true
-             :thinking-format :deepseek}}
+             :thinking-format :deepseek
+             :supports-strict-mode true}}
    "mimo-v2.5-pro"
    {:id "mimo-v2.5-pro"
     :name "MiMo-V2.5-Pro"
@@ -70,7 +74,8 @@
     :context-window 1048576
     :max-tokens 131072
     :compat {:requires-reasoning-content-on-assistant-messages true
-             :thinking-format :deepseek}}
+             :thinking-format :deepseek
+             :supports-strict-mode true}}
    "mimo-v2.5-pro-ultraspeed"
    {:id "mimo-v2.5-pro-ultraspeed"
     :name "MiMo-V2.5-Pro-UltraSpeed"
@@ -83,4 +88,5 @@
     :context-window 1048576
     :max-tokens 131072
     :compat {:requires-reasoning-content-on-assistant-messages true
-             :thinking-format :deepseek}}}}}
+             :thinking-format :deepseek
+             :supports-strict-mode true}}}}}

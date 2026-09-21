@@ -486,7 +486,10 @@
      :chat-template-kwargs {}
      :chat-template-args {}
      :supports-thinking-token-budget false
-     :supports-strict-mode (and (not moonshot?) (not together?) (not cf-gateway?) (not nvidia?))
+     ;; openai-completions compatibility alone does not imply strict JSON-schema
+     ;; tool support (pi 890f92088): the generated catalog carries an explicit
+     ;; true for capable models, and that explicit compat wins over this default.
+     :supports-strict-mode false
      :cache-control-format (when (and openrouter? (str/starts-with? id-str "anthropic/"))
                              :anthropic)
      :send-session-affinity-headers false
