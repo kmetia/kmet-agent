@@ -84,7 +84,8 @@ kernel. No kmet workaround is tied to any of the three; the local Termux
 build wrapper's `cc` shim and hand-rolled provisioning are redundant now
 that the checkout carries the PR.
 
-**`jl/classpath` syntax quotes (jolt PR #1075, pending merge).**
+**`jl/classpath` syntax quotes (jolt PR #1075, merged 2026-09-21; in the
+installed v0.8.10-34-gf2ee1dd7).**
 `eval-namespace-source` bulk-read every form before evaluating any, so a
 syntax quote in a source-loaded macro resolved in the CALLER's namespace
 (`user/v`, `No such namespace: bb`) — rewrite-clj's
@@ -110,8 +111,15 @@ skips NFKC on its own merits. The Unicode-16/17 table skew the issue also
 recorded (U+A7F1 → `"S"` on jolt; the JDK's older tables leave it alone) is
 not part of the fix and remains upstream's policy call.
 
-**`set!` on a compiler-flag var outside a load frame — filed as
-[jolt#1074](https://github.com/jolt-lang/jolt/issues/1074).**
+**`set!` on a compiler-flag var outside a load frame — fix in review as
+[jolt PR #1079](https://github.com/jolt-lang/jolt/pull/1079) (filed
+2026-09-21).** The number this finding was earlier recorded under, #1074,
+went to the Windows runtime seams issue below — no set! ticket existed until
+this one. The PR runs every user entry — `-m`/`run -m`, `-X`/`-T`, code
+tasks, and a built binary's launcher — under clojure.main's compiler-flag
+frame, and brackets `jolt.loader`'s source eval per file like the host
+loader, so the `load-extension!` workaround below is removable once it
+merges.
 `clojure.main` wraps every entry — repl, `-e`, `-m`, a script — in
 `with-bindings` for the vars sources commonly `set!` (`*warn-on-reflection*`
 and friends; main.clj:78-83), so a dependency loaded at runtime from `-main`
@@ -148,16 +156,22 @@ with a runtime `(require 'dep)` prints on. Workaround:
 `(binding [*warn-on-reflection* *warn-on-reflection*])` — the dep's `set!`
 writes the thread frame and the pop leaves the root untouched. Remove the
 binding when `-m`/loader evaluation carries clojure.main's entry bindings.
+Re-verified 2026-09-21 on the installed v0.8.10-34-gf2ee1dd7: `jolt -m app`
+and the loader repro both still throw the IllegalStateException, `-e` still
+works. The #1079 branch fixes them (both repros, the task/`-X` entries and a
+built binary verified in it); the installed build predates it.
 
 **Upstream status:** three open items — the SCI IVar gap, filed as
 [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) (`deferred`),
 re-diagnosed upstream in jolt PR #1033 — with its fix at
 [babashka/sci#1093](https://github.com/babashka/sci/pull/1093) (re-checked
-2026-09-20: open, head `1295142f`, unchanged), so the `jolt/deps.edn` SCI pin
-stays — the `set!`/entry-binding gap, filed as
-[jolt#1074](https://github.com/jolt-lang/jolt/issues/1074) (filed 2026-09-21;
-the `load-extension!` binding workaround waits on it) — and the unfiled
-Windows runtime seams below. Every other ticket this file tracked is closed.
+2026-09-21: open, head `1295142f`, unchanged), so the `jolt/deps.edn` SCI pin
+stays — the `set!`/entry-binding gap, fix in review as
+[jolt PR #1079](https://github.com/jolt-lang/jolt/pull/1079) (filed
+2026-09-21; the `load-extension!` binding workaround is removable once it
+merges) — and the Windows runtime seams, filed 2026-09-21 as
+[jolt#1074](https://github.com/jolt-lang/jolt/issues/1074). Every other
+ticket this file tracked is closed.
 
 **Workarounds live next to their ticket below.** Each workaround block is the
 removal checklist: when an upstream fix lands, delete the listed code (and the
@@ -215,18 +229,21 @@ Re-checked 2026-09-19: both still open — #1031 now carries the `deferred`
 label, and PR #1093's head is still `1295142f`, so the pin is unchanged.
 Re-checked 2026-09-20: unchanged — #1031 still `deferred`, PR #1093 still open
 at the same head `1295142f`, so the pin stays.
+Re-checked 2026-09-21: unchanged — same state (the issue's last activity is
+2026-09-18, the PR's 2026-09-16), so the pin stays.
 
-### Windows runtime seams: atomic `spit`, `path.separator`, and program resolution (unfiled)
+### [jolt#1074](https://github.com/jolt-lang/jolt/issues/1074) — Windows runtime seams: atomic `spit`, `path.separator`, and program resolution
 
 **Area:** `host/chez/java/io.ss` (`jolt-spit`, the `File` statics),
 `host/chez/java/host-static-methods.ss` (`path.separator`/`file.separator`),
 `host/chez/java/process.ss` (`proc-on-path?`, `proc-program-resolvable?`,
 `proc-path-join`).
 
-All three verified on the official v0.8.10 Windows build, and all three are
-still on `main` (`9786b7fa`, 2026-09-21). Jolt's CI is `ubuntu-latest`-only,
-so no gate covers them: a Jolt/Windows process cannot overwrite an existing
-file or spawn anything but a `/`-rooted child. kmet's curl transport (temp
+All three verified on the official v0.8.10 Windows build, filed 2026-09-21,
+and all three are still on `main` at the re-check (`f2ee1dd7`, the PR #1075
+merge, 2026-09-21). Jolt's CI is `ubuntu-latest`-only, so no gate covers
+them: a Jolt/Windows process cannot overwrite an existing file or spawn
+anything but a `/`-rooted child. kmet's curl transport (temp
 config + `spit` + spawn of `curl`) hits all three in one request.
 
 **1. `spit` over an existing file throws.** `jolt-spit` (atomic since
