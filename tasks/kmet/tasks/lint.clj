@@ -16,7 +16,8 @@
        carrying :jolt (projected the same way, under the .clj-kondo-jolt
        overlay) or :bb (read raw: clj-kondo skips an unknown feature exactly as
        jolt skips it) — plus jolt/ (jolt-only code the babashka view never
-       reads): jolt's selection.
+       reads) and every .jolt source (Jolt-only by extension): jolt's
+       selection.
 
    The re-spelling reproduces each host exactly: the rewrite keeps branch
    order, and a reader takes the first matching branch in file order — jolt
@@ -56,18 +57,24 @@
    clj-kondo's cache carries over (a fresh path would re-lint everything).
    :scope :all lints every given file; :conditional only the host-conditional
    ones (the other view's pass covers the rest, whose selection cannot
-   differ). :include-dir is a tree the view always reads, token or not. :overlay
-   is the extra config dir layered on through CLJ_KONDO_EXTRA_CONFIG_DIR."
+   differ). :include-dir is a tree the view always reads, token or not;
+   :include-ext/:exclude-ext do the same for the .jolt extension — the Jolt
+   runtime's own source extension, so a .jolt file is Jolt code by
+   construction: the babashka view must never read it and the jolt view must
+   always read it, token or not. :overlay is the extra config dir layered on
+   through CLJ_KONDO_EXTRA_CONFIG_DIR."
   [{:name "babashka"
     :token ":bb"
     :dir "target/bb-lint"
-    :scope :all}
+    :scope :all
+    :exclude-ext #{"jolt"}}
    {:name "jolt"
     :token ":jolt"
     :dir "target/jolt-lint"
     :scope :conditional
     :overlay ".clj-kondo-jolt"
-    :include-dir "jolt/"}])
+    :include-dir "jolt/"
+    :include-ext #{"jolt"}}])
 
 (def ^:private mirror-prefix-re
   ;; findings name mirror files; strip the prefix so they read as real paths.
@@ -205,7 +212,8 @@
 
 (def ^:private lint-exts
   ;; what clj-kondo picks up from a directory scan (.edn files are data; .jolt
-  ;; is the Jolt runtime's own source extension — clj-kondo reads it as Clojure)
+  ;; is the Jolt runtime's own source extension — clj-kondo reads it as
+  ;; Clojure, and the views route it to the jolt pass)
   #{"clj" "cljc" "cljs" "cljd" "clj_kondo" "jolt"})
 
 (def ^:private glob-pattern "*.{clj,cljc,cljs,cljd,clj_kondo,jolt}")
@@ -241,12 +249,16 @@
        vec))
 
 (defn- repo-relative
-  "PATH as a project-relative, normalized string. The normalize is what makes
-   the two hosts agree: bb's fs/relativize (java.nio Path.relativize) drops a
-   leading \"./\" itself, jolt's keeps it — and mirror paths and finding paths
-   are compared literally."
+  "PATH as a project-relative, normalized /-separated string. The normalize
+   is what makes the two hosts agree: bb's fs/relativize (java.nio
+   Path.relativize) drops a leading \"./\" itself, jolt's keeps it — and
+   mirror paths and finding paths are compared literally. The separator must
+   be / too: fs/normalize keeps the platform's own, so a Windows run would
+   compare `src\\kmet\\x` against the /-spelled include dirs and mirror
+   sources."
   [path]
-  (str (fs/normalize (fs/relativize (fs/cwd) (fs/absolutize (str path))))))
+  (str/replace (str (fs/normalize (fs/relativize (fs/cwd) (fs/absolutize (str path)))))
+               "\\" "/"))
 
 (defn- in-project?
   "True when PATH lives under the cwd — the only files a view can project
@@ -264,9 +276,12 @@
   (str (fs/file (:dir view) (repo-relative path))))
 
 (defn- mirror-source
-  "The source file a mirror copy projects, or nil when FILE is not one."
+  "The source file a mirror copy projects, or nil when FILE is not one.
+   /-separated like repo-relative — a mirror copy maps back to its source by
+   a literal path comparison."
   [view file]
-  (let [rel (str (fs/normalize (fs/relativize (:dir view) (str file))))]
+  (let [rel (str/replace (str (fs/normalize (fs/relativize (:dir view) (str file))))
+                         "\\" "/")]
     (when-not (str/starts-with? rel "..") rel)))
 
 (defn- mirror-files
@@ -290,6 +305,22 @@
   [view file]
   (boolean (and (:include-dir view)
                 (str/starts-with? (repo-relative file) (:include-dir view)))))
+
+(defn- file-ext [file]
+  (fs/extension (str file)))
+
+(defn- included-in?
+  "True when FILE belongs to VIEW besides its reader-conditional status
+   (:include-dir trees, :include-ext extensions like .jolt)."
+  [view file]
+  (or (include-dir? view file)
+      (contains? (set (:include-ext view)) (file-ext file))))
+
+(defn- excluded-from?
+  "True when FILE is out of VIEW by extension (:exclude-ext) — a .jolt file
+   is Jolt-only code, so the babashka view never reads it."
+  [view file]
+  (contains? (set (:exclude-ext view)) (file-ext file)))
 
 (defn- file-info
   "FILE as the views need it: its content read once, and the views whose
@@ -335,13 +366,16 @@
 (defn- pass-targets
   "VIEW's clj-kondo targets for the file INFOS, mirrors written as needed. A
    :conditional view takes the host-conditional files only (plus its
-   include-dir): everything the views read alike is already covered by the
-   :all view's pass, and a file carrying just the other host's feature is read
-   raw, which is this host's reading of it."
+   :include-dir trees and :include-ext extensions): everything the views read
+   alike is already covered by the :all view's pass, and a file carrying just
+   the other host's feature is read raw, which is this host's reading of it.
+   :all drops :exclude-ext files — .jolt is Jolt-only by construction."
   [view infos]
   (let [scoped (if (= :all (:scope view))
-                 infos
-                 (filterv (fn [info] (or (seq (:views info)) (include-dir? view (:file info))))
+                 (if (seq (:exclude-ext view))
+                   (remove #(excluded-from? view (:file %)) infos)
+                   infos)
+                 (filterv (fn [info] (or (seq (:views info)) (included-in? view (:file info))))
                           infos))]
     (mapv #(projected-file view %) scoped)))
 

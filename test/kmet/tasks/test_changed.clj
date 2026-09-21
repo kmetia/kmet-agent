@@ -17,7 +17,12 @@
            (changed/path->ns "tasks/kmet/tasks/generate_image_models.clj")))
     (is (= 'kmet.tasks.test-lint (changed/path->ns "test/kmet/tasks/test_lint.clj"))))
   (testing "extension files map to path-derived namespaces"
-    (is (= 'extensions.tools (changed/path->ns "extensions/tools.clj")))))
+    (is (= 'extensions.tools (changed/path->ns "extensions/tools.clj"))))
+  (testing "Windows fs/glob separators normalize — the graph keys are /-spelled"
+    (is (= 'kmet.app.ui.model-selector
+           (changed/path->ns "src\\kmet\\app\\ui\\model_selector.clj")))
+    (is (= 'kmet.tasks.test-lint
+           (changed/path->ns "test\\kmet\\tasks\\test_lint.clj")))))
 
 (deftest ns-requires-extraction
   (testing "vector entries"

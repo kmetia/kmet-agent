@@ -288,7 +288,7 @@ a lone ESC) and much faster where it matters:
 So the two hosts want opposite implementations — exactly the case the reader
 conditional convention exists for. `kmet.tui.utils` became **`utils.cljc`**
 (the third host-branching file after `http.cljc` / `extensions.cljc` /
-`terminal_native.cljc`):
+the terminal backend):
 
 ```clojure
 (defn- strip-ansi [s]

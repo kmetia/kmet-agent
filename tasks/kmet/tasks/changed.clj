@@ -61,14 +61,22 @@
        distinct
        sort))
 
+(defn- slashify
+  "PATH with / separators. fs/glob returns the platform separator — a
+   backslash on Windows — while every consumer here (path->ns, the
+   changed-path regex, the extensions/ prefix checks) is written in / terms,
+   so the graph keys would be `src\\kmet\\…` without this."
+  [path]
+  (str/replace (str path) "\\" "/"))
+
 (defn- dir-clj-files
-  "Every .clj/.cljc file under DIR — top level and nested. java.nio's glob
-   `**/*.cljc` requires at least one directory level, so top-level files
-   (e.g. extensions/tools.clj) need the `*.cljc` pattern too."
+  "Every .clj/.cljc/.jolt file under DIR — top level and nested, /-separated.
+   One `**.{…}` pattern rather than `*.clj` + `**/*.clj`: on Jolt/Windows the
+   separator-bearing patterns match nothing (the glob's `/` never matches the
+   platform's backslash), while `**` crosses separators there and the brace
+   set matches the same files on bb/JVM as the six old globs did."
   [dir]
-  (concat (fs/glob dir "*.clj") (fs/glob dir "**/*.clj")
-          (fs/glob dir "*.cljc") (fs/glob dir "**/*.cljc")
-          (fs/glob dir "*.jolt") (fs/glob dir "**/*.jolt")))
+  (map slashify (fs/glob dir "**.{clj,cljc,jolt}")))
 
 (defn- mtime-changed-files
   "The source-roots' .clj files modified after the baseline timestamp (mtime
@@ -78,7 +86,7 @@
                   (catch Exception _ 0))]
     (->> (mapcat dir-clj-files source-roots)
          (filter #(> (.toMillis (fs/last-modified-time %)) base))
-         (map str)
+         (map slashify)
          sort)))
 
 (defn changed-files
@@ -110,10 +118,11 @@
 (defn path->ns
   "Source/test file path to its namespace symbol
    (src/kmet/app/ui/model_selector.clj → kmet.app.ui.model-selector;
-   tasks/kmet/tasks/build.cljc → kmet.tasks.build)."
+   tasks/kmet/tasks/build.cljc → kmet.tasks.build). Accepts either
+   separator — fs/glob yields backslashes on Windows."
   [path]
   (symbol
-   (-> path
+   (-> (slashify path)
        (str/replace #"\.(?:clj[c]?|jolt)$" "")
        (str/replace "_" "-")
        (str/replace "/" ".")

@@ -17,7 +17,8 @@ raw input**, with the platform half swapped from JLine to C FFI.
 Source of truth: `src/kmet/tui/tui.md` (package docs),
 `src/kmet/tui/terminal.clj` (the protocol seam + shared terminal logic),
 `src/kmet/tui/terminal_jline.clj` (bb/JVM backend) and
-`src/kmet/tui/terminal_native.cljc` (Jolt backend),
+`src/kmet/tui/terminal_native_unix.jolt` / `src/kmet/tui/terminal_native_win.jolt`
+(the Jolt Unix/Windows backends),
 `src/kmet/libs/terminal.clj` + `src/kmet/tui/keys.clj` (portable),
 `src/kmet/tui/core.clj` (input/render loop to reimplement against).
 Jolt API refs: `jolt-lang.github.io/docs/native-interop.html`,
@@ -50,8 +51,10 @@ change), then the Jolt backend landed:
 - **`kmet.tui.terminal-jline`** is the bb/JVM backend — the only namespace
   importing `org.jline.*`, behavior unchanged (raw mode + timed reads +
   live size + the stty snapshot workaround).
-- **`kmet.tui.terminal-native`** (`.cljc`, body under one `#?(:jolt …)`
-  branch) is the Jolt backend: termios raw mode (tcgetattr → cfmakeraw →
+- **`kmet.tui.terminal-native-unix`** (`.jolt` — the runtime's own source
+  extension, so it is Jolt code by construction and bb/JVM cannot load it at
+  all; the split is why the reader conditional is gone) is the Jolt/Unix
+  backend: termios raw mode (tcgetattr → cfmakeraw →
   tcsetattr), `poll(2)` + `read(2)` for bounded reads, `ioctl(TIOCGWINSZ)`
   for the live size, and UTF-8 reassembly across read boundaries via
   `kmet.libs.terminal/utf8-decode`. Restore runs on `stop!` and on a
@@ -62,11 +65,25 @@ change), then the Jolt backend landed:
   `poll` + one 1KB read per pass (not a blocking read per char), and an
   atomic `claim-restore!` so `stop!` and the shutdown hook can never
   double-free the saved termios.
-- **Windows is open.** `create-terminal` throws a clear error there;
-  §6 is the design (kernel32 `GetConsoleMode`/`SetConsoleMode` +
-  `ENABLE_VIRTUAL_TERMINAL_INPUT`, `WaitForSingleObject` + `ReadFile`,
-  `GetConsoleScreenBufferInfo` — the same three calls as pi's
-  `win32-platform.c`).
+- **Windows landed** (2026-09-21, `jolt v0.8.10` x86_64-windows) as its own
+  backend, `kmet.tui.terminal-native-win` (same `.jolt` shape, no FFI
+  surface shared with Unix): the same approach as pi's `win32-platform.c` —
+  `GetStdHandle` +
+  `GetConsoleMode`/`SetConsoleMode` with `ENABLE_VIRTUAL_TERMINAL_INPUT`
+  for raw mode and `ENABLE_VIRTUAL_TERMINAL_PROCESSING` on the output
+  handle, `WaitForSingleObject` + `ReadConsoleW` for bounded reads
+  (UTF-16 code units → code points with a surrogate carry; a non-console
+  handle — redirected stdin — reads UTF-8 bytes instead),
+  `GetConsoleScreenBufferInfo` for the live size, and
+  `WriteConsoleW`/`WriteFile` for output (the W entry point is what libuv
+  uses for Node's stdout on a TTY; plain `ReadFile`/`WriteFile` would go
+  through the console code page and mangle non-ASCII frames). Setup is
+  deliberately non-fatal, as pi's is: no console degrades to the
+  COLUMNS/LINES size and byte reads instead of failing startup. Verified
+  on Windows: injected key records (plain char, emoji surrogate pair,
+  `VK_UP` → `\u001b[A`), raw mode `0x1f7` → `0x3e0` and exact restore,
+  live 120×30 size, the real TUI rendering, double ctrl+c exiting 0, and
+  UTF-8 byte reads from a redirected pipe/file.
 - **Mouse tracking** is not implemented (no enable/disable sequences);
   the key parser already recognizes and filters mouse events (`keys.clj`,
   §7.7).
@@ -77,15 +94,18 @@ Verified with the pty scripts (`scripts/pty_capture.py`):
 |---|---|
 | FFI round-trip in a pty | raw size 90×25 via `ioctl`; `read` of `hi👋` → `[104 105 128075]`; cooked restore |
 | `jolt test kmet.libs.test-terminal` | 4 tests / 17 assertions green (decoder) |
-| `jolt test kmet.tui.test-terminal-native` | 1 test / 5 assertions green (tty-free surface) |
-| `jolt test-ext kmet.tui.test-terminal-native` | 1 test / 7 assertions green (nested jolt in a real pty) |
+| `jolt test kmet.tui.test-terminal-native*` | 2 tests / 11 assertions green (tty-free surface on the host backend + UTF-16 decode) |
+| `jolt test-ext kmet.tui.test-terminal-native*` | Unix: 2 tests / 8 assertions (nested jolt in a real pty; the Windows console test skips); Windows: 2 tests / 9 assertions (console roundtrip; the pty test skips) |
 | `jolt test-ext kmet.tui.test-render-loop` | **12 tests / 77 assertions green** (the suite drives a protocol stub, no JLine) |
 | real kmet TUI on Jolt | `jolt run -m kmet.core` in a pty: renders, `/quit` exits 0, cursor restored (`\u001b[?25h`) |
 | suspend/resume shape | create → raw → read → stop, twice in one process: both rounds read their input |
 
 Rows 2–5 re-verified 2026-09-18 on Termux/aarch64 — the nested-pty row
-runs the real raw-mode/read path under bionic. Follow-ups: Windows (§6)
-and a Jolt-host variant of the pty app smoke — the existing
+runs the real raw-mode/read path under bionic. Row 3–4 re-verified
+2026-09-21 on x86_64-windows, where row 4 is the console roundtrip
+(CONIN$/CONOUT$ via `SetStdHandle`: raw mode, live size, `WriteConsoleW`,
+restore) and the pty row is the one that skips. Follow-ups: a Jolt-host
+variant of the pty app smoke — the existing
 `modes.test-overlay-input-smoke` spawns `bb run` (testing bb's TUI even under
 the Jolt runner), so it is `^:bb-only`.
 Known divergences from the JLine backend: it uses stdin/stdout directly
@@ -122,8 +142,9 @@ binding), raw mode Unix/Windows (§§5–6), the input pipeline (§7), key
 parsing (§8), concurrency/host-shims (§9), what ports unchanged (§10),
 packaging (§11), a sketch (§12), next steps (§13) and the evaluated-and-
 rejected babashka.ffi variant (§14). The §§4–6 FFI notes were confirmed
-against the real jolt checkout while implementing; §5 now shows the landed
-shape, §6 is the Windows design still to implement.
+against the real jolt checkout while implementing; §5 shows the landed
+Unix shape, §6 the landed Windows one (the design was `ReadFile`; the
+code reads `ReadConsoleW`, see §6).
 
 ---
 
@@ -136,8 +157,8 @@ pi-tui / kmet separate three concerns. Only the third changes per platform:
 | rendering | ANSI escapes to stdout | same — pure Clojure | same — port as-is |
 | key parsing | `parseKey`, Kitty + legacy tables | `tui/keys.clj`, 0 Java interop | port verbatim |
 | protocol knowledge | `terminal.ts` constants + negotiation | `libs/terminal.clj`, pure | port verbatim |
-| raw mode + I/O | `stdin.setRawMode` + libuv | **JLine** (`terminal_jline.clj`) | **termios FFI** (`terminal_native.cljc`, Unix) + **kernel32 FFI** (Windows, open) |
-| Windows VT input | `win32-console-mode.node` (`GetConsoleMode`/`SetConsoleMode` + `ENABLE_VIRTUAL_TERMINAL_INPUT`) | free via JLine | `defcfn` to `kernel32.dll` — same three calls |
+| raw mode + I/O | `stdin.setRawMode` + libuv | **JLine** (`terminal_jline.clj`) | **termios FFI** (`terminal_native_unix.jolt`) + **kernel32 FFI** (`terminal_native_win.jolt`, landed) |
+| Windows VT input | `win32-console-mode.node` (`GetConsoleMode`/`SetConsoleMode` + `ENABLE_VIRTUAL_TERMINAL_INPUT`) | free via JLine | `defcfn` to `kernel32` process symbols — same three calls, plus `WriteConsoleW`/`ReadConsoleW` for Unicode-correct I/O |
 
 kmet enforces this split: raw `\u001b` is banned outside `src/kmet/tui/`
 and `src/kmet/libs/terminal.clj`, and the `ITerminal` protocol
@@ -156,7 +177,8 @@ In kmet, JLine **is** raw mode plus portable I/O around it.
 `terminal_jline.clj` is literally `(.enterRawMode t)`. Nothing else from
 JLine is used — no `LineReader`, no completion; the editor is custom
 (`tui/components/editor.clj`). This holds for the bb/JVM backend only: the
-Jolt backend (`terminal_native.cljc`) supplies the same primitive set
+Jolt backends (`terminal_native_unix.jolt` / `terminal_native_win.jolt`)
+supply the same primitive set
 (raw on/off, bounded reads, live size, writes) through libc. The full
 surface the bb backend takes from JLine:
 
@@ -479,7 +501,7 @@ serves drain-on-exit.
 
 Size: no subprocess. `ioctl(TIOCGWINSZ)` answers, with a `COLUMNS`/`LINES`
 env fallback (pi: `process.stdout.columns || env || 80/24`). The landed
-shape (`terminal_native.cljc`):
+shape (`terminal_native_unix.jolt`):
 
 ```clojure
 ;; winsize is 4× unsigned short {ws_row, ws_col, ws_xpixel, ws_ypixel} —
@@ -501,6 +523,21 @@ shape (`terminal_native.cljc`):
 ---
 
 ## 6. Raw mode + VT input: Windows via kernel32 FFI
+
+**Landed** (`terminal_native_win.jolt`, 2026-09-21, verified on
+`jolt v0.8.10` x86_64-windows). The sketch below is the design; the landed
+code keeps it and adds: the output side —
+`ENABLE_VIRTUAL_TERMINAL_PROCESSING` on the std output handle (without it a
+classic console passes ANSI through verbatim; JLine's `enableVtp` does the
+same); `WINDOW|MOUSE` input cleared (we poll the size, and records
+`ReadConsoleW` cannot return would leave `WaitForSingleObject` forever
+signaled); reads via `ReadConsoleW` — UTF-16 code units → code points with a
+surrogate carry, the `ReadFile` route would run through the console *input
+code page* and mangle non-ASCII keys — with `ReadFile` + `utf8-decode` as
+the redirected-stdin path; and writes via `WriteConsoleW` (console,
+UTF-16LE) / `WriteFile` (pipe, UTF-8 bytes), libuv's dual path for Node's
+stdout. `kernel32` resolves from the process's own symbols on Windows, so no
+`:jolt/native` declaration is needed.
 
 Windows has no `termios`. Call the console API directly — these are the same
 three calls as pi-tui's `win32-console-mode.c`
@@ -564,11 +601,19 @@ Combined entry (replaces the old draft's `os-type`/`tty-mode-set!` version):
 
 Restore must run on every exit path (normal stop, exception, shutdown
 hook) — a crashed TUI that leaves the console raw/echo-off is the classic
-failure. pi-tui's helper is deliberately non-fatal when missing; keep that:
-warn and continue with degraded keys, never crash startup.
+failure. The landed shape keeps the saved modes in the record's
+`:saved-mode` atom and restores under the record's monitor
+(`win-shutdown!`), so a read already in flight finishes before the mode goes
+back; `stop!` and the shutdown hook share that path and are idempotent.
+pi-tui's helper is deliberately non-fatal when missing; keep that: warn and
+continue with degraded keys, never crash startup. The landed backend carries
+that further — no console at all still creates a terminal (env size, byte
+reads from a redirected stdin), which is also what makes the tty-free test
+suite run unchanged on Windows.
 
 After raw + VT-input are on, the byte stream is uniform across platforms
-and one shared parser handles it (§8).
+and one shared parser handles it (§8); the backend's `read-input` contract
+is one code point per call on both, so Windows converts as it reads.
 
 ---
 
@@ -699,7 +744,7 @@ mechanism — timers stay `future` + generation counters.
 | `libs.terminal` (Kitty/OSC constants, negotiation + response parsing) | port logic verbatim; `Base64` shimmed (keep or use `ffi/write-bytes`); log-file names need no `LocalDateTime` (format manually or drop the timestamp) |
 | `tui.keys`, `tui.keybindings`, `tui.utils` (width/wrap/truncate), `libs.reakt`, `tui.hiccup`, `tui.macros`, `tui.protocols`, `tui.border`, `tui.timers`, all `tui.components.*` | **already green on Jolt, unchanged** (§0) — the `add-watch`-on-atom and regex spots checked out; `test-border`/`test-timers`/`test-hiccup`/`test-track`/`test-reakt-integration` run as-is |
 | `tui.theme` | portable — already polls (`theme.clj:625-647`: "babashka.fs has no watcher"); keep the poll, keep `java.nio` out per the AGENTS.md rule |
-| `tui.terminal` (240 lines) | **rewrite** per §§4–6 behind the same `ITerminal` protocol — **done 2026-09-11**: the protocol is now lean and total, the JLine half moved to `terminal_jline.clj`, and the Jolt half is `terminal_native.cljc` (Unix; Windows open) |
+| `tui.terminal` (240 lines) | **rewrite** per §§4–6 behind the same `ITerminal` protocol — **done 2026-09-11**: the protocol is now lean and total, the JLine half moved to `terminal_jline.clj`, and the Jolt half split into `terminal_native_unix.jolt` / `terminal_native_win.jolt` (Windows landed 2026-09-21) |
 | `tui.core` input half + start/stop/resize/drain | **reimplement** per §§5–7,9 (reader thread, poll-based resize, generation-guarded timers, restores) — **done**: the reader loop calls `read-input` and the loop polls `columns`/`rows`; no JLine types remain in `core.clj` |
 | `tui.core` render half (diff, overlays, flashes, Kitty-image ranges, crash/debug logs) | port logic; retarget logging to portable I/O |
 
@@ -803,14 +848,16 @@ re-runs (`hiccup/render-lines`, no tty, no sleeps).
 
 ## 13. Next steps
 
-1. **Windows backend** (§6): `GetStdHandle`/`GetConsoleMode`/
-   `SetConsoleMode` + `ENABLE_VIRTUAL_TERMINAL_INPUT`,
-   `WaitForSingleObject` + `ReadFile`, `GetConsoleScreenBufferInfo` —
-   `terminal_native.cljc`'s Windows error is the landing spot.
-2. **Mouse tracking** — the enable/disable sequences are not implemented;
+1. **Mouse tracking** — the enable/disable sequences are not implemented;
    the key parser already recognizes and filters mouse events (§7.7).
-3. **Jolt-host pty app smoke** — `modes.test-overlay-input-smoke` spawns
-   `bb run` and is `^:bb-only`; a Jolt-host variant is the follow-up.
+2. **Jolt-host pty app smoke** — `modes.test-overlay-input-smoke` spawns
+   `bb run` and is `^:bb-only`; a Jolt-host variant is the follow-up (on
+   Windows the pty would be a ConPTY; the console roundtrip test drives the
+   real handles already, so what is missing is the app-level smoke).
+3. **Windows process layer** — not TUI: `babashka.process` on Jolt/Windows
+   cannot spawn (path separator + program resolution, `jolt-bugs.md`), which
+   also blocks a spawned-jolt Windows smoke; the terminal backend itself
+   needs nothing more.
 
 ---
 

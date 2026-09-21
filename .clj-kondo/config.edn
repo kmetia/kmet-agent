@@ -4,7 +4,8 @@
  ;; JVM-ish dialect, matched by both hosts — is for code that must not run on
  ;; a non-JVM reader). This (project) config is the BABASHKA view:
  ;; `:cljc {:features [:clj]}` makes clj-kondo read the :clj branches, which is
- ;; what babashka reads; jolt/ is bb-inert, hence excluded. The JOLT view is
+ ;; what babashka reads; jolt/ and .jolt sources are bb-inert, hence excluded.
+ ;; The JOLT view is
  ;; the other half: kmet.tasks.lint (tasks/kmet/tasks/lint.clj) projects the files whose
  ;; reading differs — those carrying :bb (into target/bb-lint/, under this
  ;; config) or :jolt (into target/jolt-lint/, under .clj-kondo-jolt/) — with

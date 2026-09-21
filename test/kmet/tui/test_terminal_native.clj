@@ -1,26 +1,32 @@
 (ns kmet.tui.test-terminal-native
   "Native (FFI) terminal backend tests — Jolt-only.
 
-   kmet.tui.terminal-native's body is a single #?(:jolt ...) branch, so on
-   bb/JVM the namespace loads empty and both tests below skip. Under
-   `jolt test` they exercise the real backend: the tty-free surface
-   directly, and the full pty roundtrip (raw mode + reads + restore, plus
-   two concurrent reads) by spawning a nested jolt in a pty through an
-   embedded marker-driven driver (^:slow — `jolt test-ext`)."
+   The backends are .jolt sources (Jolt-only by extension), so on bb/JVM
+   they are not even loadable and every test below skips. Under `jolt test`
+   they exercise the host's real backend: the tty-free surface directly and
+   the Unix pty roundtrip (raw mode + reads + restore, plus two concurrent
+   reads) by spawning a nested jolt in a pty through an embedded
+   marker-driven driver (^:slow). The Windows console roundtrip and its
+   UTF-16 helpers live in the .cljc sibling (a .clj file may not carry
+   reader conditionals, and the runner loads these on both hosts)."
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
             [clojure.string :as str]
             [clojure.test :as t :refer [deftest testing]]
+            [kmet.libs.host :as host]
             [kmet.tui.terminal :as term]))
 
 (defn- native-create-terminal
-  "The native backend's create-terminal, or nil on bb/JVM (the namespace is
-   empty there). Resolved at runtime so this test namespace compiles on both
-   hosts."
+  "This host's native backend create-terminal, or nil on bb/JVM (the native
+   namespaces are empty there). Resolved at runtime so this test namespace
+   compiles on both hosts."
   []
-  (when (boolean (find-var 'clojure.core/*jolt-version*))
-    (require 'kmet.tui.terminal-native)
-    (some-> (ns-resolve 'kmet.tui.terminal-native 'create-terminal) deref)))
+  (when (host/jolt?)
+    (let [ns-sym (if (host/windows?)
+                   'kmet.tui.terminal-native-win
+                   'kmet.tui.terminal-native-unix)]
+      (require ns-sym)
+      (some-> (ns-resolve ns-sym 'create-terminal) deref))))
 
 (deftest native-terminal-before-start
   (testing "creation, size fallback and reads before start! work without a tty"
@@ -109,7 +115,7 @@ sys.exit(os.waitstatus_to_exitcode(status) if exited else 124)
    that never comes (and stop! would hang behind it). With the lock the
    winner takes the byte and the loser times out."
   "(require '[kmet.tui.terminal :as term]
-            '[kmet.tui.terminal-native :as native])
+            '[kmet.tui.terminal-native-unix :as native])
 (let [t (native/create-terminal)]
   (term/start! t (fn [_] nil) (fn [] nil))
   (println \"STARTED\" (term/started? t) (term/columns t) (term/rows t))
@@ -134,8 +140,8 @@ sys.exit(os.waitstatus_to_exitcode(status) if exited else 124)
     (if-let [_create (native-create-terminal)]
       (let [jolt (fs/which "jolt")
             python (fs/which "python3")]
-        (if-not (and jolt python)
-          (t/is true "skipped: jolt/python3 not on PATH")
+        (if-not (and jolt python (not (host/windows?)))
+          (t/is true "skipped: the pty driver needs POSIX pty (jolt/python3 not usable here)")
           ;; target/ over fs/temp-dir: /tmp does not exist everywhere (Termux)
           (let [out-dir (str (fs/path (fs/cwd) "target"))
                 _ (fs/create-dirs out-dir)

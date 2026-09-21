@@ -13,7 +13,7 @@
   To stop: evaluate `(System/exit 0)` via nREPL (or `fuser -k 1667/tcp` from another terminal).
 - **Lint**: `bb lint` / `jolt lint` — clj-kondo over BOTH reader views, in one report:
   the babashka view (the tree, with files carrying a `:bb` branch projected) and the jolt
-  view (the files carrying `:jolt`, plus `jolt/`). clj-kondo knows only the standard
+  view (the files carrying `:jolt`, plus `jolt/` and `.jolt` sources). clj-kondo knows only the standard
   `:clj`/`:cljs` features, so `kmet.tasks.lint` (`tasks/kmet/tasks/lint.clj`) re-spells the view's own
   feature to `:clj` in a projection under `target/` (`target/bb-lint/`, `target/jolt-lint/`
   — stable paths, so clj-kondo's cache carries over) and layers
@@ -211,9 +211,10 @@ src/kmet/
     │           Usage + development docs: src/kmet/tui/tui.md — MUST be kept up to date
     │           with any behavior change they describe
     │           terminal.clj = the ITerminal protocol + shared ANSI/query
-    │           logic + host dispatch; terminal_jline.clj (bb/JVM) and
-    │           terminal_native.cljc (Jolt termios/kernel32 FFI) are the only
-    │           namespaces that touch platform deps
+    │           logic + host dispatch; terminal_jline.clj (bb/JVM),
+    │           terminal_native_unix.jolt and terminal_native_win.jolt
+    │           (Jolt termios / kernel32 FFI) are the only namespaces that
+    │           touch platform deps
     └── components/ — TUI leaf components (Container, Box, Text, ...)
 
 tasks/kmet/tasks/ — EVERY bb-task implementation (bb.edn `:requires`/entry

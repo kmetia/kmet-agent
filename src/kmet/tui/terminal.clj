@@ -7,15 +7,20 @@
    the progress keepalive; everything else (cursor/clear/title sequences,
    write log, Kitty negotiation, terminal queries, drain-on-exit) is
    derived here or in kmet.libs.terminal. Backends are resolved lazily by
-   create-terminal, so neither host touches the other's platform deps:
+   create-terminal, so neither host touches the other's platform deps and
+   neither OS loads the other's FFI surface:
 
-   - kmet.tui.terminal-jline  — Babashka/JVM: JLine 4.4.0 (bundled).
-   - kmet.tui.terminal-native — Jolt: termios (Unix) / kernel32 (Windows)
-     raw mode, byte reads and live size over jolt.ffi.
+   - kmet.tui.terminal-jline       — Babashka/JVM: JLine 4.4.0 (bundled).
+   - kmet.tui.terminal-native-unix — Jolt/Unix: termios + poll(2) over
+     jolt.ffi.
+   - kmet.tui.terminal-native-win  — Jolt/Windows: the kernel32 console
+     API over jolt.ffi.
 
    A backend record owns its private state (reader/writer, raw-mode
    snapshot, progress interval atom); nothing outside the backend reads
-   those fields."
+   those fields. The small shared pieces the platform backends build on —
+   the bounded-read buffer size, the COLUMNS/LINES size fallback and the
+   pending-queue helper — live here."
   (:require [kmet.libs.host :as host]
             [kmet.libs.terminal :as lib]))
 
@@ -74,17 +79,45 @@
       (reset! interval-atom nil)
       (write-output terminal lib/TERMINAL-PROGRESS-CLEAR-SEQUENCE))))
 
+;; ─── Shared native-backend pieces ──────────────────────────────────────────
+
+(def read-buf-size
+  "One bufferful per bounded read in the native backends: bytes on Unix and
+   for a Windows pipe, UTF-16 code units on the Windows console path."
+  1024)
+
+(defn env-size
+  "COLUMNS/LINES fallback for a live-size query that failed (pi:
+   process.stdout.columns || env || 80/24). A zero, negative or unparsable
+   value falls back to FALLBACK."
+  [name fallback]
+  (let [v (parse-long (str (System/getenv name)))]
+    (if (and v (pos? v)) v fallback)))
+
+(defn pop-pending!
+  "Take the next buffered code point from PENDING-ATOM (a backend's pending
+   queue), or nil. Atomic: the reader thread and the drain-on-exit path can
+   both call read-input while shutdown winds down."
+  [pending-atom]
+  (let [[old _] (swap-vals! pending-atom
+                            (fn [p] (if (seq p) (subvec p 1) p)))]
+    (when (seq old)
+      (nth old 0))))
+
 ;; ─── Backend dispatch ──────────────────────────────────────────────────────
 
 (defn create-terminal
   "Create the host's terminal backend (Jolt detection: kmet.libs.host).
    The backend namespace is resolved at call time, so the JLine backend
-   never loads on Jolt (no org.jline.*) and the FFI backend never loads on
-   bb/JVM (no jolt.ffi)."
+   never loads on Jolt (no org.jline.*) and the FFI backends never load on
+   bb/JVM (no jolt.ffi); on Jolt the OS picks the FFI backend, so a Unix
+   host never defines a kernel32 binding and a Windows host never defines
+   a termios one."
   []
-  (if (host/jolt?)
-    ((requiring-resolve 'kmet.tui.terminal-native/create-terminal))
-    ((requiring-resolve 'kmet.tui.terminal-jline/create-terminal))))
+  (cond
+    (not (host/jolt?)) ((requiring-resolve 'kmet.tui.terminal-jline/create-terminal))
+    (host/windows?) ((requiring-resolve 'kmet.tui.terminal-native-win/create-terminal))
+    :else ((requiring-resolve 'kmet.tui.terminal-native-unix/create-terminal))))
 
 ;; ─── Kitty protocol wrappers (lib fns bound to this terminal's writer) ─────
 

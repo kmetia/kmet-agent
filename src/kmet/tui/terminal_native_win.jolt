@@ -1,0 +1,377 @@
+(ns kmet.tui.terminal-native-win
+  "Jolt Windows terminal backend: the kernel32 console API over jolt.ffi —
+   the same approach as pi's win32-platform.c.
+
+   GetStdHandle + GetConsoleMode/SetConsoleMode with
+   ENABLE_VIRTUAL_TERMINAL_INPUT for raw mode (plus
+   ENABLE_VIRTUAL_TERMINAL_PROCESSING on the output handle so ANSI escapes
+   are interpreted), WaitForSingleObject + ReadConsoleW for reads bounded by
+   a timeout, and GetConsoleScreenBufferInfo for the live size. Setup is
+   non-fatal like pi's: without a console the backend degrades (env size,
+   bytes from a redirected stdin) instead of crashing startup. Console reads
+   return UTF-16, converted to code points here (a read boundary may split a
+   surrogate pair); non-console reads go through the same UTF-8 decoder as
+   Unix, and writes use WriteConsoleW (console) / WriteFile (pipe) — libuv's
+   dual path.
+
+   A .jolt file — the runtime's own source extension — so it is Jolt code by
+   construction, with no reader conditionals and no way for babashka or the
+   JVM to load it by accident. kmet.tui.terminal/create-terminal resolves it
+   at call time; the unit tests reach its pure helper directly. The
+   bounded-read buffer, the env size fallback and the pending-queue helper
+   live in kmet.tui.terminal."
+  (:require [kmet.libs.terminal :as lib]
+            [kmet.tui.terminal :as term]
+            [jolt.ffi :as ffi]))
+
+;; ═══ Windows (kernel32 console API) ══════════════════════════════════
+;; pi's approach (win32-platform.c / enableWindowsVTInput):
+;; GetStdHandle + GetConsoleMode/SetConsoleMode — no termios, no
+;; subprocess. Raw mode clears ECHO|LINE|PROCESSED (libuv's
+;; setRawMode) and sets ENABLE_VIRTUAL_TERMINAL_INPUT, so the console
+;; emits VT sequences (\u001b[Z for Shift+Tab) instead of records whose
+;; modifier state ReadConsoleW would lose; WINDOW|MOUSE input stay
+;; clear because we poll the size and never consume their records
+;; (a record ReadConsoleW cannot return would leave the wait forever
+;; signaled). ENABLE_VIRTUAL_TERMINAL_PROCESSING goes on the output
+;; handle (JLine's enableVtp does the same) so ANSI escapes are
+;; interpreted on a classic console. Setup is deliberately non-fatal,
+;; as pi's is: without a console the backend degrades (COLUMNS/LINES
+;; size, bytes from a redirected stdin) instead of failing startup.
+
+(ffi/defcfn ^:private win-get-std-handle "GetStdHandle" [:int] :pointer)
+(ffi/defcfn ^:private win-get-console-mode "GetConsoleMode" [:pointer :pointer] :int)
+(ffi/defcfn ^:private win-set-console-mode "SetConsoleMode" [:pointer :uint] :int)
+(ffi/defcfn ^:private win-get-console-screen-buffer-info
+  "GetConsoleScreenBufferInfo" [:pointer :pointer] :int)
+(ffi/defcfn ^:private win-write-console
+  "WriteConsoleW" [:pointer :pointer :uint :pointer :pointer] :int :blocking)
+(ffi/defcfn ^:private win-read-console
+  "ReadConsoleW" [:pointer :pointer :uint :pointer :pointer] :int :blocking)
+(ffi/defcfn ^:private win-read-file
+  "ReadFile" [:pointer :pointer :uint :pointer :pointer] :int :blocking)
+(ffi/defcfn ^:private win-write-file
+  "WriteFile" [:pointer :pointer :uint :pointer :pointer] :int :blocking)
+(ffi/defcfn ^:private win-wait-for-single-object
+  "WaitForSingleObject" [:pointer :uint] :uint :blocking)
+(ffi/defcfn ^:private win-get-last-error "GetLastError" [] :uint)
+
+(def ^:private win-std-input -10)
+(def ^:private win-std-output -11)
+(def ^:private win-wait-object "WAIT_OBJECT_0 — the handle is signaled." 0)
+;; Input-mode bits (wincon.h).
+(def ^:private win-enable-virtual-terminal-input 0x0200)
+;; Output-mode bit.
+(def ^:private win-enable-virtual-terminal-processing 0x0004)
+;; PROCESSED|LINE|ECHO|WINDOW|MOUSE — everything raw mode must clear.
+(def ^:private win-raw-mode-clear 0x001F)
+(def ^:private win-read-buf-chars 1024)
+
+(defn- win-console-mode
+  "HANDLE's console mode, or nil when it is not a console handle (or the
+   query failed) — the non-fatal probe the whole backend keys off."
+  [handle]
+  (ffi/with-out [m :uint]
+    (when (pos? (win-get-console-mode handle m))
+      (ffi/read m :uint))))
+
+(defn- win-set-mode! [handle mode]
+  (pos? (win-set-console-mode handle (bit-and mode 0xFFFFFFFF))))
+
+(defn- win-enter-raw!
+  "Put the console into raw mode. Idempotent per start!: the saved modes
+   are kept in the record's :saved-mode atom for win-restore!. Answers
+   nil when the input handle is not a console — the degraded path.
+
+   The input side is two writes, like pi's setRawMode then
+   enableWindowsVTInput: the raw flags first (clear
+   ECHO|LINE|PROCESSED|WINDOW|MOUSE — libuv's setRawMode), then the
+   virtual-terminal-input bit ORed in as a separate best-effort write,
+   so a console too old for 0x0200 still gets raw mode (degraded keys —
+   no VT sequences for modified keys — instead of line-buffered input)."
+  [term]
+  (let [in-mode (win-console-mode (:in-handle term))
+        out-mode (win-console-mode (:out-handle term))]
+    (when in-mode
+      (let [raw (bit-and in-mode (bit-not win-raw-mode-clear))]
+        (win-set-mode! (:in-handle term) raw)
+        ;; best effort: an old console rejects this and keeps `raw`
+        (win-set-mode! (:in-handle term)
+                       (bit-or raw win-enable-virtual-terminal-input))))
+    (when out-mode
+      (win-set-mode! (:out-handle term)
+                     (bit-or out-mode win-enable-virtual-terminal-processing)))
+    (when (or in-mode out-mode)
+      {:in-mode in-mode :out-mode out-mode})))
+
+;; win-shutdown! writes through it (bracketed paste off) before it is
+;; defined below, next to the other write paths.
+(declare win-write-string!)
+
+(defn- win-restore! [term]
+  (when-let [saved @(:saved-mode term)]
+    (when-let [m (:in-mode saved)] (win-set-mode! (:in-handle term) m))
+    (when-let [m (:out-mode saved)] (win-set-mode! (:out-handle term) m))
+    (reset! (:saved-mode term) nil)))
+
+(defn- win-shutdown!
+  "stop! body for the Windows record: bracketed paste off, console modes
+   restored, buffered input dropped. Runs under the record's monitor so
+   a read already inside win-read-chars! finishes BEFORE the restore —
+   the reverse order would let it consume keys typed after the terminal
+   went back to the shell. Idempotent and silent when never started (the
+   shutdown hook runs on every exit), and non-fatal on a console that
+   disappeared mid-run."
+  [term]
+  (locking term
+    (let [was-running? @(:running-ref term)]
+      (reset! (:running-ref term) false)
+      (when was-running?
+        (try
+          (win-write-string! term lib/BRACKETED-PASTE-OFF)
+          (catch Throwable _ nil)))
+      (win-restore! term)
+      (reset! (:pending term) [])
+      (reset! (:carry term) [])
+      (reset! (:utf16-carry term) nil)))
+  term)
+
+(defn- win-enable-raw! [term]
+  (when-not @(:running-ref term)
+    (reset! (:saved-mode term) (win-enter-raw! term))
+    (reset! (:running-ref term) true)
+    (try
+      (win-write-string! term lib/BRACKETED-PASTE-ON)
+      (catch Throwable _ nil)))
+  term)
+
+;; ─── Writes ────────────────────────────────────────────────────────────
+
+(defn- win-write-console!
+  "WriteConsoleW S (as UTF-16LE) to HANDLE, looping over partial writes.
+   Console text must go through the W entry point: WriteFile would encode
+   in the console's output code page, mangling non-ASCII frames."
+  [handle s]
+  (let [utf16 (.getBytes s "UTF-16LE")
+        nbytes (count utf16)
+        nchars (quot nbytes 2)]
+    (when (pos? nchars)
+      (ffi/with-alloc [buf (max 2 nbytes)]
+        (ffi/write-array buf utf16)
+        (loop [done 0]
+          (when (< done nchars)
+            ;; with-out answers its body's value (a scoped cell), so the
+            ;; recur stays outside the try/finally it expands to.
+            (let [w (ffi/with-out [written :uint]
+                      (when (pos? (win-write-console handle (+ buf (* 2 done))
+                                                     (- nchars done) written ffi/null))
+                        (ffi/read written :uint)))]
+              (if (and w (pos? w))
+                (recur (+ done w))
+                (throw (ex-info "kmet.tui.terminal-native-win: WriteConsoleW failed"
+                                {:type :terminal-native-write
+                                 :last-error (win-get-last-error)}))))))))))
+
+(defn- win-write-bytes!
+  "WriteFile S (as UTF-8 bytes) to HANDLE, looping over partial writes —
+   the redirected-stdout path (libuv's non-TTY stdout branch)."
+  [handle s]
+  (let [utf8 (.getBytes s "UTF-8")
+        nbytes (count utf8)]
+    (when (pos? nbytes)
+      (ffi/with-alloc [buf (max 1 nbytes)]
+        (ffi/write-array buf utf8)
+        (loop [done 0]
+          (when (< done nbytes)
+            (let [w (ffi/with-out [written :uint]
+                      (when (pos? (win-write-file handle (+ buf done) (- nbytes done)
+                                                  written ffi/null))
+                        (ffi/read written :uint)))]
+              (if (and w (pos? w))
+                (recur (+ done w))
+                (throw (ex-info "kmet.tui.terminal-native-win: WriteFile failed"
+                                {:type :terminal-native-write
+                                 :last-error (win-get-last-error)}))))))))))
+
+(defn- win-write-string!
+  "Write S to the terminal's output handle: WriteConsoleW (UTF-16) when
+   it is a console — what libuv does with Node's stdout on a TTY, i.e.
+   pi's output path — and WriteFile (UTF-8) when it is a pipe or file."
+  [term s]
+  (when (seq s)
+    (if (:console-out? term)
+      (win-write-console! (:out-handle term) s)
+      (win-write-bytes! (:out-handle term) s))))
+
+;; ─── Reads ─────────────────────────────────────────────────────────────
+
+(defn- utf16-units->code-points
+  "UTF-16 code units (ints) -> [CODEPOINTS CARRY]. CARRY is the lone high
+   surrogate (0xD800-0xDBFF) still waiting for its low half, or nil —
+   ReadConsoleW reads code units, so a read boundary can split a pair.
+   Unpaired surrogates become U+FFFD; kmet code points are full scalars."
+  [units carry]
+  (loop [us (if carry (cons carry units) units)
+         out []]
+    (if (empty? us)
+      [out nil]
+      (let [u (first us)
+            r (rest us)]
+        (cond
+          (and (<= 0xD800 u 0xDBFF)
+               (seq r)
+               (<= 0xDC00 (first r) 0xDFFF))
+          (recur (rest r)
+                 (conj out (+ 0x10000
+                              (bit-shift-left (- u 0xD800) 10)
+                              (- (first r) 0xDC00))))
+
+          (and (<= 0xD800 u 0xDBFF) (empty? r))
+          [out u]
+
+          (and (<= 0xD800 u 0xDBFF) (not (<= 0xDC00 (first r) 0xDFFF)))
+          (recur r (conj out 0xFFFD))
+
+          (<= 0xDC00 u 0xDFFF)
+          (recur r (conj out 0xFFFD))
+
+          :else
+          (recur r (conj out u)))))))
+
+(defn- win-read-console-chars!
+  "ReadConsoleW up to one bufferful from a console, answering code
+   points (a high-surrogate tail is carried across reads)."
+  [term handle]
+  (ffi/with-alloc [buf (* 2 win-read-buf-chars)]
+    (ffi/with-out [read :uint]
+      (when (pos? (win-read-console handle buf win-read-buf-chars read ffi/null))
+        (let [n (ffi/read read :uint)]
+          (when (pos? n)
+            (let [units (mapv #(ffi/read buf :uint16 (* 2 %)) (range n))
+                  [cps carry] (utf16-units->code-points units @(:utf16-carry term))]
+              (reset! (:utf16-carry term) carry)
+              cps)))))))
+
+(defn- win-read-pipe-bytes!
+  "ReadFile up to one bufferful from a non-console input handle (a
+   redirected pipe or file), decoded with the shared UTF-8 reassembler."
+  [term handle]
+  (ffi/with-alloc [buf term/read-buf-size]
+    (ffi/with-out [read :uint]
+      (when (pos? (win-read-file handle buf term/read-buf-size read ffi/null))
+        (let [n (ffi/read read :uint)]
+          (when (pos? n)
+            (let [[cps tail] (lib/utf8-decode (into @(:carry term)
+                                                    (ffi/read-array buf n)))]
+              (reset! (:carry term) tail)
+              cps)))))))
+
+(defn- win-read-chars!
+  "Wait up to TIMEOUT-MS for input, then read one bufferful. A console
+   input handle reads WCHARs; anything else reads bytes. nil when
+   nothing arrived (or about to stop). Serialized by the record's
+   monitor: the reader thread and drain-on-exit can both call
+   read-input, and unserialized they would race the console buffer."
+  [term timeout-ms]
+  (locking term
+    (if-not @(:running-ref term)
+      ;; A stop! that landed while the caller was on its way here: never
+      ;; read input bound for the shell.
+      nil
+      (let [handle (:in-handle term)]
+        (if (= win-wait-object
+               (win-wait-for-single-object handle (max 0 (long timeout-ms))))
+          (or (if (:console-in? term)
+                (win-read-console-chars! term handle)
+                (win-read-pipe-bytes! term handle))
+              ;; Signaled without a key — a console record ReadConsoleW
+              ;; cannot return (focus), NUL, or an EOF'd pipe. Back off
+              ;; instead of spinning (Linux's POLLHUP arm does the same).
+              (do (Thread/sleep 20) nil))
+          nil)))))
+
+(defn- win-read-char!
+  [term timeout-ms]
+  (or (term/pop-pending! (:pending term))
+      (if-not @(:running-ref term)
+        ;; Before start! (the reader thread begins first) reading would
+        ;; consume cooked-mode input — wait out the timeout instead.
+        (do (Thread/sleep (max 1 (min 100 (long timeout-ms)))) -1)
+        (let [cps (win-read-chars! term timeout-ms)]
+          (if (seq cps)
+            (do (reset! (:pending term) (subvec cps 1))
+                (nth cps 0))
+            -1)))))
+
+;; ─── Size ──────────────────────────────────────────────────────────────
+
+(defn- win-terminal-size
+  "Live {rows cols} from the console screen buffer's window rect, or nil
+   when the output handle is not a console. The env fallback is pi's:
+   process.stdout.columns || COLUMNS/LINES || 80/24."
+  [term]
+  (when (:console-out? term)
+    (ffi/with-alloc [info 32]
+      (when (pos? (win-get-console-screen-buffer-info (:out-handle term) info))
+        (let [left (ffi/read info :int16 10)
+              top (ffi/read info :int16 12)
+              right (ffi/read info :int16 14)
+              bottom (ffi/read info :int16 16)
+              cols (inc (- right left))
+              rows (inc (- bottom top))]
+          (when (and (pos? cols) (pos? rows))
+            {:rows rows :cols cols}))))))
+
+;; ─── Backend ───────────────────────────────────────────────────────────
+
+(defrecord WindowsTerminal [in-handle out-handle console-in? console-out?
+                            running-ref saved-mode pending carry utf16-carry
+                            progress-interval-atom]
+  term/ITerminal
+  (start! [this _ _] (win-enable-raw! this))
+  (stop! [this] (win-shutdown! this))
+  (started? [this] (boolean @(:running-ref this)))
+  (write-output [this s]
+    (win-write-string! this s)
+    (lib/write-log! s))
+  (read-input [this timeout-ms] (win-read-char! this timeout-ms))
+  (columns [this]
+    (or (:cols (win-terminal-size this))
+        (term/env-size "COLUMNS" 80)))
+  (rows [this]
+    (or (:rows (win-terminal-size this))
+        (term/env-size "LINES" 24)))
+  (set-progress! [this active]
+    (term/apply-progress! this (:progress-interval-atom this) active)))
+
+(defn create-terminal
+  "A WindowsTerminal over the process's std handles — GetStdHandle, the
+   same call pi's win32-console-mode.c makes (no CONIN$/CONOUT$
+   fallback: a redirected stdout stays redirected). Console detection
+   happens here; start! is still the only side effect.
+
+   The input/output handles are captured once: they do not change under
+   the process, and a shutdown-hook restore must target the same console
+   the modes were saved from."
+  []
+  (let [in-handle (win-get-std-handle win-std-input)
+        out-handle (win-get-std-handle win-std-output)
+        term (map->WindowsTerminal {:in-handle in-handle
+                                    :out-handle out-handle
+                                    :console-in? (some? (win-console-mode in-handle))
+                                    :console-out? (some? (win-console-mode out-handle))
+                                    :running-ref (atom false)
+                                    :saved-mode (atom nil)
+                                    :pending (atom [])
+                                    :carry (atom [])
+                                    :utf16-carry (atom nil)
+                                    :progress-interval-atom (atom nil)})]
+    ;; Classic failure mode: a crash in raw mode leaves the user's shell
+    ;; echo-less. The hook restores on process exit; stop! is the normal
+    ;; path and makes the hook a no-op (win-restore! clears the saved
+    ;; modes atomically through the record's monitor).
+    (try
+      (.addShutdownHook (Runtime/getRuntime)
+                        (Thread. (fn [] (try (win-shutdown! term) (catch Throwable _ nil)))))
+      (catch Throwable _ nil))
+    term))

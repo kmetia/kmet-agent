@@ -13,6 +13,7 @@
    changed-file task (`jolt format-check-changed`) and babashka remain the
    practical gates for the whole tree."
   (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [kmet.tasks.changed :as changed]))
 
 (defn- cljfmt-op
@@ -39,7 +40,11 @@
   []
   (->> ["src" "test" "tasks" "extensions"]
        (mapcat (fn [root] (fs/glob root "**.{clj,cljs,cljc,cljd,bb,edn,jolt}")))
-       (remove (fn [path] (re-find #"/target/|/(image_)?model_data/" (str path))))
+       ;; the exclusion matches / — fs/glob yields the platform separator
+       ;; (backslash on Windows), which would let the generated catalogs
+       ;; through to cljfmt
+       (remove (fn [path] (re-find #"/target/|/(image_)?model_data/"
+                                   (str/replace (str path) "\\" "/"))))
        (mapv str)))
 
 (defn format!

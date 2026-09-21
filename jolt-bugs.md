@@ -309,3 +309,44 @@ finding 2 is fixed that collapses back to `(fs/which "curl")`. Findings 1
 and 3 have no kmet workaround — the jolt fixes are what let the curl
 transport (or any child process) run on Windows.
 
+### More Windows seams: `fs/glob` separator patterns and `ProcessHandle` (unfiled)
+
+**Area:** the vendored `babashka.fs` glob primitive,
+`host/chez/java/process.ss`. Both verified on the official v0.8.10 Windows
+build (2026-09-21); both are Windows-only.
+
+**4. `fs/glob` patterns that spell a `/` match nothing.** The `**` in the
+vendored glob never crosses the platform separator on Windows, so `*`,
+`*.clj` and `**/*.clj` all return `()`, while separator-free `**` and
+`**.clj` work:
+
+```
+$ jolt -e '(require (quote [babashka.fs :as fs])) (println (count (fs/glob "src" "**/*.clj")) (count (fs/glob "src" "**.clj")))'
+0 152
+```
+
+bb matches the same patterns normally. Fix: match the pattern's `/` against
+both separators. kmet workaround: `kmet.tasks.changed/dir-clj-files` uses
+one `**.{clj,cljc,jolt}` pattern (verified to select the same files as the
+six old globs on bb), and `kmet.tasks.format/source-paths` normalizes
+before its exclusion regex. Everything else enumerating with
+separator-bearing patterns — `kmet.tasks.lint`'s `*.{…}` + `**/*.{…}` pair,
+`kmet.tasks.clean`'s `extensions/*/target` — still silently sees an empty
+tree on Jolt/Windows, so a Jolt/Windows `lint`/`clean` needs this fixed (or
+the patterns rewritten) before it can be trusted.
+
+**5. `java.lang.ProcessHandle` is absent.**
+
+```
+$ jolt -e '(println (.pid (java.lang.ProcessHandle/current)))'
+Unhandled exception (IllegalArgumentException): No dependency provides java.lang.ProcessHandle — a concrete implementation of the JDK classes must be provided.
+```
+
+`kmet.libs.terminal/capture-log-path` builds `<prefix>-<timestamp>-<pid>.log`
+when `KMET_TUI_WRITE_LOG` / `KMET_TUI_INPUT_LOG` points at a directory, so
+that path crashes the app at namespace load on Jolt/Windows (pointing the
+env var at a file works — the timestamped name is only built for a
+directory). Fix: a `ProcessHandle` shim in `process.ss` (jolt-port.md listed
+one at `process.ss:1009`; it is not reachable on this build), kmet
+workaround: avoid the pid in log names on Windows.
+

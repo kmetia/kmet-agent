@@ -1,29 +1,46 @@
 # Porting kmet to Jolt — open work
 
 The port is staged and largely landed: kmet runs on Jolt — TUI (native
-termios terminal backend), providers (HTTP via babashka.http-client over the
-jolt-lang shims), packaging (`jolt dist`), and extensions (the native
-loader, with SCI as the declared fallback). This file tracks **only what is
-still open**; finished work lives in the code, in `jolt-tui.md` (TUI
-adapter deep-dive: FFI ground rules, raw mode, input pipeline, key parser,
-concurrency) and in `jolt-bugs.md` (upstream issues filed or tracked). The
-item labels (B2, M5, …) are the original port report's ids.
+terminal backend: termios on Unix, kernel32 on Windows), providers (HTTP
+via babashka.http-client over the jolt-lang shims), packaging (`jolt
+dist`), and extensions (the native loader, with SCI as the declared
+fallback). This file tracks **only what is still open**; finished work
+lives in the code, in `jolt-tui.md` (TUI adapter deep-dive: FFI ground
+rules, raw mode, input pipeline, key parser, concurrency) and in
+`jolt-bugs.md` (upstream issues filed or tracked). The item labels (B2,
+M5, …) are the original port report's ids.
 
 ## Windows — the last platform (M2)
 
-- **Terminal backend**: `src/kmet/tui/terminal_native.cljc` has no Windows
-  implementation; `create-terminal` throws the design note. The landing
-  spot is binding kernel32 `GetConsoleMode`/`SetConsoleMode` + resize +
-  input records.
+- **Terminal backend**: done (2026-09-21, `jolt v0.8.10` x64) —
+  `src/kmet/tui/terminal_native_win.jolt` has the pi-style kernel32 backend
+  (the Unix one is `terminal_native_unix.jolt`; the two share no FFI
+  surface):
+  `GetStdHandle`/`GetConsoleMode`/`SetConsoleMode` +
+  `ENABLE_VIRTUAL_TERMINAL_INPUT` (input) / `ENABLE_VIRTUAL_TERMINAL_PROCESSING`
+  (output), `WaitForSingleObject` + `ReadConsoleW`/`ReadFile` for bounded
+  reads, `GetConsoleScreenBufferInfo` for the size, `WriteConsoleW`/`WriteFile`
+  for output; setup degrades instead of failing without a console. Verified
+  with injected key records, mode restore, the real TUI, and the
+  `windows-console-raw-mode-roundtrip` test (`jolt test-ext`). Details:
+  `jolt-tui.md` §0/§6.
 - **Process** (B2): Windows falls back to Chez `open-process-ports`, where
   ^C cannot interrupt the child; `destroy-tree` behavior needs a Windows
-  test.
+  test. This also means the pty/ConPTY-driven app smoke cannot spawn a
+  nested jolt on Windows yet.
 - **Native libs**: the upstream crypto / http-client libraries now declare
   their own `:jolt/native` candidates (`:darwin`/`:linux`/`:windows`), so
   kmet's project-level mirror block in `deps.edn` is gone (crypto#11,
   http-client#23 closed — see `jolt-bugs.md`). Still owed: the Windows
   smoke (`jolt -e '(println :ok)'` with the libcrypto/libssl/libz DLLs
   beside `jolt.exe` or on PATH).
+- **Dev loop on Jolt/Windows**: the `*-changed` tasks cannot spawn `git`
+  (the process seams above), so `jolt test-changed` / `jolt lint-changed`
+  throw before they scan; `bb` runs them normally. `kmet.tasks.changed`
+  now normalizes separators and uses a separator-free glob (the vendored
+  `fs/glob` gap, `jolt-bugs.md` findings 4–5), but `kmet.tasks.lint`'s
+  target enumeration still needs the same treatment before a Jolt/Windows
+  `lint` can be trusted. None of this touches the terminal backend.
 - Windows is the last platform to light up, after Unix parity.
 
 ## Process edges (B2)

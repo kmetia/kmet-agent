@@ -90,7 +90,14 @@
                   (the babashka view passes it too — its config excludes jolt/)"
           (let [info (@file-info "jolt/src/jolt/kmet/providers.clj")]
             (is (empty? (:views info)))
-            (is (= ["jolt/src/jolt/kmet/providers.clj"] (@pass-targets jolt [info]))))))
+            (is (= ["jolt/src/jolt/kmet/providers.clj"] (@pass-targets jolt [info])))))
+        (testing ".jolt is Jolt-only by extension: the jolt pass reads it, token
+                  or not, and the babashka pass never sees it"
+          (let [backend (path "backend.jolt" "(ns kmet.tui.backend)\n(defn f [] 1)\n")
+                info (@file-info backend)]
+            (is (empty? (:views info)))
+            (is (= [backend] (@pass-targets jolt [info])))
+            (is (= [] (@pass-targets bb [info]))))))
       (finally (fs/delete-tree dir)))))
 
 (deftest test-mirror-paths

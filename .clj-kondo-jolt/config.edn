@@ -17,6 +17,7 @@
   ;; these clj-kondo cannot see what they introduce.
   jolt.ffi/defcfn clojure.core/def
   jolt.ffi/with-alloc clojure.core/let
+  jolt.ffi/with-out clojure.core/let
   jolt.ffi/with-c-string clojure.core/let}
 
  :linters

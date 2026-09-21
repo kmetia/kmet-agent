@@ -98,7 +98,7 @@ atom change → reaction dirty → queued → frame flush runs it →
 |---|---|
 | `kmet.tui.core` | TUI instance: create/start/stop, child list, focus, overlays, input listeners, flash, render loop with line diffing |
 | `kmet.tui.terminal` | backend abstraction: the lean `ITerminal` protocol (raw mode, bounded reads, live size, writes, progress) + shared ANSI verbs, Kitty/query wrappers and drain; `create-terminal` resolves the host backend at runtime |
-| `kmet.tui.terminal-jline` / `kmet.tui.terminal-native` | the two backends — JLine on bb/JVM, termios (Unix; kernel32 pending) FFI over `jolt.ffi` on Jolt; only these namespaces touch platform deps |
+| `kmet.tui.terminal-jline` / `kmet.tui.terminal-native-unix` / `kmet.tui.terminal-native-win` | the three backends — JLine on bb/JVM, termios (Unix) / kernel32 console (Windows) FFI over `jolt.ffi` on Jolt; only these namespaces touch platform deps |
 | `kmet.tui.protocols` | `IComponent`, `IFocusable`, `IEditorComponent` |
 | `kmet.tui.macros` | `defcomponent`, `track!`, `with-let`, `invalidate-cache`, deref-capture runtime |
 | `kmet.libs.reakt` | reactions/track/cursor/batching over plain atoms |
@@ -1090,7 +1090,7 @@ backend implements (`start!`/`stop!`/`started?`/`write-output`/
 `read-input`/`columns`/`rows`/`set-progress!`). The cursor/clear/title
 verbs, Kitty/query wrappers and the drain loop are plain fns above it, so
 a backend supplies only its platform primitives (`kmet.tui.terminal-jline`,
-`kmet.tui.terminal-native` — §13).
+`kmet.tui.terminal-native-unix`, `kmet.tui.terminal-native-win` — §13).
 
 Notes:
 
