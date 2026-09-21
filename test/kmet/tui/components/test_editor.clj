@@ -329,6 +329,39 @@
       (t/is (str/starts-with? (first lines) "───"))
       (t/is (str/ends-with? (last lines) "───")))))
 
+(t/deftest test-editor-render-cursor-shows-character-under-it
+  ;; Regression: moving the cursor onto the line's LAST character must
+  ;; highlight that character, not replace it with a blank block. The
+  ;; at-end branch is selected by an empty grapheme at the cursor position
+  ;; (pi: `after.length > 0`), not by an empty tail after it — a cursor on
+  ;; the last character has an empty tail too.
+  (let [e (editor/make-editor :height 3)
+        visible (fn [line]
+                  (u/strip-ansi-codes (str/replace line u/CURSOR-MARKER "")))]
+    (core/set-focused! e true)
+    (doseq [c "abc"] (core/handle-input e (str c)))
+    ;; cursor on the last character
+    (core/handle-input e K-LEFT)
+    (let [line (second (core/render e 20))]
+      (t/is (str/includes? line "\u001b[7mc\u001b[0m")
+            "the character under the cursor is shown inverted")
+      (t/is (= "abc" (str/trim (visible line)))
+            "no character is dropped from the line"))
+    ;; mid-line cursor
+    (core/handle-input e K-LEFT)
+    (let [line (second (core/render e 20))]
+      (t/is (str/includes? line "\u001b[7mb\u001b[0m")
+            "mid-line cursor highlights its character too")
+      (t/is (= "abc" (str/trim (visible line)))
+            "no character is dropped from the line"))
+    ;; cursor at the end: the block sits on an added space
+    (dotimes [_ 2] (core/handle-input e K-RIGHT))
+    (let [line (second (core/render e 20))]
+      (t/is (str/includes? line "\u001b[7m \u001b[0m")
+            "at end the block sits on a highlighted space")
+      (t/is (= "abc" (str/trim (visible line)))
+            "text is intact at end"))))
+
 (t/deftest test-editor-render-empty
   (let [e (editor/make-editor :height 3)
         lines (core/render e 20)]

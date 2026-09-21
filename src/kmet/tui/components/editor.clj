@@ -1248,7 +1248,7 @@
                     at-cursor (edit/grapheme-at display-text vl-cursor-col)
                     after (subs display-text
                                 (min (count display-text) (+ vl-cursor-col (count at-cursor))))
-                    cursor-at-end? (empty? after)
+                    cursor-at-end? (empty? at-cursor)
                     display-with-cursor (str before
                                              (when @focused? u/CURSOR-MARKER)
                                              "\u001b[7m" (if cursor-at-end? " " at-cursor) "\u001b[0m"
