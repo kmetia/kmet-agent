@@ -235,7 +235,8 @@ Decisions from the design pass, so implementation doesn't re-derive them.
   registry), minus an exclusion list (`script` itself, and later any nested
   sandbox). Active is exactly what the model sees in its tool schema — this
   respects `set-active-tools!`, picks up extension tools automatically, and
-  keeps discovery equal to callability.
+  keeps discovery equal to callability. The set is fixed when the base is
+  built (see Lifecycle), so a script's surface is stable for its whole run.
 - Resolution is the normal path (landed as T1 prep): `get-tool` now reads
   through `get-all-tools` (custom shadows built-in, pi's registry layering),
   so the name the script sees listed is the record `execute-tool` dispatches —
@@ -311,11 +312,32 @@ Decisions from the design pass, so implementation doesn't re-derive them.
 
 ### Plumbing
 
-- The enabled set rides a dynamic var bound in `loop.clj`'s run-level
-  `binding`, next to `bash-tool/*cancel-signal*`, `*session-env-fn*`,
-  `tools-util/*cwd*` — conveyed into the tool future. The bridge computes
-  names live from the registry, so mid-session register/unregister behaves
-  like `active-tools` and `set-active-tools!`'s next-turn semantics hold.
+- The tool surface is a base-cache input, not a dynamic var (see Lifecycle).
+  The values that stay per run keep the loop's existing conveyance:
+  `bash-tool/*cancel-signal*`, `*session-env-fn*`, `tools-util/*cwd*` are
+  bound at run level and reach the tool future; the bridge closes over the
+  signal and the run's cwd when the fork is built.
+
+### Lifecycle
+
+- **Per invocation**: one fresh `sci/fork` of the cached base, per-call state
+  merged in (the bridge closure: deadline, signal, trace, the call's surface),
+  discarded when the call returns — a context is never reused between scripts.
+  The fork is the isolation boundary; verified: a `def` in one fork is
+  invisible to sibling forks and the base, and redefining (or
+  `alter-var-root`ing) a base-injected var stays fork-local.
+- **Base cache, keyed by the tool surface**: `[registry-generation
+  enabled-tool-set]`. The base is rebuilt when the registry generation changes
+  (`register-tool!`/`unregister-tool!` — extension load/unload/`/reload`;
+  T2's contributed MCP catalogs join the same counter) or when
+  `set-active-tools!` changes the enabled set. A small keyed cache (a few
+  entries) keeps sibling sessions from thrashing; the normal case is one base.
+- **Why the surface lives in the base**: the gate and `t/list`/`t/describe`
+  then read a surface fixed for the call — the same set the model saw for the
+  turn — instead of a dynamic var threaded through the tool future. `t/call`
+  dispatch still resolves through `execute-tool`, so the record executed is
+  the registry's (the key guarantees it was the listed one when the context
+  was built).
 
 ### Capabilities
 
@@ -349,7 +371,8 @@ Mechanics: cached stdlib base + per-call fork (the extensions'
 merge-opts pitfalls). `babashka.fs`/`.process` must be host-`require`d before
 their public fns are value-shared (bb preloads them, jolt does not — both
 verified). The bridge namespace closes over per-call state (deadline, signal,
-trace), which is why it is merged into the fork rather than cached.
+trace; the surface comes from the base — Lifecycle), which is why it is
+merged into the fork rather than cached.
 
 The description must teach the boundary: **bulk scanning via
 `babashka.fs`/`slurp`/`sh`** (no truncation, no per-call overhead); tools are
@@ -385,21 +408,22 @@ precedent is available if the prompt impact measures badly).
    output only; promises + deref; fs/`sh` for bulk, tools for semantic queries
    and mutations), with the usual `:prompt-snippet`/`:prompt-guidelines` shape.
    Default timeout 30s (mcpScript parity; `timeoutMs` overrides).
-2. **Engine** — same namespace (split only if it grows): cached stdlib base
-   (a `defonce` atom, the extensions' `shared-context` pattern) + per-call fork
-   through `kmet.loader.sci-loader`'s `:base` (it handles the merge-opts
-   pitfalls) with the per-call bridge merged in.
+2. **Engine** — same namespace (split only if it grows): base cache keyed by
+   `[registry-generation enabled-set]` (a `defonce` atom, the extensions'
+   `shared-context` pattern; the generation bumps on register/unregister) +
+   per-call fork through `kmet.loader.sci-loader`'s `:base` (it handles the
+   merge-opts pitfalls) with the per-call bridge merged in.
 3. **Capabilities** — the table above as value maps: host-`require`
    `babashka.fs`/`babashka.process` before sharing their public fns (bb
    preloads, jolt does not); `slurp`/`spit`/`file-seq` patches on
    `clojure.core`; `clojure.string`/`set`/`edn`/`walk`; json; cwd/env/now/sleep;
    `:features #{:bb}` or `#{:jolt}`; **no** `:classes`/`:imports`.
 4. **Bridge** — `t/call` + the builtin sugars + `t/list`/`t/describe`; the
-   active-set gate (live registry ∩ the enabled-tools dynamic var, `script`
-   excluded; unknown/inactive → `{:is-error true}` with the active list);
-   dispatch on a host worker returning a promise; `:signal`/`:ctx` passed to
-   `execute-tool`; trace atom at `:details {:calls [...]}`; never
-   `execute-tool-calls-*`, never the hooks.
+   active-set gate (the fork's injected surface, `script` excluded;
+   unknown/inactive → `{:is-error true}` with the active list); dispatch on a
+   host worker returning a promise; `:signal`/`:ctx` passed to `execute-tool`;
+   trace atom at `:details {:calls [...]}`; never `execute-tool-calls-*`,
+   never the hooks.
 5. **Deadlines** — eval on a daemon thread; `:interrupt-fn` checks the deadline
    and the run signal; on timeout the tool returns partial output +
    `:is-error` and abandons the thread (the documented limitation); inner
