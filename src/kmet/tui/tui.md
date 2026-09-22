@@ -107,7 +107,7 @@ atom change → reaction dirty → queued → frame flush runs it →
 | `kmet.tui.components.*` | host elements (see §10) |
 | `kmet.tui.theme` | color/styling API, active theme atom, theme files |
 | `kmet.tui.keys` / `keybindings` | key names, Kitty protocol decoding, keybinding manager |
-| `kmet.tui.autocomplete` / `fuzzy` | editor autocomplete dropdown: slash commands + arguments, plain path completion, gitignore-aware fuzzy `@` file search scoped to the session cwd (per-message tree snapshot, cleared on submit/clear via `invalidate-file-cache!`), fuzzy matching |
+| `kmet.tui.autocomplete` / `fuzzy` | editor autocomplete dropdown: slash commands + arguments, plain path completion, gitignore-aware fuzzy `@` file search scoped to the session cwd (tree snapshot refreshed on each new `@` token, cleared on submit/clear via `invalidate-file-cache!`), fuzzy matching |
 | `kmet.tui.utils` | text wrapping, visible width, truncation helpers |
 | `kmet.tui.border` | box-drawing glyph sets (frames, rules, table junctions) |
 | `kmet.tui.timers` | loop-owned timer registry (§6.1) |

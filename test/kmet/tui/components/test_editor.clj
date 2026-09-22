@@ -894,22 +894,52 @@
         (core/handle-input e K-TAB)
         (t/is (= "@beta.txt " (editor/editor-get-text e)))))))
 
-(t/deftest test-autocomplete-message-boundary-invalidates-file-cache
+(t/deftest test-autocomplete-new-at-token-and-message-boundary-invalidate
   (with-ac-files
     (fn []
       (let [e (make-ac-editor)
             calls (atom 0)]
         (with-redefs [ac/invalidate-file-cache! (fn [] (swap! calls inc))]
           (core/handle-input e "@")
+          (t/is (= 1 @calls) "an @ at line start walks fresh")
+          (core/handle-input e " ")
+          (doseq [c "foo"] (core/handle-input e (str c)))
+          (core/handle-input e "@")
+          (t/is (= 1 @calls) "a mid-word @ starts no mention token")
+          (core/handle-input e " ")
+          (core/handle-input e "@")
+          (t/is (= 2 @calls) "an @ after whitespace walks fresh")
           (core/handle-input e "b")
-          (t/is (zero? @calls)
-                "composing a message never invalidates — one walk per scope")
+          (t/is (= 2 @calls) "continuation reuses the token's snapshot")
+          ;; the previous dropdown is still open here: the refresh must not
+          ;; depend on the dropdown-state branch
+          (core/handle-input e " ")
+          (core/handle-input e "@")
+          (t/is (= 3 @calls) "a new @ token refreshes even with the dropdown open")
+          (core/handle-input e " ")
+          (core/handle-input e "#")
+          (t/is (= 3 @calls) "a # token has no file snapshot to refresh")
           (core/handle-input e K-ESC)
           (core/editor-set-on-submit! e (fn [_] nil))
           (core/handle-input e K-ENTER)
-          (t/is (= 1 @calls) "submit starts the next message fresh")
+          (t/is (= 4 @calls) "submit starts the next message fresh")
           (core/editor-set-text! e "")
-          (t/is (= 2 @calls) "clearing the editor also ends the message"))))))
+          (t/is (= 5 @calls) "clearing the editor also ends the message"))))))
+
+(t/deftest test-autocomplete-new-at-token-sees-files-added-mid-message
+  (with-ac-files
+    (fn []
+      (let [e (make-ac-editor)]
+        (core/handle-input e "@")
+        (doseq [c "beta"] (core/handle-input e (str c)))
+        ;; exists only after the first token's snapshot was taken
+        (spit (str ac-test-dir "/omega.txt") "o")
+        (core/handle-input e " ")
+        (core/handle-input e "@")
+        (doseq [c "omeg"] (core/handle-input e (str c)))
+        (core/handle-input e K-TAB)
+        (t/is (str/includes? (editor/editor-get-text e) "@omega.txt")
+              "the second @ token's fresh walk sees omega.txt")))))
 
 (t/deftest test-autocomplete-tab-file-completion-single-match-applies
   (with-ac-files

@@ -428,15 +428,16 @@
 (defonce ^:private file-cache (atom {}))
 
 (def ^:private file-cache-max-entries
-  "Snapshot cap: the least recently created snapshot is evicted so a message
-   touching many scopes cannot accumulate one walk per scope."
+  "Snapshot cap: the least recently created snapshot is evicted first,
+   bounding retained walks regardless of how many scopes are visited."
   8)
 
 (defn invalidate-file-cache!
-  "Drop the @-completion tree snapshots. The editor calls this when a message
-   is submitted (or the editor is cleared), so a snapshot lives for one
-   editor message — composing several @ tokens reuses the same walks, and
-   files written after a prompt are picked up by the next one."
+  "Drop the @-completion tree snapshots. The editor calls this when a new @
+   token starts — first on the line or after whitespace — so every mention
+   walks fresh — and when a message is submitted or the editor is cleared
+   (no snapshot outlives its message); within one token, keystrokes reuse
+   the same walks."
   []
   (reset! file-cache {}))
 

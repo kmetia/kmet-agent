@@ -531,6 +531,14 @@
                 (re-find (trigger-pattern editor) before))
         (request-autocomplete editor {:force false :explicit-tab false})))))
 
+(defn- new-trigger-token?
+  "True when the just-typed character at BEFORE's end starts a trigger token
+   (first char of the line, or preceded by whitespace)."
+  [before]
+  (or (= (count before) 1)
+      (and (>= (count before) 2)
+           (re-find #"[\s\t]" (subs before (- (count before) 2) (dec (count before)))))))
+
 (defn- maybe-trigger-autocomplete
   "After a character insert, auto-trigger or refresh the dropdown (pi:
    tryTriggerAutocomplete / updateAutocomplete)."
@@ -539,6 +547,10 @@
         lines (:lines state) cl (:cursor-line state) cc (:cursor-col state)
         line (or (nth lines cl) "")
         before (subs line 0 cc)]
+    ;; A new @ token walks fresh, even while the previous token's dropdown is
+    ;; still open (`#` and custom trigger chars have no file snapshot).
+    (when (and (= char "@") (new-trigger-token? before))
+      (ac/invalidate-file-cache!))
     (if @(:autocomplete-state editor)
       (request-autocomplete editor {:force (= @(:autocomplete-state editor) :force)
                                     :explicit-tab false})
@@ -547,11 +559,8 @@
         (request-autocomplete editor {:force false :explicit-tab false})
 
         (contains? (:chars (trigger-spec editor)) char)
-        (let [char-before (when (>= (count before) 2)
-                            (subs before (- (count before) 2) (dec (count before))))]
-          (when (or (= (count before) 1)
-                    (and char-before (re-find #"[\s\t]" char-before)))
-            (request-autocomplete editor {:force false :explicit-tab false})))
+        (when (new-trigger-token? before)
+          (request-autocomplete editor {:force false :explicit-tab false}))
 
         (re-find #"[a-zA-Z0-9.\-_]" char)
         (when (or (is-in-slash-command-context? editor)
