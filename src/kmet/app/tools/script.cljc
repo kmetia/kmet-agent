@@ -777,10 +777,10 @@
    :description description
    :prompt-snippet "Run Clojure scripts that scan/filter files and call tools, printing only distilled results"
    :prompt-guidelines
-   ["Use script for bulk scan/filter/aggregate work instead of shelling out to cat/rg; print only the distilled result — printing everything spends the same tokens as reading it."
+   ["Use script instead of bash file reads (cat/head/tail/wc/rg/sed/awk) or many read calls: scan/filter/aggregate in Clojure and print only the distilled result — printing everything spends the same tokens as reading it."
     "Use script to implement multi-step logic — a search/read/filter/aggregate/verify chain belongs in one script, not many separate tool round-trips."
-    "Inner tool calls are async: deref the promise, e.g. @(tools/bash {...}); fire several calls and deref later to parallelize."
-    "Prefer read/edit/write for a single file; use script when the intermediate data would bloat the conversation."]
+    "Inner calls are promises: start independent calls before derefing any of them to run them in parallel."
+    "Prefer read for one file and edit/write for changes (the user reviews diffs; a script's writes only summarize) — script is for bulk edits and data that would bloat the transcript."]
    :params {:code {:type :string :description "Clojure code to run"}
             :timeoutMs {:type :number
                         :description "Timeout in milliseconds (default 30000)"
