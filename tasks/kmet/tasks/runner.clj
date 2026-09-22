@@ -49,6 +49,7 @@
     kmet.app.test-session
     kmet.app.test-compaction
     kmet.app.test-tools
+    kmet.app.test-script
     kmet.ai.test-llm
     kmet.ai.test-attribution
     kmet.ai.test-models

@@ -5,12 +5,27 @@
             [kmet.app.tools.read :as read]
             [kmet.app.tools.write :as write]
             [kmet.app.tools.edit :as edit]
-            [kmet.app.tools.bash :as bash]))
+            [kmet.app.tools.bash :as bash]
+            [kmet.app.tools.script :as script]))
+
+(declare built-in-tools)
+
+;; ─── Registry generation ────────────────────────────────────────────────────
+
+(defonce ^:private registry-generation (atom 0))
+
+(defn tool-registry-generation
+  "Monotonic counter bumped on every registry mutation (register-tool!,
+   unregister-tool!). The script sandbox's base-context cache keys on it, so
+   a changed registry can never be served a stale sandbox surface."
+  []
+  @registry-generation)
 
 ;; ─── Built-in tools ─────────────────────────────────────────────────────────
 
-(def built-in-tools
-  "Map of tool name → Tool record for all built-in tools."
+(def ^:private base-tools
+  "Built-in tools without registry seams; the script tool joins at the bottom
+   (it dispatches through this namespace, so its record needs the fns)."
   {"read"  (tool/make-tool
             :name "read"
             :label "Read file"
@@ -73,12 +88,14 @@
   "Register a custom tool after normalizing its provider-facing schema."
   [tool]
   (let [tool (tool/normalize-tool-definition tool)]
-    (swap! custom-tools assoc (:name tool) tool)))
+    (swap! custom-tools assoc (:name tool) tool)
+    (swap! registry-generation inc)))
 
 (defn unregister-tool!
   "Remove a custom tool."
   [name]
-  (swap! custom-tools dissoc name))
+  (swap! custom-tools dissoc name)
+  (swap! registry-generation inc))
 
 (defn get-all-tools
   "Get all available tools (built-in + custom). A custom tool that reuses a
@@ -141,3 +158,16 @@
           {:content (str "Error executing " tool-name ": " (ex-message e))
            :is-error true}))
       {:content (str "Unknown tool: " tool-name) :is-error true})))
+
+;; ─── The full built-in map ─────────────────────────────────────────────────
+
+(def built-in-tools
+  "Map of tool name → Tool record for all built-in tools. The script tool
+   carries this namespace's seams: it lists through get-all-tools and
+   dispatches inner calls through execute-tool, so script resolution is the
+   same as the model's."
+  (assoc base-tools
+         "script"
+         (script/create-tool {:get-all-tools get-all-tools
+                              :execute-tool execute-tool
+                              :generation-fn tool-registry-generation})))

@@ -106,7 +106,8 @@
     (t/is (str/includes? @(:system agent) "Use bash for file operations"))
     ;; disable bash
     (loop/set-active-tools! agent (mapv :name (remove #(= "bash" (:name %)) all-tools)))
-    (t/is (= #{"read" "edit" "write"} @(:enabled-tools agent)))
+    (t/is (= (set (map :name (remove #(= "bash" (:name %)) all-tools)))
+             @(:enabled-tools agent)))
     (t/is (not (str/includes? @(:system agent) "- bash:")))
     (t/is (not (str/includes? @(:system agent) "Use bash for file operations")))
     ;; a search tool in the active set does not suppress the rule: kmet's

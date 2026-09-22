@@ -1,0 +1,232 @@
+(ns kmet.app.test-script
+  "The script tool: per-call SCI sandbox, async tools bridge, capture and
+   deadline behavior (design: script.md)."
+  (:require [babashka.fs :as fs]
+            [clojure.string :as str]
+            [clojure.test :as t]
+            [kmet.app.tools.core :as tools]
+            [kmet.app.tools.registry :as registry]
+            [kmet.app.tools.script :as script]
+            [kmet.app.tools.util :as tool-util]))
+
+(defn- run
+  "Execute the script tool the way the registry does."
+  [code & [opts on-update]]
+  (tools/execute-tool "script" (merge {:code code} opts) {:on-update on-update}))
+
+(defn- with-custom-tool [tool f]
+  (registry/register-tool! tool)
+  (try (f)
+       (finally (registry/unregister-tool! (:name tool)))))
+
+(defn- temp-dir []
+  (let [dir (str (fs/absolutize (str "target/test-script-" (System/nanoTime))))]
+    (fs/create-dirs dir)
+    dir))
+
+(t/deftest test-script-return-value
+  (let [r (run "(+ 1 2)")]
+    (t/is (not (:is-error r)))
+    (t/is (= "3" (:content r)))
+    (t/is (= script/default-timeout-ms (get-in r [:details :timeout-ms])))))
+
+(t/deftest test-script-print-and-return
+  (let [r (run "(println \"hello\") 42")]
+    (t/is (not (:is-error r)))
+    (t/is (str/includes? (:content r) "hello"))
+    (t/is (str/includes? (:content r) "42")))
+  (t/is (= "(no output)" (:content (run "nil")))))
+
+(t/deftest test-script-error
+  (let [r (run "(this-does-not-exist 1)")]
+    (t/is (:is-error r))
+    (t/is (= :error (get-in r [:details :error])))
+    (t/is (str/includes? (:content r) "this-does-not-exist"))))
+
+(t/deftest test-script-timeout
+  (let [r (run "(loop [] (recur))" {:timeoutMs 300})]
+    (t/is (:is-error r))
+    (t/is (str/includes? (:content r) "timed out"))
+    (t/is (= :timeout (get-in r [:details :error])))
+    (t/is (= 300 (get-in r [:details :timeout-ms])))))
+
+(t/deftest test-script-signal-abort
+  (let [signal (atom false)
+        f (future (tools/execute-tool "script" {:code "(loop [] (recur))"} {:signal signal}))]
+    (Thread/sleep 100)
+    (reset! signal true)
+    (let [r (deref f 10000 nil)]
+      (t/is (some? r))
+      (t/is (:is-error r))
+      (t/is (str/includes? (:content r) "aborted"))
+      (t/is (= :aborted (get-in r [:details :error]))))))
+
+(t/deftest test-script-caught-interrupt-still-aborts
+  ;; Throwable is not resolvable in the sandbox (no class access), but
+  ;; Exception is — and the interrupt exception is catchable, so the abort
+  ;; reason must win over whatever the script returns.
+  (let [r (run "(try (loop [] (recur)) (catch Exception e :caught))" {:timeoutMs 300})]
+    (t/is (:is-error r))
+    (t/is (= :timeout (get-in r [:details :error])))))
+
+(t/deftest test-script-spawn-output-captured
+  (let [r (run "@(sandbox/spawn (fn [] (println \"from-future\"))) :done")]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (str/includes? (:content r) "from-future"))))
+
+(t/deftest test-script-capabilities
+  (let [r (run (str "[(fs/exists? \"deps.edn\")"
+                    "  (> (count (slurp \"deps.edn\")) 0)"
+                    "  (json/generate-string {:a 1})"
+                    "  (vec (pmap inc [1 2 3]))"
+                    "  @(sandbox/spawn (fn [] 42))"
+                    "  (pos? (sandbox/now))"
+                    "  (string? (sandbox/env \"HOME\"))"
+                    "  (pos? (count (sandbox/cwd)))"
+                    "  (str/upper-case \"x\")"
+                    "  (set/union #{1} #{2})"
+                    "  (edn/read-string \"1\")"
+                    "  (walk/postwalk identity [[1]])]"))]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (= (str "[true true \"{\\\"a\\\":1}\" [2 3 4] 42 true true true "
+                  "\"X\" #{1 2} 1 [[1]]]")
+             (:content r)))))
+
+(t/deftest test-script-explicit-require
+  (let [r (run "(require '[clojure.string :as cs]) (cs/upper-case \"y\")")]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (= "Y" (:content r)))))
+
+(t/deftest test-script-slurp-follows-runtime-cwd
+  (let [dir (temp-dir)]
+    (try
+      (spit (str dir "/hello.txt") "from-cwd")
+      (binding [tool-util/*cwd* dir]
+        (let [r (run (str "[(slurp \"hello.txt\") (= (sandbox/cwd) \"" dir "\")]"))]
+          (t/is (not (:is-error r)) (:content r))
+          (t/is (str/includes? (:content r) "from-cwd"))
+          (t/is (str/includes? (:content r) "true"))))
+      (finally (fs/delete-tree dir)))))
+
+(t/deftest test-script-stderr-capture
+  (let [r (run "(binding [*out* *err*] (println \"oops\")) :done")]
+    (t/is (not (:is-error r)))
+    (t/is (str/includes? (:content r) "[stderr]"))
+    (t/is (str/includes? (:content r) "oops"))))
+
+(t/deftest test-script-output-truncation
+  (let [r (run "(dotimes [i 3000] (println i))")]
+    (t/is (not (:is-error r)))
+    (t/is (some? (:truncation r)))
+    (t/is (= :lines (get-in r [:truncation :truncated-by])))
+    (t/is (> (get-in r [:truncation :total-lines]) 2000))
+    (t/is (str/includes? (:content r) "truncated"))))
+
+(t/deftest test-script-streaming
+  (let [updates (atom [])
+        r (run "(dotimes [i 4] (println i) (sandbox/sleep 50))"
+               {}
+               (fn [partial] (swap! updates conj partial)))]
+    (t/is (not (:is-error r)))
+    (t/is (pos? (count @updates)))
+    (t/is (every? :is-partial @updates))))
+
+(t/deftest test-script-tool-call-promise
+  (with-custom-tool {:name "script-test-echo"
+                     :label "Echo"
+                     :description "Echo args"
+                     :execute (fn [args] {:content (pr-str args)})}
+    (fn []
+      (let [r (run "@(tools/call \"script-test-echo\" {:x 1})")]
+        (t/is (not (:is-error r)) (:content r))
+        (t/is (str/includes? (:content r) ":x 1"))
+        (t/is (= [{:tool "script-test-echo" :ok true}]
+                 (mapv #(dissoc % :duration-ms) (get-in r [:details :calls]))))
+        (t/is (integer? (get-in r [:details :calls 0 :duration-ms])))))))
+
+(t/deftest test-script-sugar-and-fan-out
+  (with-custom-tool {:name "script-test-echo"
+                     :label "Echo"
+                     :description "Echo args"
+                     :execute (fn [args] {:content (pr-str args)})}
+    (fn []
+      (let [r (run (str "(let [a (tools/call \"script-test-echo\" {:n 1})"
+                        "      b (tools/call \"script-test-echo\" {:n 2})]"
+                        "  [(clojure.string/includes? (:content @a) \":n 1\")"
+                        "   (clojure.string/includes? (:content @b) \":n 2\")])"))]
+        (t/is (not (:is-error r)) (:content r))
+        (t/is (= "[true true]" (:content r)))
+        (t/is (= 2 (count (get-in r [:details :calls]))))))))
+
+(t/deftest test-script-gate
+  (let [r (run "@(tools/call \"no-such-tool\" {})")]
+    (t/is (not (:is-error r)))
+    (t/is (str/includes? (:content r) ":is-error true"))
+    (t/is (str/includes? (:content r) "no-such-tool")))
+  (let [r (run "@(tools/call \"script\" {:code \"1\"})")]
+    (t/is (str/includes? (:content r) "not active")))
+  (binding [script/*enabled-tools-fn* (fn [] #{"read"})]
+    (t/is (= "[\"read\"]" (:content (run "(tools/list)"))))
+    (let [r (run "@(tools/call \"bash\" {})")]
+      (t/is (str/includes? (:content r) "not active")))))
+
+(t/deftest test-script-discovery
+  (with-custom-tool {:name "script-test-echo"
+                     :label "Echo"
+                     :description "Echo args"
+                     :execute (fn [_] {:content "x"})}
+    (fn []
+      (let [r (run "(let [names (tools/list)] [(boolean (some #{\"script-test-echo\"} names)) (boolean (some #{\"script\"} names))])")]
+        (t/is (= "[true false]" (:content r))))
+      (let [r (run "(let [d (tools/describe \"script-test-echo\")] [(:name d) (:label d) (contains? d :execute)])")]
+        (t/is (= "[\"script-test-echo\" \"Echo\" false]" (:content r))))
+      (let [r (run "(tools/describe \"no-such-tool\")")]
+        (t/is (str/includes? (:content r) ":is-error true"))))))
+
+(t/deftest test-script-boundary
+  (let [r (run "(System/currentTimeMillis)")]
+    (t/is (:is-error r))
+    (t/is (str/includes? (:content r) "System/currentTimeMillis")))
+  (let [r (run "(require 'kmet.app.loop)")]
+    (t/is (:is-error r))
+    (t/is (str/includes? (:content r) "kmet.app.loop")))
+  (let [r (run "(future 1)")]
+    (t/is (:is-error r))
+    (t/is (str/includes? (:content r) "future"))))
+
+(t/deftest test-script-context-isolation
+  (let [r (run "(def leaked 42) (defn tally [] 1) leaked")]
+    (t/is (not (:is-error r)))
+    (t/is (= "42" (:content r))))
+  (let [r (run "[(resolve 'leaked) (resolve 'tally)]")]
+    (t/is (not (:is-error r)))
+    (t/is (= "[nil nil]" (:content r)))))
+
+(t/deftest ^:slow test-script-process-capability
+  (let [dir (temp-dir)]
+    (try
+      (binding [tool-util/*cwd* dir]
+        ;; both babashka.process shapes: tokens with opts first, a command
+        ;; vector with opts last (the wrapper normalizes them)
+        (let [r (run (str "[(clojure.string/trim (:out (p/sh \"pwd\")))"
+                          " (clojure.string/trim (:out @(p/process \"pwd\" {:out :string})))"
+                          " (clojure.string/trim (:out (p/shell {:out :string} \"pwd\")))]"))]
+          (t/is (not (:is-error r)) (:content r))
+          (t/is (= (str "[" (pr-str dir) " " (pr-str dir) " " (pr-str dir) "]")
+                   (:content r)))))
+      (finally (fs/delete-tree dir)))))
+
+(t/deftest ^:slow test-script-inner-bash
+  (let [r (run "@(tools/bash {:command \"echo inner-ok\"})")]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (str/includes? (:content r) "inner-ok"))
+    (t/is (= "bash" (get-in r [:details :calls 0 :tool])))))
+
+(t/deftest ^:slow test-script-inner-bash-follows-runtime-cwd
+  (let [dir (temp-dir)]
+    (try
+      (binding [tool-util/*cwd* dir]
+        (let [r (run "(clojure.string/trim (:content @(tools/bash {:command \"pwd\"})))")]
+          (t/is (not (:is-error r)) (:content r))
+          (t/is (str/includes? (:content r) (last (str/split dir #"/"))))))
+      (finally (fs/delete-tree dir)))))
