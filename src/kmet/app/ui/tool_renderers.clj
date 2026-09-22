@@ -831,6 +831,107 @@
                              "...")))))]
     (h/compile-tree (tool-text rendered))))
 
+(defn- manage-result-timer!
+  "Park/cancel the 1s invalidate timer that keeps a running tool's elapsed
+   counter moving (pi: setInterval → context.invalidate); completion and
+   dispose cancel it. The timer id parks in renderer state — shared by the
+   shell-style result renderers."
+  [context started-at ended-at is-error]
+  (let [state (:state context)
+        set-state! (:set-state! context)
+        invalidate (:invalidate context)]
+    (when (and started-at (nil? ended-at) (nil? (:timer-id state)))
+      (when (and invalidate set-state!)
+        (set-state! (assoc state :timer-id (timers/every! 1000 invalidate)))))
+    (when (or ended-at is-error)
+      (when-let [id (:timer-id state)]
+        (timers/cancel! id))
+      (when (and set-state! (contains? state :timer-id))
+        (set-state! (dissoc state :timer-id))))))
+
+(defn- output-result-nodes
+  "The output body (collapsed to a visual-line window with an expand hint,
+   verbatim when expanded) and the truncation warning, as hiccup nodes. The
+   runtime appends its own truncation footer naming the full-output file; the
+   renderer strips it and rebuilds the information as its own warn line (pi:
+   strip the trailing [...] block)."
+  [content theme width expanded? ended-at truncation]
+  (let [full-output-path (:full-output-path truncation)
+        output (let [trimmed (str/trim (or content ""))]
+                 (if (and truncation
+                          (some? ended-at)
+                          (str/ends-with? trimmed "]"))
+                   (let [footer-start (str/last-index-of trimmed "\n\n[")]
+                     (if (and footer-start
+                              (let [footer (subs trimmed footer-start)]
+                                (or (and full-output-path
+                                         (str/includes? footer full-output-path))
+                                    ;; the script tool's footer names the
+                                    ;; truncation instead of a spill file
+                                    (str/includes? (str/lower-case footer) "truncat"))))
+                       (str/trimr (subs trimmed 0 footer-start))
+                       trimmed))
+                   trimmed))]
+    (concat
+     (when (seq output)
+       (let [styled (->> (str/split-lines output)
+                         (mapv #(theme/fg theme :tool-output %))
+                         (str/join "\n"))]
+         (if expanded?
+           (concat [[:spacer {:lines 1}]]
+                   [(tool-text styled)])
+           (let [{:keys [visual-lines skipped-count]}
+                 (utils/truncate-to-visual-lines styled
+                                                 bash-result-preview-lines
+                                                 width)]
+             (concat
+              [[:spacer {:lines 1}]]
+              (when (pos? skipped-count)
+                [(tool-text
+                  (utils/truncate-to-width
+                   (str (theme/fg theme :muted
+                                  (str "... (" skipped-count " earlier lines,"))
+                        " "
+                        (app-kb/key-hint "app.tools.expand" "to toggle")
+                        (theme/fg theme :muted ")"))
+                   width
+                   "..."))])
+              (tool-text-lines visual-lines))))))
+     (when truncation
+       (let [{:keys [total-lines shown-lines truncated-by max-bytes]} truncation
+             size-str (when (= truncated-by :bytes)
+                        (bash-exec/format-size
+                         (or max-bytes bash-exec/DEFAULT-MAX-BYTES)))
+             truncated-part (if (= truncated-by :bytes)
+                              (str "Truncated: " shown-lines " lines shown ("
+                                   size-str " limit)")
+                              (str "Truncated: showing " shown-lines " of "
+                                   total-lines " lines"))
+             warn (str "["
+                       (str/join ". "
+                                 (cond-> []
+                                   full-output-path
+                                   (conj (str "Full output: " full-output-path))
+                                   :always
+                                   (conj truncated-part)))
+                       "]")]
+         [[:spacer {:lines 1}]
+          (tool-text (theme/fg theme :warning warn))])))))
+
+(defn- elapsed-result-nodes
+  "The muted Elapsed/Took line, or nil when the execution never started."
+  [theme started-at ended-at]
+  (when started-at
+    (let [now (or ended-at (System/currentTimeMillis))
+          elapsed-ms (- now started-at)
+          label (if ended-at "Took" "Elapsed")]
+      [[:spacer {:lines 1}]
+       (tool-text
+        (theme/fg theme :muted
+                  (str label " "
+                       (format "%.1f" (float (/ elapsed-ms 1000)))
+                       "s")))])))
+
 (defn render-bash-result
   "Result body for the shell tool: the output (collapsed to a visual-line
    window with an expand hint, verbatim when expanded), the truncation
@@ -840,95 +941,90 @@
    state so the elapsed counter keeps moving with no output (pi:
    setInterval → context.invalidate); completion and dispose cancel it."
   [content is-error theme width expanded? started-at ended-at truncation context]
-  (let [state (:state context)
-        set-state! (:set-state! context)
-        invalidate (:invalidate context)
-        full-output-path (:full-output-path truncation)
-        ;; The runtime appends its own truncation footer; the renderer shows
-        ;; its own warn line instead (pi: strip the trailing [...] block
-        ;; naming the full-output file).
-        output (let [trimmed (str/trim (or content ""))]
-                 (if (and truncation
-                          full-output-path
-                          (some? ended-at)
-                          (str/ends-with? trimmed "]"))
-                   (let [footer-start (str/last-index-of trimmed "\n\n[")]
-                     (if (and footer-start
-                              (str/includes? (subs trimmed footer-start) full-output-path))
-                       (str/trimr (subs trimmed 0 footer-start))
-                       trimmed))
-                   trimmed))]
-    ;; A running tool ticks its own 1s repaint so elapsed time keeps moving
-    ;; with no output. That tick is a loop-owned timer (§6.1), not a parked
-    ;; future: it fires on the loop thread, only while the loop runs, and
-    ;; tui-stop's cancel-all! means it cannot outlive the session. The id
-    ;; parks in renderer state so completion and dispose can cancel it (both
-    ;; paths here, plus tool_execution's dispose).
-    (when (and started-at (nil? ended-at) (nil? (:timer-id state)))
-      (when (and invalidate set-state!)
-        (set-state! (assoc state :timer-id (timers/every! 1000 invalidate)))))
-    (when (or ended-at is-error)
-      (when-let [id (:timer-id state)]
-        (timers/cancel! id))
-      (when (and set-state! (contains? state :timer-id))
-        (set-state! (dissoc state :timer-id))))
-    (h/compile-tree
-     (into [:container {}]
-           (concat
-            (when (seq output)
-              (let [styled (->> (str/split-lines output)
-                                (mapv #(theme/fg theme :tool-output %))
-                                (str/join "\n"))]
-                (if expanded?
-                  (concat [[:spacer {:lines 1}]]
-                          [(tool-text styled)])
-                  (let [{:keys [visual-lines skipped-count]}
-                        (utils/truncate-to-visual-lines styled
-                                                        bash-result-preview-lines
-                                                        width)]
-                    (concat
-                     [[:spacer {:lines 1}]]
-                     (when (pos? skipped-count)
-                       [(tool-text
-                         (utils/truncate-to-width
-                          (str (theme/fg theme :muted
-                                         (str "... (" skipped-count " earlier lines,"))
-                               " "
-                               (app-kb/key-hint "app.tools.expand" "to toggle")
-                               (theme/fg theme :muted ")"))
-                          width
-                          "..."))])
-                     (tool-text-lines visual-lines))))))
-            (when truncation
-              (let [{:keys [total-lines shown-lines truncated-by max-bytes]} truncation
-                    size-str (when (= truncated-by :bytes)
-                               (bash-exec/format-size
-                                (or max-bytes bash-exec/DEFAULT-MAX-BYTES)))
-                    truncated-part (if (= truncated-by :bytes)
-                                     (str "Truncated: " shown-lines " lines shown ("
-                                          size-str " limit)")
-                                     (str "Truncated: showing " shown-lines " of "
-                                          total-lines " lines"))
-                    warn (str "["
-                              (str/join ". "
-                                        (cond-> []
-                                          full-output-path
-                                          (conj (str "Full output: " full-output-path))
-                                          :always
-                                          (conj truncated-part)))
-                              "]")]
-                [[:spacer {:lines 1}]
-                 (tool-text (theme/fg theme :warning warn))]))
-            (when started-at
-              (let [now (or ended-at (System/currentTimeMillis))
-                    elapsed-ms (- now started-at)
-                    label (if ended-at "Took" "Elapsed")]
-                [[:spacer {:lines 1}]
-                 (tool-text
-                  (theme/fg theme :muted
-                            (str label " "
-                                 (format "%.1f" (float (/ elapsed-ms 1000)))
-                                 "s")))])))))))
+  (manage-result-timer! context started-at ended-at is-error)
+  (h/compile-tree
+   (into [:container {}]
+         (concat (output-result-nodes content theme width expanded? ended-at truncation)
+                 (elapsed-result-nodes theme started-at ended-at)))))
+
+(def ^:private script-call-preview-lines
+  "Collapsed cap on the rendered script body, in visual lines. A long script
+   would otherwise dominate the transcript for every later message; the
+   expanded form renders it in full."
+  5)
+
+(defn render-script-call
+  "Call line for the script tool: `script <code>` (+ an explicit timeout
+   suffix). The collapsed form keeps the head of a long script and hints at
+   the rest; the expanded form renders it verbatim. The quiet title mirrors
+   the collapsed shape on one line."
+  [_name args theme width context]
+  (let [code (:code args)
+        code-str (if (string? code) code (if (nil? code) "" nil))
+        timeout (:timeoutMs args)
+        code-display (cond
+                       (nil? code-str) (theme/fg theme :error "[invalid arg]")
+                       (empty? code-str) (theme/fg theme :tool-output "...")
+                       :else code-str)
+        code-line (theme/fg theme :tool-title
+                            (theme/bold (str "script " code-display)))
+        timeout-suffix (if (and (number? timeout) (pos? timeout))
+                         (theme/fg theme :muted (str " (" timeout "ms)"))
+                         "")
+        rendered (if (:expanded context)
+                   (str code-line timeout-suffix)
+                   (let [{:keys [visual-lines skipped-count]}
+                         (utils/truncate-head-to-visual-lines code-line
+                                                              script-call-preview-lines
+                                                              width)]
+                     (if (zero? skipped-count)
+                       (str code-line timeout-suffix)
+                       (str (str/join "\n" visual-lines)
+                            "\n"
+                            (utils/truncate-to-width
+                             (str (theme/fg theme :muted
+                                            (str "... (" skipped-count " more lines,"))
+                                  " "
+                                  (app-kb/key-hint "app.tools.expand" "to toggle")
+                                  (theme/fg theme :muted ")")
+                                  timeout-suffix)
+                             width
+                             "...")))))]
+    (h/compile-tree (tool-text rendered))))
+
+(defn- script-calls-nodes
+  "One muted summary line for the script tool's inner-call trace (details
+   :calls): the tool work a script did is otherwise invisible in the
+   transcript. Failed/incomplete entries are counted."
+  [context theme]
+  (let [calls (seq (get-in context [:details :calls]))]
+    (when calls
+      (let [counts (frequencies (map :tool calls))
+            summary (str/join ", "
+                              (map (fn [n]
+                                     (let [c (get counts n)]
+                                       (if (> c 1) (str n " ×" c) n)))
+                                   (sort (keys counts))))
+            failed (count (remove :ok calls))
+            total (count calls)]
+        [[:spacer {:lines 1}]
+         (tool-text
+          (theme/fg theme :muted
+                    (str total " tool call" (when (> total 1) "s")
+                         ": " summary
+                         (when (pos? failed) (str ", " failed " failed")))))]))))
+
+(defn render-script-result
+  "Result body for the script tool: the shell-style body (output preview,
+   truncation warning, elapsed/took) plus the inner-call summary line."
+  [content is-error theme width expanded? started-at ended-at truncation context]
+  (manage-result-timer! context started-at ended-at is-error)
+  (h/compile-tree
+   (into [:container {}]
+         (concat (output-result-nodes content theme width expanded? ended-at truncation)
+                 (script-calls-nodes context theme)
+                 (elapsed-result-nodes theme started-at ended-at)))))
+
 ;; ─── Default renderers (fallback when no custom or built-in) ──────────────
 
 (defn render-default-call

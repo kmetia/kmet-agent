@@ -101,7 +101,7 @@
       (reset! (:content-atom c) "second")
       (is (some #(re-find #"second" %) (mapv strip-ansi (core/render c 40)))))))
 
-;; ─── Built-in renderers (read / write / edit / bash) ──────────────────────
+;; ─── Built-in renderers (read / write / edit / bash / script) ────────────
 
 (defn- render-tool [& {:keys [name args content is-error expanded? truncation]}]
   (let [c (te/make-tool-execution :name name :args args :content (or content "")
@@ -305,6 +305,25 @@
       (te/tool-execution-set-error! c false)
       (let [plain (mapv strip-ansi (core/render c 60))]
         (is (some #(re-find #"out1" %) plain))
+        (is (some #(re-find #"Took" %) plain))))))
+
+(deftest test-script-render-call
+  (testing "script call shows the code, not the raw args map"
+    (let [plain (render-tool :name "script" :args {:code "(+ 1 2)"})]
+      (is (some #(re-find #"script \(\+ 1 2\)" %) plain))
+      (is (not-any? #(re-find #":code" %) plain)))))
+
+(deftest test-script-render-result
+  (testing "script result shows output, the inner-call summary and duration"
+    (let [c (te/make-tool-execution :name "script"
+                                    :args {:code "1"}
+                                    :content "out1\nout2"
+                                    :details {:calls [{:tool "read" :ok true}]})]
+      (te/tool-execution-mark-execution-started! c)
+      (te/tool-execution-set-error! c false)
+      (let [plain (mapv strip-ansi (core/render c 60))]
+        (is (some #(re-find #"out1" %) plain))
+        (is (some #(re-find #"1 tool call: read" %) plain))
         (is (some #(re-find #"Took" %) plain))))))
 
 (deftest test-bash-elapsed-ticker

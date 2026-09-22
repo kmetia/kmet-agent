@@ -40,7 +40,9 @@
             ;; pi: edit renders its own diff framing, no outer Box
             :shell :self}
    "bash"  {:call renderers/render-bash-call
-            :result renderers/render-bash-result}})
+            :result renderers/render-bash-result}
+   "script" {:call renderers/render-script-call
+             :result renderers/render-script-result}})
 
 ;; ─── Render context helper ─────────────────────────────────────────────────
 
