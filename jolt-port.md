@@ -2,26 +2,28 @@
 
 The port is staged and largely landed: kmet runs on Jolt — TUI (native
 terminal backend: termios on Unix, kernel32 on Windows), providers (HTTP
-via babashka.http-client over the jolt-lang shims), packaging (`jolt
-dist`), and extensions (the native loader, with SCI as the declared
-fallback). This file tracks **only what is still open**; finished work
-lives in the code, in `jolt-tui.md` (TUI adapter deep-dive: FFI ground
+via babashka.http-client over the jolt-lang shims — Windows pending, M2),
+packaging (`jolt dist`), and extensions (the native loader, with SCI as the
+declared fallback). This file tracks **only what is still open**; finished
+work lives in the code, in `jolt-tui.md` (TUI adapter deep-dive: FFI ground
 rules, raw mode, input pipeline, key parser, concurrency) and in
 `jolt-bugs.md` (upstream issues filed or tracked). The item labels (B2,
 M5, …) are the original port report's ids.
 
 ## Windows — the last platform (M2)
 
-- **Process** (B2): Windows falls back to Chez `open-process-ports`, where
-  ^C cannot interrupt the child; `destroy-tree` behavior needs a Windows
-  test.
-- **Native libs**: still owed: the Windows smoke (`jolt -e '(println :ok)'`
-  with the libcrypto/libssl/libz DLLs beside `jolt.exe` or on PATH).
-- **Dev loop on Jolt/Windows**: `kmet.tasks.lint`'s target enumeration and
-  `kmet.tasks.clean`'s `extensions/*/target` still spell `/`-separated glob
-  patterns, which the vendored `fs/glob` misses on Windows (`jolt-bugs.md`
-  finding 4), so a Jolt/Windows `lint`/`clean` cannot be trusted until those
-  patterns are rewritten. None of this touches the terminal backend.
+- **Process** (B2): Windows has no working spawn path — the Chez
+  `open-process-ports` fallback cannot be ^C-interrupted and hands cmd.exe
+  a POSIX command string (`exec …`), so nothing starts. Needs a Windows
+  spawn path (`CreateProcess` FFI, since `posix_spawn` does not exist
+  there); once spawns work, the bash tool, `jolt lint` (clj-kondo) and
+  curl-based HTTP can run there, and `destroy-tree` gets its Windows test.
+  (`bb` on Windows is unaffected.)
+- **Sockets**: initialize Winsock and add a non-POSIX fd/poller path
+  (`fcntl`, kqueue/epoll) for the `java.net` layer — every HTTP transport
+  waits on it.
+- **Loader file handles**: make `PushbackReader.close` close the wrapped
+  reader, or loaded source trees cannot be torn down on Windows.
 - Windows is the last platform to light up, after Unix parity.
 
 ## Process edges (B2)
@@ -43,13 +45,10 @@ loader, and the `:sci` backend is the declared fallback. Open:
 - **bb-port gap**: Jolt bundles no ports, so an extension needing
   `clojure.spec` or `clojure.data.xml` declares a Maven dep; a SCI context
   still cannot load spec.alpha (M11 below), a native context can.
-- **Class graph (sci contexts)**: classes Jolt's class graph does not supply
-  (e.g. a `^StringBuilder` hint) fail the load there — upstream.
 - **M11**: `clojure.spec.alpha` injection for a SCI context.
-- **SCI pin**: `jolt/deps.edn` pins yogthos/sci @ babashka/sci#1093 — move
-  back to a Maven release once #1093 merges and a release carries it.
-- **Upstream**: jolt#1031 (SCI `IVar` `:getRawRoot`) is open in
-  `jolt-bugs.md`.
+- **SCI pin**: a host-protocol gap keeps `jolt/deps.edn`'s sci on a git
+  pin — move it back to a Maven release once the fix merges and a release
+  carries it.
 
 ## Tooling — remaining bb-only surfaces (M5/M6/M10)
 
@@ -86,7 +85,7 @@ loader, and the `:sci` backend is the declared fallback. Open:
   `bb run`, so on Jolt it would exercise bb's TUI); a Jolt-host pty variant
   is the follow-up.
 - **Stale `^:bb-only` gates**: `test-curl-compression` (its comment still
-  says java.util.zip is Jolt-unavailable; jolt PR #1044 landed it) and
-  `test-extension-gets-bundled-spec-port-and-file-seq` (the fixed bundled
-  set loads the Maven spec.alpha, and the fixture's `:jolt` loader runs it)
-  both pass under `jolt test` — drop the gates.
+  says java.util.zip is Jolt-unavailable although the runtime supplies it)
+  and `test-extension-gets-bundled-spec-port-and-file-seq` (the fixed
+  bundled set loads the Maven spec.alpha, and the fixture's `:jolt` loader
+  runs it) both pass under `jolt test` — drop the gates.
