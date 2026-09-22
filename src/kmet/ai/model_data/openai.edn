@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-17T17:44:51Z"
+ :generated-at "2026-09-22T19:47:51Z"
  :provider {:id :openai
             :name "OpenAI"
             :env-vars ["OPENAI_API_KEY"]
@@ -511,6 +511,56 @@
              :supports-openai-grammar-tools true
              :supports-tool-search true
              :supports-additional-tools true
+             :supports-explicit-prompt-cache-mode true}}
+   "gpt-6-luna"
+   {:id "gpt-6-luna"
+    :name "GPT-6 Luna"
+    :provider :openai
+    :api :openai-responses
+    :base-url "https://api.openai.com/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off "none"
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 0.1
+           :tiers [{:input 0.2 :input-tokens-above 272000 :output 0.75 :cache-read 0.02 :cache-write 0.25}]
+           :output 0.5
+           :cache-read 0.01
+           :cache-write 0.125}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true
+             :supports-openai-grammar-tools true
+             :supports-explicit-prompt-cache-mode true}}
+   "gpt-6-sol"
+   {:id "gpt-6-sol"
+    :name "GPT-6 Sol"
+    :provider :openai
+    :api :openai-responses
+    :base-url "https://api.openai.com/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off "none"
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 2
+           :tiers [{:input 4 :input-tokens-above 272000 :output 15 :cache-read 0.4 :cache-write 5}]
+           :output 10
+           :cache-read 0.2
+           :cache-write 2.5}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true
+             :supports-openai-grammar-tools true
              :supports-explicit-prompt-cache-mode true}}
    "gpt-realtime-2.1"
    {:id "gpt-realtime-2.1"

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-21T17:19:24Z"
+ :generated-at "2026-09-22T19:47:51Z"
  :provider {:id :xiaomi
             :name "Xiaomi MiMo"
             :env-vars ["XIAOMI_API_KEY"]
@@ -85,6 +85,48 @@
     :reasoning true
     :input [:text]
     :cost {:input 1.305 :output 2.61 :cache-read 0.0108 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
+    :compat {:requires-reasoning-content-on-assistant-messages true
+             :thinking-format :deepseek
+             :supports-strict-mode true}}
+   "mimo-v2.6-flash"
+   {:id "mimo-v2.6-flash"
+    :name "MiMo-V2.6-Flash"
+    :provider :xiaomi
+    :api :openai-completions
+    :base-url "https://api.xiaomimimo.com/v1"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.14 :output 0.28 :cache-read 0.0028 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
+    :compat {:requires-reasoning-content-on-assistant-messages true
+             :thinking-format :deepseek
+             :supports-strict-mode true}}
+   "mimo-v2.6-pro"
+   {:id "mimo-v2.6-pro"
+    :name "MiMo-V2.6-Pro"
+    :provider :xiaomi
+    :api :openai-completions
+    :base-url "https://api.xiaomimimo.com/v1"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.435 :output 0.87 :cache-read 0.0036 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
+    :compat {:requires-reasoning-content-on-assistant-messages true
+             :thinking-format :deepseek
+             :supports-strict-mode true}}
+   "mimo-v2.6-pro-ultraspeed"
+   {:id "mimo-v2.6-pro-ultraspeed"
+    :name "MiMo-V2.6-Pro-UltraSpeed"
+    :provider :xiaomi
+    :api :openai-completions
+    :base-url "https://api.xiaomimimo.com/v1"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 4.35 :output 8.7 :cache-read 0.036 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:requires-reasoning-content-on-assistant-messages true

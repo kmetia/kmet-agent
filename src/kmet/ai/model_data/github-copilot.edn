@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-21T17:19:24Z"
+ :generated-at "2026-09-22T19:47:51Z"
  :provider {:id :github-copilot
             :name "GitHub Copilot"
             :env-vars ["COPILOT_GITHUB_TOKEN"]
@@ -254,6 +254,29 @@
    "grok-4.6"
    {:id "grok-4.6"
     :name "Grok 4.6"
+    :provider :github-copilot
+    :api :openai-completions
+    :base-url "https://api.individual.githubcopilot.com"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 2
+           :tiers [{:input 4 :input-tokens-above 200000 :output 12 :cache-read 1 :cache-write 0}]
+           :output 6
+           :cache-read 0.5
+           :cache-write 0}
+    :context-window 500000
+    :max-tokens 128000
+    :headers {"Copilot-Integration-Id" "vscode-chat"
+              "Editor-Plugin-Version" "copilot-chat/0.35.0"
+              "Editor-Version" "vscode/1.107.0"
+              "User-Agent" "GitHubCopilotChat/0.35.0"}
+    :compat {:supports-store false
+             :supports-developer-role false
+             :supports-reasoning-effort false
+             :supports-strict-mode true}}
+   "grok-4.7"
+   {:id "grok-4.7"
+    :name "Grok 4.7"
     :provider :github-copilot
     :api :openai-completions
     :base-url "https://api.individual.githubcopilot.com"

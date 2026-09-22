@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-21T17:19:24Z"
+ :generated-at "2026-09-22T19:47:51Z"
  :provider {:id :opencode-go
             :name "OpenCode Go"
             :env-vars ["OPENCODE_API_KEY"]
@@ -350,6 +350,36 @@
     :cost {:input 0.435 :output 0.87 :cache-read 0.003625 :cache-write 0}
     :context-window 1048576
     :max-tokens 128000
+    :compat {:supports-store false
+             :supports-developer-role false
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
+   "mimo-v2.6-flash"
+   {:id "mimo-v2.6-flash"
+    :name "MiMo-V2.6-Flash"
+    :provider :opencode-go
+    :api :openai-completions
+    :base-url "https://opencode.ai/zen/go/v1"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.14 :output 0.28 :cache-read 0.0028 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
+    :compat {:supports-store false
+             :supports-developer-role false
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
+   "mimo-v2.6-pro"
+   {:id "mimo-v2.6-pro"
+    :name "MiMo-V2.6-Pro"
+    :provider :opencode-go
+    :api :openai-completions
+    :base-url "https://opencode.ai/zen/go/v1"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.435 :output 0.87 :cache-read 0.003625 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
              :max-tokens-field :max-tokens

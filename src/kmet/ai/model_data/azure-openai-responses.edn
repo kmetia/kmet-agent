@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-06T20:10:23Z"
+ :generated-at "2026-09-22T19:47:51Z"
  :provider {:id :azure-openai-responses
             :name "Azure OpenAI"
             :env-vars ["AZURE_OPENAI_API_KEY"]
@@ -443,6 +443,44 @@
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 10 :output 50 :cache-read 1 :cache-write 12.5}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-openai-grammar-tools true}}
+   "gpt-6-luna"
+   {:id "gpt-6-luna"
+    :name "GPT-6 Luna"
+    :provider :azure-openai-responses
+    :api :azure-openai-responses
+    :base-url ""
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off "none"
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 0.1 :output 0.5 :cache-read 0.01 :cache-write 0.125}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-openai-grammar-tools true}}
+   "gpt-6-sol"
+   {:id "gpt-6-sol"
+    :name "GPT-6 Sol"
+    :provider :azure-openai-responses
+    :api :azure-openai-responses
+    :base-url ""
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off "none"
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
     :context-window 1050000
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true}}

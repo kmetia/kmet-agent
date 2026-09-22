@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-21T17:19:24Z"
+ :generated-at "2026-09-22T19:47:51Z"
  :provider {:id :xiaomi-token-plan-ams
             :name "Xiaomi MiMo Token Plan (AMS)"
             :env-vars ["XIAOMI_TOKEN_PLAN_AMS_API_KEY"]
@@ -42,6 +42,34 @@
     :base-url "https://token-plan-ams.xiaomimimo.com/v1"
     :reasoning true
     :input [:text]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
+    :compat {:requires-reasoning-content-on-assistant-messages true
+             :thinking-format :deepseek
+             :supports-strict-mode true}}
+   "mimo-v2.6-flash"
+   {:id "mimo-v2.6-flash"
+    :name "MiMo-V2.6-Flash"
+    :provider :xiaomi-token-plan-ams
+    :api :openai-completions
+    :base-url "https://token-plan-ams.xiaomimimo.com/v1"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
+    :compat {:requires-reasoning-content-on-assistant-messages true
+             :thinking-format :deepseek
+             :supports-strict-mode true}}
+   "mimo-v2.6-pro"
+   {:id "mimo-v2.6-pro"
+    :name "MiMo-V2.6-Pro"
+    :provider :xiaomi-token-plan-ams
+    :api :openai-completions
+    :base-url "https://token-plan-ams.xiaomimimo.com/v1"
+    :reasoning true
+    :input [:text :image]
     :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072

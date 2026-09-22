@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-21T17:19:24Z"
+ :generated-at "2026-09-22T19:47:51Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -539,6 +539,32 @@
     :context-window 1000000
     :max-tokens 128000
     :compat {:force-adaptive-thinking true}}
+   "anthropic/claude-opus-5.5"
+   {:id "anthropic/claude-opus-5.5"
+    :name "Claude Opus 5.5"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :thinking-level-map {:max "max" :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 4 :output 20 :cache-read 0.2 :cache-write 5}
+    :context-window 1000000
+    :max-tokens 128000
+    :compat {:force-adaptive-thinking true}}
+   "anthropic/claude-opus-5.5-fast"
+   {:id "anthropic/claude-opus-5.5-fast"
+    :name "Claude Opus 5.5 (Fast)"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :thinking-level-map {:max "max" :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 8 :output 40 :cache-read 0.4 :cache-write 10}
+    :context-window 1000000
+    :max-tokens 128000
+    :compat {:force-adaptive-thinking true}}
    "anthropic/claude-sonnet-4"
    {:id "anthropic/claude-sonnet-4"
     :name "Claude Sonnet 4"
@@ -760,7 +786,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.3 :output 1.2 :cache-read 0.03 :cache-write 0}
+    :cost {:input 0.3 :output 1.2 :cache-read 0.007 :cache-write 0}
     :context-window 1048576
     :max-tokens 32768}
    "google/gemini-2.5-flash"
@@ -2051,6 +2077,50 @@
     :cost {:input 20 :output 100 :cache-read 2 :cache-write 25}
     :context-window 1050000
     :max-tokens 128000}
+   "openai/gpt-6-luna"
+   {:id "openai/gpt-6-luna"
+    :name "GPT-6 Luna"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.1 :output 0.5 :cache-read 0.01 :cache-write 0.125}
+    :context-window 1050000
+    :max-tokens 128000}
+   "openai/gpt-6-luna-fast"
+   {:id "openai/gpt-6-luna-fast"
+    :name "GPT-6 Luna (Fast)"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.2 :output 1 :cache-read 0.02 :cache-write 0.25}
+    :context-window 1050000
+    :max-tokens 128000}
+   "openai/gpt-6-sol"
+   {:id "openai/gpt-6-sol"
+    :name "GPT-6 Sol"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
+    :context-window 1050000
+    :max-tokens 128000}
+   "openai/gpt-6-sol-fast"
+   {:id "openai/gpt-6-sol-fast"
+    :name "GPT-6 Sol (Fast)"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 4 :output 20 :cache-read 0.4 :cache-write 5}
+    :context-window 1050000
+    :max-tokens 128000}
    "openai/gpt-oss-120b"
    {:id "openai/gpt-oss-120b"
     :name "GPT OSS 120B"
@@ -2491,6 +2561,39 @@
     :cost {:input 0.435 :output 0.87 :cache-read 0.0036 :cache-write 0}
     :context-window 1050000
     :max-tokens 131000}
+   "xiaomi/mimo-v2.6-flash"
+   {:id "xiaomi/mimo-v2.6-flash"
+    :name "MiMo V2.6 Flash"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.14 :output 0.28 :cache-read 0.0028 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072}
+   "xiaomi/mimo-v2.6-pro"
+   {:id "xiaomi/mimo-v2.6-pro"
+    :name "MiMo V2.6 Pro"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.435 :output 0.87 :cache-read 0.0036 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072}
+   "xiaomi/mimo-v2.6-pro-ultraspeed"
+   {:id "xiaomi/mimo-v2.6-pro-ultraspeed"
+    :name "MiMo V2.6 Pro UltraSpeed"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 4.35 :output 8.7 :cache-read 0.036 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072}
    "zai/glm-4.5"
    {:id "zai/glm-4.5"
     :name "GLM 4.5"
