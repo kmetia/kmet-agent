@@ -11,8 +11,8 @@ opt-in extensions). The one thing already in place is measurement — per-tool
 result-token attribution — so the build/no-build decision can be made on data.
 
 Status: **T1 implemented** in this tree — `src/kmet/app/tools/script.cljc`, a
-builtin (read/write/edit/bash + `script`), `kmet.app.test-script` (22 tests:
-19 fast + 3 `^:slow`, smoke-verified on babashka and jolt); only the plan's
+builtin (read/write/edit/bash + `script`), `kmet.app.test-script` (29 tests:
+25 fast + 4 `^:slow`, smoke-verified on babashka and jolt); only the plan's
 last item, the post-adoption T0 re-measurement, remains (⏳ below). **T0
 measured and analysed** (results below); the numbers rewrote the premise
 rather than killed it: maki's read-share did not transfer — bash dominates —
@@ -456,30 +456,70 @@ The plan above is now the record of what landed:
 5. ✅ **Deadlines** — eval on a daemon thread; `:interrupt-fn` checks the
    abort atom (signal/deadline/output-limit) and throws; the host waits
    `timeoutMs` + a 1.5s interrupt grace, then abandons the thread.
-6. ✅ **Output** — `*out*`/`*err*` bound to temp files, drained by reader
-   threads in bursts (a stream that has seen EOF stays at EOF — the reason for
-   reopen-per-burst), 128 KiB result tail, throttled `on-update` streaming,
-   16 MiB abort, tail truncation at 50 KiB/2000 lines. On Jolt the writers
-   are bound with `sci/binding` (the `with-sci-io` pattern); on babashka the
-   host `*out*`/`*err*` bindings are enough. UI: a builtin renderer
+6. ✅ **Output** — `*out*`/`*err*` bound to temp files; daemon reader
+   threads drain them per burst (a stream that has seen EOF stays at EOF —
+   hence reopen-per-burst) and keep the last 128 KiB: `append-chunk` trims an
+   oversized burst's own tail instead of dropping it whole, and *seen*
+   bytes/lines (which never shrink) feed both the 16 MiB abort
+   (`make-progress`) and the truncation totals — the retained tail no longer
+   knows them. The result body is capped at the tools' 50 KiB / 2000 lines.
+   Line counting and the head trim are native (`String.split`, `tail-text`'s
+   ASCII fast path): the readers run on the babashka interpreter, where a
+   per-char scan makes them fall behind a fast writer, and a lagging reader
+   under-reports the totals and starves the abort. Printing is bounded
+   (`*print-length*` 100000, `*print-level*` 30 — host vars on babashka,
+   `sci/print-*` on Jolt), so an infinite seq cannot print host code past the
+   deadline. On Jolt the writers are bound with `sci/binding` (the
+   `with-sci-io` pattern); on babashka the host `*out*`/`*err*` bindings are
+   enough. UI: a builtin renderer
    (`render-script-call`/`render-script-result`) shows the code header
    (collapsed head + expand hint), the output preview, a muted inner-call
    summary from `:details :calls` and the elapsed/took line, and strips the
    model-facing truncation notice in favor of its own warn line.
 7. ✅ **Tests** — `test/kmet/app/test_script.clj`, registered in
-   `kmet.tasks.runner/all-namespaces`: 22 tests (19 fast, 3 `^:slow`) covering
+   `kmet.tasks.runner/all-namespaces`: 29 tests (25 fast, 4 `^:slow`) covering
    return/output, errors, timeout, signal abort, a caught interrupt still
    reporting its abort, capabilities (incl. the preloaded aliases and an
    explicit `require`), cwd resolution, stderr, truncation,
    streaming, promise fan-out, spawned-future output capture, the gate,
    discovery (with `:execute` sanitized), the excluded surface, fork
-   isolation, and the three subprocess cases (inner bash, the runtime-cwd
-   binding reaching the worker, and the `babashka.process` wrapper shapes).
+   isolation, the capture edges (an oversized burst keeps its tail, the totals
+   count everything seen, the 16 MiB abort), the print bounds (an infinite seq
+   prints a bounded prefix) and the tool-name forms, plus the three subprocess
+   cases (inner bash, the runtime-cwd binding reaching the worker, and the
+   `babashka.process` wrapper shapes).
 8. ⏳ **Verify** — after adoption, re-run the T0 measurement (`/session` Tool
    Results against the 54.8%/41.6% split; the `--debug` per-tool report): bash
    file-view/search share is the number the tool exists to move.
 9. ✅ **T2 seam** — the tool takes its registry through seams; T2 passes
    extension-contributed sources through the same map instead of a new path.
+
+### Landed notes (edge cases)
+
+The probes that found the capture bugs left a set of deliberate behaviors:
+
+- **Aborted-but-finished** — an abort the interrupt never observed (Escape
+  lands as the script's inner call is cancelled and the script then returns
+  normally) reports success; the cancelled call still shows in
+  `:details :calls`. The abort reason only wins when the interrupt actually
+  fired (`assemble-result`).
+- **Catching** — `(catch Exception e ...)` works, interrupts included;
+  `Throwable`/`:default` are not resolvable (the sandbox has no classes).
+- **Uninterruptible host code** — `interrupt-fn` runs on interpreted frames;
+  a host primitive that runs long is abandoned at the deadline + 1.5 s grace
+  and keeps its thread until it finishes (the print limits are what keep that
+  window small).
+- **Coercions** — `:timeoutMs` absent, ≤ 0 or non-numeric → the 30 s default;
+  `:code` `nil`/empty → "No code provided." (a result without
+  `:timeout-ms`); a non-string `:code` is stringified.
+- **stderr** is fused after stdout under a `[stderr]` marker, not
+  interleaved; `(binding [*out* *err*] ...)` writes to that stream.
+- **Tool names** — strings, keywords and symbols all resolve (`:read` →
+  `read`); discovery normalizes and dispatch gates on the same name.
+- **Long single lines** — the body cap is line-oriented
+  (`bash-executor/truncate-tail`): a huge line followed by shorter lines is
+  dropped in favor of those, as in bash. When only the *totals* exceed the
+  cap the truncation is reported as `:truncated-by :capture`.
 
 ## References
 

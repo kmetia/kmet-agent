@@ -32,6 +32,11 @@
 (def ^:private max-output-lines bash-exec/DEFAULT-MAX-LINES)
 (def ^:private max-capture-bytes (* 16 1024 1024))
 (def ^:private max-tail-bytes (* 128 1024))
+;; Bound on printed collections (the script's own printing and the return
+;; value). Generous on purpose: it exists to stop an unbounded seq from
+;; printing forever past the deadline, not to second-guess a script's pr-str.
+(def ^:private print-length-limit 100000)
+(def ^:private print-level-limit 30)
 (def ^:private update-throttle-ms 100)
 (def ^:private drain-timeout-ms 2000)
 (def ^:private interrupt-grace-ms 1500)
@@ -67,7 +72,12 @@
 
 (defn- byte-length [s] (alength (.getBytes (str s) "UTF-8")))
 
-(defn- text-lines [s] (count (filter #(= \newline %) (str s))))
+(defn- text-lines
+  ;; String.split is the fast path on purpose: this runs per reader block on
+  ;; the babashka interpreter, where a per-char predicate scan costs ~2ms per
+  ;; 8KiB block and makes the readers fall behind a fast writer.
+  [s]
+  (dec (alength (.split (str s) "\n" -1))))
 
 (defn- preview
   "A short rendering of a failing tool result's content for the call trace."
@@ -105,10 +115,21 @@
    kmet.app.extensions/with-sci-io pattern: babashka's SCI is wired to the
    host streams, Jolt's sci vars are bound explicitly). Used by the eval
    thread and by sandbox/spawn, whose future thread would otherwise print to
-   an unbound *out* on Jolt."
+   an unbound *out* on Jolt. Print length/level are bounded alongside: an
+   infinite seq must not print host code past the deadline, and host printing
+   is not interruptible — on babashka the host vars drive SCI's printer, on
+   Jolt sci has its own."
   [out-w err-w thunk]
-  #?(:jolt (sci/binding [sci/out out-w sci/err err-w] (thunk))
-     :default (binding [*out* out-w *err* err-w] (thunk))))
+  #?(:jolt (sci/binding [sci/out out-w
+                         sci/err err-w
+                         sci/print-length print-length-limit
+                         sci/print-level print-level-limit]
+             (thunk))
+     :default (binding [*out* out-w
+                        *err* err-w
+                        *print-length* print-length-limit
+                        *print-level* print-level-limit]
+                (thunk))))
 
 ;; ─── Output capture ───────────────────────────────────────────────────────
 ;;
@@ -119,22 +140,57 @@
 ;; Past max-capture-bytes the run is aborted (:output-limit), so a runaway
 ;; print loop stays bounded in memory and on disk.
 
+(defn- tail-text
+  "The suffix of S holding at most BUDGET UTF-8 bytes (cut on char
+   boundaries)."
+  [s budget]
+  (cond
+    (<= (byte-length s) budget) s
+    ;; ASCII fast path: chars and bytes agree, so the cut is a native slice
+    (= (count s) (byte-length s)) (subs s (- (count s) budget))
+    :else
+    (loop [i (count s) used 0]
+      (if (zero? i)
+        s
+        (let [n (+ used (byte-length (subs s (dec i) i)))]
+          (if (> n budget) (subs s i) (recur (dec i) n)))))))
+
 (defn- append-chunk
-  "Append CHUNK to a capture state, dropping whole leading chunks while the
-   retained tail exceeds max-tail-bytes."
-  [state chunk]
-  (let [state (-> state
-                  (update :chunks conj chunk)
-                  (update :bytes + (byte-length chunk))
-                  (update :lines + (text-lines chunk)))]
-    (loop [s state]
-      (if (and (> (:bytes s) max-tail-bytes) (seq (:chunks s)))
-        (let [c (first (:chunks s))]
-          (recur (-> s
-                     (update :chunks subvec 1)
-                     (update :bytes - (byte-length c))
-                     (update :lines - (text-lines c)))))
-        s))))
+  "Append CHUNK to a capture state, keeping the retained tail at or under
+   max-tail-bytes. Leading chunks are dropped whole while the state is over
+   budget; when the newest chunk alone is over, its *tail* is kept — a burst
+   is one reader poll's worth of output (a script can flush megabytes in
+   25ms) and dropping it whole loses the very output the truncation notice
+   describes. SKIPPED-BYTES/LINES carry the head a reader trimmed off the
+   burst; SEEN-BYTES/SEEN-LINES count everything ever read (never decreased),
+   so the notice can report totals the retained tail no longer knows."
+  ([state chunk] (append-chunk state chunk 0 0))
+  ([state chunk skipped-bytes skipped-lines]
+   (let [state (-> state
+                   (update :chunks conj chunk)
+                   (update :bytes + (byte-length chunk))
+                   (update :lines + (text-lines chunk))
+                   (update :seen-bytes + (byte-length chunk) skipped-bytes)
+                   (update :seen-lines + (text-lines chunk) skipped-lines))]
+     (loop [s state]
+       (cond
+         (and (> (:bytes s) max-tail-bytes) (> (count (:chunks s)) 1))
+         (let [c (first (:chunks s))]
+           (recur (-> s
+                      (update :chunks subvec 1)
+                      (update :bytes - (byte-length c))
+                      (update :lines - (text-lines c)))))
+
+         (and (> (:bytes s) max-tail-bytes) (= 1 (count (:chunks s))))
+         (let [c (first (:chunks s))
+               t (tail-text c max-tail-bytes)
+               head (subs c 0 (- (count c) (count t)))]
+           (-> s
+               (assoc :chunks [t])
+               (update :bytes - (byte-length head))
+               (update :lines - (text-lines head))))
+
+         :else s)))))
 
 (defn- chunks-text [state] (apply str (:chunks state)))
 
@@ -149,25 +205,44 @@
           (do (.read in) (recur (dec remaining))))))))
 
 (defn- read-burst
-  "Read FILE from byte OFFSET to the current end. A fresh stream per burst:
-   a stream that has seen EOF keeps reporting EOF when the file grows later
-   (InputStreamReader does not re-check), and the eval thread is usually
-   still writing when the readers start. Returns [text new-offset]."
+  "Read FILE from byte OFFSET to the current end, returning [text end
+   skipped-bytes skipped-lines]. TEXT is only the retained tail — a burst is
+   one reader poll's worth of output and can be arbitrarily larger than the
+   state's budget, so the head is trimmed while reading (bounded memory) and
+   reported back, keeping the byte/line totals exact. A fresh stream per
+   burst: a stream that has seen EOF keeps reporting EOF when the file grows
+   later (InputStreamReader does not re-check), and the eval thread is
+   usually still writing when the readers start."
   [file offset]
   (try
-    (if (> (fs/size file) offset)
-      (with-open [in (java.io.FileInputStream. (str file))]
-        (skip-bytes! in offset)
-        (let [r (java.io.InputStreamReader. in "UTF-8")]
-          (loop [sb (StringBuilder.)]
-            (let [buf (char-array 4096)
-                  n (.read r buf)]
-              (if (pos? n)
-                (recur (.append sb (String. buf 0 n)))
-                (let [text (str sb)]
-                  [text (+ offset (byte-length text))]))))))
-      ["" offset])
-    (catch Throwable _ ["" offset])))
+    (let [size (fs/size file)]
+      (if (<= size offset)
+        ["" offset 0 0]
+        (with-open [in (java.io.FileInputStream. (str file))]
+          (skip-bytes! in offset)
+          (let [r (java.io.InputStreamReader. in "UTF-8")
+                buf (char-array 8192)]
+            (loop [sb (StringBuilder.) bytes 0 lines 0]
+              (let [n (.read r buf)]
+                (if (pos? n)
+                  (let [s (String. buf 0 n)
+                        sb (doto sb (.append s))
+                        bytes (+ bytes (byte-length s))
+                        lines (+ lines (text-lines s))]
+                    (if (> (count sb) (* 4 max-tail-bytes))
+                      (recur (StringBuilder.
+                              (tail-text (str sb) (* 2 max-tail-bytes)))
+                             bytes
+                             lines)
+                      (recur sb bytes lines)))
+                  (let [text (str sb)]
+                    ;; END is what was actually consumed — the file can grow
+                    ;; between the size probe and the read, and a stale END
+                    ;; would re-read (and re-count) that overlap
+                    [text (+ offset bytes)
+                     (- bytes (byte-length text))
+                     (- lines (text-lines text))]))))))))
+    (catch Throwable _ ["" offset 0 0])))
 
 (defn- start-reader
   "Daemon thread draining FILE in bursts until the eval thread closes the
@@ -176,9 +251,10 @@
   [file state progress closed?]
   (let [drain (fn []
                 (loop [offset 0]
-                  (let [[text offset'] (read-burst file offset)]
+                  (let [[text offset' skipped-bytes skipped-lines]
+                        (read-burst file offset)]
                     (when (seq text)
-                      (swap! state append-chunk text)
+                      (swap! state append-chunk text skipped-bytes skipped-lines)
                       (progress))
                     (if (and (empty? text) @closed?)
                       nil
@@ -191,13 +267,15 @@
 
 (defn- make-progress
   "The throttled on-update emitter shared by both readers. Also enforces the
-   total capture bound: a still-running script past max-capture-bytes is
-   aborted (a finished one is only truncated — the limit must not turn a
-   successful script into an error after the fact)."
+   total *seen* capture bound — the retained tail is capped by
+   max-tail-bytes, so the running total must come from the seen counters. A
+   still-running script past max-capture-bytes is aborted (a finished one is
+   only truncated — the limit must not turn a successful script into an error
+   after the fact)."
   [out-state err-state on-update abort closed?]
   (let [last-at (atom 0)]
     (fn []
-      (let [total (+ (:bytes @out-state) (:bytes @err-state))]
+      (let [total (+ (:seen-bytes @out-state) (:seen-bytes @err-state))]
         (when (and abort (nil? @abort) (not @closed?) (> total max-capture-bytes))
           (reset! abort :output-limit))
         (when on-update
@@ -216,8 +294,8 @@
         out-file (str dir "/out.log")
         err-file (str dir "/err.log")
         closed? (atom false)
-        out-state (atom {:chunks [] :bytes 0 :lines 0})
-        err-state (atom {:chunks [] :bytes 0 :lines 0})
+        out-state (atom {:chunks [] :bytes 0 :lines 0 :seen-bytes 0 :seen-lines 0})
+        err-state (atom {:chunks [] :bytes 0 :lines 0 :seen-bytes 0 :seen-lines 0})
         progress (make-progress out-state err-state on-update abort closed?)]
     {:dir dir
      :closed? closed?
@@ -232,7 +310,9 @@
   "Snapshot the capture tails and stop the readers. When FINISHED? the eval
    thread closed the writers, so wait briefly for the readers to drain them;
    an abandoned thread's readers are stopped here too — their temp file is
-   gone, and late `on-update`s must not reach a finished tool call."
+   gone, and late `on-update`s must not reach a finished tool call. The
+   byte/line counts are the *seen* totals: the retained tails no longer know
+   how much output they stand for."
   [capture finished?]
   (when finished?
     (doseq [t (:readers capture)]
@@ -241,8 +321,8 @@
   (let [out @(:out-state capture)
         err @(:err-state capture)]
     (try (fs/delete-tree (:dir capture)) (catch Throwable _ nil))
-    {:out (chunks-text out) :out-bytes (:bytes out) :out-lines (:lines out)
-     :err (chunks-text err) :err-bytes (:bytes err) :err-lines (:lines err)}))
+    {:out (chunks-text out) :out-bytes (:seen-bytes out) :out-lines (:seen-lines out)
+     :err (chunks-text err) :err-bytes (:seen-bytes err) :err-lines (:seen-lines err)}))
 
 ;; ─── Capabilities ─────────────────────────────────────────────────────────
 
@@ -337,13 +417,24 @@
               (future (eval-with-io out-w err-w f))
               (future (f))))})
 
+(defn- tool-name
+  "The registry name for X — strings pass through, keywords/symbols lose
+   their prefix (`:read` → \"read\"), anything else stringifies. Discovery
+   and dispatch must agree on it: `(tools/describe :read)` resolves, so
+   `(tools/call :read {...})` must dispatch."
+  [x]
+  (cond
+    (string? x) x
+    (or (keyword? x) (symbol? x)) (name x)
+    :else (str x)))
+
 (defn- discovery-fns
   "tools/list and tools/describe over the surface this base was built for —
    discovery is a bridge-local read of the active set, never a dispatch."
   [surface]
   {'list (fn [] (vec (keys surface)))
    'describe (fn [name]
-               (if-let [t (get surface (str name))]
+               (if-let [t (get surface (tool-name name))]
                  (select-keys t [:name :label :description :parameters])
                  {:is-error true
                   :content (str "Unknown tool: " name ". Active tools: "
@@ -422,7 +513,8 @@
    the inner tool (bash reads *cancel-signal*; read/write/edit resolve
    against *cwd*)."
   [{:keys [surface execute-tool signal ctx cwd session-env-fn trace]} name args]
-  (let [p (promise)]
+  (let [name (tool-name name)
+        p (promise)]
     (if-not (contains? surface name)
       (deliver p {:is-error true
                   :content (str "Tool not active in this script: " name
@@ -451,7 +543,7 @@
         p))))
 
 (defn- bridge-fns [opts]
-  {'call (fn [name & [args]] (dispatch! opts (str name) args))
+  {'call (fn [name & [args]] (dispatch! opts name args))
    'read (fn [& [args]] (dispatch! opts "read" args))
    'write (fn [& [args]] (dispatch! opts "write" args))
    'edit (fn [& [args]] (dispatch! opts "edit" args))
@@ -461,11 +553,15 @@
 
 (defn- format-value
   "Format a script's return value: strings raw, everything else pr-str —
-   a Clojure sandbox reports Clojure data (T2 formats MCP envelopes itself)."
+   a Clojure sandbox reports Clojure data (T2 formats MCP envelopes itself).
+   The print limits bound it here on the host: printing is host code, and an
+   unbounded value would grow in an abandoned thread past the interrupt."
   [v]
   (if (string? v)
     v
-    (pr-str v)))
+    (binding [*print-length* print-length-limit
+              *print-level* print-level-limit]
+      (pr-str v))))
 
 (defn- truncation-notice [t]
   (str "[Script output truncated: " (:total-lines t) " lines / "
@@ -492,7 +588,9 @@
        :truncation {:total-lines total-lines
                     :total-bytes total-bytes
                     :shown-lines (:output-lines t)
-                    :truncated-by (:truncated-by t)
+                    ;; :capture — the body fits, the capture tail dropped the
+                    ;; rest (the totals above are the whole output)
+                    :truncated-by (or (:truncated-by t) :capture)
                     :max-bytes max-output-bytes
                     :max-lines max-output-lines}}
       {:content body :truncation nil})))
@@ -653,6 +751,8 @@
        "(clojure.*), json (kmet.libs.json), p (babashka.process), plus tools and sandbox; "
        "clojure.core carries slurp/spit/file-seq/pmap. No Java interop and no other "
        "requires. Print with println; the last expression's value is reported too. "
+       "Errors are Exceptions — catch with (catch Exception e ...); Throwable is not "
+       "a class here. "
        "Relative paths in slurp/spit/sh resolve against the session cwd ((sandbox/cwd)); "
        "babashka.fs uses the process directory."))
 

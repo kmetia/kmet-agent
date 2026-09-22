@@ -230,3 +230,63 @@
           (t/is (not (:is-error r)) (:content r))
           (t/is (str/includes? (:content r) (last (str/split dir #"/"))))))
       (finally (fs/delete-tree dir)))))
+
+;; ─── Capture edge cases (a burst is one reader poll's worth of output) ─────
+
+(t/deftest test-append-chunk-keeps-oversized-burst-tail
+  (let [state (atom {:chunks [] :bytes 0 :lines 0 :seen-bytes 0 :seen-lines 0})
+        chunk (str "HEAD" (apply str (repeat 100000 "a\n")) "TAIL")]
+    (swap! state @#'script/append-chunk chunk)
+    (let [s @state
+          kept (apply str (:chunks s))]
+      (t/is (<= (:bytes s) (* 128 1024)) "the retained tail stays under budget")
+      (t/is (= 200008 (:seen-bytes s)) "everything read is counted")
+      (t/is (str/ends-with? kept "TAIL") "the newest chunk's tail is kept")
+      (t/is (str/starts-with? kept "a\n") "…and its head dropped")
+      (t/is (= 100000 (:seen-lines s))))))
+
+(t/deftest test-script-burst-tail-kept
+  ;; a print larger than the 128 KiB capture tail must keep its tail: the
+  ;; burst used to be dropped whole, rendering "(no output)" with no notice
+  (let [r (run "(println (apply str (repeat 140000 \"b\")))")]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (str/includes? (:content r) "bbbb") "the burst's tail survives")
+    (t/is (= :bytes (get-in r [:truncation :truncated-by])))
+    (t/is (>= (get-in r [:truncation :total-bytes]) 140000)
+          "the notice reports the burst, not the retained size")))
+
+(t/deftest test-script-oversized-burst-then-output
+  (let [r (run "(println (apply str (repeat 140000 \"b\"))) (println \"MARKER\")")]
+    (t/is (str/includes? (:content r) "MARKER"))
+    (t/is (some? (:truncation r)) "truncation is reported, not silence")))
+
+(t/deftest test-script-capture-totals-count-everything
+  ;; the notice's totals are what the capture saw, not what it kept
+  (let [r (run "(dotimes [i 40000] (println i))")]
+    (t/is (not (:is-error r)))
+    (t/is (= 40000 (get-in r [:truncation :total-lines])))
+    (t/is (str/includes? (:content r) "39999"))))
+
+(t/deftest test-script-unbounded-print-is-bounded
+  ;; *print-length* is bound: an infinite seq prints a bounded prefix instead
+  ;; of running host code past the deadline (printing is not interruptible)
+  (let [r (run "(println (range))" {:timeoutMs 5000})]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (str/includes? (:content r) "99999") "a bounded prefix is printed")
+    (t/is (str/includes? (:content r) "...") "print-length elides the rest")))
+
+(t/deftest test-script-keyword-tool-name
+  ;; discovery and dispatch agree on the name form
+  (t/is (= "[\"read\" false]"
+           (:content (run "(let [d (tools/describe :read)] [(:name d) (contains? d :execute)])"))))
+  (t/is (= "false"
+           (:content (run (str "(let [x @(tools/call :read {:path \"deps.edn\" :limit 1})]"
+                               "  (boolean (:is-error x)))"))))))
+
+(t/deftest ^:slow test-script-output-limit
+  ;; the 16 MiB capture bound is reachable: it counts what the readers saw
+  (let [r (run (str "(dotimes [i 200] (println (apply str (repeat 100000 \"x\"))))"
+                    " (sandbox/sleep 1500)"))]
+    (t/is (:is-error r) (:content r))
+    (t/is (= :output-limit (get-in r [:details :error])))
+    (t/is (str/includes? (:content r) "exceeded"))))
