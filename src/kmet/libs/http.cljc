@@ -721,6 +721,10 @@
                (update :body json/generate-string))
         throw? (if (contains? opts :throw?) (:throw? opts) true)
         opts (-> opts
+                 ;; :method is documented as :get by default; curl-argv
+                 ;; upper-cases it and would NPE on nil (the native
+                 ;; transport defaults on its own).
+                 (update :method #(or % :get))
                  (assoc :throw? nil) ;; strip, normalized below
                  (normalize-follow-redirects))
         p (resolve-proxy (:url opts) (:proxy opts))

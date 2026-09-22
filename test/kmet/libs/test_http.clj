@@ -161,6 +161,17 @@
         (t/is (= "abc" (get (:headers r) "x-custom"))))
       (finally (close)))))
 
+(deftest-transports test-default-method
+  ;; :method omitted — the documented default is :get; the curl leg used
+  ;; to NPE in curl-argv on the missing keyword.
+  (let [[base close] (start-server
+                      (fn [s req-line _ _] (respond s "200 OK" req-line {})))]
+    (try
+      (let [r (http/request {:url (str base "/default")})]
+        (t/is (= 200 (:status r)))
+        (t/is (str/starts-with? (:body r) "GET /default")))
+      (finally (close)))))
+
 (deftest-transports test-headers-lowercased
   (let [[base close] (start-server
                       (fn [s _ _ _] (respond s "200 OK" "ok" {"X-Custom" "abc"})))]
