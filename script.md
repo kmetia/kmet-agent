@@ -10,12 +10,15 @@ set is read/write/edit/bash; the grep/find/ls search tools ship as separate
 opt-in extensions). The one thing already in place is measurement — per-tool
 result-token attribution — so the build/no-build decision can be made on data.
 
-Status: **T0 measured and analysed** (results below). The numbers rewrite the
-premise rather than kill it: maki's read-share did not transfer — bash
-dominates — but ~75% of all result tokens are still the find/read workload; it
-leaks through bash (`cat`/`head`/`rg`) instead of the `read` tool. T1 is
-re-aimed at that workload, and its tool-bridge design is recorded below.
-Implementation not started.
+Status: **T0 measured and analysed** (results below); **T1 design settled**
+(tool bridge, capability table and implementation plan below: resolution
+aligned with normal dispatch, inner calls always async promises, no tool-call
+hooks). The numbers rewrote the premise rather than killed it: maki's
+read-share did not transfer — bash dominates — but ~75% of all result tokens
+are still the find/read workload; it leaks through bash (`cat`/`head`/`rg`)
+instead of the `read` tool, and T1 is aimed there. T1 implementation not
+started. T2 folds the mcp-adapter's mcpScript onto the same engine; T3 is the
+self-exec/RPC tier.
 
 ## The idea and the economics (maki.sh)
 
@@ -43,6 +46,7 @@ question is measured before anything is built. It does differ — see
 | partial output on interrupt | ✅ bash returns streamed output + "Command aborted" |
 | compaction | ✅ `kmet.app.compaction` (LLM summarization) |
 | visibility (tokens/cost) | ✅ footer: ↑in ↓out R/W cache, $cost, context % |
+| `mcpScript` (scripted MCP calls) | ✅ mcp-adapter: its own `bb`-subprocess JSON-lines RPC engine + output guard — T2 retires it into the shared script engine |
 | `code_execution` (script + distilled output) | ❌ — the candidate change |
 | per-tool token attribution | ✅ measurement: every tool-result entry carries `:result-tokens`, `/session` shows the per-tool breakdown |
 
@@ -152,7 +156,7 @@ before any new engine; T1 must capture the rest.
 ## Design investigation (what was verified, not assumed)
 
 The full discussion explored four ways to run model-written code. Recorded here
-so T1/T2 don't re-litigate it:
+so T1–T3 don't re-litigate it:
 
 1. **In-process eval on a thread + SCI.** bb and jolt both have `Thread`;
    thread termination does **not** exist on either host: `Thread.stop` throws
@@ -197,12 +201,29 @@ on jolt if a script evaluator wants `:interrupt-fn` uniformly.
   Results above.
 - **T1 — thin script tool.** One in-process SCI context per call, tools
   injected as fns, eval on a daemon thread, `:interrupt-fn` + timeout + output
-  guard. No process, no daemon, no protocol. Known limitation: host-native
-  runaway code can't be aborted (abandoned daemon thread; the agent survives).
-  The tool bridge is specified below.
-- **T2 — `kmet --script` (self-exec) and/or `--mode rpc`.** Only with a
+  guard. No process, no daemon, no protocol. Inner calls resolve through the
+  normal registry path, are always async, and fire no tool-call hooks (below).
+  Known limitation: host-native runaway code can't be aborted (abandoned
+  worker; the agent survives). The tool bridge and implementation plan are
+  below.
+- **T2 — mcp-adapter rides the shared engine.** The adapter's `mcpScript`
+  tool and runtime (`extensions/mcp-adapter/src/extensions/mcp_adapter/script.clj`:
+  its own `bb`-subprocess JSON-lines RPC runtime, no host access) retire into
+  T1's engine — the adapter contributes its MCP tools to the same sandbox and
+  the same output contract instead of shipping its own runtime. The bridge
+  must therefore accept extension-contributed tool sources, not only the kmet
+  registry; mcpScript's `emit`/console output maps onto T1's result contract
+  and `:script-mode` gating moves to the shared registration. Isolation
+  consequence, recorded: mcpScript code runs in a fresh subprocess with no
+  host access, while the shared engine is T1's in-process SCI — scripted MCP
+  code gains the host surface the tool already has (like `bash`); the
+  subprocess was the adapter's separate-runtime device, not a kmet sandbox
+  guarantee. Surface change to carry over: mcpScript's `tools/call` derefs
+  internally (blocking); the shared bridge hands the script the promise, so
+  the MCP skill's call snippets gain an explicit deref.
+- **T3 — `kmet --script` (self-exec) and/or `--mode rpc`.** Only with a
   measured need (boot cost/call frequency) or a second consumer. The tool
-  contract (description/skill/API) should survive T1→T2 untouched.
+  contract (description/skill/API) should survive T1→T3 untouched.
 
 ## T1 design — the tool bridge
 
@@ -215,6 +236,10 @@ Decisions from the design pass, so implementation doesn't re-derive them.
   sandbox). Active is exactly what the model sees in its tool schema — this
   respects `set-active-tools!`, picks up extension tools automatically, and
   keeps discovery equal to callability.
+- Resolution is the normal path (landed as T1 prep): `get-tool` now reads
+  through `get-all-tools` (custom shadows built-in, pi's registry layering),
+  so the name the script sees listed is the record `execute-tool` dispatches —
+  no separate bridge-side lookup.
 - The gate lives in the **bridge**, not in `execute-tool` (`execute-tool` is
   also called by the user-bash path, extensions and tests; global enforcement
   would change their behavior). Unknown/inactive names return
@@ -224,12 +249,22 @@ Decisions from the design pass, so implementation doesn't re-derive them.
 ### API
 
 ```
-(t/call "name" args)                  ; every active tool by name — the universal path
-(t/read args) (t/write args)          ; builtins, sugar over t/call (identical dispatch)
+(t/call "name" args)                  ; every active tool by name — returns a promise
+(t/read args) (t/write args)          ; builtins, sugar over t/call (same promise)
 (t/edit args) (t/bash args)
-(t/list) (t/describe "name")          ; discovery; describe is sanitized
+(t/list) (t/describe "name")          ; discovery; synchronous bridge-local reads
 ```
 
+- **Call fns return promises.** The call returns immediately with a promise
+  that settles with the verbatim result map; the script derefs when it needs
+  the value (`@(t/call "bash" {...})`). The mechanism is the mcpScript child
+  runtime's existing one (per-id `pending` promises, one reader thread;
+  concurrent calls from `future`s are safe) ported in-process — except the
+  bridge hands the script the promise instead of derefing internally, which
+  makes fan-out idiomatic: fire N calls, scan files locally meanwhile, deref.
+  One script call, one context entry, N inner calls that never enter context.
+- `list`/`describe` are the exception: bridge-local reads of the active-set
+  registry (no dispatch), so they stay synchronous.
 - Built-in fns are generated for the four builtins unconditionally (fixed,
   doc-able surface); if one is disabled, the gate produces the clear "not
   active" error.
@@ -249,15 +284,30 @@ Decisions from the design pass, so implementation doesn't re-derive them.
   `:tool-execution-*` events, runs hooks, and appends `:role :tool` entries to
   context and session — exactly the cost the script tool exists to avoid.
   Inner results stay out of context; only the script's output enters.
-- Result map returned **verbatim**: `{:content :is-error :details :truncation
+- Result map settled **verbatim**: `{:content :is-error :details :truncation
   :images}`. Scripts branch on `:is-error` instead of catching; do not unwrap
   `:content` (it can be a block vector) or hide `:details` (exit codes, diff,
   full-output path).
+- **Always async.** The bridge never runs a tool's `:execute` on the
+  interpreter thread: each call dispatches to a worker and returns a promise
+  the script derefs when it wants the value. In-flight calls don't block
+  dispatch — scripts fire calls, do local work (fs scans) meanwhile, then
+  deref — and the run `:signal` reaches the inner call, so Escape cancels it.
+- **Settlement.** Every dispatched promise settles when its tool returns —
+  success or `{:is-error true}`; a tool that observes the run `:signal` (bash
+  does) settles on cancel. The one non-settling case is a tool implementation
+  that neither returns nor honors `:signal`: a deref of that promise blocks
+  host-side, and the run's deadline abandons the interpreter thread (T1's
+  accepted host-native-runaway limitation).
+- **No tool-call hooks.** Inner calls never fire `on-tool-call` /
+  `on-tool-result` — no synthetic tool-call ids, no hook routing. An
+  extension that must gate scripted tool use gates the outer `script` call
+  itself.
 - Inner-call opts: `:signal` (the run cancel — Escape must kill inner bash
   children), `:ctx` (`build-extension-context`), `:on-update` collected into a
   call trace exposed at `:details {:calls [...]}` (mcpScript precedent), **no**
-  per-call UI events. A script may call tools from `future`s; the trace is an
-  atom.
+  per-call UI events. The trace is an atom — concurrent calls (the normal
+  fan-out case now that every call is a promise) append to it safely.
 
 ### Plumbing
 
@@ -267,36 +317,109 @@ Decisions from the design pass, so implementation doesn't re-derive them.
   names live from the registry, so mid-session register/unregister behaves
   like `active-tools` and `set-active-tools!`'s next-turn semantics hold.
 
-### Injection
+### Capabilities
 
-- Cached stdlib base + per-call fork (the extensions' `shared-context`
-  pattern; `kmet.loader.sci-loader`'s `:base` handles the merge-opts pitfalls).
-  Inject `slurp`/`spit`/`file-seq` (SCI's builtin core lacks them — same trick
-  as `extensions.cljc`), `babashka.fs`, `clojure.string`/`edn`/`set`, json.
-  The bridge namespace closes over per-call state (deadline, signal, trace),
-  which is why it is merged into the fork rather than cached.
-- The description must teach the boundary: **bulk scanning via
-  `babashka.fs`/`slurp`** (no truncation, no per-call overhead); tools are for
-  semantic queries (lsp/structural) and mutations.
+Settled surface. Verified against both SCI hosts (bb's bundled SCI and the
+jolt pin): value-shared `babashka.*` namespaces work in a context with **no
+`:classes`/`:imports` at all** — the extension context's `:classes {:allow
+:all}` is exactly what the script sandbox must not copy.
 
-### Open items
+| capability | surface | notes |
+|---|---|---|
+| `clojure.core` | SCI's builtin core (atoms, regex, `try`/`catch`, `with-out-str`, `promise`/`deliver`/`deref`) + host patches `slurp` `spit` `file-seq` | SCI's core lacks slurp/spit/file-seq, `future`, `pmap`, `sleep`, all `System/*` |
+| string/collections | `clojure.string` `clojure.set` `clojure.edn` `clojure.walk` | SCI builtins — `require` resolves out of the box |
+| fs | `babashka.fs` + `slurp`/`spit`/`file-seq` | the tools' own fs layer; bulk scanning is the tool's reason to exist |
+| process/shell | `babashka.process`: `sh` `shell` `process` | `$` is a macro — value-sharing can't carry it; `sh`/`shell` cover the need. This is what makes scan-and-filter work without context spill (`rg` output stays in the script) |
+| async | tool calls are promises (the API itself); host `future`/`pmap` injected as plain fns (`spawn` thunk, `pmap`) | SCI has **no** `future`/`pmap` and kmet's bb SCI ships no `sci.async`; `clojure.core.async` is unusable this way (`go`/`thread` are macros) |
+| json | `kmet.libs.json` `parse-string`/`generate-string` | the same codec the tools use |
+| cwd/env | the runtime cwd (`tool-util/*cwd*`) and `(env "HOME")` | SCI has no `System/getenv`; scripts must resolve relative paths like the tools do |
+| time | `now`/`sleep` host fns | any polling or scan-timeout loop needs them |
+| reader features | the host's own feature (`:bb` or `:jolt`) | kmet's convention — `:clj` matches both hosts and is not exposed |
+| output | `*out*`/`*err*` captured + the script's return value | T2 carries mcpScript's `emit`/console on top |
 
-- **Tool-call hooks.** `on-tool-call`/`on-tool-result` hooks live in the loop,
-  not `execute-tool` — inner calls bypass them, so an extension that blocks
-  `bash` is bypassed by a script. Option A: v1 exposes a read-only surface
-  (read + structural + lsp + fs libs): no bypass, and it matches the measured
-  workload. Option B: route inner calls through the hooks with synthetic
-  `:tool-call-id`s and the outer assistant message. Decide before scripts get
-  mutation tools.
-- **`get-tool` vs `get-all-tools` precedence.** Names come from
-  `get-all-tools` (custom wins via `merge`) but dispatch resolves through
-  `get-tool` (built-in wins via `or`) — a shadowed name would execute a
-  different tool than the one listed. Fix custom-wins before relying on
-  name→record parity.
-- **Abort/timeout.** `:interrupt-fn` aborts interpreted code; the deadline is
-  checked before each dispatch and the run signal is passed to inner calls; a
-  host-native call already in flight is not preemptible (same limitation as
-  host-native runaway code).
+Excluded deliberately: Java interop (empty `:classes`/`:imports` — host fns
+hide their own), `kmet.app.*`/`kmet.tui.*`/`kmet.extension` (the extension
+contract is not the script contract), `kmet.loader`, arbitrary `require` of
+Maven deps (dependency resolution is an extension-manifest feature), and
+network (`kmet.libs.http` stays out until measured; the single-boundary rule
+would still apply if it lands).
+
+Mechanics: cached stdlib base + per-call fork (the extensions'
+`shared-context` pattern; `kmet.loader.sci-loader`'s `:base` handles the
+merge-opts pitfalls). `babashka.fs`/`.process` must be host-`require`d before
+their public fns are value-shared (bb preloads them, jolt does not — both
+verified). The bridge namespace closes over per-call state (deadline, signal,
+trace), which is why it is merged into the fork rather than cached.
+
+The description must teach the boundary: **bulk scanning via
+`babashka.fs`/`slurp`/`sh`** (no truncation, no per-call overhead); tools are
+for semantic queries (lsp/structural) and mutations.
+
+### Settled decisions
+
+- **Tool resolution = normal tools.** One resolution path: `get-tool` reads
+  through `get-all-tools` (custom shadows built-in), so listing and dispatch
+  can never disagree. Landed as T1 prep.
+- **Inner calls always async, never inline.** `t/call` (and its sugars)
+  returns a promise the script derefs; dispatch never blocks the interpreter,
+  and the run `:signal` reaches the inner call so Escape cancels it. Scripts
+  fan out freely — one `script` call can run N inner calls in parallel.
+- **No hooks.** `on-tool-call` / `on-tool-result` do not see script-inner
+  calls (they stay a turn-level mechanic). Consequence: an extension's
+  per-tool gate — e.g. a bash guard — does not apply to scripted calls; gate
+  the `script` tool itself to block the whole surface. Mutation tools ride the
+  same bridge; the callable set is every active tool, not a read-only subset.
+
+## T1 implementation plan
+
+Placement: **builtin** (`src/`), not an opt-in extension — the measured
+workload is ~75% of all result tokens; an opt-in tool would not move it. The
+builtin set grows by one (read/write/edit/bash + `script`); existing tool
+descriptions are untouched. No settings gate in v1 (mcpScript's `:script-mode`
+precedent is available if the prompt impact measures badly).
+
+1. **Tool** — `src/kmet/app/tools/script.clj`: a `script` record
+   (name/label/description, params `code` + `timeoutMs`, `:streams? true`),
+   registered in `src/kmet/app/tools/registry.clj`'s built-in map. The
+   description nags at the measured workload (scan/filter many files, distilled
+   output only; promises + deref; fs/`sh` for bulk, tools for semantic queries
+   and mutations), with the usual `:prompt-snippet`/`:prompt-guidelines` shape.
+   Default timeout 30s (mcpScript parity; `timeoutMs` overrides).
+2. **Engine** — same namespace (split only if it grows): cached stdlib base
+   (a `defonce` atom, the extensions' `shared-context` pattern) + per-call fork
+   through `kmet.loader.sci-loader`'s `:base` (it handles the merge-opts
+   pitfalls) with the per-call bridge merged in.
+3. **Capabilities** — the table above as value maps: host-`require`
+   `babashka.fs`/`babashka.process` before sharing their public fns (bb
+   preloads, jolt does not); `slurp`/`spit`/`file-seq` patches on
+   `clojure.core`; `clojure.string`/`set`/`edn`/`walk`; json; cwd/env/now/sleep;
+   `:features #{:bb}` or `#{:jolt}`; **no** `:classes`/`:imports`.
+4. **Bridge** — `t/call` + the builtin sugars + `t/list`/`t/describe`; the
+   active-set gate (live registry ∩ the enabled-tools dynamic var, `script`
+   excluded; unknown/inactive → `{:is-error true}` with the active list);
+   dispatch on a host worker returning a promise; `:signal`/`:ctx` passed to
+   `execute-tool`; trace atom at `:details {:calls [...]}`; never
+   `execute-tool-calls-*`, never the hooks.
+5. **Deadlines** — eval on a daemon thread; `:interrupt-fn` checks the deadline
+   and the run signal; on timeout the tool returns partial output +
+   `:is-error` and abandons the thread (the documented limitation); inner
+   promises settle when their own tools settle.
+6. **Output** — capture `*out*`/`*err*` + the return value; cap with the tools'
+   50KB byte convention and the truncation metadata shape
+   (`kmet.app.bash-executor`'s truncation + the mcp-adapter guard's semantics
+   are the precedents — no extension dependency); stream partial output through
+   `on-update` like bash.
+7. **Tests** — `test/kmet/app/test_script.clj` (registered in
+   `kmet.tasks.runner/all-namespaces`): gate, promise fan-out/deref, capability
+   smoke (fs/slurp/sh/json/spawn), no-hooks proof, spin-loop abort, output +
+   trace contract, excluded surface (`System/*`, `kmet.app.*`, arbitrary
+   `require`).
+8. **Verify** — after adoption, re-run the T0 measurement (`/session` Tool
+   Results against the 54.8%/41.6% split; the `--debug` per-tool report): bash
+   file-view/search share is the number the tool exists to move.
+9. **T2 seam** — keep the tool source parameterized (registry today,
+   extension-contributed catalogs later) so the mcp-adapter convergence is an
+   addition, not a refactor.
 
 ## References
 
@@ -315,7 +438,10 @@ Decisions from the design pass, so implementation doesn't re-derive them.
 - `src/kmet/modes/interactive.clj` — the `/session` **Tool Results** section.
 - `src/kmet/app/event_bus.clj` — event vocabulary shared with the TUI (the
   serialization seam a future RPC mode would use).
-- `kmet.loader.sci-loader` — `:base` fork (per-call contexts for T2's daemon),
+- `kmet.loader.sci-loader` — `:base` fork (per-call contexts for T3's daemon),
   `:interrupt-fn` support.
+- `extensions/mcp-adapter/src/extensions/mcp_adapter/script.clj` and
+  `src/skills/mcp/SKILL.md` — mcpScript's subprocess runtime and tool surface
+  (the T2 convergence target).
 - pi: `~/src/cvstree/pi/packages/coding-agent/docs/rpc.md` (stdio RPC mode) and
   `packages/protocol` (transport-neutral CBOR, remote sessions).
