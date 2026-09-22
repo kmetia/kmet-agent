@@ -2174,54 +2174,47 @@
    (PATH names what failed — the result map has no extension name to
    report)."
   [path]
-  ;; `set!` on a dynamic var whose only binding is the root throws on Jolt
-  ;; (the JVM/bb set the root); `jolt -m`/`run` leaves user code with just
-  ;; that root binding, and library sources open with
-  ;; (set! *warn-on-reflection* ...) — a dep load would fail. The no-op
-  ;; thread binding gives those set! forms a frame to write; popping it
-  ;; restores the root untouched.
-  (binding [*warn-on-reflection* *warn-on-reflection*]
-    (let [f (io/file path)]
-      (try
-        (let [{:keys [name kind artifact entry-ns file declared-loaders legacy-loader?]}
-              (resolve-extension path)
-              loader-kind (select-loader-kind declared-loaders)]
-          (if-not loader-kind
-            {:extension name
-             :path path
-             :error nil
-             :skipped true
-             :reason :unsupported-loader
-             :declared-loaders declared-loaders
-             :available-loaders (host-loader-preference)}
-            (let [ext (map->Extension
-                       {:name name
-                        :path (str (fs/canonicalize f))
-                        :kind kind
-                        :loader-kind loader-kind
-                        :entry-ns (atom nil)
-                        :loader (atom nil)
-                        :jars (atom [])
-                        :api (atom nil)
-                        :deregister-fns (atom [])
-                        :initialized? (atom false)})]
-              (try
-                (when legacy-loader?
-                  (binding [*out* *err*]
-                    (println "Warning: extension" name
-                             "has no :loader in extension.edn — assuming"
-                             (pr-str default-loaders))))
-                (let [jar? (jar-artifact? artifact)
-                      deps (when artifact
-                             (if jar?
-                               (:deps (edn/read-string
-                                       (or (jar-entry-source (:root artifact) "deps.edn") "{}")))
-                               (deps-of-root (:root artifact))))
-                      jar-info (when jar? (jar-namespaces (:root artifact)))
-                      owns-ns? (if artifact
-                                 (fn [ns-sym] (artifact-owns-ns? artifact jar-info ns-sym))
-                                 (constantly false))
-                      deps-resolver (make-deps-resolver deps (:jars ext))
+  (let [f (io/file path)]
+    (try
+      (let [{:keys [name kind artifact entry-ns file declared-loaders legacy-loader?]}
+            (resolve-extension path)
+            loader-kind (select-loader-kind declared-loaders)]
+        (if-not loader-kind
+          {:extension name
+           :path path
+           :error nil
+           :skipped true
+           :reason :unsupported-loader
+           :declared-loaders declared-loaders
+           :available-loaders (host-loader-preference)}
+          (let [ext (map->Extension
+                     {:name name
+                      :path (str (fs/canonicalize f))
+                      :kind kind
+                      :loader-kind loader-kind
+                      :entry-ns (atom nil)
+                      :loader (atom nil)
+                      :jars (atom [])
+                      :api (atom nil)
+                      :deregister-fns (atom [])
+                      :initialized? (atom false)})]
+            (try
+              (when legacy-loader?
+                (binding [*out* *err*]
+                  (println "Warning: extension" name
+                           "has no :loader in extension.edn — assuming"
+                           (pr-str default-loaders))))
+              (let [jar? (jar-artifact? artifact)
+                    deps (when artifact
+                           (if jar?
+                             (:deps (edn/read-string
+                                     (or (jar-entry-source (:root artifact) "deps.edn") "{}")))
+                             (deps-of-root (:root artifact))))
+                    jar-info (when jar? (jar-namespaces (:root artifact)))
+                    owns-ns? (if artifact
+                               (fn [ns-sym] (artifact-owns-ns? artifact jar-info ns-sym))
+                               (constantly false))
+                    deps-resolver (make-deps-resolver deps (:jars ext))
             ;; Force the closure resolution HERE, in host scope: during the
             ;; context's SCI eval, require/requiring-resolve run through the
             ;; loader's source provider (bb hosts the interpreter), and
@@ -2230,19 +2223,19 @@
             ;; inside the eval re-enters this resolver until the stack
             ;; overflows. Resolved up front, the provider only reads the
             ;; cache.
-                      _ (when deps-resolver (deps-resolver))
+                    _ (when deps-resolver (deps-resolver))
             ;; Single-file extensions have no artifact: the file itself is
             ;; the entry namespace, served as a literal source (its ns is
             ;; read here so the loader knows what to ask for).
-                      file-source (when-not artifact (slurp file))
-                      file-ns (when-not artifact
-                                (or (some-> (ns-form-of-source file-source) second)
-                                    (throw (ex-info (str "Extension " name
-                                                         " file does not start with (ns ...)")
-                                                    {:path path}))))
-                      l (create-loader loader-kind name artifact owns-ns? deps-resolver
-                                       (when-not artifact
-                                         {file-ns {:file (str file) :source file-source}}))]
+                    file-source (when-not artifact (slurp file))
+                    file-ns (when-not artifact
+                              (or (some-> (ns-form-of-source file-source) second)
+                                  (throw (ex-info (str "Extension " name
+                                                       " file does not start with (ns ...)")
+                                                  {:path path}))))
+                    l (create-loader loader-kind name artifact owns-ns? deps-resolver
+                                     (when-not artifact
+                                       {file-ns {:file (str file) :source file-source}}))]
                 ;; bb-only: a native bb-bundled lib's Maven copy is served to
                 ;; SCI contexts (dep-source wins over the host classpath) and
                 ;; fails there on classes the GraalVM image does not expose;
@@ -2250,54 +2243,54 @@
                 ;; kmet.libs.* seam or a pure-Clojure alternative. Libs whose
                 ;; bundled port replaces the artifact wholesale were dropped
                 ;; from the closure already (bundled-artifacts).
-                  #?(:bb
-                     (doseq [lib (keys deps)
-                             :let [lib (str lib)]
-                             :when (and (contains? bb-bundled-libs lib)
-                                        (not (contains? bundled-artifacts lib)))]
-                       (binding [*out* *err*]
-                         (println "Warning: extension" (:name ext) "pins" lib
-                                  "which babashka bundles natively — its Maven copy"
-                                  "cannot run under SCI and the bundled one is not"
-                                  "shared with extension contexts; use the relevant"
-                                  "kmet.libs.* seam."))))
-                  (reset! (:loader ext) l)
-                  (if artifact
-                    (do
-                      (when-not (:source (artifact-source artifact entry-ns))
-                        (throw (ex-info (str "extension.edn :entry not found: " entry-ns)
-                                        {:path path :entry entry-ns})))
+                #?(:bb
+                   (doseq [lib (keys deps)
+                           :let [lib (str lib)]
+                           :when (and (contains? bb-bundled-libs lib)
+                                      (not (contains? bundled-artifacts lib)))]
+                     (binding [*out* *err*]
+                       (println "Warning: extension" (:name ext) "pins" lib
+                                "which babashka bundles natively — its Maven copy"
+                                "cannot run under SCI and the bundled one is not"
+                                "shared with extension contexts; use the relevant"
+                                "kmet.libs.* seam."))))
+                (reset! (:loader ext) l)
+                (if artifact
+                  (do
+                    (when-not (:source (artifact-source artifact entry-ns))
+                      (throw (ex-info (str "extension.edn :entry not found: " entry-ns)
+                                      {:path path :entry entry-ns})))
             ;; the source provider validates the entry's ns form (strict
             ;; layout + allowed requires) at locate, before anything
             ;; evaluates
-                      (loader/load l {:kind :ns :name (str entry-ns)})
-                      (reset! (:entry-ns ext) entry-ns))
-                    (do
-                      (loader/load l {:kind :ns :name (str file-ns)})
-                      (reset! (:entry-ns ext) file-ns)))
-                  (let [init-var (extension-var ext @(:entry-ns ext) 'init)]
-                    (when-not init-var
-                      (throw (ex-info (str "Extension " (:name ext)
-                                           " does not define an init fn")
-                                      {:path path})))
-                    (let [api (create-extension-api ext)]
-                      (reset! (:api ext) api)
-                      ((loader-aware ext (deref init-var)) api)
-                      (reset! (:initialized? ext) true))))
-                (swap! extensions conj ext)
-                {:extension (:name ext) :error nil
-                 :loader-kind loader-kind}
-                (catch Exception e
-                  (unload-extension! ext)
-                  {:extension nil
-                   :path path
-                   :error (or (ex-message e)
-                              (str "load failed: " (.getName (class e))))})))))
-        (catch Exception e
-          {:extension nil
-           :path path
-           :error (or (ex-message e)
-                      (str "load failed: " (.getName (class e))))})))))
+                    (loader/load l {:kind :ns :name (str entry-ns)})
+                    (reset! (:entry-ns ext) entry-ns))
+                  (do
+                    (loader/load l {:kind :ns :name (str file-ns)})
+                    (reset! (:entry-ns ext) file-ns)))
+                (let [init-var (extension-var ext @(:entry-ns ext) 'init)]
+                  (when-not init-var
+                    (throw (ex-info (str "Extension " (:name ext)
+                                         " does not define an init fn")
+                                    {:path path})))
+                  (let [api (create-extension-api ext)]
+                    (reset! (:api ext) api)
+                    ((loader-aware ext (deref init-var)) api)
+                    (reset! (:initialized? ext) true))))
+              (swap! extensions conj ext)
+              {:extension (:name ext) :error nil
+               :loader-kind loader-kind}
+              (catch Exception e
+                (unload-extension! ext)
+                {:extension nil
+                 :path path
+                 :error (or (ex-message e)
+                            (str "load failed: " (.getName (class e))))})))))
+      (catch Exception e
+        {:extension nil
+         :path path
+         :error (or (ex-message e)
+                    (str "load failed: " (.getName (class e))))}))))
 
 (defn unload-extension!
   "Unload an extension: shutdown (if initialized), deregister everything it

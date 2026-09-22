@@ -71,10 +71,8 @@
 
 (defn- dir-clj-files
   "Every .clj/.cljc/.jolt file under DIR — top level and nested, /-separated.
-   One `**.{…}` pattern rather than `*.clj` + `**/*.clj`: on Jolt/Windows the
-   separator-bearing patterns match nothing (the glob's `/` never matches the
-   platform's backslash), while `**` crosses separators there and the brace
-   set matches the same files on bb/JVM as the six old globs did."
+   One `**.{…}` pattern rather than a `*.{…}` + `**/*.{…}` pair: `**`
+   crosses separators on both hosts and matches top-level files too."
   [dir]
   (map slashify (fs/glob dir "**.{clj,cljc,jolt}")))
 

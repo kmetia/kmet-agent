@@ -362,15 +362,6 @@
 
 (def ^:private curl-timeout-seconds 120)
 
-(defn- path-dirs
-  "PATH entries split on the OS separator. Jolt answers
-   java.io.File/pathSeparator as \":\" even on Windows (its File surface
-   is POSIX-shaped), so babashka.fs/exec-paths — and the default `which`
-   lookup — are wrong there; key off the OS instead."
-  []
-  (remove str/blank? (str/split (or (System/getenv "PATH") "")
-                                (if process/windows-os? #";" #":"))))
-
 (def curl-available?
   "Resolved once: true when curl is on PATH (the curl transport needs it
    — every request in :curl mode, SOCKS/https-scheme proxies and Jolt
@@ -378,10 +369,8 @@
   (delay
     (try
       ;; fs/which honors Windows' PATHEXT (exe/com/bat/cmd) and the
-      ;; executable bit elsewhere; explicit :paths because exec-paths is
-      ;; jolt-broken on Windows (see path-dirs). No shell: Jolt on Windows
-      ;; cannot spawn one either.
-      (some? (fs/which "curl" {:paths (path-dirs)}))
+      ;; executable bit elsewhere.
+      (some? (fs/which "curl"))
       (catch Exception _ false))))
 
 (defn- watch-cancel!
