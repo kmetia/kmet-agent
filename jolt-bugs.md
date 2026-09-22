@@ -179,16 +179,18 @@ app`, the loader dep) and a single-file extension whose source opens with
 `(set! *warn-on-reflection* true)` loads through `load-extension!` on both
 loader kinds (:jolt and :sci) — re-verified 2026-09-22.
 
-**Upstream status:** four filed open items — the SCI IVar gap
+**Upstream status:** five filed open items — the SCI IVar gap
 [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) (`deferred`), with
 its fix at [babashka/sci#1093](https://github.com/babashka/sci/pull/1093)
 (re-checked 2026-09-22: open, head `1295142f`, unchanged), so the
-`jolt/deps.edn` SCI pin stays; and the three Windows runtime gaps found while
-running the smoke, filed 2026-09-22 as
-[jolt#1107](https://github.com/jolt-lang/jolt/issues/1107) (sockets),
-[jolt#1108](https://github.com/jolt-lang/jolt/issues/1108) (process spawning)
-and [jolt#1109](https://github.com/jolt-lang/jolt/issues/1109)
-(`PushbackReader.close`). The Windows runtime seams (#1074/#1077), the
+`jolt/deps.edn` SCI pin stays; and the Windows findings from the smoke, filed
+2026-09-22 as [jolt#1107](https://github.com/jolt-lang/jolt/issues/1107)
+(sockets), [jolt#1108](https://github.com/jolt-lang/jolt/issues/1108)
+(process spawning), [jolt#1109](https://github.com/jolt-lang/jolt/issues/1109)
+(`PushbackReader.close`) and
+[jolt#1110](https://github.com/jolt-lang/jolt/issues/1110) (file-surface
+parity: `Files.isHidden`, path separators). The Windows runtime seams
+(#1074/#1077), the
 `set!`/entry-binding gap (#1079/#1085), the glob separator (#1086) and
 ProcessHandle (#1087) are all fixed upstream, with their kmet workarounds
 removed and the Windows smoke run. Every other ticket this file tracked is
@@ -352,4 +354,23 @@ cannot be deleted while it is loaded *or after*
 their `fs/delete-tree` teardown there — and
 `kmet.tasks.changed/read-ns-form` leaks one handle per scanned file. Fix:
 `close` should close `(vector-ref (jhost-state self) 0)`.
+
+### Windows file-surface parity — [jolt#1110](https://github.com/jolt-lang/jolt/issues/1110)
+
+**Area:** `host/chez/java/nio-file.ss`, `java.io.File` statics, path
+rendering.
+
+**7. `Files.isHidden` is name-based on every platform, and `File`/`Path`
+stay POSIX-shaped on Windows.** The JDK answers `Files.isHidden` from the
+DOS hidden attribute on Windows (a dot-prefixed file without it is
+visible, a non-dotted file with it is hidden); jolt tests the leading dot
+everywhere (nio-file.ss:528), inverting the answer both ways —
+`babashka.fs/hidden?`/`glob` inherit it, so a `**.clj` glob selects
+different files on jolt than on bb (on a sample tree, `**.{clj,cljc,edn}`
+finds 460 under jolt vs 472 under bb). The `File.separator` statics, the
+`file.separator` property and path string rendering (`Paths.get`, `fs/path`,
+`fs/file`, `fs/relativize`) also stay POSIX (`/`) where the JVM uses `\`
+(`File.pathSeparator` is already `;`). No kmet workaround: no
+source root carries a dot-prefixed entry, and glob results are normalized
+to `/` before use.
 
