@@ -25,6 +25,10 @@
      (ffi/defcfn ^:private win-get-std-handle "GetStdHandle" [:int] :pointer)
      (ffi/defcfn ^:private win-set-std-handle "SetStdHandle" [:int :pointer] :int)
      (ffi/defcfn ^:private win-get-console-mode "GetConsoleMode" [:pointer :pointer] :int)
+     (ffi/defcfn ^:private win-get-console-output-cp "GetConsoleOutputCP" [] :uint)
+     (ffi/defcfn ^:private win-set-console-output-cp "SetConsoleOutputCP" [:uint] :int)
+     (ffi/defcfn ^:private win-get-console-cp "GetConsoleCP" [] :uint)
+     (ffi/defcfn ^:private win-set-console-cp "SetConsoleCP" [:uint] :int)
      (ffi/defcfn ^:private win-close-handle "CloseHandle" [:pointer] :int)
 
      (defn- open-console-handle
@@ -80,8 +84,16 @@
                    (t/is true "skipped: no console attached to this process"))
                (let [old-in (win-get-std-handle -10)
                      old-out (win-get-std-handle -11)
-                     before (console-mode-of in)]
+                     before (console-mode-of in)
+                     orig-out-cp (win-get-console-output-cp)
+                     orig-in-cp (win-get-console-cp)
+                     ;; force a non-UTF-8 code page so the switch is
+                     ;; observable however the console was configured
+                     before-out-cp 437
+                     before-in-cp 437]
                  (try
+                   (win-set-console-output-cp before-out-cp)
+                   (win-set-console-cp before-in-cp)
                    (win-set-std-handle -10 in)
                    (win-set-std-handle -11 out)
                    (let [t (win/create-terminal)]
@@ -93,6 +105,8 @@
                        (t/is (true? (term/started? t)))
                        (t/is (pos? (term/columns t)))
                        (t/is (pos? (term/rows t)))
+                       (t/is (= 65001 (win-get-console-output-cp))
+                             "start! put the console on the UTF-8 code page")
                        ;; WriteConsoleW — the console path of write-output
                        (term/write-output t " ")
                        (finally
@@ -100,7 +114,13 @@
                      (t/is (false? (term/started? t))))
                    (t/is (= before (console-mode-of in))
                          "stop! restored the exact console input mode")
+                   (t/is (= before-out-cp (win-get-console-output-cp))
+                         "stop! restored the console output code page")
+                   (t/is (= before-in-cp (win-get-console-cp))
+                         "stop! restored the console input code page")
                    (finally
+                     (win-set-console-output-cp orig-out-cp)
+                     (win-set-console-cp orig-in-cp)
                      (win-set-std-handle -10 old-in)
                      (win-set-std-handle -11 old-out)
                      (win-close-handle in)

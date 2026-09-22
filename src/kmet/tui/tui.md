@@ -112,6 +112,14 @@ atom change → reaction dirty → queued → frame flush runs it →
 | `kmet.tui.timers` | loop-owned timer registry (§6.1) |
 | `kmet.tui.wake` | park/wake primitive for the idle render loop (§6) |
 
+On Windows both backends put the attached console on the UTF-8 code page
+(65001) for the session — the in-process `chcp 65001`, restored by
+`stop!`/the shutdown hook — because a console left on its OEM code page
+(437 on en-US) renders UTF-8 output as mojibake (`ΓÇö` for an em dash).
+Jolt calls `SetConsoleOutputCP`/`SetConsoleCP` directly; bb spawns
+`chcp.com` (no FFI), which needs to share kmet's console — it does on a
+TTY. No-op on POSIX, when already UTF-8, or without a console.
+
 ---
 
 ## 2. The Hiccup DSL

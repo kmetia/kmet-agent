@@ -42,6 +42,10 @@
 (ffi/defcfn ^:private win-get-std-handle "GetStdHandle" [:int] :pointer)
 (ffi/defcfn ^:private win-get-console-mode "GetConsoleMode" [:pointer :pointer] :int)
 (ffi/defcfn ^:private win-set-console-mode "SetConsoleMode" [:pointer :uint] :int)
+(ffi/defcfn ^:private win-get-console-output-cp "GetConsoleOutputCP" [] :uint)
+(ffi/defcfn ^:private win-set-console-output-cp "SetConsoleOutputCP" [:uint] :int)
+(ffi/defcfn ^:private win-get-console-cp "GetConsoleCP" [] :uint)
+(ffi/defcfn ^:private win-set-console-cp "SetConsoleCP" [:uint] :int)
 (ffi/defcfn ^:private win-get-console-screen-buffer-info
   "GetConsoleScreenBufferInfo" [:pointer :pointer] :int)
 (ffi/defcfn ^:private win-write-console
@@ -63,6 +67,8 @@
 (def ^:private win-enable-virtual-terminal-input 0x0200)
 ;; Output-mode bit.
 (def ^:private win-enable-virtual-terminal-processing 0x0004)
+;; The code page the console is put on for the session (chcp 65001).
+(def ^:private win-utf8-codepage 65001)
 ;; PROCESSED|LINE|ECHO|WINDOW|MOUSE — everything raw mode must clear.
 (def ^:private win-raw-mode-clear 0x001F)
 (def ^:private win-read-buf-chars 1024)
@@ -104,15 +110,39 @@
     (when (or in-mode out-mode)
       {:in-mode in-mode :out-mode out-mode})))
 
+(defn- win-enter-utf8-codepage!
+  "Put the attached console's code pages on UTF-8 for the session, the
+   in-process `chcp 65001` — a console on its OEM code page (437 on
+   en-US) decodes any UTF-8 bytes written through it (child processes,
+   the redirected frame path) as mojibake. Answers {:out N :in M} of the
+   previous values for win-restore!; a nil entry means that side is not a
+   console (redirected, left alone). Answers nil when nothing changed."
+  [term]
+  (let [out-cp (when (:console-out? term) (win-get-console-output-cp))
+        in-cp (when (:console-in? term) (win-get-console-cp))]
+    (when (and out-cp (not= out-cp win-utf8-codepage))
+      (win-set-console-output-cp win-utf8-codepage))
+    (when (and in-cp (not= in-cp win-utf8-codepage))
+      (win-set-console-cp win-utf8-codepage))
+    (when (or out-cp in-cp) {:out out-cp :in in-cp})))
+
 ;; win-shutdown! writes through it (bracketed paste off) before it is
 ;; defined below, next to the other write paths.
 (declare win-write-string!)
 
-(defn- win-restore! [term]
+(defn- win-restore!
+  "Undo the session's console changes — raw modes first, then the UTF-8
+   code pages — through the record's atoms, so the shutdown hook and
+   stop! can both call it and only the first does the work."
+  [term]
   (when-let [saved @(:saved-mode term)]
     (when-let [m (:in-mode saved)] (win-set-mode! (:in-handle term) m))
     (when-let [m (:out-mode saved)] (win-set-mode! (:out-handle term) m))
-    (reset! (:saved-mode term) nil)))
+    (reset! (:saved-mode term) nil))
+  (when-let [{:keys [out in]} @(:saved-codepage term)]
+    (when out (win-set-console-output-cp out))
+    (when in (win-set-console-cp in))
+    (reset! (:saved-codepage term) nil)))
 
 (defn- win-shutdown!
   "stop! body for the Windows record: bracketed paste off, console modes
@@ -139,6 +169,7 @@
 (defn- win-enable-raw! [term]
   (when-not @(:running-ref term)
     (reset! (:saved-mode term) (win-enter-raw! term))
+    (reset! (:saved-codepage term) (win-enter-utf8-codepage! term))
     (reset! (:running-ref term) true)
     (try
       (win-write-string! term lib/BRACKETED-PASTE-ON)
@@ -325,7 +356,7 @@
 ;; ─── Backend ───────────────────────────────────────────────────────────
 
 (defrecord WindowsTerminal [in-handle out-handle console-in? console-out?
-                            running-ref saved-mode pending carry utf16-carry
+                            running-ref saved-mode saved-codepage pending carry utf16-carry
                             progress-interval-atom]
   term/ITerminal
   (start! [this _ _] (win-enable-raw! this))
@@ -362,6 +393,7 @@
                                     :console-out? (some? (win-console-mode out-handle))
                                     :running-ref (atom false)
                                     :saved-mode (atom nil)
+                                    :saved-codepage (atom nil)
                                     :pending (atom [])
                                     :carry (atom [])
                                     :utf16-carry (atom nil)
