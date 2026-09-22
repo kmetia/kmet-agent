@@ -1350,6 +1350,9 @@
               ;; replaces the typed text and waits for a second Enter.
               (do (if (str/starts-with? prefix "/")
                     (do (apply-selected-completion! this)
+                        ;; submit: the next message starts with a fresh
+                        ;; @-completion snapshot
+                        (ac/invalidate-file-cache!)
                         (when-let [cb @on-submit]
                           (cb (clojure.string/join "\n" (:lines @(:state-atom this))))))
                     (apply-selected-completion! this))
@@ -1384,7 +1387,9 @@
           nil
 
           (and (kb-match? this data "tui.input.submit") (not @disable-submit))
-          (do (when-let [cb @on-submit] (cb (clojure.string/join "\n" lines))) nil)
+          (do (ac/invalidate-file-cache!)
+              (when-let [cb @on-submit] (cb (clojure.string/join "\n" lines)))
+              nil)
 
           (kb-match? this data "tui.input.newLine")
           (do (add-new-line this) nil)
@@ -1607,8 +1612,14 @@
                 :top-border-fn-atom (atom nil)
                 :keybindings (atom keybindings)}))
 
-(defn editor-set-text! [editor text]
+(defn editor-set-text!
+  "Replace the editor text. A programmatic clear (submit, session switch,
+   app.clear) also ends the current @-completion message: a blank editor has
+   no snapshot left to keep."
+  [editor text]
   (cancel-autocomplete editor)
+  (when (str/blank? text)
+    (ac/invalidate-file-cache!))
   (let [old-text (editor-get-text editor)]
     ;; pi: push an undo snapshot when the content differs so programmatic
     ;; changes (submit-clear, external editor, app.clear) are undoable

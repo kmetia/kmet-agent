@@ -2,6 +2,7 @@
   "Tests for kmet.tui.autocomplete — slash command, argument, and file
    path completion via CombinedAutocompleteProvider."
   (:require [clojure.test :as t]
+            [clojure.string :as str]
             [kmet.tui.autocomplete :as ac]
             [babashka.fs :as fs]))
 
@@ -15,8 +16,19 @@
   (fs/create-dirs test-dir)
   (spit (str test-dir "/alpha.txt") "a")
   (spit (str test-dir "/beta.txt") "b")
+  (spit (str test-dir "/.gitignore") "ignored.txt\n*.tmp\n!keep.tmp\nbuild/\n!build/artifact.clj\n")
+  (spit (str test-dir "/ignored.txt") "i")
+  (spit (str test-dir "/junk.tmp") "j")
+  (spit (str test-dir "/keep.tmp") "k")
+  (spit (str test-dir "/.hidden.clj") "h")
   (fs/create-dirs (str test-dir "/nested"))
   (spit (str test-dir "/nested/gamma.md") "g")
+  (spit (str test-dir "/nested/xgamma.log") "x")
+  (spit (str test-dir "/nested/delta-two.md") "d")
+  (fs/create-dirs (str test-dir "/build"))
+  (spit (str test-dir "/build/artifact.clj") "x")
+  ;; the same dir path is reused across tests — start with a fresh snapshot
+  (ac/invalidate-file-cache!)
   (try
     (f)
     (finally
@@ -99,6 +111,179 @@
             s (ac/get-suggestions p ["@be"] 0 3 {:force false})]
         (t/is (some? s))
         (t/is (= ["@beta.txt"] (mapv :value (:items s))))))))
+
+(t/deftest at-fuzzy-walk-finds-nested-files
+  (with-temp-dir
+    (fn []
+      (let [p (make-provider)
+            s (ac/get-suggestions p ["@delta"] 0 6 {:force false})]
+        (t/is (some? s))
+        (t/is (= ["@nested/delta-two.md"] (mapv :value (:items s))))
+        (t/is (= ["nested/delta-two.md"] (mapv :description (:items s))))))))
+
+(t/deftest at-scoped-walk-completion
+  (with-temp-dir
+    (fn []
+      (let [p (make-provider)
+            s (ac/get-suggestions p ["@nested/gam"] 0 11 {:force false})]
+        (t/is (some? s))
+        (t/is (= ["gamma.md"] (mapv :label (take 1 (:items s)))))
+        (t/is (= ["@nested/gamma.md"] (mapv :value (take 1 (:items s)))))))))
+
+(t/deftest at-ranking-prefers-the-better-match
+  (with-temp-dir
+    (fn []
+      (let [p (make-provider)
+            s (ac/get-suggestions p ["@gamma"] 0 6 {:force false})]
+        (t/is (some? s))
+        ;; exact basename (gamma.md, 100) before substring (xgamma.log, 50)
+        (t/is (= ["gamma.md" "xgamma.log"] (mapv :label (:items s))))))))
+
+(t/deftest at-directory-suggestion
+  (with-temp-dir
+    (fn []
+      (let [p (make-provider)
+            s (ac/get-suggestions p ["@nest"] 0 5 {:force false})]
+        (t/is (some? s))
+        (t/is (= ["nested/"] (mapv :label (:items s))))
+        (t/is (= ["@nested/"] (mapv :value (:items s))))))))
+
+(t/deftest at-gitignore-prunes-ignored-entries
+  (with-temp-dir
+    (fn []
+      (let [p (make-provider)]
+        (t/is (nil? (ac/get-suggestions p ["@ignored"] 0 8 {:force false})))
+        (t/is (nil? (ac/get-suggestions p ["@junk"] 0 5 {:force false})))
+        (t/is (some? (ac/get-suggestions p ["@keep"] 0 5 {:force false})))
+        ;; a gitignored directory is pruned (negations inside it cannot win)
+        (t/is (nil? (ac/get-suggestions p ["@build"] 0 6 {:force false})))
+        (t/is (nil? (ac/get-suggestions p ["@artifact"] 0 9 {:force false})))))))
+
+(t/deftest at-includes-hidden-files
+  (with-temp-dir
+    (fn []
+      (let [p (make-provider)
+            s (ac/get-suggestions p ["@hidden"] 0 7 {:force false})]
+        (t/is (some? s))
+        (t/is (= ["@.hidden.clj"] (mapv :value (:items s))))))))
+
+(t/deftest at-snapshot-persists-until-invalidated
+  (with-temp-dir
+    (fn []
+      (let [p (make-provider)]
+        (t/is (some? (ac/get-suggestions p ["@beta"] 0 5 {:force false})))
+        (spit (str test-dir "/beta2.txt") "b2")
+        (t/is (nil? (ac/get-suggestions p ["@beta2"] 0 6 {:force false}))
+              "still the cached snapshot")
+        (ac/invalidate-file-cache!)
+        (t/is (some? (ac/get-suggestions p ["@beta2"] 0 6 {:force false})))))))
+
+(t/deftest at-caps-suggestions-at-20
+  (with-temp-dir
+    (fn []
+      (doseq [i (range 30)]
+        (spit (str test-dir "/cap-" i ".txt") "c"))
+      (ac/invalidate-file-cache!)
+      (let [p (make-provider)
+            s (ac/get-suggestions p ["@cap"] 0 4 {:force false})]
+        (t/is (some? s))
+        (t/is (= 20 (count (:items s))))))))
+
+(t/deftest gitignore-rule-semantics
+  (let [parsed #'ac/parse-gitignore-rules
+        ignored? #'ac/ignored?
+        verdict (fn [text rel dir?]
+                  (ignored? [{:prefix "" :rules (parsed text)}] rel dir?))]
+    (t/is (= :ignored (verdict "*.log\n" "a.log" false)))
+    (t/is (= :ignored (verdict "a.log" "sub/deep/a.log" false))
+          "an unanchored pattern matches at any depth")
+    (t/is (= :unignored (verdict "*.log\n!important.log\n" "important.log" false))
+          "the last matching rule wins")
+    (t/is (= :ignored (verdict "/top.txt\n" "top.txt" false)))
+    (t/is (nil? (verdict "/top.txt\n" "sub/top.txt" false))
+          "a leading slash anchors to the rules file's directory")
+    (t/is (= :ignored (verdict "build/\n" "build" true)))
+    (t/is (nil? (verdict "build/\n" "build" false))
+          "a trailing slash matches directories only")
+    (t/is (nil? (verdict "build/\n" "mybuild" true)))
+    (t/is (= :ignored (verdict "build/\n" "a/build/artifact.clj" false))
+          "anything below an ignored directory is ignored")
+    (t/is (= :ignored (verdict "**/generated\n" "a/b/generated" true)))
+    (t/is (= :ignored (verdict "docs/*.md\n" "docs/x.md" false)))
+    (t/is (nil? (verdict "docs/*.md\n" "other/x.md" false)))
+    (t/is (= :ignored (verdict "\\#file\n" "#file" false))
+          "a backslash escapes a leading hash")
+    (t/is (= :ignored (verdict "[]\n*.log\n" "a.log" false))
+          "an uncompilable pattern is skipped, not fatal for the file")))
+
+(t/deftest gitignore-nested-layer-precedence
+  (let [parsed #'ac/parse-gitignore-rules
+        ignored? #'ac/ignored?
+        stack [{:prefix "" :rules (parsed "*.log")}
+               {:prefix "nested" :rules (parsed "!xgamma.log")}]]
+    (t/is (= :ignored (ignored? stack "nested/other.log" false)))
+    (t/is (= :unignored (ignored? stack "nested/xgamma.log" false))
+          "a deeper .gitignore re-includes what the root ignored")
+    (t/is (= :ignored (ignored? stack "xgamma.log" false))
+          "a nested layer only applies to its subtree")))
+
+(t/deftest bare-at-lists-walk-entries-not-ignored
+  (with-temp-dir
+    (fn []
+      (let [p (make-provider)
+            s (ac/get-suggestions p ["@"] 0 1 {:force false})]
+        (t/is (some? s))
+        (t/is (some #(= "@beta.txt" (:value %)) (:items s)))
+        (t/is (not-any? #(str/includes? (:value %) "ignored.txt") (:items s)))
+        (t/is (not-any? #(str/includes? (:value %) "junk.tmp") (:items s)))
+        (t/is (not-any? #(str/includes? (:value %) "@build") (:items s)))))))
+
+(t/deftest git-info-exclude-is-honored
+  (with-temp-dir
+    (fn []
+      (fs/create-dirs (str test-dir "/.git/info"))
+      (spit (str test-dir "/.git/info/exclude") "excluded.txt\n")
+      (spit (str test-dir "/excluded.txt") "x")
+      (ac/invalidate-file-cache!)
+      (let [p (make-provider)]
+        (t/is (nil? (ac/get-suggestions p ["@excluded"] 0 9 {:force false})))))))
+
+(t/deftest scoped-walk-respects-parent-gitignore
+  (with-temp-dir
+    (fn []
+      (spit (str test-dir "/nested/sub.tmp") "x")
+      (let [p (make-provider)
+            s (ac/get-suggestions p ["@nested/"] 0 8 {:force false})]
+        ;; `*.tmp` lives in the root .gitignore; a scoped walk must still see it
+        (t/is (some? s))
+        (t/is (not-any? #(str/includes? (:value %) "sub.tmp") (:items s)))
+        (t/is (nil? (ac/get-suggestions p ["@nested/sub"] 0 11 {:force false})))))))
+
+(t/deftest at-scopes-are-cwd-only
+  (with-temp-dir
+    (fn []
+      (let [p (make-provider)]
+        (doseq [token ["@/" "@/tmp/x" "@C:/x" "@~/x" "@../x"]]
+          (t/is (nil? (ac/get-suggestions p [token] 0 (count token) {:force false}))
+                token))
+        (t/is (some? (ac/get-suggestions p ["@./nested/gam"] 0 13 {:force false}))
+              "a ./ scope stays inside the cwd")))))
+
+(t/deftest file-cache-evicts-oldest-snapshot
+  (with-temp-dir
+    (fn []
+      (doseq [i (range 9)]
+        (let [d (str test-dir "/scope-" i)]
+          (fs/create-dirs d)
+          (spit (str d "/keep.txt") "k")))
+      (ac/invalidate-file-cache!)
+      (let [p (make-provider)]
+        (doseq [i (range 9)]
+          (let [s (str "@scope-" i "/")]
+            (ac/get-suggestions p [s] 0 (count s) {:force false})))
+        (t/is (= 8 (count @@#'ac/file-cache)))
+        (t/is (some? (ac/get-suggestions p ["@scope-0/"] 0 9 {:force false}))
+              "an evicted scope re-walks on demand")))))
 
 (t/deftest base-path-fn-is-resolved-per-call
   (with-temp-dir

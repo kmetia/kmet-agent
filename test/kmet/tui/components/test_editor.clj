@@ -810,6 +810,7 @@
   (babashka.fs/create-dirs ac-test-dir)
   (spit (str ac-test-dir "/alpha.txt") "a")
   (spit (str ac-test-dir "/beta.txt") "b")
+  (ac/invalidate-file-cache!)
   (try
     (f)
     (finally
@@ -892,6 +893,23 @@
         (t/is (= :regular @(:autocomplete-state e)))
         (core/handle-input e K-TAB)
         (t/is (= "@beta.txt " (editor/editor-get-text e)))))))
+
+(t/deftest test-autocomplete-message-boundary-invalidates-file-cache
+  (with-ac-files
+    (fn []
+      (let [e (make-ac-editor)
+            calls (atom 0)]
+        (with-redefs [ac/invalidate-file-cache! (fn [] (swap! calls inc))]
+          (core/handle-input e "@")
+          (core/handle-input e "b")
+          (t/is (zero? @calls)
+                "composing a message never invalidates — one walk per scope")
+          (core/handle-input e K-ESC)
+          (core/editor-set-on-submit! e (fn [_] nil))
+          (core/handle-input e K-ENTER)
+          (t/is (= 1 @calls) "submit starts the next message fresh")
+          (core/editor-set-text! e "")
+          (t/is (= 2 @calls) "clearing the editor also ends the message"))))))
 
 (t/deftest test-autocomplete-tab-file-completion-single-match-applies
   (with-ac-files
