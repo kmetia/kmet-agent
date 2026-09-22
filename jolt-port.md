@@ -5,10 +5,8 @@ terminal backend: termios on Unix, kernel32 on Windows), providers (HTTP
 via babashka.http-client over the jolt-lang shims — Windows pending, M2),
 packaging (`jolt dist`), and extensions (the native loader, with SCI as the
 declared fallback). This file tracks **only what is still open**; finished
-work lives in the code, in `jolt-tui.md` (TUI adapter deep-dive: FFI ground
-rules, raw mode, input pipeline, key parser, concurrency) and in
-`jolt-bugs.md` (upstream issues filed or tracked). The item labels (B2,
-M5, …) are the original port report's ids.
+work lives in the code and in `jolt-bugs.md` (upstream issues filed or
+tracked). The item labels (B2, M5, …) are the original port report's ids.
 
 ## Windows — the last platform (M2)
 

@@ -22,7 +22,7 @@ edit and both pins move to the fixed revisions. The Windows smoke ran
 beside `jolt.exe`): RSA sign/verify (libcrypto), `SSLContext/getInstance
 "TLS"` (libssl) and a `java.util.zip` GZIP round trip (libz) all load and
 work. Ticket reports live here only: `jolt-port.md` is the open-work plan
-and `jolt-tui.md` the TUI adapter deep-dive — neither carries them.
+and carries none.
 
 **Windows leftovers closed by jolt PR #1090 (merged 2026-09-21).** #1086
 (`fs/glob` patterns containing a separator matched nothing on Windows —

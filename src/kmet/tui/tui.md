@@ -26,6 +26,7 @@ it up to date whenever the described behavior changes.
 13. [Layer boundaries](#13-layer-boundaries)
 14. [Building app UI — DSL first](#14-building-app-ui--dsl-first)
 15. [Design non-goals and rationale](#15-design-non-goals-and-rationale)
+16. [Jolt backends — FFI and concurrency notes](#16-jolt-backends--ffi-and-concurrency-notes)
 
 ---
 
@@ -119,6 +120,9 @@ On Windows both backends put the attached console on the UTF-8 code page
 Jolt calls `SetConsoleOutputCP`/`SetConsoleCP` directly; bb spawns
 `chcp.com` (no FFI), which needs to share kmet's console — it does on a
 TTY. No-op on POSIX, when already UTF-8, or without a console.
+
+The FFI and concurrency rules those two `.jolt` namespaces must respect,
+and the known differences from JLine, are in §16.
 
 ---
 
@@ -1565,3 +1569,56 @@ individually:
   cancel); pi is imperative (`showOverlay`), so a declarative path would
   fork every future dialog port, and extension overlays must stay
   imperative anyway.
+
+## 16. Jolt backends — FFI and concurrency notes
+
+The two `.jolt` backends (`terminal-native-unix`, `terminal-native-win`)
+are the only FFI code in the TUI. What a change there must respect (the
+platform specifics live in the backends' docstrings and comments):
+
+**jolt.ffi**
+
+- `defcfn`/`foreign-fn` are macros — type keywords and the trailing
+  options are compile-time literals.
+- Mark anything that can wait `:blocking`: it emits `__collect_safe`, so a
+  parked call does not pin the GC for every thread. All of the backends'
+  `poll`/`read`/`write`/`WaitForSingleObject`/`ReadConsoleW`/`ReadFile`
+  bindings are.
+- Out-params go through `with-out` — read the cell inside the body (the
+  form answers its body's value, not the cell); `with-alloc` frees exactly
+  once however the body ends. `(write p type v [off])` takes the value
+  **before** the offset (babashka.ffi order); `read-array`/`write-array`
+  move scalar arrays element-wise.
+- `(ffi/errno)` is only valid immediately after the failing call (an
+  alloc, park or later FFI call may overwrite it).
+- Neither backend needs a `:jolt/native` declaration: libc/POSIX symbols
+  come from the boot's process handle (`load-library` with no args or
+  `nil` — never re-load it, re-loading re-promotes the global handle above
+  scoped natives), and `kernel32` resolves from process symbols on
+  Windows.
+- A variadic call (`ioctl`) uses the `:&` marker; bare `:&` infers the
+  tail per call (compiled once, then cached). `:&` does not combine with
+  `:blocking`.
+
+**Concurrency**
+
+- `future` is a real OS thread on a shared heap — the reader thread and
+  the flush timers belong there. A fiber/`go` body is multiplexed: a
+  blocking FFI call or `Thread/sleep` inside one pins the carrier, so the
+  backends' waits must never run in a fiber.
+- `future-cancel` interrupts an interruptible wait (`Thread/sleep`,
+  `deref`) but cannot unblock a thread parked in a foreign call — that is
+  why `read-input` bounds itself with a timeout (`poll` /
+  `WaitForSingleObject` + one read) instead of parking on a blocking read,
+  and why `stop!` needs no wakeup byte.
+- `locking` exists (a re-entrant per-object monitor) but is not
+  fiber-aware: keep the body short, never sleep or park inside it.
+
+**Known differences from the JLine backend** (deliberate):
+
+- The Jolt backends use stdin/stdout directly (pi does the same); JLine
+  opens the system terminal, so a redirected stdout would still reach
+  `/dev/tty` there.
+- One shutdown hook per suspend/resume cycle; each is a no-op once its
+  terminal has stopped (bounded by user actions).
+- Windows holds the console on the UTF-8 code page while running (§1).
