@@ -10,18 +10,18 @@ set is read/write/edit/bash; the grep/find/ls search tools ship as separate
 opt-in extensions). The one thing already in place is measurement — per-tool
 result-token attribution — so the build/no-build decision can be made on data.
 
-Status: **T0 measured and analysed** (results below); **T1 design settled**
-(tool bridge, capability table and implementation plan below: resolution
-aligned with normal dispatch, inner calls always async promises, no tool-call
-hooks). The numbers rewrote the premise rather than killed it: maki's
-read-share did not transfer — bash dominates — but ~75% of all result tokens
-are still the find/read workload; it leaks through bash (`cat`/`head`/`rg`)
-instead of the `read` tool, and T1 is aimed there. **T1 is implemented** in
-this tree (`src/kmet/app/tools/script.cljc`, builtin; `kmet.app.test-script`,
-22 tests — 19 fast + 3 `^:slow` — smoke-verified on babashka and jolt; the
-plan's last item, the T0
-re-measurement, waits on adoption). T2 folds the mcp-adapter's mcpScript onto
-the same engine; T3 is the self-exec/RPC tier.
+Status: **T1 implemented** in this tree — `src/kmet/app/tools/script.cljc`, a
+builtin (read/write/edit/bash + `script`), `kmet.app.test-script` (22 tests:
+19 fast + 3 `^:slow`, smoke-verified on babashka and jolt); only the plan's
+last item, the post-adoption T0 re-measurement, remains (⏳ below). **T0
+measured and analysed** (results below); the numbers rewrote the premise
+rather than killed it: maki's read-share did not transfer — bash dominates —
+but ~75% of all result tokens are still the find/read workload; it leaks
+through bash (`cat`/`head`/`rg`) instead of the `read` tool, and T1 is aimed
+there. **T1 design settled** (tool bridge, capability table and implementation
+plan below: resolution aligned with normal dispatch, inner calls always async
+promises, no tool-call hooks). T2 folds the mcp-adapter's mcpScript onto the
+same engine; T3 is the self-exec/RPC tier.
 
 ## The idea and the economics (maki.sh)
 
@@ -432,11 +432,13 @@ precedent is available if the prompt impact measures badly).
 
 The plan above is now the record of what landed:
 
-1. ✅ **Tool** — `src/kmet/app/tools/script.clj`, a `script` record (params
-   `code` + `timeoutMs`, `:streams? true`, `:contextual? true`), registered at
-   the bottom of `registry.clj` — after the registry fns — carrying seams
-   (`get-all-tools`, `execute-tool`, `tool-registry-generation`) so it never
-   requires the registry back. Default timeout 30s.
+1. ✅ **Tool** — `src/kmet/app/tools/script.cljc` (`.cljc` for the
+   jolt/bb `sci/binding` split), a `script` record (params `code` +
+   `timeoutMs`, `:streams? true`, `:contextual? true`), registered at the
+   bottom of `registry.clj` — after the registry fns — carrying seams
+   (`:get-all-tools`, `:execute-tool`, `:generation-fn` =
+   `tool-registry-generation`) so it never requires the registry back.
+   Default timeout 30s.
 2. ✅ **Engine** — base cache keyed by `[registry-generation enabled-set]`
    (`registry-generation` is the counter `register-tool!`/`unregister-tool!`
    bump; `*enabled-tools-fn*` is the loop-bound thunk); per-call fork through
