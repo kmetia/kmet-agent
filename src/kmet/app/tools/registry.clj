@@ -81,14 +81,17 @@
   (swap! custom-tools dissoc name))
 
 (defn get-all-tools
-  "Get all available tools (built-in + custom)."
+  "Get all available tools (built-in + custom). A custom tool that reuses a
+   built-in's name shadows it (pi: the extension registry is layered over the
+   base definitions, custom wins)."
   []
   (merge built-in-tools @custom-tools))
 
 (defn get-tool
-  "Get a tool by name."
+  "Get a tool by name — resolved through get-all-tools, so the map a caller
+   executes is exactly the map the registry lists (custom shadows built-in)."
   [name]
-  (or (get built-in-tools name) (get @custom-tools name)))
+  (get (get-all-tools) name))
 
 ;; ─── Execution ─────────────────────────────────────────────────────────────
 

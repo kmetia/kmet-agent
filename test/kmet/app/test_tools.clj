@@ -60,6 +60,23 @@
     (t/is (not (contains? all "find")))
     (t/is (not (contains? all "ls")))))
 
+(t/deftest test-tool-resolution-shadowing
+  (t/testing "one resolution path: a custom tool reusing a built-in's name is
+              listed AND resolved (custom shadows built-in, pi's layering)"
+    (try
+      (tools/register-tool! {:name "read" :label "Shadow read"
+                             :description "shadow"
+                             :parameters {:type "object" :properties {}}
+                             :execute (fn [_] {:content "shadow"})})
+      (t/is (= (get (tools/get-all-tools) "read") (tools/get-tool "read"))
+            "get-tool resolves the same map get-all-tools lists")
+      (t/is (= "Shadow read" (:label (tools/get-tool "read"))))
+      (t/is (= "shadow" (:content (tools/execute-tool "read" {})))
+            "dispatch executes the listed record")
+      (finally
+        (tools/unregister-tool! "read")
+        (t/is (= "Read file" (:label (tools/get-tool "read"))))))))
+
 (t/deftest test-search-tools-extensions
   (t/testing "grep/find/ls ship as opt-in extensions: loading the shipped
               files registers the tools; results are matches only and
