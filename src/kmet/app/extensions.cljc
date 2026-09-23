@@ -1000,7 +1000,9 @@
    whole prefix is whitelisted. Required once here so they exist when a
    per-extension context is built — injection is by reference, never
    re-evaluated, so any protocols they define keep their identity. Keep in
-   sync with src/kmet/libs/ when a lib is added or removed."
+   sync with src/kmet/libs/ when a lib is added or removed, except a host
+   backend its caller loads at call time on its own platform
+   (kmet.libs.clipboard-win loads user32.dll — unloadable elsewhere)."
   '[kmet.libs.archive
     kmet.libs.aws-sigv4
     kmet.libs.clipboard

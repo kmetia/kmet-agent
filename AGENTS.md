@@ -76,7 +76,9 @@
   companions on jolt) in `bb.edn` `:deps` and `deps.edn`; JLine **4.4.0** bundled with Babashka (see
   babashka `deps.edn`: `org.jline/jline-terminal`, `org.jline/jline-reader`) as the
   bb/JVM terminal backend — the Jolt terminal backend uses no dependency: termios /
-  kernel32 through `jolt.ffi`.
+  kernel32 through `jolt.ffi`. The Windows clipboard backend works the same way —
+  `babashka.ffi` on babashka, `jolt.ffi` on jolt (`kmet.libs.clipboard-win`),
+  no dependency and no subprocess.
 - **Packaging** — the `dist` task is host-dispatched: `bb dist` runs `kmet.tasks.build`,
   `jolt dist` runs `kmet.tasks.build-jolt` (one task name on both hosts; a task may not be called
   `build` — jolt's built-in `build` owns that name, and a task either loses to it with a

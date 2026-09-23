@@ -143,6 +143,7 @@
     kmet.libs.test-sse
     kmet.libs.test-terminal
     kmet.libs.test-terminal-image
+    kmet.libs.test-clipboard
     kmet.libs.test-yaml
     kmet.libs.test-markdown
     kmet.libs.test-highlight
