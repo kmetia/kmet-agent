@@ -16,14 +16,16 @@
    unloaded), so calling a bb-only entry point under jolt surfaces as a fast
    ::bb-only ex-info from the guarded function, not a crash.
 
-   The runner is TOLERANT: every test namespace is required inside a try.
-   A namespace that cannot load under the host (a babashka-internal
+   The runner is TOLERANT per namespace: every test namespace is required
+   inside a try. A namespace that cannot load under the host (a babashka-internal
    require, a JDK class gap, a java.time.* gap — see jolt-port.md) is
-   reported and skipped, never fatal; the remaining namespaces run. This
-   is what lets the same runner serve `bb test` and `jolt test` while the
-   Jolt port is staged. On a full run every unloadable namespace is listed
-   with its load failure reason; on a filtered run the list holds only the
-   requested namespaces that failed to load.
+   reported and skipped, and the remaining namespaces still run — but the
+   run FAILS (exit 1): a skipped namespace means its tests never ran, and a
+   green result would silently shrink the gate. This is what lets the same
+   runner serve `bb test` and `jolt test` while the Jolt port is staged. On
+   a full run every unloadable namespace is listed with its load failure
+   reason; on a filtered run the list holds only the requested namespaces
+   that failed to load.
 
    Filters select tests: a plain var name (e.g. `test-tool-bash`), an ns/var
    pair (e.g. `kmet.app.test-loop/my-test`), or a whole namespace
@@ -186,7 +188,8 @@
     kmet.tasks.test-changed
     kmet.tasks.test-clean
     kmet.tasks.format-test
-    kmet.tasks.test-lint])
+    kmet.tasks.test-lint
+    kmet.tasks.test-runner])
 
 (defn- try-require
   "Require NS-SYM; returns nil on success, the throwable on failure."
@@ -517,7 +520,7 @@
 
 (defn- report-unloaded
   "Print the unloadable-namespace list, prefixed by HEADER when given."
-  ([unloaded] (report-unloaded unloaded "Namespaces that could not load (skipped):"))
+  ([unloaded] (report-unloaded unloaded "Namespaces that could not load (skipped — the run fails):"))
   ([unloaded header]
    (when (seq unloaded)
      (println (str "\n" header))
@@ -533,6 +536,12 @@
   (if (seq unloaded)
     (report-unloaded unloaded "Requested namespace(s) failed to load (no tests could run):")
     (println "No requested namespaces failed to load — no test vars matched the filter and the slow?/bb-only selection.")))
+
+(defn- exit!
+  "Exit the process with CODE. A seam: the runner tests redefine it to observe
+   the status instead of killing the test process."
+  [code]
+  (System/exit code))
 
 (defn- run-and-summarize
   "Run the selected test vars, print the summary, exit with status 0/1.
@@ -554,7 +563,8 @@
         n-assertions (+ (:pass results) (:fail results) (:error results))
         total-us (quot (- (System/nanoTime) start-ns) 1000)
         fails (:fail results)
-        errs (:error results)]
+        errs (:error results)
+        unloaded-count (count unloaded)]
     (when (or (empty? filters) (seq vars))
       (report-unloaded unloaded))
     (when (and (seq filters) (empty? vars))
@@ -567,14 +577,20 @@
     (println "Results:" (str/join ", "
                                   (cond-> [(str (:pass results) " passed")]
                                     (pos? fails) (conj (str fails " failed"))
-                                    (pos? errs) (conj (plural errs "error" "errors")))))
-    (when (and (not jolt?) mark-validated? (zero? (+ fails errs)))
+                                    (pos? errs) (conj (plural errs "error" "errors"))
+                                    (pos? unloaded-count)
+                                    (conj (str (plural unloaded-count "namespace" "namespaces")
+                                               " failed to load")))))
+    (when (and (not jolt?) mark-validated? (zero? (+ fails errs)) (empty? unloaded))
       (try ((requiring-resolve 'kmet.tasks.changed/mark-validated!))
            (catch Throwable e
              (.println System/err
                        (str "warning: could not update changed-files baseline: "
                             (.getMessage e))))))
-    (System/exit (if (pos? (+ fails errs)) 1 0))))
+    ;; A namespace that could not load fails the run: its tests never ran, so
+    ;; exit 0 would silently shrink the gate (a missing require once dropped a
+    ;; whole namespace from an otherwise green run).
+    (exit! (if (or (pos? (+ fails errs)) (pos? unloaded-count)) 1 0))))
 
 (defn -main
   "Run the test suites.

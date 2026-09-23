@@ -28,11 +28,11 @@
            :task (if (find-var 'clojure.core/*jolt-version*)
                    (apply jbuild/-main *command-line-args*)
                    (apply build/-main *command-line-args*))}
-  test    {:doc "Run fast test suites (excludes ^:slow tests). Args: plain test var names (bb test test-tool-bash), ns/var pairs, or whole namespaces (bb test kmet.tui.test-fuzzy). Whole-namespace args select non-slow vars; var args ignore slow?. Unloadable namespaces are reported with the load failure reason (full run: all; filtered run: requested only)."
+  test    {:doc "Run fast test suites (excludes ^:slow tests). Args: plain test var names (bb test test-tool-bash), ns/var pairs, or whole namespaces (bb test kmet.tui.test-fuzzy). Whole-namespace args select non-slow vars; var args ignore slow?. Unloadable namespaces are reported with the load failure reason (full run: all; filtered run: requested only) and fail the run."
            :requires ([kmet.tasks.runner :as runner])
            :task (apply runner/-main false *command-line-args*)
            :override-builtin true}
-  test-ext {:doc "Run ONLY the slow (^:slow) test suites. Args: plain test var names, ns/var pairs, or whole namespaces (bb test-ext kmet.app.test-extensions). Whole-namespace args select slow vars; var args ignore slow?. Unloadable namespaces are reported with the load failure reason (full run: all; filtered run: requested only)."
+  test-ext {:doc "Run ONLY the slow (^:slow) test suites. Args: plain test var names, ns/var pairs, or whole namespaces (bb test-ext kmet.app.test-extensions). Whole-namespace args select slow vars; var args ignore slow?. Unloadable namespaces are reported with the load failure reason (full run: all; filtered run: requested only) and fail the run."
             :requires ([kmet.tasks.runner :as runner])
             :task (apply runner/-main true *command-line-args*)
             :override-builtin true}
