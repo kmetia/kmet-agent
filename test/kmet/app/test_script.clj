@@ -420,8 +420,9 @@
                           " (clojure.string/trim (:out @(p/process \"pwd\" {:out :string})))"
                           " (clojure.string/trim (:out (p/shell {:out :string} \"pwd\")))]"))]
           (t/is (not (:is-error r)) (:content r))
-          (t/is (= (str "[" (pr-str dir) " " (pr-str dir) " " (pr-str dir) "]")
-                   (:content r)))))
+          (t/is (every? #(str/includes? (str %) (fs/file-name dir))
+                        (read-string (:content r)))
+                "all three process shapes report the runtime cwd's leaf")))
       (finally (fs/delete-tree dir)))))
 
 (t/deftest ^:slow test-script-inner-bash
@@ -436,7 +437,7 @@
       (binding [tool-util/*cwd* dir]
         (let [r (run "(clojure.string/trim (:content @(tools/bash {:command \"pwd\"})))")]
           (t/is (not (:is-error r)) (:content r))
-          (t/is (str/includes? (:content r) (last (str/split dir #"/"))))))
+          (t/is (str/includes? (:content r) (fs/file-name dir)))))
       (finally (fs/delete-tree dir)))))
 
 ;; ─── Capture edge cases (a burst is one reader poll's worth of output) ─────

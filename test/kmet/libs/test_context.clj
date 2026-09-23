@@ -60,9 +60,10 @@
                 mine (filter #(under-tmp? tmp (:path %)) files)
                 paths (map :path mine)]
             (t/is (= 1 (count mine)))
-            (t/is (= (str wt "/AGENTS.md") (first paths)))
+            (t/is (= (slash (str wt "/AGENTS.md")) (slash (first paths))))
             (t/is (= "# worktree rules" (:content (first mine))))))
-        (finally (fs/delete-tree tmp)))))
+        ;; .git/objects files are read-only on Windows — delete-tree needs :force
+        (finally (fs/delete-tree tmp {:force true})))))
   (t/testing "sibling worktree (not nested): both context files load"
     (let [tmp (tmp-dir "sibling")
           sibling (str tmp "-sib")]
@@ -82,13 +83,13 @@
         (git! tmp "worktree" "add" "-q" "-b" "feature" sibling)
         (spit (str sibling "/AGENTS.md") "# worktree rules")
         (let [files (context/load-project-context-files (str sibling "/agent") sibling)
-              under? #(str/starts-with? (str (:path %)) (str sibling "/"))
+              under? #(str/starts-with? (slash (str (:path %))) (str (slash sibling) "/"))
               mine (filter under? files)]
           (t/is (= [(slash (str sibling "/AGENTS.md"))]
                    (slash (mapv :path mine)))
                 "only the sibling's own AGENTS.md loads (no shadow, no main-repo ancestor)"))
-        (finally (fs/delete-tree tmp)
-                 (fs/delete-tree sibling))))))
+        (finally (fs/delete-tree tmp {:force true})
+                 (fs/delete-tree sibling {:force true}))))))
 
 (t/deftest test-load-project-context-files
   (t/testing "agent dir file first, then nearest ancestor first (pi order)"

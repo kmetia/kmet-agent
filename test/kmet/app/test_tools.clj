@@ -44,7 +44,9 @@
         (binding [tool-util/*cwd* dir]
           (let [result (tools/execute-tool "bash" {:command "pwd"})]
             (t/is (not (:is-error result)))
-            (t/is (str/includes? (:content result) dir))))
+            ;; git-bash answers in its MSYS view (/c/src/…), not the bound
+            ;; C:\src\… — the leaf is identical either way
+            (t/is (str/includes? (:content result) (fs/file-name dir)))))
         (finally (fs/delete-tree dir))))))
 
 ;; ─── Tool registry ─────────────────────────────────────────────────────────
