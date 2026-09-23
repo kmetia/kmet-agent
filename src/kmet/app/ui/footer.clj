@@ -34,15 +34,21 @@
 
 (defn format-cwd-for-footer
   "Replace the home prefix of cwd with ~ (pi: formatCwdForFooter). Returns
-   cwd unchanged when it is not inside home."
+   cwd unchanged when it is not inside home — or when the two cannot be
+   compared: on Windows a drive-absolute home against a drive-relative cwd
+   makes fs/relativize throw, and the footer must render anyway. The
+   rendered path is /-separated (display only)."
   [cwd home]
   (if (and home (seq home))
-    (let [rel (str (fs/relativize (fs/path home) (fs/path cwd)))]
+    (let [rel (try (some-> (fs/relativize (fs/path home) (fs/path cwd))
+                           str
+                           (str/replace fs/file-separator "/"))
+                   (catch Exception _ nil))]
       (cond
+        (nil? rel) cwd
         (empty? rel) "~"
-        (str/starts-with? rel (str ".." fs/file-separator)) cwd
-        (= rel "..") cwd
-        :else (str "~" fs/file-separator rel)))
+        (or (= rel "..") (str/starts-with? rel "../")) cwd
+        :else (str "~/" rel)))
     cwd))
 
 (defn- sanitize-status-text

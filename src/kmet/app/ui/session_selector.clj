@@ -216,7 +216,11 @@
    :ancestor-continues} for the tree-prefix rendering (pi:
    buildSessionTree + flattenSessionTree)."
   [sessions]
-  (let [idx (into {} (map-indexed (fn [i info] [(:path info) i]) sessions))
+  (let [;; both sides canonicalized: a session's :path and a child's
+        ;; :parent-session-path can be spelled differently (drive-less or
+        ;; relative), and canonicalizing only the parent's side silently
+        ;; detaches every child from its tree
+        idx (into {} (map-indexed (fn [i info] [(canon-path (:path info)) i]) sessions))
         children (volatile! (vec (repeat (count sessions) [])))
         roots (volatile! [])]
     (doseq [i (range (count sessions))

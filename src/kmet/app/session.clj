@@ -738,45 +738,71 @@
 
 (defn get-tree
   "Build a tree structure from session entries.
-   Returns map of {:id info, :children [...]}. O(n): children are grouped
-   by parent in a single pass over entries."
+   Returns a vector of {:id :role :label :summary :children [...]}. O(n):
+   children are grouped by parent in one pass, each node map is built once
+   and levels are resolved deepest-first — a recursive build overflows the
+   stack on a long chain (a 2000-entry session is real), and levels keep
+   children ordered like the recursive mapv did."
   [session]
   (let [entries @(:entries session)
         labels (resolve-labels entries)
-        by-parent (group-by :parent-id entries)]
-    (letfn [(build-node [entry]
-              {:id (:id entry)
-               :role (:role entry)
-               :label (get-in labels [(:id entry) :label])
-               :summary (let [content (:content entry)
-                              text (if (string? content) content
-                                       (str/join (map :text (filter #(= (:type %) :text) content))))
-                              trimmed (str/trim text)]
-                          (cond
-                            (seq trimmed) (subs trimmed 0 (min 60 (count trimmed)))
-                            ;; session_info entries carry the display name
-                            ;; instead of message content (pi: tree shows
-                            ;; "[title: name]")
-                            (= (:role entry) :session_info) (or (:name entry) "(empty)")
-                            ;; compaction entries carry their summary text
-                            (:summary entry) (subs (:summary entry) 0 (min 60 (count (:summary entry))))
-                            ;; model/thinking change entries carry no content — show the switch
-                            (= (:role entry) :model-change)
-                            (str "[model: " (name (:provider entry)) "/" (:model entry) "]")
-                            (= (:role entry) :thinking-level-change)
-                            (str "[thinking: " (name (:thinking-level entry)) "]")
-                            ;; custom entries carry no content — show the extension type
-                            (= (:role entry) :custom)
-                            (str "[custom: " (name (:custom-type entry)) "]")
-                            (= (:role entry) :custom-message)
-                            (str "[custom: " (name (:custom-type entry)) "]")
-                            ;; pi getEntryDisplayText: an empty assistant entry
-                            ;; (a recorded empty completion) is labeled
-                            ;; "(no content)" — its only trace anywhere
-                            (= (:role entry) :assistant) "(no content)"
-                            :else "(empty)"))
-               :children (mapv build-node (get by-parent (:id entry)))})]
-      (mapv build-node (get by-parent nil)))))
+        by-parent (group-by :parent-id entries)
+        base-node (fn [entry]
+                    {:id (:id entry)
+                     :role (:role entry)
+                     :label (get-in labels [(:id entry) :label])
+                     :summary (let [content (:content entry)
+                                    text (if (string? content)
+                                           content
+                                           (str/join (map :text (filter #(= (:type %) :text) content))))
+                                    trimmed (str/trim text)]
+                                (cond
+                                  (seq trimmed) (subs trimmed 0 (min 60 (count trimmed)))
+                                  ;; session_info entries carry the display name
+                                  ;; instead of message content (pi: tree shows
+                                  ;; "[title: name]")
+                                  (= (:role entry) :session_info) (or (:name entry) "(empty)")
+                                  ;; compaction entries carry their summary text
+                                  (:summary entry) (subs (:summary entry) 0 (min 60 (count (:summary entry))))
+                                  ;; model/thinking change entries carry no content — show the switch
+                                  (= (:role entry) :model-change)
+                                  (str "[model: " (name (:provider entry)) "/" (:model entry) "]")
+                                  (= (:role entry) :thinking-level-change)
+                                  (str "[thinking: " (name (:thinking-level entry)) "]")
+                                  ;; custom entries carry no content — show the extension type
+                                  (= (:role entry) :custom)
+                                  (str "[custom: " (name (:custom-type entry)) "]")
+                                  (= (:role entry) :custom-message)
+                                  (str "[custom: " (name (:custom-type entry)) "]")
+                                  ;; pi getEntryDisplayText: an empty assistant entry
+                                  ;; (a recorded empty completion) is labeled
+                                  ;; "(no content)" — its only trace anywhere
+                                  (= (:role entry) :assistant) "(no content)"
+                                  :else "(empty)"))})
+        ;; breadth-first levels from the roots; SEEN drops re-visits so a
+        ;; malformed cycle cannot loop forever
+        levels (loop [level (vec (get by-parent nil))
+                      acc []
+                      seen #{}]
+                 (if (empty? level)
+                   acc
+                   (let [seen' (into seen (map :id) level)]
+                     (recur (into [] (comp (mapcat #(get by-parent (:id %)))
+                                           (remove #(contains? seen' (:id %))))
+                                  level)
+                            (conj acc level)
+                            seen'))))
+        nodes (reduce (fn [m level]
+                        (reduce (fn [m entry]
+                                  (assoc m (:id entry)
+                                         (assoc (base-node entry)
+                                                :children (mapv #(get m (:id %))
+                                                                (get by-parent (:id entry))))))
+                                m
+                                level))
+                      {}
+                      (rseq levels))]
+    (mapv #(get nodes (:id %)) (get by-parent nil))))
 
 (defn compact-with-summary!
   "Append a compaction entry summarizing everything before first-kept-id (pi:

@@ -513,7 +513,14 @@
                                :content [{:type :text :text (str "m" i)}]}))
     (s/branch! session (:id (first @(:entries session))))
     (s/append-entry session {:role :user :content [{:type :text :text "fork"}]})
-    (letfn [(depth [node] (inc (apply max 0 (map depth (:children node)))))]
+    ;; iterative: the chain is 2000 deep, a recursive walk overflows
+    (letfn [(depth [root]
+              (loop [stack [[root 1]]
+                     deepest 0]
+                (if-let [[node d] (peek stack)]
+                  (recur (into (pop stack) (map (fn [c] [c (inc d)]) (:children node)))
+                         (max deepest d))
+                  deepest)))]
       (let [tree (s/get-tree session)
             root (first tree)]
         (t/is (= 1 (count tree)) "single root")

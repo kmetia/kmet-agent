@@ -261,7 +261,13 @@
       (if (or (nil? raw-path) (and (string? raw-path) (str/blank? raw-path)))
         {:content "File not found: " :is-error true}
         (let [cwd (tool-util/cwd)
-              abs-path (resolve-read-path (str raw-path) cwd)
+              ;; A non-file locator (an extension skill's ext:path) has no
+              ;; filesystem form: on Windows the ':' is an illegal path
+              ;; char, so resolution throws before the skill resolver below
+              ;; gets a chance. Fall back to the raw string — the resolver
+              ;; matches the exact location and cwd-joined forms.
+              abs-path (try (resolve-read-path (str raw-path) cwd)
+                            (catch Exception _ (str raw-path)))
               f (io/file abs-path)
               on-disk? (file-exists? abs-path)
               ;; Extension skills (ext:path locators) have no filesystem
