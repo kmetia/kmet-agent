@@ -116,7 +116,9 @@ tokens (T0 era: **~75%**).
   shows file-view + search ≈ two-thirds of it.
 
 So the script tool's competition is **bash-as-file-reader and broad search**,
-not primarily the `read` tool. The description should nag at exactly that:
+not primarily the `read` tool. The description leads with what only the tool
+can do — run a multi-step task as one call, fan calls out in parallel, keep N
+tool results out of context — and nags at the measured workload beneath it:
 scan/filter many files, print only the distilled result. The per-call averages
 also say the waste is a heavy tail, not a steady drip: cheap interventions
 (read offset/limit discipline, more precise searches) capture part of it
@@ -330,10 +332,15 @@ Clojure sandbox reports Clojure data; T2 formats MCP envelopes itself).
   `:content` (it can be a block vector) or hide `:details` (exit codes, diff,
   full-output path).
 - **Always async.** The bridge never runs a tool's `:execute` on the
-  interpreter thread: each call dispatches to a worker and returns a promise
-  the script derefs when it wants the value. In-flight calls don't block
-  dispatch — scripts fire calls, do local work (fs scans) meanwhile, then
-  deref — and the run `:signal` reaches the inner call, so Escape cancels it.
+  interpreter thread: each call queues a task on the shared bridge worker pool
+  (16 daemon workers, started lazily; concurrency is bounded, overflow waits
+  FIFO) and returns a promise the script derefs when it wants the value.
+  In-flight calls don't block dispatch — scripts fire calls, do local work (fs
+  scans) meanwhile, then deref — and the run `:signal` reaches the inner call,
+  so Escape cancels it. A script that fans out far more calls than workers and
+  derefs them in reverse waits for the queue ahead of it; bridge submissions
+  cannot nest (script is excluded from the surface), so the pool cannot
+  deadlock on itself.
 - **Settlement.** Every dispatched promise settles when its tool returns —
   success or `{:is-error true}`; a tool that observes the run `:signal` (bash
   does) settles on cancel. The one non-settling case is a tool implementation
@@ -363,7 +370,7 @@ Clojure sandbox reports Clojure data; T2 formats MCP envelopes itself).
   the base's discovery fns all read that one computed map, fixed for the call.
   The loop's other run values (`bash-tool/*cancel-signal*`,
   `*session-env-fn*`, `tools-util/*cwd*`) reach the bridge the same way. The
-  worker threads that run inner calls restore them explicitly — a raw thread
+  worker threads that run inner calls restore them explicitly — a pool worker
   conveys no dynamic bindings — which is what lets Escape cancel an inner
   bash and relative inner tool paths resolve against the session cwd.
 
@@ -429,9 +436,15 @@ bridge namespace closes over per-call state (deadline, signal, trace; the
 surface comes from the base — Lifecycle), which is why it is merged into the
 fork rather than cached.
 
-The description must teach the boundary: **bulk scanning via
-`babashka.fs`/`slurp`/`sh`** (no truncation, no per-call overhead); tools are
-for semantic queries (lsp/structural) and mutations.
+The description must teach the boundary and the batching: **one call can
+orchestrate many tool calls** (fan out, loop, chain) so N results cost one
+round trip; **bulk scanning via `babashka.fs`/`slurp`/`sh`** (no truncation,
+no per-call overhead); tools are for semantic queries (lsp/structural) and
+mutations. A harness-level guideline in `kmet.app.skills/build-guidelines`
+teaches the same at the turn level — batch independent tool calls in one
+message, since the loop runs them in parallel by default — and the script
+tool's own guidelines spell out the bash/script split. Both are kmet
+additions; pi has no parallel-tool-call guidance.
 
 ### Settled decisions
 
@@ -476,9 +489,11 @@ The plan above is now the record of what landed:
    wrappers add the cwd default and pid tracking; `:features` is the host's
    own; no `:classes`/`:imports`.
 4. ✅ **Bridge** — `tools/call` (+ variadic args) and the four sugars over
-   `execute-tool` on `kmet.libs.concurrent/spawn` workers; the gate over the
-   surface; `:signal`/`:ctx` passed through; the trace collected at
-   `:details {:calls [...]}`; never `execute-tool-calls-*`, never the hooks.
+   `execute-tool` on the shared bridge worker pool (16 daemon workers + FIFO
+   queue; `concurrent/spawn` runs the workers, a task is `.offer`ed per
+   call); the gate over the surface; `:signal`/`:ctx` passed through; the
+   trace collected at `:details {:calls [...]}`; never
+   `execute-tool-calls-*`, never the hooks.
 5. ✅ **Deadlines** — eval on a daemon thread; `:interrupt-fn` checks the
    abort atom (signal/deadline/output-limit) and throws; the host waits
    `timeoutMs` + a 1.5s interrupt grace, then abandons the thread.

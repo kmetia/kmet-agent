@@ -163,6 +163,21 @@
         (t/is (= "[true true]" (:content r)))
         (t/is (= 2 (count (get-in r [:details :calls]))))))))
 
+(t/deftest test-script-fan-out-exceeds-worker-pool
+  ;; the bridge drains through a bounded worker pool; a fan-out larger than
+  ;; the pool must still settle every promise (script.md T1 bridge)
+  (with-custom-tool {:name "script-test-echo"
+                     :label "Echo"
+                     :description "Echo args"
+                     :execute (fn [args] {:content (pr-str args)})}
+    (fn []
+      (let [r (run (str "(count (mapv deref (mapv #(tools/call \"script-test-echo\" {:n %})"
+                        " (range 40))))"))]
+        (t/is (not (:is-error r)) (:content r))
+        (t/is (= "40" (:content r)))
+        (t/is (= 40 (count (get-in r [:details :calls]))))
+        (t/is (every? :ok (get-in r [:details :calls])))))))
+
 (t/deftest test-script-gate
   (let [r (run "@(tools/call \"no-such-tool\" {})")]
     (t/is (not (:is-error r)))

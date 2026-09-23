@@ -7,16 +7,18 @@
    carries the capability namespaces and the surface's discovery fns
    (tools/list, tools/describe); the fork carries the cwd-dependent
    capabilities and the per-call tools bridge (async promises over
-   execute-tool). The script runs on a daemon thread whose SCI :interrupt-fn
-   aborts interpreted code on the run signal or the deadline; *out*/*err* are
-   captured to bounded temp files, streamed through on-update, and assembled
-   into the result (tools' 50 KiB / 2000-line convention, tail truncation)."
+   execute-tool, drained by a shared bounded worker pool). The script runs on
+   a daemon thread whose SCI :interrupt-fn aborts interpreted code on the run
+   signal or the deadline; *out*/*err* are captured to bounded temp files,
+   streamed through on-update, and assembled into the result (tools' 50 KiB /
+   2000-line convention, tail truncation)."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.app.bash-executor :as bash-exec]
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.tool :as tool]
             [kmet.app.tools.util :as tool-util]
+            [kmet.debug :as debug]
             [kmet.libs.concurrent :as concurrent]
             [kmet.libs.host :as host]
             [kmet.libs.process :as kprocess]
@@ -478,13 +480,15 @@
 (defn- cached-base
   "The base context for KEY, built on first use. A small keyed cache keeps
    sibling sessions with different surfaces from evicting each other's; a
-   rebuild is cheap and idempotent."
+   rebuild is cheap and idempotent. A hit moves KEY to the back of the LRU
+   (and a key already present is re-seated rather than duplicated, so
+   repeated hits cannot shrink the cache below base-cache-size)."
   [key build]
   (or (get-in @base-cache [:bases key])
       (let [base (build)]
         (swap! base-cache
                (fn [{:keys [order bases]}]
-                 (let [order (conj (vec order) key)
+                 (let [order (conj (vec (remove #{key} order)) key)
                        order (if (> (count order) base-cache-size)
                                (subvec order (- (count order) base-cache-size))
                                order)]
@@ -511,14 +515,45 @@
 
 ;; ─── The tools bridge ─────────────────────────────────────────────────────
 
+(def ^:private bridge-worker-count 16)
+
+(defn- start-bridge-worker!
+  "One pool worker: block on QUEUE, run a task, repeat. A task's own errors
+   are caught by its submitter; a stray throw is logged so the worker
+   survives and the pool keeps its size."
+  [queue]
+  (concurrent/spawn
+   (fn []
+     (loop []
+       (let [task (.take queue)]
+         (try
+           (task)
+           (catch Throwable t
+             (debug/log "script bridge task failed: " t))))
+       (recur)))))
+
+(defonce ^:private bridge-queue
+  ;; The shared bridge pool, started on first dispatch: inner calls queue
+  ;; here instead of each starting a platform thread, so concurrent tool
+  ;; executions (processes, connections) are bounded by bridge-worker-count.
+  ;; The queue itself is unbounded — like the promise set a fanning-out
+  ;; script already holds — and FIFO, so a script that fans out far more
+  ;; calls than workers and derefs them in reverse waits for the queue ahead
+  ;; of it. Bridge submissions cannot nest (script is excluded from the
+  ;; surface), so the pool cannot deadlock on itself.
+  (delay
+    (let [q (java.util.concurrent.LinkedBlockingQueue.)]
+      (dotimes [_ bridge-worker-count] (start-bridge-worker! q))
+      q)))
+
 (defn- dispatch!
-  "Gate NAME against the surface, then dispatch through execute-tool on a
-   worker thread and return the promise the script derefs. Unknown/inactive
-   names settle immediately with {:is-error true} and the active list.
-   Worker bindings: the run's cancel signal, session env and cwd — a raw
-   thread does not convey dynamic bindings, so the bridge restores them for
-   the inner tool (bash reads *cancel-signal*; read/write/edit resolve
-   against *cwd*)."
+  "Gate NAME against the surface, then hand the call to the shared bridge
+   pool and return the promise the script derefs. Unknown/inactive names
+   settle immediately with {:is-error true} and the active list. Worker
+   bindings: the run's cancel signal, session env and cwd — a pool worker
+   does not convey dynamic bindings, so the bridge restores them for the
+   inner tool (bash reads *cancel-signal*; read/write/edit resolve against
+   *cwd*)."
   [{:keys [surface execute-tool signal ctx cwd session-env-fn trace on-update]} name args]
   (let [name (tool-name name)
         p (promise)]
@@ -530,25 +565,27 @@
             idx (dec (count (swap! trace conj {:tool name :ok false
                                                :error "incomplete"
                                                :started-at started})))]
-        (concurrent/spawn
-         (fn []
-           (let [result (try
-                          (binding [bash-tool/*cancel-signal* signal
-                                    bash-tool/*session-env-fn* session-env-fn
-                                    tool-util/*cwd* cwd]
-                            (execute-tool name args {:signal signal :ctx ctx
-                                                     :tools surface
-                                                     :on-update on-update}))
-                          (catch Throwable t
-                            {:content (str "Error executing " name ": " (ex-message t))
-                             :is-error true}))]
-             (swap! trace assoc-in [idx]
-                    (cond-> {:tool name
-                             :ok (not (:is-error result))
-                             :duration-ms (- (System/currentTimeMillis) started)}
-                      (:is-error result)
-                      (assoc :error (preview (:content result)))))
-             (deliver p result))))
+        (.offer @bridge-queue
+                (fn []
+                  (let [result (try
+                                 (binding [bash-tool/*cancel-signal* signal
+                                           bash-tool/*session-env-fn* session-env-fn
+                                           tool-util/*cwd* cwd]
+                                   (execute-tool name args {:signal signal :ctx ctx
+                                                            :tools surface
+                                                            :on-update on-update}))
+                                 (catch Throwable t
+                                   {:content (str "Error executing " name ": " (ex-message t))
+                                    :is-error true}))]
+                    (try
+                      (swap! trace assoc-in [idx]
+                             (cond-> {:tool name
+                                      :ok (not (:is-error result))
+                                      :duration-ms (- (System/currentTimeMillis) started)}
+                               (:is-error result)
+                               (assoc :error (preview (:content result)))))
+                      (catch Throwable _ nil))
+                    (deliver p result))))
         p))))
 
 (defn- bridge-fns [opts]
@@ -748,26 +785,29 @@
 ;; ─── Tool record ──────────────────────────────────────────────────────────
 
 (def ^:private description
-  (str "Run a Clojure script in a sandbox with kmet's tools bridged in. Use it to scan, "
-       "filter and aggregate many files locally and print only the distilled result — the "
-       "script's output is the only thing that enters the conversation; inner tool calls "
-       "return to the script, never to the model.\n\n"
-       "Tool calls (each returns a promise — deref to wait; fan out several and deref later "
-       "to run them in parallel):\n"
-       "  @(tools/call \"name\" {...})   ;; any tool in the surface, by name\n"
-       "  @(tools/read {...}) @(tools/write {...}) @(tools/edit {...}) @(tools/bash {...})\n"
+  (str "Run a Clojure script in a sandbox with kmet's tools bridged in. Use it to run a "
+       "multi-step task as one call — fan tool calls out in parallel, loop, chain, filter, "
+       "scan files — so N tool results cost one round trip and only the script's distilled "
+       "output enters the conversation; inner results return to the script, never to the "
+       "model.\n\n"
+       "Tool calls return promises — deref when the value is needed:\n"
+       "  @(tools/call \"name\" {...})   ;; any active tool, by name (string/keyword/symbol)\n"
+       "  @(tools/bash {...}) @(tools/read {...}) @(tools/write {...}) @(tools/edit {...})\n"
        "  (tools/list) (tools/describe \"name\")   ;; discovery (synchronous)\n"
-       "The surface is every active tool plus extension-contributed sandbox tools "
-       "(e.g. MCP server tools). A call's value is the tool's own result map {:content "
-       ":is-error :details :truncation :images} — branch on :is-error.\n\n"
+       "Start independent calls before derefing any of them so they run in parallel; "
+       "(deref p ms ::timeout) bounds a call. The surface is every active tool plus "
+       "extension-contributed sandbox tools (e.g. MCP server tools). A call settles with "
+       "the tool's own result map {:content :is-error :details :truncation :images} — "
+       "branch on :is-error and read :content; don't pr-str the whole map (an image read "
+       "carries base64).\n\n"
        "Preloaded aliases (no require needed): fs (babashka.fs), str/set/edn/walk "
-       "(clojure.*), json (kmet.libs.json), p (babashka.process), plus tools and sandbox; "
-       "clojure.core carries slurp/spit/file-seq/pmap. No Java interop and no other "
-       "requires. Print with println; the last expression's value is reported too. "
-       "Errors are Exceptions — catch with (catch Exception e ...); Throwable is not "
-       "a class here. "
-       "Relative paths in slurp/spit/sh resolve against the session cwd ((sandbox/cwd)); "
-       "babashka.fs uses the process directory."))
+       "(clojure.*), json (kmet.libs.json), p (babashka.process), plus tools and sandbox "
+       "(cwd/env/now/sleep/spawn); clojure.core carries slurp/spit/file-seq/pmap. No Java "
+       "interop and no other requires. Print with println; the last expression's value is "
+       "reported too. Errors are Exceptions — catch with (catch Exception e ...); Throwable "
+       "is not a class here. Relative paths in slurp/spit/sh resolve against the session cwd "
+       "((sandbox/cwd)); babashka.fs uses the process directory. Default timeout 30s — raise "
+       "timeoutMs for long scans; on timeout the output so far is returned."))
 
 (defn title
   "Quiet one-liner body for the script tool: the first code line, shortened."
@@ -790,12 +830,13 @@
    :name "script"
    :label "Run script"
    :description description
-   :prompt-snippet "Run Clojure scripts that scan/filter files and call tools, printing only distilled results"
+   :prompt-snippet "Orchestrate tool calls and bulk file work in one Clojure script, printing only distilled results"
    :prompt-guidelines
-   ["Use script instead of bash file reads (cat/head/tail/wc/rg/sed/awk) or many read calls: scan/filter/aggregate in Clojure and print only the distilled result — printing everything spends the same tokens as reading it."
-    "Use script to implement multi-step logic — a search/read/filter/aggregate/verify chain belongs in one script, not many separate tool round-trips."
-    "Inner calls are promises: start independent calls before derefing any of them to run them in parallel."
-    "Prefer read for one file and edit/write for changes (the user reviews diffs; a script's writes only summarize) — script is for bulk edits and data that would bloat the transcript."]
+   ["Use script to collapse a multi-step workflow into one call — a search/read/verify chain, a loop over many files, or several tool calls belong in one script, not in N round-trips."
+    "Fire independent inner calls before derefing any of them: every tools/call returns a promise and runs in parallel; deref only when a value is needed."
+    "Route file work through script when the raw output is large or needs filtering (rg/cat/head/wc/sed/awk pipelines, many read calls): scan, filter and aggregate in Clojure and print only the distilled lines — raw output is re-sent every later turn."
+    "A quick one-off command with small output still belongs in bash; issue it alongside the script call in the same message, not in a separate turn."
+    "Prefer read for exactly one file and edit/write for reviewable changes; script is for bulk edits and data that would bloat the transcript."]
    :params {:code {:type :string :description "Clojure code to run"}
             :timeoutMs {:type :number
                         :description "Timeout in milliseconds (default 30000)"

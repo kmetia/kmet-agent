@@ -387,7 +387,10 @@
    bash file-exploration rule whenever bash is selected, then the tool and
    config guidelines, then the always-on ones. The rule is not suppressed by
    other tools: kmet's grep/find/ls are opt-in extensions, so the builtin
-   prompt text must not depend on what a user happens to have loaded."
+   prompt text must not depend on what a user happens to have loaded. The
+   parallel-batching rule is kmet's addition — pi has no parallel-tool-call
+   guidance, while kmet's loop runs a batch's calls in parallel by default
+   (kmet.app.loop/execute-tool-calls-parallel!)."
   [selected-tools guidelines]
   (let [tool-set (set selected-tools)]
     (-> []
@@ -395,6 +398,7 @@
           (conj "Use bash for file operations like ls, rg, find"))
         (into (map (fn [g] (str/trim (str g)))
                    (filter (fn [g] (seq (str/trim (str g)))) guidelines)))
+        (conj "When a turn needs several tool calls, batch the independent ones into one message — they run in parallel; wait for a call's result only before using it.")
         (conj "Be concise in your responses")
         (conj "Show file paths clearly when working with files")
         distinct)))
@@ -416,7 +420,9 @@
    skills are loaded on demand via read (pi: hasRead check). Deviations from
    pi: no pi-docs section (kmet ships no bundled docs); the bash-exploration
    guideline fires whenever bash is active — kmet's grep/find/ls are opt-in
-   extensions, so the builtin prompt does not depend on what is loaded."
+   extensions, so the builtin prompt does not depend on what is loaded; the
+   parallel-batching guideline is kmet's addition (pi has no
+   parallel-tool-call guidance)."
   [& {:keys [custom-prompt append-prompt cwd context-files tools
              prompt-guidelines skills]
       :or {cwd (str (fs/cwd))}}]

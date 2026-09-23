@@ -41,6 +41,10 @@
       (t/is (str/includes? result "- Use write only for new files or complete rewrites."))
       (t/is (str/includes? result "- Use edit for precise changes (edits[].oldText must match exactly)"))
       (t/is (str/includes? result "- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions."))))
+  (t/testing "parallel tool-call batching guideline (kmet addition)"
+    (let [result (skills/build-system-prompt :cwd "/tmp")]
+      (t/is (str/includes? result "- When a turn needs several tool calls, batch the independent ones into one message"))
+      (t/is (str/includes? result "- Use script to collapse a multi-step workflow into one call"))))
   (t/testing "skills are listed as available_skills XML"
     (let [name "test-prompt-skill"
           description "Prompt skill description."
