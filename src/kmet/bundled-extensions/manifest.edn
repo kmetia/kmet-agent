@@ -1,0 +1,25 @@
+{:schema 1
+ ;; The bundled extension artifacts, shipped with the application (both the
+ ;; babashka uberjar and the jolt embed) and offered through the config
+ ;; screen's "Bundled with kmet" group. Disabled by default; enable per
+ ;; scope via the :bundled-extensions settings key.
+ ;;
+ ;; :root is relative to the repo's extensions/ directory and is the
+ ;; artifact root exactly as pack-extension / extensions.md define it
+ ;; (directory artifacts use the src/ wrapper as their root; single-file
+ ;; artifacts are the .clj file itself).
+ :artifacts
+ [{:name "clojure"       :kind :dir  :root "clojure/src"}
+  {:name "lsp-adapter"   :kind :dir  :root "lsp-adapter/src"}
+  {:name "mcp-adapter"   :kind :dir  :root "mcp-adapter/src"}
+  {:name "review"        :kind :dir  :root "review/src"}
+  {:name "tree-sitter"   :kind :dir  :root "tree-sitter/src"}
+  {:name "tools"         :kind :file :root "tools.clj"}
+  {:name "grep-tool"     :kind :file :root "grep-tool.clj"}
+  {:name "find-tool"     :kind :file :root "find-tool.clj"}
+  {:name "ls-tool"       :kind :file :root "ls-tool.clj"}
+  {:name "deepseek-peak" :kind :file :root "deepseek-peak.clj"}]
+ ;; dev-only artifacts under extensions/ that deliberately do not ship.
+ ;; Every other top-level .clj file and <name>/src/extension.edn directory
+ ;; must be listed above (bb check-bundled-extensions enforces it).
+ :exclude []}

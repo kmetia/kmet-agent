@@ -6,9 +6,16 @@ are available in every run mode — `bb run`, `jolt run`, and the compiled
 them from `kmet config` (default: disabled) in both settings scopes; they are
 **not** installable/removable packages. Nothing is extracted to disk, ever.
 
-Status: plan. Not implemented. Intended to be executed in sessions:
-**Phase A** (kmet only, shippable today) and **Phase B** (jolt upstream +
-kmet switch). The phases are independent; Phase A must land first.
+Status: **Phase A implemented** (see git history). Deviations from the
+original plan, all deliberate: the resource prefix is `extensions/` (the
+checkout layout one-for-one, so a staged/jar/binary path reads exactly as
+the repo path); the manifest stays at `src/kmet/bundled-extensions/`
+(inside `src/`, so it resolves in dev where `extensions/` is not a
+classpath root); and a `:resource-file` artifact's extension name is the
+file name (what a user's own copy carries), with the manifest name kept as
+the config screen's display name. **Phase B** (the Jolt embedded-root
+loader) is pending upstream. The phases are independent; Phase A lands
+first.
 
 Related docs: `jar-ext.md` (extension artifact format, the "no expansion, no
 cache" decision), `extensions/extensions.md` (the extension contract),
@@ -167,8 +174,8 @@ mode:
 | mode | detection | directory artifact | single-file artifact |
 |---|---|---|---|
 | checkout (`bb run`, `jolt run`, tests) | the manifest resource resolves to a `file:` URL, and the repo's `extensions/<root>` exists | `{:kind :dir :root "<repo>/extensions/<root>"}` | `{:kind :file :path "<repo>/extensions/<root>"}` |
-| bb artifact / jolt artifact, Phase A | manifest resource is not a `file:` URL and `io/resource "kmet/bundled-extensions/<root>/extension.edn"` (dir) / `<root>` (file) exists | `{:kind :resource-dir :prefix "kmet/bundled-extensions/<root>"}` | `{:kind :resource-file :path "kmet/bundled-extensions/<root>"}` |
-| jolt artifact, Phase B | as above, plus `:native` | same plus `:native "embed:kmet/bundled-extensions/<root>"` | unchanged (D10) |
+| bb artifact / jolt artifact, Phase A | manifest resource is not a `file:` URL and `io/resource "extensions/<root>/extension.edn"` (dir) / `<root>` (file) exists | `{:kind :resource-dir :prefix "extensions/<root>"}` | `{:kind :resource-file :path "extensions/<root>"}` |
+| jolt artifact, Phase B | as above, plus `:native` | same plus `:native "embed:extensions/<root>"` | unchanged (D10) |
 
 All descriptors get `:name` (manifest name), `:bundled? true`, and a synthetic
 `:path` used for identity/display (`<prefix>` or the real path).
@@ -193,14 +200,14 @@ Everything under one prefix so the two artifact modes mirror each other:
 ```
 resource key                        source
 kmet/bundled-extensions/manifest.edn  src/kmet/bundled-extensions/manifest.edn
-kmet/bundled-extensions/clojure/src/… extensions/clojure/src/…
-kmet/bundled-extensions/tools.clj     extensions/tools.clj
+extensions/clojure/src/…              extensions/clojure/src/…
+extensions/tools.clj                 extensions/tools.clj
 ```
 
 Staging for the artifacts (build-time only, gitignored under `target/`):
 
 ```
-target/kmet-bundled/kmet/bundled-extensions/<root>/…
+target/kmet-bundled/extensions/<root>/…
 ```
 
 - `deps.edn`: `:jolt/build {:embed ["src" "target/kmet-version" "target/kmet-bundled"]}`.
@@ -472,7 +479,7 @@ root needs no adapter change.
   - `stage-bundled-extensions!` — read the manifest from disk
     (`src/kmet/bundled-extensions/manifest.edn`), run
     `validate-bundled-extensions!` (D8/D12), then copy **every file** under each
-    artifact root to `target/kmet-bundled/kmet/bundled-extensions/<root>/…`
+    artifact root to `target/kmet-bundled/extensions/<root>/…`
     (skip stale files first: delete `target/kmet-bundled` before staging).
   - `write-uberjar!` gains an `:extra-roots` option (walk `fs/glob root "**"`,
     files only, no extension filter), walked **after** the normal roots so the
@@ -750,7 +757,7 @@ order (the change touches `host/chez/loader.ss`, so the jolt gates listed in
 1. `kmet.loader.jolt-loader/embedded-roots?` — returns true when
    `(some? (resolve 'jolt.loader/embedded-root?))` (already added in Phase A).
 2. `kmet.app.bundled-extensions`: for `:resource-dir` descriptors, set
-   `:native "embed:kmet/bundled-extensions/<root>"` when the host is jolt and
+   `:native "embed:extensions/<root>"` when the host is jolt and
    `embedded-roots?` is true (do not set it elsewhere — the SCI path must not
    see a jolt-only root).
 3. `kmet.app.extensions/forced-loader-kind`: `:resource-dir` + `:native` +
@@ -788,7 +795,7 @@ order (the change touches `host/chez/loader.ss`, so the jolt gates listed in
   fallback in §2.2 and the resource mode keep the app working either way.
 - **Resource probing across classpath roots**: `:resource-*` descriptors probe
   by prefix, so a dependency jar containing a colliding
-  `kmet/bundled-extensions/...` entry could shadow a bundled file. The prefix
+  `extensions/...` entry could shadow a bundled file. The prefix
   is app-specific; `write-uberjar!` also dedupes by entry name (src first), so
   the bundled copy wins in the uberjar. A test can assert the probe resolves to
   the expected content.

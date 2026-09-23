@@ -319,6 +319,13 @@
                              {:ok false}))]
         (System/exit (if ok 0 1))))
 
+    ;; --debug turns on debug.log before any startup work loads, so the
+    ;; catalog/extension load trail is in the log too (the extension loader
+    ;; logs each successful load through it)
+    (when (:debug opts)
+      (debug/enable!)
+      (debug/log "kmet started with --debug"))
+
     ;; Provider/model registry — loads the committed catalogs (pi registers
     ;; its generated providers at startup), then the models.edn user config
     ;; layer (custom providers + overrides; errors surface as warnings)
@@ -361,9 +368,6 @@
               (let [result (print-mode/run (assoc opts :messages [msg]))]
                 ;; exit 1 when the run errored (nil result = no response text)
                 (System/exit (if (nil? result) 1 0))))))
-        (when (:debug opts)
-          (debug/enable!)
-          (debug/log "kmet started with --debug"))
 
         (println "Starting kmet...")
 

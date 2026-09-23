@@ -483,6 +483,10 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
       (fs/create-dirs (fs/parent bin))
       (when test?
         (println "generating" (str (build/generate-test-main!))))
+      ;; bundled extensions are embedded through the staged root deps.edn
+      ;; lists ("target/kmet-bundled", extension-bundle.md §2.3); staging
+      ;; validates the manifest first, so a broken bundle fails the build
+      (build/stage-bundled-extensions!)
       ;; the version resource the build bakes in (kmet --version reports it);
       ;; removed again afterwards so a later direct `jolt build` cannot bake a
       ;; previous run's version from the leftover file

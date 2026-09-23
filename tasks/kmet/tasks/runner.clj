@@ -79,6 +79,7 @@
     kmet.app.test-prompts
     kmet.app.test-extensions
     kmet.app.test-packages
+    kmet.app.test-bundled-extensions
     kmet.test-package-manager
     kmet.app.ui.test-resource-config
     kmet.app.ui.test-hotkeys

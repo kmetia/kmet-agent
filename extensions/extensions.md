@@ -93,8 +93,36 @@ select which discovered items stay enabled (e.g.
 ### Built-in extensions (`extensions/`)
 
 The repo ships a set of opt-in extensions in `extensions/` — nothing there is
-loaded by default. Enable one by symlinking (or copying) it into the global
-or project extensions dir:
+loaded by default. They are **bundled with the application**: every run mode
+(`bb run`, `jolt run`, and the built binaries) offers the whole set in
+`kmet config` under “Bundled with kmet”, and the same set is enableable from
+the settings files via the `:bundled-extensions` key (resource-array
+vocabulary: `+`/plain enables, `-`/`!` disables; a project entry is a delta
+over the global one; default disabled):
+
+```edn
+;; ~/.kmet/agent/settings.edn
+{:bundled-extensions ["clojure" "-mcp-adapter"]}
+
+;; .kmet/settings.edn (project delta)
+{:bundled-extensions ["+mcp-adapter"]}
+```
+
+Bundled extensions are not packages: `kmet install`/`remove`/`list` cannot
+see or affect them, and they are never extracted to disk. The artifact root
+is the same path in every mode — `extensions/<name>/src` for directory
+artifacts, `extensions/<file>.clj` for single files; in a checkout they load
+from the real files (directory artifacts natively on Jolt), in a built
+artifact through the bundled resource tree with the SCI backend until the
+Jolt embedded-root loader exists (extension-bundle.md Phase B).
+
+The shipped set is enumerated in `src/kmet/bundled-extensions/manifest.edn`;
+`bb check-bundled-extensions` validates it (every artifact under
+`extensions/` is listed or excluded, directory manifests declare `:sci`,
+strict ns-path layout, `deps.edn` with only `:deps` and no `:local/root`).
+
+To develop against an edited copy, the classic paths still work — symlink
+(or copy) an extension into the global or project extensions dir:
 
 ```bash
 ln -s "$PWD/extensions/tools.clj" ~/.kmet/agent/extensions/tools.clj

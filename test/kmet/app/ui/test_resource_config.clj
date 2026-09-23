@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [clojure.edn :as edn]
             [babashka.fs :as fs]
+            [kmet.app.bundled-extensions :as bundled]
             [kmet.app.packages :as pkgs]
             [kmet.app.ui.resource-config :as rc]
             [kmet.config :as cfg]
@@ -33,8 +34,11 @@
    maps written to the files. The read/save redefs are file-based, so
    read-after-write round-trips behave like production. CWD is a single
    stable temp dir whose .kmet IS the project dir (production layout), so
-   project auto dirs created by a test actually resolve."
-  [f {:keys [user project]}]
+   project auto dirs created by a test actually resolve. The bundled layer
+   is stubbed out unless OPTS :bundled? — the pre-existing tests assert
+   exact row models of their own fixtures; the bundled tests opt in and see
+   the real artifacts."
+  [f {:keys [user project bundled?]}]
   (let [global-dir (tmp-dir)
         cwd (tmp-dir)
         project-dir (str (fs/path cwd ".kmet"))
@@ -48,19 +52,24 @@
     (when project
       (fs/create-dirs project-dir)
       (spit (str (fs/path project-dir "settings.edn")) (pr-str project)))
-    (with-redefs [cfg/read-global-settings-map (fn [] (read-file (str (fs/path global-dir "settings.edn")) {}))
-                  cfg/read-project-settings-map (fn [] (read-file (str (fs/path project-dir "settings.edn")) {}))
-                  cfg/save-setting! (fn [path value]
-                                      (spit (str (fs/path global-dir "settings.edn"))
-                                            (pr-str (assoc-in (read-file (str (fs/path global-dir "settings.edn")) {}) path value))))
-                  cfg/save-project-setting! (fn [path value]
-                                              (fs/create-dirs project-dir)
-                                              (spit (str (fs/path project-dir "settings.edn"))
-                                                    (pr-str (assoc-in (read-file (str (fs/path project-dir "settings.edn")) {}) path value))))
-                  cfg/get-agent-dir (fn [] global-dir)
-                  cfg/project-dir (fn [] project-dir)
-                  fs/cwd (fn [] cwd)]
-      (f {:global-dir global-dir :project-dir project-dir :cwd cwd}))))
+    (let [run (fn []
+                (with-redefs [cfg/read-global-settings-map (fn [] (read-file (str (fs/path global-dir "settings.edn")) {}))
+                              cfg/read-project-settings-map (fn [] (read-file (str (fs/path project-dir "settings.edn")) {}))
+                              cfg/save-setting! (fn [path value]
+                                                  (spit (str (fs/path global-dir "settings.edn"))
+                                                        (pr-str (assoc-in (read-file (str (fs/path global-dir "settings.edn")) {}) path value))))
+                              cfg/save-project-setting! (fn [path value]
+                                                          (fs/create-dirs project-dir)
+                                                          (spit (str (fs/path project-dir "settings.edn"))
+                                                                (pr-str (assoc-in (read-file (str (fs/path project-dir "settings.edn")) {}) path value))))
+                              cfg/get-agent-dir (fn [] global-dir)
+                              cfg/project-dir (fn [] project-dir)
+                              fs/cwd (fn [] cwd)]
+                  (f {:global-dir global-dir :project-dir project-dir :cwd cwd})))]
+      (if bundled?
+        (run)
+        (with-redefs [bundled/artifacts (constantly [])]
+          (run))))))
 
 (defn- render-lines [screen width]
   (protocols/render screen width))
@@ -409,6 +418,82 @@
           (t/is (= [] (:extensions settings))))
         (t/is (= :inherit (:override-state (first (item-rows screen)))))))
     {}))
+
+;; ─── Bundled extensions (extension-bundle.md) ─────────────────────────────
+
+(t/deftest test-screen-bundled-group-and-global-toggle
+  ;; the app-provided set renders first as ONE fixed group (artifact base
+  ;; dirs do not split it), all off by default; space writes the global
+  ;; :bundled-extensions entry (plain name on, -name off)
+  (with-settings
+    (fn [ctx]
+      (let [screen (rc/make-resource-config-screen :rows 40)
+            items (item-rows screen)
+            first-row (first-item-row screen)
+            settings (fn [] (:bundled-extensions
+                             (edn/read-string (slurp (str (fs/path (:global-dir ctx)
+                                                                   "settings.edn"))))))]
+        (t/is (= 10 (count items)))
+        (t/is (every? #(= :bundled (get-in (:item %) [:metadata :origin])) items))
+        (t/is (= "Bundled with kmet" (:label (:group first-row))))
+        (t/is (= 1 (count (filter #(= :group (:kind %)) (rc/screen-rows screen)))))
+        (t/is (= (set (map :name (bundled/artifacts)))
+                 (set (map #(get-in (:item %) [:metadata :display-name]) items)))
+              "manifest names are the row names")
+        (t/is (every? #(false? (:enabled %)) items))
+        (t/is (some #(str/includes? % "bundled") (render-lines screen 100)))
+        (t/testing "space enables the selected bundled extension"
+          (protocols/handle-input screen " ")
+          (t/is (= ["clojure"] (settings)))
+          (t/is (true? (:enabled (first-item-row screen)))))
+        (t/testing "space again writes the explicit disable entry"
+          (protocols/handle-input screen " ")
+          (t/is (= ["-clojure"] (settings)))
+          (t/is (false? (:enabled (first-item-row screen)))))))
+    {:bundled? true}))
+
+(t/deftest test-screen-bundled-project-override-cycle
+  ;; project scope: the bundled row is an inherited global setting; the
+  ;; tri-state cycle writes +/- deltas into the project
+  ;; :bundled-extensions vector and drops the entry back at :inherit
+  (with-settings
+    (fn [ctx]
+      (let [screen (rc/make-resource-config-screen :rows 40
+                                                   :write-scope :project
+                                                   :project-mode? true)
+            settings (fn [] (let [f (str (fs/path (:project-dir ctx) "settings.edn"))]
+                              (when (fs/exists? f) (edn/read-string (slurp f)))))]
+        (t/is (= :inherit (:override-state (first-item-row screen))))
+        (t/is (true? (:inherited? (first-item-row screen))))
+        (t/is (some #(and (str/includes? % "clojure")
+                          (str/includes? % "bundled")
+                          (str/includes? % "global setting"))
+                    (render-lines screen 100)))
+        (t/testing "inherit → load writes +name"
+          (protocols/handle-input screen " ")
+          (t/is (= ["+clojure"] (:bundled-extensions (settings))))
+          (t/is (= :load (:override-state (first-item-row screen)))))
+        (t/testing "load → unload writes -name"
+          (protocols/handle-input screen " ")
+          (t/is (= ["-clojure"] (:bundled-extensions (settings))))
+          (t/is (= :unload (:override-state (first-item-row screen)))))
+        (t/testing "unload → inherit drops the entry"
+          (protocols/handle-input screen " ")
+          (t/is (= [] (:bundled-extensions (settings))))
+          (t/is (= :inherit (:override-state (first-item-row screen)))))))
+    {:bundled? true}))
+
+(t/deftest test-screen-bundled-global-setting-drives-the-rows
+  ;; a global :bundled-extensions entry shows up as enabled in both scopes
+  (with-settings
+    (fn [_]
+      (let [screen (rc/make-resource-config-screen :rows 40)
+            row (first (filter #(= "clojure" (get-in (:item %) [:metadata :display-name]))
+                               (item-rows screen)))]
+        (t/is (true? (:enabled row)))
+        (t/is (some #(str/includes? % "clojure") (render-lines screen 100)))))
+    {:user {:bundled-extensions ["clojure"]}
+     :bundled? true}))
 
 ;; ─── Project auto-dir items (regression: SCI duplicate-key crash) ─────────
 

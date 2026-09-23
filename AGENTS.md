@@ -209,6 +209,12 @@ src/kmet/
 ├── app/      — App-level business logic (pi: dist/core/)
 │   ├── tools/  — Tool implementations (one file per tool)
 │   └── ui/     — App-specific TUI components (Pi's coding-agent layer)
+├── bundled-extensions/ — the committed bundled-extensions manifest (a
+│              resource, not a namespace: kmet/bundled-extensions/manifest.edn,
+│              read by kmet.app.bundled-extensions; see extension-bundle.md).
+│              The shipped set lives in extensions/ at the repo root and is
+│              staged by the packagers under the same relative paths
+│              (target/kmet-bundled/extensions/<root>)
 └── tui/      — Generic TUI library (Pi's @earendil-works/pi-tui)
     │           Usage + development docs: src/kmet/tui/tui.md — MUST be kept up to date
     │           with any behavior change they describe
@@ -240,6 +246,12 @@ extensions/ — Shipped opt-in extensions (single .clj files or manifest dirs;
               pi: examples/extensions). Namespaces align with the layout: a
               single file is kmet.extensions.<name> (stem), a manifest dir
               kmet.extensions.<name>.* with the entry kmet.extensions.<name>.core.
+              The whole set is bundled with the app (disabled by default,
+              enabled via `kmet config` / the :bundled-extensions settings
+              key — extension-bundle.md), enumerated in
+              src/kmet/bundled-extensions/manifest.edn and validated by
+              `bb check-bundled-extensions`; the packagers stage each
+              artifact root under target/kmet-bundled/extensions/<root>.
               Extension authoring guide (the full
               kmet.extension contract): extensions/extensions.md — MUST be
               kept up to date with any behavior it describes

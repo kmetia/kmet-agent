@@ -262,6 +262,73 @@
             "the later callback resolves the extension's own resource"))
     (extensions/unload-all-extensions!)))
 
+;; ─── Bundled resource descriptors (extension-bundle.md) ───────────────────
+
+(defn- with-extension-resources
+  "Run F with io/resource answering the bundle's extensions/ keys from the
+   test classpath (extensions/<x> → fixtures/<x>): artifact mode's resource
+   lookup, against known fixtures."
+  [f]
+  (let [orig io/resource
+        mapped (fn [key]
+                 (let [k (str key)]
+                   (if (str/starts-with? k "extensions/")
+                     (orig (str "fixtures/" (subs k (count "extensions/"))))
+                     (orig key))))]
+    (with-redefs [io/resource mapped] (f))))
+
+(t/deftest test-load-resource-dir-descriptor
+  ;; artifact mode: a :resource-dir descriptor loads the same extension the
+  ;; checkout path does, with every source read through the extensions/
+  ;; prefix and the SCI backend (Phase A)
+  (extensions/clear-extensions!)
+  (try
+    (with-extension-resources
+      (fn []
+        (let [result (extensions/load-extension-descriptor!
+                      {:name "ext-dir" :kind :resource-dir
+                       :prefix "extensions/ext-dir"
+                       :path "extensions/ext-dir" :bundled? true})]
+          (t/is (nil? (:error result)) (str "loaded: " (:error result)))
+          (t/is (= :sci (:loader-kind result)))
+          (t/is (true? (:bundled result)))
+          (t/is (some? (tools/get-tool "multi-ext-tool")))
+          (let [loaded (first (extensions/get-loaded-extensions))]
+            (t/is (= "multi-ext" (:name loaded)))
+            (t/is (= :resource-dir (:kind loaded)))
+            (t/is (true? (:bundled loaded)))
+            (t/is (nil? (:extension-dir loaded)))))))
+    (finally (extensions/unload-all-extensions!))))
+
+(t/deftest test-load-resource-file-descriptor
+  ;; a single-file bundled artifact: SCI on every host (D10), and its
+  ;; extension identity is the file name (what a user's own copy carries)
+  (extensions/clear-extensions!)
+  (try
+    (with-extension-resources
+      (fn []
+        (let [result (extensions/load-extension-descriptor!
+                      {:name "hello-ext" :kind :resource-file
+                       :path "extensions/ext-single/hello_ext.clj" :bundled? true})]
+          (t/is (nil? (:error result)) (str "loaded: " (:error result)))
+          (t/is (= :sci (:loader-kind result)))
+          (t/is (some? (commands/find-command "hello-ext")))
+          (t/is (= "hello_ext.clj" (:name (first (extensions/get-loaded-extensions))))))))
+    (finally (extensions/unload-all-extensions!))))
+
+(t/deftest test-duplicate-name-skipped
+  ;; D11: the bundled layer ranks last — a same-name extension already
+  ;; loaded (a user's own copy) is skipped, not loaded twice
+  (extensions/clear-extensions!)
+  (try
+    (let [first-result (extensions/load-extension! "test/fixtures/ext-dir")
+          second-result (extensions/load-extension! "test/fixtures/ext-dir")]
+      (t/is (nil? (:error first-result)))
+      (t/is (true? (:skipped second-result)))
+      (t/is (= :duplicate-name (:reason second-result)))
+      (t/is (= 1 (count (extensions/get-loaded-extensions)))))
+    (finally (extensions/unload-all-extensions!))))
+
 (t/deftest test-unload-removes-provider-registration
   (extensions/clear-extensions!)
   (models/load-catalogs!)

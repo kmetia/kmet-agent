@@ -6,12 +6,21 @@ is loaded by default.
 
 ## Enabling an extension
 
-Extensions load from the global dir (`~/.kmet/agent/extensions/`) and the
-project-local dir (`.kmet/extensions/`) at startup and on `/reload`. Enable
-a shipped extension by symlinking or copying it into one of those — or
-install it as a **package** with `kmet install <path>` (records the source
-in settings; see README “Package subcommands” and
-`extensions/extensions.md`):
+The shipped set is **bundled with kmet**, so the normal path is no setup at
+all: `kmet config` lists every extension under “Bundled with kmet”
+(default off), and the same set can be enabled from the settings files with
+the `:bundled-extensions` key (`["clojure" "-mcp-adapter"]` globally,
+`["+mcp-adapter"]` as a project delta). Bundled extensions are not
+packages — `kmet install`/`remove`/`list` cannot touch them — and nothing is
+ever extracted to disk (see `extensions/extensions.md` and
+`extension-bundle.md`).
+
+Extensions also load from the global dir (`~/.kmet/agent/extensions/`) and
+the project-local dir (`.kmet/extensions/`) at startup and on `/reload`.
+Use this for local development against an edited copy: symlink or copy the
+extension into one of those — or install it as a **package** with
+`kmet install <path>` (records the source in settings; see README “Package
+subcommands” and `extensions/extensions.md`):
 
 ```bash
 # one-time setup: make the shipped extension a package (user scope)

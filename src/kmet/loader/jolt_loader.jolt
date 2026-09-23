@@ -147,6 +147,15 @@
   [l]
   (jl/unloaded? (jolt-of l)))
 
+(defn embedded-roots?
+  "Does this Jolt runtime support embedded loader roots — a root string
+   `embed:<prefix>` resolved through the runtime's embedded-resource store?
+   A capability probe for kmet's bundled-extension switch
+   (extension-bundle.md Phase B): the var only exists once the feature
+   ships, so every earlier release answers false."
+  []
+  (some? (resolve 'jolt.loader/embedded-root?)))
+
 (defn status
   "Jolt's diagnostics map for L (kmet's `status` is the portable view)."
   [l]

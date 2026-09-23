@@ -14,7 +14,12 @@
  ;; version it was built as (`kmet --version`) instead of describing whatever
  ;; checkout it happens to run in; a missing root embeds nothing, which is what
  ;; a direct `jolt build` gets (then the runtime falls back to git describe).
- :jolt/build {:embed ["src" "target/kmet-version"]}
+ ;; target/kmet-bundled is the staged bundled-extension tree
+ ;; (kmet.tasks.build/stage-bundled-extensions!): its contents keep the repo's
+ ;; extensions/<name>/src layout, so io/resource reads a bundled extension at
+ ;; the same path in a binary as in a checkout (extension-bundle.md). A
+ ;; missing root embeds nothing — the runtime then offers no bundled set.
+ :jolt/build {:embed ["src" "target/kmet-version" "target/kmet-bundled"]}
 
  :deps {        ;; babashka.fs / babashka.process are deliberately NOT deps: babashka
         ;; bundles them, and jolt vendors the same namespaces (built-in,

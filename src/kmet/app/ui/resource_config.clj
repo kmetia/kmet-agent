@@ -1,7 +1,14 @@
 (ns kmet.app.ui.resource-config
   "The `kmet config` resource-configuration screen (pi:
-   modes/interactive/components/config-selector.ts — packages first, then
-   top-level groups, pi buildGroups over the unified resolution).
+   modes/interactive/components/config-selector.ts — the bundled group
+   first, then packages, then top-level groups, pi buildGroups over the
+   unified resolution).
+
+   The bundled group lists the app-provided bundled extensions
+   (kmet.app.bundled-extensions, extension-bundle.md): always present,
+   disabled by default, toggled through the :bundled-extensions settings
+   key of the write scope (global: plain/-name; project: +/- delta over
+   the global setting).
 
    Layout (pi parity): top spacer, top border, spacer, two header lines
    (title · action hints, scope hint), spacer, the search input line, a
@@ -60,12 +67,17 @@
 (defn- display-name
   "pi displayName rules: extensions name their file (with the parent folder
    prefix when the extension does not live in a conventional extensions/
-   dir); SKILL.md skills name their folder; prompts/themes their file."
+   dir); SKILL.md skills name their folder; prompts/themes their file. A
+   bundled item prefers its manifest name (metadata :display-name) — a
+   resource artifact's path basename is the synthetic prefix."
   [item]
   (let [path (:path item)
         file (fs/file-name path)
         parent (fs/file-name (fs/parent path))]
     (cond
+      (get-in item [:metadata :display-name])
+      (get-in item [:metadata :display-name])
+
       (and (= (:resource-type item) :extensions) (not= parent "extensions"))
       (if (and parent file) (str parent "/" file) (or file path))
 
@@ -77,10 +89,16 @@
 (defn- group-label
   "pi getGroupLabel — package groups name their source + scope; top-level
    settings-entry groups name their scope (User/Project settings); auto-dir
-   groups name the scope + base dir (User/∼... or Project/.kmet/...)."
+   groups name the scope + base dir (User/∼... or Project/.kmet/...); the
+   bundled group is a fixed label — the shipped set is the same in every
+   project."
   [origin scope source base-dir agent-dir]
-  (if (= origin :package)
-    (str source " (" (name scope) ")")
+  (cond
+    (= origin :bundled) "Bundled with kmet"
+
+    (= origin :package) (str source " (" (name scope) ")")
+
+    :else
     (if (not= source "auto")
       (if (= scope :user) "User settings" "Project settings")
       (let [home (System/getProperty "user.home")
@@ -100,14 +118,19 @@
   [items-by-type agent-dir]
   (let [all (mapcat items-by-type (keys items-by-type))
         by-group (group-by (fn [item]
-                             {:origin (get-in item [:metadata :origin] :package)
-                              :scope (get-in item [:metadata :scope])
-                              :source (get-in item [:metadata :source])
-                              :base-dir (get-in item [:metadata :base-dir])})
+                             (let [origin (get-in item [:metadata :origin] :package)]
+                               {:origin origin
+                                :scope (get-in item [:metadata :scope])
+                                :source (get-in item [:metadata :source])
+                                ;; the bundled set is ONE group whatever each
+                                ;; artifact's base dir is; packages/top-level
+                                ;; items keep the base-dir grouping pi uses
+                                :base-dir (when-not (= :bundled origin)
+                                            (get-in item [:metadata :base-dir]))}))
                            all)]
     (vec
      (for [[gk group-items] (sort-by (fn [[gk _]]
-                                       [(if (= :package (:origin gk)) 0 1)
+                                       [(case (:origin gk) :bundled 0 :package 1 2)
                                         (if (= :user (:scope gk)) 0 1)
                                         (str (:source gk))
                                         (str (:base-dir gk))])
@@ -243,8 +266,21 @@
             name (display-name item)
             name (if (and selected? (not dimmed?)) (th/bold name) name)
             name (if dimmed? (th/fg t :dim name) name)
-            suffix (if single?
+            suffix (cond
+                     ;; bundled rows carry the app-provided marker; in
+                     ;; project scope an inherited (not overridden) row
+                     ;; says so, an overridden one keeps the usual suffix
+                     (pkgs/bundled-item? item)
+                     (str (th/fg t :dim "  bundled")
+                          (when (= write-scope :project)
+                            (if (= ov :inherit)
+                              (th/fg t :dim " · global setting")
+                              (override-suffix t :project ov inherited?))))
+
+                     single?
                      (th/fg t :muted "  always loaded")
+
+                     :else
                      (override-suffix t write-scope ov inherited?))]
         (u/truncate-to-width
          (str cursor "    "
@@ -259,21 +295,26 @@
    {:user user-only-resolution :project merged-resolution}. The user view
    is pi's global config view (untrusted settings manager): the project
    scope — settings and auto dirs — is absent, not just the project
-   entries."
+   entries. Both carry the bundled layer, with the enabled state each view
+   sees (user-only settings for :user, the merged settings for :project)."
   []
   (let [user-settings (cfg/read-global-settings-map)
         project-settings (cfg/read-project-settings-map)]
-    {:user (pkgs/resolve-package-items user-settings nil nil false)
-     :project (pkgs/resolve-package-items user-settings project-settings)}))
+    {:user (pkgs/resolve-package-items user-settings nil nil false
+                                       (pkgs/bundled-items user-settings nil))
+     :project (pkgs/resolve-package-items user-settings project-settings nil true
+                                          (pkgs/bundled-items user-settings project-settings))}))
 
 (defn- override-state-of
   "pi getProjectOverrideState — ITEM's project override state from the live
-   project settings: the resource-array branch for top-level items, the
-   package-entry branch otherwise."
+   project settings: the bundled :bundled-extensions branch, the
+   resource-array branch for top-level items, the package-entry branch
+   otherwise."
   [item]
-  (if (pkgs/top-level-item? item)
-    (pkgs/top-level-override-state-of item)
-    (pkgs/override-state-of item (pkgs/project-packages))))
+  (cond
+    (pkgs/bundled-item? item) (pkgs/bundled-override-state-of item)
+    (pkgs/top-level-item? item) (pkgs/top-level-override-state-of item)
+    :else (pkgs/override-state-of item (pkgs/project-packages))))
 
 (defn- item-state-of
   "The per-row state of ITEM in the current WRITE-SCOPE (pi reads the
@@ -402,37 +443,62 @@
 (defn- toggle-selected!
   "Space/enter on an item row (pi toggleResource): global scope flips the
    enabled state (package items write the package entry, top-level items
-   the scope's settings resource array); project scope cycles
-   inherit/load/unload (pi getNextOverrideState + setProjectResourceOverride
-   — the package or the top-level branch per origin). The row's state
-   updates in place (pi updateItem) — the layout is not re-resolved.
-   Single-extension package rows cannot be toggled (their filters are
-   ignored at resolve time)."
+   the scope's settings resource array, bundled items the
+   :bundled-extensions entry); project scope cycles inherit/load/unload
+   (pi getNextOverrideState + setProjectResourceOverride — the package,
+   top-level or bundled branch per origin). The row's state updates in
+   place (pi updateItem) — the layout is not re-resolved. Single-extension
+   package rows cannot be toggled (their filters are ignored at resolve
+   time)."
   [this]
   (let [st @(:state-atom this)
         rows (:rows st)
         row (when (seq rows) (nth rows (min (:selected st) (dec (count rows))) nil))]
     (when (and row (= :item (:kind row)))
       (let [item (:item row)]
-        (when-not (pkgs/single-extension-item? item)
+        (cond
+          ;; bundled items are not :packages entries: the global branch
+          ;; writes the :bundled-extensions key, the project branch its
+          ;; +/- delta (kmet.app.packages/apply-bundled-*)
+          (pkgs/bundled-item? item)
           (if (= :global (:write-scope st))
-            ;; pi: global scope toggles user-scope items only (project rows
-            ;; toggle from the project scope view)
-            (when (= :user (get-in item [:metadata :scope]))
-              (let [enabled (not (:enabled row))]
-                (pkgs/apply-global-toggle! item enabled)
-                (update-row-state! this {:enabled enabled
-                                         :override-state :inherit})))
+            (let [enabled (not (:enabled row))]
+              (pkgs/apply-bundled-toggle! item enabled)
+              (update-row-state! this {:enabled enabled
+                                       :override-state :inherit}))
             (let [next-state (pkgs/next-override-state (:override-state row)
                                                        (:inherited-enabled row))]
               (when (not= next-state (:override-state row))
-                (pkgs/apply-project-override! item next-state)
+                (pkgs/apply-bundled-project-override! item next-state)
                 (update-row-state!
                  this
                  {:override-state next-state
                   :enabled (if (= :inherit next-state)
                              (:inherited-enabled row)
-                             (= :load next-state))})))))))))
+                             (= :load next-state))}))))
+
+          (pkgs/single-extension-item? item) nil
+
+          (= :global (:write-scope st))
+          ;; pi: global scope toggles user-scope items only (project rows
+          ;; toggle from the project scope view)
+          (when (= :user (get-in item [:metadata :scope]))
+            (let [enabled (not (:enabled row))]
+              (pkgs/apply-global-toggle! item enabled)
+              (update-row-state! this {:enabled enabled
+                                       :override-state :inherit})))
+
+          :else
+          (let [next-state (pkgs/next-override-state (:override-state row)
+                                                     (:inherited-enabled row))]
+            (when (not= next-state (:override-state row))
+              (pkgs/apply-project-override! item next-state)
+              (update-row-state!
+               this
+               {:override-state next-state
+                :enabled (if (= :inherit next-state)
+                           (:inherited-enabled row)
+                           (= :load next-state))}))))))))
 
 (defn- refresh-filter!
   "Apply the search field's text to the row list (pi: searchInput change →

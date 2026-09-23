@@ -47,6 +47,23 @@
   "target/kmet-test-entry")
 (def ^:private test-entry-file "target/kmet-test-entry/kmet/tasks/test_main.clj")
 
+;; bundled extensions (extension-bundle.md): the committed manifest and the
+;; build-time staging root the packagers embed/walk
+(def ^:private bundled-manifest-path
+  "The committed manifest, read straight from the checkout (it is inside
+   src/, so the runtime sees it as a classpath resource in every mode)."
+  "src/kmet/bundled-extensions/manifest.edn")
+(def ^:private bundled-staging-root
+  "Build-time staging root the packagers embed/walk as an extra root: its
+   tree is exactly the runtime's resource keys,
+   extensions/<manifest :root>/…"
+  "target/kmet-bundled")
+(def ^:private bundled-resource-prefix
+  "Resource prefix the staged tree is keyed under — the repo's extensions/
+   directory, so a resource path matches the checkout path
+   (extensions/<manifest :root>)."
+  "extensions")
+
 (defn- bb-only!
   "Throw ::bb-only when invoked under the jolt host. kmet.tasks.build is the
    babashka packaging pipeline (babashka.classpath classpath, java.util.zip
@@ -262,6 +279,11 @@
 
 ;; ─── Uberjar ───────────────────────────────────────────────────────────────
 
+;; forward declaration: stage-bundled-extensions! lives in the bundled-extension
+;; section below (it needs strict-ns-for-path / extension-loader-kinds), while
+;; the uberjar writers above already stage before walking the extra root
+(declare stage-bundled-extensions!)
+
 (defn- write-uberjar!
   "Write JAR (its manifest Main-Class MAIN) in THIS process — no nested bb
    interpreter (a second ~200MB babashka under memory pressure is what gets
@@ -272,77 +294,100 @@
    generated root under target/ lands at its namespace path), then the
    entries of each dependency jar already on the classpath (the Maven jars —
    data.json for the JSON seam, cljfmt for the format task — aren't
-   bb-builtin; keeping all jars is simpler than filtering). Dependency
+   bb-builtin; keeping all jars is simpler than filtering). OPTIONS
+   :extra-roots are walked after the normal roots, every regular file (no
+   extension filter — bundled skills and other resources ship too), so the
+   `seen` dedupe keeps the normal roots winning any collision. Dependency
    manifests and signatures are skipped so ours wins. Returns the absolute
    jar path."
-  [jar main roots]
-  (fs/create-dirs (fs/parent jar))
-  (let [tmp (str jar ".part")
-        seen (volatile! #{})
-        ;; path.separator is ";" on Windows and ":" on Unix — the old
-        ;; #"::?" split only worked on Unix and glued all Windows
-        ;; classpath entries into one string, so no dep jar ever landed in
-        ;; the uberjar (data.json etc. were missing)
-        dep-jars (->> (str/split (bcp/get-classpath)
-                                 (re-pattern (System/getProperty "path.separator")))
-                      (filter #(and (str/ends-with? % ".jar")
-                                    (not (fs/directory? %)))))]
-    (with-open [zos (java.util.zip.ZipOutputStream. (io/output-stream tmp))]
-      (.putNextEntry zos (java.util.zip.ZipEntry. "META-INF/MANIFEST.MF"))
-      (io/copy (.getBytes (str "Manifest-Version: 1.0\r\n"
-                               "Main-Class: " main "\r\n\r\n")) zos)
-      (.closeEntry zos)
-      ;; the version this artifact is: kmet.core reads it back for
-      ;; `kmet --version` (a built binary has no checkout to describe)
-      (.putNextEntry zos (java.util.zip.ZipEntry. "kmet/version.txt"))
-      (io/copy (.getBytes (str (version-lib/checkout-version) "\n")) zos)
-      (.closeEntry zos)
-      (doseq [root roots
-              p (sort-by str (fs/glob root "**.{clj,cljc,edn}"))]
-        (let [rel (str (fs/relativize root p))
-              ;; jar entries must use / separators — fs/relativize yields \ on
-              ;; Windows, which breaks bb's classpath lookup (kmet/core.clj
-              ;; would not resolve from the appended jar)
-              entry (str/replace rel "\\" "/")]
-          (when-not (contains? @seen entry)
-            (vswap! seen conj entry)
-            (.putNextEntry zos (java.util.zip.ZipEntry. entry))
-            (with-open [in (io/input-stream (fs/file p))]
-              (io/copy in zos))
-            (.closeEntry zos))))
-      (doseq [j dep-jars]
-        (with-open [zf (java.util.zip.ZipFile. (fs/file j))]
-          (doseq [e (enumeration-seq (.entries zf))
-                  :when (not (.isDirectory e))]
-            (let [n (.getName e)]
-              (when-not (or (str/starts-with? n "META-INF/")
-                            (contains? @seen n))
-                (vswap! seen conj n)
-                (.putNextEntry zos (java.util.zip.ZipEntry. n))
-                (with-open [in (.getInputStream zf e)]
-                  (io/copy in zos))
-                (.closeEntry zos)))))))
-    (fs/move (fs/path tmp) (fs/path jar) {:replace-existing true})
-    (fs/canonicalize jar)))
+  ([jar main roots] (write-uberjar! jar main roots nil))
+  ([jar main roots {:keys [extra-roots]}]
+   (fs/create-dirs (fs/parent jar))
+   (let [tmp (str jar ".part")
+         seen (volatile! #{})
+         ;; path.separator is ";" on Windows and ":" on Unix — the old
+         ;; #"::?" split only worked on Unix and glued all Windows
+         ;; classpath entries into one string, so no dep jar ever landed in
+         ;; the uberjar (data.json etc. were missing)
+         dep-jars (->> (str/split (bcp/get-classpath)
+                                  (re-pattern (System/getProperty "path.separator")))
+                       (filter #(and (str/ends-with? % ".jar")
+                                     (not (fs/directory? %)))))]
+     (with-open [zos (java.util.zip.ZipOutputStream. (io/output-stream tmp))]
+       (.putNextEntry zos (java.util.zip.ZipEntry. "META-INF/MANIFEST.MF"))
+       (io/copy (.getBytes (str "Manifest-Version: 1.0\r\n"
+                                "Main-Class: " main "\r\n\r\n")) zos)
+       (.closeEntry zos)
+       ;; the version this artifact is: kmet.core reads it back for
+       ;; `kmet --version` (a built binary has no checkout to describe)
+       (.putNextEntry zos (java.util.zip.ZipEntry. "kmet/version.txt"))
+       (io/copy (.getBytes (str (version-lib/checkout-version) "\n")) zos)
+       (.closeEntry zos)
+       (doseq [root roots
+               p (sort-by str (fs/glob root "**.{clj,cljc,edn}"))]
+         (let [rel (str (fs/relativize root p))
+               ;; jar entries must use / separators — fs/relativize yields \ on
+               ;; Windows, which breaks bb's classpath lookup (kmet/core.clj
+               ;; would not resolve from the appended jar)
+               entry (str/replace rel "\\" "/")]
+           (when-not (contains? @seen entry)
+             (vswap! seen conj entry)
+             (.putNextEntry zos (java.util.zip.ZipEntry. entry))
+             (with-open [in (io/input-stream (fs/file p))]
+               (io/copy in zos))
+             (.closeEntry zos))))
+       ;; bundled-extension staging: every file (skills and other resources
+       ;; ship too, hence no extension filter); src/ walks first, so a
+       ;; collision keeps the normal root's entry
+       (doseq [root extra-roots
+               :when (fs/directory? root)
+               p (sort-by str (fs/glob root "**"))
+               :when (fs/regular-file? p)]
+         (let [entry (str/replace (str (fs/relativize root p)) "\\" "/")]
+           (when-not (contains? @seen entry)
+             (vswap! seen conj entry)
+             (.putNextEntry zos (java.util.zip.ZipEntry. entry))
+             (with-open [in (io/input-stream (fs/file p))]
+               (io/copy in zos))
+             (.closeEntry zos))))
+       (doseq [j dep-jars]
+         (with-open [zf (java.util.zip.ZipFile. (fs/file j))]
+           (doseq [e (enumeration-seq (.entries zf))
+                   :when (not (.isDirectory e))]
+             (let [n (.getName e)]
+               (when-not (or (str/starts-with? n "META-INF/")
+                             (contains? @seen n))
+                 (vswap! seen conj n)
+                 (.putNextEntry zos (java.util.zip.ZipEntry. n))
+                 (with-open [in (.getInputStream zf e)]
+                   (io/copy in zos))
+                 (.closeEntry zos)))))))
+     (fs/move (fs/path tmp) (fs/path jar) {:replace-existing true})
+     (fs/canonicalize jar))))
 
 (defn uberjar*
   "Create target/kmet.jar in THIS process — the app uberjar `bb dist`
-   appends: Main-Class kmet.core, every src/ file, then the dependency jars."
+   appends: Main-Class kmet.core, every src/ file, then the dependency jars
+   and the staged bundled extensions (stage-bundled-extensions!)."
   []
   (bb-only! "kmet.tasks.build/uberjar*")
-  (write-uberjar! jar-path main-class ["src"]))
+  (stage-bundled-extensions!)
+  (write-uberjar! jar-path main-class ["src"]
+                  {:extra-roots [bundled-staging-root]}))
 
 (defn test-uberjar*
   "Create target/kmet-test.jar — the jar `bb dist --test` appends:
    Main-Class kmet.tasks.test-main, src/ + tasks/ + test/ and the generated
-   test entry (generate-test-main!). Everything the runner can require is in
-   the jar; on babashka it still loads test namespaces dynamically and
-   tolerantly, the way `bb test` does."
+   test entry (generate-test-main!), plus the staged bundled extensions.
+   Everything the runner can require is in the jar; on babashka it still
+   loads test namespaces dynamically and tolerantly, the way `bb test` does."
   []
   (bb-only! "kmet.tasks.build/test-uberjar*")
   (generate-test-main!)
+  (stage-bundled-extensions!)
   (write-uberjar! test-jar-path test-main-class
-                  ["src" "tasks" "test" test-entry-root]))
+                  ["src" "tasks" "test" test-entry-root]
+                  {:extra-roots [bundled-staging-root]}))
 
 ;; ─── Assembling artifacts ──────────────────────────────────────────────────
 
@@ -368,7 +413,10 @@ LD=\"$PREFIX/glibc/lib/%s\"
 [ -x \"$LD\" ] || { echo \"termux glibc package required: pkg install glibc-repo && pkg install glibc\" >&2; exit 1; }
 unset LD_PRELOAD
 export TMPDIR=\"${TMPDIR:-$PREFIX/tmp}\"
-exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" \"$@\"
+# `--` stops babashka's own option parsing: `--version` (or any other flag
+# name babashka also owns) must reach the jar's main, not babashka, which
+# would print its own version and exit.
+exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" -- \"$@\"
 "
           bin-name linker))
 
@@ -550,6 +598,165 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" \"$@\"
           (.closeEntry zos))))
     (println "packed" out)
     out))
+
+;; ─── Bundled extensions (extension-bundle.md) ──────────────────────────────
+
+(defn- bundle-error!
+  [msg]
+  (throw (ex-info msg {:type ::bundle-error})))
+
+(defn- discover-bundled-roots
+  "Every shippable artifact root under DIR (default: the checkout's
+   extensions/), relative to it: top-level .clj files and <name>/src
+   directories carrying extension.edn. README/extensions.md/dev wrappers
+   are not artifacts."
+  ([] (discover-bundled-roots "extensions"))
+  ([dir]
+   (let [d (io/file dir)]
+     (when-not (fs/directory? d)
+       (bundle-error! (str "no " dir " directory at " (fs/cwd))))
+     (into #{}
+           (keep (fn [entry]
+                   (let [path (str entry)
+                         name (fs/file-name path)]
+                     (cond
+                       (and (fs/regular-file? entry) (str/ends-with? path ".clj")) name
+                       (and (fs/directory? entry)
+                            (fs/exists? (io/file path "src" "extension.edn")))
+                       (str name "/src")
+                       :else nil))))
+           (fs/list-dir d)))))
+
+(defn- validate-bundled-dir!
+  "D8 checks for one :dir artifact root: extension.edn with :name + symbol
+   :entry + a :loader vector that includes :sci, every source file's (ns ...)
+   matching its strict path, and a deps.edn (when present) carrying only
+   :deps with no :local/root."
+  [name root]
+  (let [manifest-file (io/file root "extension.edn")]
+    (when-not (fs/regular-file? manifest-file)
+      (bundle-error! (str "bundled extension " name ": no extension.edn in " root)))
+    (let [m (edn/read-string (slurp manifest-file))
+          entry-ns (:entry m)
+          loaders (:loader m)]
+      (when-not (and (:name m) (symbol? entry-ns))
+        (bundle-error! (str "bundled extension " name
+                            ": extension.edn needs :name + symbol :entry, got " (pr-str m))))
+      (when-not (and (sequential? loaders) (seq loaders)
+                     (every? extension-loader-kinds loaders))
+        (bundle-error! (str "bundled extension " name
+                            ": extension.edn needs a non-empty :loader vector of "
+                            (vec (sort extension-loader-kinds)))))
+      (when-not (some #{:sci} loaders)
+        (bundle-error! (str "bundled extension " name
+                            ": :loader must include :sci — bundled resource artifacts
+   load through the SCI backend until the Jolt embedded-root feature exists")))
+      (let [base (str/replace (namespace-munge (str entry-ns)) "." "/")
+            entry-file (some (fn [ext]
+                               (let [f (io/file (str root) (str base ext))]
+                                 (when (.exists f) f)))
+                             [".cljc" ".clj" ".bb"])]
+        (when-not entry-file
+          (bundle-error! (str "bundled extension " name ": :entry not found: " entry-ns))))
+      (doseq [f (sort-by str (mapcat #(fs/glob root (str "**." %)) ["clj" "cljc" "bb"]))]
+        (let [rel (str/replace (str (fs/relativize root f)) "\\" "/")
+              expected (strict-ns-for-path rel)
+              actual (with-open [r (java.io.PushbackReader. (io/reader (fs/file f)))]
+                       (second (read r)))]
+          (when-not (= expected actual)
+            (bundle-error! (str "bundled extension " name " strict layout violation: " rel
+                                " declares " actual ", expected " expected)))))
+      (let [deps-file (io/file root "deps.edn")]
+        (when (fs/regular-file? deps-file)
+          (let [deps (edn/read-string (slurp deps-file))]
+            (when-not (map? deps)
+              (bundle-error! (str "bundled extension " name ": deps.edn must be an EDN map")))
+            (when-not (= #{:deps} (set (keys deps)))
+              (bundle-error! (str "bundled extension " name
+                                  ": deps.edn may only carry :deps, got " (pr-str (keys deps)))))
+            (when (some (fn [[_ spec]]
+                          (and (map? spec)
+                               (or (contains? spec :local/root)
+                                   (contains? spec :local-root))))
+                        (:deps deps))
+              (bundle-error! (str "bundled extension " name
+                                  ": deps.edn must not use :local/root — a bundled artifact
+   has no stable root in a binary")))))))))
+
+(defn- validate-bundled-file!
+  "A :file artifact is a single-file extension: the file must exist and
+   start with an (ns ...) form."
+  [name root]
+  (when-not (fs/regular-file? (io/file root))
+    (bundle-error! (str "bundled extension " name ": missing file " root)))
+  (let [form (with-open [r (java.io.PushbackReader. (io/reader (fs/file root)))]
+               (read r))]
+    (when-not (and (list? form) (= 'ns (first form)))
+      (bundle-error! (str "bundled extension " name ": " root
+                          " does not start with an (ns ...) form")))))
+
+(defn validate-bundled-extensions!
+  "Validate the committed bundled-extensions manifest against the checkout:
+   every artifact under extensions/ is listed (minus :exclude), every
+   listed root exists and passes its kind's D8 checks (see
+   validate-bundled-dir! / validate-bundled-file!). Returns the parsed
+   manifest; throws ex-info with :type ::bundle-error on any violation.
+   Shared by bb check-bundled-extensions, the packagers' staging step and
+   the test gate — offline and side-effect free."
+  []
+  (let [manifest (edn/read-string (slurp bundled-manifest-path))
+        entries (:artifacts manifest)
+        listed (set (map :root entries))
+        excluded (set (:exclude manifest))]
+    (doseq [root (sort (discover-bundled-roots))]
+      (when-not (or (contains? listed root) (contains? excluded root))
+        (bundle-error! (str "extensions/" root " is not listed in " bundled-manifest-path
+                            " — add it to :artifacts or :exclude"))))
+    (doseq [{:keys [name kind root]} entries
+            :let [path (str (fs/path "extensions" root))]]
+      (when-not (contains? #{:dir :file} kind)
+        (bundle-error! (str "bundled extension " name ": :kind must be :dir or :file")))
+      (when (contains? excluded root)
+        (bundle-error! (str "bundled extension " name ": listed and excluded at once (" root ")")))
+      (case kind
+        :dir (validate-bundled-dir! name path)
+        :file (validate-bundled-file! name path)))
+    manifest))
+
+(defn check-bundled-extensions!
+  "bb check-bundled-extensions — validate the bundle without building.
+   Prints the artifact count; throws on the first violation."
+  []
+  (let [m (validate-bundled-extensions!)]
+    (println "Bundled extensions OK:" (count (:artifacts m)) "artifact(s)")
+    (count (:artifacts m))))
+
+(defn stage-bundled-extensions!
+  "Validate the bundle, then stage it for the artifacts: every file of
+   every artifact root is copied to
+   target/kmet-bundled/extensions/<root>/…, which is exactly
+   the resource-key layout the runtime probes (see
+   kmet.app.bundled-extensions). The staging root is the extra root the bb
+   uberjar walks and the jolt :jolt/build :embed list embeds; deleting it
+   first keeps stale files out. Returns the staging root path. Host-neutral
+   (fs + slurp/spit), so `jolt dist` can share it."
+  []
+  (let [manifest (validate-bundled-extensions!)
+        dest-root (fs/path bundled-staging-root)]
+    (when (fs/exists? dest-root)
+      (fs/delete-tree dest-root))
+    (doseq [{:keys [kind root]} (:artifacts manifest)
+            :let [src (fs/path "extensions" root)
+                  dest (fs/path dest-root bundled-resource-prefix root)]]
+      (if (= kind :dir)
+        (doseq [f (filter fs/regular-file? (fs/glob src "**"))]
+          (let [target (fs/path dest (fs/relativize src f))]
+            (fs/create-dirs (fs/parent target))
+            (fs/copy f target {:replace-existing true})))
+        (do (fs/create-dirs (fs/parent dest))
+            (fs/copy src dest {:replace-existing true}))))
+    (println "staged bundled extensions in" (str dest-root))
+    (str dest-root)))
 
 ;; ─── CLI ───────────────────────────────────────────────────────────────────
 

@@ -224,3 +224,88 @@
           (is (contains? entries "skills/clojure-edit/SKILL.md"))
           (is (not (contains? entries "META-INF/MANIFEST.MF")) "no META-INF"))
         (finally (fs/delete-if-exists out))))))
+
+;; ─── Bundled extensions (extension-bundle.md) ─────────────────────────────
+
+(deftest ^:bb-only bundle-validator-accepts-the-committed-manifest
+  (let [manifest (build/validate-bundled-extensions!)]
+    (is (= 10 (count (:artifacts manifest))))
+    (is (= [] (:exclude manifest)))))
+
+(deftest ^:bb-only bundle-validator-discovery-is-convention-based
+  ;; the completeness scan: top-level .clj files and <name>/src dirs are
+  ;; artifacts; READMEs and dirs without src/extension.edn are dev wrappers
+  (let [dir "target/test-bundle-discovery"]
+    (fs/delete-tree dir)
+    (fs/create-dirs (str dir "/one/src"))
+    (spit (str dir "/one/src/extension.edn") "{:name \"one\" :entry one.core :loader [:sci]}\n")
+    (spit (str dir "/single.clj") "(ns single)\n")
+    (fs/create-dirs (str dir "/wrapper"))
+    (spit (str dir "/wrapper/README.md") "not an artifact\n")
+    (try
+      (is (= #{"one/src" "single.clj"} (@#'build/discover-bundled-roots dir)))
+      (finally (fs/delete-tree dir)))))
+
+(deftest ^:bb-only bundle-validator-rejects
+  (testing "a dir artifact whose :loader lacks :sci"
+    (let [dir "target/test-bundle-nosci"]
+      (fs/delete-tree dir)
+      (fs/create-dirs (str dir "/bundle/bad"))
+      (spit (str dir "/bundle/extension.edn") "{:name \"bad\" :entry bad.main :loader [:jolt]}")
+      (spit (str dir "/bundle/bad/main.clj") "(ns bad.main)\n(defn init [api] nil)\n")
+      (is (thrown-with-msg? Exception #"must include :sci"
+                            (@#'build/validate-bundled-dir! "bad" (str dir "/bundle"))))
+      (fs/delete-tree dir)))
+  (testing "a dir artifact with a strict-layout violation"
+    (let [dir "target/test-bundle-sloppy"]
+      (fs/delete-tree dir)
+      (fs/create-dirs (str dir "/bundle/sloppy"))
+      (spit (str dir "/bundle/extension.edn") "{:name \"sloppy\" :entry sloppy.main :loader [:sci]}")
+      (spit (str dir "/bundle/sloppy/main.clj") "(ns wrong.place)\n(defn init [api] nil)\n")
+      (is (thrown-with-msg? Exception #"strict layout violation"
+                            (@#'build/validate-bundled-dir! "sloppy" (str dir "/bundle"))))
+      (fs/delete-tree dir)))
+  (testing "a deps.edn with :local/root or extra keys"
+    (let [dir "target/test-bundle-deps"]
+      (fs/delete-tree dir)
+      (fs/create-dirs (str dir "/bundle/lr"))
+      (spit (str dir "/bundle/extension.edn") "{:name \"lr\" :entry lr.main :loader [:sci]}")
+      (spit (str dir "/bundle/lr/main.clj") "(ns lr.main)\n(defn init [api] nil)\n")
+      (spit (str dir "/bundle/deps.edn") "{:deps {foo/bar {:local/root \"../x\"}}}")
+      (is (thrown-with-msg? Exception #":local/root"
+                            (@#'build/validate-bundled-dir! "lr" (str dir "/bundle"))))
+      (spit (str dir "/bundle/deps.edn") "{:deps {} :aliases {}}")
+      (is (thrown-with-msg? Exception #"only carry :deps"
+                            (@#'build/validate-bundled-dir! "lr" (str dir "/bundle"))))
+      (fs/delete-tree dir)))
+  (testing "a single-file artifact without an (ns ...) form"
+    (let [f "target/test-bundle-badfile.clj"]
+      (spit f "(println :x)\n")
+      (is (thrown-with-msg? Exception #"does not start with"
+                            (@#'build/validate-bundled-file! "badfile" f)))
+      (fs/delete-if-exists f))))
+
+(deftest ^:bb-only stage-bundled-extensions-embeds-the-artifact-roots
+  (let [root (build/stage-bundled-extensions!)]
+    (is (= "target/kmet-bundled" root))
+    (testing "directory artifacts keep the extensions/<name>/src layout"
+      (is (fs/regular-file? "target/kmet-bundled/extensions/clojure/src/extension.edn"))
+      (is (fs/regular-file? "target/kmet-bundled/extensions/clojure/src/kmet/extensions/clojure/core.clj"))
+      (is (fs/regular-file? "target/kmet-bundled/extensions/clojure/src/skills/clojure-edit/SKILL.md")))
+    (testing "single-file artifacts ship at extensions/<file>.clj"
+      (is (fs/regular-file? "target/kmet-bundled/extensions/tools.clj"))
+      (is (fs/regular-file? "target/kmet-bundled/extensions/deepseek-peak.clj")))
+    (testing "dev wrappers never ship"
+      (is (not (fs/exists? "target/kmet-bundled/extensions/clojure/bb.edn")))
+      (is (not (fs/exists? "target/kmet-bundled/extensions/clojure/README.md")))
+      (is (not (fs/exists? "target/kmet-bundled/extensions/clojure/test"))))))
+
+(deftest ^:bb-only uberjar-carries-the-bundled-extensions
+  (let [jar (build/uberjar*)]
+    (with-open [zf (java.util.zip.ZipFile. (fs/file jar))]
+      (let [entries (set (map (fn [e] (.getName ^java.util.zip.ZipEntry e))
+                              (enumeration-seq (.entries zf))))]
+        (is (contains? entries "extensions/clojure/src/extension.edn"))
+        (is (contains? entries "extensions/clojure/src/skills/clojure-edit/SKILL.md"))
+        (is (contains? entries "extensions/tools.clj"))
+        (is (contains? entries "kmet/bundled-extensions/manifest.edn"))))))
