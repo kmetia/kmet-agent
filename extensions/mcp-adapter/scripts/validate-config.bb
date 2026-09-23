@@ -13,9 +13,9 @@
          '[clojure.java.io :as io]
          '[kmet.libs.json :as json]
          '[kmet.extension :as ext]
-         '[extensions.mcp-adapter.config :as config]
-         '[extensions.mcp-adapter.metadata :as metadata]
-         '[extensions.mcp-adapter :as mcp])
+         '[kmet.extensions.mcp-adapter.config :as config]
+         '[kmet.extensions.mcp-adapter.metadata :as metadata]
+         '[kmet.extensions.mcp-adapter.core :as mcp])
 
 (def failures (atom 0))
 

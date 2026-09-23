@@ -84,7 +84,7 @@ clojure_paren_repair:
 - Unified diff of the changes
 
 `clojure_edit` and `clojure_edit_replace_sexp` reject unbalanced delimiters
-in replacement/match content via the shared `edit-util` pipeline — pass
+in replacement/match content via the shared `kmet.extensions.clojure.edit-util` pipeline — pass
 complete, balanced forms. Use `clojure_paren_repair` to fix a file whose
 delimiters are broken.
 
@@ -118,7 +118,7 @@ No `deps.edn` — everything is served by kmet's fixed bundled set
 hosts:
 
 - cljfmt 0.16.5 — code formatting (`cljfmt.edn` discovery and its `#re`
-  reader live in edit-util, so `cljfmt.config` is only loaded for its
+  reader live in `kmet.extensions.clojure.edit-util`, so `cljfmt.config` is only loaded for its
   `default-config` var)
 - rewrite-clj 1.2.57 — form parsing/zippers
 - edamame — delimiter error detection

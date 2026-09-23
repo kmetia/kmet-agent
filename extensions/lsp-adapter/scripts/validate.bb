@@ -18,12 +18,12 @@
          '[clojure.java.io :as io]
          '[clojure.string :as str]
          '[sci.core :as sci]
-         '[extensions.lsp-adapter.detect :as detect]
-         '[extensions.lsp-adapter :as entry]
-         '[extensions.lsp-adapter.lsp :as lsp]
-         '[extensions.lsp-adapter.runtime :as runtime]
-         '[extensions.lsp-adapter.tools :as tools]
-         '[extensions.lsp-adapter.panel :as panel]
+         '[kmet.extensions.lsp-adapter.detect :as detect]
+         '[kmet.extensions.lsp-adapter.core :as entry]
+         '[kmet.extensions.lsp-adapter.lsp :as lsp]
+         '[kmet.extensions.lsp-adapter.runtime :as runtime]
+         '[kmet.extensions.lsp-adapter.tools :as tools]
+         '[kmet.extensions.lsp-adapter.panel :as panel]
          '[kmet.tui.protocols :as protocols]
          '[kmet.tui.utils :as u])
 
@@ -138,7 +138,7 @@
   (check "uri->path inverts path->uri"
          (every? #(= % (lsp/uri->path (lsp/path->uri %))) paths)))
 
-(let [src (slurp (str ext-dir "/src/extensions/lsp_adapter/lsp.clj"))
+(let [src (slurp (str ext-dir "/src/kmet/extensions/lsp_adapter/lsp.clj"))
       forms (remove #(and (seq? %) (= 'ns (first %)))
                     (read-string (str "[\n" src "\n]")))
       ctx (sci/init

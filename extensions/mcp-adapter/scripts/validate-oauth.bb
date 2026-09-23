@@ -10,7 +10,7 @@
 (require '[babashka.process :as proc]
          '[clojure.string :as str]
          '[clojure.java.io :as io]
-         '[extensions.mcp-adapter.auth :as auth]
+         '[kmet.extensions.mcp-adapter.auth :as auth]
          '[kmet.libs.oauth :as oauth-lib])
 
 (def failures (atom 0))
@@ -214,7 +214,7 @@
              (str/starts-with? (get headers "Authorization") "Bearer access-cc-")))
     (auth/logout! "cc-server")
     (check "logout clears machine cache"
-           (nil? (get @(resolve 'extensions.mcp-adapter.auth/machine-token-cache)
+           (nil? (get @(resolve 'kmet.extensions.mcp-adapter.auth/machine-token-cache)
                       "cc-server")))))
 
 (defn test-jwt-bearer-flow [oauth-port store-path]

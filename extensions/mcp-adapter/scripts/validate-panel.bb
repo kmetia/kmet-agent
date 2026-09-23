@@ -7,8 +7,8 @@
          '[kmet.tui.core :as core]
          '[kmet.tui.keybindings :as kb]
          '[kmet.tui.theme :as theme]
-         '[extensions.mcp-adapter.metadata :as metadata]
-         '[extensions.mcp-adapter.panel :as panel])
+         '[kmet.extensions.mcp-adapter.metadata :as metadata]
+         '[kmet.extensions.mcp-adapter.panel :as panel])
 
 (def failures (atom 0))
 

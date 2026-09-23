@@ -46,10 +46,11 @@ code, skills, merged resources — while dev-only files stay outside:
 extensions/clojure/              ; dev wrapper, never packaged
 ├── README.md  bb.edn  test/
 └── src/                         ; === artifact root: zip as-is / symlink to install ===
-    ├── extension.edn
+    ├── extension.edn            ; {:name "clojure" :entry kmet.extensions.clojure.core}
     ├── deps.edn                 ; :deps only
-    ├── edit_tool.clj
-    ├── kmet/extensions/clojure/core.clj
+    ├── kmet/extensions/clojure/
+    │   ├── core.clj
+    │   └── edit_tool.clj
     └── skills/clojure-edit/SKILL.md
 ```
 
@@ -60,7 +61,8 @@ never ship.
 ## Layout rules
 
 - **Single-file extensions** (`*.clj` at the top level of the directory) —
-  one namespace defining `(defn init [api])`. They cannot carry a
+  one namespace defining `(defn init [api])`, namespaced
+  `kmet.extensions.<name>` (the file's stem). They cannot carry a
   `deps.edn`, so they may only use `kmet.extension` plus the shared
   `kmet.tui.*` / `kmet.libs.*` library layers, the shared renderer
   namespaces (`kmet.app.ui.tool-renderers`, `kmet.app.keybindings`),
@@ -73,7 +75,9 @@ never ship.
 - **Directory-based extensions** (a subdirectory with an `extension.edn`
   manifest `{:name ... :entry my.ext.main :loader [:jolt :sci]}`) — separate
   projects with a **strict ns-path layout** (namespace `a.b/c` at `a/b/c.clj`
-  under the root). `:loader` lists the loader backends the extension
+  under the root). Shipped directories namespace their code
+  `kmet.extensions.<name>.*`, the manifest entry at
+  `kmet.extensions.<name>.core`. `:loader` lists the loader backends the extension
   supports (`:sci` / `:jolt`; the host picks its own preference — see
   `extensions.md` § Loader compatibility). They may carry a `deps.edn` for
   library dependencies (`:deps` only) and their own tests (run them from
@@ -98,7 +102,7 @@ dialogs. The factory receives `(tui theme keybindings close)` and returns a
 component (a `defcomponent`, or a duck-typed map `{:render :handle-input
 :invalidate}`); the host mounts it (overlay or editor dock), feeds it
 input, and `close` dismisses it. Pattern (extensions/tools.clj,
-extensions/mcp-adapter/src/extensions/mcp_adapter/panel.clj):
+extensions/mcp-adapter/src/kmet/extensions/mcp_adapter/panel.clj):
 
 ```clojure
 (ext/ui-custom api

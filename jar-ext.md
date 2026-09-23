@@ -89,16 +89,21 @@ extensions/clojure/              ; dev wrapper, never packaged
 └── src/                         ; === artifact root, zipped as-is ===
     ├── extension.edn            ; {:name "clojure" :entry kmet.extensions.clojure.core}
     ├── deps.edn                 ; {:deps {...}} only
-    ├── edit_tool.clj            ; (ns edit-tool) — already strict
-    ├── kmet/extensions/clojure/core.clj
+    ├── kmet/extensions/clojure/
+    │   ├── core.clj             ; (ns kmet.extensions.clojure.core)
+    │   ├── edit_tool.clj        ; (ns kmet.extensions.clojure.edit-tool)
+    │   ├── edit_util.clj
+    │   ├── sexp_tool.clj
+    │   └── paren_repair.clj
     └── skills/clojure-edit/SKILL.md
 ```
 
 Consequences:
 
 - `bb.edn :paths` in each wrapper stays `["src" "test" "../../src"]`
-  (`"src"` now means the artifact root; flat test namespaces like
-  `edit-util-test` still resolve). Tests referencing moved paths update:
+  (`"src"` now means the artifact root; test namespaces at their ns paths
+  under `test/`, e.g. `kmet.extensions.clojure.edit-util-test`,
+  still resolve). Tests referencing moved paths update:
   skill dir strings (`"skills/..."` → `"src/skills/..."`),
   tree-sitter `resources/` references → `src/kmet/...`.
 - Install = two spellings of one thing:

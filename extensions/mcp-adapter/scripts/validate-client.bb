@@ -11,8 +11,8 @@
 (require '[babashka.process :as proc]
          '[clojure.string :as str]
          '[clojure.java.io :as io]
-         '[extensions.mcp-adapter.client :as client]
-         '[extensions.mcp-adapter.config :as config])
+         '[kmet.extensions.mcp-adapter.client :as client]
+         '[kmet.extensions.mcp-adapter.config :as config])
 
 (def failures (atom 0))
 

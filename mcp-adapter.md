@@ -49,7 +49,7 @@ never by convenience.
 | HTTP | in Phase 1: streamable HTTP + legacy SSE; auth: static bearer/headers + OAuth (RFC 8414 discovery, RFC 7591 DCR, PKCE loopback + device flow) |
 | OAuth machinery | new generic lib `kmet.libs.oauth`, extracted from `kmet.ai.oauth` (device-code poll, PKCE, callback server) + RFC 8414/7591 additions; extension `auth.clj` is a thin adapter; `kmet.ai.oauth` refactored onto the lib — one implementation, no duplication |
 | `/mcp serve` | out of scope |
-| Entry ns | `extensions.mcp-adapter` (a `kmet.*` prefix is rejected by the loader) |
+| Entry ns | `kmet.extensions.mcp-adapter.core` |
 
 ## 3. Scope
 
@@ -84,23 +84,23 @@ implemented — §15.23-34 record the build notes and deviations.
 
 | pi-mcp-adapter module | kmet file | Ported behavior |
 |---|---|---|
-| `index.ts` (installMcpAdapter) | `mcp_adapter.clj` | init/shutdown, state, tool registration, events, lifecycle generations simplified to per-server locks |
+| `index.ts` (installMcpAdapter) | `core.clj` | init/shutdown, state, tool registration, events, lifecycle generations simplified to per-server locks |
 | `config.ts` (loadMcpConfig, writeProjectServerDisabledOverride) | `config.clj` | precedence merge, disabled override — EDN sources instead of mcp.json, no imports/host discovery (Phase 1) |
 | `server-manager.ts` | `client.clj` | server lifecycle, lazy connect, reconnect, stdio+streamable-http+sse transports (no sampling/elicitation handlers) |
 | `mcp-auth.ts`, `mcp-oauth-provider.ts`, `oauth-handler.ts`, `mcp-auth-flow.ts`, `mcp-callback-server.ts` | `kmet.libs.oauth` + `auth.clj` | generic machinery → `kmet.libs.oauth` (extracted from `kmet.ai.oauth`, extended with RFC 8414 discovery + RFC 7591 DCR + token exchange/refresh); `auth.clj` is a thin adapter (config → lib calls, token-store file, browser open, status). Extensions cannot require `kmet.ai.*` — the lib is the shared seam; plaintext store instead of OS keyring |
 | `proxy-modes.ts` (executeSearch/Describe/Call/Connect/Status) | `proxy.clj` | proxy tool dispatch, search ranking, describe, status text |
-| `direct-tools.ts` (resolveDirectTools, createDirectToolExecutor) | `mcp_adapter.clj` (§10.5) | per-server direct-tools opt-in, MCP_DIRECT_TOOLS env, tool-prefix naming, cache-backed registration |
+| `direct-tools.ts` (resolveDirectTools, createDirectToolExecutor) | `core.clj` (§10.5) | per-server direct-tools opt-in, MCP_DIRECT_TOOLS env, tool-prefix naming, cache-backed registration |
 | `metadata-cache.ts` (loadMetadataCache, isServerCacheValid) | `metadata.clj` | persistent cache, config fingerprint, 7-day freshness |
-| `commands.ts` (`/mcp` subcommands) | `mcp_adapter.clj` (§10.6) | status/search/list/connect/disconnect/enable/disable/auth/logout (+ refresh); no setup panels (Phase 1) |
-| `init.ts` (updateStatusBar, lazyConnect) | `mcp_adapter.clj` | status text, lazy/eager/keep-alive connect, description rebuild |
+| `commands.ts` (`/mcp` subcommands) | `core.clj` (§10.6) | status/search/list/connect/disconnect/enable/disable/auth/logout (+ refresh); no setup panels (Phase 1) |
+| `init.ts` (updateStatusBar, lazyConnect) | `core.clj` | status text, lazy/eager/keep-alive connect, description rebuild |
 | `types.ts` (ServerEntry, McpSettings, ToolPrefix) | `config.clj` (§6.2) | same field semantics, kebab-case EDN + tolerant camel reading |
 | `mcp-output-guard.ts` | `output_guard.clj` | result bounding: max-bytes/max-lines truncation + temp-file spill + details bound (string-content adaptation) |
 | `prompts.ts` | `prompts.clj` | prompt slash-commands: bash-style arg parsing, positional/named resolution, role-marked formatting, cache-driven registration |
 | `mcp-code.ts` / `mcp-script-worker.mjs` | `tool_source.clj` | retired into the shared script engine (script.md T2): the cached MCP catalog is contributed to kmet's builtin `script` tool as a tool source — `register-tool-source!` + `tool-proxy/script-tool-records`, calls through `call-mcp-tool` |
-| `mcp-setup-panel.ts` | `setup.clj` + `mcp_adapter.clj` | setup panel: known-server presets, custom-server form with connection test, host-config import, project scaffolding |
+| `mcp-setup-panel.ts` | `setup.clj` + `core.clj` | setup panel: known-server presets, custom-server form with connection test, host-config import, project scaffolding |
 | `config.ts` IMPORT_PATHS / extractServers | `config.clj` | host-config discovery + adoption (JSON host files only — no TOML reader in bb; codex config.json covered, config.toml not) |
 | `search-ranking.ts` | `proxy.clj` | full weighted ranking port (name/original/server/description/keywords + coverage gates) replacing the Phase-1 name-over-description ranking |
-| `types.ts` includeTools/excludeTools/searchKeywords, idleTimeout | `config.clj` + `proxy.clj` + `mcp_adapter.clj` | glob-filtered direct-tool registration, keyword-boosted search, idle reaper daemon |
+| `types.ts` includeTools/excludeTools/searchKeywords, idleTimeout | `config.clj` + `proxy.clj` + `core.clj` | glob-filtered direct-tool registration, keyword-boosted search, idle reaper daemon |
 | `mcp-auth.ts` keyring storage | `auth.clj` | OS-keyring backends (macOS security / Linux secret-tool / Windows Credential Manager P/Invoke) with plaintext fallback; settings :token-storage / env MCP_TOKEN_STORAGE |
 | skills/ (mcp-scripting) | `skills/mcp/SKILL.md` | usage skill, contributed via `:resources-discover` |
 
@@ -122,9 +122,7 @@ results natively).
 
 ```
 extensions/mcp-adapter/
-├── extension.edn                 {:name "mcp-adapter" :entry "src/extensions/mcp_adapter.clj"}
 ├── README.md                     usage, config reference, /mcp reference, security note
-├── skills/mcp/SKILL.md           usage skill (contributed via :resources-discover)
 ├── scripts/
 │   ├── fake-mcp-server.bb        fake stdio MCP server (validation)
 │   ├── fake-http-mcp-server.bb   fake streamable-HTTP MCP server (validation)
@@ -135,16 +133,19 @@ extensions/mcp-adapter/
 │   ├── validate-panel.bb         McpPanel/TextDialog/prompt component checks
 │   ├── validate-script.bb        scripted-MCP end-to-end against the fake server
 │   └── e2e.bb                    headless proxy-tool smoke
-└── src/extensions/mcp_adapter.clj          entry: init/shutdown, state, registration, /mcp
-    src/extensions/mcp_adapter/config.clj   EDN config + host-config discovery/adoption
-    src/extensions/mcp_adapter/client.clj   transports + JSON-RPC + prompts/resources calls
-    src/extensions/mcp_adapter/auth.clj     OAuth: discovery, DCR, PKCE/device flows, token store + keyring
-    src/extensions/mcp_adapter/metadata.clj cache (tools + prompts + resources)
-    src/extensions/mcp_adapter/tool_proxy.clj    proxy tool executor + search ranking
-    src/extensions/mcp_adapter/output_guard.clj  result bounding (pi mcp-output-guard.ts)
-    src/extensions/mcp_adapter/prompts.clj  prompt slash-commands (pi prompts.ts)
-    src/extensions/mcp_adapter/tool_source.clj   script-sandbox tool source (script.md T2)
-    src/extensions/mcp_adapter/setup.clj    setup panel (pi mcp-setup-panel.ts)
+└── src/                          artifact root
+    ├── extension.edn             {:name "mcp-adapter" :entry kmet.extensions.mcp-adapter.core}
+    ├── skills/mcp/SKILL.md       usage skill (contributed via :resources-discover)
+    └── kmet/extensions/mcp_adapter/core.clj          entry: init/shutdown, state, registration, /mcp
+        kmet/extensions/mcp_adapter/config.clj        EDN config + host-config discovery/adoption
+        kmet/extensions/mcp_adapter/client.clj        transports + JSON-RPC + prompts/resources calls
+        kmet/extensions/mcp_adapter/auth.clj          OAuth: discovery, DCR, PKCE/device flows, token store + keyring
+        kmet/extensions/mcp_adapter/metadata.clj      cache (tools + prompts + resources)
+        kmet/extensions/mcp_adapter/tool_proxy.clj    proxy tool executor + search ranking
+        kmet/extensions/mcp_adapter/output_guard.clj  result bounding (pi mcp-output-guard.ts)
+        kmet/extensions/mcp_adapter/prompts.clj       prompt slash-commands (pi prompts.ts)
+        kmet/extensions/mcp_adapter/tool_source.clj   script-sandbox tool source (script.md T2)
+        kmet/extensions/mcp_adapter/setup.clj         setup panel (pi mcp-setup-panel.ts)
 ```
 
 This plan lives at the repo root (`mcp-adapter.md`), not inside the
@@ -520,7 +521,7 @@ Per server: name, lifecycle, state (`idle`/`connecting`/`connected`/
 (from cache or live), error tail when failed, cache age. Plus global
 settings line (direct-tools default, tool-prefix) and cache file age.
 
-## 10. Entry — `mcp_adapter.clj`
+## 10. Entry — `kmet/extensions/mcp_adapter/core.clj`
 
 ### 10.1 State
 
@@ -711,7 +712,7 @@ them in that order.
 5. `auth.clj` adapter (+ fake OAuth server validation)
 6. `metadata.clj`
 7. `proxy.clj`
-8. entry `mcp_adapter.clj` (state, tools, direct tools, `/mcp`, events)
+8. entry `kmet/extensions/mcp_adapter/core.clj` (state, tools, direct tools, `/mcp`, events)
 9. skill + README, full validation pass (§12)
 
 ## 14. Risks & notes
@@ -855,7 +856,7 @@ landed and every deliberate deviation from the text above.
     plan text, and the first port skipped it. Consequence: after adding a
     `:direct-tools` server to the config, its tools did not register
     (and so did not appear in `/tools`) until the server was connected
-    once by hand. Fixed in `mcp_adapter.clj` with
+    once by hand. Fixed in `kmet/extensions/mcp_adapter/core.clj` with
     `bootstrap-direct-tools!` — background-connects direct-tool servers
     without a fresh cache entry at init and after `/mcp refresh`; each
     connect refreshes the cache and resyncs direct tools via

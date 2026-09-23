@@ -7,9 +7,9 @@
 
 (ns kmet.extensions.clojure.core
   (:require [clojure.java.io :as io]
-            [edit-tool]
-            [paren-repair]
-            [sexp-tool]
+            [kmet.extensions.clojure.edit-tool :as edit-tool]
+            [kmet.extensions.clojure.paren-repair :as paren-repair]
+            [kmet.extensions.clojure.sexp-tool :as sexp-tool]
             [kmet.extension :as ext]))
 
 (defn init [api]

@@ -217,7 +217,7 @@ on jolt if a script evaluator wants `:interrupt-fn` uniformly.
   below.
 - **T2 — mcp-adapter rides the shared engine. ✅ landed.** The adapter's
   `mcpScript` tool and its `bb`-subprocess JSON-lines runtime are gone
-  (`extensions/mcp-adapter/src/extensions/mcp_adapter/tool_source.clj` is
+  (`extensions/mcp-adapter/src/kmet/extensions/mcp_adapter/tool_source.clj` is
   now ~30 lines of contribution glue). What shipped:
   - **Core: extension-contributed tool sources.**
     `kmet.app.tools.registry/register-tool-source!` /
@@ -689,7 +689,7 @@ pipeline both callers use:
   serialization seam a future RPC mode would use).
 - `kmet.loader.sci-loader` — `:base` fork (per-call contexts for T3's daemon),
   `:interrupt-fn` support.
-- `extensions/mcp-adapter/src/extensions/mcp_adapter/tool_source.clj` and
+- `extensions/mcp-adapter/src/kmet/extensions/mcp_adapter/tool_source.clj` and
   `tool_proxy.clj` (`script-tool-records`) — the contributed MCP catalog
   (T2); `src/skills/mcp/SKILL.md` — the scripted-MCP surface taught to the
   model (the retired `script.clj` subprocess runtime and its tool surface

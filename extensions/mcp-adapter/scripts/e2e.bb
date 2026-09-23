@@ -6,9 +6,9 @@
 (require '[clojure.string :as str]
          '[clojure.java.io :as io]
          '[kmet.extension :as ext]
-         '[extensions.mcp-adapter :as mcp]
-         '[extensions.mcp-adapter.config :as config]
-         '[extensions.mcp-adapter.metadata :as metadata])
+         '[kmet.extensions.mcp-adapter.core :as mcp]
+         '[kmet.extensions.mcp-adapter.config :as config]
+         '[kmet.extensions.mcp-adapter.metadata :as metadata])
 
 (def failures (atom 0))
 (defn check [label ok]

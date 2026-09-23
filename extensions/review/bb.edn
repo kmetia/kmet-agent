@@ -2,7 +2,9 @@
  :tasks
  {test {:doc "Run review extension tests (args: test namespace names)"
         :task (let [nss (or (some->> *command-line-args* (map symbol))
-                            '[prompts-test git-test review-test])]
+                            '[kmet.extensions.review.prompts-test
+                              kmet.extensions.review.git-test
+                              kmet.extensions.review.review-test])]
                 (doseq [ns-sym nss]
                   (require ns-sym))
                 (let [summary (apply clojure.test/run-tests nss)]

@@ -237,7 +237,10 @@ tasks/kmet/tasks/ — EVERY bb-task implementation (bb.edn `:requires`/entry
               test_lint.clj, format_test.clj, ...).
 
 extensions/ — Shipped opt-in extensions (single .clj files or manifest dirs;
-              pi: examples/extensions). Extension authoring guide (the full
+              pi: examples/extensions). Namespaces align with the layout: a
+              single file is kmet.extensions.<name> (stem), a manifest dir
+              kmet.extensions.<name>.* with the entry kmet.extensions.<name>.core.
+              Extension authoring guide (the full
               kmet.extension contract): extensions/extensions.md — MUST be
               kept up to date with any behavior it describes
 

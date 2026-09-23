@@ -7,34 +7,35 @@ A kmet extension providing Clojure-aware tools, ported from [clojure-mcp](https:
 ## Architecture
 
 ```
-extensions/clojure/
-├── bb.edn                — standalone `bb test` task (4 namespaces)
-├── extension.edn         — {:name "clojure" :entry "src/kmet/extensions/clojure/core.clj"}
-├── README.md             — usage info with examples
-├── skills/
-│   └── clojure-edit/
-│       └── SKILL.md      — editing guidelines for all 3 tools (port of clojure_form_edit.md)
-├── src/
-│   ├── edit_util.clj     — shared: edamame detect + parinferish repair + cljfmt + zipper helpers
-│   ├── edit_tool.clj     — ns edit-tool (= clojure_edit)
-│   ├── sexp_tool.clj     — ns sexp-tool (= clojure_edit_replace_sexp)
-│   ├── paren_repair.clj  — ns paren-repair (= clojure_paren_repair) + write-reject/edit-warn hooks
+extensions/clojure/          ; dev wrapper, never packaged
+├── bb.edn                  — standalone `bb test` task (4 namespaces)
+├── README.md               — usage info with examples
+├── src/                    ; artifact root
+│   ├── extension.edn       — {:name "clojure" :entry kmet.extensions.clojure.core}
+│   ├── skills/
+│   │   └── clojure-edit/
+│   │       └── SKILL.md    — editing guidelines for all 3 tools (port of clojure_form_edit.md)
 │   └── kmet/extensions/clojure/
-│       └── core.clj      — ns kmet.extensions.clojure.core (registers 3 tools, contributes skill via :resources-discover)
+│       ├── core.clj        — ns kmet.extensions.clojure.core (registers 3 tools, contributes skill via :resources-discover)
+│       ├── edit_util.clj   — ns kmet.extensions.clojure.edit-util (shared: edamame detect + parinferish repair + cljfmt + zipper helpers)
+│       ├── edit_tool.clj   — ns kmet.extensions.clojure.edit-tool (= clojure_edit)
+│       ├── sexp_tool.clj   — ns kmet.extensions.clojure.sexp-tool (= clojure_edit_replace_sexp)
+│       └── paren_repair.clj — ns kmet.extensions.clojure.paren-repair (= clojure_paren_repair) + write-reject/edit-warn hooks
 └── test/
-    ├── edit_util_test.clj — delimiter-error? / repair-delimiters / lint-repair + formatting
-    ├── edit_tool_test.clj — clojure_edit matrix
-    ├── sexp_tool_test.clj — clojure_edit_replace_sexp matrix
-    └── paren_repair_test.clj — repair + hooks (write reject, edit warn)
+    └── kmet/extensions/clojure/
+        ├── edit_util_test.clj — delimiter-error? / repair-delimiters / lint-repair + formatting
+        ├── edit_tool_test.clj — clojure_edit matrix
+        ├── sexp_tool_test.clj — clojure_edit_replace_sexp matrix
+        └── paren_repair_test.clj — repair + hooks (write reject, edit warn)
 ```
 
 Each extension runs in an isolated SCI context. Dependencies are declared per-extension in a `deps.edn`, resolved by `borkdude.deps` in-process — this extension needs none: rewrite-clj, cljfmt, edamame and parinferish are all in kmet's fixed bundled set (extensions.md § Bundled extension libraries), shared by reference on both hosts. The shared library layers `kmet.tui.*` and `kmet.libs.*` are likewise injected by reference.
 
-Tool namespaces use the tool name (e.g. `clojure_edit` → ns `edit-tool`). The entry point `kmet.extensions.clojure.core` requires tool namespaces and calls their `register!` functions.
+Tool namespaces live under `kmet.extensions.clojure` (e.g. `clojure_edit` → ns `kmet.extensions.clojure.edit-tool`). The entry point `kmet.extensions.clojure.core` requires tool namespaces and calls their `register!` functions.
 
 ## Completed
 
-### clojure_edit (edit-tool.clj)
+### clojure_edit (kmet/extensions/clojure/edit_tool.clj)
 
 Structure-aware Clojure form editing. Full port of clojure-mcp `form_edit/{core,pipeline,tool}.clj`.
 
@@ -75,7 +76,7 @@ Structure-aware Clojure form editing. Full port of clojure-mcp `form_edit/{core,
 - Config-based cljfmt toggle (`:partial`, `true`, `false`) — kmet always uses full formatting
 - Write-file-guard — not applicable without nREPL integration
 
-### clojure_edit_replace_sexp (sexp-tool.clj)
+### clojure_edit_replace_sexp (kmet/extensions/clojure/sexp_tool.clj)
 
 S-expression level replacement. Full port of clojure-mcp `form_edit/{core,pipeline,tool}.clj` (sexp variant).
 
@@ -180,7 +181,7 @@ Delimiter repair tool. Port of clojure-mcp `paren_repair/{core,tool}.clj` (file-
 - `core.clj` — also contributes `skills/clojure-edit` via the `:resources-discover` event (skill was previously dead content — never wired into discovery)
 - Host fix in `kmet.app.extensions`: `:extension-dir` for a directory extension was computed as the PARENT of the extension dir (wrong), which broke `:extension-dir`-relative resource discovery for ALL dir extensions (clojure + mcp-adapter skills silently never loaded). Now the extension's own directory; `get-loaded-extensions` exposes it; regression tests added
 - deps.edn/bb.edn: + parinferish 0.8.0
-- Tests: edit-util-test (repair/detection), paren-repair-test (tool behavior incl. format toggle, .edn, diffs)
+- Tests: kmet.extensions.clojure.edit-util-test (repair/detection), kmet.extensions.clojure.paren-repair-test (tool behavior incl. format toggle, .edn, diffs)
 
 **Pipeline (matches clojure-mcp `repair-file!`):**
 1. edamame `delimiter-error?` on the file content (or on replacement content for lint-repair)

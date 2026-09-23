@@ -6,7 +6,7 @@
 ;; error results, the gate, timeout, streaming, and the call trace.
 ;;
 ;; The adapter no longer ships its own runtime — `mcpScript` retired into the
-;; shared script engine (extensions/mcp-adapter/src/extensions/mcp_adapter/
+;; shared script engine (extensions/mcp-adapter/src/kmet/extensions/mcp_adapter/
 ;; tool_source.clj). What this validates is exactly that wiring: the catalog
 ;; in the sandbox surface, calls through proxy/call-mcp-tool, and the
 ;; extension's :script-mode gate.
@@ -43,8 +43,8 @@
 
 (require '[kmet.extension :as ext]
          '[kmet.app.tools.registry :as registry]
-         '[extensions.mcp-adapter :as mcp]
-         '[extensions.mcp-adapter.config :as config])
+         '[kmet.extensions.mcp-adapter.core :as mcp]
+         '[kmet.extensions.mcp-adapter.config :as config])
 
 (def failures (atom 0))
 

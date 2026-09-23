@@ -100,6 +100,11 @@ or project extensions dir:
 ln -s "$PWD/extensions/tools.clj" ~/.kmet/agent/extensions/tools.clj
 ```
 
+Built-in extension namespaces follow the layout: a single file is
+`kmet.extensions.<name>` (the file's stem); a manifest dir namespaces its
+code `kmet.extensions.<name>.*` with the manifest `:entry` at
+`kmet.extensions.<name>.core`.
+
 Single-file extensions ship without tests (they must stay small and
 self-contained); directory-based extensions are separate projects with
 their own tests. See [`README.md`](README.md).

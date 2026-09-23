@@ -10,7 +10,10 @@
  :tasks
  {test {:doc "Run clojure extension tests (args: test namespace names)"
         :task (let [nss (or (some->> *command-line-args* (map symbol))
-                            '[edit-util-test edit-tool-test sexp-tool-test paren-repair-test])]
+                            '[kmet.extensions.clojure.edit-util-test
+                              kmet.extensions.clojure.edit-tool-test
+                              kmet.extensions.clojure.sexp-tool-test
+                              kmet.extensions.clojure.paren-repair-test])]
                 (doseq [ns-sym nss]
                   (require ns-sym))
                 (let [summary (apply clojure.test/run-tests nss)]
