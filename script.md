@@ -375,7 +375,7 @@ Clojure sandbox reports Clojure data; T2 formats MCP envelopes itself).
   script's own abort both kill inner bash children), `:ctx`
   (`build-extension-context`), `:on-update` collected into a call trace
   exposed at `:details {:calls [...]}` (mcpScript precedent), `:timeout`
-  (seconds) and `:elapsed-ms` (measured total) always, **no**
+  (seconds; nil = no deadline) and `:elapsed-ms` (measured total) always, **no**
   per-call UI events. The trace is an atom — concurrent calls (the normal
   fan-out case now that every call is a promise) append to it safely.
 
@@ -503,7 +503,8 @@ The plan above is now the record of what landed:
    bottom of `registry.clj` — after the registry fns — carrying seams
    (`:get-all-tools`, `:execute-tool`, `:generation-fn` =
    `tool-registry-generation`) so it never requires the registry back.
-   Default timeout 30 s (fractional allowed).
+   No deadline by default (bash parity: `:timeout` omitted or 0 = none); a
+   positive value is seconds, fractional, capped at a day.
 2. ✅ **Engine** — base cache keyed by `[registry-generation enabled-set]`
    (`registry-generation` is the counter `register-tool!`/`unregister-tool!`
    bump; `*enabled-tools-fn*` is the loop-bound thunk); per-call fork through
@@ -521,10 +522,14 @@ The plan above is now the record of what landed:
    trace collected at `:details {:calls [...]}`; never
    `execute-tool-calls-*`, never the hooks.
 5. ✅ **Deadlines** — eval on a daemon thread; `:interrupt-fn` checks the
-   abort atom (signal/deadline/output-limit) and throws; the host waits
-   the `:timeout` deadline + a 1.5 s interrupt grace, then abandons the
-   thread. The result reports the effective `:timeout` (seconds) and the
-   measured total `:elapsed-ms` in `:details`.
+   abort atom (signal/deadline/output-limit) and throws; when `:timeout` is
+   set the host waits that deadline + a 1.5 s interrupt grace, then abandons
+   the thread. With no deadline the wait is unbounded except for Escape: a
+   host-blocked script (which the interrupt cannot reach) is abandoned after
+   the same 1.5 s grace once the cancel signal fires. The result reports the
+   effective `:timeout` (seconds, nil = no deadline) and the measured total
+   `:elapsed-ms` in `:details` — wall clock for the whole call, so it
+   includes that grace and the capture drain, not just script runtime.
 6. ✅ **Output** — `*out*`/`*err*` bound to temp files; daemon reader
    threads drain them per burst (a stream that has seen EOF stays at EOF —
    hence reopen-per-burst) and keep the last 128 KiB: `append-chunk` trims an
@@ -579,11 +584,13 @@ The probes that found the capture bugs left a set of deliberate behaviors:
 - **Catching** — `(catch Exception e ...)` works, interrupts included;
   `Throwable`/`:default` are not resolvable (the sandbox has no classes).
 - **Uninterruptible host code** — `interrupt-fn` runs on interpreted frames;
-  a host primitive that runs long is abandoned at the deadline + 1.5 s grace
+  a host primitive that runs long is abandoned at the deadline (or, with no
+  deadline, at the next Escape) + 1.5 s grace
   and keeps its thread until it finishes (the print limits are what keep that
   window small).
-- **Coercions** — `:timeout` (seconds, bash's unit; fractional ok) absent,
-  ≤ 0 or non-numeric → the 30 s default;
+- **Coercions** — `:timeout` (seconds, bash's unit; fractional rounds to
+  the nearest ms, minimum 1, capped at a day) absent, 0, negative or
+  non-numeric → **no deadline**, exactly bash's semantics;
   `:code` `nil`/empty → "No code provided." (a result without
   `:timeout`/`:elapsed-ms`); a non-string `:code` is stringified.
 - **stderr** is fused after stdout under a `[stderr]` marker, not

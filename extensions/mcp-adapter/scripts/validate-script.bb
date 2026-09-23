@@ -75,10 +75,10 @@
 
 (defn- script-exec
   "Run CODE through the real script tool; returns the tool result map."
-  [code & [{:keys [on-update timeout-ms]}]]
+  [code & [{:keys [on-update timeout]}]]
   (registry/execute-tool "script"
                          (cond-> {:code code}
-                           timeout-ms (assoc :timeoutMs timeout-ms))
+                           timeout (assoc :timeout timeout))
                          (cond-> {}
                            on-update (assoc :on-update on-update))))
 
@@ -130,12 +130,12 @@
              (and (not (:is-error r))
                   (str/includes? (:content r) "captured")
                   (str/includes? (:content r) "3"))))
-    ;; timeout
-    (let [r (script-exec "(loop [] (recur))" {:timeout-ms 1500})]
+    ;; timeout (:timeout is seconds — bash's unit)
+    (let [r (script-exec "(loop [] (recur))" {:timeout 1.5})]
       (check "timeout"
              (and (true? (:is-error r))
                   (= :timeout (get-in r [:details :error]))
-                  (str/includes? (:content r) "timed out after 1500ms"))))
+                  (str/includes? (:content r) "timed out after 1.5s"))))
     ;; call trace
     (let [r (script-exec "@(tools/call \"fake_add\" {:a 1 :b 2})")]
       (check "details :calls"

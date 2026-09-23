@@ -34,7 +34,7 @@
   (let [r (run "(+ 1 2)")]
     (t/is (not (:is-error r)))
     (t/is (= "3" (:content r)))
-    (t/is (= 30 (get-in r [:details :timeout])))))
+    (t/is (nil? (get-in r [:details :timeout])) "no deadline unless asked")))
 
 (t/deftest test-script-print-and-return
   (let [r (run "(println \"hello\") 42")]
@@ -541,14 +541,37 @@
           (t/is (zero? @updates)
                 "updates from a call that began after the result are dropped"))))))
 (t/deftest test-script-result-reports-time
-  ;; :timeout is in seconds (bash's unit); the result reports the measured
-  ;; total as :elapsed-ms alongside the effective timeout
+  ;; :timeout is seconds (bash's unit) and bash's nil/0/negative semantics:
+  ;; no deadline. The result reports the effective timeout and the measured
+  ;; total as :elapsed-ms
   (let [r (run "(sandbox/sleep 120) :ok")]
     (t/is (not (:is-error r)))
-    (t/is (= 30 (get-in r [:details :timeout])) "the default is 30 s")
+    (t/is (nil? (get-in r [:details :timeout])) "omitted = no deadline")
     (t/is (>= (get-in r [:details :elapsed-ms]) 100)
           "the measured total rides in the result"))
   (let [r (run ":ok" {:timeout 0.5})]
     (t/is (= 0.5 (get-in r [:details :timeout])) "fractional seconds survive"))
+  (let [r (run ":ok" {:timeout 0})]
+    (t/is (nil? (get-in r [:details :timeout])) "0 = no deadline, like bash"))
   (let [r (run ":ok" {:timeout "bad"})]
-    (t/is (= 30 (get-in r [:details :timeout])) "non-numeric falls back")))
+    (t/is (nil? (get-in r [:details :timeout])) "non-numeric = no deadline"))
+  (let [r (run ":ok" {:timeout 1e16})]
+    (t/is (= 86400 (get-in r [:details :timeout]))
+          "an absurd timeout clamps to the one-day cap instead of overflowing"))
+  (let [r (run "(sandbox/sleep 300) :ok" {:timeout 0.0001})]
+    (t/is (= :timeout (get-in r [:details :error])))
+    (t/is (= 0.001 (get-in r [:details :timeout])) "sub-ms rounds up to 1 ms")))
+(t/deftest ^:slow test-script-escape-abandons-host-blocked-script
+  ;; with no deadline the wait is unbounded — but Escape must still end the
+  ;; call: a host-blocked script (the interrupt cannot reach it) is abandoned
+  ;; after the same 1.5 s grace the timeout path uses
+  (let [signal (atom false)
+        f (future (tools/execute-tool "script"
+                                      {:code "(sandbox/sleep 5000) :ok"}
+                                      {:signal signal}))]
+    (Thread/sleep 200)
+    (reset! signal true)
+    (let [r (deref f 5000 nil)]
+      (t/is (some? r) "the tool call returns instead of blocking on the sleep")
+      (t/is (:is-error r))
+      (t/is (= :aborted (get-in r [:details :error]))))))

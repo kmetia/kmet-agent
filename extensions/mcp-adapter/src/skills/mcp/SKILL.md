@@ -79,7 +79,8 @@ separate runtime retired into this engine):
   (`mcp({connect: "name"})`) before scripting it.
 - Print with `println`; the script's return value is reported too.
   `(emit ...)`/`console.log` no longer exist — they were mcpScript's API.
-- `timeout` (seconds, default 30) bounds the whole script; calls still in
+- `timeout` (seconds; omit or 0 = no deadline, like bash) bounds the whole
+  script; calls still in
   flight appear in `:details :calls` as `incomplete` with their elapsed
   time, and `:details :elapsed-ms` reports the measured total. Progress
   notifications stream into the output while a call runs.

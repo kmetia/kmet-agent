@@ -29,7 +29,11 @@
 
 ;; ─── Constants ────────────────────────────────────────────────────────────
 
-(def default-timeout-ms 30000)
+(def ^:private max-timeout-ms
+  "Cap on an explicit timeout — a day. Bash has no cap (a huge :timeout just
+   runs); capping keeps the deadline arithmetic overflow-free and the value
+   bounded in the result."
+  (* 24 60 60 1000))
 
 (defn- ms->sec
   "Milliseconds as seconds — whole numbers stay integers (30000 → 30), the
@@ -126,8 +130,10 @@
   (or (System/getenv "TMPDIR") (System/getProperty "java.io.tmpdir")))
 
 (defn- normalize-timeout
-  "The effective deadline in ms from TIMEOUT seconds (bash's unit). Absent,
-   ≤ 0 or non-numeric → the 30 s default. Fractional seconds work (0.5)."
+  "The effective deadline in ms from TIMEOUT seconds (bash's unit), or nil
+   for **no deadline** — absent, 0, negative and non-numeric all mean none,
+   exactly bash's :timeout semantics. A positive value rounds to the nearest
+   ms (minimum 1) and is capped at max-timeout-ms."
   [v]
   (let [secs (try
                (double (cond
@@ -135,9 +141,8 @@
                          (string? v) (Double/parseDouble (str/trim v))
                          :else nil))
                (catch Exception _ nil))]
-    (if (and secs (pos? secs))
-      (long (* 1000.0 secs))
-      default-timeout-ms)))
+    (when (and secs (pos? secs))
+      (-> (* 1000.0 secs) Math/round (max 1) (min max-timeout-ms)))))
 
 (defn- combined-signal
   "The cancel signal a script's inner calls observe: true when the run's
@@ -746,7 +751,7 @@
       (do (reset! abort :aborted)
           (throw (ex-info "Script interrupted" {:type :script/interrupt :reason :aborted})))
 
-      (>= (System/currentTimeMillis) deadline)
+      (and deadline (>= (System/currentTimeMillis) deadline))
       (do (reset! abort :timeout)
           (throw (ex-info "Script interrupted" {:type :script/interrupt :reason :timeout}))))))
 
@@ -784,8 +789,10 @@
 (defn- assemble-result
   "Build the tool result from the eval outcome and the capture snapshot.
    ABORT-REASON wins when set: a script unwound by the interrupt (however it
-   reports, e.g. a catch that rethrows) cannot outlive its deadline."
-  [res capture timeout-ms trace abort-reason elapsed-ms]
+   reports, e.g. a catch that rethrows) cannot outlive its deadline.
+   TIMEOUT-MS nil = no deadline (bash parity) and the result's :timeout is
+   nil; ELAPSED-MS is the measured wall clock of the whole call."
+  [{:keys [res capture timeout-ms trace abort-reason elapsed-ms]}]
   (let [{:keys [out err out-bytes out-lines err-bytes err-lines]} capture
         status (or abort-reason (:status res))
         value (when (= :ok status) (:value res))
@@ -810,9 +817,10 @@
         calls (trace-snapshot trace)]
     (cond-> {:content content
              :is-error (not= :ok status)
-             ;; :timeout in seconds (the unit it was asked for), :elapsed-ms
-             ;; the measured total — the UI's Took line reads it
-             :details (cond-> {:timeout (ms->sec timeout-ms)
+             ;; :timeout in seconds (the unit it was asked for; nil = no
+             ;; deadline), :elapsed-ms the measured total — the UI's Took
+             ;; line reads it
+             :details (cond-> {:timeout (some-> timeout-ms ms->sec)
                                :elapsed-ms elapsed-ms}
                         (not= :ok status) (assoc :error status)
                         (seq calls) (assoc :calls calls))}
@@ -843,7 +851,7 @@
         abort (atom nil)
         cancelled (combined-signal signal abort)
         writers (atom nil)
-        deadline (+ started-at timeout-ms)
+        deadline (when timeout-ms (+ started-at timeout-ms))
         trace (atom [])
         bridge (bridge-fns {:surface surface
                             :execute-tool execute-tool
@@ -864,17 +872,30 @@
         capture (start-capture on-update abort)
         _ (reset! writers capture)
         {:keys [done result]} (start-eval-thread! fork-ctx code capture)]
-    (when-not (deref done timeout-ms false)
-      (compare-and-set! abort nil :timeout)
-      ;; the interpreter notices the abort on its next step; a host-blocked
-      ;; script does not, and is abandoned here
-      (deref done interrupt-grace-ms false))
+    (if timeout-ms
+      (when-not (deref done timeout-ms false)
+        (compare-and-set! abort nil :timeout)
+        ;; the interpreter notices the abort on its next step; a host-blocked
+        ;; script does not, and is abandoned here
+        (deref done interrupt-grace-ms false))
+      ;; no deadline (bash's nil/0): wait for the script — but Escape must
+      ;; still end the call, so a host-blocked script (which the interrupt
+      ;; cannot reach) is abandoned after the same grace the deadline uses
+      (loop []
+        (when (= ::pending (deref done interrupt-grace-ms ::pending))
+          (if @cancelled
+            (compare-and-set! abort nil :aborted)
+            (recur)))))
     (try
       (let [finished? (realized? done)
             snapshot (finish-capture! capture finished?)
             res (or @result {:status (or @abort :timeout)})]
-        (assemble-result res snapshot timeout-ms trace @abort
-                         (- (System/currentTimeMillis) started-at)))
+        (assemble-result {:res res
+                          :capture snapshot
+                          :timeout-ms timeout-ms
+                          :trace trace
+                          :abort-reason @abort
+                          :elapsed-ms (- (System/currentTimeMillis) started-at)}))
       (finally (reset! live? false)))))
 
 ;; ─── Tool record ──────────────────────────────────────────────────────────
@@ -901,9 +922,10 @@
        "interop and no other requires. Print with println; the last expression's value is "
        "reported too. Errors are Exceptions — catch with (catch Exception e ...); Throwable "
        "is not a class here. Relative paths in slurp/spit/sh resolve against the session cwd "
-       "((sandbox/cwd)); babashka.fs uses the process directory. Default timeout 30 s — raise "
-       ":timeout for long scans; on timeout the output so far is returned, inner "
-       "calls are cancelled, and the result carries :elapsed-ms."))
+       "((sandbox/cwd)); babashka.fs uses the process directory. No timeout by default, like "
+       "bash: omit :timeout or pass 0 for no deadline; a positive :timeout is seconds "
+       "(fractional ok, capped at a day) and on timeout the output so far is returned, "
+       "inner calls are cancelled, and the result carries :elapsed-ms."))
 
 (defn title
   "Quiet one-liner body for the script tool: the first code line, shortened."
@@ -938,9 +960,8 @@
     "Prefer read for exactly one file and edit/write for reviewable changes; script is for bulk edits and data that would bloat the transcript."]
    :params {:code {:type :string :description "Clojure code to run"}
             :timeout {:type :number
-                      :description (str "Timeout in seconds (default "
-                                        (ms->sec default-timeout-ms)
-                                        "; fractional allowed), like bash's :timeout")
+                      :description (str "Timeout in seconds — like bash's :timeout: omit or 0 "
+                                        "= no deadline; fractional ok, capped at a day")
                       :optional? true}}
    :execute (fn [args on-update signal ctx]
               (let [code (some-> (:code args) str)]
