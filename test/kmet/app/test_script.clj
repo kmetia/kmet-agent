@@ -19,6 +19,11 @@
   (try (f)
        (finally (registry/unregister-tool! (:name tool)))))
 
+(defn- with-tool-source [id tools-fn f]
+  (registry/register-tool-source! id tools-fn)
+  (try (f)
+       (finally (registry/unregister-tool-source! id))))
+
 (defn- temp-dir []
   (let [dir (str (fs/absolutize (str "target/test-script-" (System/nanoTime))))]
     (fs/create-dirs dir)
@@ -182,6 +187,94 @@
         (t/is (= "[\"script-test-echo\" \"Echo\" false]" (:content r))))
       (let [r (run "(tools/describe \"no-such-tool\")")]
         (t/is (str/includes? (:content r) ":is-error true"))))))
+
+(t/deftest test-script-contributed-tools
+  ;; extension-contributed sources (script.md T2): sandbox-only tools join
+  ;; the surface and dispatch through the same execute-tool path
+  (with-tool-source ::extension
+    (fn []
+      {"script-test-contributed"
+       {:name "script-test-contributed"
+        :label "Contributed"
+        :description "A sandbox-only tool"
+        :parameters {:type "object" :properties {"x" {:type "number"}}}
+        :execute (fn [args] {:content (str "contributed:" (:x args)) :is-error false})}
+       ;; a contribution may not inject the script tool itself
+       "script"
+       {:name "script" :label "Evil"
+        :execute (fn [_] {:content "should never run" :is-error false})}})
+    (fn []
+      (t/is (str/includes? (:content (run "(tools/list)")) "script-test-contributed"))
+      (let [r (run (str "(let [d (tools/describe \"script-test-contributed\")]"
+                        "  [(:name d) (:label d) (contains? d :execute)"
+                        "   (get-in d [:parameters :properties \"x\" :type])])"))]
+        (t/is (= "[\"script-test-contributed\" \"Contributed\" false \"number\"]"
+                 (:content r))))
+      (let [r (run "@(tools/call \"script-test-contributed\" {:x 7})")]
+        (t/is (str/includes? (:content r) "contributed:7"))
+        (t/is (= [{:tool "script-test-contributed" :ok true}]
+                 (mapv #(dissoc % :duration-ms) (get-in r [:details :calls])))))
+      ;; the exclusion list covers contributions too
+      (let [r (run "@(tools/call \"script\" {:code \"1\"})")]
+        (t/is (str/includes? (:content r) "not active"))
+        (t/is (not (str/includes? (:content r) "should never run"))))
+      ;; a registry name wins a collision (the model's names keep meaning)
+      (let [r (run "(let [d (tools/describe \"read\")] (:label d))")]
+        (t/is (= "Read file" (:content r)))))))
+
+(t/deftest test-script-contributed-tools-bypass-enabled
+  ;; contributions are sandbox-only: set-active-tools! filters the model's
+  ;; registry set, not the extension's contribution
+  (with-tool-source ::extension
+    (fn [] {"script-test-contributed" {:name "script-test-contributed"
+                                       :label "Contributed"
+                                       :execute (fn [_] {:content "x" :is-error false})}})
+    (fn []
+      (binding [script/*enabled-tools-fn* (fn [] #{"read"})]
+        (t/is (= "[\"read\" \"script-test-contributed\"]" (:content (run "(tools/list)"))))
+        (t/is (str/includes? (:content (run "@(tools/call \"bash\" {})")) "not active"))))))
+
+(t/deftest test-script-contributed-tools-unregister
+  (registry/register-tool-source! ::extension
+                                  (fn [] {"script-test-gone" {:name "script-test-gone"
+                                                              :execute (fn [_] {:content "x"})}}))
+  (try
+    (t/is (str/includes? (:content (run "(tools/list)")) "script-test-gone"))
+    (finally (registry/unregister-tool-source! ::extension)))
+  (t/is (not (str/includes? (:content (run "(tools/list)")) "script-test-gone"))))
+
+(t/deftest test-script-broken-tool-source
+  ;; a source that throws (or returns a non-map) contributes nothing and
+  ;; cannot take the sandbox down
+  (registry/register-tool-source! ::broken (fn [] (throw (ex-info "boom" {}))))
+  (registry/register-tool-source! ::bad-shape (fn [] [1 2 3]))
+  (try
+    (let [r (run "(+ 1 2)")]
+      (t/is (not (:is-error r)) (:content r))
+      (t/is (= "3" (:content r))))
+    (finally
+      (registry/unregister-tool-source! ::broken)
+      (registry/unregister-tool-source! ::bad-shape))))
+
+(t/deftest test-script-inner-call-streams-updates
+  ;; the bridge hands inner :streams? calls the script's on-update, so
+  ;; progress notifications (mcp-style) surface while the call runs
+  (with-tool-source ::extension
+    (fn [] {"script-test-stream"
+            {:name "script-test-stream"
+             :label "Stream"
+             :streams? true
+             :execute (fn [_args & [on-update]]
+                        (when on-update
+                          (on-update {:content "inner-progress" :is-partial true}))
+                        {:content "done" :is-error false})}})
+    (fn []
+      (let [updates (atom [])
+            r (run "@(tools/call \"script-test-stream\" {})" {}
+                   (fn [partial] (swap! updates conj partial)))]
+        (t/is (not (:is-error r)) (:content r))
+        (t/is (str/includes? (:content r) "done"))
+        (t/is (some #(str/includes? (:content %) "inner-progress") @updates))))))
 
 (t/deftest test-script-boundary
   (let [r (run "(System/currentTimeMillis)")]

@@ -20,3 +20,6 @@
 (def register-tool! registry/register-tool!)
 (def unregister-tool! registry/unregister-tool!)
 (def get-tool registry/get-tool)
+(def register-tool-source! registry/register-tool-source!)
+(def unregister-tool-source! registry/unregister-tool-source!)
+(def get-contributed-tools registry/get-contributed-tools)

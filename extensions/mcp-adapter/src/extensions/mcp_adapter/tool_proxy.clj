@@ -9,10 +9,9 @@
    streaming tool-call progress (:on-update receives notifications/
    progress events as partial content), resource reads
    (read-mcp-resource — the read_<resource> direct-tool executor),
-   and mcpScript support (describe-item's :inputTypeScript TS-shape
-   rendering — pi ts-shape.ts renderTsShape with formatSchema fallback —
-   plus rank-suggestions, the pi rankSuggestions top-N for
-   tool_not_found errors).
+   and script-tool-records — the cached catalog the mcp-adapter
+   contributes to kmet's `script` sandbox (script.md T2; replaces the
+   retired mcpScript runtime and its search/describe/TS-shape envelopes).
 
    Dispatch precedence (§9.2): search → describe → tool → connect →
    disconnect → list → server (list that server's tools) → status.
@@ -304,16 +303,6 @@
             (swap! matches conj {:server server-name :tool tool :score score})))))
     (vec (sort-by (juxt (comp - :score) (comp :name :tool)) @matches))))
 
-(defn- paginate
-  [items offset limit]
-  (let [safe-offset (max 0 (or offset 0))
-        safe-limit (max 1 (or limit 1))
-        total (count items)
-        page (vec (take safe-limit (drop safe-offset items)))]
-    {:items page :total total :has-more (< (+ safe-offset (count page)) total)
-     :next-offset (when (< (+ safe-offset (count page)) total)
-                    (+ safe-offset (count page)))}))
-
 (defn- tool-prefix-mode
   "The effective prefix mode for a server (per-server over settings)."
   [state server-name]
@@ -562,245 +551,7 @@
         {:content (str/join "\n" @out) :is-error false}))))
 
 ;; ─── Describe (§9.4) ──────────────────────────────────────────────────────
-;; TS-shape rendering for describe + rankSuggestions (pi ts-shape.ts /
-;; search-ranking.ts) — used by the mcpScript runtime envelopes.
-
-(defn- ts-keywordize
-  "Recursively keywordize a schema's keys (the EDN cache stores
-   string-keyed schemas; the wire/cache read path yields both). Keys like
-   `:$defs`/`$ref`/`additionalProperties` become :$defs/:$ref/… — the
-   renderer then uses keyword accessors uniformly (pi ts-shape.ts reads
-   string keys; we normalize once at the entry point). :required entries
-   become keywords too (they must match the keywordized property keys)."
-  [schema]
-  (cond
-    (map? schema)
-    (into {} (map (fn [[k v]]
-                    [(keyword k)
-                     (if (= :required (keyword k))
-                       (mapv keyword v)
-                       (ts-keywordize v))]))
-          schema)
-    (vector? schema) (mapv ts-keywordize schema)
-    :else schema))
-
-(defn- ts-unsupported?
-  [schema]
-  (some (fn [k]
-          (and (contains? schema k)
-               (or (not= k :additionalProperties)
-                   (not= false (:additionalProperties schema)))))
-        [:if :then :else :allOf :not :patternProperties :additionalProperties]))
-
-(defn- ts-render-literal
-  "A TS literal for an enum/const value, or nil when unrenderable (pi
-   renderLiteral)."
-  [v]
-  (cond
-    (or (nil? v) (string? v) (boolean? v)) (pr-str v)
-    (and (number? v)
-         (not (Double/isNaN v))
-         (not (Double/isInfinite v))) (str v)
-    :else nil))
-
-(defn- ts-normalize-type
-  "Schema :type values arrive as strings or keywords (EDN cache) —
-   normalize to the string form."
-  [t]
-  (if (keyword? t) (name t) (str t)))
-
-(defn- ts-render-type
-  "The TS name for a JSON-Schema type, or nil (pi renderType)."
-  [t]
-  (case (ts-normalize-type t)
-    "string" "string"
-    ("number" "integer") "number"
-    "boolean" "boolean"
-    "null" "null"
-    "object" "{}"
-    "array" "unknown[]"
-    nil))
-
-(defn- ts-property-name
-  "Property names render bare when they are valid TS identifiers, else
-   JSON-stringified (pi formatPropertyName). Names arrive as strings or
-   keywords (EDN cache) — keyword names use `name` (no leading colon)."
-  [prop-name]
-  (let [prop-name (if (keyword? prop-name) (clojure.core/name prop-name) (str prop-name))]
-    (if (re-matches #"[A-Za-z_$][A-Za-z0-9_$]*" prop-name)
-      prop-name
-      (pr-str prop-name))))
-
-(defn- ts-needs-parens?
-  "Union types need parens before [] (pi needsParentheses)."
-  [rendered]
-  (str/includes? rendered " | "))
-
-(defn- ts-render*
-  "Render one schema node as TypeScript, or nil when unsupported (pi
-   ts-shape.ts render). DEFINITIONS is a map of decoded $defs/definitions
-   pointers → schema maps; ALIASES maps pointer → generated alias."
-  [schema definitions aliases]
-  (cond
-    (or (not (map? schema)) (ts-unsupported? schema)) nil
-
-    (contains? schema :$ref)
-    (when-let [[_ group name] (re-matches #"^#/(\$defs|definitions)/([^/]+)$" (:$ref schema))]
-      (let [decoded (-> name (str/replace "~1" "/") (str/replace "~0" "~"))
-            key (str group "/" decoded)]
-        (when (contains? definitions key)
-          (or (get @aliases key)
-              (let [candidate (if (re-matches #"[A-Za-z_$][\w$]*" decoded) decoded nil)
-                    alias (if (and candidate (not (some #{candidate} (vals @aliases))))
-                            candidate
-                            (str "Definition" (inc (count @aliases))))
-                    alias (loop [n alias]
-                            (if (some #{n} (vals @aliases))
-                              (recur (str n (inc (count @aliases))))
-                              n))]
-                (swap! aliases assoc key alias)
-                alias)))))
-
-    (seq (:enum schema))
-    (let [values (keep ts-render-literal (:enum schema))]
-      (when (= (count values) (count (:enum schema)))
-        (str/join " | " values)))
-
-    (contains? schema :const)
-    (ts-render-literal (:const schema))
-
-    (or (seq (:anyOf schema)) (seq (:oneOf schema)))
-    (let [variants (or (:anyOf schema) (:oneOf schema))
-          rendered (mapv #(ts-render* % definitions aliases) variants)]
-      (when (every? some? rendered)
-        (str/join " | " rendered)))
-
-    (or (= "object" (ts-normalize-type (:type schema))) (contains? schema :properties))
-    (if (nil? (:properties schema))
-      "{}"
-      (when (map? (:properties schema))
-        (let [required (set (:required schema))
-              props (mapv (fn [[name spec]]
-                            (let [rendered (ts-render* spec definitions aliases)]
-                              (when rendered
-                                (str (ts-property-name name)
-                                     (when-not (contains? required name) "?")
-                                     ": " rendered ";"))))
-                          (:properties schema))]
-          (if (some nil? props)
-            nil
-            (if (seq props)
-              (str "{ " (str/join " " props) " }")
-              "{}")))))
-
-    (= "array" (ts-normalize-type (:type schema)))
-    (if (nil? (:items schema))
-      "unknown[]"
-      (let [item (ts-render* (:items schema) definitions aliases)]
-        (when item
-          (str (if (ts-needs-parens? item) (str "(" item ")") item) "[]"))))
-
-    (vector? (:type schema))
-    (let [types (mapv ts-render-type (:type schema))]
-      (when (every? some? types)
-        (str/join " | " types)))
-
-    (some? (:type schema))
-    (ts-render-type (:type schema))
-
-    :else "unknown"))
-
-(defn- format-schema
-  "Multi-line human-readable schema fallback for describe (pi
-   tool-metadata.ts formatSchema): one line per property with type,
-   required/optional, description, enum/default when present."
-  [input-schema]
-  (let [schema (or input-schema {})
-        properties (:properties schema)
-        required (set (:required schema))]
-    (if (and (map? properties) (seq properties))
-      (str/join "\n"
-                (mapv (fn [[name spec]]
-                        (let [spec (or spec {})
-                              type (or (:type spec) "any")
-                              enum (when (seq (:enum spec)) (str "enum: " (pr-str (:enum spec))))
-                              default (when (contains? spec :default)
-                                        (str "default: " (pr-str (:default spec))))
-                              parts (str/join ", " (remove nil? [(str "type: " type)
-                                                                 (if (required name) "required" "optional")
-                                                                 enum default]))]
-                          (str "  " name " (" parts ")"
-                               (when (seq (:description spec))
-                                 (str "\n      " (:description spec))))))
-                      (sort-by key properties)))
-      "(no parameters)")))
-
-(defn render-ts-shape
-  "Render a JSON-Schema input schema as a compact TypeScript shape (pi
-   ts-shape.ts renderTsShape), or nil when the schema is empty or uses
-   constructs the renderer cannot express. $defs/definitions become
-   `type Alias = ...` declarations; unknown nodes degrade to `unknown`
-   rather than failing the whole shape."
-  [input-schema]
-  (when (map? input-schema)
-    (let [input-schema (ts-keywordize input-schema)
-          definitions (into {}
-                            (for [group [:$defs :definitions]
-                                  :let [raw (get input-schema group)]
-                                  :when (map? raw)
-                                  [name definition] raw
-                                  :when (map? definition)]
-                              [(str (clojure.core/name group) "/"
-                                    (-> (clojure.core/name name)
-                                        (str/replace "~1" "/")
-                                        (str/replace "~0" "~")))
-                               definition]))
-          aliases (atom {})
-          root (ts-render* input-schema definitions aliases)]
-      (when root
-        (let [decls (keep (fn [[key alias]]
-                            (when-let [rendered (ts-render* (get definitions key) definitions aliases)]
-                              (str "type " alias " = " rendered ";")))
-                          @aliases)]
-          (if (seq decls)
-            (str (str/join "\n" decls) "\n\n" root)
-            root))))))
-
-(defn describe-input-shape
-  "The schema text for a tool descriptor: the compact TypeScript shape
-   when renderable, else the formatSchema fallback (pi describeTool:
-   renderTsShape ?? formatSchema)."
-  [input-schema]
-  (or (render-ts-shape input-schema)
-      (format-schema input-schema)))
-
-(defn rank-suggestions
-  "Top-N raw tool names similar to NAME for tool_not_found messages (pi
-   rankSuggestions): strip the longest matching configured server prefix
-   (server/short/mcp forms, longest first), then rank-match the stripped
-   query across all cached tools (keywords excluded) and take the first
-   LIMIT names."
-  [state name limit]
-  (let [server-names (keys (:mcp-servers (:config state)))
-        prefixes (->> (for [server server-names
-                            mode [:server :short :mcp]]
-                        (let [prefix (case mode
-                                       :short (let [short (sanitize-tool-name
-                                                           (str/replace server #"-?mcp$" ""))]
-                                                (if (seq short) short "mcp"))
-                                       :mcp "mcp"
-                                       (sanitize-tool-name server))]
-                          (when (seq prefix) prefix)))
-                      (remove nil?)
-                      distinct
-                      (sort-by #(- (count %))))
-        stripped (or (first (for [p prefixes
-                                  :when (str/starts-with? name (str p "_"))]
-                              (subs name (+ (count p) 1))))
-                     name)]
-    (->> (rank-tool-matches state stripped nil)
-         (take limit)
-         (mapv (comp :name :tool)))))
+;; Find + render one cached tool for the proxy tool's describe mode.
 
 (defn- find-tool
   "Find a tool by (prefixed) name across servers. Returns {:server :tool}
@@ -858,60 +609,6 @@
                          (str "      " (:description spec)))))))
           (swap! out conj "\nNo parameters defined."))
         {:content (str/join "\n" @out) :is-error false}))))
-
-(defn search-items
-  "Structured search for the mcpScript runtime (pi rankToolMatches →
-   paginate in mcp-code.ts): ranked matches as
-   {:items [{:path prefixed-name :name raw :server :description :score}]
-   :total :has-more :next-offset}."
-  [state query server limit offset]
-  (let [matches (if (str/blank? (or query ""))
-                  []
-                  (rank-tool-matches state query server))
-        {:keys [items total has-more next-offset]} (paginate matches offset limit)]
-    {:items (mapv (fn [{:keys [server tool score]}]
-                    (cond-> {:path (format-tool-name state server (:name tool))
-                             :name (:name tool)
-                             :server server
-                             :score score}
-                      (:description tool) (assoc :description (:description tool))))
-                  items)
-     :total total :has-more has-more :next-offset next-offset}))
-
-(defn describe-item
-  "Structured describe for the mcpScript runtime (pi describeTool): the
-   tool descriptor {:path :name :server :description :inputTypeScript}
-   (the input schema as a compact TS shape; formatSchema fallback) or
-   {:path :error {:code :message :suggestions}} when not found."
-  [state path]
-  (let [match (find-tool state path)]
-    (cond
-      (= :ambiguous match)
-      {:path path :error {:code "ambiguous"
-                          :message (str "Tool \"" path "\" matches multiple servers. "
-                                        "Pass a prefixed name.")}}
-
-      (nil? match)
-      {:path path :error {:code "tool_not_found"
-                          :message (str "Tool not found: " path)
-                          :suggestions (rank-suggestions state path 5)}}
-
-      :else
-      (let [{:keys [server tool]} match]
-        (cond-> {:path (format-tool-name state server (:name tool))
-                 :name (:name tool)
-                 :server server}
-          (:description tool) (assoc :description (:description tool))
-          (:inputSchema tool) (assoc :inputTypeScript
-                                     (describe-input-shape (:inputSchema tool))))))))
-
-(defn find-tool-for-path
-  "Resolve a (prefixed or raw) tool path to {:server :name} for the
-   mcpScript runtime, or nil when not found / ambiguous."
-  [state path]
-  (let [match (find-tool state path)]
-    (when (and match (not= :ambiguous match))
-      {:server (:server match) :name (:name (:tool match))})))
 
 ;; ─── List / connect / disconnect ──────────────────────────────────────────
 
@@ -1041,6 +738,38 @@
               (return-error (str "Server \"" server "\" not connected"))))
           (catch Exception e
             (return-error (str "MCP call failed: " (ex-message e)))))))))
+
+(defn script-tool-records
+  "The cached MCP catalog as script-sandbox tool maps, keyed by the
+   prefixed name (script.md T2 — replaces the retired mcpScript tool):
+   {name → {:name :label :description :parameters :streams? :execute}}.
+   Every enabled, configured server's cached tools are listed (no spawn —
+   the call connects lazily), so the sandbox sees the catalog the `mcp`
+   proxy searches; calls go through call-mcp-tool, so failure backoff,
+   auth and the output guard apply unchanged. A name claimed by more than
+   one tool (possible under :tool-prefix :none) is dropped — silently
+   calling the wrong server would be worse than the name being absent."
+  [state]
+  (let [candidates (for [[server definition] (sort-by key (:mcp-servers (:config state)))
+                         :when (not (or (true? (:disabled definition))
+                                        (misconfigured? definition)))
+                         tool (or (cached-tools state server) [])]
+                     [(format-tool-name state server (:name tool)) server tool])]
+    (into {}
+          (keep (fn [[name entries]]
+                  (when (= 1 (count entries))
+                    (let [[_ server tool] (first entries)]
+                      [name
+                       {:name name
+                        :label (str "MCP: " (:name tool))
+                        :description (or (:description tool) "(no description)")
+                        :parameters (or (:inputSchema tool)
+                                        {:type "object" :properties {}})
+                        :streams? true
+                        :execute (fn [args & [on-update]]
+                                   (call-mcp-tool state server (:name tool) args
+                                                  {:on-update on-update}))}]))))
+          (group-by first candidates))))
 
 (defn read-mcp-resource
   "Read a resource by URI on a server (the read_<resource> direct-tool

@@ -110,6 +110,44 @@
   [name]
   (get (get-all-tools) name))
 
+;; ─── Extension-contributed tool sources ────────────────────────────────────
+;; Sandbox-only tools: a source contributes tool maps into the script tool's
+;; surface without joining get-all-tools (the model's tool set). The
+;; mcp-adapter contributes its cached MCP catalog this way (script.md T2).
+
+(defonce ^:private tool-sources (atom {}))
+
+(defn register-tool-source!
+  "Register (or replace) an extension-contributed tool source. ID identifies
+   the source; TOOLS-FN is a 0-arg fn returning {name → tool map} — the same
+   shape a registered tool map has (:name :label :description :parameters
+   :execute, optional :streams?/:contextual?/:prepare-arguments).
+   Contributed tools join the script sandbox's surface only; the registry
+   shadows a colliding name. Re-registering under the same ID replaces the
+   source and bumps the generation, so cached script bases rebuild against
+   the new catalog."
+  [id tools-fn]
+  (swap! tool-sources assoc id tools-fn)
+  (swap! registry-generation inc)
+  nil)
+
+(defn unregister-tool-source!
+  "Remove a contributed tool source by ID."
+  [id]
+  (swap! tool-sources dissoc id)
+  (swap! registry-generation inc)
+  nil)
+
+(defn get-contributed-tools
+  "Merge every registered source's current tools. A source that throws or
+   returns a non-map contributes nothing — a broken extension must not take
+   the sandbox's surface down."
+  []
+  (reduce (fn [acc tools-fn]
+            (let [tools (try (tools-fn) (catch Exception _ nil))]
+              (if (map? tools) (merge acc tools) acc)))
+          {} (vals @tool-sources)))
+
 ;; ─── Execution ─────────────────────────────────────────────────────────────
 
 (defn- normalize-args
@@ -131,13 +169,17 @@
    opts — {:on-update (fn [partial]) streaming callback (passed to the
    tool's execute when it declares :streams?); :signal — cancel atom; :ctx
    — extension context map for :contextual? tools (pi: execute(toolCallId,
-   params, signal, onUpdate, ctx)). A :contextual? tool's execute always
-   receives 4 args (fn [args on-update signal ctx]) — pi passes the signal
-   and ctx unconditionally; other tools keep (fn [args]) / (fn [args
-   on-update]). Returns {:content str :is-error bool}."
+   params, signal, onUpdate, ctx)); :tools — a name → tool map override for
+   the script sandbox, which passes its own surface so the script's listing
+   is authoritative for dispatch (contributed sandbox tools are not in
+   get-all-tools). A :contextual? tool's execute always receives 4 args
+   (fn [args on-update signal ctx]) — pi passes the signal and ctx
+   unconditionally; other tools keep (fn [args]) / (fn [args on-update]).
+   Returns {:content str :is-error bool}."
   [tool-name args & [opts]]
-  (let [{:keys [on-update signal ctx]} (or opts {})]
-    (if-let [tool (get-tool tool-name)]
+  (let [{:keys [on-update signal ctx tools]} (or opts {})
+        tool (if tools (get tools tool-name) (get-tool tool-name))]
+    (if tool
       (try
         ;; pi prepareToolCallArguments: a tool's :prepare-arguments shim
         ;; rewrites the raw args before schema validation/execution
@@ -163,11 +205,12 @@
 
 (def built-in-tools
   "Map of tool name → Tool record for all built-in tools. The script tool
-   carries this namespace's seams: it lists through get-all-tools and
-   dispatches inner calls through execute-tool, so script resolution is the
-   same as the model's."
+   carries this namespace's seams: it lists through get-all-tools (plus
+   extension-contributed sources) and dispatches inner calls through
+   execute-tool, so script resolution is the same as the model's."
   (assoc base-tools
          "script"
          (script/create-tool {:get-all-tools get-all-tools
+                              :get-contributed-tools get-contributed-tools
                               :execute-tool execute-tool
                               :generation-fn tool-registry-generation})))

@@ -493,14 +493,21 @@
         base)))
 
 (defn- active-surface
-  "Ordered map of name → Tool record for the run's callable set:
-   registry ∩ enabled, minus the exclusion list. nil ENABLED means all."
-  [all enabled]
-  (let [enabled (or enabled (set (keys all)))]
+  "Ordered map of name → Tool record for the run's callable set: the
+   registry tools the model can call (∩ ENABLED; nil = all), plus the
+   extension-contributed sandbox tools (always available — they are not in
+   the model's tool set; the registry shadows a colliding contribution),
+   minus the exclusion list."
+  [all contributed enabled]
+  (let [enabled (or enabled (set (keys all)))
+        ;; registry wins a name collision: the model's names keep their
+        ;; meaning, and tools/list and tools/call must agree
+        contributed (apply dissoc contributed (keys all))]
     (into (sorted-map)
-          (filter (fn [[n _]] (and (contains? enabled n)
-                                   (not (contains? excluded-tool-names n)))))
-          all)))
+          (filter (fn [[n _]] (and (not (contains? excluded-tool-names n))
+                                   (or (contains? enabled n)
+                                       (contains? contributed n)))))
+          (merge all contributed))))
 
 ;; ─── The tools bridge ─────────────────────────────────────────────────────
 
@@ -512,7 +519,7 @@
    thread does not convey dynamic bindings, so the bridge restores them for
    the inner tool (bash reads *cancel-signal*; read/write/edit resolve
    against *cwd*)."
-  [{:keys [surface execute-tool signal ctx cwd session-env-fn trace]} name args]
+  [{:keys [surface execute-tool signal ctx cwd session-env-fn trace on-update]} name args]
   (let [name (tool-name name)
         p (promise)]
     (if-not (contains? surface name)
@@ -529,7 +536,9 @@
                           (binding [bash-tool/*cancel-signal* signal
                                     bash-tool/*session-env-fn* session-env-fn
                                     tool-util/*cwd* cwd]
-                            (execute-tool name args {:signal signal :ctx ctx}))
+                            (execute-tool name args {:signal signal :ctx ctx
+                                                     :tools surface
+                                                     :on-update on-update}))
                           (catch Throwable t
                             {:content (str "Error executing " name ": " (ex-message t))
                              :is-error true}))]
@@ -694,13 +703,15 @@
       truncation (assoc :truncation truncation))))
 
 (defn- run-script
-  [{:keys [code timeout-ms signal ctx on-update get-all-tools execute-tool
-           generation-fn]}]
+  [{:keys [code timeout-ms signal ctx on-update get-all-tools get-contributed-tools
+           execute-tool generation-fn]}]
   (let [timeout-ms (normalize-timeout timeout-ms)
         cwd (tool-util/cwd)
         session-env-fn bash-tool/*session-env-fn*
         enabled (when *enabled-tools-fn* (*enabled-tools-fn*))
-        surface (active-surface (get-all-tools) enabled)
+        surface (active-surface (get-all-tools)
+                                (if get-contributed-tools (get-contributed-tools) {})
+                                enabled)
         base-key [(generation-fn) (when enabled (into (sorted-set) enabled))]
         base (cached-base base-key #(build-base surface))
         abort (atom nil)
@@ -713,6 +724,7 @@
                             :ctx ctx
                             :cwd cwd
                             :session-env-fn session-env-fn
+                            :on-update on-update
                             :trace trace})
         fork (sci-loader/sci-loader
               {:id "script"
@@ -742,11 +754,12 @@
        "return to the script, never to the model.\n\n"
        "Tool calls (each returns a promise — deref to wait; fan out several and deref later "
        "to run them in parallel):\n"
-       "  @(tools/call \"name\" {...})   ;; any active tool, by name\n"
+       "  @(tools/call \"name\" {...})   ;; any tool in the surface, by name\n"
        "  @(tools/read {...}) @(tools/write {...}) @(tools/edit {...}) @(tools/bash {...})\n"
        "  (tools/list) (tools/describe \"name\")   ;; discovery (synchronous)\n"
-       "A call's value is the tool's own result map {:content :is-error :details "
-       ":truncation :images} — branch on :is-error.\n\n"
+       "The surface is every active tool plus extension-contributed sandbox tools "
+       "(e.g. MCP server tools). A call's value is the tool's own result map {:content "
+       ":is-error :details :truncation :images} — branch on :is-error.\n\n"
        "Preloaded aliases (no require needed): fs (babashka.fs), str/set/edn/walk "
        "(clojure.*), json (kmet.libs.json), p (babashka.process), plus tools and sandbox; "
        "clojure.core carries slurp/spit/file-seq/pmap. No Java interop and no other "
@@ -767,10 +780,12 @@
 (defn create-tool
   "Build the script Tool record. OPTS wires the registry seams (registry.clj
    builds the built-in entry; tests may build their own):
-     :get-all-tools — 0-arg registry tool map
+     :get-all-tools — 0-arg registry tool map (the model's tools)
+     :get-contributed-tools — 0-arg extension-contributed sandbox tool map
+                              (script.md T2; optional, defaults to none)
      :execute-tool  — (fn [name args opts]) dispatch
      :generation-fn — 0-arg registry generation counter"
-  [{:keys [get-all-tools execute-tool generation-fn]}]
+  [{:keys [get-all-tools get-contributed-tools execute-tool generation-fn]}]
   (tool/make-tool
    :name "script"
    :label "Run script"
@@ -795,6 +810,7 @@
                                :ctx ctx
                                :on-update on-update
                                :get-all-tools get-all-tools
+                               :get-contributed-tools get-contributed-tools
                                :execute-tool execute-tool
                                :generation-fn generation-fn}))))
    :streams? true

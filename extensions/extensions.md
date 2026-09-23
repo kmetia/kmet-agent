@@ -458,6 +458,38 @@ the wrappers below or directly.
 (ext/set-active-tools api ["read" "write"])
 ```
 
+### Sandbox tool sources (`register-tool-source!`)
+
+A tool source contributes a whole catalog of tools **only to the `script`
+tool's sandbox surface**: the model never sees them in its tool schema and
+`set-active-tools!` does not filter them. Use it for tools that are meant
+to be looped over or fanned out inside scripts but would bloat the model's
+context if advertised (the mcp-adapter contributes its cached MCP catalog
+this way — script.md T2):
+
+```clojure
+(ext/register-tool-source! api :my-catalog
+  (fn [] {"cat_tool_a" {:name "cat_tool_a"
+                        :description "..."
+                        :parameters {:type "object" :properties {...}}
+                        :streams? true
+                        :execute (fn [args & [on-update]] {:content "..."})}
+           "cat_tool_b" {...}}))
+(ext/unregister-tool-source! api :my-catalog)
+```
+
+- The 0-arg fn is called whenever the sandbox surface is built, so it must
+  return the *current* catalog (read live state, not a snapshot).
+- Re-registering under the same id replaces the source and bumps the
+  registry generation, which invalidates cached script contexts — call it
+  whenever the catalog changes.
+- Contributed tools go through the same execution path as registry tools
+  (arg normalization, `:prepare-arguments`, `:contextual?`/`:streams?`
+  dispatch, error mapping). The registry shadows a colliding name, and the
+  sandbox exclusion list still applies — a source can never contribute
+  `script` itself.
+- The registration is removed automatically when the extension unloads.
+
 ### Tool execute contract
 
 By default `:execute` receives `(fn [args])`. A tool that declares

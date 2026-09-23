@@ -6,8 +6,9 @@ notes and recorded deviations. Rev 2: OAuth (RFC 8414/7591, PKCE loopback
 Phase-2 OAuth machine grants (client-credentials RFC 6749 §4.4 +
 jwt-bearer RFC 7523, §15.17-20) implemented. Rev 4 (this revision): the
 rest of the original Phase-2 list implemented — OS-keyring token storage,
-prompts → slash commands, resources → read tool, mcpScript batching
-(Clojure port), setup wizard + host-config adoption, include/exclude/
+prompts → slash commands, resources → read tool, scripted MCP (T2: the
+mcpScript runtime retired into kmet's shared `script` tool), setup wizard +
+host-config adoption, include/exclude/
 searchKeywords globs, idle-timeout reaping, output guards, streaming
 tool-call progress (§15.23-34). `/mcp serve` was **dropped from the plan
 by request** (the user asked to drop it and implement the rest).
@@ -74,7 +75,7 @@ never by convenience.
 - `/mcp serve` (expose kmet as an MCP server) — **dropped from the plan by
   request** (Rev 4).
 
-All other Phase-2 items (keyring storage, prompts, resources, mcpScript,
+All other Phase-2 items (keyring storage, prompts, resources, scripted MCP,
 setup wizard / host-config adoption, include/exclude/searchKeywords globs,
 idle-timeout reaping, output guards, streaming tool-call progress) are
 implemented — §15.23-34 record the build notes and deviations.
@@ -95,7 +96,7 @@ implemented — §15.23-34 record the build notes and deviations.
 | `types.ts` (ServerEntry, McpSettings, ToolPrefix) | `config.clj` (§6.2) | same field semantics, kebab-case EDN + tolerant camel reading |
 | `mcp-output-guard.ts` | `output_guard.clj` | result bounding: max-bytes/max-lines truncation + temp-file spill + details bound (string-content adaptation) |
 | `prompts.ts` | `prompts.clj` | prompt slash-commands: bash-style arg parsing, positional/named resolution, role-marked formatting, cache-driven registration |
-| `mcp-code.ts` / `mcp-script-worker.mjs` | `script.clj` | mcpScript for bb: sandboxed `bb` subprocess (no host access), tools/search/describe/call bridge over a JSON-lines stdin/stdout protocol, emit + captured console, timeout + call trace |
+| `mcp-code.ts` / `mcp-script-worker.mjs` | `tool_source.clj` | retired into the shared script engine (script.md T2): the cached MCP catalog is contributed to kmet's builtin `script` tool as a tool source — `register-tool-source!` + `tool-proxy/script-tool-records`, calls through `call-mcp-tool` |
 | `mcp-setup-panel.ts` | `setup.clj` + `mcp_adapter.clj` | setup panel: known-server presets, custom-server form with connection test, host-config import, project scaffolding |
 | `config.ts` IMPORT_PATHS / extractServers | `config.clj` | host-config discovery + adoption (JSON host files only — no TOML reader in bb; codex config.json covered, config.toml not) |
 | `search-ranking.ts` | `proxy.clj` | full weighted ranking port (name/original/server/description/keywords + coverage gates) replacing the Phase-1 name-over-description ranking |
@@ -105,12 +106,14 @@ implemented — §15.23-34 record the build notes and deviations.
 
 Deliberately not ported (Rev 4): `mcp-panel.ts` (ported as panel.clj),
 `mcp-setup-panel.ts` full desktop layout (setup.clj implements the same
-actions on kmet's component model), `mcp-code.ts` JS worker (Clojure
-port — the flat `tools.<name>` shorthand cannot exist in Clojure, §15.31),
+actions on kmet's component model), `mcp-code.ts`/`mcp-script-worker.mjs`
+(the standalone runtime — retired into kmet's shared `script` engine,
+script.md T2; the flat `tools.<name>` shorthand never existed in Clojure),
 `tool-approval.ts` (kmet has no approval UI; `:approve-tools` is not
 implemented), `mcp-output-guard.ts` image pass-through (kmet tool results
 are string content), `ui-*.ts`, `mcp-script-worker.mjs` vm isolation
-(replaced by the subprocess sandbox), `prompts.ts` live-metadata
+(irrelevant — the shared sandbox is in-process SCI),
+`prompts.ts` live-metadata
 subsystems (the cache is the live source after connects), `resource-tools.ts`
 (ported inline in the entry), `tool-result-renderer.ts` (kmet renders tool
 results natively).
@@ -130,7 +133,7 @@ extensions/mcp-adapter/
 │   ├── validate-config.bb        config + metadata + host-adoption + extension load
 │   ├── validate-oauth.bb         OAuth flows (PKCE/device/redirect-uri/machine grants)
 │   ├── validate-panel.bb         McpPanel/TextDialog/prompt component checks
-│   ├── validate-script.bb        mcpScript end-to-end against the fake server
+│   ├── validate-script.bb        scripted-MCP end-to-end against the fake server
 │   └── e2e.bb                    headless proxy-tool smoke
 └── src/extensions/mcp_adapter.clj          entry: init/shutdown, state, registration, /mcp
     src/extensions/mcp_adapter/config.clj   EDN config + host-config discovery/adoption
@@ -140,7 +143,7 @@ extensions/mcp-adapter/
     src/extensions/mcp_adapter/tool_proxy.clj    proxy tool executor + search ranking
     src/extensions/mcp_adapter/output_guard.clj  result bounding (pi mcp-output-guard.ts)
     src/extensions/mcp_adapter/prompts.clj  prompt slash-commands (pi prompts.ts)
-    src/extensions/mcp_adapter/script.clj   mcpScript bb port (pi mcp-code.ts + worker)
+    src/extensions/mcp_adapter/tool_source.clj   script-sandbox tool source (script.md T2)
     src/extensions/mcp_adapter/setup.clj    setup panel (pi mcp-setup-panel.ts)
 ```
 
@@ -994,20 +997,27 @@ landed and every deliberate deviation from the text above.
     text/string contents joined, blobs summarized). The metadata cache now
     stores `:prompts`/`:resources` per server and the fingerprint covers
     `:include-tools`/`:exclude-tools`/`:expose-resources`.
-27. **mcpScript for bb** (`script.clj`, pi mcp-code.ts +
-    mcp-script-worker.mjs): the `mcpScript` tool (settings `:script-mode
-    false` disables, pi parity) runs trusted **Clojure** in a sandboxed
-    `bb` subprocess — no host access, only the tools bridge. The runtime
-    is an embedded string; the tools/console bridges are loaded as real
-    namespaces (`mcp-script.tools`, `mcp-script.console`) and aliased, so
-    `(tools/call path args)`, `(tools/search {...})`, `(tools/describe
-    {...})`, `(console/log ...)` resolve as vars. Protocol: JSON lines
-    over stdin/stdout; user *out*/*err* are bound (set! is forbidden on
-    root bindings in bb) and flushed as `[stdout]`/`[stderr]` emits;
-    `emit` streams via on-update; timeout (default 30s, `timeoutMs` param)
-    kills the process tree and in-flight calls appear in details as
-    `error "incomplete"`. Search/describe/call resolve from the metadata
-    cache (pi parity — connect a server once before scripting it).
+27. **Scripted MCP rides the shared script engine** (`tool_source.clj`,
+    script.md T2 — retires pi mcp-code.ts + mcp-script-worker.mjs and the
+    adapter's own runtime): the extension contributes its cached MCP
+    catalog to kmet's builtin `script` tool as a **tool source**
+    (`kmet.app.tools.registry/register-tool-source!` +
+    `tool-proxy/script-tool-records`) instead of registering a tool of its
+    own. Sandbox-only: contributed tools are in the script surface
+    (`tools/list`/`tools/describe`/`tools/call`) but never in the model's
+    tool set, so the `mcp` proxy stays the model's gateway. Records are
+    built from the metadata cache (no spawn), calls go through
+    `proxy/call-mcp-tool` — lazy connect, failure backoff, auth and the
+    output guard unchanged — and `sync-direct-tools!` re-registers the
+    source on every catalog sync (generation bump invalidates cached
+    sandbox contexts). Settings `:script-mode false` drops the
+    contribution. The old surface changes shipped with it: kmet result
+    maps + explicit `@` deref instead of `{:ok :data}` envelopes,
+    `println` instead of `emit`/`console.*`, the shared in-process SCI
+    sandbox instead of a `bb` subprocess, and the mcpScript renderer's
+    place taken by the shared script renderer. Loading `:env` on stdio
+    servers was fixed in the same pass (`connect-stdio` used
+    babashka.process's variadic form, which silently drops the opts map).
 28. **Setup wizard + host-config adoption** (`setup.clj` + `/mcp setup`,
     `/mcp import`, pi mcp-setup-panel.ts + config.ts IMPORT_PATHS):
     known-server presets (deepwiki/context7/notion/github/chrome-devtools,
@@ -1050,7 +1060,7 @@ landed and every deliberate deviation from the text above.
     Oversized text is truncated to a head-preview with a notice pointing
     at the temp-file spill (0600); the raw MCP result in details is kept
     when its JSON fits, else replaced by a compact summary + spill.
-    Applied to proxy calls, resource reads, and mcpScript results.
+    Applied to proxy calls, resource reads, and scripted MCP calls.
     Deviation: `fs/create-temp-dir` is broken in this bb version
     (NoSuchFileException) and Termux's `/tmp` is read-only — temp dirs
     are built from `TMPDIR` (fallback java.io.tmpdir) + nanoTime.
@@ -1058,8 +1068,9 @@ landed and every deliberate deviation from the text above.
     `:on-notification`; `notifications/progress` events are forwarded
     (stdio/SSE via the wait loop, streamable-http via the SSE body
     reader) instead of being dropped. The mcp proxy tool, direct tools,
-    and mcpScript declare `:streams?` and stream progress as partial
-    content (`[progress 42/100 — message]`) while a call runs — the host
+    and the contributed MCP script tools declare `:streams?` and stream
+    progress as partial content (`[progress 42/100 — message]`) while a
+    call runs — the host
     shows it live and the final result replaces it. `connect!` only
     queries prompts/resources when the server advertises the capability
     (an unadvertised method errors with -32601).
@@ -1071,11 +1082,11 @@ landed and every deliberate deviation from the text above.
     transports (30 checks), validate-config.bb grew include/exclude/
     keywords/idle-timeout normalization, cache prompts/resources,
     host-discovery + adoption + write-server-entry + presets (30 checks),
-    and the new validate-script.bb drives the registered mcpScript tool
-    end-to-end through create-nullable-api (16 checks). All suites plus
-    e2e.bb pass. A headless REAL-loader smoke (kmet.app.extensions/
+    and validate-script.bb drives the contributed MCP source end-to-end
+    through create-nullable-api + the real script tool (17 checks). All
+    suites plus e2e.bb pass. A headless REAL-loader smoke (kmet.app.extensions/
     load-extension!, sci context) passes: extension load, proxy connect/
-    call, mcpScript call/search through the real tool registry.
+    call, scripted MCP calls through the real tool registry.
 34. **Unload NPE — resolved, not a host bug**: the headless real-loader
     smoke's unload failure (a `(deref nil)` NPE inside unload-extension!)
     was a bug in the TEST HARNESS, not the host: `load-extension!` returns

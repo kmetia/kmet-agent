@@ -1,13 +1,48 @@
 #!/usr/bin/env bb
-;; mcpScript end-to-end validation (§12.6 Phase 2): load the extension
-;; against create-nullable-api with a config pointing at the fake stdio
-;; server, then drive the registered mcpScript tool: search/describe/call
-;; envelopes, emit + return value, error path, timeout, tool_not_found.
+;; Scripted-MCP end-to-end validation (§12.6 Phase 2, script.md T2): load the
+;; extension against create-nullable-api with a config pointing at the fake
+;; stdio server, bridge the contributed MCP tool source into the real
+;; registry, then drive kmet's builtin `script` tool: discovery, calls,
+;; error results, the gate, timeout, streaming, and the call trace.
 ;;
-;; Usage: bb validate-script.bb scripts/fake-mcp-server.bb
-(require '[clojure.string :as str]
+;; The adapter no longer ships its own runtime — `mcpScript` retired into the
+;; shared script engine (extensions/mcp-adapter/src/extensions/mcp_adapter/
+;; tool_source.clj). What this validates is exactly that wiring: the catalog
+;; in the sandbox surface, calls through proxy/call-mcp-tool, and the
+;; extension's :script-mode gate.
+;;
+;; Usage: bb -cp ../../src:src scripts/validate-script.bb scripts/fake-mcp-server.bb
+;; (the script adds org.clojure/data.json from ~/.m2 to the classpath when the
+;; runner didn't already include it)
+(require '[babashka.classpath :as bcp]
+         '[babashka.fs :as fs]
          '[clojure.java.io :as io]
-         '[kmet.extension :as ext]
+         '[clojure.string :as str])
+
+;; kmet.libs.json needs org.clojure/data.json; a bare `bb -cp ../../src:src`
+;; (the documented invocation) doesn't resolve bb.edn deps, so when the
+;; namespace isn't loadable, add the version the root bb.edn pins (2.4.0 —
+;; 2.5.x uses definterface, which babashka's native image rejects) from the
+;; local Maven cache.
+(defn- ensure-data-json! []
+  (try (require 'clojure.data.json)
+       (catch Exception _
+         (let [base (str (fs/home) "/.m2/repository/org/clojure/data.json")
+               jar (or (first (fs/glob (str base "/2.4.0") "*.jar"))
+                       (last (sort (fs/glob base "**/*.jar"))))]
+           (when jar (bcp/add-classpath (str jar)))
+           (try (require 'clojure.data.json)
+                (catch Exception _
+                  (println "org.clojure/data.json is not loadable and no usable jar was found in ~/.m2.")
+                  (println "Re-run with one added to the classpath, e.g.:")
+                  (println "  bb -cp ../../src:src:$HOME/.m2/repository/org/clojure/data.json/2.4.0/data.json-2.4.0.jar \\")
+                  (println "     scripts/validate-script.bb scripts/fake-mcp-server.bb")
+                  (System/exit 2)))))))
+
+(ensure-data-json!)
+
+(require '[kmet.extension :as ext]
+         '[kmet.app.tools.registry :as registry]
          '[extensions.mcp-adapter :as mcp]
          '[extensions.mcp-adapter.config :as config])
 
@@ -21,140 +56,115 @@
                     (do (println "Usage: bb validate-script.bb <fake-mcp-server.bb>")
                         (System/exit 2))))
 
-(def home (System/getProperty "user.dir"))
-(def global (str home "/.mcp-script-g-" (System/nanoTime) ".edn"))
-(def project (str home "/.mcp-script-p-" (System/nanoTime) ".edn"))
+;; temp configs live in TMPDIR (a crashed run must not litter the repo)
+(def tmp-root (or (System/getenv "TMPDIR") (System/getProperty "java.io.tmpdir")))
+(def global (str tmp-root "/.mcp-script-g-" (System/nanoTime) ".edn"))
+(def project (str tmp-root "/.mcp-script-p-" (System/nanoTime) ".edn"))
+(def global-off (str tmp-root "/.mcp-script-off-g-" (System/nanoTime) ".edn"))
+(def project-off (str tmp-root "/.mcp-script-off-p-" (System/nanoTime) ".edn"))
 
-(defn script-exec
-  "Run CODE through the registered mcpScript tool; returns the tool
-   result map."
-  [tool code & [timeout-ms]]
-  (let [params (cond-> {:code code}
-                 timeout-ms (assoc :timeoutMs timeout-ms))]
-    ((:execute tool) params)))
-
+;; the fake server is a bare bb child: hand it this process's classpath so it
+;; can require kmet.libs.json (it adds the src dir itself)
 (spit global (pr-str {:settings {}
-                      :mcp-servers {"fake" {:command "bb" :args [fake-stdio]}}}))
+                      :mcp-servers {"fake" {:command "bb" :args [fake-stdio]
+                                            :env {"BABASHKA_CLASSPATH" (System/getProperty "java.class.path")}}}}))
 (spit project "{}\n")
+(spit global-off (pr-str {:settings {:script-mode false}
+                          :mcp-servers {"fake" {:command "bb" :args [fake-stdio]}}}))
+(spit project-off "{}\n")
 
-(with-redefs [config/global-config-path (delay global)
+(defn- script-exec
+  "Run CODE through the real script tool; returns the tool result map."
+  [code & [{:keys [on-update timeout-ms]}]]
+  (registry/execute-tool "script"
+                         (cond-> {:code code}
+                           timeout-ms (assoc :timeoutMs timeout-ms))
+                         (cond-> {}
+                           on-update (assoc :on-update on-update))))
+
+(with-redefs [config/global-config-path (fn [] global)
               config/project-config-path (fn [& _] project)]
   (let [{:keys [api state]} (ext/create-nullable-api)]
     (mcp/init api)
-    (let [tool (get-in @state [:tools "mcpScript"])]
-      (check "mcpScript tool registered" (some? tool))
-      (check "mcpScript params" (contains? (get-in tool [:parameters :properties]) "code"))
+    (let [source-fn (get-in @state [:tool-sources :mcp])]
+      (check "mcpScript retired (no registered tool)" (nil? (get-in @state [:tools "mcpScript"])))
+      (check "tool source registered by the extension" (fn? source-fn))
+      ;; bridge the fixture's source into the real registry (the fixture api
+      ;; captures registrations; the shared script tool reads the registry)
+      (registry/register-tool-source! :mcp source-fn))
 
-      ;; connect the fake server first (search/describe/call resolve from
-      ;; the metadata cache — pi parity: the script tool sees tools that
-      ;; were cached by a connect)
-      (let [proxy-tool (get-in @state [:tools "mcp"])
-            r ((:execute proxy-tool) {:connect "fake"})]
-        (check "proxy connect for cache" (false? (:is-error r))))
+    ;; connect the fake server (fills the metadata cache the source reads)
+    (let [proxy-tool (get-in @state [:tools "mcp"])
+          r ((:execute proxy-tool) {:connect "fake"})]
+      (check "proxy connect for cache" (false? (:is-error r)))
+      (when (:is-error r) (println "  →" (:content r))))
 
-      (println "\n── script execution ──")
-      ;; search + emit + return value
-      (let [r (script-exec tool "(emit (tools/search {:query \"echo\"})) (+ 1 2)")]
-        (check "search envelope + return"
-               (and (str/includes? (:content r) "echo")
-                    (str/includes? (:content r) "3")
-                    (false? (:is-error r)))))
-      ;; describe
-      (let [r (script-exec tool "(emit (tools/describe {:path \"fake_echo\"})) \"done\"")]
-        (check "describe envelope"
-               (and (str/includes? (:content r) "fake_echo")
-                    (str/includes? (:content r) "done"))))
-      ;; describe carries the input-schema TS shape
-      (let [r (script-exec tool "(emit (tools/describe {:path \"fake_echo\"})) nil")]
-        (check "describe :inputTypeScript"
-               (str/includes? (:content r) "message: string;")))
-      ;; call with args + emit
-      (let [r (script-exec tool "(emit ((tools/call \"fake_echo\" {:message \"hi from script\"}) :data))")]
-        (check "tools/call envelope"
-               (str/includes? (:content r) "echo: hi from script")))
-      ;; call error: unknown tool (with suggestions)
-      (let [r (script-exec tool "(emit (tools/call \"nope\" {}))")]
-        (check "tools/call tool_not_found"
-               (str/includes? (:content r) "tool_not_found")))
-      ;; call error: unknown tool carries ranked suggestions
-      (let [r (script-exec tool "(emit (tools/call \"echoo\" {}))")]
-        (check "tool_not_found suggestions"
-               (and (str/includes? (:content r) "suggestions")
-                    (str/includes? (:content r) "echo"))))
-      ;; call error: server error result (boom -> isError)
-      (let [r (script-exec tool "(emit (tools/call \"fake_boom\" {}))")]
-        (check "tools/call error result"
-               (str/includes? (:content r) "kaboom")))
-      ;; capture stdout + console
-      (let [r (script-exec tool "(println \"captured\") (console/log \"logged\") \"ok\"")]
-        (check "stdout + console captured"
-               (and (str/includes? (:content r) "captured")
-                    (str/includes? (:content r) "logged"))))
-      ;; throw -> script_error
-      (let [r (script-exec tool "(throw (ex-info \"boom\" {}))")]
-        (check "script error"
-               (and (true? (:is-error r))
-                    (= "script_error" (get-in r [:details :error]))
-                    (str/includes? (:content r) "boom"))))
-      ;; timeout kills the worker
-      (let [r (script-exec tool "(loop [] (recur))" 1500)]
-        (check "timeout"
-               (and (true? (:is-error r))
-                    (= "timeout" (get-in r [:details :error]))
-                    (str/includes? (:content r) "timed out after 1500ms"))))
-      ;; invalid path never reaches dispatch
-      (let [r (script-exec tool "(emit (tools/call \"\" {}))")]
-        (check "invalid_tool_path"
-               (str/includes? (:content r) "invalid_tool_path")))
-      ;; progress streaming: slow call with on-update partials
-      (let [partials (atom [])
-            tool (get-in @state [:tools "mcpScript"])
-            r ((:execute tool) {:code "(emit (tools/call \"fake_slow\" {:ms 600}))"}
-                               (fn [partial] (swap! partials conj (:content partial))))]
-        (check "streaming partials arrive" (seq @partials))
-        (check "slow call result" (str/includes? (:content r) "slept")))
-      ;; detail: call trace present
-      (let [r (script-exec tool "(tools/call \"fake_echo\" {:message \"x\"}) nil")]
-        (check "details :calls"
-               (some (fn [c] (and (= "call" (:operation c))
-                                  (= "fake_echo" (:path c))
-                                  (true? (:ok c))))
-                     (get-in r [:details :calls]))))
-      ;; detail: search + describe operations recorded too
-      (let [r (script-exec tool "(tools/search {:query \"echo\"}) (tools/describe {:path \"fake_echo\"}) nil")
-            ops (get-in r [:details :calls])]
-        (check "trace records search + describe"
-               (and (some #(and (= "search" (:operation %)) (= "echo" (:query %))) ops)
-                    (some #(and (= "describe" (:operation %)) (= "fake_echo" (:path %))) ops))))
-      ;; detail: failed call recorded as ok false with error code
-      (let [r (script-exec tool "(tools/call \"fake_boom\" {}) nil")]
-        (check "trace records failed call"
-               (some (fn [c] (and (= "call" (:operation c))
-                                  (= "fake_boom" (:path c))
-                                  (false? (:ok c))
-                                  (= "call_failed" (:error c))))
-                     (get-in r [:details :calls]))))
-      ;; timeout leaves the in-flight call as "incomplete" in the trace,
-      ;; with a duration bounded by the deadline (not inflated by teardown)
-      (let [r (script-exec tool "(tools/call \"fake_slow\" {:ms 5000}) nil" 1200)
-            entry (first (filter #(and (= "call" (:operation %))
-                                       (= "fake_slow" (:path %)))
-                                 (get-in r [:details :calls])))]
-        (check "incomplete call in timeout trace"
-               (and (false? (:ok entry))
-                    (= "incomplete" (:error entry))
-                    (<= (:duration-ms entry) 2000))))
-      ;; concurrent tools/call from futures: unique rpc ids + the single
-      ;; reader thread must route each result to its promise (a duplicate
-      ;; id bug would hang the script until timeout)
-      (let [r (script-exec tool "(def fs (mapv (fn [ms] (future (tools/call \"fake_slow\" {:ms ms}))) [200 100 300])) (count (filter :ok (mapv deref fs)))")]
-        (check "concurrent calls resolve"
-               (and (str/includes? (:content r) "3")
-                    (false? (:is-error r)))))
-      (mcp/shutdown api)
-      (check "shutdown after scripts" true))))
+    (println "\n── script execution over the contributed MCP catalog ──")
+    ;; discovery: the cached catalog is in the sandbox surface
+    (let [r (script-exec "(let [names (tools/list)] [(boolean (some #{\"fake_echo\"} names)) (boolean (some #{\"script\"} names))])")]
+      (check "tools/list carries the MCP catalog, never script"
+             (= "[true false]" (:content r))))
+    ;; describe returns the contributed record's schema (not :execute)
+    (let [r (script-exec "(let [d (tools/describe \"fake_echo\")] [(:name d) (:label d) (contains? d :execute) (str/includes? (pr-str (:parameters d)) \"message\")])")]
+      (check "tools/describe carries name/label/parameters, no :execute"
+             (= "[\"fake_echo\" \"MCP: echo\" false true]" (:content r))))
+    ;; call: deref the promise, branch on the kmet result map
+    (let [r (script-exec "@(tools/call \"fake_echo\" {:message \"hi from script\"})")]
+      (check "tools/call result"
+             (and (not (:is-error r))
+                  (str/includes? (:content r) "echo: hi from script"))))
+    ;; call error: server marks the result isError
+    (let [r (script-exec "@(tools/call \"fake_boom\" {})")]
+      (check "MCP error result reaches the script"
+             (and (not (:is-error r)) (str/includes? (:content r) ":is-error true"))))
+    ;; gate: unknown names never dispatch
+    (let [r (script-exec "@(tools/call \"nope\" {})")]
+      (check "unknown tool gated"
+             (and (not (:is-error r)) (str/includes? (:content r) "not active"))))
+    ;; the registry shadows a colliding contribution
+    (let [r (script-exec "(:label (tools/describe \"read\"))")]
+      (check "registry wins name collisions" (= "Read file" (:content r))))
+    ;; stdout + return value ride the shared capture
+    (let [r (script-exec "(println \"captured\") (+ 1 2)")]
+      (check "stdout + return value"
+             (and (not (:is-error r))
+                  (str/includes? (:content r) "captured")
+                  (str/includes? (:content r) "3"))))
+    ;; timeout
+    (let [r (script-exec "(loop [] (recur))" {:timeout-ms 1500})]
+      (check "timeout"
+             (and (true? (:is-error r))
+                  (= :timeout (get-in r [:details :error]))
+                  (str/includes? (:content r) "timed out after 1500ms"))))
+    ;; call trace
+    (let [r (script-exec "@(tools/call \"fake_add\" {:a 1 :b 2})")]
+      (check "details :calls"
+             (some (fn [c] (and (= "fake_add" (:tool c)) (true? (:ok c))))
+                   (get-in r [:details :calls]))))
+    ;; progress notifications stream through the script's on-update
+    (let [partials (atom [])
+          r (script-exec "@(tools/call \"fake_slow\" {:ms 600})"
+                         {:on-update (fn [partial] (swap! partials conj (:content partial)))})]
+      (check "inner progress partials arrive" (seq @partials))
+      (check "slow call result" (str/includes? (:content r) "slept")))
+    ;; removal: the generation bump drops the catalog from the next script
+    (registry/unregister-tool-source! :mcp)
+    (let [r (script-exec "(tools/list)")]
+      (check "unregister removes the catalog"
+             (not (str/includes? (:content r) "fake_echo"))))
+    (mcp/shutdown api)
+    (check "shutdown after scripts" true))
 
-(io/delete-file global true)
-(io/delete-file project true)
+  ;; :script-mode false → the extension contributes nothing
+  (with-redefs [config/global-config-path (fn [] global-off)
+                config/project-config-path (fn [& _] project-off)]
+    (let [{:keys [api state]} (ext/create-nullable-api)]
+      (mcp/init api)
+      (check ":script-mode false drops the tool source"
+             (nil? (get-in @state [:tool-sources :mcp])))
+      (mcp/shutdown api))))
+
+(doseq [f [global project global-off project-off]]
+  (io/delete-file f true))
 (println "\n" (if (zero? @failures) "ALL PASS" (str @failures " FAILURES")))
 (System/exit (if (zero? @failures) 0 1))

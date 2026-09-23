@@ -103,7 +103,8 @@ paths itself, or that should land in the session's own project after
 `/resume`/`/import`, must set `:cwd` explicitly.
 
 Settings keys: `:direct-tools`, `:tool-prefix`, `:disable-proxy-tool`,
-`:script-mode` (default true — gates the mcpScript tool),
+`:script-mode` (default true — contributes the MCP catalog to the script
+sandbox, see below),
 `:idle-timeout` (minutes, default 10, 0 disables reaping),
 `:output-guard` (false disables, or `{:max-bytes :max-lines
 :details-max-bytes}` tuning), `:token-storage` (`:auto` default |
@@ -168,7 +169,7 @@ cached metadata so no server spawns at startup. Names are lowercased with
 | `/mcp setup` | interactive setup panel: known-server presets, custom-server form (with connection test), host-config import, scaffold `.kmet/mcp.edn` |
 | `/mcp import` | headless host-config adoption (see below) |
 
-## Prompts, resources, mcpScript
+## Prompts, resources, scripted MCP
 
 - **Prompts** → slash commands: every prompt a server advertises becomes
   `/mcp__<server>__<prompt>`, registered from the metadata cache. Args map
@@ -177,17 +178,19 @@ cached metadata so no server spawns at startup. Names are lowercased with
 - **Resources** → read tools: servers expose `read_<resource>` direct
   tools by default (`:expose-resources false` disables) that call
   `resources/read`.
-- **mcpScript** (`mcpScript` tool, settings `:script-mode false`
-  disables): trusted Clojure in a sandboxed `bb` subprocess (no host
-  access) with a `tools` bridge — `(tools/search {...})`,
-  `(tools/describe {:path ...})`, `(tools/call path args)` returning
-  `{:ok true :data ...}` / `{:ok false :error {:code :message
-  :suggestions}}`, plus `emit` and `console.log`. `tools/describe`
-  returns `:inputTypeScript` (the tool's input schema as a compact TS
-  shape). Result details carry a `calls` trace of every
-  search/describe/call with outcome and duration; calls still in flight
-  at a timeout appear as `{:ok false :error "incomplete"}` with the
-  elapsed time. See `skills/mcp/SKILL.md`.
+- **Scripted MCP** (settings `:script-mode false` stops the
+  contribution): the adapter contributes its cached MCP catalog to
+  kmet's builtin **`script`** tool as a tool source
+  (`tool_source.clj`) — MCP tools are in the sandbox surface by their
+  prefixed names, `(tools/list)`/`(tools/describe)` discover them, and
+  `@(tools/call "server_tool" args)` runs one (a promise settling with
+  the kmet result map `{:content :is-error :details}`, not the old
+  `{:ok :data}` envelope). Calls go through `proxy/call-mcp-tool`, so
+  lazy connect, failure backoff, auth and the output guard match the
+  proxy; progress notifications stream while a call runs. The separate
+  `mcpScript` tool and its `bb`-subprocess runtime retired
+  (script.md T2) — scripts are the one scripted-MCP surface. See
+  `skills/mcp/SKILL.md`.
 - **include/exclude globs**: server `:include-tools`/`:exclude-tools`
   (`["server_*"]`) filter which tools register as direct tools;
   `:search-keywords {"server_*" ["capture"]}` boost proxy search.
@@ -241,24 +244,28 @@ configure. Only add servers you trust.
 
 The `scripts/` directory carries fake MCP/OAuth servers and six
 validation scripts (client transports, config/extension load, OAuth flow,
-McpPanel/TextDialog/prompt components, mcpScript end-to-end) plus an
+McpPanel/TextDialog/prompt components, scripted-MCP end-to-end) plus an
 end-to-end smoke of the proxy-tool surface (`e2e.bb`, headless — see plan
 §15.22):
 
 ```bash
-bb -cp ../../src:src scripts/validate-client.bb scripts/fake-mcp-server.bb scripts/fake-http-mcp-server.bb
-bb -cp ../../src:src scripts/validate-config.bb
-bb -cp ../../src:src scripts/validate-panel.bb
-bb -cp ../../src:src scripts/validate-oauth.bb scripts/fake-oauth-server.bb
-bb -cp ../../src:src scripts/validate-script.bb scripts/fake-mcp-server.bb
-bb -cp ../../src:src scripts/e2e.bb scripts/fake-mcp-server.bb
+# `bb -cp` replaces the classpath, so the kmet tree's org.clojure/data.json
+# (2.4.0) must be added explicitly; validate-script.bb adds it from ~/.m2
+# itself when missing.
+DATA_JSON="$HOME/.m2/repository/org/clojure/data.json/2.4.0/data.json-2.4.0.jar"
+bb -cp ../../src:src:$DATA_JSON scripts/validate-client.bb scripts/fake-mcp-server.bb scripts/fake-http-mcp-server.bb
+bb -cp ../../src:src:$DATA_JSON scripts/validate-config.bb
+bb -cp ../../src:src:$DATA_JSON scripts/validate-panel.bb
+bb -cp ../../src:src:$DATA_JSON scripts/validate-oauth.bb scripts/fake-oauth-server.bb
+bb -cp ../../src:src:$DATA_JSON scripts/validate-script.bb scripts/fake-mcp-server.bb
+bb -cp ../../src:src:$DATA_JSON scripts/e2e.bb scripts/fake-mcp-server.bb
 ```
 
 ## Phase-3 roadmap
 
 Only `/mcp serve` (expose kmet as an MCP server) remains out of scope —
 dropped from the plan by request. Everything else on the original Phase-2
-list (keyring storage, prompts, resources, mcpScript, setup wizard +
+list (keyring storage, prompts, resources, scripted MCP, setup wizard +
 host-config adoption, include/exclude globs, idle-timeout reaping, output
 guards, streaming progress) is implemented — see the plan's §15.23-34 for
 the recorded deviations.

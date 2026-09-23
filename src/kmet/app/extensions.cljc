@@ -658,6 +658,9 @@
    deregister fn so unload removes exactly what this extension added."
   [ext]
   (let [track (fn [f] (track-deregister! ext f) f)
+        ;; tool-source ids this extension registered — re-registering the
+        ;; same id (catalog sync) must not stack deregister fns
+        source-ids (atom #{})
         name (:name ext)]
     {:extension-name name
      :extension-path (:path ext)
@@ -686,6 +689,17 @@
                        (tools/register-tool! (loader-aware-map ext tool))
                        (track (fn [] (tools/unregister-tool! (:name tool)))))
      :unregister-tool! tools/unregister-tool!
+     ;; sandbox-only tools: contributed into the script tool's surface, never
+     ;; the model's tool set (mcp-adapter's MCP catalog — script.md T2)
+     :register-tool-source! (fn [id tools-fn]
+                              (tools/register-tool-source! id tools-fn)
+                              (if (contains? @source-ids id)
+                                nil
+                                (do (swap! source-ids conj id)
+                                    (track (fn [] (tools/unregister-tool-source! id))))))
+     :unregister-tool-source! (fn [id]
+                                (swap! source-ids disj id)
+                                (tools/unregister-tool-source! id))
      ;; pi: createBashTool — the bash tool constructor with its options
      ;; (spawnHook / exposeSessionEnvironment / commandPrefix / shellPath /
      ;; operations). The built-in bash tool is the same constructor with

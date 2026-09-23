@@ -102,10 +102,13 @@
   [definition]
   (let [argv (stdio-argv definition)
         env (merge (into {} (System/getenv)) (:env definition))
-        p (apply proc/process argv
-                 {:in :stream :out :stream :err :stream
-                  :dir (:cwd definition)
-                  :env env})
+        ;; the vector form: babashka.process's variadic form silently drops
+        ;; the opts map, so `(apply proc/process argv opts)` never passed
+        ;; :env (per-server env was broken)
+        p (proc/process (vec argv)
+                        {:in :stream :out :stream :err :stream
+                         :dir (:cwd definition)
+                         :env env})
         pid (process/process-pid p)
         ch (async/chan 128)
         tail (atom [])]

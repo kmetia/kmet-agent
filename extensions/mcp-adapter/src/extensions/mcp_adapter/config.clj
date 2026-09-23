@@ -263,7 +263,7 @@
   (str "{:settings {:direct-tools false           ;; global default for direct tools\n"
        "            :tool-prefix :server          ;; :server | :none | :short | :mcp\n"
        "            :disable-proxy-tool false}\n"
-       "            ;; :script-mode true            ;; gates the mcpScript tool\n"
+       "            ;; :script-mode true            ;; contribute MCP tools to the script sandbox\n"
        "            ;; :mcp-footer-status :full     ;; :full | :compact | :off (footer)\n"
        "            ;; :show-status-icon true      ;; show the 🔌 prefix (footer)\n"
        "            ;; :idle-timeout 10             ;; minutes; 0 disables reaping\n"

@@ -47,40 +47,47 @@ disables the `read_<resource>` direct tools that are registered for the
 server's MCP resources by default. Server `searchKeywords`
 (`{"server_*" ["screenshot" "capture"]}`) boost proxy search ranking.
 
-## mcpScript — batch multiple MCP calls
+## Scripted MCP calls — with the `script` tool
 
-The `mcpScript` tool runs trusted **Clojure** that makes several MCP calls
-in one request — loop, filter, chain, or fan out. It runs in a sandboxed
-`bb` subprocess with no host access; only the tools bridge:
+MCP tools are contributed to kmet's builtin `script` sandbox, so several
+MCP calls run in one request — loop, filter, chain, or fan out — and only
+the script's output enters the conversation. The sandbox is Clojure with
+the tools bridge; it has no host access and no `mcpScript` (the old
+separate runtime retired into this engine):
 
 ```clojure
-;; discover first (structured, not an {ok data} envelope):
-(emit (tools/search {:query "screenshot"}))      ;; {:items [{:path :name :server :description :score}] :total ...}
-;; describe carries :inputTypeScript — the input schema as a compact TS shape:
-(emit (tools/describe {:path "chrome_devtools_take_screenshot"}))
+;; discovery: the cached MCP catalog is in the script's tool surface
+(tools/list)                          ;; every callable name
+(tools/describe "chrome_devtools_take_screenshot")
+;; → {:name :label :description :parameters ...}   (never :execute)
 
-;; then call — {:ok true :data ...} or {:ok false :error {:code :message :suggestions}}:
-(let [r (tools/call "chrome_devtools_take_screenshot" {:format "png"})]
-  (when (:ok r) (emit (:data r))))
+;; call: every tools/call returns a promise — deref it, branch on :is-error
+@(tools/call "chrome_devtools_take_screenshot" {:format "png"})
+;; → the tool's own result map {:content "..." :is-error false :details ...}
 
-;; loop/filter/fan out; emit() for user-visible output, console/log etc.
-(emit (str "processed " (count results) " files"))
+;; fan out: start calls before derefing any of them
+(let [a (tools/call "server_a_query" {:q "x"})
+      b (tools/call "server_b_query" {:q "y"})]
+  (println (:content @a))
+  (println (:content @b)))
 ```
 
-- `timeoutMs` param (default 30000) bounds the whole script; on timeout
-  the worker is killed and in-flight calls appear in the result details
-  as incomplete.
-- Result details carry a `calls` trace: every search/describe/call with
-  its input, outcome, and duration (calls still running at a timeout
-  show `{:error "incomplete"}` with the elapsed time).
-- `tool_not_found` errors include `:suggestions` — similar tool names
-  ranked from the metadata cache (pi `rankSuggestions`).
-- Progress notifications stream into the tool output while calls run.
-- Call paths are the prefixed names (`server_toolname`); search/describe
-  resolve from cached metadata — connect a server once (`mcp({connect:
-  "name"})` or a prior session's cache) before scripting it.
-- The flat `tools.<name>(args)` shorthand of pi's JavaScript mcpScript is
-  not available in Clojure — always use `(tools/call "name" args)`.
+- MCP tools appear by their prefixed names (`server_toolname`) from the
+  metadata cache — the first call connects lazily, and failure backoff,
+  auth and the output guard match the `mcp` proxy. A server that has
+  never been connected has no cache entry yet, so connect it once
+  (`mcp({connect: "name"})`) before scripting it.
+- Print with `println`; the script's return value is reported too.
+  `(emit ...)`/`console.log` no longer exist — they were mcpScript's API.
+- `timeoutMs` (default 30000) bounds the whole script; calls still in
+  flight appear in `:details :calls` as `incomplete` with their elapsed
+  time. Progress notifications stream into the output while a call runs.
+- Ranked search lives in the proxy: `@(tools/call "mcp" {:search
+  "screenshot"})`, or filter `(tools/list)` locally.
+- A name claimed by two servers is absent from the surface (the default
+  `:tool-prefix :server` keeps names unique).
+- `:script-mode false` (settings) drops the MCP contribution: the sandbox
+  then only has kmet's own tools.
 
 ## Prompts → slash commands
 

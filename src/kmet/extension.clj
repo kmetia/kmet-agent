@@ -61,6 +61,7 @@
 ;;   :register-command! :unregister-command! :get-commands
 ;;   :register-tool! :unregister-tool! :get-all-tools :create-bash-tool
 ;;   :get-active-tools :set-active-tools
+;;   :register-tool-source! :unregister-tool-source!  — sandbox tool sources
 ;;   :on-event :emit-event!                             — event bus
 ;;   :on-input :on-before-agent-start                   — hooks
 ;;   :on-tool-call :on-tool-result                      — tool transforms
@@ -93,6 +94,20 @@
 
 (defn register-tool! [api tool] ((:register-tool! api) tool))
 (defn unregister-tool! [api name] ((:unregister-tool! api) name))
+
+(defn register-tool-source!
+  "Register (or replace) a sandbox tool source: ID → a 0-arg fn returning
+   {name → tool map}. Contributed tools join the script tool's surface (e.g.
+   the mcp-adapter's MCP catalog) without joining the model's tool set;
+   re-registering under the same ID replaces the source and invalidates
+   cached script surfaces. Removed automatically when the extension unloads.
+   Returns the deregister fn on the first registration under ID, nil on a
+   replace."
+  [api id tools-fn] ((:register-tool-source! api) id tools-fn))
+(defn unregister-tool-source!
+  "Remove a sandbox tool source by ID."
+  [api id] ((:unregister-tool-source! api) id))
+
 (defn get-all-tools [api] ((:get-all-tools api)))
 (defn get-active-tools [api] ((:get-active-tools api)))
 (defn set-active-tools [api names] ((:set-active-tools api) names))
@@ -271,7 +286,7 @@
 (defn create-nullable-api
   "A test-fixture api that captures registrations into a state atom.
    Returns {:api ... :state atom}. State shape:
-     {:commands {name cmd} :tools {name tool}
+     {:commands {name cmd} :tools {name tool} :tool-sources {id fn}
       :handlers {event-type [handler ...]} :flags {name opts}
       :entry-renderers {custom-type renderer} :message-renderers {custom-type renderer}
       :skills [{:content opts}] :prompts [prompt]
@@ -284,7 +299,7 @@
    pass a temp dir in tests that exercise agent-dir state)."
   ([] (create-nullable-api {}))
   ([{:keys [agent-dir]}]
-   (let [state (atom {:commands {} :tools {} :handlers {}
+   (let [state (atom {:commands {} :tools {} :tool-sources {} :handlers {}
                       :flags {} :entry-renderers {} :message-renderers {}
                       :skills [] :prompts []
                       :tool-call-hooks [] :tool-result-hooks []
@@ -302,6 +317,10 @@
                                 (swap! state assoc-in [:tools (:name tool)] tool)
                                 (fn [] (swap! state update :tools dissoc (:name tool))))
               :unregister-tool! (fn [name] (swap! state update :tools dissoc name))
+              :register-tool-source! (fn [id tools-fn]
+                                       (swap! state assoc-in [:tool-sources id] tools-fn)
+                                       (fn [] (swap! state update :tool-sources dissoc id)))
+              :unregister-tool-source! (fn [id] (swap! state update :tool-sources dissoc id))
               :get-all-tools (fn [] (vals (:tools @state)))
               :get-active-tools (fn [] (keys (:tools @state)))
               :set-active-tools (fn [names] (swap! state assoc :active-tools names))

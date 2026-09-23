@@ -10,18 +10,19 @@ set is read/write/edit/bash; the grep/find/ls search tools ship as separate
 opt-in extensions). The one thing already in place is measurement — per-tool
 result-token attribution — so the build/no-build decision can be made on data.
 
-Status: **T1 implemented** in this tree — `src/kmet/app/tools/script.cljc`, a
-builtin (read/write/edit/bash + `script`), `kmet.app.test-script` (29 tests:
-25 fast + 4 `^:slow`, smoke-verified on babashka and jolt); only the plan's
-last item, the post-adoption T0 re-measurement, remains (⏳ below). **T0
-measured and analysed** (results below); the numbers rewrote the premise
+Status: **T1 and T2 implemented** in this tree — `src/kmet/app/tools/script.cljc`,
+a builtin (read/write/edit/bash + `script`), `kmet.app.test-script` (34 tests:
+30 fast + 4 `^:slow`, smoke-verified on babashka and jolt); the mcp-adapter's
+`mcpScript` tool and `bb`-subprocess runtime retired into the same engine
+(its catalog joins the sandbox as a contributed tool source — T2 below). Only
+the plan's last item, the post-adoption T0 re-measurement, remains (⏳ below).
+**T0 measured and analysed** (results below); the numbers rewrote the premise
 rather than killed it: maki's read-share did not transfer — bash dominates —
 but ~75% of all result tokens are still the find/read workload; it leaks
 through bash (`cat`/`head`/`rg`) instead of the `read` tool, and T1 is aimed
 there. **T1 design settled** (tool bridge, capability table and implementation
 plan below: resolution aligned with normal dispatch, inner calls always async
-promises, no tool-call hooks). T2 folds the mcp-adapter's mcpScript onto the
-same engine; T3 is the self-exec/RPC tier.
+promises, no tool-call hooks). T3 is the self-exec/RPC tier.
 
 ## The idea and the economics (maki.sh)
 
@@ -49,7 +50,7 @@ question is measured before anything is built. It does differ — see
 | partial output on interrupt | ✅ bash returns streamed output + "Command aborted" |
 | compaction | ✅ `kmet.app.compaction` (LLM summarization) |
 | visibility (tokens/cost) | ✅ footer: ↑in ↓out R/W cache, $cost, context % |
-| `mcpScript` (scripted MCP calls) | ✅ mcp-adapter: its own `bb`-subprocess JSON-lines RPC engine + output guard — T2 retires it into the shared script engine |
+| `mcpScript` (scripted MCP calls) | ✅ mcp-adapter: retired into the shared `script` tool — the catalog is a contributed sandbox tool source (T2) |
 | `code_execution` (script + distilled output) | ❌ — the candidate change |
 | per-tool token attribution | ✅ measurement: every tool-result entry carries `:result-tokens`, `/session` shows the per-tool breakdown |
 
@@ -209,21 +210,46 @@ on jolt if a script evaluator wants `:interrupt-fn` uniformly.
   Known limitation: host-native runaway code can't be aborted (abandoned
   worker; the agent survives). The tool bridge and implementation plan are
   below.
-- **T2 — mcp-adapter rides the shared engine.** The adapter's `mcpScript`
-  tool and runtime (`extensions/mcp-adapter/src/extensions/mcp_adapter/script.clj`:
-  its own `bb`-subprocess JSON-lines RPC runtime, no host access) retire into
-  T1's engine — the adapter contributes its MCP tools to the same sandbox and
-  the same output contract instead of shipping its own runtime. The bridge
-  must therefore accept extension-contributed tool sources, not only the kmet
-  registry; mcpScript's `emit`/console output maps onto T1's result contract
-  and `:script-mode` gating moves to the shared registration. Isolation
-  consequence, recorded: mcpScript code runs in a fresh subprocess with no
-  host access, while the shared engine is T1's in-process SCI — scripted MCP
-  code gains the host surface the tool already has (like `bash`); the
-  subprocess was the adapter's separate-runtime device, not a kmet sandbox
-  guarantee. Surface change to carry over: mcpScript's `tools/call` derefs
-  internally (blocking); the shared bridge hands the script the promise, so
-  the MCP skill's call snippets gain an explicit deref.
+- **T2 — mcp-adapter rides the shared engine. ✅ landed.** The adapter's
+  `mcpScript` tool and its `bb`-subprocess JSON-lines runtime are gone
+  (`extensions/mcp-adapter/src/extensions/mcp_adapter/tool_source.clj` is
+  now ~30 lines of contribution glue). What shipped:
+  - **Core: extension-contributed tool sources.**
+    `kmet.app.tools.registry/register-tool-source!` /
+    `unregister-tool-source!` (id → a 0-arg fn returning {name → tool map})
+    and `get-contributed-tools`; registration bumps the generation, so
+    cached sandbox bases rebuild. `script/create-tool` gained the
+    `:get-contributed-tools` seam; `active-surface` merges contributions
+    after the enabled filter (sandbox-only tools are not in the model's
+    tool set, so `set-active-tools!` must not hide them; the registry
+    shadows a colliding name) and still applies the exclusion list — a
+    source can never contribute `script` itself. Dispatch stays one path:
+    the bridge passes its surface as `execute-tool`'s `:tools` opt, so a
+    contributed name goes through the same normalization/`:streams?`/
+    `:contextual?` handling without joining `get-tool`/`get-all-tools`.
+    The extension API (`:register-tool-source!`/`:unregister-tool-source!`,
+    tracked for unload) is documented in `extensions/extensions.md`.
+  - **Adapter: the catalog as a source.**
+    `tool-proxy/script-tool-records` builds records from the metadata cache
+    (prefixed name → `{:name :label :description :parameters :streams?
+    :execute}`; `:execute` calls `proxy/call-mcp-tool`, so lazy connect,
+    failure backoff, auth and the output guard are unchanged); a name
+    claimed by two servers is dropped. `tool_source/sync!` re-registers on
+    every `sync-direct-tools!` (init/connect/refresh) and drops the source
+    when settings `:script-mode false`. The mcpScript-only helpers in
+    `tool_proxy.clj` (search/describe envelopes, TS-shape renderer,
+    rank-suggestions, paginate) were deleted with the runtime.
+  - **Surface carried over:** kmet result map + explicit `@` deref instead of
+    `{:ok :data}` envelopes; `println` instead of `emit`/`console.*`;
+    progress notifications still stream (the bridge now passes the script's
+    `on-update` to inner `:streams?` calls). Isolation consequence as
+    recorded: scripted MCP code is T1's in-process SCI — strictly sandboxier
+    than the old `bb` child carrying the host classpath — at the cost of T1's
+    documented host-native-runaway limitation.
+  - **Docs/validation:** the mcp skill, adapter README, `mcp-adapter.md` and
+    the `mcp` proxy description teach the script surface;
+    `scripts/validate-script.bb` was rewritten to drive the contributed
+    source through the real script tool (17 checks).
 - **T3 — `kmet --script` (self-exec) and/or `--mode rpc`.** Only with a
   measured need (boot cost/call frequency) or a second consumer. The tool
   contract (description/skill/API) should survive T1→T3 untouched.
@@ -487,7 +513,11 @@ The plan above is now the record of what landed:
    count everything seen, the 16 MiB abort), the print bounds (an infinite seq
    prints a bounded prefix) and the tool-name forms, plus the three subprocess
    cases (inner bash, the runtime-cwd binding reaching the worker, and the
-   `babashka.process` wrapper shapes).
+   `babashka.process` wrapper shapes); T2 added five more (34 tests: 30 fast):
+   the contributed-source surface/describe/dispatch, the exclusion and
+   registry shadowing of contributions, the `set-active-tools!` bypass,
+   unregister + generation invalidation, a throwing source, and inner-call
+   progress streaming.
 8. ⏳ **Verify** — after adoption, re-run the T0 measurement (`/session` Tool
    Results against the 54.8%/41.6% split; the `--debug` per-tool report): bash
    file-view/search share is the number the tool exists to move.
@@ -547,8 +577,10 @@ The probes that found the capture bugs left a set of deliberate behaviors:
   serialization seam a future RPC mode would use).
 - `kmet.loader.sci-loader` — `:base` fork (per-call contexts for T3's daemon),
   `:interrupt-fn` support.
-- `extensions/mcp-adapter/src/extensions/mcp_adapter/script.clj` and
-  `src/skills/mcp/SKILL.md` — mcpScript's subprocess runtime and tool surface
-  (the T2 convergence target).
+- `extensions/mcp-adapter/src/extensions/mcp_adapter/tool_source.clj` and
+  `tool_proxy.clj` (`script-tool-records`) — the contributed MCP catalog
+  (T2); `src/skills/mcp/SKILL.md` — the scripted-MCP surface taught to the
+  model (the retired `script.clj` subprocess runtime and its tool surface
+  are the T2 convergence target that landed).
 - pi: `~/src/cvstree/pi/packages/coding-agent/docs/rpc.md` (stdio RPC mode) and
   `packages/protocol` (transport-neutral CBOR, remote sessions).

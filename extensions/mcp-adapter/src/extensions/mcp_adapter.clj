@@ -17,7 +17,7 @@
             [extensions.mcp-adapter.panel :as panel]
             [extensions.mcp-adapter.prompts :as prompts]
             [extensions.mcp-adapter.tool-proxy :as proxy]
-            [extensions.mcp-adapter.script :as script]
+            [extensions.mcp-adapter.tool-source :as script-source]
             [extensions.mcp-adapter.setup :as setup]
             [kmet.extension :as ext]
             [kmet.libs.concurrent :as concurrent]
@@ -311,19 +311,6 @@
     (str "mcp list " (title-arg args :server))
     :else "mcp status"))
 
-(defn- title-preview
-  [s n]
-  (let [pv (when (string? s)
-             (first (remove str/blank? (map str/trim (str/split-lines s)))))]
-    (when (seq pv)
-      (if (> (count pv) n) (str (subs pv 0 n) "…") pv))))
-
-(defn- title-mcpscript
-  [args]
-  (if-let [pv (title-preview (title-arg args :code) 80)]
-    (str "mcpScript " pv)
-    "mcpScript"))
-
 (defn- title-direct-tool
   [prefixed]
   (fn [args]
@@ -416,7 +403,8 @@
    unregister removed. Runs at init and after every connect/refresh.
    Resource read_* tools execute via proxy/read-mcp-resource; tools via
    proxy/call-mcp-tool. All declare :streams? — progress notifications
-   stream as partial content while a call runs."
+   stream as partial content while a call runs. Also syncs the script
+   sandbox's MCP tool source (script.md T2) — same trigger, same catalog."
   [state]
   (let [specs (direct-tools-specs state)
         next-names (set (map :prefixed specs))
@@ -449,7 +437,8 @@
           (swap! (:registered-direct @state) assoc (:prefixed spec) fp))))
     (doseq [name (remove next-names (keys registered))]
       (ext/unregister-tool! (:api @state) name)
-      (swap! (:registered-direct @state) dissoc name))))
+      (swap! (:registered-direct @state) dissoc name))
+    (script-source/sync! (:api @state) state)))
 
 ;; ─── Proxy tool (§10.4) ───────────────────────────────────────────────────
 
@@ -472,6 +461,7 @@
            (str "Servers: " (str/join ", " summaries) ". ")
            "No servers with cached tools. ")
          "Servers connect lazily on first use. "
+         "For several calls in one request use the script tool — MCP tools are in its surface by name. "
          "search: \"screenshot\" · tool: \"" (name prefix) "_tool\" args: {...}.")))
 
 (defn- register-proxy-tool!
@@ -1069,45 +1059,6 @@
 
 ;; ─── Init / shutdown (§10.2) ──────────────────────────────────────────────
 
-(defn- register-script-tool!
-  "Register the mcpScript tool (pi index.ts — gated by settings
-   :script-mode, default on)."
-  [state]
-  (ext/register-tool! (:api @state)
-                      {:name "mcpScript"
-                       :label "MCP Script"
-                       :description (str "Run trusted Clojure that makes multiple MCP tool calls in one "
-                                         "request — loop, filter, chain, or fan out between calls. "
-                                         "For a single MCP call, search, describe, status check, or auth "
-                                         "action, use the mcp tool instead. "
-                                         "Discover with (tools/search {:query \"...\"}) — resolves to "
-                                         "{:items [{:path :name :server :description :score}] :total "
-                                         ":has-more :next-offset}, not an {:ok :data} envelope. "
-                                         "Inspect with (tools/describe {:path \"...\"}) — the tool "
-                                         "descriptor, or {:path :error {:code :message}}. "
-                                         "Then call (tools/call path args) — resolves to {:ok true :data} "
-                                         "or {:ok false :error {:code :message}} — or use direct flat "
-                                         "calls when the name is already known; use (emit value) for "
-                                         "user-visible output.")
-                       :prompt-snippet "Batch multiple MCP tool calls in one Clojure request (loop, filter, chain)"
-                       :parameters {:type "object"
-                                    :properties
-                                    {"code" {:type "string"
-                                             :description "Trusted Clojure MCP script. Use (tools/call \"server_tool\" args) and (emit value)."}
-                                     "timeoutMs" {:type "number"
-                                                  :description "Execution timeout in milliseconds (default: 30000)"}}
-                                    :required ["code"]}
-                       :streams? true
-                       :execute (fn [params & [on-update]]
-                                  (let [params (or params {})
-                                        code (or (:code params) "")
-                                        timeout-ms (when (number? (:timeoutMs params))
-                                                     (:timeoutMs params))]
-                                    (script/run-script state code
-                                                       {:timeout-ms timeout-ms
-                                                        :on-update on-update})))
-                       :title title-mcpscript}))
-
 (defn init
   "Extension init (required by the loader)."
   [api]
@@ -1122,9 +1073,9 @@
     (auth/configure-storage! (:settings config))
     ;; 2. proxy tool (§10.4)
     (register-proxy-tool! state)
-    ;; 2b. mcpScript tool (pi: settings.scriptMode !== false)
-    (when (not= false (:script-mode (:settings config)))
-      (register-script-tool! state))
+    ;; 2b. the MCP catalog joins the script sandbox as a tool source —
+    ;; registered by sync-direct-tools! below (settings :script-mode
+    ;; gates it; script.md T2 retired the separate mcpScript tool)
     ;; 3. direct tools from cache (§10.5)
     (sync-direct-tools! state)
     ;; 3b. prompt commands from cache (pi resolveCachedPrompts)
