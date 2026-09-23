@@ -367,4 +367,13 @@
           lines (plain (r/render-script-result content false th 100 true 1000 2000 trunc {}) 100)]
       (is (not-any? #(str/includes? % "Print less") lines)
           "the model-facing notice does not render twice")
-      (is (some #(str/includes? % "Truncated: showing 2 of 99 lines") lines)))))
+      (is (some #(str/includes? % "Truncated: showing 2 of 99 lines") lines))))
+  (testing "the measured :elapsed-ms wins over the component timestamp span"
+    (let [context {:details {:elapsed-ms 3400}}
+          lines (plain (r/render-script-result "a" false th 60 true 1000 2000 nil context) 60)]
+      (is (str/includes? (peek lines) "Took 3.4s")
+          "the tool's own measurement, not the 1.0s start/end span")))
+  (testing "a replayed result (no timestamps) still reports the measured time"
+    (let [context {:details {:elapsed-ms 3400}}
+          lines (plain (r/render-script-result "a" false th 60 true nil nil nil context) 60)]
+      (is (str/includes? (peek lines) "Took 3.4s")))))
