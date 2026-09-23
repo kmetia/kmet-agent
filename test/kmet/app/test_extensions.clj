@@ -3,11 +3,13 @@
    lifecycle, per-extension deregistration, and the nullable api fixture
    (kmet.extension/create-nullable-api) for testing extensions in isolation.
    Contexts are per host — SCI on bb/JVM, the runtime's own loader on Jolt —
-   and the suite runs on both. ^:bb-only is what Jolt genuinely cannot do:
-   the bundled clojure.spec port test (nothing loads spec.alpha there, and
-   bb's port is not injected) and the cljfmt Maven-chain test (the fixture's
-   deps.edn excludes the bb-bundled rewrite-clj, leaving Jolt's closure
-   without it — a fixture-local gap, extensions.md § bb-bundled ports)."
+   and the suite runs on both. ^:bb-only is what Jolt genuinely cannot run:
+   the bundled clojure.spec port test (its body passes on Jolt — the Maven
+   spec.alpha loads through the native loader — but a Windows teardown
+   cannot remove the fixture: `read` over a `PushbackReader` keeps the
+   source stream open until GC, jolt-bugs.md) and the packed-clojure jar
+   roundtrip (a dependency-closure fixture, extensions.md § bb-bundled
+   ports)."
   (:require [clojure.test :as t :refer [testing]]
             [clojure.string :as str]
             [clojure.java.io :as io]
@@ -408,8 +410,11 @@
   ;; (spec-port-namespaces), so extensions get working clojure.spec.alpha
   ;; without deps.edn pins. file-seq is likewise absent from SCI's core and
   ;; injected with slurp/spit (cljfmt.io's FileEntity protocol needs it).
-  ;; Stays ^:bb-only: Jolt has no bundled spec port and nothing there loads
-  ;; the Maven copy, so its contexts have no clojure.spec.alpha to share.
+  ;; Stays ^:bb-only for the teardown, not the body: on Jolt the assertions
+  ;; pass (the Maven spec.alpha loads through the native loader), but a
+  ;; Windows run cannot delete the fixture afterwards — `read` over a
+  ;; `PushbackReader` keeps the source stream open until GC, so the loader
+  ;; holds the file (jolt-bugs.md).
   (extensions/clear-extensions!)
   (let [dir "target/test-ext-spec-file-seq"]
     (fs/delete-tree dir)
@@ -1114,11 +1119,16 @@
               ":extension-dir is nil for jars"))
       (testing ".zip suffix loads identically"
         (let [zip "target/test-ext-jar.zip"]
+          (fs/delete-if-exists zip)
           (fs/copy jar zip)
           (extensions/unload-all-extensions!)
           (let [result (extensions/load-extension! zip)]
             (t/is (nil? (:error result)) (str "loaded: " (:error result)))
             (t/is (= "jar-ok|bundled" (:content (tools/execute-tool "jar-ext-tool" {})))))
+          ;; unload before tearing the fixture down: the JVM's jar: URL cache
+          ;; pins a loaded archive on Windows (release: track-cached-jar! +
+          ;; unload-extension!)
+          (extensions/unload-all-extensions!)
           (fs/delete-if-exists zip)))
       (testing "load-extensions-from-dir picks up top-level jars"
         (let [container "target/test-ext-jar-container"]
@@ -1130,6 +1140,7 @@
             (t/is (= 1 (count (filter #(nil? (:error %)) results)))
                   (str "jar picked up: " (pr-str results)))
             (t/is (= "jar-ok|bundled" (:content (tools/execute-tool "jar-ext-tool" {})))))
+          (extensions/unload-all-extensions!)
           (fs/delete-tree container)))
       (testing "the SCI backend serves the archive too (Jolt's fallback: jar entries read per call, jar: URLs for resources)"
         (let [sci-jar "target/test-ext-jar-sci.jar"]
@@ -1146,6 +1157,7 @@
             (t/is (nil? (:error result)) (str "loaded: " (:error result)))
             (t/is (= :sci (:loader-kind result)))
             (t/is (= "jar-ok|bundled" (:content (tools/execute-tool "jar-ext-tool" {})))))
+          (extensions/unload-all-extensions!)
           (fs/delete-if-exists sci-jar)))
       (testing "sloppy ns (file declares another namespace) fails with an actionable error"
         (let [sdir "target/test-ext-jar-sloppy-src"

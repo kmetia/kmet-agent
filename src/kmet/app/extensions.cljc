@@ -110,7 +110,7 @@
 (install-provider-event-bridges!)
 
 ;; ─── Extension records ────────────────────────────────────────────────────
-(defrecord Extension [name path kind loader-kind entry-ns loader jars api deregister-fns initialized?])
+(defrecord Extension [name path kind loader-kind entry-ns loader jars api deregister-fns initialized? jar-files])
 
 (defn- extension-dir-of
   "The extension's own directory: for a dir extension :path IS the
@@ -1130,6 +1130,22 @@
     (when (.exists f)
       (:deps (edn/read-string (slurp f))))))
 
+(defn- track-cached-jar!
+  "Track the JVM's cached JarFile for the archive at ROOT in JAR-FILES (a
+   {root jar-file} atom) so `unload-extension!` can close it. Opening a
+   `jar:` URL with the JDK's default caching pins the archive for the JVM's
+   lifetime — on Windows the jar then cannot be deleted after unload. Jolt's
+   jar: URLs open per call and cache nothing, so the branch is a no-op
+   there."
+  [jar-files root url]
+  #?(:jolt nil
+     :default
+     (when (and jar-files (not (contains? @jar-files root)))
+       (try
+         (let [conn ^java.net.JarURLConnection (.openConnection ^java.net.URL url)]
+           (swap! jar-files assoc root (.getJarFile conn)))
+         (catch Exception _ nil)))))
+
 (defn- extension-resource-fn
   "A clojure.java.io/resource replacement scoped to one extension artifact:
    own artifact first (dir: file URL when present; jar: jar:file:...!/entry
@@ -1138,14 +1154,29 @@
    ignored). Host slurp opens file: and jar: URLs via openStream, so
    extension code reads bundled resources with no extraction. JAR-INFO is
    the jar-namespaces map collected once at load (nil for dirs) — the zip
-   is never re-enumerated per lookup."
-  [artifact jar-info deps-resolver]
+   is never re-enumerated per lookup. JAR-FILES registers the JDK's cached
+   JarFile for the extension's own jar so unload can release it (see
+   track-cached-jar!)."
+  [artifact jar-info deps-resolver jar-files]
   (let [host-resource (deref #'clojure.java.io/resource)
+        ;; The one jar: spelling both hosts open: `file:` + the
+        ;; /-separated absolute path, no percent-encoding. JVM .toURI
+        ;; renders Windows paths JVM-style (`file:/C:/…`) but Jolt's
+        ;; renders backslashes encoded (`%5C`), which Jolt's opener then
+        ;; treats literally; Jolt in turn rejects the leading-slash
+        ;; spelling JVM accepts. This shape opens on both.
+        jar-url (fn [root rel]
+                  (java.net.URL.
+                   (str "jar:file:"
+                        (str/replace (str (fs/absolutize (io/file root))) "\\" "/")
+                        "!/" rel)))
         own (fn [rel]
               (let [{:keys [kind root]} artifact]
                 (if (= :jar kind)
                   (when (contains? (:entries jar-info) rel)
-                    (java.net.URL. (str "jar:" (.toURL (.toURI (io/file root))) "!/" rel)))
+                    (let [u (jar-url root rel)]
+                      (track-cached-jar! jar-files root u)
+                      u))
                   (let [f (io/file (str root) rel)]
                     (when (.exists f)
                       (io/as-url f))))))]
@@ -1158,7 +1189,7 @@
                               (let [f (io/file (str entry) rel)]
                                 (when (.exists f) (io/as-url f)))
                               (when (jar-entry-source entry rel)
-                                (java.net.URL. (str "jar:" (.toURL (.toURI (io/file entry))) "!/" rel)))))
+                                (jar-url entry rel))))
                           (when deps-resolver (deps-resolver)))
                     (host-resource rel))))]
       (fn
@@ -2013,17 +2044,19 @@
    artifact-scoped clojure.java.io/resource merged onto the fork. Runs on
    babashka, the JVM and — for manifests declaring :sci without a native
    alternative — Jolt; the reader features follow the host (reader-features)."
-  [ext-name artifact owns-ns? deps-resolver literal
+  [ext artifact owns-ns? deps-resolver literal
    tui-namespaces libs-namespaces]
   ;; the extension's own resources shadow the host's inside the context: a
   ;; jar's entries and a declared dep's roots answer io/resource. The base
   ;; context carries the host lookup; the per-extension fn is merged per
   ;; namespace (sci/merge-opts), leaving the base and sibling forks alone.
-  (let [resource-fn (when artifact
+  (let [ext-name (:name ext)
+        resource-fn (when artifact
                       (extension-resource-fn
                        artifact
                        (when (jar-artifact? artifact) (jar-namespaces (:root artifact)))
-                       deps-resolver))]
+                       deps-resolver
+                       (:jar-files ext)))]
     (loader-sci/sci-loader
      {:id (str "ext:" ext-name)
       :sources (make-source-fn ext-name artifact owns-ns? deps-resolver
@@ -2113,16 +2146,16 @@
    and dep closure — they differ in what that means: injected namespace maps
    and a source provider under SCI, the filtered host root and real source
    roots under the native Jolt loader."
-  [loader-kind ext-name artifact owns-ns? deps-resolver literal]
+  [loader-kind ext artifact owns-ns? deps-resolver literal]
   (host-requires!)
   #?(:jolt
      (case loader-kind
-       :jolt (create-jolt-loader ext-name artifact owns-ns? deps-resolver literal
+       :jolt (create-jolt-loader (:name ext) artifact owns-ns? deps-resolver literal
                                  (shared-tui-namespaces) (shared-libs-namespaces))
-       :sci (create-sci-loader ext-name artifact owns-ns? deps-resolver literal
+       :sci (create-sci-loader ext artifact owns-ns? deps-resolver literal
                                (shared-tui-namespaces) (shared-libs-namespaces)))
      :default
-     (create-sci-loader ext-name artifact owns-ns? deps-resolver literal
+     (create-sci-loader ext artifact owns-ns? deps-resolver literal
                         (shared-tui-namespaces) (shared-libs-namespaces))))
 
 (defn- loader-aware
@@ -2211,7 +2244,8 @@
                       :jars (atom [])
                       :api (atom nil)
                       :deregister-fns (atom [])
-                      :initialized? (atom false)})]
+                      :initialized? (atom false)
+                      :jar-files (atom {})})]
             (try
               (when legacy-loader?
                 (binding [*out* *err*]
@@ -2247,7 +2281,7 @@
                                   (throw (ex-info (str "Extension " name
                                                        " file does not start with (ns ...)")
                                                   {:path path}))))
-                    l (create-loader loader-kind name artifact owns-ns? deps-resolver
+                    l (create-loader loader-kind ext artifact owns-ns? deps-resolver
                                      (when-not artifact
                                        {file-ns {:file (str file) :source file-source}}))]
                 ;; bb-only: a native bb-bundled lib's Maven copy is served to
@@ -2326,6 +2360,12 @@
     (when-let [l @(:loader ext)]
       (loader/unload! l))
     (reset! (:loader ext) nil)
+    (when-let [jar-files (:jar-files ext)]
+      #?(:jolt (reset! jar-files {})
+         :default (let [jars @jar-files]
+                    (doseq [[_ jf] jars]
+                      (try (.close ^java.io.Closeable jf) (catch Exception _)))
+                    (reset! jar-files {}))))
     (reset! (:jars ext) [])
     (swap! extensions (fn [exts] (remove #(identical? % ext) exts)))
     nil))

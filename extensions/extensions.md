@@ -647,7 +647,10 @@ works for dir installs, symlinked checkouts and unexpanded jars:
 ```
 
 Rules: resources are referenced by exact shipped names — directory listing
-inside jars is unsupported. Skills/prompts registered this way are
+inside jars is unsupported. Jar installs are read in place, no extraction:
+sources are opened per call, resources through `jar:` URLs, and kmet
+releases the extension's own archive handle at unload — a jar can be
+replaced or removed once the extension is unloaded. Skills/prompts registered this way are
 self-contained single files (no relative refs); the host stores the body in
 memory and serves extension skills through the `read` tool under their
 `name:path` location (pass the `<location>` verbatim) as well as via
