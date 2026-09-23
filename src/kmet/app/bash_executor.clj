@@ -225,6 +225,23 @@
               ["ProgramFiles" "ProgramFiles(x86)"]))
       (if process/windows-os? "cmd.exe" "sh")))
 
+(defn- wait-for-child!
+  "pi: waitForChildProcess — wait for the DIRECT child to exit and return its
+   exit code.
+
+   babashka.process's deref is not usable as the wait: on Windows (bb/JVM) it
+   blocks until the child's stdout/stderr pipes are closed, not merely until
+   the child exits, so a detached descendant holding the pipes would stall
+   the tool for that descendant's whole lifetime — and the bounded drain that
+   exists for exactly that case (see the :cleanup in create-default-ops)
+   would never run. `:proc` carries the java.lang.Process on both hosts; its
+   waitFor returns when the child itself exits. The record's own :exit is set
+   only by deref and is not read anywhere."
+  [p]
+  (if-let [child (:proc p)]
+    (.waitFor child)
+    (:exit (deref p))))
+
 (defn create-default-ops [& {:keys [shell-path]}]
   ;; Pi: throw early if custom shellPath is specified but not found
   (when (and shell-path (not (fs/exists? shell-path)))
@@ -309,11 +326,10 @@
                         (when @signal (process/kill-process-tree! pid))))
             ;; Wait for the process here, in binding order, so the watchers
             ;; above are already polling while we block. The watchers kill the
-            ;; tree on timeout/cancel, so deref returns on every path — and
+            ;; tree on timeout/cancel, so the wait returns on every path — and
             ;; `done` below is only reset after this, which is what lets the
             ;; signal poller keep killing while the process is still running.
-            result (try (deref p) (catch Exception _ nil))
-            exit-code (:exit result)]
+            exit-code (try (wait-for-child! p) (catch Exception _ nil))]
           ;; done stops both watchers (signal + timeout) within their next
           ;; sleep cycle. Set only after the process has exited; resetting
           ;; earlier would tell the watchers we are done while the process is
@@ -341,10 +357,9 @@
                             ;; settle: readers that already EOF'd join
                             ;; instantly, while a reader blocked on a pipe held
                             ;; open by a detached descendant is abandoned after
-                            ;; the grace period and the stream is closed to
-                            ;; release it (it terminates on its own when the
-                            ;; descendant exits). Both readers share ONE grace
-                            ;; deadline — draining them sequentially would
+                            ;; the grace period (it terminates on its own when
+                            ;; the descendant exits). Both readers share ONE
+                            ;; grace deadline — draining them sequentially would
                             ;; double (or worse) the bounded return time for
                             ;; commands with a detached descendant holding both
                             ;; pipes.
@@ -353,8 +368,21 @@
                                 (when f
                                   (try (deref f (max 0 (- deadline (System/currentTimeMillis))) nil)
                                        (catch Exception _ nil)))))
-                            (doseq [stream [(:out p) (:err p)]]
-                              (when stream
+                            ;; Closing the streams releases the pipes, but the
+                            ;; JDK's process-pipe close DRAINS the pipe on the
+                            ;; calling thread: on Windows a stuck reader's
+                            ;; stream blocks there until the descendant exits —
+                            ;; exactly what this bounded drain exists to avoid.
+                            ;; A stuck reader's stream is therefore closed from
+                            ;; a background thread (pi's destroy is async);
+                            ;; the descendant's exit is what really unblocks
+                            ;; the read, and the thread ends with it. A reader
+                            ;; that already EOF'd closes on the spot.
+                            (doseq [[f stream] [[out-future (:out p)] [err-future (:err p)]]
+                                    :when stream]
+                              (if (and f (not (future-done? f)))
+                                (try (future (try (.close stream) (catch Exception _ nil)))
+                                     (catch Exception _ nil))
                                 (try (.close stream) (catch Exception _ nil))))
                             (doseq [f [out-future err-future]]
                               (when f

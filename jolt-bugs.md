@@ -180,14 +180,16 @@ app`, the loader dep) and a single-file extension whose source opens with
 `(set! *warn-on-reflection* true)` loads through `load-extension!` on both
 loader kinds (:jolt and :sci) — re-verified 2026-09-22.
 
-**Upstream status:** four filed open items — the SCI IVar gap
+**Upstream status:** five filed open items — the SCI IVar gap
 [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) (`deferred`), with
 its fix at [babashka/sci#1093](https://github.com/babashka/sci/pull/1093)
 (re-checked 2026-09-23: open, head `1295142f`, unchanged), so the
 `jolt/deps.edn` SCI pin stays; the `read`/`PushbackReader` handle leak
 [jolt#1117](https://github.com/jolt-lang/jolt/issues/1117); the Windows
 `File.toURI`/`file:` URL spelling
-[jolt#1118](https://github.com/jolt-lang/jolt/issues/1118); and the
+[jolt#1118](https://github.com/jolt-lang/jolt/issues/1118); the no-op
+`fs/set-last-modified-time`
+[jolt#1119](https://github.com/jolt-lang/jolt/issues/1119); and the
 [http-client#28](https://github.com/jolt-lang/http-client/issues/28)
 transport's Windows half — plus jolt#1110's recorded path-separator
 divergence.
@@ -286,7 +288,13 @@ It keeps kmet's bundled-spec-port extension test `^:bb-only` — the test body
 passes on Jolt, only the Windows teardown cannot remove the fixture — filed
 2026-09-23 as
 [jolt#1117](https://github.com/jolt-lang/jolt/issues/1117); the leak is
-platform-independent, observable only on Windows.
+platform-independent, observable only on Windows. The Windows `jolt test`
+run's remaining failures are all of this class (38: pending-delete
+`DirectoryNotEmptyException`/`File exists` teardowns) or the
+[http-client#28](https://github.com/jolt-lang/http-client/issues/28)
+transport's (31) plus
+[jolt#1119](https://github.com/jolt-lang/jolt/issues/1119)'s stale-lock test
+— none are kmet-side (2026-09-23, v0.8.11).
 
 ### [jolt#1118](https://github.com/jolt-lang/jolt/issues/1118) — `File.toURI` emits an unopenable `file:` URL on Windows
 
@@ -306,3 +314,17 @@ jolt renders paths with `/` where the JVM uses `\` (`File.separator`, the
 `file.separator` property, canonical paths), which `known-divergences.edn`
 records; a consumer that needs `\` renders it itself. URL/URI encoding is a
 separate, filed gap — see jolt#1118.
+
+### [jolt#1119](https://github.com/jolt-lang/jolt/issues/1119) — `fs/set-last-modified-time` is a no-op (Windows)
+
+`(fs/set-last-modified-time dir t)` never takes effect on v0.8.11: given a
+number (millis — what babashka accepts) the mtime stays at creation time,
+silently; given a `java.time.Instant` it raises `variable #{inst-ms
+*top*:inst-ms} is not bound` from inside
+`babashka.fs/set-last-modified-time`. `fs/last-modified-time` returns an
+opaque `#object[:object]` there (bb returns a `FileTime`) and `inst-ms` on
+it raises the same error. kmet breaks a stale file lock by comparing the
+lock directory's mtime against a threshold, so back-dating the lock — the
+only way the test can manufacture one — is impossible on jolt and the
+acquisition times out: `file-lock-stale-lock-is-broken` cannot pass. Filed
+2026-09-23.
