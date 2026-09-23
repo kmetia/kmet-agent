@@ -2013,7 +2013,13 @@ Be precise and concise in your responses."}}]
                 ;; a thunk, not a snapshot: set-active-tools! takes effect on
                 ;; the next turn, and the script sandbox keys its context on
                 ;; the set it resolves at call time
-                script-tool/*enabled-tools-fn* (fn [] @(:enabled-tools agent))]
+                script-tool/*enabled-tools-fn* (fn [] @(:enabled-tools agent))
+                ;; the run's agent-level tool hooks as thunks — a hook set
+                ;; mid-run is picked up, and scripted inner calls go through
+                ;; the same before/after semantics as the loop's own batches
+                script-tool/*tool-hooks*
+                {:before (fn [ctx] (when-let [h @(:before-tool-call agent)] (h ctx)))
+                 :after (fn [ctx] (when-let [h @(:after-tool-call agent)] (h ctx)))}]
         (future
           (try
             (let [msg-count-before (count @(:messages agent))

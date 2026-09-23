@@ -178,6 +178,37 @@
         (t/is (= 40 (count (get-in r [:details :calls]))))
         (t/is (every? :ok (get-in r [:details :calls])))))))
 
+(t/deftest test-script-inner-tool-hooks
+  ;; the run's agent-level hooks reach scripted calls: arg rewrite, block
+  ;; (settled without executing, after hook still runs — loop parity),
+  ;; result override; inner calls carry a synthetic id and no message
+  (with-custom-tool {:name "script-test-echo"
+                     :label "Echo"
+                     :description "Echo args"
+                     :execute (fn [args] {:content (pr-str args)})}
+    (fn []
+      (let [payloads (atom [])]
+        (binding [script/*tool-hooks*
+                  {:before (fn [ctx]
+                             (swap! payloads conj ctx)
+                             (when (= "script-test-echo" (:tool-name ctx))
+                               (if (:block (:args ctx))
+                                 {:block true :reason "blocked by hook"}
+                                 {:args (assoc (:args ctx) :hooked true)})))
+                   :after (fn [ctx]
+                            (when (= "script-test-echo" (:tool-name ctx))
+                              {:content (str (:content (:result ctx)) "|after")}))}]
+          (let [r (run (str "[(deref (tools/call \"script-test-echo\" {:n 1}))"
+                            " (deref (tools/call \"script-test-echo\" {:block true}))]"))]
+            (t/is (not (:is-error r)) (:content r))
+            (t/is (str/includes? (:content r) ":n 1, :hooked true"))
+            (t/is (str/includes? (:content r) "|after"))
+            (t/is (str/includes? (:content r) "blocked by hook|after"))
+            (t/is (= 2 (count (get-in r [:details :calls]))))
+            (t/is (not (:ok (get-in r [:details :calls 1])))))
+          (t/is (= #{"script-0" "script-1"} (set (map :tool-call-id @payloads))))
+          (t/is (every? #(not (contains? % :assistant-message)) @payloads)))))))
+
 (t/deftest test-script-gate
   (let [r (run "@(tools/call \"no-such-tool\" {})")]
     (t/is (not (:is-error r)))

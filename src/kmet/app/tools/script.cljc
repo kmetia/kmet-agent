@@ -71,6 +71,19 @@
    execute-tool directly) — then every registry tool is callable."
   nil)
 
+(def ^:dynamic *tool-hooks*
+  "Bound by kmet.app.loop next to *enabled-tools-fn*: the run's agent-level
+   tool hooks — the same fns the loop's own batches call:
+     :before (fn [{:keys [tool-name args tool-call-id assistant-message]}])
+              → nil | {:block true :reason …} | {:args rewritten}
+     :after  (fn [{:keys [tool-name args result is-error]}])
+              → nil | {:content … :is-error …}
+   nil = no hooks (extension code calling the tool outside a loop run).
+   A scripted inner call carries a synthetic :tool-call-id and no
+   :assistant-message, and the hook's :terminate hint is ignored (there is
+   no batch)."
+  nil)
+
 ;; ─── Small helpers ────────────────────────────────────────────────────────
 
 (defn- byte-length [s] (alength (.getBytes (str s) "UTF-8")))
@@ -549,9 +562,13 @@
    settle immediately with {:is-error true} and the active list. The pool
    worker conveys no dynamic bindings, so the bridge passes the run's cancel
    signal, session env and cwd as the invocation pipeline's :bindings (bash
-   reads *cancel-signal*; read/write/edit resolve against *cwd*); the call
-   itself runs through the shared pipeline (kmet.app.tools.invoke)."
-  [{:keys [surface execute-tool signal ctx cwd session-env-fn trace on-update]} name args]
+   reads *cancel-signal*; read/write/edit resolve against *cwd*). The call
+   runs through the shared pipeline (kmet.app.tools.invoke) with the run's
+   tool hooks (*tool-hooks*): a blocked call settles with the hook's reason
+   without executing, and the after hook runs for blocked calls too (loop
+   parity). Inner calls carry a synthetic tool-call id and no assistant
+   message."
+  [{:keys [surface execute-tool signal ctx cwd session-env-fn hooks trace on-update]} name args]
   (let [name (tool-name name)
         p (promise)]
     (if-not (contains? surface name)
@@ -564,17 +581,28 @@
                                                :started-at started})))]
         (.offer @bridge-queue
                 (fn []
-                  (let [result (invoke/run-tool-call
-                                execute-tool
-                                {:tool-name name
-                                 :args args
-                                 :signal signal
-                                 :ctx ctx
-                                 :on-update on-update
-                                 :tools surface
-                                 :bindings {:signal signal
-                                            :session-env-fn session-env-fn
-                                            :cwd cwd}})]
+                  (let [call {:tool-name name
+                              :args args
+                              :tool-call-id (str "script-" idx)
+                              :assistant-message nil}
+                        prep (invoke/prepare-tool-call (assoc call :before-hook (:before hooks)))
+                        call (assoc call :args (if (contains? prep :args) (:args prep) args))
+                        executed (if (:block prep)
+                                   (:block prep)
+                                   (invoke/execute-tool-call
+                                    execute-tool
+                                    (assoc call
+                                           :signal signal
+                                           :ctx ctx
+                                           :on-update on-update
+                                           :tools surface
+                                           :bindings {:signal signal
+                                                      :session-env-fn session-env-fn
+                                                      :cwd cwd})))
+                        result (-> (invoke/finish-tool-call
+                                    (assoc call :after-hook (:after hooks))
+                                    executed)
+                                   (dissoc :terminate))]
                     (try
                       (swap! trace assoc-in [idx]
                              (cond-> {:tool name
@@ -743,6 +771,7 @@
   (let [timeout-ms (normalize-timeout timeout-ms)
         cwd (tool-util/cwd)
         session-env-fn bash-tool/*session-env-fn*
+        hooks *tool-hooks*
         enabled (when *enabled-tools-fn* (*enabled-tools-fn*))
         surface (active-surface select-tools
                                 (get-all-tools)
@@ -760,6 +789,7 @@
                             :ctx ctx
                             :cwd cwd
                             :session-env-fn session-env-fn
+                            :hooks hooks
                             :on-update on-update
                             :trace trace})
         fork (sci-loader/sci-loader

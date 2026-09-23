@@ -455,11 +455,18 @@ additions; pi has no parallel-tool-call guidance.
   returns a promise the script derefs; dispatch never blocks the interpreter,
   and the run `:signal` reaches the inner call so Escape cancels it. Scripts
   fan out freely — one `script` call can run N inner calls in parallel.
-- **No hooks.** `on-tool-call` / `on-tool-result` do not see script-inner
-  calls (they stay a turn-level mechanic). Consequence: an extension's
-  per-tool gate — e.g. a bash guard — does not apply to scripted calls; gate
-  the `script` tool itself to block the whole surface. Mutation tools ride the
+- **Hooks (T4).** Script-inner calls run through the *same* agent-level
+  before/after hooks as the loop's batches (`script/*tool-hooks*`, bound in
+  `run-agent-turn` as thunks over `:before-tool-call`/`:after-tool-call`):
+  the before hook can block (the call settles with its reason and never
+  executes) or rewrite args, the after hook can override `:content` /
+  `:is-error` — for blocked calls too, loop parity. Caveats: an inner call
+  carries a synthetic `:tool-call-id` and no `:assistant-message`, its
+  `:terminate` hint is ignored (there is no batch), and it still produces no
+  tool-execution event, transcript or session entry. Mutation tools ride the
   same bridge; the callable set is every active tool, not a read-only subset.
+  A per-tool gate is policy, not a sandbox — the script can also shell out
+  via `babashka.process` — so gating `script` itself is the only real block.
 
 ## T1 implementation (landed)
 
