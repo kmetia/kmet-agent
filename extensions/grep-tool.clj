@@ -56,14 +56,16 @@
                    (fs/file dir-path))))))
 
 (defn- search-file!
-  "Append FILE's matching lines to RESULTS; an unreadable file is recorded
-   in SKIPPED instead (a binary blob must not abort the search)."
+  "Append FILE's matching lines to RESULTS, the path /-separated; an
+   unreadable file is recorded in SKIPPED instead (a binary blob must not
+   abort the search)."
   [results skipped re file]
   (try
     (with-open [rdr (io/reader (str file))]
-      (doseq [[idx line] (map-indexed vector (line-seq rdr))]
-        (when (re-find re line)
-          (vswap! results conj (str file ":" (inc idx) ": " line)))))
+      (let [shown (renderers/display-path file)]
+        (doseq [[idx line] (map-indexed vector (line-seq rdr))]
+          (when (re-find re line)
+            (vswap! results conj (str shown ":" (inc idx) ": " line))))))
     (catch Exception _e
       (vswap! skipped conj (str file)))))
 

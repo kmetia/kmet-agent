@@ -135,17 +135,31 @@
 (def ^:private compact-resource-file-names
   #{"AGENTS.override.md" "AGENTS.md" "AGENTS.MD" "CLAUDE.md" "CLAUDE.MD"})
 
-(defn- path-relative-to-cwd-or-absolute
+(defn display-path
+  "The /-separated form of PATH for tool result text: str of a Windows Path
+   renders with backslashes, and result paths are read-only labels. Public:
+   shared with the opt-in search tools."
+  [path]
+  (str/replace (str path) fs/file-separator "/"))
+
+(defn path-relative-to-cwd-or-absolute
   "Pi: formatPathRelativeToCwdOrAbsolute — path relative to cwd when inside
-   it, absolute otherwise."
+   it, absolute otherwise. fs-aware: a literal \"/\" prefix never matches on
+   Windows (C:\\…\\x vs C:\\…/), which fell back to the full path. Public:
+   shared with the opt-in search tools' result rendering."
   [file-path cwd]
   (let [abs (resolve-path file-path cwd)
         cwd-abs (str (fs/absolutize cwd))]
-    (if (= abs cwd-abs)
+    (cond
+      (= abs cwd-abs)
       "."
-      (if (str/starts-with? abs (str cwd-abs "/"))
-        (subs abs (count (str cwd-abs "/")))
-        abs))))
+
+      (fs/starts-with? abs cwd-abs)
+      (try (display-path (fs/relativize cwd-abs abs))
+           (catch Exception _ (display-path abs)))
+
+      :else
+      (display-path abs))))
 
 (defn- get-pi-docs-classification
   "Pi: getPiDocsClassification — README.md and docs/* / examples/* inside the

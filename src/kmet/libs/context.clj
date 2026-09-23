@@ -89,7 +89,10 @@
     (let [common-git-dir (canonicalize (:common-git-dir git-paths))
           worktree-root (canonicalize (:repo-dir git-paths))
           main-repo-root (str (fs/parent common-git-dir))]
-      (when (str/starts-with? worktree-root (str main-repo-root "/"))
+      ;; strictly inside: a literal "/" suffix never matched on Windows,
+      ;; and fs/starts-with? alone would also accept the main repo itself
+      (when (and (fs/starts-with? worktree-root main-repo-root)
+                 (not= worktree-root main-repo-root))
         (when (= (canonicalize (str (fs/path main-repo-root ".git"))) common-git-dir)
           (when-let [context-file (load-context-file-from-dir worktree-root)]
             (str (fs/path main-repo-root (fs/file-name (:path context-file))))))))))

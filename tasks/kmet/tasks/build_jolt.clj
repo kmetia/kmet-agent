@@ -133,15 +133,17 @@
               :else "kmet"))))
 
 (defn- default-artifact
-  "The dist artifact path for a build: kmet-<ver>-jolt<jv>-<platform>[-dev][.exe]
+  "The dist artifact label for a build: dist/kmet-<ver>-jolt<jv>-<platform>[-dev][.exe]
    (kmet-test-... for a --test build). An nt platform takes the suffix, the
    way jolt's own output path does — the file has to be executable by name on
-   Windows."
+   Windows. A /-joined string, not a Path: the label is printed and tested,
+   and str of a Path renders with backslashes on Windows."
   ([ver jolt-ver platform mode] (default-artifact ver jolt-ver platform mode {}))
   ([ver jolt-ver platform mode {:keys [test?]}]
-   (fs/path dist-dir (str (artifact-base ver jolt-ver platform
-                                         {:dev? (= mode "dev") :test? test?})
-                          (when (windows-platform? platform) ".exe")))))
+   (str dist-dir "/"
+        (artifact-base ver jolt-ver platform
+                       {:dev? (= mode "dev") :test? test?})
+        (when (windows-platform? platform) ".exe"))))
 
 ;; ─── CLI ──────────────────────────────────────────────────────────────────
 

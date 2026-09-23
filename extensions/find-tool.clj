@@ -62,7 +62,7 @@
         (let [name (fs/file-name file)]
           (when (or (re-find re name)
                     (re-find re (str file)))
-            (vswap! results conj (str file)))))
+            (vswap! results conj (renderers/display-path file)))))
       (let [r @results]
         (if (empty? r)
           {:content (str "No files matching \"" pattern "\"")}

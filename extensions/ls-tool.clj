@@ -43,7 +43,9 @@
                                           (str type " " (format "%10d" size) " " name)
                                           name)))
                                     entries))]
-          {:content (str "Contents of " (fs/canonicalize dir) ":\n" result)})))
+          {:content (str "Contents of "
+                         (renderers/display-path (fs/canonicalize dir))
+                         ":\n" result)})))
     (catch Exception e
       {:content (str "Error listing: " (ex-message e)) :is-error true})))
 

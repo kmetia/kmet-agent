@@ -55,12 +55,18 @@
 
 (defn shorten-title-path
   "Home-relative display path for a quiet title (pi: shortenPath).
-   Non-string input passes through — callers guard with string?/seq."
+   Non-string input passes through — callers guard with string?/seq. Only
+   absolute paths fold; the ~-folded form is /-separated (a literal \"/\"
+   home check never matched on Windows)."
   [p]
   (let [home (System/getProperty "user.home" "")]
-    (if (and (string? p) (seq home)
-             (or (= p home) (str/starts-with? p (str home "/"))))
-      (str "~" (subs p (count home)))
+    (if (and (string? p) (seq home) (fs/absolute? p))
+      (let [home* (str (fs/absolutize home))
+            abs (str (fs/absolutize p))]
+        (if (or (= abs home*) (fs/starts-with? abs home*))
+          (let [rel (str/replace (str (fs/relativize home* abs)) fs/file-separator "/")]
+            (if (empty? rel) "~" (str "~/" rel)))
+          p))
       p)))
 
 (defn title-path-arg
