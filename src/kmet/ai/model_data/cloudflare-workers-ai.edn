@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-21T17:19:24Z"
+ :generated-at "2026-09-23T05:01:08Z"
  :provider {:id :cloudflare-workers-ai
             :name "Cloudflare Workers AI"
             :env-vars ["CLOUDFLARE_API_KEY" "CLOUDFLARE_ACCOUNT_ID"]
@@ -235,6 +235,13 @@
     :api :openai-completions
     :base-url "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1"
     :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max nil
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh nil}
     :input [:text]
     :cost {:input 0.2 :output 0.3 :cache-read 0 :cache-write 0}
     :context-window 128000
