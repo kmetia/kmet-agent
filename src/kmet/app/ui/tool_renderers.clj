@@ -919,17 +919,20 @@
           (tool-text (theme/fg theme :warning warn))])))))
 
 (defn- elapsed-result-nodes
-  "The muted Elapsed/Took line, or nil when the execution never started."
-  [theme started-at ended-at]
-  (when started-at
-    (let [now (or ended-at (System/currentTimeMillis))
-          elapsed-ms (- now started-at)
-          label (if ended-at "Took" "Elapsed")]
+  "The muted Elapsed/Took line, or nil when the execution never started.
+   MEASURED-MS — the tool's own recorded duration (script's :details
+   :elapsed-ms) — wins over the component timestamp span when given."
+  [theme started-at ended-at & [measured-ms]]
+  (let [elapsed-ms (or measured-ms
+                       (when started-at
+                         (- (or ended-at (System/currentTimeMillis)) started-at)))]
+    (when (some? elapsed-ms)
       [[:spacer {:lines 1}]
        (tool-text
         (theme/fg theme :muted
-                  (str label " "
-                       (format "%.1f" (float (/ elapsed-ms 1000)))
+                  (str (if (or ended-at measured-ms) "Took" "Elapsed")
+                       " "
+                       (format "%.1f" (float (/ (max 0 elapsed-ms) 1000)))
                        "s")))])))
 
 (defn render-bash-result
@@ -961,7 +964,7 @@
   [_name args theme width context]
   (let [code (:code args)
         code-str (if (string? code) code (if (nil? code) "" nil))
-        timeout (:timeoutMs args)
+        timeout (:timeout args)
         code-display (cond
                        (nil? code-str) (theme/fg theme :error "[invalid arg]")
                        (empty? code-str) (theme/fg theme :tool-output "...")
@@ -969,7 +972,7 @@
         code-line (theme/fg theme :tool-title
                             (theme/bold (str "script " code-display)))
         timeout-suffix (if (and (number? timeout) (pos? timeout))
-                         (theme/fg theme :muted (str " (" timeout "ms)"))
+                         (theme/fg theme :muted (str " (" timeout "s)"))
                          "")
         rendered (if (:expanded context)
                    (str code-line timeout-suffix)
@@ -1016,14 +1019,16 @@
 
 (defn render-script-result
   "Result body for the script tool: the shell-style body (output preview,
-   truncation warning, elapsed/took) plus the inner-call summary line."
+   truncation warning, elapsed/took — the tool's own measured time when the
+   result carries it) plus the inner-call summary line."
   [content is-error theme width expanded? started-at ended-at truncation context]
   (manage-result-timer! context started-at ended-at is-error)
   (h/compile-tree
    (into [:container {}]
          (concat (output-result-nodes content theme width expanded? ended-at truncation)
                  (script-calls-nodes context theme)
-                 (elapsed-result-nodes theme started-at ended-at)))))
+                 (elapsed-result-nodes theme started-at ended-at
+                                       (get-in context [:details :elapsed-ms]))))))
 
 ;; ─── Default renderers (fallback when no custom or built-in) ──────────────
 

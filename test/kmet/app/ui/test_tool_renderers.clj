@@ -324,8 +324,8 @@
       (is (= 1 (count lines)))
       (is (str/includes? (first lines) "script (+ 1 2)"))))
   (testing "an explicit timeout renders as a suffix"
-    (let [lines (plain (r/render-script-call "script" {:code "1" :timeoutMs 5000} th 60 {}) 60)]
-      (is (str/includes? (first lines) "(5000ms)"))))
+    (let [lines (plain (r/render-script-call "script" {:code "1" :timeout 5} th 60 {}) 60)]
+      (is (str/includes? (first lines) "(5s)"))))
   (testing "collapsed caps a multiline script at the head + hint"
     (let [code (str/join "\n" (mapv #(str "(println " % ")") (range 20)))
           lines (plain (r/render-script-call "script" {:code code} th 60 {:expanded false}) 60)]

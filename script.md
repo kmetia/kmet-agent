@@ -12,7 +12,7 @@ result-token attribution — so the build/no-build decision can be made on data.
 
 Status: **T1, T2 and T4 implemented** in this tree —
 `src/kmet/app/tools/script.cljc`, a builtin (read/write/edit/bash + `script`),
-`kmet.app.test-script` (41 tests: 32 fast + 9 `^:slow`, smoke-verified on
+`kmet.app.test-script` (42 tests: 33 fast + 9 `^:slow`, smoke-verified on
 babashka and jolt); the mcp-adapter's `mcpScript` tool and `bb`-subprocess
 runtime retired into the same engine (its catalog joins the sandbox as a
 contributed tool source — T2 below). T4 shares the invocation pipeline with
@@ -374,7 +374,8 @@ Clojure sandbox reports Clojure data; T2 formats MCP envelopes itself).
 - Inner-call opts: `:signal` (the combined cancel signal — Escape and the
   script's own abort both kill inner bash children), `:ctx`
   (`build-extension-context`), `:on-update` collected into a call trace
-  exposed at `:details {:calls [...]}` (mcpScript precedent), **no**
+  exposed at `:details {:calls [...]}` (mcpScript precedent), `:timeout`
+  (seconds) and `:elapsed-ms` (measured total) always, **no**
   per-call UI events. The trace is an atom — concurrent calls (the normal
   fan-out case now that every call is a promise) append to it safely.
 
@@ -497,11 +498,12 @@ The plan above is now the record of what landed:
 
 1. ✅ **Tool** — `src/kmet/app/tools/script.cljc` (`.cljc` for the
    jolt/bb `sci/binding` split), a `script` record (params `code` +
-   `timeoutMs`, `:streams? true`, `:contextual? true`), registered at the
+   `timeout` in seconds — bash's unit —, `:streams? true`, `:contextual?
+   true`), registered at the
    bottom of `registry.clj` — after the registry fns — carrying seams
    (`:get-all-tools`, `:execute-tool`, `:generation-fn` =
    `tool-registry-generation`) so it never requires the registry back.
-   Default timeout 30s.
+   Default timeout 30 s (fractional allowed).
 2. ✅ **Engine** — base cache keyed by `[registry-generation enabled-set]`
    (`registry-generation` is the counter `register-tool!`/`unregister-tool!`
    bump; `*enabled-tools-fn*` is the loop-bound thunk); per-call fork through
@@ -520,7 +522,9 @@ The plan above is now the record of what landed:
    `execute-tool-calls-*`, never the hooks.
 5. ✅ **Deadlines** — eval on a daemon thread; `:interrupt-fn` checks the
    abort atom (signal/deadline/output-limit) and throws; the host waits
-   `timeoutMs` + a 1.5s interrupt grace, then abandons the thread.
+   the `:timeout` deadline + a 1.5 s interrupt grace, then abandons the
+   thread. The result reports the effective `:timeout` (seconds) and the
+   measured total `:elapsed-ms` in `:details`.
 6. ✅ **Output** — `*out*`/`*err*` bound to temp files; daemon reader
    threads drain them per burst (a stream that has seen EOF stays at EOF —
    hence reopen-per-burst) and keep the last 128 KiB: `append-chunk` trims an
@@ -578,9 +582,10 @@ The probes that found the capture bugs left a set of deliberate behaviors:
   a host primitive that runs long is abandoned at the deadline + 1.5 s grace
   and keeps its thread until it finishes (the print limits are what keep that
   window small).
-- **Coercions** — `:timeoutMs` absent, ≤ 0 or non-numeric → the 30 s default;
+- **Coercions** — `:timeout` (seconds, bash's unit; fractional ok) absent,
+  ≤ 0 or non-numeric → the 30 s default;
   `:code` `nil`/empty → "No code provided." (a result without
-  `:timeout-ms`); a non-string `:code` is stringified.
+  `:timeout`/`:elapsed-ms`); a non-string `:code` is stringified.
 - **stderr** is fused after stdout under a `[stderr]` marker, not
   interleaved; `(binding [*out* *err*] ...)` writes to that stream.
 - **Tool names** — strings, keywords and symbols all resolve (`:read` →

@@ -34,7 +34,7 @@
   (let [r (run "(+ 1 2)")]
     (t/is (not (:is-error r)))
     (t/is (= "3" (:content r)))
-    (t/is (= script/default-timeout-ms (get-in r [:details :timeout-ms])))))
+    (t/is (= 30 (get-in r [:details :timeout])))))
 
 (t/deftest test-script-print-and-return
   (let [r (run "(println \"hello\") 42")]
@@ -50,11 +50,11 @@
     (t/is (str/includes? (:content r) "this-does-not-exist"))))
 
 (t/deftest test-script-timeout
-  (let [r (run "(loop [] (recur))" {:timeoutMs 300})]
+  (let [r (run "(loop [] (recur))" {:timeout 0.3})]
     (t/is (:is-error r))
     (t/is (str/includes? (:content r) "timed out"))
     (t/is (= :timeout (get-in r [:details :error])))
-    (t/is (= 300 (get-in r [:details :timeout-ms])))))
+    (t/is (= 0.3 (get-in r [:details :timeout])))))
 
 (t/deftest test-script-signal-abort
   (let [signal (atom false)
@@ -71,7 +71,7 @@
   ;; Throwable is not resolvable in the sandbox (no class access), but
   ;; Exception is — and the interrupt exception is catchable, so the abort
   ;; reason must win over whatever the script returns.
-  (let [r (run "(try (loop [] (recur)) (catch Exception e :caught))" {:timeoutMs 300})]
+  (let [r (run "(try (loop [] (recur)) (catch Exception e :caught))" {:timeout 0.3})]
     (t/is (:is-error r))
     (t/is (= :timeout (get-in r [:details :error])))))
 
@@ -226,7 +226,7 @@
                                     (deliver observed (boolean @sig))
                                     {:content "done"}))}
       (fn []
-        (let [r (run "(deref (tools/call \"script-test-wait\" {}))" {:timeoutMs 200})]
+        (let [r (run "(deref (tools/call \"script-test-wait\" {}))" {:timeout 0.2})]
           (t/is (:is-error r))
           (t/is (= :timeout (get-in r [:details :error])))
           (t/is (true? (deref observed 3000 false))))))))
@@ -251,7 +251,7 @@
               (let [r (run (str "(let [ps (mapv (fn [_] (tools/call \"script-test-block\" {})) (range 64))]"
                                 "  (tools/call \"script-test-late\" {})"
                                 "  (deref (first ps)))")
-                           {:timeoutMs 300})]
+                           {:timeout 0.3})]
                 (t/is (:is-error r))
                 (t/is (= :timeout (get-in r [:details :error])) (pr-str r)))
               (finally (deliver release true)))
@@ -270,7 +270,7 @@
       (let [r (run (str "(deref (tools/call \"bash\" {:command "
                         (pr-str (str "sleep 2; touch '" marker "'"))
                         "}))")
-                   {:timeoutMs 400})]
+                   {:timeout 0.4})]
         (t/is (:is-error r))
         (t/is (= :timeout (get-in r [:details :error])))
         (Thread/sleep 2500)
@@ -478,7 +478,7 @@
 (t/deftest test-script-unbounded-print-is-bounded
   ;; *print-length* is bound: an infinite seq prints a bounded prefix instead
   ;; of running host code past the deadline (printing is not interruptible)
-  (let [r (run "(println (range))" {:timeoutMs 5000})]
+  (let [r (run "(println (range))" {:timeout 5})]
     (t/is (not (:is-error r)) (:content r))
     (t/is (str/includes? (:content r) "99999") "a bounded prefix is printed")
     (t/is (str/includes? (:content r) "...") "print-length elides the rest")))
@@ -512,7 +512,7 @@
         (binding [script/*tool-hooks*
                   {:before (fn [_] (Thread/sleep 800) nil)}]
           (let [r (run "(deref (tools/call \"script-test-slow-hook-target\" {}))"
-                       {:timeoutMs 200})]
+                       {:timeout 0.2})]
             (t/is (:is-error r))
             (t/is (= :timeout (get-in r [:details :error])))))))
     (t/is (false? @ran)
@@ -534,9 +534,21 @@
                                   {:content "done"})}
       (fn []
         (let [r (run "(tools/call \"script-test-late-updates\" {}) nil"
-                     {:timeoutMs 5000}
+                     {:timeout 5}
                      (fn [_] (swap! updates inc)))]
           (t/is (not (:is-error r)))
           (Thread/sleep 600)
           (t/is (zero? @updates)
                 "updates from a call that began after the result are dropped"))))))
+(t/deftest test-script-result-reports-time
+  ;; :timeout is in seconds (bash's unit); the result reports the measured
+  ;; total as :elapsed-ms alongside the effective timeout
+  (let [r (run "(sandbox/sleep 120) :ok")]
+    (t/is (not (:is-error r)))
+    (t/is (= 30 (get-in r [:details :timeout])) "the default is 30 s")
+    (t/is (>= (get-in r [:details :elapsed-ms]) 100)
+          "the measured total rides in the result"))
+  (let [r (run ":ok" {:timeout 0.5})]
+    (t/is (= 0.5 (get-in r [:details :timeout])) "fractional seconds survive"))
+  (let [r (run ":ok" {:timeout "bad"})]
+    (t/is (= 30 (get-in r [:details :timeout])) "non-numeric falls back")))

@@ -31,6 +31,14 @@
 
 (def default-timeout-ms 30000)
 
+(defn- ms->sec
+  "Milliseconds as seconds — whole numbers stay integers (30000 → 30), the
+   rest a double (300 → 0.3), so the timeout reported in a result reads like
+   the one that was asked for."
+  [ms]
+  (let [q (quot ms 1000)]
+    (if (= ms (* q 1000)) q (/ ms 1000.0))))
+
 (def ^:private max-output-bytes bash-exec/DEFAULT-MAX-BYTES)
 (def ^:private max-output-lines bash-exec/DEFAULT-MAX-LINES)
 (def ^:private max-capture-bytes (* 16 1024 1024))
@@ -117,14 +125,19 @@
 (defn- temp-root []
   (or (System/getenv "TMPDIR") (System/getProperty "java.io.tmpdir")))
 
-(defn- normalize-timeout [v]
-  (let [n (try
-            (long (cond
-                    (number? v) v
-                    (string? v) (Long/parseLong (str/trim v))
-                    :else nil))
-            (catch Exception _ nil))]
-    (if (and n (pos? n)) n default-timeout-ms)))
+(defn- normalize-timeout
+  "The effective deadline in ms from TIMEOUT seconds (bash's unit). Absent,
+   ≤ 0 or non-numeric → the 30 s default. Fractional seconds work (0.5)."
+  [v]
+  (let [secs (try
+               (double (cond
+                         (number? v) v
+                         (string? v) (Double/parseDouble (str/trim v))
+                         :else nil))
+               (catch Exception _ nil))]
+    (if (and secs (pos? secs))
+      (long (* 1000.0 secs))
+      default-timeout-ms)))
 
 (defn- combined-signal
   "The cancel signal a script's inner calls observe: true when the run's
@@ -772,13 +785,13 @@
   "Build the tool result from the eval outcome and the capture snapshot.
    ABORT-REASON wins when set: a script unwound by the interrupt (however it
    reports, e.g. a catch that rethrows) cannot outlive its deadline."
-  [res capture timeout-ms trace abort-reason]
+  [res capture timeout-ms trace abort-reason elapsed-ms]
   (let [{:keys [out err out-bytes out-lines err-bytes err-lines]} capture
         status (or abort-reason (:status res))
         value (when (= :ok status) (:value res))
         ret (when (some? value) (format-value value))
         error-text (case status
-                     :timeout (str "Script timed out after " timeout-ms "ms")
+                     :timeout (str "Script timed out after " (ms->sec timeout-ms) "s")
                      :aborted "Script aborted"
                      :output-limit (str "Script output exceeded "
                                         (bash-exec/format-size max-capture-bytes)
@@ -797,15 +810,19 @@
         calls (trace-snapshot trace)]
     (cond-> {:content content
              :is-error (not= :ok status)
-             :details (cond-> {:timeout-ms timeout-ms}
+             ;; :timeout in seconds (the unit it was asked for), :elapsed-ms
+             ;; the measured total — the UI's Took line reads it
+             :details (cond-> {:timeout (ms->sec timeout-ms)
+                               :elapsed-ms elapsed-ms}
                         (not= :ok status) (assoc :error status)
                         (seq calls) (assoc :calls calls))}
       truncation (assoc :truncation truncation))))
 
 (defn- run-script
-  [{:keys [code timeout-ms signal ctx on-update get-all-tools get-contributed-tools
+  [{:keys [code timeout signal ctx on-update get-all-tools get-contributed-tools
            select-tools execute-tool generation-fn]}]
-  (let [timeout-ms (normalize-timeout timeout-ms)
+  (let [timeout-ms (normalize-timeout timeout)
+        started-at (System/currentTimeMillis)
         cwd (tool-util/cwd)
         session-env-fn bash-tool/*session-env-fn*
         hooks *tool-hooks*
@@ -826,7 +843,7 @@
         abort (atom nil)
         cancelled (combined-signal signal abort)
         writers (atom nil)
-        deadline (+ (System/currentTimeMillis) timeout-ms)
+        deadline (+ started-at timeout-ms)
         trace (atom [])
         bridge (bridge-fns {:surface surface
                             :execute-tool execute-tool
@@ -856,7 +873,8 @@
       (let [finished? (realized? done)
             snapshot (finish-capture! capture finished?)
             res (or @result {:status (or @abort :timeout)})]
-        (assemble-result res snapshot timeout-ms trace @abort))
+        (assemble-result res snapshot timeout-ms trace @abort
+                         (- (System/currentTimeMillis) started-at)))
       (finally (reset! live? false)))))
 
 ;; ─── Tool record ──────────────────────────────────────────────────────────
@@ -883,9 +901,9 @@
        "interop and no other requires. Print with println; the last expression's value is "
        "reported too. Errors are Exceptions — catch with (catch Exception e ...); Throwable "
        "is not a class here. Relative paths in slurp/spit/sh resolve against the session cwd "
-       "((sandbox/cwd)); babashka.fs uses the process directory. Default timeout 30s — raise "
-       "timeoutMs for long scans; on timeout the output so far is returned and inner "
-       "calls are cancelled."))
+       "((sandbox/cwd)); babashka.fs uses the process directory. Default timeout 30 s — raise "
+       ":timeout for long scans; on timeout the output so far is returned, inner "
+       "calls are cancelled, and the result carries :elapsed-ms."))
 
 (defn title
   "Quiet one-liner body for the script tool: the first code line, shortened."
@@ -919,15 +937,17 @@
     "A quick one-off command with small output still belongs in bash; issue it alongside the script call in the same message, not in a separate turn."
     "Prefer read for exactly one file and edit/write for reviewable changes; script is for bulk edits and data that would bloat the transcript."]
    :params {:code {:type :string :description "Clojure code to run"}
-            :timeoutMs {:type :number
-                        :description "Timeout in milliseconds (default 30000)"
-                        :optional? true}}
+            :timeout {:type :number
+                      :description (str "Timeout in seconds (default "
+                                        (ms->sec default-timeout-ms)
+                                        "; fractional allowed), like bash's :timeout")
+                      :optional? true}}
    :execute (fn [args on-update signal ctx]
               (let [code (some-> (:code args) str)]
                 (if (str/blank? code)
                   {:content "No code provided." :is-error true}
                   (run-script {:code code
-                               :timeout-ms (or (:timeoutMs args) (:timeout-ms args))
+                               :timeout (:timeout args)
                                :signal signal
                                :ctx ctx
                                :on-update on-update

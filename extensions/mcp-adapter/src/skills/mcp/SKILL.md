@@ -79,9 +79,10 @@ separate runtime retired into this engine):
   (`mcp({connect: "name"})`) before scripting it.
 - Print with `println`; the script's return value is reported too.
   `(emit ...)`/`console.log` no longer exist — they were mcpScript's API.
-- `timeoutMs` (default 30000) bounds the whole script; calls still in
+- `timeout` (seconds, default 30) bounds the whole script; calls still in
   flight appear in `:details :calls` as `incomplete` with their elapsed
-  time. Progress notifications stream into the output while a call runs.
+  time, and `:details :elapsed-ms` reports the measured total. Progress
+  notifications stream into the output while a call runs.
 - Ranked search lives in the proxy: `@(tools/call "mcp" {:search
   "screenshot"})`, or filter `(tools/list)` locally.
 - A name claimed by two servers is absent from the surface (the default
