@@ -80,6 +80,7 @@
             [kmet.app.compaction :as compaction]
             [kmet.app.skills :as skills]
             [kmet.app.tools.core :as tools]
+            [kmet.app.tools.invoke :as invoke]
             [kmet.app.tools.util :as tools-util]
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.script :as script-tool]
@@ -226,11 +227,10 @@ Be precise and concise in your responses."}}]
 
 (defn- active-tools
   "The tools sent to the LLM: the registry filtered to the :enabled-tools
-   set (nil = all), preserving registry order."
+   set (nil = all), preserving registry order (registry/select-tools)."
   [agent]
-  (if-let [enabled @(:enabled-tools agent)]
-    (filterv #(contains? enabled (:name %)) (vals (tools/get-all-tools)))
-    (vals (tools/get-all-tools))))
+  (vals (tools/select-tools (tools/get-all-tools)
+                            {:enabled @(:enabled-tools agent)})))
 
 (defn set-active-tools!
   "Restrict the tools sent to the LLM to NAMES (a set or seq of tool
@@ -836,14 +836,6 @@ Be precise and concise in your responses."}}]
   [tool-calls]
   (boolean (some #(= :sequential (tool-execution-mode (:name %))) tool-calls)))
 
-(defn- run-tool-call!
-  "Await a tool future, returning its result map. The UI updates only on
-   actual tool output events (pi: tool_execution_update carries partial
-   content) — no periodic progress pings, so a long-running tool does not
-   force constant screen updates."
-  [f]
-  @f)
-
 (defn- await-all-tool-results!
   "Poll all pending tool futures concurrently until every future completes.
    Returns a map tool-call-id → result in approximate completion order
@@ -873,47 +865,6 @@ Be precise and concise in your responses."}}]
                 (deref f 100 :pending))
               (recur)))))))
 
-(defn- before-tool-hook-result
-  "Run the before-tool-call hook if registered (pi: beforeToolCall).
-   Returns nil to allow, {:block true :reason ...} to block, or
-   {:args transformed-args} to rewrite the call's arguments. A throwing
-   hook blocks with the error message as reason. A blocked result may
-   carry :terminate true — the run stops after this batch when EVERY
-   finalized call in it carries the hint (pi: ToolCallEventResult.terminate)."
-  [agent tc-id tc-name tc-args assistant-msg]
-  (when-let [hook @(:before-tool-call agent)]
-    (try
-      (hook {:assistant-message assistant-msg
-             :tool-call-id tc-id
-             :tool-name tc-name
-             :args tc-args})
-      (catch Exception e
-        {:block true
-         :reason (str "before-tool-call hook error: " (ex-message e))}))))
-
-(defn- after-tool-hook-result
-  "Run the after-tool-call hook if registered (pi: afterToolCall), merging any
-   returned :content / :is-error overrides into the result. A throwing hook
-   turns the result into an error."
-  [agent tc-id tc-name tc-args result assistant-msg]
-  (if-let [hook @(:after-tool-call agent)]
-    (try
-      (let [hook-result (hook {:assistant-message assistant-msg
-                               :tool-call-id tc-id
-                               :tool-name tc-name
-                               :args tc-args
-                               :result result
-                               :is-error (:is-error result false)})]
-        (if hook-result
-          (cond-> result
-            (:content hook-result) (assoc :content (:content hook-result))
-            (contains? hook-result :is-error) (assoc :is-error (:is-error hook-result)))
-          result))
-      (catch Exception e
-        {:content (str "after-tool-call hook error: " (ex-message e))
-         :is-error true}))
-    result))
-
 (defn- tool-on-update
   "Streaming callback for a tool execution (pi: tool onUpdate) — emits
    :tool-execution-update with partial content so the UI can show live
@@ -940,16 +891,18 @@ Be precise and concise in your responses."}}]
                                         :tool-call-id tc-id
                                         :tool-name tc-name
                                         :args tc-args})
-                           (let [before (before-tool-hook-result agent tc-id tc-name tc-args assistant-msg)]
+                           (let [prep (invoke/prepare-tool-call
+                                       {:tool-name tc-name
+                                        :args tc-args
+                                        :tool-call-id tc-id
+                                        :assistant-message assistant-msg
+                                        :before-hook @(:before-tool-call agent)})]
                              (cond
-                               (:block before)
-                               (assoc tc :kmet/blocked
-                                      (cond-> {:content (or (:reason before) "Tool execution was blocked")
-                                               :is-error true}
-                                        (:terminate before) (assoc :terminate true)))
+                               (:block prep)
+                               (assoc tc :kmet/blocked (:block prep))
 
-                               (contains? before :args)
-                               (assoc tc :arguments (:args before))
+                               (contains? prep :args)
+                               (assoc tc :arguments (:args prep))
 
                                :else tc))))
                        tool-calls)
@@ -961,15 +914,22 @@ Be precise and concise in your responses."}}]
         ;; order — a hash-map can't express it, and iterating one gives
         ;; arbitrary tool-execution-end event order.
         completion-order (atom [])
-        ;; The cancel signal comes from the run-level binding in run-agent-turn
-        ;; (conveyed into these futures), so no per-future binding needed.
+        ;; The cancel signal and the session env/cwd bindings come from the
+        ;; run-level binding in run-agent-turn (conveyed into these futures),
+        ;; so no per-future binding is needed (invoke/execute-tool-call's
+        ;; :bindings is the pool-worker path).
         futures (into {} (map (fn [tc]
                                 [(:id tc)
                                  (future (let [tc-id (:id tc)
-                                               result (tools/execute-tool (:name tc) (:arguments tc)
-                                                                          {:on-update (tool-on-update agent tc-id)
-                                                                           :signal (:signal agent)
-                                                                           :ctx (extensions/build-extension-context)})]
+                                               result (invoke/execute-tool-call
+                                                       tools/execute-tool
+                                                       {:tool-name (:name tc)
+                                                        :args (:arguments tc)
+                                                        :tool-call-id tc-id
+                                                        :assistant-message assistant-msg
+                                                        :signal (:signal agent)
+                                                        :ctx (extensions/build-extension-context)
+                                                        :on-update (tool-on-update agent tc-id)})]
                                            (swap! completion-order conj [tc-id result])
                                            result))])
                               pending))
@@ -977,9 +937,14 @@ Be precise and concise in your responses."}}]
         finalized (into {}
                         (map (fn [tc]
                                (let [tc-id (:id tc)
-                                     raw (or (:kmet/blocked tc) (get raw-results tc-id))
-                                     result (after-tool-hook-result agent tc-id (:name tc) (:arguments tc) raw assistant-msg)]
-                                 [tc-id result])))
+                                     raw (or (:kmet/blocked tc) (get raw-results tc-id))]
+                                 [tc-id (invoke/finish-tool-call
+                                         {:tool-name (:name tc)
+                                          :args (:arguments tc)
+                                          :tool-call-id tc-id
+                                          :assistant-message assistant-msg
+                                          :after-hook @(:after-tool-call agent)}
+                                         raw)])))
                         prepared)]
     ;; tool-execution-end in completion order: blocked first (prep order), then completion order
     (doseq [tc prepared :when (contains? tc :kmet/blocked)]
@@ -1027,17 +992,31 @@ Be precise and concise in your responses."}}]
                      :tool-call-id tc-id
                      :tool-name tc-name
                      :args tc-args})
-        (let [before (before-tool-hook-result agent tc-id tc-name tc-args assistant-msg)
-              result (if (:block before)
-                       (cond-> {:content (or (:reason before) "Tool execution was blocked")
-                                :is-error true}
-                         (:terminate before) (assoc :terminate true))
-                       (run-tool-call!
-                        (future (tools/execute-tool tc-name tc-args
-                                                    {:on-update (tool-on-update agent tc-id)
-                                                     :signal (:signal agent)
-                                                     :ctx (extensions/build-extension-context)}))))
-              result (after-tool-hook-result agent tc-id tc-name tc-args result assistant-msg)
+        (let [prep (invoke/prepare-tool-call
+                    {:tool-name tc-name
+                     :args tc-args
+                     :tool-call-id tc-id
+                     :assistant-message assistant-msg
+                     :before-hook @(:before-tool-call agent)})
+              args (if (contains? prep :args) (:args prep) tc-args)
+              raw (if (:block prep)
+                    (:block prep)
+                    (invoke/execute-tool-call
+                     tools/execute-tool
+                     {:tool-name tc-name
+                      :args args
+                      :tool-call-id tc-id
+                      :assistant-message assistant-msg
+                      :signal (:signal agent)
+                      :ctx (extensions/build-extension-context)
+                      :on-update (tool-on-update agent tc-id)}))
+              result (invoke/finish-tool-call
+                      {:tool-name tc-name
+                       :args args
+                       :tool-call-id tc-id
+                       :assistant-message assistant-msg
+                       :after-hook @(:after-tool-call agent)}
+                      raw)
               result-msg (tool-result-message tc-id tc-name result)]
           (when (not= false append?)
             (swap! (:messages agent) conj result-msg)

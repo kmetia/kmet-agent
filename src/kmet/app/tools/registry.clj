@@ -148,6 +148,27 @@
               (if (map? tools) (merge acc tools) acc)))
           {} (vals @tool-sources)))
 
+;; ─── Callable surfaces ─────────────────────────────────────────────────────
+
+(defn select-tools
+  "Filter ALL (a name → Tool map, e.g. get-all-tools) to a caller's surface:
+   ENABLED names (nil = every tool in ALL), plus CONTRIBUTED sandbox-only
+   tools (not in get-all-tools; a colliding name keeps ALL's record), minus
+   EXCLUDE names (a sandbox must not expose itself). Preserves ALL's order.
+   The loop's schema and the script bridge's callable set both resolve
+   through this, so what a caller lists and what it can dispatch cannot
+   drift."
+  [all {:keys [enabled contributed exclude]}]
+  (let [enabled (or enabled (set (keys all)))
+        contributed (apply dissoc (or contributed {}) (keys all))
+        keep? (fn [n]
+                (and (not (contains? (or exclude #{}) n))
+                     (or (contains? enabled n)
+                         (contains? contributed n))))]
+    (->> (merge all contributed)
+         (filter (fn [[n _]] (keep? n)))
+         (into (empty all)))))
+
 ;; ─── Execution ─────────────────────────────────────────────────────────────
 
 (defn- normalize-args
@@ -212,5 +233,6 @@
          "script"
          (script/create-tool {:get-all-tools get-all-tools
                               :get-contributed-tools get-contributed-tools
+                              :select-tools select-tools
                               :execute-tool execute-tool
                               :generation-fn tool-registry-generation})))

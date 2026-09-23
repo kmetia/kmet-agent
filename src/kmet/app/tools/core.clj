@@ -1,8 +1,10 @@
 (ns kmet.app.tools.core
-  "Tool system public API — Tool record, registry, and execution.
-   Re-exports from kmet.app.tools.tool and kmet.app.tools.registry."
+  "Tool system public API — Tool record, registry, execution and the shared
+   invocation pipeline. Re-exports from kmet.app.tools.tool,
+   kmet.app.tools.registry and kmet.app.tools.invoke."
   (:require [kmet.app.tools.tool :as tool]
-            [kmet.app.tools.registry :as registry]))
+            [kmet.app.tools.registry :as registry]
+            [kmet.app.tools.invoke :as invoke]))
 
 ;; ─── From tool.clj (Tool record + helpers) ──────────────────────────────────
 
@@ -23,3 +25,13 @@
 (def register-tool-source! registry/register-tool-source!)
 (def unregister-tool-source! registry/unregister-tool-source!)
 (def get-contributed-tools registry/get-contributed-tools)
+(def select-tools registry/select-tools)
+
+;; ─── From invoke.clj (the shared invocation pipeline) ──────────────────────
+
+(def blocked-result invoke/blocked-result)
+(def hook-payload invoke/hook-payload)
+(def prepare-tool-call invoke/prepare-tool-call)
+(def execute-tool-call invoke/execute-tool-call)
+(def finish-tool-call invoke/finish-tool-call)
+(def run-tool-call invoke/run-tool-call)

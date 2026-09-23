@@ -77,6 +77,81 @@
         (tools/unregister-tool! "read")
         (t/is (= "Read file" (:label (tools/get-tool "read"))))))))
 
+(t/deftest test-select-tools
+  (let [all {"read" {:name "read"} "bash" {:name "bash"}}]
+    (t/testing "nil enabled keeps every tool, in registry order"
+      (t/is (= ["read" "bash"] (keys (tools/select-tools all {})))))
+    (t/testing "enabled filters the registry set"
+      (t/is (= ["bash"] (keys (tools/select-tools all {:enabled #{"bash"}})))))
+    (t/testing "contributed tools join even when not enabled; the registry shadows a collision; exclude removes"
+      (t/is (= ["read" "mcp_x"]
+               (keys (tools/select-tools all {:enabled #{"read"}
+                                              :contributed {"mcp_x" {:name "mcp_x"}
+                                                            "read" {:name "shadow"}}}))))
+      (t/is (= ["read" "bash"]
+               (keys (tools/select-tools all {:contributed {"mcp_x" {:name "mcp_x"}}
+                                              :exclude #{"mcp_x"}})))))))
+
+;; ─── Shared invocation pipeline (kmet.app.tools.invoke) ───────────────────
+
+(t/deftest test-invoke-prepare-tool-call
+  (t/testing "no hook passes (nil = keep the original args)"
+    (t/is (nil? (tools/prepare-tool-call {:tool-name "x" :args {:a 1}}))))
+  (t/testing "an args rewrite comes back as {:args ...}"
+    (t/is (= {:args {:a 2}}
+             (tools/prepare-tool-call {:tool-name "x" :args {:a 1}
+                                       :before-hook (fn [_] {:args {:a 2}})}))))
+  (t/testing "a block carries the reason and :terminate"
+    (t/is (= {:content "no" :is-error true :terminate true}
+             (get (tools/prepare-tool-call
+                   {:tool-name "x" :args {}
+                    :before-hook (fn [_] {:block true :reason "no" :terminate true})})
+                  :block))))
+  (t/testing "a throwing hook blocks with the error as the reason"
+    (let [prep (tools/prepare-tool-call {:tool-name "x" :args {}
+                                         :before-hook (fn [_] (throw (ex-info "boom" {})))})]
+      (t/is (:is-error (:block prep)))
+      (t/is (str/includes? (:content (:block prep)) "boom"))))
+  (t/testing "hook payload carries the id/message when present"
+    (let [seen (atom nil)]
+      (tools/prepare-tool-call {:tool-name "x" :args {:a 1} :tool-call-id "tc-1" :assistant-message {:role :assistant}
+                                :before-hook (fn [ctx] (reset! seen ctx) nil)})
+      (t/is (= {:tool-name "x" :args {:a 1} :tool-call-id "tc-1" :assistant-message {:role :assistant}}
+               @seen)))))
+
+(t/deftest test-invoke-execute-and-finish
+  (t/testing ":bindings are applied around execution (the pool-worker case)"
+    (let [seen (atom nil)
+          exec (fn [_ _ & [_]] (reset! seen [(boolean @bash-tool/*cancel-signal*)
+                                             (tool-util/cwd)
+                                             (bash-tool/*session-env-fn*)])
+                 {:content "ok"})]
+      (binding [tool-util/*cwd* "/outer"]
+        (tools/execute-tool-call exec {:tool-name "x" :args {}
+                                       :bindings {:signal (atom true)
+                                                  :session-env-fn (fn [] {:KMET_X "1"})
+                                                  :cwd "/inner"}}))
+      (t/is (= [true "/inner" {:KMET_X "1"}] @seen))))
+  (t/testing "a throwing tool becomes an error result"
+    (let [r (tools/execute-tool-call (fn [_ _ & [_]] (throw (ex-info "kaput" {})))
+                                     {:tool-name "x" :args {}})]
+      (t/is (:is-error r))
+      (t/is (str/includes? (:content r) "kaput"))))
+  (t/testing "the after hook overrides :content / :is-error"
+    (t/is (= {:content "ok|hooked" :is-error false}
+             (tools/finish-tool-call {:tool-name "x" :args {}
+                                      :after-hook (fn [{:keys [result]}]
+                                                    {:content (str (:content result) "|hooked")
+                                                     :is-error false})}
+                                     {:content "ok"})))
+    (t/is (= {:content "ok"} (tools/finish-tool-call {:tool-name "x" :args {}} {:content "ok"}))))
+  (t/testing "a throwing after hook replaces the result with the error"
+    (let [r (tools/finish-tool-call {:tool-name "x" :args {}
+                                     :after-hook (fn [_] (throw (ex-info "late" {})))}
+                                    {:content "ok"})]
+      (t/is (:is-error r))
+      (t/is (str/includes? (:content r) "late")))))
+
 (t/deftest test-search-tools-extensions
   (t/testing "grep/find/ls ship as opt-in extensions: loading the shipped
               files registers the tools; results are matches only and

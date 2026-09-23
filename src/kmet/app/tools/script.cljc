@@ -17,6 +17,7 @@
             [kmet.app.bash-executor :as bash-exec]
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.tool :as tool]
+            [kmet.app.tools.invoke :as invoke]
             [kmet.app.tools.util :as tool-util]
             [kmet.debug :as debug]
             [kmet.libs.concurrent :as concurrent]
@@ -497,21 +498,17 @@
         base)))
 
 (defn- active-surface
-  "Ordered map of name → Tool record for the run's callable set: the
-   registry tools the model can call (∩ ENABLED; nil = all), plus the
-   extension-contributed sandbox tools (always available — they are not in
-   the model's tool set; the registry shadows a colliding contribution),
-   minus the exclusion list."
-  [all contributed enabled]
-  (let [enabled (or enabled (set (keys all)))
-        ;; registry wins a name collision: the model's names keep their
-        ;; meaning, and tools/list and tools/call must agree
-        contributed (apply dissoc contributed (keys all))]
-    (into (sorted-map)
-          (filter (fn [[n _]] (and (not (contains? excluded-tool-names n))
-                                   (or (contains? enabled n)
-                                       (contains? contributed n)))))
-          (merge all contributed))))
+  "Ordered map of name → Tool record for the run's callable set, via the
+   registry's select-tools: the registry tools the model can call (∩ ENABLED;
+   nil = all), plus the extension-contributed sandbox tools (always
+   available — they are not in the model's tool set; the registry shadows a
+   colliding contribution), minus the exclusion list. Sorted so discovery
+   and dispatch share one stable order."
+  [select-tools all contributed enabled]
+  (into (sorted-map)
+        (select-tools all {:enabled enabled
+                           :contributed contributed
+                           :exclude excluded-tool-names})))
 
 ;; ─── The tools bridge ─────────────────────────────────────────────────────
 
@@ -549,11 +546,11 @@
 (defn- dispatch!
   "Gate NAME against the surface, then hand the call to the shared bridge
    pool and return the promise the script derefs. Unknown/inactive names
-   settle immediately with {:is-error true} and the active list. Worker
-   bindings: the run's cancel signal, session env and cwd — a pool worker
-   does not convey dynamic bindings, so the bridge restores them for the
-   inner tool (bash reads *cancel-signal*; read/write/edit resolve against
-   *cwd*)."
+   settle immediately with {:is-error true} and the active list. The pool
+   worker conveys no dynamic bindings, so the bridge passes the run's cancel
+   signal, session env and cwd as the invocation pipeline's :bindings (bash
+   reads *cancel-signal*; read/write/edit resolve against *cwd*); the call
+   itself runs through the shared pipeline (kmet.app.tools.invoke)."
   [{:keys [surface execute-tool signal ctx cwd session-env-fn trace on-update]} name args]
   (let [name (tool-name name)
         p (promise)]
@@ -567,16 +564,17 @@
                                                :started-at started})))]
         (.offer @bridge-queue
                 (fn []
-                  (let [result (try
-                                 (binding [bash-tool/*cancel-signal* signal
-                                           bash-tool/*session-env-fn* session-env-fn
-                                           tool-util/*cwd* cwd]
-                                   (execute-tool name args {:signal signal :ctx ctx
-                                                            :tools surface
-                                                            :on-update on-update}))
-                                 (catch Throwable t
-                                   {:content (str "Error executing " name ": " (ex-message t))
-                                    :is-error true}))]
+                  (let [result (invoke/run-tool-call
+                                execute-tool
+                                {:tool-name name
+                                 :args args
+                                 :signal signal
+                                 :ctx ctx
+                                 :on-update on-update
+                                 :tools surface
+                                 :bindings {:signal signal
+                                            :session-env-fn session-env-fn
+                                            :cwd cwd}})]
                     (try
                       (swap! trace assoc-in [idx]
                              (cond-> {:tool name
@@ -741,12 +739,13 @@
 
 (defn- run-script
   [{:keys [code timeout-ms signal ctx on-update get-all-tools get-contributed-tools
-           execute-tool generation-fn]}]
+           select-tools execute-tool generation-fn]}]
   (let [timeout-ms (normalize-timeout timeout-ms)
         cwd (tool-util/cwd)
         session-env-fn bash-tool/*session-env-fn*
         enabled (when *enabled-tools-fn* (*enabled-tools-fn*))
-        surface (active-surface (get-all-tools)
+        surface (active-surface select-tools
+                                (get-all-tools)
                                 (if get-contributed-tools (get-contributed-tools) {})
                                 enabled)
         base-key [(generation-fn) (when enabled (into (sorted-set) enabled))]
@@ -823,9 +822,12 @@
      :get-all-tools — 0-arg registry tool map (the model's tools)
      :get-contributed-tools — 0-arg extension-contributed sandbox tool map
                               (script.md T2; optional, defaults to none)
+     :select-tools  — (fn [all {:keys [enabled contributed exclude]}]) — the
+                      registry's surface filter, so a script's callable set
+                      resolves exactly like the loop's schema
      :execute-tool  — (fn [name args opts]) dispatch
      :generation-fn — 0-arg registry generation counter"
-  [{:keys [get-all-tools get-contributed-tools execute-tool generation-fn]}]
+  [{:keys [get-all-tools get-contributed-tools select-tools execute-tool generation-fn]}]
   (tool/make-tool
    :name "script"
    :label "Run script"
@@ -852,6 +854,7 @@
                                :on-update on-update
                                :get-all-tools get-all-tools
                                :get-contributed-tools get-contributed-tools
+                               :select-tools select-tools
                                :execute-tool execute-tool
                                :generation-fn generation-fn}))))
    :streams? true
