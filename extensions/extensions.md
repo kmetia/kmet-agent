@@ -296,6 +296,10 @@ evaluation context**. Every extension runs in its own isolated context:
   the same internal namespace name). Rebinding the *root* of a shared var
   (`alter-var-root`, `alter-meta!`) is not isolated across extensions —
   don't monkey-patch the shared layers.
+- **A `jolt dist` binary cannot resolve deps today** — the app image doesn't
+  carry `jolt.deps`, so an extension with a `deps.edn` warns and skips there
+  (dev jolt and every bb mode resolve normally). The shipped set declares no
+  `deps.edn`; see extension-bundle.md §6.
 
 ### Outbound HTTP (`kmet.libs.http`)
 

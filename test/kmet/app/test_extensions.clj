@@ -316,6 +316,17 @@
           (t/is (= "hello_ext.clj" (:name (first (extensions/get-loaded-extensions))))))))
     (finally (extensions/unload-all-extensions!))))
 
+(t/deftest test-resource-dir-deps-lookup
+  ;; a resource artifact's deps.edn is read through the same extensions/
+  ;; prefix as its sources — the bundled-deps path of a built artifact (the
+  ;; resolution itself is the same tools.deps pass as any extension's)
+  (with-extension-resources
+    (fn []
+      (t/is (= {'dev.weavejester/cljfmt {:mvn/version "0.16.5"
+                                         :exclusions ['rewrite-clj/rewrite-clj]}}
+               (@#'extensions/deps-of-root {:kind :resource-dir
+                                            :prefix "extensions/ext-cljfmt"}))))))
+
 (t/deftest test-duplicate-name-skipped
   ;; D11: the bundled layer ranks last — a same-name extension already
   ;; loaded (a user's own copy) is skipped, not loaded twice

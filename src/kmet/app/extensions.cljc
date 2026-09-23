@@ -1687,8 +1687,11 @@
    (defn- closure-jars
      "The dependency source ROOTS for DEPS-MAP on Jolt — the equivalent of
       bb's jar closure. jolt.deps/resolve-deps (the tools.deps expansion
-      engine, AOT'd into the jolt binary) fetches Maven/git deps and returns
-      their jars (unexpanded — jolt loads a jar root through its central
+      engine, part of jolt's own core — but NOT of a `jolt build` app image,
+      so in a built binary this resolution fails with \"Could not locate
+      jolt/deps.jolt\"; extension-bundle.md §6 records the gap) fetches
+      Maven/git deps and returns their jars (unexpanded — jolt loads a jar
+      root through its central
       directory) plus :local/root paths; the source provider and the loader
       read both (see dep-source). Resolution failures throw, mirroring the
       bb branch. A jar is read in place, so unload releases it with the

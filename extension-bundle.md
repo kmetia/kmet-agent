@@ -17,6 +17,25 @@ the config screen's display name. **Phase B** (the Jolt embedded-root
 loader) is pending upstream. The phases are independent; Phase A lands
 first.
 
+Verification record (leftover checks run after the implementation):
+
+- The bb uberjar/dist artifact loads the bundle from `extensions/…` resources
+  (empty dir, temp agent dir): `clojure kind=resource-dir loader=sci
+  bundled=true`.
+- The jolt dist artifact does the same (built with `jolt dist`, run from an
+  empty dir against a temp agent dir): `clojure kind=resource-dir
+  loader=sci bundled=true`, `grep-tool.clj kind=resource-file loader=sci
+  bundled=true`; `--version` reports the baked version, and `jolt dist
+  --smoke` passes (176 models listed, then the version — both from the
+  artifact run directly). That is thanks to a packager fix found here: no
+  Termux launcher is written for a bionic-linked binary (the packager probes
+  the ELF interpreter), since the glibc-loader launcher made a locally built
+  jolt artifact exit 127.
+- `kmet list` / `kmet remove clojure` cannot see or affect the bundle ("No
+  packages installed." / "No matching package found").
+- No shipped artifact declares a `deps.edn`; the jolt-binary deps gap in
+  §6 was found by testing an external extension with a Maven dep.
+
 Related docs: `jar-ext.md` (extension artifact format, the "no expansion, no
 cache" decision), `extensions/extensions.md` (the extension contract),
 `extensions/README.md` (the shipped set), `src/kmet/loader/loader.md` (the
@@ -127,7 +146,9 @@ artifact out of the bundle.
   `:loader-kind`), not SCI.
 - A bundled extension that carries a `deps.edn` resolves and downloads its
   closure at first enable, exactly like a user-installed extension — and, like
-  one, fails with a warning when offline.
+  one, fails with a warning when offline. bb/JVM and dev jolt only: a jolt
+  **binary** currently cannot resolve any extension deps (see §6) — no shipped
+  artifact declares one.
 - `bb check-bundled-extensions` passes and `bb test-changed` / `bb lint-changed`
   are clean.
 
@@ -811,12 +832,22 @@ order (the change touches `host/chez/loader.ss`, so the jolt gates listed in
 - **`:local/root` in a bundled `deps.edn`** is forbidden by the gate: the
   current resolver resolves relative local roots against the process cwd, and a
   resource artifact has no stable root in a binary.
-- **Jolt binaries + deps**: `closure-jars`' docstring says `jolt.deps` is AOT'd
-  into the jolt binary, so runtime resolution should work there; pin it with a
-  Phase A jolt-binary check (enable a bundled artifact with one small
-  `:mvn/version` dep in a temp agent dir and assert the load succeeds) — mark
-  it `^:slow` / manual if the network makes it unsuitable for the default
-  gates.
+- **Jolt binaries + deps — a real limitation, verified in Phase A**: the
+  `closure-jars` claim was that `jolt.deps` is AOT'd into the jolt binary, so
+  runtime resolution works there. **It does not**: `jolt.deps` lives in jolt's
+  core (`jolt-core/jolt/deps.clj`) and a `jolt build` app image carries only
+  the app's own require closure, so a binary that tries to resolve an
+  extension's `deps.edn` fails with `Could not locate jolt/deps.jolt (or
+  .clj/.cljc) on the source roots` (the extension warns and rolls back, the
+  app continues). Dev jolt resolves fine (the core is on its source roots),
+  including an extension whose dep then fails to *load* because the library
+  itself is not jolt-compatible — orthogonal, jolt's domain. No shipped
+  artifact declares a `deps.edn` (D12 gate allows one), so the bundle is
+  unaffected; bb binaries are unaffected (`clojure.tools.deps` is bundled).
+  Closing it needs an upstream/packager change (statically require `jolt.deps`
+  in the app closure or embed jolt's core namespaces) plus a jolt-compatible
+  dep to test with; until then, document the gap rather than ship a bundled
+  artifact with deps.
 - **Extension registry conflicts**: two enabled extensions may still register
   the same tool/command name; that is existing behavior. Bundled-vs-user
   duplicates are handled by D11.

@@ -121,8 +121,11 @@
     `--test` / `--test-ext` flags run it (its `--smoke` runs `--test kmet.libs.test-num`
     from the empty dir); a plain app build never selects those roots. Build `--test`
     in the default release mode — a dev build's uncompressed fasl image can push the
-    full suite's boot over Chez's LZ4 ceiling into a very slow gzip re-encode. Termux gets a
-    `.sh` launcher through the glibc linker, like the bb one minus `--jar`. Flags:
+    full suite's boot over Chez's LZ4 ceiling into a very slow gzip re-encode. Termux
+    gets a `.sh` launcher through the glibc linker when the built binary is
+    glibc-linked (the packager probes the ELF interpreter: a binary linked with
+    the bionic cc, e.g. a local jolt build there, runs directly and gets none),
+    like the bb one minus `--jar`. Flags:
     `--dev|--opt`, `--closed-world`, `--dynamic`, `--boot fast|small|plain`,
     `--target MACHINE --target-pack DIR`, `-o PATH`, `--force`, `--smoke`, `--test`,
     `--jolt PATH`.

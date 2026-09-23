@@ -17,8 +17,9 @@
      its <out>.build payload dir) survives across runs and never lands in dist/;
    - a smoke test that runs the artifact away from the checkout, which is what
      proves the model catalogs were embedded and not merely found on disk;
-   - a Termux launcher, like the babashka packager's: a glibc-linked binary
-     needs the glibc dynamic linker on Android.
+   - a Termux launcher, like the babashka packager's, when the local link is
+     glibc: a glibc-linked binary needs the glibc dynamic linker on Android,
+     while a jolt linked with the bionic cc runs directly and needs none.
 
    The compile runs as a `jolt build` SUBPROCESS, not in this process:
 
@@ -34,6 +35,7 @@
      then this wrapper's own `jolt build` call re-enters the task forever."
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             ;; shared with the babashka packager: one artifact-version rule
             ;; (kmet.libs.version) and one termux probe
@@ -275,19 +277,50 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
 "
           bin-name linker))
 
+(defn- binary-contains?
+  "True when the raw bytes of FILE contain the ASCII NEEDLE. Streamed in
+   64 KiB chunks with a small carry, so a needle split across a chunk
+   boundary still matches and a whole artifact never lands in memory."
+  [file needle]
+  (let [keep (max 1 (dec (count needle)))]
+    (with-open [in (io/input-stream (fs/file file))]
+      (loop [tail ""]
+        (let [buf (byte-array 65536)
+              read (.read in buf)]
+          (if (neg? read)
+            false
+            (let [s (str tail (String. buf 0 read))]
+              (if (str/includes? s needle)
+                true
+                (recur (if (>= (count s) keep) (subs s (- (count s) keep)) s))))))))))
+
+(defn- glibc-linked?
+  "True when ARTIFACT's ELF interpreter is a glibc loader — its PT_INTERP
+   path contains \"ld-linux\". A binary linked with the Termux bionic cc
+   (what a local jolt build there uses) carries \"linker64\" instead and
+   runs directly, no loader and no LD_PRELOAD dance."
+  [artifact]
+  (binary-contains? artifact "ld-linux"))
+
 (defn- write-launcher!
-  "On a Termux host, write and return the .sh launcher for ARTIFACT (nil
-   otherwise). Only the host's own platform can run its launcher, so cross
-   builds get none."
+  "On a Termux host, write and return the .sh launcher for ARTIFACT when the
+   binary is glibc-linked (nil otherwise: a bionic-linked local build runs
+   directly, and smoke-test! then runs the artifact itself). Only the host's
+   own platform can run its launcher, so cross builds get none."
   [artifact platform]
   (when (and (build/termux?) (= platform (host-platform)))
     (let [linker (if (str/includes? (str platform) "aarch64")
                    "ld-linux-aarch64.so.1"
                    "ld-linux-x86-64.so.2")
           launcher (fs/path (fs/parent artifact) (str (fs/file-name artifact) ".sh"))]
-      (spit (str launcher) (wrapper-script (str (fs/file-name artifact)) linker))
-      (fs/set-posix-file-permissions launcher "rwxr-xr-x")
-      launcher)))
+      (if (glibc-linked? artifact)
+        (do (spit (str launcher) (wrapper-script (str (fs/file-name artifact)) linker))
+            (fs/set-posix-file-permissions launcher "rwxr-xr-x")
+            launcher)
+        ;; a stale launcher from an earlier glibc-linked build of the same
+        ;; path would shadow the (directly running) artifact for users and
+        ;; smoke runs alike
+        (do (fs/delete-if-exists launcher) nil)))))
 
 (defn- temp-run-dir
   "A throwaway dir to run the artifact from, on the platform's real temp root
@@ -453,8 +486,9 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
 
    Artifacts land in dist/ as kmet-<ver>-jolt<jv>-<platform>[-dev][.exe]
    (kmet-test-<ver>-... for --test builds). On a Termux host the build also
-   writes a .sh launcher next to the binary — the binary is glibc-linked, so
-   run the launcher; a cross build gets none."
+   writes a .sh launcher next to a glibc-linked binary (run that instead of
+   the binary); a jolt linked with the bionic cc runs directly, and a cross
+   build gets none either."
   [& args]
   (let [{:keys [mode target target-pack out force? no-smoke? jolt help? test?] :as opts}
         (parse-args args)]

@@ -309,3 +309,36 @@
         (is (contains? entries "extensions/clojure/src/skills/clojure-edit/SKILL.md"))
         (is (contains? entries "extensions/tools.clj"))
         (is (contains? entries "kmet/bundled-extensions/manifest.edn"))))))
+
+(deftest ^:bb-only uberjar-extra-roots-never-shadow
+  ;; extension-bundle.md §6: the extra (bundled) roots are walked after the
+  ;; normal roots through one `seen` set, and the dependency jars last of
+  ;; all — so a colliding extensions/... entry can never shadow an app file,
+  ;; whatever root carries it.
+  (let [base "target/test-uberjar-order"
+        normal (str base "/normal")
+        extra (str base "/extra")
+        out (str base ".jar")]
+    (fs/delete-tree base)
+    (fs/delete-if-exists out)
+    (fs/create-dirs (str normal "/extensions"))
+    (fs/create-dirs (str extra "/extensions/clojure/src"))
+    (spit (str normal "/app.clj") "(ns app)\n")
+    (spit (str normal "/extensions/tools.clj") "(ns app.shadowed-tools)\n")
+    (spit (str extra "/extensions/tools.clj") "(ns bundled.tools)\n")
+    (spit (str extra "/extensions/clojure/src/extension.edn") "{:name \"clojure\"}\n")
+    (spit (str extra "/extensions/clojure/src/SKILL.md") "skill\n")
+    (try
+      (let [jar (@#'build/write-uberjar! out "kmet.core" [normal] {:extra-roots [extra]})
+            names (with-open [zf (java.util.zip.ZipFile. (fs/file jar))]
+                    (set (map (fn [e] (.getName ^java.util.zip.ZipEntry e))
+                              (enumeration-seq (.entries zf)))))
+            tools (with-open [zf (java.util.zip.ZipFile. (fs/file jar))]
+                    (slurp (.getInputStream zf (.getEntry zf "extensions/tools.clj"))))]
+        (is (= "(ns app.shadowed-tools)\n" tools) "the normal root wins the collision")
+        (is (contains? names "extensions/clojure/src/extension.edn"))
+        (is (contains? names "extensions/clojure/src/SKILL.md")
+            "extra roots are walked without an extension filter"))
+      (finally
+        (fs/delete-tree base)
+        (fs/delete-if-exists out)))))

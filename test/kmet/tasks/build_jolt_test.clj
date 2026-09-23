@@ -152,3 +152,33 @@
     (testing "a plain app build never sees the test roots"
       (is (not-any? #{"-A:kmet-test" "kmet.tasks.test-main"}
                     (argv {:mode "release" :flags [] :out "/o"}))))))
+
+(deftest binary-interpreter-probe-drives-the-launcher
+  ;; the Termux launcher is only for glibc-linked artifacts; a jolt linked
+  ;; with the bionic cc runs directly and must not get one (a stale launcher
+  ;; from an earlier glibc build of the same path is removed)
+  (let [dir "target/test-jolt-launcher"
+        glibc (str dir "/glibc.bin")
+        bionic (str dir "/bionic.bin")
+        launcher (str dir "/bionic.bin.sh")]
+    (fs/delete-tree dir)
+    (fs/create-dirs dir)
+    ;; a needle straddling the 64 KiB chunk boundary is the interesting case
+    (spit bionic (str (apply str (repeat 65530 "x")) "linker64" (apply str (repeat 100 "y"))))
+    (spit glibc (str (apply str (repeat 65530 "x")) "/lib/ld-linux-aarch64.so.1"))
+    (try
+      (is (@#'jbuild/binary-contains? glibc "ld-linux"))
+      (is (not (@#'jbuild/binary-contains? bionic "ld-linux")))
+      (is (@#'jbuild/binary-contains? bionic "linker64"))
+      (is (@#'jbuild/glibc-linked? glibc))
+      (is (not (@#'jbuild/glibc-linked? bionic)))
+      (spit launcher "#!/bin/sh\n")
+      (with-redefs [build/termux? (constantly true)
+                    jbuild/host-platform (constantly "linux-aarch64")]
+        (is (nil? (@#'jbuild/write-launcher! bionic "linux-aarch64"))
+            "bionic artifact gets no launcher")
+        (is (not (fs/exists? launcher)) "...and the stale one is removed")
+        (is (= (str (fs/path dir "glibc.bin.sh"))
+               (str (@#'jbuild/write-launcher! glibc "linux-aarch64")))
+            "a glibc artifact gets the launcher"))
+      (finally (fs/delete-tree dir)))))
