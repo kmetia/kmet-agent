@@ -5,7 +5,8 @@
             [clojure.java.io :as io]
             [babashka.fs :as fs]
             [kmet.app.session :as s]
-            [kmet.libs.usage :as usage]))
+            [kmet.libs.usage :as usage]
+            [kmet.test-utils :refer [slash]]))
 
 (def test-dir "target/test-sessions")
 
@@ -1176,7 +1177,7 @@
         (fs/create-dirs other)
         (t/testing "the recorded cwd when the directory exists"
           (let [s (s/create-session dir {:cwd other})]
-            (t/is (= other (s/session-cwd s)))))
+            (t/is (= (slash other) (slash (s/session-cwd s))))))
         (t/testing "nil when it is gone (pi: MissingSessionCwdError — the caller falls back)"
           (let [s (s/create-session dir {:cwd (str dir "/gone")})]
             (t/is (nil? (s/session-cwd s)))))
@@ -1209,9 +1210,9 @@
             (t/is (= (slurp source) (slurp dest))))
           (t/testing "a taken name is suffixed (pi: COPYFILE_EXCL retry)"
             (let [plan (s/plan-session-import source dest-dir)]
-              (t/is (= (str (fs/path dest-dir
-                                     (str/replace (fs/file-name source) #"\.ednl$" "-1.ednl")))
-                       (:path plan)))
+              (t/is (= (slash (fs/path dest-dir
+                                       (str/replace (fs/file-name source) #"\.ednl$" "-1.ednl")))
+                       (slash (:path plan))))
               (t/is (= (:path plan) (s/copy-imported-session! plan)))
               (t/is (fs/exists? (:path plan))))))
         (t/testing "a source already in the destination dir is not copied again"

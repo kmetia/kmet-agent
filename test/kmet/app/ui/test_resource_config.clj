@@ -12,7 +12,8 @@
             [kmet.tui.hiccup :as hiccup]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.tui.protocols :as protocols]
-            [kmet.tui.utils :as u]))
+            [kmet.tui.utils :as u]
+            [kmet.test-utils :refer [slash]]))
 
 (defn- tmp-dir []
   (str (fs/create-temp-dir {:dir (System/getenv "TMPDIR")})))
@@ -397,11 +398,11 @@
         (t/is (= :inherit (:override-state (first (item-rows screen)))))
         (protocols/handle-input screen " ")
         (let [settings (edn/read-string (slurp (str (fs/path project-dir "settings.edn"))))]
-          (t/is (= [item-path (str "-" item-path)] (:extensions settings))))
+          (t/is (= [(slash item-path) (str "-" (slash item-path))] (slash (:extensions settings)))))
         (t/is (= :unload (:override-state (first (item-rows screen)))))
         (protocols/handle-input screen " ")
         (let [settings (edn/read-string (slurp (str (fs/path project-dir "settings.edn"))))]
-          (t/is (= [item-path (str "+" item-path)] (:extensions settings))))
+          (t/is (= [(slash item-path) (str "+" (slash item-path))] (slash (:extensions settings)))))
         (t/is (= :load (:override-state (first (item-rows screen)))))
         (protocols/handle-input screen " ")
         (let [settings (edn/read-string (slurp (str (fs/path project-dir "settings.edn"))))]

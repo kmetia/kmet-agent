@@ -4,7 +4,8 @@
             [clojure.java.io :as io]
             [babashka.fs :as fs]
             [babashka.process :as proc]
-            [kmet.libs.context :as context]))
+            [kmet.libs.context :as context]
+            [kmet.test-utils :refer [slash]]))
 
 (defn- tmp-dir
   "Writable temp dir under target/ (ancestors may contain uncontrolled
@@ -13,9 +14,10 @@
   (str (fs/absolutize (fs/file "target" (str "test-ctx-" suffix "-" (System/currentTimeMillis))))))
 
 (defn- under-tmp?
-  "True when a path string is inside the temp tree."
+  "True when a path string is inside the temp tree (separator-agnostic: bb
+   renders \\ between components, jolt /)."
   [tmp p]
-  (str/starts-with? (str p) (str tmp "/")))
+  (str/starts-with? (slash (str p)) (str (slash tmp) "/")))
 
 (defn- git!
   "Run a git command inside DIR. Returns trimmed stdout."
@@ -82,8 +84,8 @@
         (let [files (context/load-project-context-files (str sibling "/agent") sibling)
               under? #(str/starts-with? (str (:path %)) (str sibling "/"))
               mine (filter under? files)]
-          (t/is (= [(str sibling "/AGENTS.md")]
-                   (mapv :path mine))
+          (t/is (= [(slash (str sibling "/AGENTS.md"))]
+                   (slash (mapv :path mine)))
                 "only the sibling's own AGENTS.md loads (no shadow, no main-repo ancestor)"))
         (finally (fs/delete-tree tmp)
                  (fs/delete-tree sibling))))))
@@ -106,8 +108,8 @@
         (spit b-file "# b rules")
         (let [files (context/load-project-context-files agent-dir dir-b)]
           ;; take 3: ancestors above the temp tree may add more files
-          (t/is (= [agent-file b-file a-file]
-                   (take 3 (map :path files)))))
+          (t/is (= (slash [agent-file b-file a-file])
+                   (slash (take 3 (map :path files))))))
         (finally (fs/delete-tree tmp)))))
   (t/testing "missing context files contribute nothing (pi)"
     (let [tmp (tmp-dir "empty")
@@ -125,7 +127,7 @@
         (io/make-parents f)
         (spit f "# rules")
         (let [files (context/load-project-context-files agent-dir agent-dir)]
-          (t/is (= f (first (map :path files))))
+          (t/is (= (slash f) (slash (first (map :path files)))))
           (t/is (= 1 (count (filter #(under-tmp? tmp %) (map :path files))))))
         (finally (fs/delete-tree tmp))))))
 

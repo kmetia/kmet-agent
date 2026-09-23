@@ -108,7 +108,7 @@
     (try
       (spit (str dir "/hello.txt") "from-cwd")
       (binding [tool-util/*cwd* dir]
-        (let [r (run (str "[(slurp \"hello.txt\") (= (sandbox/cwd) \"" dir "\")]"))]
+        (let [r (run (str "[(slurp \"hello.txt\") (= (sandbox/cwd) " (pr-str dir) ")]"))]
           (t/is (not (:is-error r)) (:content r))
           (t/is (str/includes? (:content r) "from-cwd"))
           (t/is (str/includes? (:content r) "true"))))

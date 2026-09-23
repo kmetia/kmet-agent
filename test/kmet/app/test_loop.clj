@@ -19,7 +19,8 @@
             [kmet.app.loop :as loop]
             [kmet.config :as cfg]
             [kmet.app.ui.chat-history :as ui]
-            [kmet.tui.theme :as th]))
+            [kmet.tui.theme :as th]
+            [kmet.test-utils :refer [slash]]))
 
 (declare make-test-provider)
 
@@ -57,7 +58,7 @@
           @(loop/run-agent-turn agent {:message "run"
                                        :on-done (fn [_])
                                        :on-error (fn [_])}))
-        (t/is (= dir @seen) "the tool call ran with the session's cwd bound")
+        (t/is (= (slash dir) (slash @seen)) "the tool call ran with the session's cwd bound")
         (t/is (= (System/getProperty "user.dir") (tool-util/cwd))
               "the binding does not leak past the run")
         (finally (fs/delete-tree dir) (fs/delete-tree sessions))))))

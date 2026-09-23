@@ -4,7 +4,8 @@
             [clojure.string :as str]
             [babashka.fs :as fs]
             [kmet.app.session :as s]
-            [kmet.app.session-export :as se]))
+            [kmet.app.session-export :as se]
+            [kmet.test-utils :refer [slash]]))
 
 (def test-dir "target/test-session-export")
 
@@ -153,7 +154,7 @@
       (s/append-entry sess {:role :assistant :content "a"})
       (let [project (str test-dir "/project")
             path (se/default-export-path sess project)]
-        (t/is (= project (str (fs/parent path))))
+        (t/is (= (slash project) (slash (fs/parent path))))
         (t/is (str/starts-with? (fs/file-name path) "kmet-session-"))
         (t/is (str/ends-with? path ".html"))
         (t/testing "export-to-html! takes the same :cwd"

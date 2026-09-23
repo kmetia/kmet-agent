@@ -7,7 +7,8 @@
             [kmet.config :as cfg]
             [kmet.app.bash-executor :as bash-exec]
             [kmet.libs.http :as http]
-            [kmet.ai.auth :as auth]))
+            [kmet.ai.auth :as auth]
+            [kmet.test-utils :refer [slash]]))
 
 ;; ─── Defaults ──────────────────────────────────────────────────────────────
 
@@ -118,9 +119,9 @@
     (t/testing "relative paths resolve against their scope dir"
       (let [global (resolve-paths {:session-dir "sessions" :model "x"} "/g/base")
             project (resolve-paths {:session-dir "sessions"} "/p/base")]
-        (t/is (= "/g/base/sessions" (:session-dir global)))
+        (t/is (= "/g/base/sessions" (slash (:session-dir global))))
         (t/is (= "x" (:model global)))
-        (t/is (= "/p/base/sessions" (:session-dir project)))))
+        (t/is (= "/p/base/sessions" (slash (:session-dir project))))))
     (t/testing "retired :*-dir keys and resource entries pass through unresolved"
       (let [res (resolve-paths {:extensions-dir "/custom/ext"
                                 :extensions ["extra"]} "/base")]
@@ -169,17 +170,17 @@
   (t/testing "default is ~/.kmet/agent"
     ;; env stubbed so the assertions hold on hosts that set the override
     (with-redefs [auth/getenv (fn [_] nil)]
-      (t/is (str/ends-with? (auth/resolve-agent-dir) "/.kmet/agent"))
+      (t/is (str/ends-with? (slash (auth/resolve-agent-dir)) "/.kmet/agent"))
       (t/is (= (auth/resolve-agent-dir) (cfg/get-agent-dir)))))
   (t/testing "KMET_CODING_AGENT_DIR wins; blanks fall back"
     (with-redefs [auth/getenv (fn [_] nil)]
-      (t/is (str/ends-with? (auth/resolve-agent-dir) "/.kmet/agent")))
+      (t/is (str/ends-with? (slash (auth/resolve-agent-dir)) "/.kmet/agent")))
     (with-redefs [auth/getenv (fn [_] "/sandbox/agent")]
       (t/is (= "/sandbox/agent" (auth/resolve-agent-dir)))
-      (t/is (= "/sandbox/agent/auth.edn" (auth/auth-file-path)))
-      (t/is (= "/sandbox/agent/settings.edn" (cfg/global-settings-path))))
+      (t/is (= "/sandbox/agent/auth.edn" (slash (auth/auth-file-path))))
+      (t/is (= "/sandbox/agent/settings.edn" (slash (cfg/global-settings-path)))))
     (with-redefs [auth/getenv (fn [_] "   ")]
-      (t/is (str/ends-with? (auth/resolve-agent-dir) "/.kmet/agent")))
+      (t/is (str/ends-with? (slash (auth/resolve-agent-dir)) "/.kmet/agent")))
     (with-redefs [auth/getenv (fn [_] "~/custom")]
       (t/is (str/starts-with? (auth/resolve-agent-dir) (System/getProperty "user.home"))))))
 

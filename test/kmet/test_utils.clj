@@ -3,6 +3,19 @@
             [clojure.test :as t]
             [kmet.tui.utils :as u]))
 
+(defn slash
+  "The /-separated form of path values — strings, Paths/Files, or maps, sets
+   and vectors of them. kmet renders Windows paths with \\ on bb and with /
+   on jolt, so path expectations compare through this on both sides."
+  [x]
+  (cond
+    (nil? x) nil
+    (string? x) (str/replace x "\\" "/")
+    (map? x) (into {} (map (fn [[k v]] [k (slash v)])) x)
+    (set? x) (into #{} (map slash) x)
+    (sequential? x) (mapv slash x)
+    :else (str/replace (str x) "\\" "/")))
+
 (t/deftest test-visible-width
   (t/is (= 0 (u/visible-width "")))
   (t/is (= 5 (u/visible-width "hello")))

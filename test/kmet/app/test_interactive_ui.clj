@@ -36,7 +36,8 @@
             [babashka.fs :as fs]
             [kmet.config :as cfg]
             [kmet.tui.keybindings :as tui-kb]
-            [kmet.app.event-bus :as event-bus]))
+            [kmet.app.event-bus :as event-bus]
+            [kmet.test-utils :refer [slash]]))
 
 (defn- capture-mount!
   "A dock/mount! stand-in for tests: records the component that receives
@@ -824,11 +825,12 @@
                         :content (str "Session imported from: " (:file src))}
                        (last-message ch))
                     "pi: showStatus 'Session imported from: …'")
-              (t/is (= foreign (fdp/fdp-get-cwd (:footer-provider cs)))
+              (t/is (= (slash foreign) (slash (fdp/fdp-get-cwd (:footer-provider cs))))
                     "the runtime cwd follows the imported session's")
-              (t/is (= foreign (get-in @(:system-prompt-opts @(:agent-state cs)) [:cwd]))
+              (t/is (= (slash foreign)
+                       (slash (get-in @(:system-prompt-opts @(:agent-state cs)) [:cwd])))
                     "and the system prompt options")
-              (t/is (str/includes? @(:system @(:agent-state cs)) foreign)
+              (t/is (str/includes? (slash @(:system @(:agent-state cs))) (slash foreign))
                     "the model is told where its tools will run")
               (t/is (= [{:path "AGENTS.md" :content "LAUNCH-PROJECT CONTEXT"}]
                        (get-in @(:system-prompt-opts @(:agent-state cs)) [:context-files]))
@@ -941,7 +943,7 @@
             ((:handler (commands/find-command "export")) cs "")
             (let [msg (last-message ch)]
               (t/is (= :info (:role msg)))
-              (t/is (str/includes? (str (:content msg)) project)
+              (t/is (str/includes? (slash (str (:content msg))) (slash project))
                     "the reported path is inside the session's project"))
             (let [files (vec (fs/list-dir project))]
               (t/is (= 1 (count files)) "one export, in the project dir")
@@ -950,7 +952,7 @@
                 (with-redefs [tui/tui-request-render (fn [_])
                               tui/tui-set-focus (fn [_ _])]
                   ((:handler (commands/find-command "export")) cs "\"\""))
-                (t/is (str/includes? (str (:content (last-message ch))) project)
+                (t/is (str/includes? (slash (str (:content (last-message ch)))) (slash project))
                       "not a 'Failed to export session' error")))))
         (finally (fs/delete-tree dir))))))
 

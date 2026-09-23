@@ -10,7 +10,8 @@
             [kmet.app.prompts :as prompts]
             [kmet.app.skills :as skills]
             [kmet.config :as cfg]
-            [kmet.tui.theme :as theme]))
+            [kmet.tui.theme :as theme]
+            [kmet.test-utils :refer [slash]]))
 
 (defn- tmp-dir []
   (str (fs/create-temp-dir {:dir (System/getenv "TMPDIR")})))
@@ -80,24 +81,24 @@
     (t/is (= 2 (count (:prompts res))))
     (t/is (= 1 (count (:themes res))))
     (t/is (every? :enabled (mapcat res (keys res))))
-    (t/is (= dir (get-in (first (:extensions res)) [:metadata :base-dir])))
-    (t/is (= dir (get-in (first (:skills res)) [:metadata :base-dir])))))
+    (t/is (= (slash dir) (slash (get-in (first (:extensions res)) [:metadata :base-dir]))))
+    (t/is (= (slash dir) (slash (get-in (first (:skills res)) [:metadata :base-dir]))))))
 
 (t/deftest test-resolve-single-file-package
   (let [dir (tmp-dir)
         f (str dir "/ext.clj")]
     (spit f "(ns ext)\n")
     (let [res (with-stubbed-cwd #(pkgs/resolve-package-items {:packages [f]} nil))]
-      (t/is (= [f] (mapv :path (:extensions res))))
+      (t/is (= [(slash f)] (slash (mapv :path (:extensions res)))))
       (t/is (empty? (:skills res)))
-      (t/is (= dir (get-in (first (:extensions res)) [:metadata :base-dir]))))))
+      (t/is (= (slash dir) (slash (get-in (first (:extensions res)) [:metadata :base-dir])))))))
 
 (t/deftest test-resolve-extension-dir-package
   (let [dir (tmp-dir)]
     (spit (str dir "/extension.edn") "{:name \"pkg-ext\" :entry pkg.ext}\n")
     (spit (str dir "/pkg_ext.clj") "(ns pkg.ext)\n")
     (let [res (with-stubbed-cwd #(pkgs/resolve-package-items {:packages [dir]} nil))]
-      (t/is (= [dir] (mapv :path (:extensions res))))
+      (t/is (= [(slash dir)] (slash (mapv :path (:extensions res)))))
       (t/is (empty? (:skills res))))))
 
 (t/deftest test-resolve-bare-dir-is-extension-container
@@ -105,8 +106,8 @@
     (spit (str dir "/a.clj") "(ns bare-a)\n")
     (spit (str dir "/b.clj") "(ns bare-b)\n")
     (let [res (with-stubbed-cwd #(pkgs/resolve-package-items {:packages [dir]} nil))]
-      (t/is (= #{(str dir "/a.clj") (str dir "/b.clj")}
-               (set (map :path (:extensions res))))))))
+      (t/is (= (slash #{(str dir "/a.clj") (str dir "/b.clj")})
+               (slash (set (map :path (:extensions res)))))))))
 
 (t/deftest test-missing-package-skipped
   (let [res (with-stubbed-cwd #(pkgs/resolve-package-items {:packages [(str (tmp-dir) "/nope")]} nil))]
@@ -242,7 +243,7 @@
             (t/is (= 1 (count listed)))
             (t/is (= "my-pkg/ext.clj" (:source (first listed))))
             (t/is (= :user (:scope (first listed))))
-            (t/is (= pkg-file (:installed-path (first listed))))))
+            (t/is (= (slash pkg-file) (slash (:installed-path (first listed)))))))
         (t/testing "remove deletes the entry"
           (t/is (true? (pkgs/remove-package-from-settings! pkg-file)))
           (t/is (empty? (:packages (edn/read-string (slurp (str (fs/path global-dir "settings.edn")))))))
@@ -368,9 +369,9 @@
 ;; ─── Pattern engine ────────────────────────────────────────────────────────
 
 (t/deftest test-apply-patterns
-  (let [base (str (fs/path "/pkg"))
+  (let [base "/pkg"
         paths ["/pkg/extensions/a.clj" "/pkg/extensions/b.clj" "/pkg/extensions/c.clj"]
-        rel (fn [p] (str/replace p (str base "/") ""))]
+        rel (fn [p] (str/replace (slash p) (str base "/") ""))]
     (t/is (= #{"extensions/a.clj" "extensions/b.clj" "extensions/c.clj"}
              (set (map rel (pkgs/apply-patterns paths ["extensions/*.clj"] base)))))
     (t/testing "exclude glob"
@@ -442,7 +443,7 @@
                    {:packages [{:source "./pkg" :autoload false
                                 :extensions ["+extensions/proj-ext.clj"]}]})]
           (t/is (= ["proj-ext.clj"] (mapv (comp fs/file-name :path) (:extensions res))))
-          (t/is (str/starts-with? (:path (first (:extensions res))) proj-pkg))
+          (t/is (str/starts-with? (slash (:path (first (:extensions res)))) (slash proj-pkg)))
           (t/is (every? :enabled (:extensions res))))))))
 
 (t/deftest test-delta-patterns
@@ -456,8 +457,8 @@
 
 (t/deftest test-discover-skill-files
   (let [dir (make-package (tmp-dir))]
-    (t/is (= #{(str dir "/skills/root/SKILL.md") (str dir "/skills/flat.md")}
-             (set (skills/discover-skill-files (str dir "/skills")))))))
+    (t/is (= (slash #{(str dir "/skills/root/SKILL.md") (str dir "/skills/flat.md")})
+             (slash (set (skills/discover-skill-files (str dir "/skills"))))))))
 
 (t/deftest test-single-extension-items-are-not-toggleable
   (with-isolated-settings
@@ -500,8 +501,8 @@
                   cfg/project-dir (fn [] (str (tmp-dir) "/.kmet"))
                   fs/cwd (fn [] (tmp-dir))]
       (let [res (pkgs/resolve-package-items {:extensions ["solo.clj" "extra"]} nil)]
-        (t/is (= #{ext-file (str extra "/x.clj")}
-                 (set (map :path (:extensions res)))))
+        (t/is (= (slash #{ext-file (str extra "/x.clj")})
+                 (slash (set (map :path (:extensions res))))))
         (t/is (every? :enabled (:extensions res)))
         (t/is (every? #(= :top-level (get-in % [:metadata :origin])) (:extensions res)))
         (t/is (every? #(= "local" (get-in % [:metadata :source])) (:extensions res)))
@@ -522,10 +523,10 @@
             local (filterv #(= "local" (get-in % [:metadata :source])) (:prompts res))]
         ;; excluded files stay in the resolution with :enabled false
         ;; (pi: every collected file is added with its enabled state)
-        (t/is (= #{(str sandbox "/prompts/a.md") (str sandbox "/prompts/b.md")}
-                 (set (map :path local))))
-        (t/is (= [(str sandbox "/prompts/a.md")]
-                 (mapv :path (filterv :enabled local))))))))
+        (t/is (= (slash #{(str sandbox "/prompts/a.md") (str sandbox "/prompts/b.md")})
+                 (slash (set (map :path local)))))
+        (t/is (= [(slash (str sandbox "/prompts/a.md"))]
+                 (slash (mapv :path (filterv :enabled local)))))))))
 
 (t/deftest test-top-level-overrides-adjust
   (let [sandbox (tmp-dir)]
@@ -552,7 +553,7 @@
                   cfg/project-dir (fn [] (str proj "/.kmet"))
                   fs/cwd (fn [] proj)]
       (let [res (pkgs/resolve-package-items nil {:extensions ["extensions"]})]
-        (t/is (= [(str proj-ext "/p.clj")] (mapv :path (:extensions res))))
+        (t/is (= [(slash (str proj-ext "/p.clj"))] (slash (mapv :path (:extensions res)))))
         (t/is (= :project (get-in (first (:extensions res)) [:metadata :scope])))))))
 
 (t/deftest test-top-level-missing-path-skipped
@@ -610,7 +611,7 @@
                   cfg/project-dir (fn [] (str proj "/.kmet"))
                   fs/cwd (fn [] proj)]
       (let [res (pkgs/resolve-package-items nil {:extensions [(str proj "/shared.clj")]})]
-        (t/is (some #(= shared (:path %)) (:extensions res)))))))
+        (t/is (some #(= (slash shared) (slash (:path %))) (:extensions res)))))))
 
 ;; ─── Top-level toggle writes ──────────────────────────────────────────────
 
@@ -660,7 +661,7 @@
       (let [item (first (:prompts (pkgs/resolve-package-items nil nil)))
             patterns (pkgs/top-level-override-patterns item :project)]
         (t/is (contains? patterns "prompts/test.md"))
-        (t/is (contains? patterns file))
+        (t/is (contains? (slash patterns) (slash file)))
         (t/is (= :inherit (pkgs/top-level-override-state-of item)))
         (t/is (= "prompts/test.md" (pkgs/top-level-pattern item)))))))
 
@@ -679,9 +680,10 @@
                   fs/cwd (fn [] proj)]
       (let [user-view (pkgs/resolve-package-items nil {:prompts ["prompts/proj.md"]} nil false)
             full-view (pkgs/resolve-package-items nil {:prompts ["prompts/proj.md"]})]
-        (t/is (= [(str sandbox "/prompts/user.md")] (mapv :path (:prompts user-view))))
-        (t/is (= #{(str sandbox "/prompts/user.md") (str proj "/.kmet/prompts/proj.md")}
-                 (set (map :path (:prompts full-view)))))))))
+        (t/is (= [(slash (str sandbox "/prompts/user.md"))]
+                 (slash (mapv :path (:prompts user-view)))))
+        (t/is (= (slash #{(str sandbox "/prompts/user.md") (str proj "/.kmet/prompts/proj.md")})
+                 (slash (set (map :path (:prompts full-view))))))))))
 
 (t/deftest test-auto-dir-scope-not-path-prefix
   ;; regression: the agent dir can live inside the project scope root

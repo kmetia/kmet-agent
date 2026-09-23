@@ -8,7 +8,8 @@
             [kmet.app.extensions :as extensions]
             [kmet.ai.api.shared :as schema-shared]
             [kmet.app.tools.bash :as bash-tool]
-            [kmet.app.bash-executor :as bash-exec]))
+            [kmet.app.bash-executor :as bash-exec]
+            [kmet.test-utils :refer [slash]]))
 
 (t/deftest test-tool-cwd-binding
   (t/testing "relative tool paths resolve against the bound runtime cwd (pi:
@@ -20,10 +21,11 @@
               "unbound: the process cwd")
         (binding [tool-util/*cwd* dir]
           (t/is (= dir (tool-util/cwd)))
-          (t/is (= "/abs/path.txt" (tool-util/resolve-tool-path "/abs/path.txt"))
-                "absolute paths pass through")
-          (t/is (= (str (fs/path dir "sub/notes.txt"))
-                   (tool-util/resolve-tool-path "sub/notes.txt")))
+          (let [abs (str (fs/absolutize "target/abs-path.txt"))]
+            (t/is (= abs (tool-util/resolve-tool-path abs))
+                  "absolute paths pass through"))
+          (t/is (= (slash (fs/path dir "sub/notes.txt"))
+                   (slash (tool-util/resolve-tool-path "sub/notes.txt"))))
           (t/is (not (:is-error (tools/execute-tool "write" {:path "notes.txt" :content "hi"}))))
           (t/is (= "hi" (slurp (str (fs/path dir "notes.txt"))))
                 "write lands inside the bound cwd")

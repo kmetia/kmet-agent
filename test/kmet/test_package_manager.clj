@@ -7,7 +7,8 @@
             [clojure.string :as str]
             [babashka.fs :as fs]
             [kmet.package-manager :as pm]
-            [kmet.config :as cfg]))
+            [kmet.config :as cfg]
+            [kmet.test-utils :refer [slash]]))
 
 (defn- tmp-dir []
   (str (fs/create-temp-dir {:dir (System/getenv "TMPDIR")})))
@@ -203,5 +204,5 @@
           (t/is (str/includes? out "User packages:"))
           (t/is (str/includes? out "Project packages:"))
           (t/is (str/includes? out (str "  " (fs/file-name pkg))))
-          (t/is (str/includes? out (str "    " pkg)))
+          (t/is (str/includes? (slash out) (str "    " (slash pkg))))
           (t/is (str/includes? out "  ../proj")))))))
