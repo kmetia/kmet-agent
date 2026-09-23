@@ -10,12 +10,15 @@ set is read/write/edit/bash; the grep/find/ls search tools ship as separate
 opt-in extensions). The one thing already in place is measurement — per-tool
 result-token attribution — so the build/no-build decision can be made on data.
 
-Status: **T1 and T2 implemented** in this tree — `src/kmet/app/tools/script.cljc`,
-a builtin (read/write/edit/bash + `script`), `kmet.app.test-script` (34 tests:
-30 fast + 4 `^:slow`, smoke-verified on babashka and jolt); the mcp-adapter's
-`mcpScript` tool and `bb`-subprocess runtime retired into the same engine
-(its catalog joins the sandbox as a contributed tool source — T2 below). Only
-the plan's last item, the post-adoption T0 re-measurement, remains (⏳ below).
+Status: **T1, T2 and T4 implemented** in this tree —
+`src/kmet/app/tools/script.cljc`, a builtin (read/write/edit/bash + `script`),
+`kmet.app.test-script` (38 tests: 32 fast + 6 `^:slow`, smoke-verified on
+babashka and jolt); the mcp-adapter's `mcpScript` tool and `bb`-subprocess
+runtime retired into the same engine (its catalog joins the sandbox as a
+contributed tool source — T2 below). T4 shares the invocation pipeline with
+the loop (`kmet.app.tools.invoke`), so scripted calls fire the run's tool
+hooks and a script abort cancels inner calls. Only the plan's last item, the
+post-adoption T0 re-measurement, remains (⏳ below).
 **T0 measured and analysed** (results below); the numbers rewrote the premise
 rather than killed it: maki's read-share did not transfer — bash dominates —
 but ~75% of all result tokens are still the find/read workload; it leaks
@@ -255,6 +258,11 @@ on jolt if a script evaluator wants `:interrupt-fn` uniformly.
 - **T3 — `kmet --script` (self-exec) and/or `--mode rpc`.** Only with a
   measured need (boot cost/call frequency) or a second consumer. The tool
   contract (description/skill/API) should survive T1→T3 untouched.
+- **T4 — shared invocation core + hooks + cancellation. ✅ landed.** The
+  bridge stopped owning a private execution path: `kmet.app.tools.invoke`
+  serves the loop and the sandbox alike, scripted calls fire the run's
+  tool hooks, a script abort cancels what it can reach, and surface
+  selection unifies through `registry/select-tools`. Details below.
 
 ## T1 design — the tool bridge
 
@@ -342,23 +350,30 @@ Clojure sandbox reports Clojure data; T2 formats MCP envelopes itself).
   cannot nest (script is excluded from the surface), so the pool cannot
   deadlock on itself.
 - **Settlement.** Every dispatched promise settles when its tool returns —
-  success or `{:is-error true}`; a tool that observes the run `:signal` (bash
+  success or `{:is-error true}`; a tool that observes the cancel signal (bash
   does) settles on cancel. The one non-settling case is a tool implementation
-  that neither returns nor honors `:signal`: a deref of that promise blocks
+  that neither returns nor honors the signal: a deref of that promise blocks
   host-side, and the run's deadline abandons the interpreter thread (T1's
-  accepted host-native-runaway limitation). A script-level abort
-  (`:timeout`, `:output-limit`) does **not** cancel in-flight inner calls —
-  only the run signal (Escape) does; the trace reports them `incomplete` and
-  they settle (or linger) on their own. A script that catches the interrupt
-  exception cannot outlive its abort either: the result reports the abort
-  reason, not `:ok`.
-- **No tool-call hooks.** Inner calls never fire `on-tool-call` /
-  `on-tool-result` — no synthetic tool-call ids, no hook routing. An
-  extension that must gate scripted tool use gates the outer `script` call
-  itself.
-- Inner-call opts: `:signal` (the run cancel — Escape must kill inner bash
-  children), `:ctx` (`build-extension-context`), `:on-update` collected into a
-  call trace exposed at `:details {:calls [...]}` (mcpScript precedent), **no**
+  accepted host-native-runaway limitation). The signal inner calls see is
+  **combined** (T4): true when the run signal (Escape) fires *or* the script
+  aborts (`:timeout`, `:output-limit`), so a deadline cancels in-flight calls
+  the way Escape does; a queued call picked up after the abort settles as
+  cancelled and never executes. Tools that ignore the signal still linger,
+  and the trace reports them `incomplete`. A script that catches the
+  interrupt exception cannot outlive its abort either: the result reports
+  the abort reason, not `:ok`.
+- **Tool-call hooks (T4).** Inner calls run through the run's agent-level
+  before/after hooks (`script/*tool-hooks*`): block/arg rewrite and
+  `:content`/`:is-error` overrides apply, for blocked calls too. An inner
+  call has a synthetic `:tool-call-id`, no `:assistant-message`, and its
+  `:terminate` hint is dropped; it still emits no tool-execution event or
+  transcript/session entry. A per-tool hook is policy, not a sandbox (the
+  script can shell out via `babashka.process`), so gating the outer `script`
+  call is the only real block.
+- Inner-call opts: `:signal` (the combined cancel signal — Escape and the
+  script's own abort both kill inner bash children), `:ctx`
+  (`build-extension-context`), `:on-update` collected into a call trace
+  exposed at `:details {:calls [...]}` (mcpScript precedent), **no**
   per-call UI events. The trace is an atom — concurrent calls (the normal
   fan-out case now that every call is a promise) append to it safely.
 
@@ -573,21 +588,69 @@ The probes that found the capture bugs left a set of deliberate behaviors:
   dropped in favor of those, as in bash. When only the *totals* exceed the
   cap the truncation is reported as `:truncated-by :capture`.
 
+## T4 — shared invocation core, hooks, cancellation (landed)
+
+The bridge no longer owns a private execution path. `kmet.app.tools.invoke`
+(`prepare-tool-call` / `execute-tool-call` / `finish-tool-call` / the
+`run-tool-call` convenience) is the one pipeline both callers use:
+
+- **Loop** (`execute-tool-calls-parallel!` / `-sequential!`) splits the
+  phases the way it always ran them — prepare sequentially with the start
+  event, execute in the batch futures, finish at finalize — and keeps its
+  own events, `await-all`, context/session append and terminate handling.
+  The old `before-/after-tool-hook-result` helpers and `run-tool-call!` are
+  gone. The sequential path now honors a before-hook arg rewrite (it
+  previously ignored one while parallel honored it).
+- **Script** runs prepare → execute → finish inside its pool task; a blocked
+  call settles with the hook's reason (its `:terminate` hint is dropped — no
+  batch) and the after hook still runs, matching the loop. Promises, trace,
+  gate and discovery stay bridge-local.
+- **Hooks reach the script** through `script/*tool-hooks*`, bound in
+  `run-agent-turn` as thunks over the agent's
+  `:before-tool-call`/`:after-tool-call` (the mode-built chains over
+  `extensions/get-tool-call-hooks`/`get-tool-result-hooks`). An inner call
+  carries a synthetic `:tool-call-id` (`script-<n>`) and no
+  `:assistant-message`; it still emits no tool-execution event and no
+  transcript/session entry — gate the `script` tool itself for policy (a
+  per-tool gate is not a sandbox: the script can shell out via
+  `babashka.process`).
+- **Cancellation**: the bridge's per-call signal is a read-only combined
+  derefable (`combined-signal`), true when the run signal (Escape) fired or
+  the script aborted (timeout/output-limit). It reaches in-flight tools as
+  `*cancel-signal*`/`:signal` (bash's poller kills the process tree) and is
+  checked by a pool task before it starts: a queued call after an abort
+  settles as `{:is-error true :content "Script cancelled before …"}` and
+  never executes (the trace records `:error "cancelled"`). A normally
+  finished script leaves the signal false, so its queue still drains
+  (underefed `tools/call` keeps its fire-and-forget meaning). Per-tool
+  coverage stays cooperative — MCP calls have no signal plumbing, and
+  host-blocked code remains unkillable until T3's process isolation.
+- **Surfaces** unify through `registry/select-tools` (ALL ∩ ENABLED, plus
+  contributed sandbox tools, minus exclusions), used by `loop/active-tools`
+  and the sandbox, so what a caller lists and what it can dispatch cannot
+  drift.
+
 ## References
 
 - `src/kmet/app/tools/script.cljc` — the T1 implementation: base cache,
-  capabilities, bridge, capture, deadline; `test/kmet/app/test_script.clj`
-  the tests. `script.cljc` (not `.clj`) because of the `#?(:jolt …
-  :default …)` `sci/binding` — clj-kondo allows reader conditionals only in
-  `.cljc`, and the split must be read out on babashka (the macro expands to
-  private `sci.impl` fns babashka's nested SCI cannot resolve).
+  capabilities, bridge, capture, deadline, combined cancel signal;
+  `test/kmet/app/test_script.clj` the tests. `script.cljc` (not `.clj`)
+  because of the `#?(:jolt … :default …)` `sci/binding` — clj-kondo allows
+  reader conditionals only in `.cljc`, and the split must be read out on
+  babashka (the macro expands to private `sci.impl` fns babashka's nested SCI
+  cannot resolve).
+- `src/kmet/app/tools/invoke.clj` — the T4 shared invocation pipeline
+  (`prepare-tool-call` / `execute-tool-call` / `finish-tool-call` /
+  `run-tool-call`); `test/kmet/app/test_tools.clj` covers its hook/binding
+  semantics.
 - `src/kmet/app/tools/core.clj`, `src/kmet/app/tools/registry.clj` —
-  `execute-tool` (the bridge seam), `built-in-tools`, `get-all-tools`,
-  `get-tool`, `tool-registry-generation` (the base-cache generation counter).
+  `execute-tool` (the bridge seam), `select-tools` (the shared surface
+  filter), `built-in-tools`, `get-all-tools`, `get-tool`,
+  `tool-registry-generation` (the base-cache generation counter).
 - `src/kmet/app/loop.clj` — run-level bindings (incl.
-  `script/*enabled-tools-fn*`) + `active-tools` / `set-active-tools!`;
-  `execute-tool-calls-*` (what the bridge must not route through); the
-  `--debug` per-tool report at agent end.
+  `script/*enabled-tools-fn*` and `script/*tool-hooks*`) + `active-tools` /
+  `set-active-tools!`; `execute-tool-calls-*` (what the bridge must not route
+  through); the `--debug` per-tool report at agent end.
 - `src/kmet/app/extensions.cljc` — `shared-context` / `shared-var-map` /
   `build-context-namespaces` (SCI injection pattern), `build-extension-context`.
 - `src/kmet/extension.clj` — tool registration (`register-tool!`,

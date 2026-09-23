@@ -118,6 +118,18 @@
             (catch Exception _ nil))]
     (if (and n (pos? n)) n default-timeout-ms)))
 
+(defn- combined-signal
+  "The cancel signal a script's inner calls observe: true when the run's
+   cancel signal (Escape) fired or the script itself aborted
+   (timeout/output-limit). Read-only — tools poll it (bash's poller kills the
+   process tree), and the bridge checks it before starting a pooled call, so
+   an aborted script's queued calls never run. A normally finished script
+   leaves it false: its queue still drains (fire-and-forget `tools/call`)."
+  [run-signal abort]
+  (reify clojure.lang.IDeref
+    (deref [_] (boolean (or (some? @abort)
+                            (when run-signal (boolean @run-signal)))))))
+
 (defn- path-in-cwd
   "Resolve a relative string path against CWD — the read/write/edit tools'
    resolve-tool-path behavior, so slurp/spit/file-seq follow the session cwd."
@@ -567,7 +579,9 @@
    tool hooks (*tool-hooks*): a blocked call settles with the hook's reason
    without executing, and the after hook runs for blocked calls too (loop
    parity). Inner calls carry a synthetic tool-call id and no assistant
-   message."
+   message. A call picked up after the script aborted is settled as
+   cancelled and never executes — the pool queue cannot fire side effects
+   past the deadline."
   [{:keys [surface execute-tool signal ctx cwd session-env-fn hooks trace on-update]} name args]
   (let [name (tool-name name)
         p (promise)]
@@ -581,37 +595,48 @@
                                                :started-at started})))]
         (.offer @bridge-queue
                 (fn []
-                  (let [call {:tool-name name
-                              :args args
-                              :tool-call-id (str "script-" idx)
-                              :assistant-message nil}
-                        prep (invoke/prepare-tool-call (assoc call :before-hook (:before hooks)))
-                        call (assoc call :args (if (contains? prep :args) (:args prep) args))
-                        executed (if (:block prep)
-                                   (:block prep)
-                                   (invoke/execute-tool-call
-                                    execute-tool
-                                    (assoc call
-                                           :signal signal
-                                           :ctx ctx
-                                           :on-update on-update
-                                           :tools surface
-                                           :bindings {:signal signal
-                                                      :session-env-fn session-env-fn
-                                                      :cwd cwd})))
-                        result (-> (invoke/finish-tool-call
-                                    (assoc call :after-hook (:after hooks))
-                                    executed)
-                                   (dissoc :terminate))]
-                    (try
-                      (swap! trace assoc-in [idx]
-                             (cond-> {:tool name
-                                      :ok (not (:is-error result))
-                                      :duration-ms (- (System/currentTimeMillis) started)}
-                               (:is-error result)
-                               (assoc :error (preview (:content result)))))
-                      (catch Throwable _ nil))
-                    (deliver p result))))
+                  (if @signal
+                    (do
+                      (try
+                        (swap! trace assoc-in [idx]
+                               {:tool name
+                                :ok false
+                                :error "cancelled"
+                                :duration-ms (- (System/currentTimeMillis) started)})
+                        (catch Throwable _ nil))
+                      (deliver p {:is-error true
+                                  :content (str "Script cancelled before " name " ran")}))
+                    (let [call {:tool-name name
+                                :args args
+                                :tool-call-id (str "script-" idx)
+                                :assistant-message nil}
+                          prep (invoke/prepare-tool-call (assoc call :before-hook (:before hooks)))
+                          call (assoc call :args (if (contains? prep :args) (:args prep) args))
+                          executed (if (:block prep)
+                                     (:block prep)
+                                     (invoke/execute-tool-call
+                                      execute-tool
+                                      (assoc call
+                                             :signal signal
+                                             :ctx ctx
+                                             :on-update on-update
+                                             :tools surface
+                                             :bindings {:signal signal
+                                                        :session-env-fn session-env-fn
+                                                        :cwd cwd})))
+                          result (-> (invoke/finish-tool-call
+                                      (assoc call :after-hook (:after hooks))
+                                      executed)
+                                     (dissoc :terminate))]
+                      (try
+                        (swap! trace assoc-in [idx]
+                               (cond-> {:tool name
+                                        :ok (not (:is-error result))
+                                        :duration-ms (- (System/currentTimeMillis) started)}
+                                 (:is-error result)
+                                 (assoc :error (preview (:content result)))))
+                        (catch Throwable _ nil))
+                      (deliver p result)))))
         p))))
 
 (defn- bridge-fns [opts]
@@ -780,12 +805,13 @@
         base-key [(generation-fn) (when enabled (into (sorted-set) enabled))]
         base (cached-base base-key #(build-base surface))
         abort (atom nil)
+        cancelled (combined-signal signal abort)
         writers (atom nil)
         deadline (+ (System/currentTimeMillis) timeout-ms)
         trace (atom [])
         bridge (bridge-fns {:surface surface
                             :execute-tool execute-tool
-                            :signal signal
+                            :signal cancelled
                             :ctx ctx
                             :cwd cwd
                             :session-env-fn session-env-fn
@@ -836,7 +862,8 @@
        "reported too. Errors are Exceptions — catch with (catch Exception e ...); Throwable "
        "is not a class here. Relative paths in slurp/spit/sh resolve against the session cwd "
        "((sandbox/cwd)); babashka.fs uses the process directory. Default timeout 30s — raise "
-       "timeoutMs for long scans; on timeout the output so far is returned."))
+       "timeoutMs for long scans; on timeout the output so far is returned and inner "
+       "calls are cancelled."))
 
 (defn title
   "Quiet one-liner body for the script tool: the first code line, shortened."

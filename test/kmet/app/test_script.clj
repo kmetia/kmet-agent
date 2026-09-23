@@ -4,6 +4,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
+            [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.core :as tools]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.script :as script]
@@ -208,6 +209,56 @@
             (t/is (not (:ok (get-in r [:details :calls 1])))))
           (t/is (= #{"script-0" "script-1"} (set (map :tool-call-id @payloads))))
           (t/is (every? #(not (contains? % :assistant-message)) @payloads)))))))
+
+(t/deftest ^:slow test-script-timeout-cancels-inner-call
+  ;; a script abort drives the combined signal its inner calls poll — the
+  ;; same one the run signal feeds (bash's poller kills process trees)
+  (let [observed (promise)]
+    (with-custom-tool {:name "script-test-wait"
+                       :label "Wait"
+                       :description "Waits for the cancel signal"
+                       :execute (fn [_]
+                                  (let [sig bash-tool/*cancel-signal*]
+                                    (loop [n 0]
+                                      (when (and (< n 300) (not @sig))
+                                        (Thread/sleep 10)
+                                        (recur (inc n))))
+                                    (deliver observed (boolean @sig))
+                                    {:content "done"}))}
+      (fn []
+        (let [r (run "(deref (tools/call \"script-test-wait\" {}))" {:timeoutMs 200})]
+          (t/is (:is-error r))
+          (t/is (= :timeout (get-in r [:details :error])))
+          (t/is (true? (deref observed 3000 false))))))))
+
+(t/deftest ^:slow test-script-queued-calls-skipped-after-abort
+  ;; a call still in the pool queue when the script aborts settles as
+  ;; cancelled and never executes — a timed-out script cannot fire
+  ;; side effects from its queue
+  (let [release (promise)
+        late-ran (atom 0)]
+    (with-custom-tool {:name "script-test-block"
+                       :label "Block"
+                       :description "Blocks until released"
+                       :execute (fn [_] @release {:content "ok"})}
+      (fn []
+        (with-custom-tool {:name "script-test-late"
+                           :label "Late"
+                           :description "Counts invocations"
+                           :execute (fn [_] (swap! late-ran inc) {:content "late"})}
+          (fn []
+            (try
+              (let [r (run (str "(let [ps (mapv (fn [_] (tools/call \"script-test-block\" {})) (range 64))]"
+                                "  (tools/call \"script-test-late\" {})"
+                                "  (deref (first ps)))")
+                           {:timeoutMs 300})]
+                (t/is (:is-error r))
+                (t/is (= :timeout (get-in r [:details :error])) (pr-str r)))
+              (finally (deliver release true)))
+            ;; let the released workers drain the queue (every queued task
+            ;; is settled as cancelled without executing)
+            (Thread/sleep 400)
+            (t/is (zero? @late-ran))))))))
 
 (t/deftest test-script-gate
   (let [r (run "@(tools/call \"no-such-tool\" {})")]
