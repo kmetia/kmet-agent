@@ -556,9 +556,9 @@
 ;; covered by the dual-mode test-timeout-ms (curl mode enforces the total
 ;; deadline via --max-time)
 
-(deftest-curl ^:bb-only test-curl-compression
+(deftest-curl test-curl-compression
   ;; --compressed: a gzip Content-Encoding response arrives decompressed
-  ;; (bb-only: java.util.zip is unavailable on Jolt)
+  ;; (the runtime's java.util.zip inflates it on Jolt too)
   (let [[base close] (start-server
                       (fn [s _ _ _]
                         (let [body "hello gzip world"

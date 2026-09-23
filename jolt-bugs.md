@@ -29,14 +29,15 @@ and carries none.
 `**/*.clj` returned `()`) and #1087 (`java.lang.ProcessHandle` absent on
 every platform) were both closed by that PR, verified 2026-09-22 on
 v0.8.10-71-gbbb7d34d. The kmet checks this unblocked: `jolt clean --dry-run`
-lists `extensions/*/target`, `kmet.tasks.lint`'s `*.{…}` + `**/*.{…}` pair
+lists `extensions/*/target`, `kmet.tasks.lint`'s `**.{…}`
 and `kmet.tasks.format`'s globs enumerate the Jolt/Windows tree, and
 `KMET_TUI_WRITE_LOG=<dir> jolt -e "(require 'kmet.libs.terminal)"` loads
 (the pid name builds). `kmet.tasks.changed/dir-clj-files` drops the
 jolt-broken rationale — the single `**.{…}` pattern is now simply the
-shorter spelling. One residual divergence, no kmet impact: on Windows bb's
-`**` matches dot-prefixed entries (`Files/isHidden` reads the attribute)
-while jolt's treats a leading dot as hidden; no source root carries one.
+shorter spelling. The residual hidden-entry divergence once recorded here
+closed with PR #1112 as well: `Files.isHidden` answers from the DOS
+attribute on both hosts, so `**.clj` globs select the same files on Windows
+(verified 2026-09-23).
 The #1074 workaround is retired: `kmet.libs.http/curl-available?` is
 `(fs/which "curl")` again (jolt's `fs/which`/`exec-paths` answer the
 `;`-separated Windows PATH correctly, 37 entries, same as bb).
@@ -179,21 +180,21 @@ app`, the loader dep) and a single-file extension whose source opens with
 `(set! *warn-on-reflection* true)` loads through `load-extension!` on both
 loader kinds (:jolt and :sci) — re-verified 2026-09-22.
 
-**Upstream status:** five filed open items — the SCI IVar gap
+**Upstream status:** four filed open items — the SCI IVar gap
 [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) (`deferred`), with
 its fix at [babashka/sci#1093](https://github.com/babashka/sci/pull/1093)
-(re-checked 2026-09-22: open, head `1295142f`, unchanged), so the
-`jolt/deps.edn` SCI pin stays; and the Windows findings from the smoke, filed
-2026-09-22 as [jolt#1107](https://github.com/jolt-lang/jolt/issues/1107)
-(sockets), [jolt#1108](https://github.com/jolt-lang/jolt/issues/1108)
-(process spawning), [jolt#1109](https://github.com/jolt-lang/jolt/issues/1109)
-(`PushbackReader.close`) and
-[jolt#1110](https://github.com/jolt-lang/jolt/issues/1110) (file-surface
-parity: `Files.isHidden`, path separators) — all four `deferred`, and all
-four addressed the same day by upstream PR
-[jolt#1112](https://github.com/jolt-lang/jolt/pull/1112) (open, unmerged;
-see the Windows section for what it fixes and what it only records). The
-Windows runtime seams (#1074/#1077), the
+(re-checked 2026-09-23: open, head `1295142f`, unchanged), so the
+`jolt/deps.edn` SCI pin stays; the `read`/`PushbackReader` handle leak
+[jolt#1117](https://github.com/jolt-lang/jolt/issues/1117); the Windows
+`File.toURI`/`file:` URL spelling
+[jolt#1118](https://github.com/jolt-lang/jolt/issues/1118); and the
+[http-client#28](https://github.com/jolt-lang/http-client/issues/28)
+transport's Windows half — plus jolt#1110's recorded path-separator
+divergence.
+The Windows smoke's four runtime findings (jolt#1107-#1110) are fixed by
+jolt PR #1112 (merged 2026-09-22, `dde4803c`, carried by v0.8.11; the
+kmet side validated 2026-09-23 on the installed Windows build) — closed
+findings, dropped here. The Windows runtime seams (#1074/#1077), the
 `set!`/entry-binding gap (#1079/#1085), the glob separator (#1086) and
 ProcessHandle (#1087) are all fixed upstream, with their kmet workarounds
 removed and the Windows smoke run. Every other ticket this file tracked is
@@ -256,157 +257,52 @@ Re-checked 2026-09-19: both still open — #1031 now carries the `deferred`
 label, and PR #1093's head is still `1295142f`, so the pin is unchanged.
 Re-checked 2026-09-20: unchanged — #1031 still `deferred`, PR #1093 still open
 at the same head `1295142f`, so the pin stays.
-Re-checked 2026-09-22: unchanged — same state (the issue's last activity is
-2026-09-18, the PR's 2026-09-16), so the pin stays.
+Re-checked 2026-09-23: unchanged — the issue is still `deferred` (last
+activity 2026-09-18) and PR #1093 is still open at head `1295142f`
+(mergeable, checks unstable), so the pin stays.
 
-### Windows runtime gaps — filed as jolt#1107/#1108/#1109
+### [http-client#28](https://github.com/jolt-lang/http-client/issues/28) — transport still POSIX-only on Windows
 
-**Area:** `stdlib/jolt/socket.clj` + `stdlib/jolt/io_poller.clj`,
-`host/chez/java/process.ss`, `host/chez/java/host-static-classes.ss`.
+`jolt.http.net` is a POSIX FFI layer of its own (`getaddrinfo`, `fcntl`,
+`poll` — no `jolt.winsock`), so `babashka.http-client` over the shims dies
+`UnknownHostException` on Windows even on v0.8.11: the runtime's `java.net`
+socket layer is fixed, the library's transport half is not. kmet rides it
+for the default `:platform` transport, so that path stays Windows-dead
+until the library branches; `:curl` mode works (spawns are fixed).
+Re-verified 2026-09-23; filed as
+[http-client#28](https://github.com/jolt-lang/http-client/issues/28).
 
-All three re-verified 2026-09-22 on the installed v0.8.10-71-gbbb7d34d
-Windows build, and filed the same day. None has a kmet workaround, and the
-first two are why a Jolt/Windows host cannot reach the network or spawn a
-program at all — whatever the proxy environment says: the failures sit below
-the transport, before any request is routed.
+### [jolt#1117](https://github.com/jolt-lang/jolt/issues/1117) — `read` over a `PushbackReader` keeps the wrapped stream open
 
-**Upstream PR [jolt#1112](https://github.com/jolt-lang/jolt/pull/1112)
-(opened 2026-09-22, still open)** is the first cut at all four Windows
-reports: `WSAStartup` centralized in a new `jolt.winsock` plus the BSD
-socket constants (`SOL_SOCKET`, `SO_REUSEADDR`, `FIONREAD`, no
-`MSG_NOSIGNAL` on Windows), a `CreateProcessW` spawn path in the JDK's own
-Windows shape (one command line, `CreatePipe` streams, handle-based
-reaping), the `PushbackReader.close` delegation, and the per-machine-type
-`Files.isHidden`. Two #1107 bullets are deliberately answered rather than
-implemented and recorded: Windows sockets stay **blocking** (`nonblock!` is
-a no-op — the descriptor only exists for the fiber poller, which is
-kqueue/epoll, and WSAPoll is not its translation), and `NetworkInterface`
-enumerates nothing for want of a `GetAdaptersAddresses` walk
-(`InetAddress/getLocalHost` answers from `gethostname` + the resolver, the
-JDK's own primary path). `windows-deps` gains `make winplatform winpath`,
-so a live `ProcessBuilder` spawn is CI-covered on both hosts; the socket
-half needs a built `jolt.exe` and stays out. The PR's gates all ran on
-Linux/x64 — its native halves (`CreateProcessW`, `CreatePipe`,
-`GetFileAttributesW`) have no Windows exercise yet — and upstream asks for a
-follow-up validated on a real Windows machine, so the four issues stay
-`deferred`. No kmet action until it merges and a release carries it.
+v0.8.11's `PushbackReader.close` delegation does not cover this path: after
+`(read r …)` runs on a `PushbackReader`, closing `r` leaves the wrapped
+stream open — the OS handle releases only at GC, which on Windows makes the
+file a pending delete that cannot be removed (and its directory
+undeletable). `jolt.loader`'s `eval-namespace-source` is exactly that shape
+(`with-open` over `(java.io.PushbackReader. (io/reader file))` + `read`), so
+a source tree loaded through the native loader cannot be deleted on Windows
+while the process lives (minimal repro re-verified 2026-09-23 on v0.8.11).
+It keeps kmet's bundled-spec-port extension test `^:bb-only` — the test body
+passes on Jolt, only the Windows teardown cannot remove the fixture — filed
+2026-09-23 as
+[jolt#1117](https://github.com/jolt-lang/jolt/issues/1117); the leak is
+platform-independent, observable only on Windows.
 
-**4. Windows sockets —
-[jolt#1107](https://github.com/jolt-lang/jolt/issues/1107). The `java.net`
-socket layer never initializes Winsock and polls POSIX only.** `jolt.socket`
-is documented as "POSIX socket support" and calls no
-`WSAStartup`; only `jolt.nrepl` (`ensure-winsock!`, nrepl.clj:84) and
-`jolt.mvn-http` (mvn_http.clj:112-121) initialize Winsock, which is why
-Maven resolution and nREPL work on Windows while everything else fails:
+### [jolt#1118](https://github.com/jolt-lang/jolt/issues/1118) — `File.toURI` emits an unopenable `file:` URL on Windows
 
-```
-$ jolt -e '(let [s (java.net.Socket.)] ...)'
-Unhandled exception (IOException): socket() failed
-$ jolt -e '(println (java.net.InetAddress/getByName "localhost"))'
-Unhandled exception (IOException): unknown host: localhost
-$ jolt -e '(println (java.net.InetAddress/getLocalHost))'
-Unhandled exception (RuntimeException): foreign-procedure: no entry for "getifaddrs"
-```
+`(.toURI (io/file p))` renders `file:C:%5CUsers%5C…` on Windows (separators
+percent-encoded, no slash before the drive) where the JVM renders
+`file:/C:/Users/…`; the URL jolt itself emits cannot be opened
+(`No such file or directory`), the standard `file:/C:/…` and
+`file:///C:/…` spellings are rejected (`Invalid argument`), and the opener
+does not percent-decode (`%20`/`%5C` are literal). kmet builds extension
+jar-resource URLs with its own portable spelling (`jar:file:` + the
+/-separated absolute path) rather than `.toURL`/`.toURI`.
 
-A manual `WSAStartup` proves the split: name resolution starts working, and
-the next POSIX assumption surfaces — `guard-fd!` (socket.clj:136) →
-`io_poller/nonblock!` (io_poller.clj:94) calls `fcntl F_GETFL/F_SETFL`:
+### jolt#1110's path-separator half — recorded divergence
 
-```
-$ jolt -e '(…WSAStartup… (java.net.InetAddress/getByName "localhost"))'
-#object[java.net.Inet4Address "localhost/127.0.0.1"]
-Unhandled exception (RuntimeException): foreign-procedure: no entry for "fcntl"
-```
-
-`jolt-lang/http-client`'s own transport (`jolt.http.net`, its own POSIX
-`getaddrinfo`) fails the same way — no `WSAStartup`, so
-`babashka.http-client` cannot reach any host:
-
-```
-$ jolt -M -e '(require (quote [babashka.http-client :as http])) (http/get "https://example.com")'
-Unhandled exception (UnknownHostException): example.com
-```
-
-Fix: initialize Winsock once in the runtime (ws2_32 is linked by
-`build.ss:486`; `jolt.nrepl`'s explicit `load-library "ws2_32.dll"` is the
-shape) and add a Windows branch for the fd helpers — `ioctlsocket(FIONBIO)`
-for `nonblock!`, `select`/`WSAPoll` in place of kqueue/epoll. Until then
-any `java.net` socket use (and every kmet transport) is Windows-dead.
-
-**5. Windows process spawning —
-[jolt#1108](https://github.com/jolt-lang/jolt/issues/1108). The spawn path
-hands `cmd.exe` a POSIX shell string.** Where the fd-level spawn's FFI
-surface is missing — Windows machine types
-(process.ss:20-21) — `jolt.process` falls back to Chez's
-`open-process-ports` and passes it `proc-build-shell-command`'s string
-(process.ss:291-304), which opens with `exec ` and uses `cd … &&`/`env -i`
-(the `/bin/sh` shape). `cmd.exe` rejects the first token, so every spawn
-fails — exit 0, error on the child's stderr, no program run:
-
-```
-$ jolt -M -e '(require (quote [babashka.process :as p])) (p/shell {:out :string :err :string :continue true} "git" "--version")'
-{:exit 0, :out "", :err "'exec' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n"}
-```
-
-`ProcessBuilder` builds through the same string, so `babashka.process`,
-`clojure.java.shell` and every kmet subprocess are unusable on
-Jolt/Windows: the bash tool, `jolt lint` (clj-kondo), the `:curl` HTTP
-transport, `jolt test-ext`'s subprocess tests. Fix: a Windows spawn path —
-`CreateProcess` directly, or a `cmd /c`-compatible command string with the
-POSIX `exec`/`env` shorthands dropped.
-
-**6. `java.io.PushbackReader.close` —
-[jolt#1109](https://github.com/jolt-lang/jolt/issues/1109). The method is a
-no-op.** The method table registers `(cons "close" (lambda (self) jolt-nil))`
-(host-static-classes.ss:1138), so closing the PushbackReader never closes
-the reader it wraps — the JVM's `PushbackReader.close` closes the
-underlying stream, and `alias-host-methods!` gives
-`clojure.lang.LineNumberingPushbackReader` the same no-op. Invisible on
-POSIX; on Windows the wrapped file stays open until process exit and a
-delete only marks it pending (the name stays in its directory):
-
-```
-$ # with-open over (java.io.PushbackReader. (io/reader "src/dep.clj")), then:
-$ jolt -e '(… (fs/delete "src/dep.clj") (println (mapv str (fs/list-dir "src"))))'
-[src/dep.clj]
-```
-
-**Correction (upstream PR #1112).** The issue's impact section overstated
-the reach. `io/reader` on a path answers an in-memory StringReader — the
-file is read eagerly (`host/chez/java/io.ss`) — so `jolt.loader`'s source
-eval (loader.clj:1268) and kmet's own `kmet.tasks.changed/read-ns-form`
-(both `(io/reader …)`; kmet never uses `java.io.FileReader`) hold no handle.
-Only the streaming readers leak, so the earlier attribution of kmet's
-Windows `fs/delete-tree` teardown failures to this path is retracted pending
-a re-check. Fix: PR #1112 makes `close` delegate to the wrapped reader.
-
-### Windows file-surface parity — [jolt#1110](https://github.com/jolt-lang/jolt/issues/1110)
-
-**Area:** `host/chez/java/nio-file.ss`, `java.io.File` statics, path
-rendering.
-
-**7. `Files.isHidden` is name-based on every platform, and `File`/`Path`
-stay POSIX-shaped on Windows.** The JDK answers `Files.isHidden` from the
-DOS hidden attribute on Windows (a dot-prefixed file without it is
-visible, a non-dotted file with it is hidden); jolt tests the leading dot
-everywhere (nio-file.ss:528), inverting the answer both ways —
-`babashka.fs/hidden?`/`glob` inherit it, so a `**.clj` glob selects
-different files on jolt than on bb (on a sample tree, `**.{clj,cljc,edn}`
-finds 460 under jolt vs 472 under bb). The `File.separator` statics, the
-`file.separator` property and path string rendering (`Paths.get`, `fs/path`,
-`fs/file`, `fs/relativize`) also stay POSIX (`/`) where the JVM uses `\`
-(`File.pathSeparator` is already `;`). No kmet workaround: no
-source root carries a dot-prefixed entry, and glob results are normalized
-to `/` before use.
-
-**PR #1112 disposition:** Part 1 is fixed — the shim now branches on the
-machine type (DOS attribute on Windows, leading dot on POSIX; upstream also
-corrected the issue's "directories too" claim — the JDK's Windows check is
-the bare bit test). Part 2 is recorded rather than changed: flipping
-`File.separator` alone would disagree with what `File`/`Path` actually
-render, and moving the rendering is not local (getCanonicalPath, the glob
-translator and every path comparison in the shim are written over `/`), so
-`known-divergences.edn` is broadened to carry the consumer-visible
-consequence (its stale `path.separator`-is-`:` claim corrected there too).
-No kmet action.
-
+The separator half of #1110 was answered rather than changed: on Windows
+jolt renders paths with `/` where the JVM uses `\` (`File.separator`, the
+`file.separator` property, canonical paths), which `known-divergences.edn`
+records; a consumer that needs `\` renders it itself. URL/URI encoding is a
+separate, filed gap — see jolt#1118.

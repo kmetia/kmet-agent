@@ -2,7 +2,8 @@
 
 The port is staged and largely landed: kmet runs on Jolt — TUI (native
 terminal backend: termios on Unix, kernel32 on Windows), providers (HTTP
-via babashka.http-client over the jolt-lang shims — Windows pending, M2),
+via babashka.http-client over the jolt-lang shims — Windows needs the
+library's transport half, M2),
 packaging (`jolt dist`), and extensions (the native loader, with SCI as the
 declared fallback). This file tracks **only what is still open**; finished
 work lives in the code and in `jolt-bugs.md` (upstream issues filed or
@@ -10,19 +11,23 @@ tracked). The item labels (B2, M5, …) are the original port report's ids.
 
 ## Windows — the last platform (M2)
 
-- **Process** (B2): Windows has no working spawn path — the Chez
-  `open-process-ports` fallback cannot be ^C-interrupted and hands cmd.exe
-  a POSIX command string (`exec …`), so nothing starts. Needs a Windows
-  spawn path (`CreateProcess` FFI, since `posix_spawn` does not exist
-  there); once spawns work, the bash tool, `jolt lint` (clj-kondo) and
-  curl-based HTTP can run there, and `destroy-tree` gets its Windows test.
-  (`bb` on Windows is unaffected.)
-- **Sockets**: initialize Winsock and add a non-POSIX fd/poller path
-  (`fcntl`, kqueue/epoll) for the `java.net` layer — every HTTP transport
-  waits on it.
-- **Loader file handles**: make `PushbackReader.close` close the wrapped
-  reader, or loaded source trees cannot be torn down on Windows.
-- Windows is the last platform to light up, after Unix parity.
+The runtime gaps closed in jolt v0.8.11 (PR #1112): spawns work
+(`CreateProcessW`), the `java.net` layer initializes Winsock, and
+`PushbackReader.close` delegates to the wrapped reader — verified
+2026-09-23 on the installed Windows build. Open:
+
+- **http-client transport**: `jolt.http.net` is a POSIX FFI layer of its own
+  (`getaddrinfo`/`fcntl`/`poll`, no `jolt.winsock`), so babashka.http-client
+  — kmet's default `:platform` transport — still dies on Windows
+  ([http-client#28](https://github.com/jolt-lang/http-client/issues/28)).
+  Needs a library-side Windows branch; `:curl` mode works meanwhile.
+- **Loader file handles**: `read` over a `PushbackReader` leaves the wrapped
+  stream open until GC, so a source tree the native loader read cannot be
+  deleted on Windows ([jolt#1117](https://github.com/jolt-lang/jolt/issues/1117));
+  this keeps the bundled-spec-port extension test `^:bb-only`. (The close
+  delegation is fixed; the `read` path is not.)
+- **Validation**: run the bash tool, `jolt lint` (clj-kondo) and the curl
+  transport on Windows, and give `destroy-tree` its Windows test.
 
 ## Process edges (B2)
 
@@ -82,8 +87,3 @@ loader, and the `:sci` backend is the declared fallback. Open:
 - **`modes.test-overlay-input-smoke`** is `^:bb-only` (its driver spawns
   `bb run`, so on Jolt it would exercise bb's TUI); a Jolt-host pty variant
   is the follow-up.
-- **Stale `^:bb-only` gates**: `test-curl-compression` (its comment still
-  says java.util.zip is Jolt-unavailable although the runtime supplies it)
-  and `test-extension-gets-bundled-spec-port-and-file-seq` (the fixed
-  bundled set loads the Maven spec.alpha, and the fixture's `:jolt` loader
-  runs it) both pass under `jolt test` — drop the gates.

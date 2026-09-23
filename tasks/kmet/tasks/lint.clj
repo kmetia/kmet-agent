@@ -216,21 +216,21 @@
   ;; Clojure, and the views route it to the jolt pass)
   #{"clj" "cljc" "cljs" "cljd" "clj_kondo" "jolt"})
 
-(def ^:private glob-pattern "*.{clj,cljc,cljs,cljd,clj_kondo,jolt}")
+(def ^:private glob-pattern "**.{clj,cljc,cljs,cljd,clj_kondo,jolt}")
 
 (defn- lintable?
   [path]
   (contains? lint-exts (fs/extension (str path))))
 
 (defn- lintable-files
-  "The lintable files under DIR, recursively. target/ is build output — and
-   this namespace's own mirrors — never source."
+  "The lintable files under DIR, recursively — one `**.{…}` pattern matches
+   top-level and nested files (`**` crosses separators), the same spelling
+   kmet.tasks.changed/dir-clj-files uses. target/ is build output — and this
+   namespace's own mirrors — never source."
   [dir]
-  (->> (concat (fs/glob dir glob-pattern)
-               (fs/glob dir (str "**/" glob-pattern)))
+  (->> (fs/glob dir glob-pattern)
        (map str)
        (remove #(str/includes? % "/target/"))
-       distinct
        sort))
 
 (defn- target-files
