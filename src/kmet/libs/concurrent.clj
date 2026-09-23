@@ -1,5 +1,10 @@
 (ns kmet.libs.concurrent
-  "Daemon-thread spawn helper for extension SCI contexts.
+  "Small concurrency primitives shared across layers:
+
+   - `spawn` — the extension-SCI daemon-thread replacement for `future`
+   - `or-signal` — a read-only OR-view over cancel signals (the provider
+     stream's guard trip, the script bridge's abort), used wherever a
+     consumer must poll two triggers as one
 
    Extensions run in isolated SCI contexts where `future`/`pmap`/`pcalls`
    are not available — SCI is a pure interpreter with no bundled
@@ -40,3 +45,13 @@
     (.setDaemon t true)
     (.start t)
     t))
+
+(defn or-signal
+  "A read-only derefable that is true when any of SIGNALS fires — the OR-view
+   of a run's cancel atom and a local trigger. A nil signal never fires
+   (a script run outside the loop's cancel plumbing). The view is deref-only:
+   the underlying atoms stay the single source of truth, never reset or
+   watched through it."
+  [& signals]
+  (reify clojure.lang.IDeref
+    (deref [_] (boolean (some (fn [s] (when s (boolean @s))) signals)))))

@@ -92,6 +92,7 @@
             [kmet.app.extensions :as extensions]
             [kmet.app.event-bus :as event-bus]
             [kmet.debug :as debug]
+            [kmet.libs.concurrent :as concurrent]
             [kmet.config :as cfg]))
 
 ;; ─── Agent state ───────────────────────────────────────────────────────────
@@ -856,6 +857,9 @@ Be precise and concise in your responses."}}]
           (do (doseq [[tc-id f] remaining]
                 (when-not (= :pending (deref f 0 :pending))
                   (swap! results assoc tc-id
+                         ;; belt-and-braces: invoke/execute-tool-call already
+                         ;; turns a throwing tool into an error result, so this
+                         ;; only covers a failure inside the future body itself
                          (try @f
                               (catch Exception e
                                 {:content (str "Error executing tool: " (ex-message e))
@@ -1043,11 +1047,17 @@ Be precise and concise in your responses."}}]
    itself (true by default). The repeat-loop guard path passes false and
    appends ALL results (suppressed + survivor) in source order itself, so a
    batch with suppressed calls keeps tool_use/tool_result ordering (strict
-   providers reject misordered results)."
+   providers reject misordered results).
+
+   The batch runs under script-tool/*assistant-message* so a scripted inner
+   call carries the same assistant message in its hook payload as the outer
+   script call (futures convey the binding; the bridge captures it on the
+   tool thread and hands it to its pool workers, which do not)."
   [agent tool-calls assistant-msg & [append?]]
-  (if (has-sequential-tool-call? tool-calls)
-    (execute-tool-calls-sequential! agent tool-calls assistant-msg append?)
-    (execute-tool-calls-parallel! agent tool-calls assistant-msg append?)))
+  (binding [script-tool/*assistant-message* assistant-msg]
+    (if (has-sequential-tool-call? tool-calls)
+      (execute-tool-calls-sequential! agent tool-calls assistant-msg append?)
+      (execute-tool-calls-parallel! agent tool-calls assistant-msg append?))))
 
 ;; ─── Tool call accumulator ─────────────────────────────────────────────────
 
@@ -1131,10 +1141,10 @@ Be precise and concise in your responses."}}]
         ;; the guard's cancel rides on call-signal, an OR-view the stream
         ;; transport derefs each line (SSE) / before each poll (curl),
         ;; while tool futures keep the run-level agent signal untouched.
-        ;; Read-only — the transport only derefs it, never reset!/add-watch.
+        ;; Read-only (kmet.libs.concurrent/or-signal) — the transport only
+        ;; derefs it, never reset!/add-watch.
         guard-trip (atom false)
-        call-signal (reify clojure.lang.IDeref
-                      (deref [_] (boolean (or @(:signal agent) @guard-trip))))
+        call-signal (concurrent/or-signal (:signal agent) guard-trip)
         provider @(:provider agent)
         ep (resolve-endpoint agent)
         system (or @(:system-prompt-override agent) @(:system agent))

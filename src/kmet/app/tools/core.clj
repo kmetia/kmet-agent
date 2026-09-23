@@ -29,9 +29,6 @@
 
 ;; ─── From invoke.clj (the shared invocation pipeline) ──────────────────────
 
-(def blocked-result invoke/blocked-result)
-(def hook-payload invoke/hook-payload)
 (def prepare-tool-call invoke/prepare-tool-call)
 (def execute-tool-call invoke/execute-tool-call)
 (def finish-tool-call invoke/finish-tool-call)
-(def run-tool-call invoke/run-tool-call)

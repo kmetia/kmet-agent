@@ -79,9 +79,17 @@
      :after  (fn [{:keys [tool-name args result is-error]}])
               → nil | {:content … :is-error …}
    nil = no hooks (extension code calling the tool outside a loop run).
-   A scripted inner call carries a synthetic :tool-call-id and no
-   :assistant-message, and the hook's :terminate hint is ignored (there is
-   no batch)."
+   A scripted inner call carries a synthetic :tool-call-id and the turn's
+   :assistant-message (from *assistant-message*), and the hook's :terminate
+   hint is ignored (there is no batch)."
+  nil)
+
+(def ^:dynamic *assistant-message*
+  "The assistant message whose tool-call batch is running — bound by
+   kmet.app.loop around execute-tool-calls! so a script's inner calls carry
+   the same :assistant-message in their hook payload as the outer script
+   call. nil outside the loop (extension code calling the tool directly);
+   the key is then omitted from the hook payload."
   nil)
 
 ;; ─── Small helpers ────────────────────────────────────────────────────────
@@ -121,14 +129,13 @@
 (defn- combined-signal
   "The cancel signal a script's inner calls observe: true when the run's
    cancel signal (Escape) fired or the script itself aborted
-   (timeout/output-limit). Read-only — tools poll it (bash's poller kills the
-   process tree), and the bridge checks it before starting a pooled call, so
-   an aborted script's queued calls never run. A normally finished script
-   leaves it false: its queue still drains (fire-and-forget `tools/call`)."
+   (timeout/output-limit). Read-only (kmet.libs.concurrent/or-signal) — tools
+   poll it (bash's poller kills the process tree), and the bridge checks it at
+   admission, so an aborted script's queued calls never run. A normally
+   finished script leaves it false: its queue still drains (fire-and-forget
+   `tools/call`)."
   [run-signal abort]
-  (reify clojure.lang.IDeref
-    (deref [_] (boolean (or (some? @abort)
-                            (when run-signal (boolean @run-signal)))))))
+  (concurrent/or-signal run-signal abort))
 
 (defn- path-in-cwd
   "Resolve a relative string path against CWD — the read/write/edit tools'
@@ -578,11 +585,12 @@
    runs through the shared pipeline (kmet.app.tools.invoke) with the run's
    tool hooks (*tool-hooks*): a blocked call settles with the hook's reason
    without executing, and the after hook runs for blocked calls too (loop
-   parity). Inner calls carry a synthetic tool-call id and no assistant
-   message. A call picked up after the script aborted is settled as
-   cancelled and never executes — the pool queue cannot fire side effects
-   past the deadline."
-  [{:keys [surface execute-tool signal ctx cwd session-env-fn hooks trace on-update]} name args]
+   parity). Inner calls carry a synthetic tool-call id and the turn's
+   assistant message. A call picked up after the script aborted — or whose
+   before hook ran past the abort — is settled as cancelled and never
+   executes: the pool queue cannot fire side effects past the deadline."
+  [{:keys [surface execute-tool signal ctx cwd session-env-fn hooks assistant-message
+           trace on-update]} name args]
   (let [name (tool-name name)
         p (promise)]
     (if-not (contains? surface name)
@@ -592,51 +600,55 @@
       (let [started (System/currentTimeMillis)
             idx (dec (count (swap! trace conj {:tool name :ok false
                                                :error "incomplete"
-                                               :started-at started})))]
+                                               :started-at started})))
+            settle-cancelled!
+            (fn []
+              (try
+                (swap! trace assoc-in [idx]
+                       {:tool name
+                        :ok false
+                        :error "cancelled"
+                        :duration-ms (- (System/currentTimeMillis) started)})
+                (catch Throwable _ nil))
+              (deliver p {:is-error true
+                          :content (str "Script cancelled before " name " ran")}))]
         (.offer @bridge-queue
                 (fn []
                   (if @signal
-                    (do
-                      (try
-                        (swap! trace assoc-in [idx]
-                               {:tool name
-                                :ok false
-                                :error "cancelled"
-                                :duration-ms (- (System/currentTimeMillis) started)})
-                        (catch Throwable _ nil))
-                      (deliver p {:is-error true
-                                  :content (str "Script cancelled before " name " ran")}))
+                    (settle-cancelled!)
                     (let [call {:tool-name name
                                 :args args
                                 :tool-call-id (str "script-" idx)
-                                :assistant-message nil}
-                          prep (invoke/prepare-tool-call (assoc call :before-hook (:before hooks)))
-                          call (assoc call :args (if (contains? prep :args) (:args prep) args))
-                          executed (if (:block prep)
-                                     (:block prep)
-                                     (invoke/execute-tool-call
-                                      execute-tool
-                                      (assoc call
-                                             :signal signal
-                                             :ctx ctx
-                                             :on-update on-update
-                                             :tools surface
-                                             :bindings {:signal signal
-                                                        :session-env-fn session-env-fn
-                                                        :cwd cwd})))
-                          result (-> (invoke/finish-tool-call
-                                      (assoc call :after-hook (:after hooks))
-                                      executed)
-                                     (dissoc :terminate))]
-                      (try
-                        (swap! trace assoc-in [idx]
-                               (cond-> {:tool name
-                                        :ok (not (:is-error result))
-                                        :duration-ms (- (System/currentTimeMillis) started)}
-                                 (:is-error result)
-                                 (assoc :error (preview (:content result)))))
-                        (catch Throwable _ nil))
-                      (deliver p result)))))
+                                :assistant-message assistant-message}
+                          prep (invoke/prepare-tool-call (assoc call :before-hook (:before hooks)))]
+                      (if @signal
+                        (settle-cancelled!)
+                        (let [call (assoc call :args (if (contains? prep :args) (:args prep) args))
+                              executed (if (:block prep)
+                                         (:block prep)
+                                         (invoke/execute-tool-call
+                                          execute-tool
+                                          (assoc call
+                                                 :signal signal
+                                                 :ctx ctx
+                                                 :on-update on-update
+                                                 :tools surface
+                                                 :bindings {:signal signal
+                                                            :session-env-fn session-env-fn
+                                                            :cwd cwd})))
+                              result (-> (invoke/finish-tool-call
+                                          (assoc call :after-hook (:after hooks))
+                                          executed)
+                                         (dissoc :terminate))]
+                          (try
+                            (swap! trace assoc-in [idx]
+                                   (cond-> {:tool name
+                                            :ok (not (:is-error result))
+                                            :duration-ms (- (System/currentTimeMillis) started)}
+                                     (:is-error result)
+                                     (assoc :error (preview (:content result)))))
+                            (catch Throwable _ nil))
+                          (deliver p result)))))))
         p))))
 
 (defn- bridge-fns [opts]
@@ -797,6 +809,13 @@
         cwd (tool-util/cwd)
         session-env-fn bash-tool/*session-env-fn*
         hooks *tool-hooks*
+        assistant-message *assistant-message*
+        live? (atom true)
+        ;; a queued call still runs after the script returned
+        ;; (fire-and-forget) — its UI updates must not: the outer tool call is
+        ;; over, the transcript already has its result
+        on-update (when on-update
+                    (fn [evt] (when @live? (on-update evt))))
         enabled (when *enabled-tools-fn* (*enabled-tools-fn*))
         surface (active-surface select-tools
                                 (get-all-tools)
@@ -816,6 +835,7 @@
                             :cwd cwd
                             :session-env-fn session-env-fn
                             :hooks hooks
+                            :assistant-message assistant-message
                             :on-update on-update
                             :trace trace})
         fork (sci-loader/sci-loader
@@ -832,10 +852,12 @@
       ;; the interpreter notices the abort on its next step; a host-blocked
       ;; script does not, and is abandoned here
       (deref done interrupt-grace-ms false))
-    (let [finished? (realized? done)
-          snapshot (finish-capture! capture finished?)
-          res (or @result {:status (or @abort :timeout)})]
-      (assemble-result res snapshot timeout-ms trace @abort))))
+    (try
+      (let [finished? (realized? done)
+            snapshot (finish-capture! capture finished?)
+            res (or @result {:status (or @abort :timeout)})]
+        (assemble-result res snapshot timeout-ms trace @abort))
+      (finally (reset! live? false)))))
 
 ;; ─── Tool record ──────────────────────────────────────────────────────────
 

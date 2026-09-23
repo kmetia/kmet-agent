@@ -8,6 +8,7 @@
             [kmet.libs.aws-sigv4 :as aws-sigv4]
             [kmet.ai.google-adc :as google-adc]
             [kmet.libs.usage :as usage]
+            [kmet.libs.json :as json]
             [kmet.app.tools.core :as tools]
             [kmet.app.tools.util :as tool-util]
             [kmet.app.skills :as skills]
@@ -2047,6 +2048,96 @@
     (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
       (t/is (true? (:is-error end)))
       (t/is (.contains (:content (:result end)) "after-tool-call hook error")))))
+
+(t/deftest test-loop-before-tool-call-rewrites-args
+  (let [seen (atom [])
+        agent (loop/make-agent-state)]
+    (reset! (:before-tool-call agent)
+            (fn [_] {:args {:command "rewritten"}}))
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message (stub-llm-tool-then-text (atom 0))
+                  tools/execute-tool (fn [_ args _]
+                                       (swap! seen conj args)
+                                       {:content "ok" :is-error false})]
+      @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+    (t/is (= [{:command "rewritten"}] @seen)
+          "the parallel path executes with the rewritten args")))
+
+(t/deftest test-loop-before-tool-call-rewrites-args-sequential
+  ;; the sequential path honors the rewrite too (it ignored one before the
+  ;; pipeline refactor)
+  (let [seen (atom nil)
+        calls (atom 0)]
+    (tools/register-tool!
+     (tools/make-tool :name "rewrite-seq-tool" :label "Seq"
+                      :description "sequential rewrite test tool"
+                      :parameters {:x (tools/param :x :string "x")}
+                      :execute (fn [_] {:content "seq" :is-error false})
+                      :execution-mode :sequential))
+    (try
+      (let [agent (loop/make-agent-state)]
+        (reset! (:before-tool-call agent)
+                (fn [_] {:args {:x "rewritten"}}))
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [opts]
+                        (future
+                          (if (= 1 (swap! calls inc))
+                            (do (when-let [on-tc (:on-tool-call opts)]
+                                  (on-tc {:id "t1" :name "rewrite-seq-tool"
+                                          :arguments "{}" :index 0}))
+                                (when-let [on-done (:on-done opts)]
+                                  (on-done :tool-calls)))
+                            (do (when-let [on-text (:on-text opts)]
+                                  (on-text "ok"))
+                                (when-let [on-done (:on-done opts)]
+                                  (on-done :stop))))
+                          :done))
+                      tools/execute-tool (fn [_ args _]
+                                           (reset! seen args)
+                                           {:content "seq" :is-error false})]
+          @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])})))
+      (t/is (= {:x "rewritten"} @seen))
+      (finally
+        (tools/unregister-tool! "rewrite-seq-tool")))))
+
+(t/deftest test-loop-scripted-calls-fire-tool-hooks
+  ;; the run's agent-level hooks reach calls made inside a script: the loop
+  ;; binds script/*tool-hooks* and script/*assistant-message* around the batch,
+  ;; the bridge captures them on the tool thread and hands them to its pool
+  ;; workers (raw threads convey no bindings)
+  (let [hook-calls (atom [])
+        calls (atom 0)
+        agent (loop/make-agent-state)]
+    (reset! (:before-tool-call agent)
+            (fn [ctx] (swap! hook-calls conj ctx) nil))
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message
+                  (fn [opts]
+                    (future
+                      (if (= 1 (swap! calls inc))
+                        (do (when-let [on-tc (:on-tool-call opts)]
+                              (on-tc {:id "tc1" :name "script"
+                                      :arguments (json/generate-string
+                                                  {:code "(deref (tools/call \"read\" {:path \"deps.edn\"}))"})
+                                      :index 0}))
+                            (when-let [on-done (:on-done opts)]
+                              (on-done :tool-calls)))
+                        (do (when-let [on-text (:on-text opts)]
+                              (on-text "ok"))
+                            (when-let [on-done (:on-done opts)]
+                              (on-done :stop))))
+                      :done))]
+      @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+    (t/is (some #(= "read" (:tool-name %)) @hook-calls)
+          "the scripted read call fired the run's before-tool-call hook")
+    (t/is (some #(str/starts-with? (str (:tool-call-id %)) "script-") @hook-calls)
+          "the inner call carries a synthetic script-N tool-call-id")
+    (t/is (some #(= "tc1" (:tool-call-id %)) @hook-calls)
+          "the outer script call went through the same hook")
+    (t/is (= (:assistant-message (first (filter #(= "script" (:tool-name %)) @hook-calls)))
+             (:assistant-message (first (filter #(= "read" (:tool-name %)) @hook-calls))))
+          "the inner call carries the same assistant message as the outer call")))
 
 ;; ─── Auto-retry ───────────────────────────────────────────────────────────
 

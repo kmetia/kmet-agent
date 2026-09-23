@@ -750,8 +750,8 @@ Scripted tool calls run through the same hooks: a `script` call's inner
 `tools/call` (and the `tools/bash`/`read`/`write`/`edit` sugars) fires the
 before hook (block with `{:block true :reason ...}`, or rewrite with
 `{:args ...}`) and the after hook (override `:content` / `:is-error`). Two
-caveats: an inner call carries a synthetic `:tool-call-id` and no
-`:assistant-message`, and a blocked call's `:terminate` hint is ignored
+caveats: an inner call carries a synthetic `:tool-call-id` (but the batch's
+assistant message), and a blocked call's `:terminate` hint is ignored
 (there is no batch). Inner calls still produce no tool-execution events and
 no transcript/session entries. A per-tool hook is policy, not a sandbox —
 the script sandbox can also shell out through `babashka.process`

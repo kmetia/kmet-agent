@@ -260,6 +260,24 @@
             (Thread/sleep 400)
             (t/is (zero? @late-ran))))))))
 
+(t/deftest ^:slow test-script-timeout-kills-inner-bash
+  ;; the combined signal reaches the bash tool's poller, so the inner process
+  ;; tree dies at the script's timeout: the child's side effect never lands
+  ;; (a 2s sleep would beat the marker check below if it survived)
+  (let [dir (temp-dir)
+        marker (str dir "/marker")]
+    (try
+      (let [r (run (str "(deref (tools/call \"bash\" {:command "
+                        (pr-str (str "sleep 2; touch '" marker "'"))
+                        "}))")
+                   {:timeoutMs 400})]
+        (t/is (:is-error r))
+        (t/is (= :timeout (get-in r [:details :error])))
+        (Thread/sleep 2500)
+        (t/is (not (fs/exists? marker))
+              "the killed child never touched the marker"))
+      (finally (fs/delete-tree dir)))))
+
 (t/deftest test-script-gate
   (let [r (run "@(tools/call \"no-such-tool\" {})")]
     (t/is (not (:is-error r)))
@@ -480,3 +498,45 @@
     (t/is (:is-error r) (:content r))
     (t/is (= :output-limit (get-in r [:details :error])))
     (t/is (str/includes? (:content r) "exceeded"))))
+(t/deftest ^:slow test-script-abort-during-slow-before-hook-skips-call
+  ;; the admission check runs again after the before hook: a hook that ran
+  ;; past the abort cannot let its call start
+  (let [ran (atom false)]
+    (with-custom-tool {:name "script-test-slow-hook-target"
+                       :label "Target"
+                       :description "Records execution"
+                       :execute (fn [_]
+                                  (reset! ran true)
+                                  {:content "ran"})}
+      (fn []
+        (binding [script/*tool-hooks*
+                  {:before (fn [_] (Thread/sleep 800) nil)}]
+          (let [r (run "(deref (tools/call \"script-test-slow-hook-target\" {}))"
+                       {:timeoutMs 200})]
+            (t/is (:is-error r))
+            (t/is (= :timeout (get-in r [:details :error])))))))
+    (t/is (false? @ran)
+          "the call whose hook outlived the abort never executed")))
+
+(t/deftest ^:slow test-script-late-inner-updates-dropped
+  ;; a fire-and-forget call that starts after the script returned still runs,
+  ;; but its UI updates are dropped — the outer tool call is over
+  (let [updates (atom 0)]
+    (with-custom-tool {:name "script-test-late-updates"
+                       :label "Late updates"
+                       :description "Streams partials after a delay"
+                       :contextual? true
+                       :execute (fn [_ on-update _signal _ctx]
+                                  (dotimes [_ 3]
+                                    (Thread/sleep 100)
+                                    (when on-update
+                                      (on-update {:content "partial" :is-partial true})))
+                                  {:content "done"})}
+      (fn []
+        (let [r (run "(tools/call \"script-test-late-updates\" {}) nil"
+                     {:timeoutMs 5000}
+                     (fn [_] (swap! updates inc)))]
+          (t/is (not (:is-error r)))
+          (Thread/sleep 600)
+          (t/is (zero? @updates)
+                "updates from a call that began after the result are dropped"))))))

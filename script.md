@@ -12,7 +12,7 @@ result-token attribution — so the build/no-build decision can be made on data.
 
 Status: **T1, T2 and T4 implemented** in this tree —
 `src/kmet/app/tools/script.cljc`, a builtin (read/write/edit/bash + `script`),
-`kmet.app.test-script` (38 tests: 32 fast + 6 `^:slow`, smoke-verified on
+`kmet.app.test-script` (41 tests: 32 fast + 9 `^:slow`, smoke-verified on
 babashka and jolt); the mcp-adapter's `mcpScript` tool and `bb`-subprocess
 runtime retired into the same engine (its catalog joins the sandbox as a
 contributed tool source — T2 below). T4 shares the invocation pipeline with
@@ -365,8 +365,9 @@ Clojure sandbox reports Clojure data; T2 formats MCP envelopes itself).
 - **Tool-call hooks (T4).** Inner calls run through the run's agent-level
   before/after hooks (`script/*tool-hooks*`): block/arg rewrite and
   `:content`/`:is-error` overrides apply, for blocked calls too. An inner
-  call has a synthetic `:tool-call-id`, no `:assistant-message`, and its
-  `:terminate` hint is dropped; it still emits no tool-execution event or
+  call has a synthetic `:tool-call-id` but carries the batch's
+  `:assistant-message` (`script/*assistant-message*`), and its `:terminate`
+  hint is dropped; it still emits no tool-execution event or
   transcript/session entry. A per-tool hook is policy, not a sandbox (the
   script can shell out via `babashka.process`), so gating the outer `script`
   call is the only real block.
@@ -471,13 +472,14 @@ additions; pi has no parallel-tool-call guidance.
   and the run `:signal` reaches the inner call so Escape cancels it. Scripts
   fan out freely — one `script` call can run N inner calls in parallel.
 - **Hooks (T4).** Script-inner calls run through the *same* agent-level
-  before/after hooks as the loop's batches (`script/*tool-hooks*`, bound in
-  `run-agent-turn` as thunks over `:before-tool-call`/`:after-tool-call`):
+  before/after hooks as the loop's batches (`script/*tool-hooks*` and the
+  per-batch `script/*assistant-message*`, bound in `run-agent-turn` and
+  `execute-tool-calls!`):
   the before hook can block (the call settles with its reason and never
   executes) or rewrite args, the after hook can override `:content` /
   `:is-error` — for blocked calls too, loop parity. Caveats: an inner call
-  carries a synthetic `:tool-call-id` and no `:assistant-message`, its
-  `:terminate` hint is ignored (there is no batch), and it still produces no
+  carries a synthetic `:tool-call-id`, its `:terminate` hint is ignored
+  (there is no batch), and it still produces no
   tool-execution event, transcript or session entry. Mutation tools ride the
   same bridge; the callable set is every active tool, not a read-only subset.
   A per-tool gate is policy, not a sandbox — the script can also shell out
@@ -591,8 +593,8 @@ The probes that found the capture bugs left a set of deliberate behaviors:
 ## T4 — shared invocation core, hooks, cancellation (landed)
 
 The bridge no longer owns a private execution path. `kmet.app.tools.invoke`
-(`prepare-tool-call` / `execute-tool-call` / `finish-tool-call` / the
-`run-tool-call` convenience) is the one pipeline both callers use:
+(`prepare-tool-call` / `execute-tool-call` / `finish-tool-call`) is the one
+pipeline both callers use:
 
 - **Loop** (`execute-tool-calls-parallel!` / `-sequential!`) splits the
   phases the way it always ran them — prepare sequentially with the start
@@ -608,21 +610,28 @@ The bridge no longer owns a private execution path. `kmet.app.tools.invoke`
 - **Hooks reach the script** through `script/*tool-hooks*`, bound in
   `run-agent-turn` as thunks over the agent's
   `:before-tool-call`/`:after-tool-call` (the mode-built chains over
-  `extensions/get-tool-call-hooks`/`get-tool-result-hooks`). An inner call
-  carries a synthetic `:tool-call-id` (`script-<n>`) and no
-  `:assistant-message`; it still emits no tool-execution event and no
-  transcript/session entry — gate the `script` tool itself for policy (a
-  per-tool gate is not a sandbox: the script can shell out via
-  `babashka.process`).
-- **Cancellation**: the bridge's per-call signal is a read-only combined
-  derefable (`combined-signal`), true when the run signal (Escape) fired or
-  the script aborted (timeout/output-limit). It reaches in-flight tools as
+  `extensions/get-tool-call-hooks`/`get-tool-result-hooks`), and the batch's
+  assistant message through `script/*assistant-message*`, bound around
+  `execute-tool-calls!` — so an inner call's hook payload matches the outer
+  script call's, except for the synthetic `:tool-call-id` (`script-<n>`).
+  Both are captured on the tool thread and passed to the pool workers by
+  value (raw worker threads convey no bindings). An inner call still emits
+  no tool-execution event and no transcript/session entry — gate the
+  `script` tool itself for policy (a per-tool gate is not a sandbox: the
+  script can shell out via `babashka.process`).
+- **Cancellation**: the bridge's per-call signal is a read-only OR-view
+  (`kmet.libs.concurrent/or-signal` — the same helper behind the loop's
+  provider-stream guard), true when the run signal (Escape) fired or the
+  script aborted (timeout/output-limit). It reaches in-flight tools as
   `*cancel-signal*`/`:signal` (bash's poller kills the process tree) and is
-  checked by a pool task before it starts: a queued call after an abort
+  checked twice by a pool task — at admission and again after its before
+  hook, so a slow hook cannot start a call past the abort: such a call
   settles as `{:is-error true :content "Script cancelled before …"}` and
   never executes (the trace records `:error "cancelled"`). A normally
   finished script leaves the signal false, so its queue still drains
-  (underefed `tools/call` keeps its fire-and-forget meaning). Per-tool
+  (underefed `tools/call` keeps its fire-and-forget meaning) — only its
+  `on-update` stream stops with the result, so a late-started call cannot
+  emit progress for a tool call the loop already finished. Per-tool
   coverage stays cooperative — MCP calls have no signal plumbing, and
   host-blocked code remains unkillable until T3's process isolation.
 - **Surfaces** unify through `registry/select-tools` (ALL ∩ ENABLED, plus
@@ -640,17 +649,23 @@ The bridge no longer owns a private execution path. `kmet.app.tools.invoke`
   babashka (the macro expands to private `sci.impl` fns babashka's nested SCI
   cannot resolve).
 - `src/kmet/app/tools/invoke.clj` — the T4 shared invocation pipeline
-  (`prepare-tool-call` / `execute-tool-call` / `finish-tool-call` /
-  `run-tool-call`); `test/kmet/app/test_tools.clj` covers its hook/binding
-  semantics.
+  (`prepare-tool-call` / `execute-tool-call` / `finish-tool-call`);
+  `test/kmet/app/test_tools.clj` covers its hook/binding semantics, and
+  `test/kmet/app/test_loop.clj` the loop side (block, arg rewrite in both
+  batch modes, after-hook overrides, and hook propagation into a scripted
+  call).
+- `src/kmet/libs/concurrent.clj` — `or-signal` (the read-only OR-view of
+  cancel signals used by the script bridge and the loop's provider guard)
+  next to the extension `spawn` helper.
 - `src/kmet/app/tools/core.clj`, `src/kmet/app/tools/registry.clj` —
   `execute-tool` (the bridge seam), `select-tools` (the shared surface
   filter), `built-in-tools`, `get-all-tools`, `get-tool`,
   `tool-registry-generation` (the base-cache generation counter).
 - `src/kmet/app/loop.clj` — run-level bindings (incl.
-  `script/*enabled-tools-fn*` and `script/*tool-hooks*`) + `active-tools` /
-  `set-active-tools!`; `execute-tool-calls-*` (what the bridge must not route
-  through); the `--debug` per-tool report at agent end.
+  `script/*enabled-tools-fn*`, `script/*tool-hooks*` and the per-batch
+  `script/*assistant-message*`) + `active-tools` / `set-active-tools!`;
+  `execute-tool-calls-*` (what the bridge must not route through); the
+  `--debug` per-tool report at agent end.
 - `src/kmet/app/extensions.cljc` — `shared-context` / `shared-var-map` /
   `build-context-namespaces` (SCI injection pattern), `build-extension-context`.
 - `src/kmet/extension.clj` — tool registration (`register-tool!`,

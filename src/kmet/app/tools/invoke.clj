@@ -5,9 +5,9 @@
      prepare-tool-call  — the before hook (pi: beforeToolCall): pass, rewrite
                           args, or block the call with a result
      execute-tool-call  — execute through execute-tool under the caller's
-                          worker bindings; exceptions become error results
+                          worker bindings; a throwing tool becomes an error
+                          result
      finish-tool-call   — the after hook (pi: afterToolCall): result overrides
-     run-tool-call      — execute + finish (the script bridge's per-call path)
 
    Each caller keeps its own concurrency and bookkeeping: the loop emits
    events and appends context/session entries (and splits prepare from
@@ -20,7 +20,7 @@
   (:require [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.util :as tool-util]))
 
-(defn blocked-result
+(defn- blocked-result
   "The canonical result of a blocked call (pi: beforeToolCall :block). The
    hook's :terminate rides through — the loop's batch handling reads it; the
    script bridge drops it (there is no batch)."
@@ -29,11 +29,11 @@
            :is-error true}
     (:terminate hook-result) (assoc :terminate true)))
 
-(defn hook-payload
-  "The context a tool hook receives (pi: beforeToolCall/afterToolCall). The
-   script bridge has no wire id for an inner call and no per-call assistant
-   message: TOOL-CALL-ID is synthetic there and ASSISTANT-MESSAGE may be
-   nil, so both keys are omitted when absent."
+(defn- hook-payload
+  "The context a tool hook receives (pi: beforeToolCall/afterToolCall). Keys
+   absent from CALL are omitted: TOOL-CALL-ID is synthetic for a scripted
+   inner call, ASSISTANT-MESSAGE is nil outside the loop's batch (extension
+   code calling the tool directly)."
   [{:keys [tool-name args tool-call-id assistant-message]}]
   (cond-> {:tool-name tool-name :args args}
     tool-call-id (assoc :tool-call-id tool-call-id)
@@ -61,7 +61,10 @@
    around execution ({:signal :session-env-fn :cwd}) — a raw worker thread
    conveys no dynamic bindings, which is the script bridge's pool-worker
    case; the loop's futures already convey the run-wide ones. Returns the
-   result map; never throws — a tool exception becomes an error result."
+   result map; never throws — a throwing tool becomes an error result.
+   Catches Throwable, not just Exception: a pool worker must settle its
+   promise whatever the tool throws, and the loop gets the same per-call
+   isolation (a tool Error cannot take the run down)."
   [execute-tool {:keys [tool-name args signal ctx on-update tools bindings]}]
   (let [execute #(execute-tool tool-name args
                                (cond-> {}
@@ -98,9 +101,3 @@
         {:content (str "after-tool-call hook error: " (ex-message e))
          :is-error true}))
     result))
-
-(defn run-tool-call
-  "execute-tool-call + finish-tool-call — the script bridge's whole per-call
-   pipeline (its before hook runs through prepare-tool-call first)."
-  [execute-tool call]
-  (finish-tool-call call (execute-tool-call execute-tool call)))
