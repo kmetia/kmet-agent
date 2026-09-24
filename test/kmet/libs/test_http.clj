@@ -269,7 +269,7 @@
     (t/is (= :transport-error (:type (ex-data e))))
     (t/is (str/includes? (ex-message e) "network error"))))
 
-(deftest-transports test-timeout-ms
+(deftest-transports ^:slow test-timeout-ms
   (let [[base close] (start-server
                       (fn [s _ _ _]
                         (Thread/sleep 5000)

@@ -142,22 +142,27 @@
        (is (re-find #"-32000" (ex-message e)))))))
 
 (deftest out-of-order-responses-correlate-by-id
-  (run-with-conn
-   :content-length
-   (let [received (atom [])]
-     (fn [{:keys [id]} send!]
+  (let [received (atom [])
+        a-landed (promise)]
+    (run-with-conn
+     :content-length
+     (fn [{:keys [id method]} send!]
        (swap! received conj {:id id :send! send!})
+       (when (= "a" method)
+         (deliver a-landed true))
        ;; once both requests landed, answer them in reverse order
        (when (= 2 (count @received))
          (let [[a b] @received]
            ((:send! b) {:jsonrpc "2.0" :id (:id b) :result {:which "b"}})
-           ((:send! a) {:jsonrpc "2.0" :id (:id a) :result {:which "a"}})))))
-   (fn [conn]
-     (let [pa (future (jsonrpc/request! conn "a" {} {:timeout-ms 3000}))
-           pb (do (Thread/sleep 10)
-                  (future (jsonrpc/request! conn "b" {} {:timeout-ms 3000})))]
-       (is (= {:which "a"} (deref pa 5000 ::timeout)))
-       (is (= {:which "b"} (deref pb 5000 ::timeout)))))))
+           ((:send! a) {:jsonrpc "2.0" :id (:id a) :result {:which "a"}}))))
+     (fn [conn]
+       (let [pa (future (jsonrpc/request! conn "a" {} {:timeout-ms 3000}))]
+         (is (true? (deref a-landed 2000 false)) "request A landed")
+         (let [pb (future (jsonrpc/request! conn "b" {} {:timeout-ms 3000}))
+               result-a (deref pa 5000 ::timeout)
+               result-b (deref pb 5000 ::timeout)]
+           (is (= {:which "a"} result-a))
+           (is (= {:which "b"} result-b))))))))
 
 (deftest stale-response-dropped-no-crash
   (run-with-conn
@@ -171,7 +176,8 @@
          "stale id-424242 reply ignored, matching id-1 delivered"))))
 
 (deftest notification-reaches-callback
-  (let [seen (atom [])]
+  (let [seen (atom [])
+        notified (promise)]
     (run-with-conn
      :content-length
      (fn [{:keys [id method]} send!]
@@ -179,10 +185,12 @@
          ;; push arrives before the reply; both cross the same pipe
          (send! {:jsonrpc "2.0" :method "upd" :params {:p 1}})
          (send! {:jsonrpc "2.0" :id id :result "done"})))
-     {:on-notification (fn [m] (swap! seen conj m))}
+     {:on-notification (fn [m]
+                         (swap! seen conj m)
+                         (deliver notified true))}
      (fn [conn]
        (is (= "done" (jsonrpc/request! conn "trigger" {} {:timeout-ms 2000})))
-       (Thread/sleep 100)
+       (is (= true (deref notified 2000 false)) "notification callback ran")
        (is (= [{:jsonrpc "2.0" :method "upd" :params {:p 1}}] @seen))))))
 
 ;; Server→client request handling is observed from the fake side: after the
@@ -193,6 +201,7 @@
    an ON-REQUEST handler installed on the client."
   [on-request]
   (let [reply (promise)
+        handled (promise)
         c2s (pipe-pair)
         s2c (pipe-pair)]
     (start-fake! (:in c2s) (:out s2c) :content-length
@@ -202,13 +211,17 @@
                      (do (send! {:jsonrpc "2.0" :id 900
                                  :method "workspace/configuration"
                                  :params {:items ["a"]}})
-                         (Thread/sleep 80)
+                         (deref handled 2000 :timeout)
                          (send! {:jsonrpc "2.0" :id id :result :done}))
 
                      (not method)
                      (deliver reply (dissoc msg :jsonrpc)))))
     (let [conn (jsonrpc/connect-streams
-                {:in (:in s2c) :out (:out c2s) :on-request on-request})]
+                {:in (:in s2c)
+                 :out (:out c2s)
+                 :on-request (fn [method params]
+                               (deliver handled true)
+                               (on-request method params))})]
       (try
         (jsonrpc/request! conn "trigger" {} {:timeout-ms 3000})
         (deref reply 2000 ::no-reply)
@@ -233,7 +246,7 @@
 
 ;; ─── Connection: lifecycle ───────────────────────────────────────────────
 
-(deftest timeout-vs-death-distinction
+(deftest ^:slow timeout-vs-death-distinction
   (run-with-conn
    :content-length
    (fn [_msg _send!] nil)
@@ -243,7 +256,7 @@
        (is (some? e))
        (is (= :kmet.libs.jsonrpc/timeout (:type (ex-data e))))))))
 
-(deftest eof-fails-pending-as-transport-dead-not-timeout
+(deftest ^:slow eof-fails-pending-as-transport-dead-not-timeout
   (let [c2s (pipe-pair)
         s2c (pipe-pair)
         conn (jsonrpc/connect-streams {:in (:in s2c) :out (:out c2s)})]
@@ -271,7 +284,7 @@
       (is (some? e))
       (is (= :kmet.libs.jsonrpc/transport-dead (:type (ex-data e)))))))
 
-(deftest last-used-bumps-on-traffic
+(deftest ^:slow last-used-bumps-on-traffic
   (run-with-conn
    :content-length
    (fn [{:keys [id]} send!] (send! {:jsonrpc "2.0" :id id :result nil}))
@@ -292,19 +305,26 @@
 (deftest graceful-close-sends-shutdown-then-exit-and-kills
   (let [frames (atom [])
         killed (atom false)
+        exit-seen (promise)
+        killed-seen (promise)
         c2s (pipe-pair)
         s2c (pipe-pair)]
     (start-fake! (:in c2s) (:out s2c) :content-length
                  (fn [{:keys [id method]} send!]
                    (swap! frames conj method)
                    (when (= method "shutdown")
-                     (send! {:jsonrpc "2.0" :id id :result nil}))))
+                     (send! {:jsonrpc "2.0" :id id :result nil}))
+                   (when (= method "exit")
+                     (deliver exit-seen true))))
     (let [conn (jsonrpc/connect-streams
                 {:in (:in s2c) :out (:out c2s)
-                 :kill-fn (fn [] (reset! killed true))})]
+                 :kill-fn (fn []
+                            (reset! killed true)
+                            (deliver killed-seen true))})]
       (jsonrpc/close! conn {:graceful {:request "shutdown"
                                        :notification "exit"}})
-      (Thread/sleep 100)
+      (is (= true (deref exit-seen 2000 false)) "exit notification sent")
+      (is (= true (deref killed-seen 2000 false)) "kill hook ran")
       (is (= ["shutdown" "exit"] @frames)
           "shutdown request then exit notification, in order")
       (is (true? @killed) "kill-fn invoked after the dance")

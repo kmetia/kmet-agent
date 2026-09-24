@@ -340,20 +340,23 @@
 
 (deftest test-concurrent-same-key-loads-once
   (let [inits (atom 0)
-        go (promise)
+        entered (promise)
+        release (promise)
         l (ldr/make-loader
            {:locate-fn (fn [_] [{:kind :ns :file "memory://x"}])
             :ns-load-fn (fn [_ _ _]
                           (swap! inits inc)
-                          (deliver go true)
-                          (Thread/sleep 50)
+                          (deliver entered true)
+                          (deref release 5000 :timeout)
                           {:namespace 'x})})
         h1 (atom nil)
         h2 (atom nil)
         t1 (Thread. #(reset! h1 (ldr/load l (req :ns "x"))))
-        t2 (Thread. #(do (deref go 5000 nil) (reset! h2 (ldr/load l (req :ns "x")))))]
+        t2 (Thread. #(do (deref entered 5000 nil) (reset! h2 (ldr/load l (req :ns "x")))))]
     (.start t1)
     (.start t2)
+    (is (true? (deref entered 5000 false)) "loader initialization started")
+    (deliver release true)
     (.join t1 5000)
     (.join t2 5000)
     (is (= 1 @inits) "the in-flight claim dedupes initialization")

@@ -46,6 +46,17 @@
                                      (fn [_])  ;; show-error
                                      (fn [] (swap! changed inc)))}))
 
+(defn- with-immediate-theme-queries
+  "Run F with terminal-theme queries already answered. These are controller
+   unit tests; the terminal query transport has its own timeout tests."
+  [f]
+  (with-redefs [core/tui-query-terminal-background-color
+                (fn [_ & _]
+                  (doto (promise) (deliver {:r 0x1f :g 0x1f :b 0x1f})))
+                core/tui-query-terminal-color-scheme
+                (fn [_ & _] (doto (promise) (deliver :light)))]
+    (f)))
+
 (t/deftest test-constructor-applies-config-theme
   (t/testing "the :theme config setting is applied at construction"
     (let [{:keys [ctrl]} (make-ctrl {:theme "light"})]
@@ -108,13 +119,15 @@
       (t/is (= "light" (tc/get-theme-selection ctrl)))
       (t/is (= "light" (tc/get-active-theme-name ctrl))))))
 
-(t/deftest ^:slow test-set-theme-setting-automatic
+(t/deftest test-set-theme-setting-automatic
   (t/testing "an automatic setting is recorded and enables sync"
-    (let [{:keys [ctrl]} (make-ctrl {:theme "dark"})]
-      (tc/set-theme-setting! ctrl "light/dark")
-      (t/is (= "light/dark" (tc/get-theme-selection ctrl)))
-      (t/is (true? @(:auto-sync-enabled-atom ctrl)))
-      (t/is (contains? #{"light" "dark"} (tc/get-active-theme-name ctrl))))))
+    (with-immediate-theme-queries
+      (fn []
+        (let [{:keys [ctrl]} (make-ctrl {:theme "dark"})]
+          (tc/set-theme-setting! ctrl "light/dark")
+          (t/is (= "light/dark" (tc/get-theme-selection ctrl)))
+          (t/is (true? @(:auto-sync-enabled-atom ctrl)))
+          (t/is (contains? #{"light" "dark"} (tc/get-active-theme-name ctrl))))))))
 
 (t/deftest test-get-terminal-theme
   (t/testing "the env-detected terminal theme is exposed"
@@ -145,17 +158,19 @@
       (t/is (false? @(:force-redraw? tui)) "no forced redraw")
       (t/is (zero? @changed) "no on-changed notification"))))
 
-(t/deftest ^:slow test-apply-from-settings-detected-noop-does-not-force
+(t/deftest test-apply-from-settings-detected-noop-does-not-force
   (t/testing "the no-setting detection path is a no-op when the detected theme
             matches the env-detected theme the constructor applied"
-    (let [{:keys [ctrl tui changed]} (make-ctrl {})]
-      (reset! changed 0)
-      (reset! (:force-redraw? tui) false)
-      (tc/apply-from-settings! ctrl)
-      (t/is (contains? #{"light" "dark"} (tc/get-active-theme-name ctrl)))
-      (t/is (false? @(:force-redraw? tui))
-            "the second startup paint (the session-load double redraw) is gone")
-      (t/is (zero? @changed) "no on-changed notification"))))
+    (with-immediate-theme-queries
+      (fn []
+        (let [{:keys [ctrl tui changed]} (make-ctrl {})]
+          (reset! changed 0)
+          (reset! (:force-redraw? tui) false)
+          (tc/apply-from-settings! ctrl)
+          (t/is (contains? #{"light" "dark"} (tc/get-active-theme-name ctrl)))
+          (t/is (false? @(:force-redraw? tui))
+                "the second startup paint (the session-load double redraw) is gone")
+          (t/is (zero? @changed) "no on-changed notification"))))))
 
 (t/deftest test-apply-theme-name-keyword-detection
   (t/testing "the detection path yields :light/:dark keywords — they must resolve to the
@@ -172,28 +187,31 @@
               "a real switch notifies twice — pi parity: setTheme fires the
               onThemeChange callback and applyThemeName fires notifyChanged")))))
 
-(t/deftest ^:slow test-apply-from-settings-auto
+(t/deftest test-apply-from-settings-auto
   (t/testing "an auto setting enables auto-sync and applies one side; the
             notification sequence is written (CSI ? 2031 h)"
-    (let [{:keys [tui ctrl writes]} (make-ctrl {:theme "light/dark"})]
-      ;; notifications are written only while the TUI is running
-      (reset! (:running? tui) true)
-      (tc/apply-from-settings! ctrl)
-      ;; detection falls back to the environment on the stub (no OSC 11
-      ;; response) — one of the two sides must be active
-      (t/is (contains? #{"light" "dark"} (tc/get-active-theme-name ctrl)))
-      (t/is (true? @(:auto-sync-enabled-atom ctrl)) "auto-sync enabled")
-      (t/is (some #(str/includes? % "\u001b[?2031h") @writes)
-            "color-scheme notifications requested"))))
+    (with-immediate-theme-queries
+      (fn []
+        (let [{:keys [tui ctrl writes]} (make-ctrl {:theme "light/dark"})]
+          ;; notifications are written only while the TUI is running
+          (reset! (:running? tui) true)
+          (tc/apply-from-settings! ctrl)
+          ;; one side is active
+          (t/is (contains? #{"light" "dark"} (tc/get-active-theme-name ctrl)))
+          (t/is (true? @(:auto-sync-enabled-atom ctrl)) "auto-sync enabled")
+          (t/is (some #(str/includes? % "\u001b[?2031h") @writes)
+                "color-scheme notifications requested"))))))
 
-(t/deftest ^:slow test-auto-sync-toggles-on-scheme-report
+(t/deftest test-auto-sync-toggles-on-scheme-report
   (t/testing "a color scheme report switches themes while auto-sync is on"
-    (let [{:keys [ctrl]} (make-ctrl {:theme "light/dark"})]
-      (tc/apply-from-settings! ctrl)
-      (let [before (tc/get-active-theme-name ctrl)
-            _ (tc/apply-terminal-theme! ctrl (if (= before "light") :dark :light))]
-        (t/is (not= before (tc/get-active-theme-name ctrl))
-              "the other side of the auto setting becomes active"))))
+    (with-immediate-theme-queries
+      (fn []
+        (let [{:keys [ctrl]} (make-ctrl {:theme "light/dark"})]
+          (tc/apply-from-settings! ctrl)
+          (let [before (tc/get-active-theme-name ctrl)
+                _ (tc/apply-terminal-theme! ctrl (if (= before "light") :dark :light))]
+            (t/is (not= before (tc/get-active-theme-name ctrl))
+                  "the other side of the auto setting becomes active"))))))
   (t/testing "reports are ignored while auto-sync is off"
     (let [{:keys [ctrl]} (make-ctrl {:theme "dark"})]
       (tc/apply-from-settings! ctrl)

@@ -650,17 +650,19 @@
 
 ;; ─── Regression: run-agent-turn signals cleanup ─────────────────────────
 
-(t/deftest ^:slow test-loop-run-agent-turn-resets-signal
+(t/deftest test-loop-run-agent-turn-resets-signal
   (let [agent (loop/make-agent-state)]
     (reset! (:signal agent) true)
     (reset! (:status agent) :thinking)
-    ;; run with no API key — should exercire error path
-    (let [errors (atom [])]
+    ;; run with no API key — should exercise the error path
+    (let [errors (atom [])
+          done (promise)]
       (loop/run-agent-turn agent
                            {:message "test"
-                            :on-error (fn [e] (swap! errors conj e))})
-      (Thread/sleep 200)
-      ;; signal should have been reset by run-agent-turn
+                            :on-error (fn [e]
+                                        (swap! errors conj e)
+                                        (deliver done true))})
+      (t/is (true? (deref done 2000 false)) "error callback fires")
       (t/is (false? @(:signal agent)) "Signal reset at start of turn")
       (t/is (pos? (count @errors)) "Error callback called")
       (t/is (.contains (first @errors) "No API key") "Error message is about API key"))))
@@ -676,13 +678,14 @@
     (deref done 2000 :timeout)
     (t/is (false? @(:signal agent)) "Signal should be false after turn ends")))
 
-(t/deftest ^:slow test-loop-status-after-error
-  (let [agent (loop/make-agent-state)]
+(t/deftest test-loop-status-after-error
+  (let [agent (loop/make-agent-state)
+        done (promise)]
     (reset! (:status agent) :idle)
     (loop/run-agent-turn agent
                          {:message "hi"
-                          :on-error (fn [_])})
-    (Thread/sleep 200)
+                          :on-error (fn [_] (deliver done true))})
+    (t/is (true? (deref done 2000 false)) "error callback fires")
     (t/is (= :idle @(:status agent)) "Status should be idle after error turn")
     (t/is (false? @(:signal agent)) "Signal should be false after error turn")))
 
@@ -743,7 +746,7 @@
         (t/is (= "hello" (:content (:delta mu))) "delta content should carry the text")))
     (t/is (false? @(:signal agent)) "Signal should be false after turn")))
 
-(t/deftest ^:slow test-loop-tool-execution-events
+(t/deftest test-loop-tool-execution-events
   (let [events (atom [])
         call-count (atom 0)
         agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))]
@@ -763,14 +766,11 @@
                               (on-done :stop))))
                       :done))
                   tools/execute-tool
-                  ;; Streaming tool: emits one partial update via on-update
-                  ;; (live output), then completes after 250ms. P4 contract:
-                  ;; opts map {:on-update .. :signal .. :ctx ..} (pi:
-                  ;; executeTool passes signal/onUpdate/ctx unconditionally)
+                  ;; P4 contract: opts map {:on-update .. :signal .. :ctx ..}
+                  ;; (pi: executeTool passes signal/onUpdate/ctx unconditionally).
                   (fn [_ _ opts]
                     (when-let [on-update (:on-update opts)]
                       (on-update {:content "partial output"}))
-                    (Thread/sleep 250)
                     {:content "ok" :is-error false})]
       ;; deref inside with-redefs keeps the rebinding until the turn completes
       @(loop/run-agent-turn agent
@@ -790,7 +790,7 @@
             end (first (filter #(= :tool-execution-end (:type %)) @events))]
         (t/is (= "tc1" (:tool-call-id start)) "start carries the tool call id")
         (t/is (= "bash" (:tool-name start)) "start carries the tool name")
-        (t/is (= "tc1" (:tool-call-id end)) "end carries the tool call id")
+        (t/is (= "tc1" (:tool-call-id end)) "end carries the tool id")
         (t/is (= "ok" (:content (:result end))) "end carries the result")
         (t/is (false? (:is-error end)) "end carries the error flag"))
       ;; agent-end includes the new messages from this loop
@@ -1341,46 +1341,41 @@
 
 ;; ─── Cancellation ─────────────────────────────────────────────────────────
 
-(t/deftest ^:slow test-loop-cancel-delivers-promise
+(t/deftest test-loop-cancel-delivers-promise
   (let [errors (atom [])
         dones (atom 0)
         events (atom [])
+        started (promise)
         agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message
-                  ;; hangs forever: on-done/on-error never fire
-                  (fn [_] (future (Thread/sleep 10000) :never))]
+                  ;; Signal entry, then leave the call unresolved. Only the
+                  ;; agent's cancel signal may settle it.
+                  (fn [_]
+                    (deliver started true)
+                    (promise))]
       (let [fut (loop/run-agent-turn agent
                                      {:message "hi"
                                       :on-done (fn [_] (swap! dones inc))
                                       :on-error (fn [e] (swap! errors conj e))})]
-        ;; wait until the LLM call is in flight
-        (loop []
-          (when (nil? @(:active-call agent))
-            (Thread/sleep 20)
-            (recur)))
-        (let [start (System/currentTimeMillis)]
-          (loop/cancel-turn agent)
-          ;; Bounded wait: a working cancel settles in ms; if the cancel
-          ;; delivery ever fails, fail promptly instead of stalling the
-          ;; suite for the 330s LLM deref deadline.
-          (deref fut 15000 :timeout)
-          (t/is (< (- (System/currentTimeMillis) start) 5000)
-                "run ends promptly after cancel (no 120s timeout wait)")
-          (t/is (empty? @errors) "no error callback on cancel")
-          (t/is (zero? @dones) "no done callback on cancel")
-          (t/is (= :idle @(:status agent)) "status idle after cancel")
-          ;; The cancelled call settles as a stopReason-aborted attempt
-          ;; (pi: an aborted partial persists to the session history)
-          (t/is (some #(and (= :message-end (:type %))
-                            (= :aborted (:stop-reason (:message %))))
-                      @events)
-                "cancel delivers an aborted :message-end")
-          (let [ae-idx (first (keep-indexed #(when (= :agent-end (:type %2)) %1) @events))
-                as-idx (first (keep-indexed #(when (= :agent-settled (:type %2)) %1) @events))]
-            (t/is (some? ae-idx) ":agent-end emitted on cancel")
-            (t/is (some? as-idx) ":agent-settled emitted on cancel")
-            (t/is (< ae-idx as-idx) ":agent-settled follows :agent-end on cancel")))))))
+        (t/is (true? (deref started 2000 false)) "the LLM call is in flight")
+        (loop/cancel-turn agent)
+        (t/is (not= ::timeout (deref fut 2000 ::timeout))
+              "run settles after cancel")
+        (t/is (empty? @errors) "no error callback on cancel")
+        (t/is (zero? @dones) "no done callback on cancel")
+        (t/is (= :idle @(:status agent)) "status idle after cancel")
+        ;; The cancelled call settles as a stopReason-aborted attempt
+        ;; (pi: an aborted partial persists to the session history)
+        (t/is (some #(and (= :message-end (:type %))
+                          (= :aborted (:stop-reason (:message %))))
+                    @events)
+              "cancel delivers an aborted :message-end")
+        (let [ae-idx (first (keep-indexed #(when (= :agent-end (:type %2)) %1) @events))
+              as-idx (first (keep-indexed #(when (= :agent-settled (:type %2)) %1) @events))]
+          (t/is (some? ae-idx) ":agent-end emitted on cancel")
+          (t/is (some? as-idx) ":agent-settled emitted on cancel")
+          (t/is (< ae-idx as-idx) ":agent-settled follows :agent-end on cancel"))))))
 
 ;; ─── Error events ─────────────────────────────────────────────────────────
 
@@ -1405,9 +1400,11 @@
       (t/is (some #{:agent-settled} types)
             ":agent-settled emitted after an errored run"))))
 
-(t/deftest ^:slow test-loop-cancel-during-tool-execution
+(t/deftest test-loop-cancel-during-tool-execution
   (let [errors (atom [])
         dones (atom 0)
+        started (promise)
+        release (promise)
         agent (loop/make-agent-state)]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message
@@ -1420,27 +1417,23 @@
                       :done))
                   tools/execute-tool
                   (fn [_ _ _]
-                    (Thread/sleep 2000)
+                    (deliver started true)
+                    (deref release 2000 :timeout)
                     {:content "ok" :is-error false})]
       (let [fut (loop/run-agent-turn agent
                                      {:message "hi"
                                       :on-done (fn [_] (swap! dones inc))
                                       :on-error (fn [e] (swap! errors conj e))})]
-        ;; wait until the tool is executing
-        (loop []
-          (when-not (= :executing @(:status agent))
-            (Thread/sleep 20)
-            (recur)))
-        (let [start (System/currentTimeMillis)]
-          (loop/cancel-turn agent)
-          (deref fut 15000 :timeout)
-          ;; Window 10s: cancel latency = time-to-tool-completion (~2s) +
-          ;; loop response; a broken cancel hangs to the 15s deref timeout.
-          (t/is (< (- (System/currentTimeMillis) start) 10000)
-                "run ends promptly after cancel during tool execution")
-          (t/is (empty? @errors) "no error callback on cancel")
-          (t/is (zero? @dones) "no done callback on cancel")
-          (t/is (= :idle @(:status agent)) "status idle after cancel"))))))
+        (t/is (true? (deref started 2000 false)) "the tool is executing")
+        (loop/cancel-turn agent)
+        ;; Let the stub return after cancellation. The bounded future wait
+        ;; still catches a loop that fails to observe the signal.
+        (deliver release true)
+        (t/is (not= ::timeout (deref fut 2000 ::timeout))
+              "run settles after cancellation during tool execution")
+        (t/is (empty? @errors) "no error callback on cancel")
+        (t/is (zero? @dones) "no done callback on cancel")
+        (t/is (= :idle @(:status agent)) "status idle after cancel")))))
 
 ;; ─── Retry classification ─────────────────────────────────────────────────
 
@@ -1669,7 +1662,6 @@
                       (when-let [on-thinking (:on-thinking opts)]
                         (dotimes [_ 4]
                           (on-thinking "Let me analyze this problem carefully. ")))
-                      (Thread/sleep 30)
                       (when-let [on-done (:on-done opts)]
                         (on-done :stop))
                       :done))]
@@ -2268,37 +2260,33 @@
                         (= "recovered" (get-in % [:content 0 :text])))
                   ctx)))))
 
-(t/deftest ^:slow test-loop-cancel-records-aborted-attempt
+(t/deftest test-loop-cancel-records-aborted-attempt
   ;; pi parity: an abort mid-stream finalizes the partial as a
   ;; stopReason-aborted assistant message persisted to the session (never
   ;; the live context) — history keeps what the model managed to say.
   (let [dir (str "target/test-loop-aborted-attempt-" (System/currentTimeMillis))
         events (atom [])
+        started (promise)
         sess (session/create-session dir)
         agent (loop/make-agent-state
                :on-event (fn [e] (swap! events conj e))
                :session sess)]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message
-                  ;; Streams a little, then hangs forever: on-done/on-error
-                  ;; never fire — cancel-turn must settle the call
+                  ;; Stream a little, then leave the call unresolved. The
+                  ;; start signal replaces a timing sleep.
                   (fn [opts]
-                    (future
-                      (when-let [ot (:on-text opts)] (ot "half a thought"))
-                      (Thread/sleep 10000)
-                      :never))]
+                    (when-let [ot (:on-text opts)]
+                      (ot "half a thought"))
+                    (deliver started true)
+                    (promise))]
       (let [fut (loop/run-agent-turn agent
                                      {:message "hi"
                                       :on-done (fn [_])
                                       :on-error (fn [_])})]
-        ;; Wait until the LLM call is in flight and the partial landed
-        (loop []
-          (when (nil? @(:active-call agent))
-            (Thread/sleep 20)
-            (recur)))
-        (Thread/sleep 100)
+        (t/is (true? (deref started 2000 false)) "the partial stream landed")
         (loop/cancel-turn agent)
-        (deref fut 15000 :timeout)
+        (t/is (not= ::timeout (deref fut 2000 ::timeout)) "cancel settles the run")
         (let [ends (filter #(and (= :message-end (:type %))
                                  (= :aborted (:stop-reason (:message %))))
                            @events)]
@@ -2454,10 +2442,14 @@
     (t/is (not-any? #(= :auto-retry-start (:type %)) @events)
           "overflow is not retried (compaction handles it)")))
 
-(t/deftest ^:slow test-loop-retry-cancel-during-backoff
+(t/deftest test-loop-retry-cancel-during-backoff
   (let [events (atom [])
+        retry-started (promise)
         agent (loop/make-agent-state
-               :on-event (fn [e] (swap! events conj e))
+               :on-event (fn [e]
+                           (swap! events conj e)
+                           (when (= :auto-retry-start (:type e))
+                             (deliver retry-started true)))
                :max-retries 3
                :base-delay-ms 5000)]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
@@ -2468,9 +2460,10 @@
                         (on-error "connection lost"))
                       :done))]
       (let [fut (loop/run-agent-turn agent {:message "hi" :on-error (fn [_])})]
-        (Thread/sleep 200)
+        (t/is (true? (deref retry-started 2000 false)) "retry backoff started")
         (loop/cancel-turn agent)
-        @fut))
+        (t/is (not= ::timeout (deref fut 2000 ::timeout))
+              "cancel interrupts the backoff")))
     (let [ends (filter #(= :auto-retry-end (:type %)) @events)]
       (t/is (= 1 (count ends)))
       (t/is (false? (:success (first ends))))
@@ -2809,7 +2802,7 @@
     (t/is (= "custom" @(:system-prompt-override agent))
           "prepare-next-turn sets the system prompt override for later turns")))
 
-(t/deftest ^:slow test-loop-should-stop-after-turn
+(t/deftest test-loop-should-stop-after-turn
   (let [calls (atom 0)
         agent (loop/make-agent-state)]
     (reset! (:should-stop-after-turn agent) (fn [_] true))
@@ -2846,35 +2839,53 @@
               (on-done :stop))))
       :done)))
 
-(t/deftest ^:slow test-loop-parallel-tool-execution
+(t/deftest test-loop-parallel-tool-execution
   (let [events (atom [])
-        agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))
-        ;; Wall-clock concurrency bounds are load-sensitive (a loaded host
-        ;; stretches two 400ms sleeps past any fixed threshold) — assert the
-        ;; actual property instead: the two tool executions overlap.
-        intervals (atom [])]
+        started-count (atom 0)
+        active-tools (atom 0)
+        both-started (promise)
+        release-tools (promise)
+        agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message (stub-llm-two-tool-calls-then-text (atom 0))
                   tools/execute-tool
                   (fn [_ _ _]
-                    (let [s (System/currentTimeMillis)]
-                      (Thread/sleep 400)
-                      (swap! intervals conj [s (System/currentTimeMillis)])
-                      {:content "ok" :is-error false}))]
-      @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
-    (t/is (= 2 (count @intervals)))
-    (t/is (let [[[s1 e1] [s2 e2]] @intervals]
-            (< (max s1 s2) (min e1 e2)))
-          "the two 400ms tools overlap — executed concurrently, not sequentially")
-    (t/is (= 2 (count (filter #(= :tool-execution-start (:type %)) @events))))
-    (t/is (= 2 (count (filter #(= :tool-execution-end (:type %)) @events))))
-    (let [te (first (filter #(= :turn-end (:type %)) @events))]
-      (t/is (= 2 (count (:tool-results te))) "turn-end carries both results"))
-    (t/is (= 2 (count (filter #(= :tool (:role %)) (loop/get-context agent))))
-          "both tool results appended to context")))
+                    (swap! started-count inc)
+                    (swap! active-tools inc)
+                    (when (= 2 @started-count)
+                      (deliver both-started true))
+                    (deref release-tools 2000 :timeout)
+                    (swap! active-tools dec)
+                    {:content "ok" :is-error false})]
+      (let [run (future
+                  (deref (loop/run-agent-turn agent
+                                              {:message "run" :on-error (fn [_])})
+                         2000
+                         ::timeout))]
+        (try
+          (t/is (true? (deref both-started 2000 false))
+                "both tool executions are in flight together")
+          (t/is (= 2 @active-tools) "both tool bodies are active concurrently")
+          (finally
+            (deliver release-tools true)))
+        (t/is (not= ::timeout @run) "the turn completes")
+        (t/is (= 2 @started-count) "both tools execute")
+        (t/is (= 0 @active-tools) "both tool bodies exited")
+        (t/is (= 2 (count (filter #(= :tool-execution-start (:type %)) @events))))
+        (t/is (= 2 (count (filter #(= :tool-execution-end (:type %)) @events))))
+        (let [te (first (filter #(= :turn-end (:type %)) @events))]
+          (t/is (= 2 (count (:tool-results te))) "turn-end carries both results"))
+        (t/is (= 2 (count (filter #(= :tool (:role %)) (loop/get-context agent))))
+              "both tool results appended to context")))))
 
-(t/deftest ^:slow test-loop-sequential-tool-execution
-  (let [seq-calls (atom 0)
+(t/deftest test-loop-sequential-tool-execution
+  (let [llm-call-count (atom 0)
+        tool-count (atom 0)
+        completed (atom [])
+        first-started (promise)
+        second-started (promise)
+        release-first (promise)
+        release-second (promise)
         agent (loop/make-agent-state)]
     (tools/register-tool!
      (tools/make-tool :name "seq-tool" :label "Seq"
@@ -2887,7 +2898,7 @@
                     llm/send-message
                     (fn [opts]
                       (future
-                        (if (= 1 (swap! seq-calls inc))
+                        (if (= 1 (swap! llm-call-count inc))
                           (do (when-let [on-tc (:on-tool-call opts)]
                                 (on-tc {:id "t1" :name "seq-tool" :arguments "{}" :index 0})
                                 (on-tc {:id "t2" :name "seq-tool" :arguments "{}" :index 1}))
@@ -2900,12 +2911,27 @@
                         :done))
                     tools/execute-tool
                     (fn [_ _ _]
-                      (Thread/sleep 400)
-                      {:content "seq" :is-error false})]
-        (let [start (System/currentTimeMillis)]
-          @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])})
-          (t/is (>= (- (System/currentTimeMillis) start) 700)
-                "a :sequential tool forces the whole batch sequential (~800ms for 2×400ms)")))
+                      (let [n (swap! tool-count inc)]
+                        (deliver (if (= 1 n) first-started second-started) true)
+                        (deref (if (= 1 n) release-first release-second)
+                               2000
+                               :timeout)
+                        (swap! completed conj n)
+                        {:content "seq" :is-error false}))]
+        (let [run (future (deref (loop/run-agent-turn agent {:message "run" :on-error (fn [_])}) 2000 ::timeout))]
+          (try
+            (t/is (true? (deref first-started 2000 false)) "first tool starts")
+            (t/is (false? (realized? second-started)) "second tool has not started")
+            (t/is (empty? @completed) "the first tool is still in flight")
+            (deliver release-first true)
+            (t/is (true? (deref second-started 2000 false)) "second tool starts after release")
+            (t/is (= [1] @completed) "only the first tool completed")
+            (deliver release-second true)
+            (t/is (not= ::timeout (deref run 2000 ::timeout)) "the turn completes")
+            (t/is (= [1 2] @completed) "tools completed in order")
+            (finally
+              (deliver release-first true)
+              (deliver release-second true)))))
       (finally
         (tools/unregister-tool! "seq-tool")))))
 
@@ -3313,14 +3339,18 @@
       (t/is (= "replacement" (get-in (last evs) [:messages 0 :content 0 :text]))
             "event carries the new conversation"))))
 
-(t/deftest ^:slow test-loop-compaction-cancelled
+(t/deftest test-loop-compaction-cancelled
   (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
         sess (session/create-session (str dir))
         events (atom [])
+        started (promise)
         agent (loop/make-agent-state
                :session sess
                :keep-recent-tokens 40
-               :on-event (fn [e] (swap! events conj e)))]
+               :on-event (fn [e]
+                           (swap! events conj e)
+                           (when (= :compaction-start (:type e))
+                             (deliver started true))))]
     (try
       (doseq [i (range 6)]
         (let [m {:role :user :content [{:type :text :text
@@ -3334,17 +3364,17 @@
                     ;; only the cancel signal (via summarize!'s watch) ends it.
                     llm/send-message (fn [_] (promise))]
         (let [fut (future (loop/compact-context! agent nil :threshold))]
-          (Thread/sleep 300) ;; let summarization "start"
+          (t/is (true? (deref started 2000 false)) "summarization started")
           (loop/cancel-turn agent)
-          (t/is (= :aborted @fut) "compact-context! reports :aborted on cancel")))
+          (t/is (= :aborted (deref fut 2000 ::timeout))
+                "compact-context! reports :aborted on cancel")))
       (t/is (some #(and (= :compaction-start (:type %)) (= :threshold (:reason %))) @events)
             "compaction-start emitted with the threshold reason")
       (t/is (some #(and (= :compaction-end (:type %)) (:aborted %)) @events)
             "compaction-end carries :aborted")
       (t/is (= 6 (count @(:entries sess))) "session untouched by aborted compaction")
       (t/is (= 6 (count @(:messages agent))) "in-memory context untouched")
-      (finally
-        (fs/delete-tree dir)))))
+      (finally (fs/delete-tree dir)))))
 
 (t/deftest test-loop-manual-compaction-clears-stale-cancel-signal
   ;; Regression (/compact after Escape): Escape leaves the run's cancel
@@ -3382,9 +3412,10 @@
       (finally
         (fs/delete-tree dir)))))
 
-(t/deftest ^:slow test-loop-compaction-refuses-when-active
+(t/deftest test-loop-compaction-refuses-when-active
   (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
         sess (session/create-session (str dir))
+        started (promise)
         agent (loop/make-agent-state :session sess
                                      :keep-recent-tokens 40)]
     (try
@@ -3396,23 +3427,18 @@
           (swap! (:messages agent) conj m)
           (session/append-entry sess m)))
       (with-redefs [cfg/get-api-key (fn [_] "test-key")
-                    llm/send-message (fn [_] (promise))]
+                    llm/send-message (fn [_]
+                                       (deliver started true)
+                                       (promise))]
         (let [fut (future (loop/compact-context! agent))]
-          ;; Wait until the first compaction is actually in flight — the
-          ;; second call below must see :compacting? true, or it would start
-          ;; its own compaction and block 120s on the never-resolving
-          ;; summarize promise (llm/send-message is redefined to a bare
-          ;; promise; only the cancel signal ends it).
-          (loop []
-            (when-not @(:compacting? agent)
-              (Thread/sleep 20)
-              (recur)))
+          ;; The second call must see the first compaction in flight. Waiting
+          ;; on its summarization entry avoids a polling sleep.
+          (t/is (true? (deref started 2000 false)) "first compaction started")
           (t/is (false? (loop/compact-context! agent))
                 "second compaction refused while one is in flight")
           (loop/cancel-turn agent)
-          (t/is (= :aborted @fut))))
-      (finally
-        (fs/delete-tree dir)))))
+          (t/is (= :aborted (deref fut 2000 ::timeout)))))
+      (finally (fs/delete-tree dir)))))
 
 ;; ─── Bash result recording (pi: recordBashResult + _flushPendingBashMessages)
 
@@ -3654,7 +3680,7 @@
     (t/is (= 300000 (:idle-timeout-ms @sent))
           "the idle timeout stays the separate per-byte deadline")))
 
-(t/deftest test-loop-total-deadline-timeout-retries-then-surfaces
+(t/deftest ^:slow test-loop-total-deadline-timeout-retries-then-surfaces
   ;; pi parity: a total-deadline timeout (the deref :timeout sentinel, which
   ;; fires when the transport deadline was disabled/didn't deliver) is a
   ;; RETRYABLE error — never a silent hard abort. It retries with backoff,
@@ -3676,7 +3702,7 @@
                   llm/send-message
                   (fn [_]
                     ;; never deliver — the deref hits its timeout
-                    (future (Thread/sleep 1000) :done))]
+                    (promise))]
       @(loop/run-agent-turn agent {:message "hi" :on-error (fn [e] (swap! errors conj e))}))
     (t/is (= 1 (count @errors)) "the timeout surfaces via on-error (not silent)")
     (t/is (str/includes? (first @errors) "timed out")

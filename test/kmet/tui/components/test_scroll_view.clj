@@ -112,7 +112,7 @@
     (sv/set-scrollbar! sv :hidden)
     (t/is (= 80 (sv/get-content-width sv 80)))))
 
-(t/deftest test-auto-scrollbar-transient-visible
+(t/deftest ^:slow test-auto-scrollbar-transient-visible
   ;; transient scrollbar: shown on activity, hidden when its debounce
   ;; fires. The debounce rides the loop-owned timer registry (§6.1), so
   ;; a pump stands in for the frame loop — deterministic, no wall-clock
@@ -132,7 +132,7 @@
     (timers/pump!)
     (t/is (not (sv/is-scrollbar-visible? sv)) "hidden once the debounce fires")))
 
-(t/deftest test-transient-scrollbar-debounce-rearms-and-dispose-cancels
+(t/deftest ^:slow test-transient-scrollbar-debounce-rearms-and-dispose-cancels
   ;; repeated activity re-arms the debounce (the component holds at most one
   ;; id), and dispose cancels it — no zombie render-request
   (let [lines (mapv #(str "line" %) (range 10))

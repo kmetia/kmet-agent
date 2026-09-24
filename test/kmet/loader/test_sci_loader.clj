@@ -141,12 +141,16 @@
   ;; Several contexts race on one namespace name. Each has its own SCI
   ;; context and its own source, so every load must end with its own
   ;; definition — no cross-talk through the shared in-flight bookkeeping.
-  (let [mk (fn [n]
+  (let [arrived (atom 0)
+        ready (promise)
+        mk (fn [n]
              (lsci/sci-loader
               {:id (str "conc" n)
                :sources {'conc {:file (str "conc" n ".clj")
                                 :source (fn []
-                                          (Thread/sleep 5)
+                                          (when (= 4 (swap! arrived inc))
+                                            (deliver ready true))
+                                          (deref ready 5000 :timeout)
                                           (str "(ns conc) (defn who [] :c" n ")"))}}}))
         ls (mapv mk (range 4))
         loaded (mapv deref (mapv #(future (load-ns % "conc")) ls))]

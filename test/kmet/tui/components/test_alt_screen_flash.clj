@@ -17,7 +17,7 @@
     (t/is (satisfies? core/IComponent c))
     (t/is (= [] (core/render c 10)) "no flashes initially")))
 
-(t/deftest test-flash-renders-inverse-line
+(t/deftest ^:slow test-flash-renders-inverse-line
   (let [c (asf/make-alt-screen-flash (fn []))]
     (asf/alt-screen-flash! c "Copied!")
     (let [lines (core/render c 20)]
@@ -59,7 +59,7 @@
       (t/is (not (contains? (timers/scheduled) id))
             "…and cancels the pending expiry — no zombie render-request"))))
 
-(t/deftest test-request-render-called
+(t/deftest ^:slow test-request-render-called
   (let [renders (atom 0)
         c (asf/make-alt-screen-flash #(swap! renders inc))]
     (asf/alt-screen-flash! c "x" :duration-ms 20)

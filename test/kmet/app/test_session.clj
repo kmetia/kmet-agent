@@ -215,7 +215,7 @@
       (t/is (= 1 (count (s/list-sessions cwd-a))) "cwd dir lists flat")
       (finally (fs/delete-tree dir)))))
 
-(t/deftest ^:slow test-find-most-recent-session
+(t/deftest test-find-most-recent-session
   ;; G23/continue: pi findMostRecentSession — header-based discovery in the
   ;; cwd dir, scoped by header :cwd; legacy headerless files and other-cwd
   ;; sessions excluded, no fallback
@@ -224,14 +224,20 @@
         cwd-b (s/session-dir-for-cwd dir "/home/user/proj-b")
         sa1 (s/create-session cwd-a {:cwd "/home/user/proj-a"})
         _ (s/append-entry sa1 {:role :assistant :content "a1"})
-        _ (Thread/sleep 5)
         sa2 (s/create-session cwd-a {:cwd "/home/user/proj-a"})
         _ (s/append-entry sa2 {:role :assistant :content "a2"})
         sb (s/create-session cwd-b {:cwd "/home/user/proj-b"})
         _ (s/append-entry sb {:role :assistant :content "b1"})
         ;; a legacy headerless file in the cwd dir — must be excluded
         legacy (s/create-session cwd-a {:cwd "/home/user/proj-a"})
-        _ (spit (:file legacy) "{:id \"1\" :role :assistant :content \"old\"}\n")]
+        _ (spit (:file legacy) "{:id \"1\" :role :assistant :content \"old\"}\n")
+        now (System/currentTimeMillis)]
+    ;; Discovery orders files by mtime. Set the ordering explicitly instead of
+    ;; sleeping between writes, including a newer headerless decoy.
+    (fs/set-last-modified-time (:file sa1) (- now 40))
+    (fs/set-last-modified-time (:file sb) (- now 30))
+    (fs/set-last-modified-time (:file sa2) (- now 20))
+    (fs/set-last-modified-time (:file legacy) (- now 10))
     (try
       (t/is (= (:file sa2) (s/find-most-recent-session cwd-a "/home/user/proj-a"))
             "newest matching session in the cwd dir wins")
@@ -402,21 +408,20 @@
       (t/is (nil? (:name (s/build-session-info (:file sess)))))
       (finally (fs/delete-tree dir)))))
 
-(t/deftest ^:slow test-session-build-info-modified
+(t/deftest test-session-build-info-modified
   ;; G15: modified = latest message activity time (pi: buildSessionInfo),
   ;; not the file mtime
   (let [dir (str "target/test-sess-buildinfo-mod-" (System/currentTimeMillis))
         sess (s/create-session dir)]
     (try
       (s/append-entry sess {:role :assistant :content "a"})
-      (Thread/sleep 10)
       (s/append-entry sess {:role :assistant :content "b"})
       (let [info (s/build-session-info (:file sess))
             last-ts (:timestamp (last @(:entries sess)))
             last-ms (try (-> (java.time.Instant/parse last-ts) (.toEpochMilli))
                          (catch Exception _ nil))]
         (t/is (some? info))
-        (t/is (>= (:modified info) last-ms)
+        (t/is (= (:modified info) last-ms)
               "modified reflects the latest message activity"))
       (finally (fs/delete-tree dir)))))
 

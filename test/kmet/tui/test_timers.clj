@@ -7,7 +7,7 @@
 
 (t/use-fixtures :each (fn [f] (timers/cancel-all!) (f) (timers/cancel-all!)))
 
-(t/deftest after-fires-once-when-due
+(t/deftest ^:slow after-fires-once-when-due
   (let [fired (atom 0)]
     (timers/after! 50 #(swap! fired inc))
     (t/is (false? (timers/pump!)) "not due yet")
@@ -19,7 +19,7 @@
       (t/is (false? (timers/pump!)))
       (t/is (= 1 @fired)))))
 
-(t/deftest every-repeats-and-reschedules-from-now
+(t/deftest ^:slow every-repeats-and-reschedules-from-now
   (let [fired (atom 0)
         id (timers/every! 20 #(swap! fired inc))]
     (t/is (= 1 (count (timers/scheduled))))
@@ -36,7 +36,7 @@
     (timers/cancel! id)
     (t/is (empty? (timers/scheduled)))))
 
-(t/deftest cancel-is-idempotent-and-stops-firing
+(t/deftest ^:slow cancel-is-idempotent-and-stops-firing
   (let [fired (atom 0)
         id (timers/every! 10 #(swap! fired inc))]
     (timers/cancel! id)
@@ -46,7 +46,7 @@
     (t/is (false? (timers/pump!)))
     (t/is (zero? @fired))))
 
-(t/deftest cancel-all-clears-every-timer
+(t/deftest ^:slow cancel-all-clears-every-timer
   (timers/after! 10 identity)
   (timers/every! 10 identity)
   (t/is (= 2 (count (timers/scheduled))))
@@ -55,7 +55,7 @@
   (Thread/sleep 15)
   (t/is (false? (timers/pump!))))
 
-(t/deftest a-throwing-thunk-is-swallowed-and-its-timer-survives
+(t/deftest ^:slow a-throwing-thunk-is-swallowed-and-its-timer-survives
   ;; the loop must not die on a bad thunk, and a repeating timer keeps its
   ;; next tick (same policy as macros/schedule-frame!)
   (let [fired (atom 0)
@@ -68,7 +68,7 @@
     (timers/pump!)
     (t/is (= 2 @fired))))
 
-(t/deftest a-timer-that-cancels-itself-stays-cancelled
+(t/deftest ^:slow a-timer-that-cancels-itself-stays-cancelled
   ;; rescheduling happens before the thunk runs, so a thunk cancelling its
   ;; own id must win — the re-arm must not resurrect it
   (let [fired (atom 0)

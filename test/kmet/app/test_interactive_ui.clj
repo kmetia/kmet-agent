@@ -512,7 +512,7 @@
       ((var inter/clear-status-indicator!) cs)
       (t/is (nil? ((var inter/current-status-indicator) cs))))))
 
-(deftest test-transient-indicator-drives-frames
+(deftest ^:slow test-transient-indicator-drives-frames
   (testing "a transient indicator shown outside an agent turn arms its own
             frame driver — the clock-driven frames only advance when
             something requests renders (manual /compact regression: without
@@ -556,7 +556,7 @@
       ((var inter/clear-status-indicator!) cs :working)
       (t/is (= :compaction (:kind @(:status-current cs)))))))
 
-(deftest test-release-background-status
+(deftest ^:slow test-release-background-status
   (testing "a background status (share/branch summary) releases its slot and
             gives the working spinner back while the turn still streams"
     (let [cs (test-status-cs)

@@ -224,25 +224,22 @@
       (t/is (= [{:type :error :message "Response ended without a status"}] evts)))))
 
 (t/deftest test-responses-stream-completes
-  (let [[in out] (make-pipe)
-        events (atom [])
-        f (future
-            (sse/process-responses-stream {:body in}
-                                          (fn [e] (swap! events conj e))
-                                          nil)
-            :done)]
-    (.write out (.getBytes "event: response.output_text.delta\ndata: {\"output_index\":0,\"delta\":\"hi\"}\n\n"))
-    (.write out (.getBytes "event: response.completed\ndata: {\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":{\"input_tokens\":10,\"output_tokens\":5,\"total_tokens\":15}}}\n\n"))
-    (.flush out)
-    ;; pipes don't unblock on close-while-reading — let the reader consume first
-    (Thread/sleep 50)
-    (.close out)
-    (t/is (= :done (deref f 3000 :timeout)))
+  (let [body (java.io.ByteArrayInputStream.
+              (.getBytes (str "event: response.output_text.delta\n"
+                              "data: {\"output_index\":0,\"delta\":\"hi\"}\n\n"
+                              "event: response.completed\n"
+                              "data: {\"response\":{\"id\":\"resp_1\",\"status\":\"completed\","
+                              "\"usage\":{\"input_tokens\":10,\"output_tokens\":5,"
+                              "\"total_tokens\":15}}}\n\n")))
+        events (atom [])]
+    (sse/process-responses-stream
+     {:body body}
+     (fn [e] (swap! events conj e))
+     (atom false))
     (t/is (= [{:type :text :content "hi"}
               {:type :usage :usage {:input_tokens 10 :output_tokens 5 :total_tokens 15}}
               {:type :done :stop-reason :stop}]
-             @events))
-    (.close in)))
+             @events))))
 
 (t/deftest test-responses-stream-premature-end
   ;; no terminal event before EOF → error (pi: 'OpenAI Responses stream
@@ -407,54 +404,50 @@
   ;; captured from message_delta — pi sets output.stopReason from
   ;; message_delta, mapStopReason. A refusal surfaces as :error instead of
   ;; :done (pi pushes {type: "error"} for error stop-reasons).
-  (let [[in out] (make-pipe)
-        events (atom [])
-        f (future
-            (sse/process-anthropic-stream {:body in}
-                                          (fn [e] (swap! events conj e))
-                                          nil)
-            :done)]
-    (.write out (.getBytes (str "event: content_block_delta\n"
-                                "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n")))
-    (.write out (.getBytes "event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n"))
-    (.write out (.getBytes "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
-    (.flush out)
-    (Thread/sleep 50)
-    (.close out)
-    (t/is (= :done (deref f 3000 :timeout)))
+  (let [body (java.io.ByteArrayInputStream.
+              (.getBytes (str "event: content_block_delta\n"
+                              "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                              "\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n"
+                              "event: message_delta\n"
+                              "data: {\"type\":\"message_delta\","
+                              "\"delta\":{\"stop_reason\":\"tool_use\"}}\n\n"
+                              "event: message_stop\n"
+                              "data: {\"type\":\"message_stop\"}\n\n")))
+        events (atom [])]
+    (sse/process-anthropic-stream
+     {:body body}
+     (fn [e] (swap! events conj e))
+     (atom false))
     (t/is (= [{:type :text :content "hi"}
               {:type :message-delta :stop-reason :tool-use}
               {:type :done :stop-reason :tool-use}]
              @events)
-          "message_delta tool_use folds into the terminal done")
-    (.close in)))
+          "message_delta tool_use folds into the terminal done")))
 
 (t/deftest test-anthropic-stream-refusal-surfaces-as-error
-  ;; pi: a refusal message_delta maps to stopReason "error" with the
+  ;; A refusal message_delta maps to stopReason "error" with the
   ;; explanation — the stream must surface it via :error (the caller's
   ;; on-error path), never as a normal :done.
-  (let [[in out] (make-pipe)
-        events (atom [])
-        f (future
-            (sse/process-anthropic-stream {:body in}
-                                          (fn [e] (swap! events conj e))
-                                          nil)
-            :done)]
-    (.write out (.getBytes (str "event: content_block_delta\n"
-                                "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"no\"}}\n\n")))
-    (.write out (.getBytes (str "event: message_delta\n"
-                                "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"refusal\",\"stop_details\":{\"explanation\":\"I refuse\"}}}\n\n")))
-    (.write out (.getBytes "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
-    (.flush out)
-    (Thread/sleep 50)
-    (.close out)
-    (t/is (= :done (deref f 3000 :timeout)))
+  (let [body (java.io.ByteArrayInputStream.
+              (.getBytes (str "event: content_block_delta\n"
+                              "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                              "\"delta\":{\"type\":\"text_delta\",\"text\":\"no\"}}\n\n"
+                              "event: message_delta\n"
+                              "data: {\"type\":\"message_delta\","
+                              "\"delta\":{\"stop_reason\":\"refusal\","
+                              "\"stop_details\":{\"explanation\":\"I refuse\"}}}\n\n"
+                              "event: message_stop\n"
+                              "data: {\"type\":\"message_stop\"}\n\n")))
+        events (atom [])]
+    (sse/process-anthropic-stream
+     {:body body}
+     (fn [e] (swap! events conj e))
+     (atom false))
     (t/is (= [{:type :text :content "no"}
               {:type :message-delta :stop-reason :error :error-message "I refuse"}
               {:type :error :message "I refuse"}]
              @events)
-          "refusal becomes an :error event with the explanation")
-    (.close in)))
+          "refusal becomes an :error event with the explanation")))
 
 (t/deftest test-parse-google-thought-signature
   ;; pi google-shared: thoughtSignature rides on thought parts and is
@@ -489,25 +482,20 @@
   ;; Regression: the event-name from an `event:` line must survive the
   ;; buffering (the cond previously stored the data value, so every event
   ;; parsed as :unknown and the stream produced no text).
-  (let [[in out] (make-pipe)
-        events (atom [])
-        f (future
-            (sse/process-anthropic-stream {:body in}
-                                          (fn [e] (swap! events conj e))
-                                          nil)
-            :done)]
-    (.write out (.getBytes (str "event: content_block_delta\n"
-                                "data: {\"type\":\"content_block_delta\",\"index\":0,"
-                                "\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n")))
-    (.write out (.getBytes "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n"))
-    (.flush out)
-    (Thread/sleep 50)
-    (.close out)
-    (t/is (= :done (deref f 3000 :timeout)))
+  (let [body (java.io.ByteArrayInputStream.
+              (.getBytes (str "event: content_block_delta\n"
+                              "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                              "\"delta\":{\"type\":\"text_delta\",\"text\":\"hi\"}}\n\n"
+                              "event: message_stop\n"
+                              "data: {\"type\":\"message_stop\"}\n\n")))
+        events (atom [])]
+    (sse/process-anthropic-stream
+     {:body body}
+     (fn [e] (swap! events conj e))
+     (atom false))
     (t/is (= [{:type :text :content "hi"}
               {:type :done :stop-reason :end-turn}]
-             @events))
-    (.close in)))
+             @events))))
 
 (t/deftest test-openai-stream-read-error-surfaces-immediately
   ;; A transport read failure (e.g. HTTP/2 RST_STREAM thrown by

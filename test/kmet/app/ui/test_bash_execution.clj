@@ -95,7 +95,7 @@
       (t/is (not (contains? (timers/scheduled) driver))
             "completion cancels the registry timer"))))
 
-(t/deftest test-bash-execution-elapsed-ticks-while-running
+(t/deftest ^:slow test-bash-execution-elapsed-ticks-while-running
   (t/testing "1s elapsed ticker (pi renderResult setInterval parity) re-stamps while :running; completion clears it"
     (let [c (be/make-bash-execution :command "sleep 5")
           ticker @(:elapsed-ticker-id-atom c)]
@@ -160,7 +160,7 @@
           (be/bash-execution-set-complete! c 0 false)
           (protocols/dispose c))))))
 
-(t/deftest test-dispose-stops-frame-driver
+(t/deftest ^:slow test-dispose-stops-frame-driver
   ;; A component dropped from the chat (e.g. /new while a run is in
   ;; flight) must not keep firing schedule-frame! into the frame hook.
   ;; The loop pumps the registry; here we pump by hand, so the assertion

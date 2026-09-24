@@ -790,10 +790,15 @@
 (t/deftest test-wait-for-callback-or-manual
   (testing "callback wins the race"
     (let [manual-p (promise)
+          manual-entered (promise)
           interaction {:signal (atom false)
-                       :prompt (fn [_] (deref manual-p))}
+                       :prompt (fn [_]
+                                 (deliver manual-entered true)
+                                 (deref manual-p))}
           code-p (promise)
-          _ (future (Thread/sleep 150) (deliver code-p {:code "c"}))]
+          _ (future
+              (deref manual-entered 2000 :timeout)
+              (deliver code-p {:code "c"}))]
       (try
         (let [r (@#'oauth/wait-for-callback-or-manual
                  interaction code-p {:type :manual-code :message "m"} 5000)]
@@ -802,25 +807,31 @@
         (finally (deliver manual-p "x")))))
   (testing "flow cancel → :cancelled"
     (let [manual-p (promise)
+          manual-entered (promise)
           signal (atom false)
           interaction {:signal signal
-                       :prompt (fn [_] (deref manual-p))}
+                       :prompt (fn [_]
+                                 (deliver manual-entered true)
+                                 (deref manual-p))}
           code-p (promise)
-          _ (future (Thread/sleep 300) (reset! signal true))]
+          _ (future
+              (deref manual-entered 2000 :timeout)
+              (reset! signal true))]
       (try
         (t/is (= :cancelled
                  (:source (@#'oauth/wait-for-callback-or-manual
                            interaction code-p {:type :manual-code :message "m"} 10000))))
-        (finally (deliver manual-p "x")))))
-  (testing "deadline → :timeout"
-    (let [manual-p (promise)
-          interaction {:signal (atom false)
-                       :prompt (fn [_] (deref manual-p))}
-          code-p (promise)]
-      (t/is (= :timeout
-               (:source (@#'oauth/wait-for-callback-or-manual
-                         interaction code-p {:type :manual-code :message "m"} 100))))
-      (deliver manual-p "x"))))
+        (finally (deliver manual-p "x"))))))
+
+(t/deftest ^:slow test-wait-for-callback-or-manual-deadline
+  (let [manual-p (promise)
+        interaction {:signal (atom false)
+                     :prompt (fn [_] (deref manual-p))}
+        code-p (promise)]
+    (t/is (= :timeout
+             (:source (@#'oauth/wait-for-callback-or-manual
+                       interaction code-p {:type :manual-code :message "m"} 100))))
+    (deliver manual-p "x")))
 
 (t/deftest test-anthropic-callback-server
   (let [server (@#'oauth/start-anthropic-callback-server "exp-state" 54603)]

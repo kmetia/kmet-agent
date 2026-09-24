@@ -55,7 +55,7 @@
     (t/is (= :error (get-in r [:details :error])))
     (t/is (str/includes? (:content r) "this-does-not-exist"))))
 
-(t/deftest test-script-timeout
+(t/deftest ^:slow test-script-timeout
   (let [r (run "(loop [] (recur))" {:timeout 0.3})]
     (t/is (:is-error r))
     (t/is (str/includes? (:content r) "timed out"))
@@ -109,7 +109,7 @@
             (deliver release true)
             (Thread/sleep 50)))))))
 
-(t/deftest test-script-signal-abort
+(t/deftest ^:slow test-script-signal-abort
   (let [signal (atom false)
         f (future (tools/execute-tool "script" {:code "(loop [] (recur))"} {:signal signal}))]
     (Thread/sleep 100)
@@ -120,7 +120,7 @@
       (t/is (str/includes? (:content r) "aborted"))
       (t/is (= :aborted (get-in r [:details :error]))))))
 
-(t/deftest test-script-caught-interrupt-still-aborts
+(t/deftest ^:slow test-script-caught-interrupt-still-aborts
   ;; Throwable is not resolvable in the sandbox (no class access), but
   ;; Exception is — and the interrupt exception is catchable, so the abort
   ;; reason must win over whatever the script returns.

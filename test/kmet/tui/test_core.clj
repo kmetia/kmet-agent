@@ -702,7 +702,7 @@
       (Thread/sleep 5)))
   (pred))
 
-(t/deftest test-reader-thread-kitty-enter-submits
+(t/deftest ^:slow test-reader-thread-kitty-enter-submits
   ;; End-to-end through the real reader thread: the flags report activates
   ;; kitty, the arrow's press+release is filtered, and Enter submits — the
   ;; reported regression, one level above the dispatch-level tests.
@@ -747,7 +747,7 @@
     ((var kmet.tui.core/process-input-buffer!) tui (fn [_] -2) buf)
     @dispatched))
 
-(t/deftest test-split-paste-marker-head-waits-for-remainder
+(t/deftest ^:slow test-split-paste-marker-head-waits-for-remainder
   ;; WSL/conpty stalls can split "\u001b[200~" across reads (the lone
   ;; "\u001b" head arrives, the tail 50ms+ later). The head must wait
   ;; for its remainder in the ESC branch — never dispatch as Escape, or it
@@ -782,7 +782,7 @@
       ((var kmet.tui.core/process-input-buffer!) tui (fn [_] -2) buf)
       (t/is (= ["\u001b[24~"] @dispatched) "F12 dispatched as one sequence"))))
 
-(t/deftest test-lone-esc-still-fires-as-escape
+(t/deftest ^:slow test-lone-esc-still-fires-as-escape
   (testing "a lone ESC with no follow-up still fires as Escape"
     (let [tui (core/create-tui nil)
           buf (atom "\u001b")
@@ -817,7 +817,7 @@
     (feed-batches! tui buf batches)
     {:editor ed :buf buf :submitted submitted}))
 
-(t/deftest test-batched-bracketed-paste-commits-in-one-pass
+(t/deftest ^:slow test-batched-bracketed-paste-commits-in-one-pass
   ;; The reported bug: a whole paste coalesced into one reader batch showed
   ;; nothing until later keys were pressed (the remainder sat unprocessed
   ;; in buf). Every split below must commit in the same pass — and later
@@ -1038,7 +1038,7 @@
             "alt+down then right, one sequence each")
       (t/is (= "" @buf) "buffer drained"))))
 
-(t/deftest test-incomplete-sequence-flush-timeouts
+(t/deftest ^:slow test-incomplete-sequence-flush-timeouts
   ;; A lone ESC fires as Escape after ESCAPE-FLUSH-MS (100ms, not pi's 10ms:
   ;; WSL/conpty stalls split sequences 50ms+ apart, so 10ms consumed a lone
   ;; ESC head before its tail arrived), but a partial CSI sequence waits
@@ -1139,7 +1139,7 @@
       (t/is (= ["\u001b"] @dispatched) "Escape dispatched")
       (t/is (= "" @buf) "buffer consumed"))))
 
-(t/deftest test-split-sequence-across-reads-never-corrupts
+(t/deftest ^:slow test-split-sequence-across-reads-never-corrupts
   ;; WSL/conpty stalls split escape sequences across reads with 50ms+ gaps:
   ;; the head arrives, the tail much later. The sequence flush timer (50ms)
   ;; must NOT dispatch the head as keys while the remainder is in flight — or
