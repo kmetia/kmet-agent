@@ -110,10 +110,11 @@
     reports the built-as version rather than describing whatever repo it runs in)
     and, with `--smoke`, runs it with `--debug`, `--list-models`, and `--version` from an
     empty temp dir with `JOLT_PWD` and `KMET_CODING_AGENT_DIR` pointed there. The temporary
-    agent enables the bundled `clojure` directory extension, and the smoke asserts its
-    debug line says `kind=resource-dir loader=jolt bundled=true` (embedded native root,
-    not SCI). io/resource falls back to JOLT_PWD-relative source roots, so a run from the
-    checkout would pass without `deps.edn :jolt/build {:embed ["src" "target/kmet-version"
+    agent enables bundled `clojure` and `deepseek-peak`; the smoke asserts their debug
+    lines report `loader=jolt` (an embedded directory root and an exact
+    single-file source mapping, not SCI). io/resource falls back to
+    JOLT_PWD-relative source roots, so a run from the checkout would pass
+    without `deps.edn :jolt/build {:embed ["src" "target/kmet-version"
     "target/kmet-bundled"]}` baking the model catalogs, version, and bundled extensions in
     — none of those roots is tasks/, so nothing under tasks/ rides in the binary even
     though it is on the classpath). `--test` builds the compiled
@@ -280,8 +281,7 @@ extension contract root: namespaces extensions depend on, init/shutdown, api).
 The bundled-extension native path requires a Jolt runtime exposing
 `jolt.loader/embedded-root?`; until the first tagged release carrying it lands,
 that capability probe is the floor and kmet falls back to SCI. Single-file
-bundled resources stay on SCI because an embedded root addresses a prefix, not
-one exact file key.
+resources use the Jolt adapter's exact namespace-to-embedded-key mapping.
 `jolt/` is kmet's RFC 0014 provider slot (details: jolt/README.md). **Empty by design**: the JDK gaps it was built for —
 the `java.net.http.HttpTimeoutException` ctor, the multi-arg
 `java.net.URI` ctors, `ProcessBuilder` File redirects,

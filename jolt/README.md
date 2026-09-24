@@ -33,13 +33,13 @@ no provisions.
 
 ## Bundled-extension loader floor
 
-kmet's built bundled **directory** extensions use Jolt's native loader over
+kmet's bundled **directory** extensions use Jolt's native loader over
 `embed:<prefix>` roots when the runtime exposes
-`jolt.loader/embedded-root?`. The version floor is therefore the first Jolt
-release carrying that API; until it is tagged, the capability probe is the
-floor. Jolt without it remains supported and kmet falls back to SCI. Bundled
-single-file resource artifacts also stay on SCI because an embedded root names
-a prefix, not one exact file key.
+`jolt.loader/embedded-root?`; bundled single-file resources map their
+namespace directly to the exact embedded key. The version floor is therefore
+the first Jolt release carrying that API; until it is tagged, the capability
+probe is the floor. Jolt without it remains supported and kmet falls back to
+SCI.
 
 ## No `jolt.crypto` require
 

@@ -25,9 +25,10 @@ Verification record (leftover checks run after the implementation):
   bundled=true`.
 - The jolt dist artifact does the same (built with `jolt dist`, run from an
   empty dir against a temp agent dir): an enabled `clojure` directory
-  artifact logs `kind=resource-dir loader=jolt bundled=true`, while
-  `grep-tool.clj` remains `kind=resource-file loader=sci bundled=true`;
-  `--version` reports the baked version, and `jolt dist --smoke` checks the
+  artifact logs `kind=resource-dir loader=jolt bundled=true`, and
+  `deepseek-peak.clj` logs `kind=resource-file loader=jolt bundled=true`
+  through its exact namespace-to-resource mapping; `--version` reports the
+  baked version, and `jolt dist --smoke` checks both
   native load line, the model catalog, and the version. That is thanks to a
   packager fix found here: no Termux launcher is written for a bionic-linked
   binary (the packager probes the ELF interpreter), since the glibc-loader
@@ -70,31 +71,33 @@ in the config TUI. Details in §2.5.
 The artifact bytes live
 in the application artifact (uberjar / jolt `:embed`) as resources; the loaders
 read them in place. This is the whole point of the delivery design (§2.2), and
-the reason Phase B exists: the Jolt **native** loader needs a real root, which
-is solved by teaching `jolt.loader` an embedded root rather than extracting.
-Dependency resolution is not extraction: it keeps writing only to the standard
+the reason Phase B exists: the Jolt **native** loader needs embedded source
+locations, supplied as an embedded directory root or an exact namespace-to-key
+mapping rather than extraction. Dependency resolution is not extraction: it
+keeps writing only to the standard
 `~/.m2`/`~/.gitlibs` caches, exactly as it does for every extension today
 (§2.8).
 
 **D5. One artifact-descriptor abstraction.** The runtime resolves each manifest
 entry into a descriptor whose `:kind` is `:dir`/`:file` (a source checkout),
 `:resource-dir`/`:resource-file` (a bb artifact, or a jolt artifact before
-Phase B), with an optional `:native` embedded root (Phase B). Everything below
-the descriptor (SCI source provider, jolt loader, resource lookup, discovery)
-switches on that kind.
+Phase B), with an optional `:native` embedded root or exact source key.
+Everything below the descriptor (SCI source provider, jolt loader, resource
+lookup, discovery) switches on that kind.
 
-**D6. Resource artifacts prefer an embedded native root on Jolt.** With
+**D6. Resource artifacts prefer native embedded sources on Jolt.** With
 `jolt.loader/embedded-root?` available, a built `:resource-dir` carries an
-`embed:<prefix>` root and loads through Jolt's native backend. Babashka and
-older Jolt releases keep the Phase A SCI fallback. `:resource-file` remains
-SCI because the root API addresses prefixes, not one exact embedded key;
-native single-file loading needs an exact-file source API rather than
-runtime materialization or a duplicate staged namespace tree.
+`embed:<prefix>` root, while a `:resource-file` maps its declared namespace
+directly to the exact embedded key (for example
+`kmet.extensions.deepseek-peak` → `extensions/deepseek-peak.clj`). Both load
+through Jolt's native backend. Babashka and older Jolt releases keep the
+Phase A SCI fallback.
 
 **D7. The Jolt native loader's embedded root kind is the Phase B backend.**
-Implemented in the Jolt repo and selected by capability, kmet prefers it for
-`:resource-dir` artifacts on Jolt. Directory/file artifacts from a checkout
-keep their existing path behavior. Details in §4.
+Implemented in the Jolt repo and selected by capability, kmet prefers it
+for resource-directory roots and exact resource-file source mappings on Jolt.
+Directory/file artifacts from a checkout keep their existing path behavior.
+Details in §4.
 
 **D8. Bundled artifacts are restricted.** They may carry a `deps.edn` for
 external libraries (§2.8) but otherwise use the fixed bundled set and the
@@ -113,14 +116,13 @@ dist staging step validate every bundled file (strict ns-path layout + the
 extension-requires allowlist) against the checkout instead. Directory artifacts
 from a checkout keep the per-load validation.
 
-**D10. Single-file bundled resources remain SCI for now.** Native single-file
-loading is desirable, but the embedded-root contract locates a namespace below
-a root prefix. `extensions/tools.clj` is one exact key, whereas its native
-namespace path would be `kmet/extensions/tools.clj` below that prefix. Using
-today's native path would require `materialize-single-file!` to write a temp
-file (forbidden for a bundled artifact), and synthesizing a second staged tree
-would duplicate the artifact solely to satisfy path lookup. An exact embedded
-source/file-root API can remove this exception without either compromise.
+**D10. Single-file bundled resources use an exact native source mapping.**
+Their embedded key does not match the namespace's strict path, so the Jolt
+adapter's `:sources` option maps the requested namespace directly to that key.
+The mapping hit names the owning context as its home, preserving native
+evaluation, context privacy, and unload ownership without materialization or
+a duplicate staged namespace tree. Babashka/older Jolt keep the same descriptor
+on SCI.
 
 **D11. Same-name dedupe.** The bundled layer ranks last, so a user's own copy
 (symlink, package, auto dir) loads first; a bundled artifact whose name is
@@ -148,9 +150,9 @@ artifact out of the bundle.
 - `kmet install`/`remove`/`list` cannot see or affect bundled extensions.
 - `kmet remove <anything>` never removes a bundled extension.
 - On a Jolt binary built with embedded-root support, directory artifacts
-  load through the native loader (visible in `--debug` logging /
-  `get-loaded-extensions`'s `:loader-kind`), not SCI. Older Jolt binaries
-  remain on the SCI fallback.
+  and single-file resources load through the native loader (visible in
+  `--debug` logging / `get-loaded-extensions`'s `:loader-kind`), not SCI.
+  Older Jolt binaries remain on the SCI fallback.
 - A bundled extension that carries a `deps.edn` resolves and downloads its
   closure at first enable, exactly like a user-installed extension — and, like
   one, fails with a warning when offline. bb/JVM and dev jolt only: a jolt
@@ -203,7 +205,7 @@ mode:
 |---|---|---|---|
 | checkout (`bb run`, `jolt run`, tests) | the manifest resource resolves to a `file:` URL, and the repo's `extensions/<root>` exists | `{:kind :dir :root "<repo>/extensions/<root>"}` | `{:kind :file :path "<repo>/extensions/<root>"}` |
 | bb artifact / jolt artifact, Phase A | manifest resource is not a `file:` URL and `io/resource "extensions/<root>/extension.edn"` (dir) / `<root>` (file) exists | `{:kind :resource-dir :prefix "extensions/<root>"}` | `{:kind :resource-file :path "extensions/<root>"}` |
-| jolt artifact, Phase B | as above, plus `:native` when `jolt.loader/embedded-root?` exists | same plus `:native "embed:extensions/<root>"` | unchanged (D10) |
+| jolt artifact, Phase B | as above, plus `:native` when `jolt.loader/embedded-root?` exists | same plus `:native "embed:extensions/<root>"` | same plus `:native "extensions/<root>"` (exact source key) |
 
 All descriptors get `:name` (manifest name), `:bundled? true`, and a synthetic
 `:path` used for identity/display (`<prefix>` or the real path).
@@ -363,7 +365,7 @@ The descriptor kinds and their plumbing:
 | `deps.edn` | `(edn/read-string (slurp (io/resource (str prefix "/deps.edn"))))` — the same resolver as today (§2.8) |
 | unload cleanup | nothing to close (`loader/unload!` only) |
 | per-load strict-layout/requires validation | skipped (D9) |
-| single file | `(slurp (io/resource path))` + `ns-form-of-source` scan, as today; synthetic `:path` |
+| single file | `(slurp (io/resource path))` + `ns-form-of-source` at descriptor resolution; native Jolt maps that namespace to the exact `:path` key |
 
 Specific changes in `src/kmet/app/extensions.cljc`:
 
@@ -380,9 +382,10 @@ Specific changes in `src/kmet/app/extensions.cljc`:
 4. Loader selection: `forced-loader-kind [artifact declared]` returns
    `:jolt` for a native resource-directory descriptor when the host supports
    embedded roots; otherwise resource artifacts return `:sci`.
-   `create-jolt-loader` uses the `:native` root as the loader root when it is
-   chosen; `own-source-entries`/`validate-native-sources!` are not used for
-   it (D9).
+   `create-jolt-loader` uses the `:native` value as an embedded directory
+   root or, for a single file, as the target of the adapter's namespace
+   `:sources` mapping; `own-source-entries`/`validate-native-sources!` are
+   not used for either embedded shape (D9/D10).
 5. `Extension` record: add `:bundled?` (and keep the descriptor, e.g.
    `:artifact`), `get-loaded-extensions` exposes `:bundled`.
 6. Name dedupe (D11): at the top of `load-extension*`, after
@@ -782,27 +785,29 @@ order (the change touches `host/chez/loader.ss`, so the jolt gates listed in
 
 The descriptor sets `:native`, descriptor resolution preserves it,
 `forced-loader-kind` selects `:jolt` behind the capability probe, and
-`create-jolt-loader` consumes the embedded root. The Jolt packager's app smoke
-enables `clojure` in a temporary agent dir and asserts the native load line.
-Older Jolt releases continue through the SCI branch.
+`create-jolt-loader` consumes either the embedded directory root or the exact
+single-file source mapping. The Jolt packager's app smoke enables `clojure`
+and `deepseek-peak` in a temporary agent dir and asserts both native load
+lines. Older Jolt releases continue through the SCI branch.
 
 1. `kmet.loader.jolt-loader/embedded-roots?` — returns true when
    `(some? (resolve 'jolt.loader/embedded-root?))` (already added in Phase A).
-2. `kmet.app.bundled-extensions`: for `:resource-dir` descriptors, set
-   `:native "embed:extensions/<root>"` when the host is jolt and
-   `embedded-roots?` is true (do not set it elsewhere — the SCI path must not
-   see a jolt-only root).
-3. `kmet.app.extensions/forced-loader-kind`: `:resource-dir` + `:native` +
-   jolt + `embedded-roots?` → `:jolt`; otherwise `:resource-*` → `:sci`.
-4. `create-jolt-loader`: when the chosen artifact is `:resource-dir` with a
-   native root, build `(loader-jolt/classpath [native-root] …)`; skip
-   `own-source-entries`/`validate-native-sources!` (D9).
+2. `kmet.app.bundled-extensions`: when the host is Jolt and
+   `embedded-roots?` is true, resource directories set
+   `:native "embed:extensions/<root>"`; single files set `:native` to their
+   exact `extensions/<root>` key.
+3. `kmet.app.extensions/forced-loader-kind`: either resource kind + `:native`
+   + jolt + `embedded-roots?` → `:jolt`; otherwise → `:sci`.
+4. `create-jolt-loader`: a native resource directory uses its `embed:` root;
+   a native resource file passes `{entry-ns exact-key}` through
+   `loader-jolt/classpath`'s `:sources` option. Both skip
+   `own-source-entries`/`validate-native-sources!` (D9/D10).
 5. The release floor is the first Jolt release carrying
    `jolt.loader/embedded-root?`; until that release is tagged, the capability
    probe is the floor and `jolt dist --smoke` requires the native branch.
-   The smoke runs from an empty dir with a temp agent dir enabling the bundled
-   `clojure` **directory** extension and asserts its `--debug` line reports
-   `loader=jolt`.
+   The smoke runs from an empty dir with a temp agent dir enabling bundled
+   `clojure` (directory) and `deepseek-peak` (single file), then asserts both
+   `--debug` lines report `loader=jolt`.
 
 ---
 

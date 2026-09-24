@@ -194,6 +194,8 @@
         (is (str/includes? settings ":bundled-extensions")
             "the app smoke runs with an extension enabled")
         (is (str/includes? settings "\"clojure\"")
-            "a bundled directory extension exercises the native embedded root"))
+            "a bundled directory extension exercises the native embedded root")
+        (is (str/includes? settings "\"deepseek-peak\"")
+            "a bundled single file exercises the exact native source mapping"))
       (finally
         (fs/delete-tree dir)))))

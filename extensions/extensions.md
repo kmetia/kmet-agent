@@ -114,10 +114,10 @@ is the same path in every mode — `extensions/<name>/src` for directory
 artifacts, `extensions/<file>.clj` for single files; in a checkout they load
 from the real files (directory artifacts natively on Jolt), and in a built
 artifact through the bundled resource tree. On Jolt with embedded loader
-roots, directory artifacts use the native loader over `embed:<prefix>`;
-older Jolt releases fall back to SCI. Single-file resource artifacts remain
-SCI because an embedded root names a prefix, not one exact file key
-(extension-bundle.md D10).
+roots, directory artifacts use the native loader over `embed:<prefix>`, and
+single-file resources map their namespace directly to the exact embedded key
+(for example `kmet.extensions.deepseek-peak` to
+`extensions/deepseek-peak.clj`). Older Jolt releases fall back to SCI.
 
 The shipped set is enumerated in `src/kmet/bundled-extensions/manifest.edn`;
 `bb check-bundled-extensions` validates it (every artifact under

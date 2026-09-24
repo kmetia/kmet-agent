@@ -23,11 +23,10 @@
    through a descriptor instead of a path (kmet.app.bundled-extensions): a
    checkout's real artifact root, or — in a built artifact — a resource
    tree under extensions/<root>. On Jolt with embedded loader roots, a
-   resource-directory descriptor carries an `embed:<prefix>` root and loads
-   through the native backend; older Jolt releases fall back to SCI, and a
-   single-file bundled artifact always stays SCI (the root API addresses
-   prefixes, not one exact embedded file). Each extension evaluates in its
-   own isolated
+   resource-directory descriptor carries an `embed:<prefix>` root and a
+   single-file descriptor maps its namespace directly to the exact embedded
+   key; both load through the native backend. Older Jolt releases fall back
+   to SCI. Each extension evaluates in its own isolated
    context: a fork of one shared SCI base carrying the injected host layers
    and the seeded classes (see shared-context) on babashka, or a set of real
    Jolt namespaces served by the runtime's native loader when the manifest
@@ -1106,13 +1105,14 @@
                        entries)}))
 
 (defn- artifact-source
-  "The source of NS-SYM in ARTIFACT ({:kind :dir/:jar/:resource-dir}), or
-   nil. Strict ns-path lookup: dirs probe <root>/<ns-path>.<ext> (direct fs
-   probes need no follow-links handling — symlinked roots resolve through
-   the fs); resource dirs probe the same path under the artifact's
-   resource prefix; jars probe entry names through a per-call ZipFile.
+  "The source of NS-SYM in ARTIFACT (:dir/:jar/:resource-dir/:resource-file),
+   or nil. Strict ns-path lookup: dirs probe <root>/<ns-path>.<ext> (direct
+   fs probes need no follow-links handling — symlinked roots resolve through
+   the fs); resource dirs probe the same path under the artifact's resource
+   prefix; a resource file answers only its recorded entry namespace from the
+   exact resource key; jars probe entry names through a per-call ZipFile.
    Returns {:source :display}."
-  [{:keys [kind root prefix]} ns-sym]
+  [{:keys [kind root prefix] :as artifact} ns-sym]
   (let [base (ns-path ns-sym)]
     (case kind
       :jar
@@ -1120,6 +1120,11 @@
               (when-let [source (jar-entry-source root (str base ext))]
                 {:source source :display (str root "!/" base ext)}))
             source-extensions)
+
+      :resource-file
+      (when (= ns-sym (:entry-ns artifact))
+        (when-let [r (io/resource (:path artifact))]
+          {:source (slurp r) :display (:path artifact)}))
 
       :resource-dir
       (some (fn [ext]
@@ -1138,9 +1143,10 @@
    membership derives from paths, never file contents: dirs probe the fs,
    resource dirs the resource prefix, jars check JAR-INFO (the
    entry/namespace sets collected once at load; nil for the others)."
-  [{:keys [kind root prefix]} jar-info ns-sym]
+  [{:keys [kind root prefix] :as artifact} jar-info ns-sym]
   (case kind
     :jar (contains? (:namespaces jar-info) ns-sym)
+    :resource-file (= ns-sym (:entry-ns artifact))
     :resource-dir
     (boolean (some (fn [ext]
                      (io/resource (str prefix "/" (ns-path ns-sym) ext)))
@@ -1155,6 +1161,7 @@
   [artifact]
   (let [f (case (:kind artifact)
             :resource-dir (io/resource (str (:prefix artifact) "/deps.edn"))
+            :resource-file nil
             (let [f (io/file (str (:root artifact)) "deps.edn")]
               (when (.exists f) f)))]
     (when f
@@ -1206,6 +1213,9 @@
 
                   (= :resource-dir kind)
                   (host-resource (str prefix "/" rel))
+
+                  (= :resource-file kind)
+                  nil
 
                   :else
                   (let [f (io/file (str root) rel)]
@@ -1519,8 +1529,9 @@
    checkout artifacts and resolve exactly like paths (:root names them);
    :resource-dir reads its manifest from the resource prefix and carries a
    descriptor-supplied :native root when the host supports embedded roots;
-   :resource-file is the resource itself (its ns is read from the file at
-   load, like any single-file extension). DESCRIPTOR's :path is the
+   :resource-file reads its namespace from the resource and, when
+   :native is supplied, carries that exact key for native source mapping.
+   DESCRIPTOR's :path is the
    synthetic identity used for display and dedupe."
   [{:keys [kind root prefix path name native]}]
   (case kind
@@ -1549,15 +1560,25 @@
       ;; the name is the resource's file name, not the manifest name: the
       ;; extension identity a user's own copy of the same single file would
       ;; carry (dedupe, D11); the manifest name stays the display name
-      {:name (fs/file-name path)
-       :kind :resource-file
-       :artifact nil
-       :entry-ns nil
-       :declared-loaders default-loaders
-       :legacy-loader? false
-       :file r
-       :path path
-       :bundled? true}
+      (let [source (slurp r)
+            ns-form (ns-form-of-source source)
+            entry-ns (when ns-form (second ns-form))]
+        (when-not entry-ns
+          (throw (ex-info (str "Bundled extension resource does not start with (ns ...): " path)
+                          {:path path :resource path})))
+        {:name (fs/file-name path)
+         :kind :resource-file
+         :artifact (when native
+                     {:kind :resource-file
+                      :path path
+                      :entry-ns entry-ns
+                      :native native})
+         :entry-ns entry-ns
+         :declared-loaders default-loaders
+         :legacy-loader? false
+         :file r
+         :path path
+         :bundled? true})
       (throw (ex-info (str "Bundled extension resource missing: " path)
                       {:path path :resource path})))))
 
@@ -2200,43 +2221,40 @@
 
 #?(:jolt
    (defn- create-jolt-loader
-     "The native backend's per-extension loader: own sources from the artifact
-      root — a directory or a jar read through its central directory, or a
-      single-file extension materialized at its munged ns path first — plus
-      the dep roots (jars load in place), with the shared contract as the
-      filtered host root — real Jolt namespaces shared by reference. Own
-      sources are validated up front: the native reader never calls back
-      into kmet."
+     "The native backend's per-extension loader: own sources from a directory
+      root, a jar, an embedded directory root, or an exact embedded source
+      mapping for a single file; plus the dep roots (jars load in place), with
+      the shared contract as the filtered host root. Own filesystem sources are
+      validated up front because the native reader never calls back into kmet;
+      bundled embedded artifacts are gated by bb check-bundled-extensions."
      [ext-name artifact owns-ns? deps-resolver literal
       tui-namespaces libs-namespaces]
-     (let [embedded? (boolean (:native artifact))
+     (let [native (:native artifact)
+           mapped-file? (and native (= :resource-file (:kind artifact)))
+           embedded? (boolean native)
+           dep-roots (vec (when deps-resolver (deps-resolver)))
            root (cond
-                  ;; Phase B: a bundled :resource-dir artifact's native
-                  ;; embedded root ("embed:<prefix>") is the loader root; a
-                  ;; wrong prefix degrades to a miss, per the marker's
-                  ;; contract. Reached only when the runtime probe passed
-                  ;; (forced-loader-kind).
-                  embedded? (:native artifact)
+                  mapped-file? nil
+                  embedded? native
                   artifact (:root artifact)
                   :else (let [[ns-sym {:keys [file source]}] (first literal)]
-                          (materialize-single-file! ext-name ns-sym file source)))]
-       ;; the native reader never calls back into kmet, so the SCI path's
-       ;; lazy checks run up front for a filesystem root; an embedded
-       ;; bundle is gated by bb check-bundled-extensions instead (D9)
+                          (materialize-single-file! ext-name ns-sym file source)))
+           roots (into (if root [root] []) dep-roots)
+           sources (when mapped-file?
+                     {(str (:entry-ns artifact)) (:path artifact)})]
        (when-not embedded?
          (validate-native-sources! ext-name root owns-ns? tui-namespaces libs-namespaces))
        (loader-jolt/classpath
-        (into [root] (when deps-resolver (deps-resolver)))
+        roots
         {:id (str "ext:" ext-name)
+         :sources sources
          :parent (loader-jolt/host-view
                   (loader-jolt/root)
                   (shared-namespace-names)
                   ;; the stdlib families resolve lazily; the fixed bundled
-                  ;; extension set loads eagerly (extension-libs), so this
-                  ;; net only catches a set sub-namespace outside its
-                  ;; require chain (cljfmt.main, rewrite-clj.paredit) — the
-                  ;; host copy still wins over a context's own roots,
-                  ;; which is the set's contract
+                  ;; extension set loads eagerly, so this catches a set
+                  ;; sub-namespace outside its require chain while the host
+                  ;; copy still wins per the set's contract
                   {:also (fn [nm]
                            (or (jolt-host-builtin? nm)
                                (bundled-extension-lib? nm)))})}))))
@@ -2273,16 +2291,16 @@
 
 (defn- forced-loader-kind
   "The loader-kind a bundled resource artifact must use, or nil when the
-   manifest declares none. A :resource-dir carrying a :native root prefers
-   Jolt's native loader behind the embedded-root capability probe; a bundled
-   directory that does not declare :jolt still falls back to its required
-   :sci backend (D6/D8/D10)."
+   manifest declares none. A resource descriptor carrying :native prefers
+   Jolt's native loader behind the embedded-root capability probe; any
+   descriptor without a usable native root, or a manifest that does not
+   declare :jolt, falls back to the required :sci backend."
   [{:keys [kind artifact]} declared-loaders]
   (when (resource-kind? kind)
-    (let [native (if (= kind :resource-dir)
-                   #?(:jolt (if (and (:native artifact) (embedded-roots?)) :jolt :sci)
-                      :default :sci)
-                   :sci)]
+    (let [native #?(:jolt (if (and (:native artifact) (embedded-roots?))
+                            :jolt
+                            :sci)
+                    :default :sci)]
       (first (filter #(contains? (set declared-loaders) %)
                      [native :sci])))))
 
@@ -2520,8 +2538,9 @@
    real extensions/ path and loads exactly as load-extension! would; in a
    built artifact the files come from the extensions/ resource prefix. On
    Jolt with embedded loader roots, directory descriptors use their native
-   `embed:<prefix>` root; older Jolt releases and single-file resources use
-   SCI (see forced-loader-kind)."
+   `embed:<prefix>` root and single-file descriptors map their namespace to
+   the exact embedded key; older Jolt releases use SCI (see
+   forced-loader-kind)."
   [descriptor]
   (let [path (:path descriptor)]
     (try

@@ -62,10 +62,11 @@
    bake."
   ["--list-models"])
 
-(def ^:private bundled-native-log-line
-  "The successful-load line that proves a built bundled directory extension
-   used Jolt's native loader over an embedded root, not the SCI fallback."
-  "extension loaded: clojure kind=resource-dir loader=jolt bundled=true")
+(def ^:private bundled-native-log-lines
+  "Successful-load lines proving both a bundled directory root and a mapped
+   single-file resource used Jolt's native loader, not the SCI fallback."
+  ["extension loaded: clojure kind=resource-dir loader=jolt bundled=true"
+   "extension loaded: deepseek-peak.clj kind=resource-file loader=jolt bundled=true"])
 
 ;; ─── naming ───────────────────────────────────────────────────────────────
 
@@ -338,21 +339,22 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
     (fs/create-temp-dir {:dir dir :prefix "smoke-"})))
 
 (defn- prepare-smoke-agent-dir
-  "Create an isolated agent dir under the smoke run directory with one bundled
-   directory extension enabled. The app's first smoke command runs with
-   --debug, so its successful-load line proves embedded-root loader selection."
+  "Create an isolated agent dir under the smoke run directory with a bundled
+   directory extension and a bundled single-file extension enabled. The app's
+   first smoke command runs with --debug, so their load lines prove both
+   embedded-root and exact-source native loader selection."
   [dir]
   (let [agent-dir (str (fs/path dir "agent"))]
     (fs/create-dirs agent-dir)
     (spit (str (fs/path agent-dir "settings.edn"))
-          (pr-str {:bundled-extensions ["clojure"]}))
+          (pr-str {:bundled-extensions ["clojure" "deepseek-peak"]}))
     agent-dir))
 
 (defn- smoke-test!
   "Run the freshly built current-host artifact. An app artifact: run it with
    --debug and the --list-models smoke args, require exit 0, and assert an
-   enabled bundled directory extension loaded through Jolt's native embedded
-   root; then require --version to report the version the artifact was baked
+   enabled bundled directory and single-file resources loaded through Jolt's
+   native roots; then require --version to report the version the artifact was baked
    as. A --test artifact: `--test kmet.libs.test-num` must run that
    namespace (exit 0 and the Testing header) — the suite is statically
    required into the AOT image, so a run from the empty dir proves it was
@@ -397,14 +399,17 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
                   (println "smoke test passed:" (count (str/split-lines (:out res))) "models listed")
                   (let [log-file (str (fs/path dir "debug.log"))
                         log-text (if (fs/regular-file? log-file) (slurp log-file) "")
-                        loaded-natively? (str/includes? log-text bundled-native-log-line)]
-                    (if loaded-natively?
-                      (println "smoke test passed: bundled clojure loaded through Jolt's native embedded root")
+                        missing-native-logs (remove #(str/includes? log-text %)
+                                                    bundled-native-log-lines)]
+                    (if (empty? missing-native-logs)
+                      (println "smoke test passed: bundled directory and single-file resources loaded through Jolt's native mapped roots")
                       (do (binding [*out* *err*]
-                            (println "debug log:" log-text))
+                            (println "debug log:" log-text)
+                            (println "missing native load lines:" missing-native-logs))
                           (throw (ex-info (str "smoke test failed for " artifact
-                                               " — bundled clojure did not load through Jolt's native embedded root")
-                                          {:type ::smoke-failed :exit (:exit res)}))))))
+                                               " — bundled resources did not load through Jolt's native mapped roots")
+                                          {:type ::smoke-failed :exit (:exit res)
+                                           :missing missing-native-logs}))))))
                 (do (binding [*out* *err*] (println (:err res)))
                     (throw (ex-info (str "smoke test failed for " artifact
                                          " — the artifact did not run (see jolt-bugs.md: a gitlib-only"
@@ -493,9 +498,9 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
                                target/jolt/ and compile from scratch
      --smoke                   verify the artifact after building: run it from
                                an empty directory with a temporary agent dir,
-                               list the models, assert an enabled bundled
-                               directory extension used the native embedded
-                               root, and check --version against the version
+                               list the models, assert bundled directory
+                               and single-file resources used native mapped
+                               roots, and check --version against the version
                                baked in — the check to run before publishing. A --test
                                artifact runs `--test kmet.libs.test-num`
                                instead (proving the suite is compiled in). A

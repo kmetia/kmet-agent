@@ -10,8 +10,9 @@
      {:name \"tools\"   :kind :resource-file :path \"extensions/tools.clj\"}
 
    On a Jolt runtime with embedded loader roots, an artifact-mode directory
-   descriptor also carries `:native \"embed:<prefix>\"`; older Jolt releases
-   keep the resource descriptor on kmet's SCI fallback.
+   descriptor carries `:native \"embed:<prefix>\"`, while a single-file
+   descriptor carries its exact embedded key as `:native`; older Jolt releases
+   keep both on kmet's SCI fallback.
 
    In a source checkout the manifest resource answers a `file:` URL (both
    hosts, verified on jolt dev) and the repo root derives from that URL —
@@ -152,29 +153,33 @@
                     d))))
         (:artifacts manifest)))
 
-(defn- native-embedded-root
-  "The native embedded root for resource KEY when this Jolt runtime supports
-   embedded loader roots; nil on babashka and older Jolt releases."
-  [key]
+(defn- native-resource-target
+  "The native source target for a resource artifact: an `embed:<prefix>` root
+   for a directory, or the exact embedded key for a single file. nil on
+   babashka and older Jolt releases."
+  [kind key]
   (when (and (find-var 'clojure.core/*jolt-version*)
              ((requiring-resolve 'kmet.loader.jolt-loader/embedded-roots?)))
-    (str "embed:" key)))
+    (if (= kind :dir)
+      (str "embed:" key)
+      key)))
 
 (defn- resource-descriptor
   "One artifact-mode descriptor, or nil when the resource probe misses.
    Directory descriptors carry a native embedded root when the host Jolt
-   supports one; single-file descriptors stay on the SCI backend because
-   the native root API addresses prefixes, not one exact resource key."
+   supports one; single-file descriptors carry their exact embedded key for
+   the native loader's namespace-to-source mapping."
   [{:keys [name kind root]}]
   (let [key (str resource-prefix "/" root)
-        native (native-embedded-root key)]
+        native (native-resource-target kind key)]
     (if (= kind :dir)
       (when (io/resource (str key "/extension.edn"))
         (cond-> {:name name :kind :resource-dir :prefix key
                  :path key :bundled? true}
           native (assoc :native native)))
       (when (io/resource key)
-        {:name name :kind :resource-file :path key :bundled? true}))))
+        (cond-> {:name name :kind :resource-file :path key :bundled? true}
+          native (assoc :native native))))))
 
 (defn resource-descriptors
   "Descriptors for MANIFEST in artifact mode: each artifact is probed

@@ -62,18 +62,40 @@
   []
   (->JoltLoader (jl/isolated)))
 
+(defn- mapped-source-hit
+  "A native namespace hit that maps (:name REQ) to its exact source location,
+   or nil. HOME is filled after the owning loader is constructed; making it the
+   hit's home gives the namespace the real native reader and keeps unload
+   ownership in the same context."
+  [sources home req]
+  (when (= :ns (:kind req))
+    (when-let [file (get sources (:name req))]
+      {:kind :ns :name (:name req) :file file :loader @home})))
+
 (defn classpath
   "ROOTS searched in order, with OPTS:
 
-     :id     diagnostics id
-     :parent a delegate (adapter or raw Jolt loader), consulted first
+     :id      diagnostics id
+     :parent  a delegate (adapter or raw Jolt loader), consulted first
+     :sources map of namespace name -> exact native source location; these
+              mappings are tried before the parent and do not require the
+              location to sit below a root (an embedded key can be a loose
+              single file)
 
    Eager: an unreadable root throws here, not at the first load."
   ([roots] (classpath roots nil))
-  ([roots {:keys [id parent]}]
-   (->JoltLoader (jl/classpath roots (cond-> {}
-                                       id (assoc :id id)
-                                       parent (assoc :parent (jolt-of parent)))))))
+  ([roots {:keys [id parent sources]}]
+   (let [home (atom nil)
+         mapped (when (seq sources)
+                  (jl/->loader (fn [req] (mapped-source-hit sources home req))))
+         delegate (cond
+                    (and mapped parent) (jl/delegating mapped (jolt-of parent))
+                    mapped mapped
+                    :else (jolt-of parent))
+         loader (jl/classpath roots (cond-> {:parent delegate}
+                                      id (assoc :id id)))]
+     (reset! home loader)
+     (->JoltLoader loader))))
 
 (defn ->loader
   "A delegate over RESOLVE-FN — (fn [req]) answering hits, a hit or nil."

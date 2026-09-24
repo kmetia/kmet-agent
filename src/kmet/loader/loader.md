@@ -936,9 +936,9 @@ into the resource table baked by `:jolt/build {:embed [...]}`. Namespace and
 resource hits carry the embedded key as their own location; a resource hit
 carries `:embedded? true`, so opening reads that key rather than re-resolving
 the request's relative name. `jolt.loader/embedded-root?` is the public
-capability probe. This is the root kind kmet's built bundled directory
-extensions use on Jolt; Babashka, older Jolt releases, and single-file
-resource artifacts stay on SCI.
+capability probe. kmet uses embedded roots for bundled directories and an
+exact namespace-to-key source mapping for bundled single files; Babashka and
+older Jolt releases stay on SCI.
 
 **What landed, and how it differs from M0–M4.** The substrate is one
 global namespace registry (rt.ss's var-table), so a context is built *out
@@ -1046,14 +1046,20 @@ kmet's protocol to the Jolt loader — protocols do not unify, so it adapts
 rather than aliases — and adds what the extension contract needs and the raw
 surface does not express: `host-view` (a *miss-not-denial* filter of the host
 root to the shared namespace names, with `kmet.loader.*` rejected as host
-machinery) and the ambient binding. `kmet.app.extensions/create-loader` picks
-it on Jolt: the extension's own sources are read by the native reader from its
-artifact root — a single-file extension is materialized at its munged ns path
-first, and every own source is validated up front, because the native reader
-never calls back into kmet — dep roots are the `jolt.deps` resolution's
-sources (jars, read in place, plus `:local/root` directories),
-and the shared contract arrives as the filtered host root instead of copied
-vars. Every callback an extension registers, and init/shutdown themselves, run
+machinery), the ambient binding, and `classpath`'s `:sources` map from a
+requested namespace to an exact native source key. A mapped hit names the
+owning context as its home, so it uses the real native reader and unloads with
+that context.
+
+`kmet.app.extensions/create-loader` picks the native backend on Jolt: bundled
+directories use an `embed:<prefix>` root; bundled single files map their
+declared namespace directly to the exact embedded key (no materialization or
+restaging); checkout single files are still materialized at their munged ns
+path. Filesystem own sources are validated up front because the native reader
+never calls back into kmet; bundled embedded artifacts are gated at build time.
+Dep roots are the `jolt.deps` resolution's sources (jars, read in place, plus
+`:local/root` directories), and the shared contract arrives as the filtered
+host root instead of copied vars. Every callback an extension registers, and init/shutdown themselves, run
 wrapped in `with-loader*` — every fn inside a registration *map* too
 (`:get-argument-completions`, `:render-call`/`:render-result`, `:title`, …),
 not just its handler, since the app calls each of them long after the load:

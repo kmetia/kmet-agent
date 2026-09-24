@@ -328,8 +328,9 @@
     (t/is true "skipped: embedded loader roots are Jolt-only")))
 
 (t/deftest test-load-resource-file-descriptor
-  ;; a single-file bundled artifact: SCI on every host (D10), and its
-  ;; extension identity is the file name (what a user's own copy carries)
+  ;; without a native target (the Babashka/older-Jolt shape), a bundled
+  ;; single file stays SCI; its extension identity is the file name (what a
+  ;; user's own copy carries)
   (extensions/clear-extensions!)
   (try
     (with-extension-resources
@@ -342,6 +343,27 @@
           (t/is (some? (commands/find-command "hello-ext")))
           (t/is (= "hello_ext.clj" (:name (first (extensions/get-loaded-extensions))))))))
     (finally (extensions/unload-all-extensions!))))
+
+(t/deftest test-resource-file-native-source-selects-jolt
+  ;; The resource key is extensions/ext-single/hello_ext.clj, while the native
+  ;; request is hello-ext. Resolution records that namespace and passes the
+  ;; exact key to the adapter's :sources map.
+  (if (host/jolt?)
+    (with-extension-resources
+      (fn []
+        (let [resolved (@#'extensions/resolve-extension-descriptor
+                        {:name "hello-ext" :kind :resource-file
+                         :path "extensions/ext-single/hello_ext.clj"
+                         :native "extensions/ext-single/hello_ext.clj"
+                         :bundled? true})
+              artifact (:artifact resolved)
+              probe (requiring-resolve 'kmet.app.extensions/embedded-roots?)]
+          (t/is (= 'hello-ext (:entry-ns resolved)))
+          (t/is (= 'hello-ext (:entry-ns artifact)))
+          (t/is (= (:path resolved) (:path artifact)))
+          (with-redefs-fn {probe (constantly true)}
+            #(t/is (= :jolt (@#'extensions/forced-loader-kind resolved [:sci :jolt])))))))
+    (t/is true "skipped: embedded loader roots are Jolt-only")))
 
 (t/deftest test-resource-dir-deps-lookup
   ;; a resource artifact's deps.edn is read through the same extensions/

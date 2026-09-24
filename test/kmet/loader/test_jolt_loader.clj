@@ -72,6 +72,28 @@
         (fs/delete-tree d)))
     (t/is true "skipped: the adapter is Jolt-only")))
 
+(deftest adapter-maps-a-namespace-to-an-exact-source
+  ;; A bundled single file is stored at extensions/tools.clj, but its native
+  ;; namespace is kmet.extensions.tools. :sources maps the namespace request
+  ;; directly to that exact file without materializing or restaging it.
+  (if-let [{:keys [root classpath host-view]} (adapter)]
+    (let [d (dir! "mapped-source")
+          loose (str d "/loose.clj")]
+      (spit loose "(ns strict.path) (def answer 42)\n")
+      (let [l (classpath []
+                         {:id "test:mapped-source"
+                          :sources {"strict.path" loose}
+                          :parent (host-view (root) #{})})]
+        (try
+          (loader/load l {:kind :ns :name "strict.path"})
+          (t/is (= 42 (deref (loader/load l {:kind :var :name "strict.path/answer"}))))
+          (t/is (empty? (loader/find (root) {:kind :ns :name "strict.path"}))
+                "the mapped namespace remains private to its context")
+          (finally
+            (loader/unload! l)
+            (fs/delete-tree d)))))
+    (t/is true "skipped: the adapter is Jolt-only")))
+
 (deftest adapter-host-view-is-the-extension-contract
   (if-let [{:keys [root host-view]} (adapter)]
     (let [host (host-view (root) #{'kmet.extension 'kmet.libs})]
