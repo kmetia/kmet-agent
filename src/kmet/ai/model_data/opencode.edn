@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-23T05:01:08Z"
+ :generated-at "2026-09-24T07:02:29Z"
  :provider {:id :opencode
             :name "OpenCode (Zen)"
             :env-vars ["OPENCODE_API_KEY"]
@@ -678,6 +678,28 @@
     :compat {:supports-store false
              :supports-developer-role false
              :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
+   "space-bunny-free"
+   {:id "space-bunny-free"
+    :name "Space Bunny Free"
+    :provider :opencode
+    :api :openai-completions
+    :base-url "https://opencode.ai/zen/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 524288
+    :compat {:supports-store false
+             :supports-developer-role false
+             :max-tokens-field :max-tokens
              :supports-strict-mode true}}}
   :openai-responses
   {"gpt-5"
@@ -1116,7 +1138,7 @@
                          :max "max"
                          :medium "medium"
                          :minimal nil
-                         :off "none"
+                         :off nil
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 0.1
@@ -1140,7 +1162,7 @@
                          :max "max"
                          :medium "medium"
                          :minimal nil
-                         :off "none"
+                         :off nil
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 2

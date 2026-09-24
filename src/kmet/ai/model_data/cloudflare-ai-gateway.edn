@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-17T20:57:18Z"
+ :generated-at "2026-09-24T07:02:29Z"
  :provider {:id :cloudflare-ai-gateway
             :name "Cloudflare AI Gateway"
             :env-vars ["CLOUDFLARE_API_KEY" "CLOUDFLARE_ACCOUNT_ID" "CLOUDFLARE_GATEWAY_ID"]
@@ -105,6 +105,19 @@
     :thinking-level-map {:max "max" :minimal "low" :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
+    :context-window 1000000
+    :max-tokens 128000
+    :compat {:force-adaptive-thinking true :send-session-affinity-headers true}}
+   "claude-opus-5.5"
+   {:id "claude-opus-5.5"
+    :name "Claude Opus 5.5"
+    :provider :cloudflare-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/anthropic"
+    :reasoning true
+    :thinking-level-map {:max "max" :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 4 :output 20 :cache-read 0.2 :cache-write 5}
     :context-window 1000000
     :max-tokens 128000
     :compat {:force-adaptive-thinking true :send-session-affinity-headers true}}
@@ -474,6 +487,52 @@
            :output 50
            :cache-read 1
            :cache-write 12}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true :supports-openai-grammar-tools true}}
+   "gpt-6-luna"
+   {:id "gpt-6-luna"
+    :name "GPT-6 Luna"
+    :provider :cloudflare-ai-gateway
+    :api :openai-responses
+    :base-url "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/openai"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 0.1
+           :tiers [{:input 0.2 :input-tokens-above 272000 :output 0.75 :cache-read 0.02 :cache-write 0.25}]
+           :output 0.5
+           :cache-read 0.01
+           :cache-write 0.125}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true :supports-openai-grammar-tools true}}
+   "gpt-6-sol"
+   {:id "gpt-6-sol"
+    :name "GPT-6 Sol"
+    :provider :cloudflare-ai-gateway
+    :api :openai-responses
+    :base-url "https://gateway.ai.cloudflare.com/v1/{CLOUDFLARE_ACCOUNT_ID}/{CLOUDFLARE_GATEWAY_ID}/openai"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 2
+           :tiers [{:input 4 :input-tokens-above 272000 :output 15 :cache-read 0.4 :cache-write 5}]
+           :output 10
+           :cache-read 0.2
+           :cache-write 2.5}
     :context-window 1050000
     :max-tokens 128000
     :compat {:supports-strict-mode true :supports-openai-grammar-tools true}}

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-13T13:59:11Z"
+ :generated-at "2026-09-24T07:02:29Z"
  :provider {:id :together
             :name "Together AI"
             :env-vars ["TOGETHER_API_KEY"]
@@ -16,7 +16,7 @@
     :thinking-level-map {:low nil :medium nil :minimal nil :off nil}
     :input [:text]
     :cost {:input 0.3 :output 1.2 :cache-read 0.06 :cache-write 0}
-    :context-window 202752
+    :context-window 196608
     :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
@@ -127,7 +127,7 @@
     :thinking-level-map {:low nil :medium nil :minimal nil}
     :input [:text]
     :cost {:input 0.14 :output 0.28 :cache-read 0.03 :cache-write 0}
-    :context-window 1000000
+    :context-window 1048576
     :max-tokens 384000
     :compat {:supports-store false
              :supports-developer-role false
@@ -393,7 +393,7 @@
     :thinking-level-map {:low nil :medium nil :minimal nil}
     :input [:text]
     :cost {:input 1.4 :output 4.4 :cache-read 0.26 :cache-write 0}
-    :context-window 512000
+    :context-window 1048575
     :max-tokens 164000
     :compat {:supports-store false
              :supports-developer-role false

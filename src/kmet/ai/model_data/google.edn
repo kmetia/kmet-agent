@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-02T23:43:15Z"
+ :generated-at "2026-09-24T07:02:29Z"
  :provider {:id :google
             :name "Google"
             :env-vars ["GEMINI_API_KEY"]
@@ -49,8 +49,8 @@
            :output 10
            :cache-read 0
            :cache-write 0}
-    :context-window 131072
-    :max-tokens 65536}
+    :context-window 128000
+    :max-tokens 64000}
    "gemini-2.5-flash"
    {:id "gemini-2.5-flash"
     :name "Gemini 2.5 Flash"
@@ -123,7 +123,7 @@
     :input [:text :image]
     :cost {:input 0.25 :output 30 :cache-read 0 :cache-write 0}
     :context-window 65536
-    :max-tokens 65536}
+    :max-tokens 4096}
    "gemini-3.1-flash-lite-preview"
    {:id "gemini-3.1-flash-lite-preview"
     :name "Gemini 3.1 Flash Lite Preview"

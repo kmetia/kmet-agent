@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-22T19:47:51Z"
+ :generated-at "2026-09-24T07:02:29Z"
  :provider {:id :opencode-go
             :name "OpenCode Go"
             :env-vars ["OPENCODE_API_KEY"]
@@ -474,6 +474,28 @@
     :compat {:supports-store false
              :supports-developer-role false
              :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
+   "space-bunny-free"
+   {:id "space-bunny-free"
+    :name "Space Bunny Free"
+    :provider :opencode-go
+    :api :openai-completions
+    :base-url "https://opencode.ai/zen/go/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 524288
+    :compat {:supports-store false
+             :supports-developer-role false
+             :max-tokens-field :max-tokens
              :supports-strict-mode true}}}
   :openai-responses
   {"gpt-5.6-luna"
@@ -496,6 +518,29 @@
            :output 1.2
            :cache-read 0.02
            :cache-write 0.25}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:session-affinity-format :openai-nosession}}
+   "gpt-6-luna"
+   {:id "gpt-6-luna"
+    :name "GPT-6 Luna"
+    :provider :opencode-go
+    :api :openai-responses
+    :base-url "https://opencode.ai/zen/go/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 0.1
+           :tiers [{:input 0.2 :input-tokens-above 272000 :output 0.75 :cache-read 0.02 :cache-write 0.25}]
+           :output 0.5
+           :cache-read 0.01
+           :cache-write 0.125}
     :context-window 1050000
     :max-tokens 128000
     :compat {:session-affinity-format :openai-nosession}}

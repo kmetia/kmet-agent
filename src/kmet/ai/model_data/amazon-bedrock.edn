@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-23T05:01:08Z"
+ :generated-at "2026-09-24T07:02:29Z"
  :provider {:id :amazon-bedrock
             :name "Amazon Bedrock"
             :env-vars []
@@ -762,7 +762,7 @@
     :input [:text :image]
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 128000
     :compat {:supports-strict-mode true}}
    "global.openai.gpt-5.6-luna"
    {:id "global.openai.gpt-5.6-luna"
@@ -837,6 +837,7 @@
     :api :bedrock-converse-stream
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 0.1
            :tiers [{:input 0.2 :input-tokens-above 272000 :output 0.75 :cache-read 0.02 :cache-write 0.25}]
@@ -853,6 +854,7 @@
     :api :bedrock-converse-stream
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 2
            :tiers [{:input 4 :input-tokens-above 272000 :output 15 :cache-read 0.4 :cache-write 5}]
@@ -1141,7 +1143,7 @@
     :reasoning true
     :input [:text]
     :cost {:input 0.3 :output 1.2 :cache-read 0 :cache-write 0}
-    :context-window 204800
+    :context-window 196608
     :max-tokens 131072
     :compat {:supports-strict-mode true}}
    "minimax.minimax-m2.5"
@@ -1165,7 +1167,7 @@
     :reasoning false
     :input [:text]
     :cost {:input 0.4 :output 2 :cache-read 0 :cache-write 0}
-    :context-window 256000
+    :context-window 262144
     :max-tokens 8192
     :compat {:supports-strict-mode true}}
    "mistral.magistral-small-2509"
@@ -1225,7 +1227,7 @@
     :reasoning false
     :input [:text :image]
     :cost {:input 0.5 :output 1.5 :cache-read 0 :cache-write 0}
-    :context-window 256000
+    :context-window 262144
     :max-tokens 8192
     :compat {:supports-strict-mode true}}
    "mistral.pixtral-large-2502-v1:0"
@@ -1272,7 +1274,7 @@
     :reasoning true
     :input [:text]
     :cost {:input 0.6 :output 2.5 :cache-read 0 :cache-write 0}
-    :context-window 262143
+    :context-window 262144
     :max-tokens 16000
     :compat {:supports-strict-mode true}}
    "moonshotai.kimi-k2.5"
@@ -1284,7 +1286,7 @@
     :reasoning true
     :input [:text :image]
     :cost {:input 0.6 :output 3 :cache-read 0 :cache-write 0}
-    :context-window 262143
+    :context-window 262144
     :max-tokens 16384
     :compat {:supports-strict-mode true}}
    "nvidia.nemotron-nano-12b-v2"
@@ -1296,7 +1298,7 @@
     :reasoning false
     :input [:text :image]
     :cost {:input 0.2 :output 0.6 :cache-read 0 :cache-write 0}
-    :context-window 128000
+    :context-window 131072
     :max-tokens 8192
     :compat {:supports-strict-mode true}}
    "nvidia.nemotron-nano-3-30b"
@@ -1345,7 +1347,7 @@
     :thinking-level-map {:xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 2.75 :output 16.5 :cache-read 0.275 :cache-write 0}
-    :context-window 272000
+    :context-window 1000000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}
    "openai.gpt-5.5"
@@ -1358,7 +1360,7 @@
     :thinking-level-map {:xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 5.5 :output 33 :cache-read 0.55 :cache-write 0}
-    :context-window 272000
+    :context-window 1000000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}
    "openai.gpt-5.6-luna"
@@ -1429,6 +1431,40 @@
     :context-window 1050000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}
+   "openai.gpt-6-luna"
+   {:id "openai.gpt-6-luna"
+    :name "GPT-6 Luna"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 0.11
+           :tiers [{:input 0.22 :input-tokens-above 272000 :output 0.825 :cache-read 0.022 :cache-write 0.275}]
+           :output 0.55
+           :cache-read 0.011
+           :cache-write 0.1375}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true}}
+   "openai.gpt-6-sol"
+   {:id "openai.gpt-6-sol"
+    :name "GPT-6 Sol"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 2.2
+           :tiers [{:input 4.4 :input-tokens-above 272000 :output 16.5 :cache-read 0.44 :cache-write 5.5}]
+           :output 11
+           :cache-read 0.22
+           :cache-write 2.75}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true}}
    "openai.gpt-oss-120b"
    {:id "openai.gpt-oss-120b"
     :name "gpt-oss-120b"
@@ -1438,8 +1474,8 @@
     :reasoning true
     :input [:text]
     :cost {:input 0.15 :output 0.6 :cache-read 0 :cache-write 0}
-    :context-window 128000
-    :max-tokens 16384
+    :context-window 131072
+    :max-tokens 131072
     :compat {:supports-strict-mode true}}
    "openai.gpt-oss-120b-1:0"
    {:id "openai.gpt-oss-120b-1:0"
@@ -1450,8 +1486,8 @@
     :reasoning true
     :input [:text]
     :cost {:input 0.15 :output 0.6 :cache-read 0 :cache-write 0}
-    :context-window 128000
-    :max-tokens 16384
+    :context-window 131072
+    :max-tokens 128000
     :compat {:supports-strict-mode true}}
    "openai.gpt-oss-20b"
    {:id "openai.gpt-oss-20b"
@@ -1462,8 +1498,8 @@
     :reasoning true
     :input [:text]
     :cost {:input 0.07 :output 0.3 :cache-read 0 :cache-write 0}
-    :context-window 128000
-    :max-tokens 16384
+    :context-window 131072
+    :max-tokens 131072
     :compat {:supports-strict-mode true}}
    "openai.gpt-oss-20b-1:0"
    {:id "openai.gpt-oss-20b-1:0"
@@ -1474,8 +1510,8 @@
     :reasoning true
     :input [:text]
     :cost {:input 0.07 :output 0.3 :cache-read 0 :cache-write 0}
-    :context-window 128000
-    :max-tokens 16384
+    :context-window 131072
+    :max-tokens 128000
     :compat {:supports-strict-mode true}}
    "openai.gpt-oss-safeguard-120b"
    {:id "openai.gpt-oss-safeguard-120b"
@@ -1908,7 +1944,7 @@
     :input [:text :image]
     :cost {:input 3.3 :output 16.5 :cache-read 0.33 :cache-write 4.125}
     :context-window 1048576
-    :max-tokens 131072
+    :max-tokens 128000
     :compat {:supports-strict-mode true}}
    "us.openai.gpt-5.6-luna"
    {:id "us.openai.gpt-5.6-luna"
@@ -1983,6 +2019,7 @@
     :api :bedrock-converse-stream
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 0.11
            :tiers [{:input 0.22 :input-tokens-above 272000 :output 0.825 :cache-read 0.022 :cache-write 0.275}]
@@ -1999,6 +2036,7 @@
     :api :bedrock-converse-stream
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
     :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 2.2
            :tiers [{:input 4.4 :input-tokens-above 272000 :output 16.5 :cache-read 0.44 :cache-write 5.5}]
@@ -2096,7 +2134,7 @@
     :reasoning true
     :input [:text]
     :cost {:input 0.6 :output 2.2 :cache-read 0 :cache-write 0}
-    :context-window 204800
+    :context-window 202752
     :max-tokens 131072
     :compat {:supports-strict-mode true}}
    "zai.glm-4.7-flash"
@@ -2108,7 +2146,7 @@
     :reasoning true
     :input [:text]
     :cost {:input 0.07 :output 0.4 :cache-read 0 :cache-write 0}
-    :context-window 200000
+    :context-window 202752
     :max-tokens 131072
     :compat {:supports-strict-mode true}}
    "zai.glm-5"

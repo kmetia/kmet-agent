@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-21T17:19:24Z"
+ :generated-at "2026-09-24T07:02:29Z"
  :provider {:id :fireworks
             :name "Fireworks AI"
             :env-vars ["FIREWORKS_API_KEY"]
@@ -77,6 +77,21 @@
     :cost {:input 0.22 :output 0.66 :cache-read 0.007 :cache-write 0}
     :context-window 1000000
     :max-tokens 384000
+    :compat {:supports-long-cache-retention false
+             :send-session-affinity-headers true
+             :supports-cache-control-on-tools false
+             :supports-eager-tool-input-streaming false}}
+   "accounts/fireworks/models/ember-1"
+   {:id "accounts/fireworks/models/ember-1"
+    :name "Ember-1"
+    :provider :fireworks
+    :api :anthropic-messages
+    :base-url "https://api.fireworks.ai/inference"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
     :compat {:supports-long-cache-retention false
              :send-session-affinity-headers true
              :supports-cache-control-on-tools false

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-23T05:01:08Z"
+ :generated-at "2026-09-24T07:02:29Z"
  :provider {:id :commandcode
             :name "Command Code"
             :env-vars ["CMD_API_KEY"]
@@ -791,7 +791,7 @@
     :input [:text :image]
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 0}
     :context-window 1000000
-    :max-tokens 131072
+    :max-tokens 1048576
     :compat {:thinking-format :openai}}
    "nvidia/nemotron-3-ultra-550b-a55b"
    {:id "nvidia/nemotron-3-ultra-550b-a55b"
@@ -835,6 +835,17 @@
     :context-window 1000000
     :max-tokens 128000
     :compat {:thinking-format :openrouter}}
+   "stealth/space-bunny-alpha"
+   {:id "stealth/space-bunny-alpha"
+    :name "Space Bunny Alpha"
+    :provider :commandcode
+    :api :openai-completions
+    :base-url "https://api.commandcode.ai/provider/v1"
+    :reasoning false
+    :input [:text]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1000000
+    :max-tokens 32768}
    "stepfun/Step-3.5-Flash"
    {:id "stepfun/Step-3.5-Flash"
     :name "Step 3.5 Flash"

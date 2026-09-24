@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-04T07:41:13Z"
+ :generated-at "2026-09-24T07:02:29Z"
  :provider {:id :minimax
             :name "MiniMax"
             :env-vars ["MINIMAX_API_KEY"]
@@ -41,5 +41,5 @@
            :output 1.2
            :cache-read 0.06
            :cache-write 0}
-    :context-window 1048576
+    :context-window 1000000
     :max-tokens 512000}}}}

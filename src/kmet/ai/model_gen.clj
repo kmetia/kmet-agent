@@ -409,9 +409,14 @@
    (for [[mid m] (or (get-in data ["github-copilot" "models"]) {})
          :when (and (true? (get m "tool_call"))
                     (not= "deprecated" (get m "status")))]
-     (let [claude? (boolean (re-find #"^claude-(haiku|sonnet|opus)-[45]([.\-]|$)" mid))
+     (let [claude? (boolean (re-find #"^claude-(haiku|sonnet|opus)-[45]([.-]|$)" mid))
            needs-responses? (or (= mid "grok-4.5")
+                                ;; GPT-5.x and GPT-6.x models on Copilot are
+                                ;; served through the Responses endpoint;
+                                ;; Chat Completions rejects them with
+                                ;; unsupported_api_for_model (pi: needsResponsesApi).
                                 (str/starts-with? mid "gpt-5")
+                                (str/starts-with? mid "gpt-6")
                                 (str/starts-with? mid "oswe")
                                 (str/starts-with? mid "mai-"))]
        (cond
@@ -422,11 +427,6 @@
                               :context-default 128000 :max-default 8192})
                   m)
          needs-responses? (apply-thinking-maps
-                           ;; Grok 4.5 / gpt-5 / oswe / MAI-Code models are only
-                           ;; served through the Copilot /responses endpoint
-                           ;; (pi: needsResponsesApi). No explicit compat — the
-                           ;; strict/tool-search/explicit-cache passes don't
-                           ;; apply to copilot (pi), only grammar tools do.
                            (model-map :github-copilot :openai-responses
                                       "https://api.individual.githubcopilot.com" m mid
                                       {:headers copilot-static-headers
@@ -1562,21 +1562,21 @@
     mm))
 
 (defn- supports-openai-xhigh?
-  "pi supportsOpenAiXhigh: GPT-5.2+ and GPT-6 Astra expose xhigh."
+  "pi supportsOpenAiXhigh: GPT-5.2+ and GPT-6 models expose xhigh."
   [id]
   (or (str/includes? id "gpt-5.2")
       (str/includes? id "gpt-5.3")
       (str/includes? id "gpt-5.4")
       (str/includes? id "gpt-5.5")
       (str/includes? id "gpt-5.6")
-      (str/includes? id "gpt-6-astra")))
+      (str/includes? id "gpt-6")))
 
 (defn- supports-openai-max?
-  "pi supportsOpenAiMax: GPT-5.6 and GPT-6 Astra on the
+  "pi supportsOpenAiMax: GPT-5.6 and GPT-6 models on the
    responses/completions family."
   [mm]
   (and (or (str/includes? (:id mm) "gpt-5.6")
-           (str/includes? (:id mm) "gpt-6-astra"))
+           (str/includes? (:id mm) "gpt-6"))
        (contains? #{:openai-responses :azure-openai-responses
                     :openai-codex-responses :openai-completions} (:api mm))))
 
@@ -1618,7 +1618,8 @@
       (and (contains? #{:openai-responses :azure-openai-responses} (:api mm))
            (str/starts-with? id "gpt-5"))
       (merge-thinking-level-map {:off nil})
-      (and (= id "gpt-6-astra")
+      ;; GPT-6 on Responses supports the full effort range, including off.
+      (and (str/starts-with? id "gpt-6")
            (contains? #{:openai-responses :azure-openai-responses
                         :openai-codex-responses}
                       (:api mm)))
@@ -1626,6 +1627,8 @@
                                  :high "high" :xhigh "xhigh" :max "max"})
       (and (= :github-copilot provider) (str/starts-with? id "gpt-5"))
       (merge-thinking-level-map {:minimal "low"})
+      (and (= :github-copilot provider) (str/starts-with? id "gpt-6"))
+      (merge-thinking-level-map {:minimal nil})
       (and (= :openai-responses (:api mm))
            (= :openai provider)
            (contains? openai-responses-none-reasoning-models id))
