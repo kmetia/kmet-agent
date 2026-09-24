@@ -532,8 +532,8 @@
   (swap! themes assoc (:name theme) theme))
 
 (defn unregister-theme!
-  "Remove the theme NAME from the registry (extension unload — jar-ext.md
-   §5; built-ins should never be unregistered). No-op when absent."
+  "Remove the theme NAME from the registry (extension unload; built-ins
+   should never be unregistered). No-op when absent."
   [theme-name]
   (swap! themes dissoc (str theme-name))
   nil)

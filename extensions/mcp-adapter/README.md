@@ -1,9 +1,8 @@
 # mcp-adapter
 
 MCP server access for kmet, ported from
-[pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter)
-(design contract: [`../../mcp-adapter.md`](../../mcp-adapter.md) — see
-`extensions/README.md` for the extension system overview).
+[pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter).
+See `extensions/README.md` for the extension system overview.
 
 The point is context economy: instead of hundreds of tool definitions
 burning your context window, you get one `mcp` proxy tool (~200 tokens).

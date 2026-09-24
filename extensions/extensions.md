@@ -302,7 +302,7 @@ evaluation context**. Every extension runs in its own isolated context:
 - **A `jolt dist` binary cannot resolve deps today** — the app image doesn't
   carry `jolt.deps`, so an extension with a `deps.edn` warns and skips there
   (dev jolt and every bb mode resolve normally). The shipped set declares no
-  `deps.edn`; see extension-bundle.md §6.
+  `deps.edn`.
 
 ### Outbound HTTP (`kmet.libs.http`)
 

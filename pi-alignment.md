@@ -27,7 +27,60 @@ extension boundaries, `context_with_system`, per-model image input limits).
 | Additional run modes | `--mode rpc` / `--mode json`, `pi server` / `pi client` / `pi rpc`, `packages/server`, `packages/client`, `packages/protocol` (CBOR), `docs/rpc.md`, `docs/sdk.md` | Not ported — kmet ships interactive + print modes only |
 | Project trust | `core/project-trust.ts`, `core/trust-manager.ts`, `/trust`, `trust-selector.ts`, `--approve`/`--no-approve`, `defaultProjectTrust`, `trust.json` | Not ported — project settings/extensions load unconditionally (`-a`/`-na` parse as no-ops on the package commands) |
 | Package sources: npm/git | `npm:`/`git:` installs (npm registry + git clone machinery in `core/package-manager.ts`), `pi update`/self-update, temporary `--extension` installs, per-package autoload deltas over npm/git identities | Not ported — kmet packages are local files/directories only (`kmet install ./dir`, `~`, absolute, relative; anything else errors with "Unsupported package source"). The remainder of the package manager IS ported (next section) |
-| Session interop / JSONL | pi JSONL session files, `/export` `.jsonl`, `--export` from JSONL | EDNL-only by design (see `session.md`) — `/export` writes standalone HTML |
+| Session interop / JSONL | pi JSONL session files, `/export` `.jsonl`, `--export` from JSONL | EDNL-only by design (see [Session storage and alignment](#session-storage-and-alignment)) — `/export` writes standalone HTML |
+
+## Session storage and alignment
+
+`kmet.app.session` follows pi v3 `SessionManager` semantics in EDN/Clojure,
+rather than importing pi's file format. It is intentionally EDNL-only: there
+is no JSONL codec, import/export, or reading and writing of pi session files,
+and no v1→v2/v2→v3 migration machinery. The v4 harness concepts (lanes, a
+shared sequence/mutation log, records, writer claims, and session search) are
+out of scope. The EDNL header's `:version` is informational; legacy
+headerless files still load with `:header nil`.
+
+### Storage and mutation model
+
+- Each session is line-delimited EDN. The first line is a header map carrying
+  `:type`, `:version`, `:id`, `:created-at`, `:cwd`, and optional
+  `:parent-session`; later entries carry `:id`, `:parent-id`, `:role`,
+  `:content`, `:timestamp`, and role-specific fields.
+- Files live under `~/.kmet/sessions/<--cwd-->/` with timestamped `.ednl`
+  names. Creation is lazy: no file is written until the first assistant
+  message.
+- Branching changes the in-memory leaf; subsequent appends create a new
+  branch while the existing entries remain in the file and tree. Fork and
+  clone retain entry ids, record `:parent-session`, and re-chain labels.
+- A lock serializes mutations to prevent concurrent appends from creating
+  orphaned siblings. Entry ids combine a time-ordered prefix with a
+  collision-checked random component.
+- Loading streams files in bounded chunks, skips malformed non-tail lines,
+  repairs a torn final line, and publishes through a temporary file and
+  rename. Session-info listing is likewise streamed, bounded, concurrent,
+  and reports progress for the resume overlay.
+
+### Context and extension state
+
+- Context is built along the active root-to-leaf path. Model and thinking
+  settings are derived from persisted change entries; compaction appends a
+  summary entry while retaining summarized history, and context projects the
+  latest summary plus the retained tail. Branch summaries become context
+  messages on resume.
+- `custom` entries hold extension state and never enter LLM context;
+  `custom_message` entries project as `:custom`-role messages and use their
+  display flag for TUI rendering. Labels are tree entries with latest-wins
+  lookup. The extension API exposes append/get custom entries, custom
+  messages, labels, and the live session.
+- The optional pi query APIs (`findEntries`/`findEntriesOnBranch`) are not
+  ported; kmet exposes branch/tree queries instead.
+
+### Session commands and export
+
+`/session`, `/export`, `/share`, and `/copy` are implemented. Export is a
+standalone, escaped HTML document with session statistics; `/share` exports
+through `gh gist`; `/copy` copies the last assistant text with platform
+clipboard support and an OSC 52 fallback. JSONL export/import remains out of
+scope by the EDNL-only decision.
 
 ## Ported: the resource resolution & local-source package manager
 
@@ -287,9 +340,9 @@ design decisions, not mechanical ports:
 - **`ContextEditEntry` / `appendContextEdit`** — append-only per-message
   context edits: `replacement: null` omits one message from future provider
   context, a content replacement swaps its text; raw history, usage, and UI
-  history stay untouched. kmet has no context-edit layer (compaction rewrites
-  the stored context; nothing can omit a single message without editing
-  history).
+  history stay untouched. kmet has no per-message context-edit layer;
+  compaction is append-only and changes only the projected context, so it
+  cannot omit one arbitrary message.
 - **Actionable `turn_end` / `agent_before_settle` boundaries** — extension
   handlers can return `{:entries [...] :continue bool}` to persist
   structural entries in order and ensure one next provider request without

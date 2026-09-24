@@ -159,8 +159,8 @@
 
 (defn register-prompt-template!
   "Register a prompt template from an extension's bundled .md content string
-   (jar-ext.md §5 — the extension reads its own resource via io/resource and
-   hands the content over, so jarred templates need no filesystem path).
+   (the extension reads its own resource via io/resource and hands the
+   content over, so jarred templates need no filesystem path).
    OPTS: :name (command name), :content (raw .md), :location (display
    locator, e.g. `my-ext:prompts/foo.md`), :extension (owner name).
    Returns a deregister fn removing exactly this template."

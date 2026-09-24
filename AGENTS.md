@@ -218,7 +218,7 @@ src/kmet/
 │   └── ui/     — App-specific TUI components (Pi's coding-agent layer)
 ├── bundled-extensions/ — the committed bundled-extensions manifest (a
 │              resource, not a namespace: kmet/bundled-extensions/manifest.edn,
-│              read by kmet.app.bundled-extensions; see extension-bundle.md).
+│              read by kmet.app.bundled-extensions; see extensions/extensions.md).
 │              The shipped set lives in extensions/ at the repo root and is
 │              staged by the packagers under the same relative paths
 │              (target/kmet-bundled/extensions/<root>)
@@ -255,7 +255,7 @@ extensions/ — Shipped opt-in extensions (single .clj files or manifest dirs;
               kmet.extensions.<name>.* with the entry kmet.extensions.<name>.core.
               The whole set is bundled with the app (disabled by default,
               enabled via `kmet config` / the :bundled-extensions settings
-              key — extension-bundle.md), enumerated in
+              key), enumerated in
               src/kmet/bundled-extensions/manifest.edn and validated by
               `bb check-bundled-extensions`; the packagers stage each
               artifact root under target/kmet-bundled/extensions/<root>.

@@ -259,8 +259,8 @@ on jolt if a script evaluator wants `:interrupt-fn` uniformly.
     recorded: scripted MCP code is T1's in-process SCI — strictly sandboxier
     than the old `bb` child carrying the host classpath — at the cost of T1's
     documented host-native-runaway limitation.
-  - **Docs/validation:** the mcp skill, adapter README, `mcp-adapter.md` and
-    the `mcp` proxy description teach the script surface;
+  - **Docs/validation:** the mcp skill, adapter README, and the `mcp`
+    proxy description teach the script surface;
     `scripts/validate-script.bb` was rewritten to drive the contributed
     source through the real script tool (17 checks).
 - **T3 — `kmet --script` (self-exec) and/or `--mode rpc`.** Only with a

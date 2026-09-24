@@ -17,7 +17,7 @@
  ;; target/kmet-bundled is the staged bundled-extension tree
  ;; (kmet.tasks.build/stage-bundled-extensions!): its contents keep the repo's
  ;; extensions/<name>/src layout, so io/resource reads a bundled extension at
- ;; the same path in a binary as in a checkout (extension-bundle.md). A
+ ;; the same path in a binary as in a checkout. A
  ;; missing root embeds nothing — the runtime then offers no bundled set.
  :jolt/build {:embed ["src" "target/kmet-version" "target/kmet-bundled"]}
 

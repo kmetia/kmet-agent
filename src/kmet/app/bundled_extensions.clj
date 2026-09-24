@@ -1,6 +1,6 @@
 (ns kmet.app.bundled-extensions
   "Bundled extension artifacts — the shipped `extensions/` set, resolved in
-   whichever form the current run can reach them (extension-bundle.md).
+   whichever form the current run can reach them.
 
    `artifacts` answers one descriptor per manifest entry:
 

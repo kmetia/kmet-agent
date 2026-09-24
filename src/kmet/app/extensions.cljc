@@ -19,7 +19,7 @@
    host's backends is skipped, not failed. A manifest without :loader (a
    legacy extension) is treated as [:sci :jolt] with a warning; a
    single-file extension implicitly supports both. Everything else is
-   required from there. Bundled extensions (extension-bundle.md) resolve
+   required from there. Bundled extensions resolve
    through a descriptor instead of a path (kmet.app.bundled-extensions): a
    checkout's real artifact root, or — in a built artifact — a resource
    tree under extensions/<root>. On Jolt with embedded loader roots, a
@@ -125,8 +125,7 @@
    directory; for a single-file extension it's the file, so the dir is its
    parent. nil for jar and bundled resource extensions — a jar has no
    directory and a bundled resource artifact has no stable one (state goes
-   under the agent dir); resources are accessed via io/resource instead
-   (see jar-ext.md)."
+   under the agent dir); resources are accessed via io/resource."
   [ext]
   (when-not (contains? #{:jar :resource-dir :resource-file} (:kind ext))
     (str (if (fs/directory? (:path ext))
@@ -770,9 +769,9 @@
                                    (register-message-renderer! custom-type renderer)
                                    (track (fn [] (swap! message-renderers dissoc custom-type))))
      :register-skill! (fn [raw-content & [opts]]
-                        ;; jar-ext.md §5: the extension reads its own bundled
-                        ;; SKILL.md via io/resource and hands the content over,
-                        ;; so jarred skills need no filesystem path
+                        ;; The extension reads its own bundled SKILL.md via
+                        ;; io/resource and hands the content over, so jarred
+                        ;; skills need no filesystem path
                         (let [dereg (skills/register-extension-skill!
                                      raw-content
                                      (assoc opts :extension name))]
@@ -1708,7 +1707,7 @@
       bb's jar closure. jolt.deps/resolve-deps (the tools.deps expansion
       engine, part of jolt's own core — but NOT of a `jolt build` app image,
       so in a built binary this resolution fails with \"Could not locate
-      jolt/deps.jolt\"; extension-bundle.md §6 records the gap) fetches
+      jolt/deps.jolt\"; the extension guide records the gap) fetches
       Maven/git deps and returns their jars (unexpanded — jolt loads a jar
       root through its central
       directory) plus :local/root paths; the source provider and the loader
@@ -2277,7 +2276,7 @@
 
 (defn- resource-kind?
   "True for the bundled resource artifact kinds — a built artifact's view
-   of a directory/file extension (extension-bundle.md §2.2)."
+   of a directory/file extension."
   [kind]
   (contains? #{:resource-dir :resource-file} kind))
 
@@ -2285,7 +2284,7 @@
    (defn- embedded-roots?
      "Does this Jolt runtime support embedded loader roots? The capability
       probe is the Phase B gate: without it, bundled resource artifacts
-      stay on the SCI backend (extension-bundle.md D6)."
+      stay on the SCI backend."
      []
      (loader-jolt/embedded-roots?)))
 
@@ -2592,7 +2591,7 @@
   "Loaded extensions as {:name str :path str :kind :file/:dir/:jar
    :loader-kind :sci/:jolt :entry-ns symbol :extension-dir str-or-nil
    :bundled bool} maps (extension-dir = the extension's own directory; nil
-   for jar and bundled resource extensions — see jar-ext.md)."
+   for jar and bundled resource extensions)."
   []
   (mapv (fn [ext] {:name (:name ext) :path (:path ext)
                    :kind (:kind ext)

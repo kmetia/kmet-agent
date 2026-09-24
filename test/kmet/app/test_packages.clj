@@ -710,7 +710,7 @@
       (t/is (= 1 (count (:extensions (pkgs/resolve-package-items nil nil nil false))))
             "global view keeps the agent auto resources"))))
 
-;; ─── Bundled extensions (extension-bundle.md) ─────────────────────────────
+;; ─── Bundled extensions ─────────────────────────────
 
 (t/deftest test-bundled-entry-state-and-enabled
   (t/is (= :inherit (pkgs/bundled-entry-state nil "clojure")))

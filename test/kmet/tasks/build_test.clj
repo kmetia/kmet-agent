@@ -225,7 +225,7 @@
           (is (not (contains? entries "META-INF/MANIFEST.MF")) "no META-INF"))
         (finally (fs/delete-if-exists out))))))
 
-;; ─── Bundled extensions (extension-bundle.md) ─────────────────────────────
+;; ─── Bundled extensions ────────────────────────────────────────────────────
 
 (deftest ^:bb-only bundle-validator-accepts-the-committed-manifest
   (let [manifest (build/validate-bundled-extensions!)]
@@ -311,7 +311,7 @@
         (is (contains? entries "kmet/bundled-extensions/manifest.edn"))))))
 
 (deftest ^:bb-only uberjar-extra-roots-never-shadow
-  ;; extension-bundle.md §6: the extra (bundled) roots are walked after the
+  ;; The extra (bundled) roots are walked after the
   ;; normal roots through one `seen` set, and the dependency jars last of
   ;; all — so a colliding extensions/... entry can never shadow an app file,
   ;; whatever root carries it.

@@ -258,7 +258,7 @@
             "the later callback resolves the extension's own resource"))
     (extensions/unload-all-extensions!)))
 
-;; ─── Bundled resource descriptors (extension-bundle.md) ───────────────────
+;; ─── Bundled resource descriptors ───────────────────
 
 (defn- with-extension-resources
   "Run F with io/resource answering the bundle's extensions/ keys from the
@@ -1204,7 +1204,7 @@
         (fs/delete-tree dir)))))
 
 (t/deftest test-jar-extension-load-resource-unload
-  ;; jar distribution (jar-ext.md §1): code served from the archive without
+  ;; Jar distribution: code served from the archive without
   ;; expansion — per-call ZipFile on babashka, the archive root on Jolt's
   ;; native loader (jars load in place) — resources via the shadowed
   ;; io/resource, :extension-dir nil, unload clean.
@@ -1312,7 +1312,7 @@
 
 (t/deftest test-extension-dir-resource-fallback
   ;; dir extensions keep :extension-dir + a working io/resource file-URL
-  ;; fallback (jar-ext.md §4 — same test jar layout, unpacked).
+  ;; fallback (same test jar layout, unpacked).
   (extensions/clear-extensions!)
   (let [dir "target/test-ext-dir-resource"]
     (fs/delete-tree dir)
@@ -1338,7 +1338,7 @@
         (fs/delete-tree dir)))))
 
 (t/deftest test-extension-self-registers-skill-and-prompt
-  ;; jar-ext.md §5: extensions self-register bundled content through
+  ;; Extensions self-register bundled content through
   ;; ext/register-skill! / ext/register-prompt! (no host enumeration);
   ;; unload deregisters exactly what the extension added.
   (extensions/clear-extensions!)
@@ -1382,7 +1382,7 @@
 
 (t/deftest test-shipped-extensions-load-from-src
   ;; the repo's own extensions restructured to src/-as-artifact-root
-  ;; (jar-ext.md §2): every shipped src/ dir loads through the real runtime.
+  ;; Every shipped src/ dir loads through the real runtime.
   ;; The shipped manifests declare :loader — lsp/mcp/review/tree-sitter
   ;; [:jolt :sci], clojure [:sci :jolt]: Jolt picks its native loader when
   ;; :jolt is declared whatever the order, bb the SCI backend.

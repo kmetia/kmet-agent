@@ -1,8 +1,7 @@
 (ns kmet.extensions.mcp-adapter.config
-  "EDN MCP config loading/merging for the mcp-adapter extension (§6 of the
-   design contract, mcp-adapter.md at the repo root (§15.21) — pi:
-   config.ts loadMcpConfig / writeProjectServerDisabledOverride, adapted to
-   kmet: EDN only, exactly two sources, no imports/host discovery).
+  "EDN MCP config loading/merging for the mcp-adapter extension, ported from
+   pi config.ts loadMcpConfig / writeProjectServerDisabledOverride and
+   adapted to kmet: EDN only, exactly two sources, no imports/host discovery.
 
    Sources & precedence:
      - global  <agent-dir>/mcp.edn     (lower; the host agent dir —

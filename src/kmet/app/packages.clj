@@ -5,7 +5,7 @@
    pi-alignment.md).
 
    A fifth, app-provided layer sits after packages: the bundled extensions
-   (kmet.app.bundled-extensions, extension-bundle.md) — the shipped
+   (kmet.app.bundled-extensions) — the shipped
    `extensions/` set, present in every run mode and disabled unless the
    `:bundled-extensions` settings entries enable it. Bundled items rank
    last (5), are not `:packages` entries (kmet install/remove cannot touch
@@ -1016,7 +1016,7 @@
           (subs s 1)
           s)))))
 
-;; ─── Bundled extensions (see extension-bundle.md) ─────────────────────────
+;; ─── Bundled extensions ──────────────────────────
 ;; The app-provided fifth layer: descriptors from
 ;; kmet.app.bundled-extensions, PackageItem-shaped here, enabled through
 ;; the :bundled-extensions settings key. The key shares the resource-array

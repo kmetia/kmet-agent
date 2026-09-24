@@ -419,7 +419,7 @@
         (t/is (= :inherit (:override-state (first (item-rows screen)))))))
     {}))
 
-;; ─── Bundled extensions (extension-bundle.md) ─────────────────────────────
+;; ─── Bundled extensions ─────────────────────────────
 
 (t/deftest test-screen-bundled-group-and-global-toggle
   ;; the app-provided set renders first as ONE fixed group (artifact base

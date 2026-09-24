@@ -47,7 +47,7 @@
   "target/kmet-test-entry")
 (def ^:private test-entry-file "target/kmet-test-entry/kmet/tasks/test_main.clj")
 
-;; bundled extensions (extension-bundle.md): the committed manifest and the
+;; bundled extensions: the committed manifest and the
 ;; build-time staging root the packagers embed/walk
 (def ^:private bundled-manifest-path
   "The committed manifest, read straight from the checkout (it is inside
@@ -508,7 +508,7 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" -- \"$
                                    {:type ::smoke-failed :exit (:exit res)
                                     :version reported :expected expected})))))))))))
 
-;; ─── Extension packaging (jar-ext.md §6) ────────────────────────────────────
+;; ─── Extension packaging ──────────────────────────────────────────────────
 
 (defn- strict-ns-for-path
   "The namespace symbol a strict-layout .clj file at REL (slash-separated,
@@ -599,7 +599,7 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" -- \"$
     (println "packed" out)
     out))
 
-;; ─── Bundled extensions (extension-bundle.md) ──────────────────────────────
+;; ─── Bundled extensions ────────────────────────────────────────────────────
 
 (defn- bundle-error!
   [msg]

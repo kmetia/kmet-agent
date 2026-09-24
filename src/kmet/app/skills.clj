@@ -211,8 +211,8 @@
 
 (defn register-extension-skill!
   "Register a skill from an extension's bundled SKILL.md content string
-   (jar-ext.md §5 — the extension reads its own resource via io/resource
-   and hands the content over, so jarred skills need no filesystem path).
+   (the extension reads its own resource via io/resource and hands the
+   content over, so jarred skills need no filesystem path).
    OPTS: :location (display locator, e.g. `my-ext:skills/mcp/SKILL.md`),
    :fallback-name (when frontmatter has no name), :extension (owner name).
    Same validation/collision rules as dir loading (first wins). The body is

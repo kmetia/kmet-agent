@@ -12,8 +12,7 @@ all: `kmet config` lists every extension under “Bundled with kmet”
 the `:bundled-extensions` key (`["clojure" "-mcp-adapter"]` globally,
 `["+mcp-adapter"]` as a project delta). Bundled extensions are not
 packages — `kmet install`/`remove`/`list` cannot touch them — and nothing is
-ever extracted to disk (see `extensions/extensions.md` and
-`extension-bundle.md`).
+ever extracted to disk (see `extensions/extensions.md`).
 
 Extensions also load from the global dir (`~/.kmet/agent/extensions/`) and
 the project-local dir (`.kmet/extensions/`) at startup and on `/reload`.
@@ -94,7 +93,7 @@ never ship.
 - **Jar/zip extensions** — the same layout packed as a single archive
   (`extension.edn` + `deps.edn` at the root, code at ns paths, resources by
   exact name). The loader serves them unexpanded. See `extensions.md` for
-  the format and `jar-ext.md` for the full plan.
+  the format.
 
 All extension files — source **and any tests they carry** — are covered by
 the repo gates: `bb lint` / `bb format` / `bb format-check` lint and format

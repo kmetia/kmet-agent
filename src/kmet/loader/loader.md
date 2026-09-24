@@ -34,8 +34,7 @@ Not implemented yet: Phase 3 (JVM native backend + hybrid — deliberately
 last: the JVM host already gets isolation through SCI) and Phase 4
 (promotion).
 
-Related docs (repo-root relative): `jar-ext.md` (extension artifact
-format — the loader it touches), `jolt-port.md` §B3,
+Related docs (repo-root relative): `jolt-port.md` §B3,
 `extensions/extensions.md` (the extension contract), `src/kmet/tui/tui.md`
 (house style for a package reference doc).
 
@@ -916,7 +915,7 @@ upgrades that must satisfy the same suite.
   `kmet.loader.*` directly, and a require of it from extension code fails
   with an actionable "host machinery" error; the extension-facing surface is
   unchanged, so promotion still breaks nothing.
-- Tests: existing extension/jar-ext tests stay green; add case 1 (v1/v2)
+- Tests: existing extension/jar-zip tests stay green; add case 1 (v1/v2)
   as a real extension fixture; case 9 on sci.
 - Gate: `bb test-changed` (plus `bb test` for the extensions suites if
   touched broadly), `bb format-check-changed`.
@@ -1101,7 +1100,7 @@ one exception: they are stored and compared by identity.
 ## 10. Rollout order and validation
 
 1. Phase 0 green on bb (fast, no kmet behavior change). **Done.**
-2. Phase 1 on bb: `/reload`, extension fixtures, jar-ext suites unchanged.
+2. Phase 1 on bb: `/reload`, extension fixtures, jar/zip suites unchanged.
    **Done.**
 3. Phase 1 on Jolt: `jolt -e "(require 'kmet.loader.core)"`, the suite, then
    kmet's extension tests. **Done** — `jolt test

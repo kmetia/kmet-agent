@@ -1,5 +1,5 @@
 (ns kmet.app.test-bundled-extensions
-  "Bundled extension discovery and its package layer (extension-bundle.md):
+  "Bundled extension discovery and its package layer:
    the committed manifest and the gate over the repo's extensions/ tree,
    descriptor resolution in checkout vs artifact (resource) mode, and the
    enabled-state semantics of the :bundled-extensions settings key."
