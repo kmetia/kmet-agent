@@ -2,32 +2,22 @@
 
 The port is staged and largely landed: kmet runs on Jolt — TUI (native
 terminal backend: termios on Unix, kernel32 on Windows), providers (HTTP
-via babashka.http-client over the jolt-lang shims — Windows needs the
-library's transport half, M2),
-packaging (`jolt dist`), and extensions (the native loader, with SCI as the
-declared fallback). This file tracks **only what is still open**; finished
-work lives in the code and in `jolt-bugs.md` (upstream issues filed or
-tracked). The item labels (B2, M5, …) are the original port report's ids.
+via babashka.http-client over the jolt-lang shims, including the Windows
+transport from http-client v0.0.15), packaging (`jolt dist`), and extensions
+(the native loader, with SCI as the declared fallback). This file tracks
+**only what is still open**; finished work lives in the code and in
+`jolt-bugs.md` (upstream issues filed or tracked). The item labels (B2,
+M5, …) are the original port report's ids.
 
 ## Windows — the last platform (M2)
 
-The runtime gaps closed in jolt v0.8.11 (PR #1112): spawns work
-(`CreateProcessW`), the `java.net` layer initializes Winsock, and
-`PushbackReader.close` delegates to the wrapped reader — verified
-2026-09-23 on the installed Windows build. Open:
-
-- **http-client transport**: `jolt.http.net` is a POSIX FFI layer of its own
-  (`getaddrinfo`/`fcntl`/`poll`, no `jolt.winsock`), so babashka.http-client
-  — kmet's default `:platform` transport — still dies on Windows
-  ([http-client#28](https://github.com/jolt-lang/http-client/issues/28)).
-  Needs a library-side Windows branch; `:curl` mode works meanwhile.
-- **Loader file handles**: `read` over a `PushbackReader` leaves the wrapped
-  stream open until GC, so a source tree the native loader read cannot be
-  deleted on Windows ([jolt#1117](https://github.com/jolt-lang/jolt/issues/1117));
-  this keeps the bundled-spec-port extension test `^:bb-only`. (The close
-  delegation is fixed; the `read` path is not.)
-- **Validation**: run the bash tool, `jolt lint` (clj-kondo) and the curl
-  transport on Windows, and give `destroy-tree` its Windows test.
+The runtime gaps closed in jolt v0.8.11 (PR #1112): Windows process
+spawns and `java.net` sockets. Follow-up jolt PR #1123 fixes the reader
+handle leak, Windows file URLs and mtime handling; it is present in
+`v0.8.11-18-g79bf6d6e`. The Windows HTTP transport is fixed in
+http-client v0.0.15, now pinned by kmet. Remaining work here is validation:
+run the bash tool, `jolt lint` (clj-kondo), both native and curl HTTP
+transports on Windows, and give `destroy-tree` its Windows test.
 
 ## Process edges (B2)
 

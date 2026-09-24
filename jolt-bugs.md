@@ -180,33 +180,32 @@ app`, the loader dep) and a single-file extension whose source opens with
 `(set! *warn-on-reflection* true)` loads through `load-extension!` on both
 loader kinds (:jolt and :sci) — re-verified 2026-09-22.
 
-**Upstream status:** five filed open items — the SCI IVar gap
-[jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) (`deferred`), with
-its fix at [babashka/sci#1093](https://github.com/babashka/sci/pull/1093)
-(re-checked 2026-09-23: open, head `1295142f`, unchanged), so the
-`jolt/deps.edn` SCI pin stays; the `read`/`PushbackReader` handle leak
-[jolt#1117](https://github.com/jolt-lang/jolt/issues/1117); the Windows
-`File.toURI`/`file:` URL spelling
-[jolt#1118](https://github.com/jolt-lang/jolt/issues/1118); the no-op
-`fs/set-last-modified-time`
-[jolt#1119](https://github.com/jolt-lang/jolt/issues/1119); and the
-[http-client#28](https://github.com/jolt-lang/http-client/issues/28)
-transport's Windows half — plus jolt#1110's recorded path-separator
-divergence.
-The Windows smoke's four runtime findings (jolt#1107-#1110) are fixed by
-jolt PR #1112 (merged 2026-09-22, `dde4803c`, carried by v0.8.11; the
-kmet side validated 2026-09-23 on the installed Windows build) — closed
-findings, dropped here. The Windows runtime seams (#1074/#1077), the
-`set!`/entry-binding gap (#1079/#1085), the glob separator (#1086) and
-ProcessHandle (#1087) are all fixed upstream, with their kmet workarounds
-removed and the Windows smoke run. Every other ticket this file tracked is
-closed.
+**Upstream status (re-checked 2026-09-24):** two findings remain open: the SCI
+IVar gap [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031)
+(`deferred`; its fix [babashka/sci#1093](https://github.com/babashka/sci/pull/1093)
+is still open at head `1295142f`, so the `jolt/deps.edn` pin stays), and the
+Windows path-rendering half of jolt#1110 (deferred; see below).
 
-**Workarounds are retired, not tracked here.** Every workaround block this
-file carried was the removal checklist for one ticket; each landed with its
-fix, so none remain. Source comments describe the local *why* without ticket
-numbers; the closure notes above carry the ticket mapping for the removed
-code.
+The other recent items have closed. The Windows transport
+[http-client#28](https://github.com/jolt-lang/http-client/issues/28) was
+fixed by [PR #29](https://github.com/jolt-lang/http-client/pull/29), released
+as `v0.0.15`; `deps.edn` now pins that fix. jolt#1117 (reader handle leak),
+#1118 (Windows file URLs) and #1119 (mtime) were fixed by
+[jolt PR #1123](https://github.com/jolt-lang/jolt/pull/1123), merged
+2026-09-24 as `859918f2`; the installed Jolt build
+`v0.8.11-18-g79bf6d6e` includes it and passes the relevant regressions. The
+associated kmet test gate and custom jar-URL workaround are removed below. The `Files.isHidden` half of #1110,
+and the Windows runtime findings #1107-#1109, were fixed by jolt PR #1112
+(merged 2026-09-22, `dde4803c`, in v0.8.11). The Windows runtime seams
+(#1074/#1077), `set!`/entry-binding gap (#1079/#1085), glob separator
+(#1086) and ProcessHandle (#1087) are also fixed upstream; their kmet
+workarounds have been removed.
+
+**Fixed-issue workarounds are retired.** The source-level workaround blocks
+this file tracked were removal checklists for fixed tickets; those have been
+removed. The SCI git pin is still required for the open #1031 fallback case
+(see above), and jolt#1110's remaining path-rendering difference is documented
+rather than patched in kmet.
 
 Historical labels from the deleted `bb-jolt.md` map as: `JOLT-12`→#947,
 `JOLT-13`→#944; git history has the full field reports.
@@ -217,16 +216,17 @@ Historical labels from the deleted `bb-jolt.md` map as: `JOLT-12`→#947,
 
 **Area:** SCI vendored in jolt (`sci.impl.vars`), jolt's `clojure.lang.Var` shim
 
-All shipped extensions fail to load on jolt with:
+With stock SCI 0.13.53, defining SCI records over copied host protocols
+fails with:
 ```
 No implementation of method: :getRawRoot of protocol: #'sci.impl.vars/IVar
 found for class: clojure.lang.Var
 ```
-This is distinct from jolt#1006 (which was about `defrecord` over injected
-host protocols — that one is closed). The `IVar` protocol in vendored SCI
-0.13.53 expects `:getRawRoot` on `clojure.lang.Var`, but jolt's Var shim
-doesn't implement it. This blocks mcp-adapter, lsp-adapter, review, and
-clojure extensions on jolt.
+This is distinct from jolt#1006 (the `defrecord` analysis issue, now closed).
+The gap affects Jolt extensions that use the SCI backend and copy/implement
+host protocols; shipped extensions that select Jolt's native loader are not
+blocked. The current `jolt/deps.edn` SCI git pin supplies the fix from PR
+#1093 for the `:sci` fallback.
 
 **Workaround — retired on Jolt (2026-09-16).** Extension contexts no longer
 run under SCI there: `kmet.app.extensions/create-loader` builds them on the
@@ -259,72 +259,15 @@ Re-checked 2026-09-19: both still open — #1031 now carries the `deferred`
 label, and PR #1093's head is still `1295142f`, so the pin is unchanged.
 Re-checked 2026-09-20: unchanged — #1031 still `deferred`, PR #1093 still open
 at the same head `1295142f`, so the pin stays.
-Re-checked 2026-09-23: unchanged — the issue is still `deferred` (last
-activity 2026-09-18) and PR #1093 is still open at head `1295142f`
-(mergeable, checks unstable), so the pin stays.
+Re-checked 2026-09-24: still open/deferred; PR #1093 remains open at head
+`1295142f`, so the SCI pin stays.
 
-### [http-client#28](https://github.com/jolt-lang/http-client/issues/28) — transport still POSIX-only on Windows
+### [jolt#1110](https://github.com/jolt-lang/jolt/issues/1110) — Windows path rendering remains deferred
 
-`jolt.http.net` is a POSIX FFI layer of its own (`getaddrinfo`, `fcntl`,
-`poll` — no `jolt.winsock`), so `babashka.http-client` over the shims dies
-`UnknownHostException` on Windows even on v0.8.11: the runtime's `java.net`
-socket layer is fixed, the library's transport half is not. kmet rides it
-for the default `:platform` transport, so that path stays Windows-dead
-until the library branches; `:curl` mode works (spawns are fixed).
-Re-verified 2026-09-23; filed as
-[http-client#28](https://github.com/jolt-lang/http-client/issues/28).
-
-### [jolt#1117](https://github.com/jolt-lang/jolt/issues/1117) — `read` over a `PushbackReader` keeps the wrapped stream open
-
-v0.8.11's `PushbackReader.close` delegation does not cover this path: after
-`(read r …)` runs on a `PushbackReader`, closing `r` leaves the wrapped
-stream open — the OS handle releases only at GC, which on Windows makes the
-file a pending delete that cannot be removed (and its directory
-undeletable). `jolt.loader`'s `eval-namespace-source` is exactly that shape
-(`with-open` over `(java.io.PushbackReader. (io/reader file))` + `read`), so
-a source tree loaded through the native loader cannot be deleted on Windows
-while the process lives (minimal repro re-verified 2026-09-23 on v0.8.11).
-It keeps kmet's bundled-spec-port extension test `^:bb-only` — the test body
-passes on Jolt, only the Windows teardown cannot remove the fixture — filed
-2026-09-23 as
-[jolt#1117](https://github.com/jolt-lang/jolt/issues/1117); the leak is
-platform-independent, observable only on Windows. The Windows `jolt test`
-run's remaining failures are all of this class (38: pending-delete
-`DirectoryNotEmptyException`/`File exists` teardowns) or the
-[http-client#28](https://github.com/jolt-lang/http-client/issues/28)
-transport's (31) plus
-[jolt#1119](https://github.com/jolt-lang/jolt/issues/1119)'s stale-lock test
-— none are kmet-side (2026-09-23, v0.8.11).
-
-### [jolt#1118](https://github.com/jolt-lang/jolt/issues/1118) — `File.toURI` emits an unopenable `file:` URL on Windows
-
-`(.toURI (io/file p))` renders `file:C:%5CUsers%5C…` on Windows (separators
-percent-encoded, no slash before the drive) where the JVM renders
-`file:/C:/Users/…`; the URL jolt itself emits cannot be opened
-(`No such file or directory`), the standard `file:/C:/…` and
-`file:///C:/…` spellings are rejected (`Invalid argument`), and the opener
-does not percent-decode (`%20`/`%5C` are literal). kmet builds extension
-jar-resource URLs with its own portable spelling (`jar:file:` + the
-/-separated absolute path) rather than `.toURL`/`.toURI`.
-
-### jolt#1110's path-separator half — recorded divergence
-
-The separator half of #1110 was answered rather than changed: on Windows
-jolt renders paths with `/` where the JVM uses `\` (`File.separator`, the
-`file.separator` property, canonical paths), which `known-divergences.edn`
-records; a consumer that needs `\` renders it itself. URL/URI encoding is a
-separate, filed gap — see jolt#1118.
-
-### [jolt#1119](https://github.com/jolt-lang/jolt/issues/1119) — `fs/set-last-modified-time` is a no-op (Windows)
-
-`(fs/set-last-modified-time dir t)` never takes effect on v0.8.11: given a
-number (millis — what babashka accepts) the mtime stays at creation time,
-silently; given a `java.time.Instant` it raises `variable #{inst-ms
-*top*:inst-ms} is not bound` from inside
-`babashka.fs/set-last-modified-time`. `fs/last-modified-time` returns an
-opaque `#object[:object]` there (bb returns a `FileTime`) and `inst-ms` on
-it raises the same error. kmet breaks a stale file lock by comparing the
-lock directory's mtime against a threshold, so back-dating the lock — the
-only way the test can manufacture one — is impossible on jolt and the
-acquisition times out: `file-lock-stale-lock-is-broken` cannot pass. Filed
-2026-09-23.
+The `Files.isHidden` half was fixed by PR #1112. The remaining issue is
+`File`/`Path` string rendering and separators (`/` rather than `\\` on
+Windows), which is a known divergence recorded upstream. As of 2026-09-24,
+#1110 remains open/deferred; [jolt PR #1124](https://github.com/jolt-lang/jolt/pull/1124)
+proposes the rendering fix but is still open. kmet normalizes paths at the
+places where it needs a host-independent spelling; no app workaround is
+waiting to be removed.

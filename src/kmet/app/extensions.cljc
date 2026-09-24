@@ -1188,17 +1188,11 @@
    track-cached-jar!)."
   [artifact jar-info deps-resolver jar-files]
   (let [host-resource (deref #'clojure.java.io/resource)
-        ;; The one jar: spelling both hosts open: `file:` + the
-        ;; /-separated absolute path, no percent-encoding. JVM .toURI
-        ;; renders Windows paths JVM-style (`file:/C:/…`) but Jolt's
-        ;; renders backslashes encoded (`%5C`), which Jolt's opener then
-        ;; treats literally; Jolt in turn rejects the leading-slash
-        ;; spelling JVM accepts. This shape opens on both.
+        ;; Jolt PR #1123 fixed File.toURI and the file: URL opener on
+        ;; Windows, so use the host's normal file URL spelling here too.
         jar-url (fn [root rel]
                   (java.net.URL.
-                   (str "jar:file:"
-                        (str/replace (str (fs/absolutize (io/file root))) "\\" "/")
-                        "!/" rel)))
+                   (str "jar:" (.toURL (.toURI (io/file root))) "!/" rel)))
         own (fn [rel]
               (let [{:keys [kind root prefix]} artifact]
                 (cond

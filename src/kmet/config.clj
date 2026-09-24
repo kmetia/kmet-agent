@@ -324,9 +324,8 @@
 (defn get-http-transport
   "Outbound HTTP transport mode (see kmet.libs.http/set-transport!):
    :platform (default) — babashka.http-client where possible, curl
-   fallback where it cannot serve (SOCKS/https-scheme proxies; live
-   streams on Jolt); :curl — every request through curl. Invalid values
-   fall back to :platform."
+   fallback when proxy type requires it (SOCKS/https-scheme); :curl — every
+   request through curl. Invalid values fall back to :platform."
   [config]
   (let [v (get config :http-transport :platform)]
     (if (contains? #{:platform :curl} v) v :platform)))

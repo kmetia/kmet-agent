@@ -358,14 +358,13 @@
       (catch Exception e
         (throw (transport-error e))))))
 
-;; ─── Transport: curl (SOCKS / https-scheme proxies) ───────────────────────
+;; ─── Transport: curl (explicit :curl mode / SOCKS / https-scheme proxies) ─
 
 (def ^:private curl-timeout-seconds 120)
 
 (def curl-available?
   "Resolved once: true when curl is on PATH (the curl transport needs it
-   — every request in :curl mode, SOCKS/https-scheme proxies and Jolt
-   streams in :platform mode)."
+   — every request in :curl mode and SOCKS/https-scheme proxies)."
   (delay
     (try
       ;; fs/which honors Windows' PATHEXT (exe/com/bat/cmd) and the
@@ -597,15 +596,15 @@
     (try (.delete f) (catch Exception _ nil))))
 
 (defn- curl-request
-  "One request over curl (SOCKS / https-scheme proxies), with status and
-   header parity to the native path. For :stream responses the body
+  "One request over curl (:curl mode, SOCKS / https-scheme proxies), with
+   status and header parity to the native path. For :stream responses the body
    InputStream is returned with private state (:http/curl in the response
    map) — the caller reads it and calls http/close! (reaps the process,
    deletes temp files, reports transport failures) or http/abort! (kills
    the tree on cancel)."
   [url opts p throw?]
   (when-not @curl-available?
-    (throw (ex-info "curl not found on PATH — required for the curl transport and SOCKS/https-scheme proxies (install curl, or switch back to the platform HTTP transport)"
+    (throw (ex-info "curl not found on PATH — required for the :curl transport and SOCKS/https-scheme proxies (install curl, or switch back to the platform HTTP transport)"
                     {:type :curl-not-found})))
   (let [header-file (curl-header-file)
         config-file (curl-config-file (:headers opts) p)
@@ -706,7 +705,8 @@
      :follow-redirects — :normal (default, follow) | :always | :never
                           (true follows, false never follows)
      :signal           — cancel atom (curl path only: kills the process
-                          tree mid-stream)
+                          tree mid-stream; used when :curl mode is active or
+                          a SOCKS/https-scheme proxy requires curl)
      :proxy            — :env (default) | :none | explicit proxy map
 
    The transport is selected process-wide (set-transport!): :platform

@@ -62,9 +62,11 @@ and Termux (Android).
 
 - [Babashka](https://babashka.org/) ≥ 1.13.222 (bundles JLine 4.4.0) — the
   primary host
-- [Jolt](https://github.com/jolt-lang/jolt) ≥ v0.8.6-98 — optional: the same
-  code runs natively on jolt (`jolt run -m kmet.core`, `jolt dist`; see
-  `jolt-port.md`)
+- [Jolt](https://github.com/jolt-lang/jolt) ≥ v0.8.9 — optional: the same
+  code runs natively on Jolt (`jolt run -m kmet.core`, `jolt dist`; see
+  `jolt-port.md`). For Windows jar resources and extension-source cleanup,
+  use a build containing PR #1123 (verified on
+  `v0.8.11-18-g79bf6d6e`) or newer.
 - API keys: `OPENCODE_API_KEY` (opencode-go/opencode), `DEEPSEEK_API_KEY`,
   `OPENAI_API_KEY` (openai), `XAI_API_KEY` (xai), `AZURE_OPENAI_API_KEY`
   (azure-openai-responses; base URL/deployment from `AZURE_OPENAI_BASE_URL` /
@@ -324,7 +326,7 @@ Example `~/.kmet/agent/settings.edn`:
  :session-dir "~/.kmet/sessions"
  :http-idle-timeout-ms 300000   ; LLM stream idle + total deadline in ms; 0 disables
  :http-transport :platform      ; :platform (default) = babashka.http-client on both hosts,
-                                ; curl only for SOCKS/https-scheme proxies; :curl = everything through curl
+                                ; curl for SOCKS/https-scheme proxies; :curl = everything through curl
  :http-total-timeout-ms nil     ; whole-request deadline in ms; nil = the idle timeout, 0 disables
  :shell-command-prefix nil      ; line prepended to every bash command, e.g. "shopt -s expand_aliases"; nil = none
  :shell-path nil                ; custom shell binary for bash execution (e.g. Cygwin/Git Bash on Windows); a leading ~ expands

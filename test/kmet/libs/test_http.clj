@@ -147,9 +147,8 @@
 
 ;; ─── Request contract (every use case × every transport mode) ─────────────
 ;; The dual-mode tests below run under :platform (babashka.http-client;
-;; curl fallback for SOCKS/https-scheme proxies and Jolt streams) and
-;; :curl (everything through curl) — see the transport-mode coverage
-;; section above for the macros.
+;; curl fallback for SOCKS/https-scheme proxies) and :curl (everything
+;; through curl) — see the transport-mode coverage section above.
 
 (deftest-transports test-get
   (let [[base close] (start-server
@@ -579,14 +578,14 @@
 
 (deftest-curl test-curl-abort
   ;; abort! must kill the curl process tree (the sse read loop's cancel
-  ;; path); close! then reaps/untracks. With the cancel signal fired,
-  ;; close! skips the mid-stream transport-error report. The server sends
-  ;; headers + a partial body immediately, then stalls mid-body (never
+  ;; path); close! then reaps/untracks. Runs only with :curl forced, since
+  ;; the platform transport also streams responses natively on Jolt. With
+  ;; the cancel signal fired, close! skips the mid-stream transport-error
+  ;; report. The server sends headers + a partial body immediately, then stalls mid-body (never
   ;; completing the declared Content-Length): the GET returns on the
   ;; headers, so abort!/close! genuinely run mid-stream. (Sleeping before
   ;; the headers would make the GET itself wait out the sleep — slow and
-  ;; testing nothing.) Runs with the curl transport forced — platform
-  ;; mode would stream natively on bb.
+  ;; testing nothing.)
   (let [[base close] (start-server
                       (fn [s _ _ _]
                         (let [b (.getBytes "partial")

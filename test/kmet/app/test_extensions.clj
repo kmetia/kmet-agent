@@ -3,13 +3,9 @@
    lifecycle, per-extension deregistration, and the nullable api fixture
    (kmet.extension/create-nullable-api) for testing extensions in isolation.
    Contexts are per host — SCI on bb/JVM, the runtime's own loader on Jolt —
-   and the suite runs on both. ^:bb-only is what Jolt genuinely cannot run:
-   the bundled clojure.spec port test (its body passes on Jolt — the Maven
-   spec.alpha loads through the native loader — but a Windows teardown
-   cannot remove the fixture: `read` over a `PushbackReader` keeps the
-   source stream open until GC, jolt-bugs.md) and the packed-clojure jar
-   roundtrip (a dependency-closure fixture, extensions.md § bb-bundled
-   ports)."
+   and the suite runs on both. The remaining ^:bb-only test is the packed-
+   clojure jar roundtrip, a dependency-closure fixture (extensions.md §
+   bb-bundled ports)."
   (:require [clojure.test :as t :refer [testing]]
             [clojure.string :as str]
             [clojure.java.io :as io]
@@ -480,7 +476,7 @@
         (extensions/unload-all-extensions!)
         (fs/delete-tree dir)))))
 
-(t/deftest ^:bb-only test-extension-gets-bundled-spec-port-and-file-seq
+(t/deftest test-extension-gets-bundled-spec-port-and-file-seq
   ;; bb's clojure.spec.alpha is a bundled port bb does not preload (unlike
   ;; tools.reader), and its Maven copy fails under SCI (spec.gen.alpha's
   ;; locking2 macro expands monitor-enter, which SCI's core lacks) — the
@@ -488,11 +484,8 @@
   ;; (spec-port-namespaces), so extensions get working clojure.spec.alpha
   ;; without deps.edn pins. file-seq is likewise absent from SCI's core and
   ;; injected with slurp/spit (cljfmt.io's FileEntity protocol needs it).
-  ;; Stays ^:bb-only for the teardown, not the body: on Jolt the assertions
-  ;; pass (the Maven spec.alpha loads through the native loader), but a
-  ;; Windows run cannot delete the fixture afterwards — `read` over a
-  ;; `PushbackReader` keeps the source stream open until GC, so the loader
-  ;; holds the file (jolt-bugs.md).
+  ;; Jolt loads the Maven spec.alpha through its native loader; both hosts
+  ;; now run the same fixture cleanup after loading its source.
   (extensions/clear-extensions!)
   (let [dir "target/test-ext-spec-file-seq"]
     (fs/delete-tree dir)
@@ -1162,9 +1155,10 @@
   ;; expansion — per-call ZipFile on babashka, the archive root on Jolt's
   ;; native loader (jars load in place) — resources via the shadowed
   ;; io/resource, :extension-dir nil, unload clean.
+  ;; The space exercises file-URL escaping through jar:file URLs on Jolt.
   (extensions/clear-extensions!)
   (let [dir "target/test-ext-jar-src"
-        jar "target/test-ext-jar.jar"]
+        jar "target/test ext-jar.jar"]
     (fs/delete-tree dir)
     (fs/delete-if-exists jar)
     (fs/create-dirs (str dir "/jar_ext"))
@@ -1203,9 +1197,7 @@
           (let [result (extensions/load-extension! zip)]
             (t/is (nil? (:error result)) (str "loaded: " (:error result)))
             (t/is (= "jar-ok|bundled" (:content (tools/execute-tool "jar-ext-tool" {})))))
-          ;; unload before tearing the fixture down: the JVM's jar: URL cache
-          ;; pins a loaded archive on Windows (release: track-cached-jar! +
-          ;; unload-extension!)
+          ;; The JVM caches JarURLConnection archives; unload before deleting.
           (extensions/unload-all-extensions!)
           (fs/delete-if-exists zip)))
       (testing "load-extensions-from-dir picks up top-level jars"
@@ -1220,8 +1212,9 @@
             (t/is (= "jar-ok|bundled" (:content (tools/execute-tool "jar-ext-tool" {})))))
           (extensions/unload-all-extensions!)
           (fs/delete-tree container)))
-      (testing "the SCI backend serves the archive too (Jolt's fallback: jar entries read per call, jar: URLs for resources)"
-        (let [sci-jar "target/test-ext-jar-sci.jar"]
+      (testing "the SCI backend serves the archive too"
+        ;; The space also exercises escaped jar:file URLs on Jolt's SCI fallback.
+        (let [sci-jar "target/test ext-jar-sci.jar"]
           (fs/delete-if-exists sci-jar)
           (with-open [zos (java.util.zip.ZipOutputStream. (io/output-stream sci-jar))]
             (doseq [rel ["extension.edn" "jar_ext/main.clj" "jar_ext/helper.clj" "data.txt"]]

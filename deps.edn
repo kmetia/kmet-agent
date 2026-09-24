@@ -55,16 +55,14 @@
         ;; kmet.libs.http routes direct/http-proxy traffic through it on
         ;; Jolt — curl stays only for SOCKS/https-scheme proxies.
         org.babashka/http-client {:mvn/version "0.4.25"}
-        ;; The shims behind babashka.http-client on Jolt (upstream main at
-        ;; http-client PR #27, merged 2026-09-19): PR #25 dropped the libz
-        ;; shims and their stale java.util.zip claims (no per-run upgrade
-        ;; warning), PR #27 stopped applying HttpRequest.timeout to a body
-        ;; already in flight. The native block is just libc sockets (OpenSSL
-        ;; comes from jolt-crypto), so still no project-level :jolt/native
-        ;; block. The library's floor is jolt 0.8.9 — java.util.zip entered
-        ;; the runtime there (see jolt-bugs.md).
+        ;; The shims behind babashka.http-client on Jolt. PR #25 dropped
+        ;; the libz shims and stale java.util.zip claims; PR #27 fixed body
+        ;; timeouts; PR #29 added the Windows Winsock transport (http-client
+        ;; v0.0.15, fixing http-client#28). Pin the merge so the default
+        ;; :platform transport works on Windows too. OpenSSL comes from
+        ;; jolt-crypto; java.util.zip is runtime surface from Jolt 0.8.9.
         io.github.jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
-                                         :git/sha "281689c9b6b54f3b09bb0fd3ca05dba4e54c6953"}
+                                         :git/sha "29385f28fac5a139ef090c2d806e1122123ce386"}
         ;; cljfmt / spec.alpha / rewrite-clj serve the format tasks
         ;; (kmet.tasks.format — one code path on both hosts) AND the fixed
         ;; bundled extension set (kmet.app.extension-libs, extensions.md §
