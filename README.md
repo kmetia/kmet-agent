@@ -5,6 +5,17 @@ with differential rendering, LLM integration, and tool execution.
 
 Inspired by [pi](https://pi.dev) — a terminal-based AI coding agent.
 
+## Project information
+
+| Item | Details |
+|------|---------|
+| Project | **kmet** — an LLM-powered terminal coding agent with a local tool loop |
+| Repository | [github.com/kmetia/kmet-agent](https://github.com/kmetia/kmet-agent) |
+| Language and runtime | Clojure; [Babashka](https://babashka.org/) is the primary runtime, with optional native [Jolt](https://github.com/jolt-lang/jolt) builds |
+| Interfaces | Interactive TUI, non-interactive `--print` mode, local packages, skills, prompts, themes, and extensions |
+| Platforms | Linux, macOS, Windows, WSL, and Termux (Android) |
+| License | [EPL-2.0](LICENSE) |
+
 ## The name
 
 *kmet* (Cyrillic **кмет**) is an old Slavic word. It goes back to Proto-Slavic `*kъmetь`
@@ -58,9 +69,59 @@ and Termux (Android).
   OpenRouter), and an image-model registry (`kmet.ai.image-models`)
 - **Cross-platform** — Linux, macOS, Windows, WSL, and Termux (Android)
 
+## Getting started
+
+The commands below use `bb run` from a source checkout. If you built or
+installed a self-contained executable, use the same options with `kmet` in
+place of `bb run` (or invoke the generated `dist/kmet-*` file directly).
+
+### 1. Run from a checkout
+
+Install Babashka first, then clone and start kmet:
+
+```sh
+git clone https://github.com/kmetia/kmet-agent.git
+cd kmet-agent
+bb run
+```
+
+For a packaged build, use `bb dist` (or `jolt dist` on the Jolt host) and
+run the resulting executable in `dist/`; see [Building](#building) for the
+options and artifact names.
+
+### 2. Configure a provider
+
+The default `opencode-go` provider reads `OPENCODE_API_KEY`:
+
+```sh
+export OPENCODE_API_KEY='your-api-key'
+bb run --list-models
+bb run --provider opencode-go --model deepseek-v4-flash
+```
+
+You can also start kmet and use `/login` to store a credential in
+`~/.kmet/agent/auth.edn`, or use `/login <provider>` for a supported OAuth
+provider. Environment variables are not written to the settings file. Use
+the provider and model names shown by `--list-models` when selecting a
+different account or model.
+
+### 3. Automate a request
+
+For a one-shot response, use print mode from the checkout or a packaged
+executable:
+
+```sh
+bb run --print "summarize the project"
+```
+
+Use `@path/to/file` before the message to attach file contents to the first
+request. See [In-TUI commands](#in-tui-commands) for interactive commands and
+[Configuration](#configuration) for persistent settings, sessions, and
+resource locations.
+
 ## Prerequisites
 
-- [Babashka](https://babashka.org/) ≥ 1.13.222 (bundles JLine 4.4.0) — the
+- [Babashka](https://babashka.org/) ≥ 1.13.224 (bundles JLine 4.4.5) — the
   primary host
 - [Jolt](https://github.com/jolt-lang/jolt) ≥ v0.8.9 — optional: the same
   code runs natively on Jolt (`jolt run -m kmet.core`, `jolt dist`; see
@@ -103,8 +164,8 @@ and Termux (Android).
 bb run
 jolt run -m kmet.core     # ...or on the Jolt host
 
-# Or via the checked-in entry script
-./kmet
+# Or invoke the checked-in entry script explicitly (works on Termux too)
+bb kmet
 
 # With options
 bb run --model deepseek-v4-flash --provider opencode-go
@@ -316,6 +377,13 @@ Settings are loaded from:
 2. `.kmet/settings.edn` — project-local overrides
 3. Environment variables: `KMET_PROVIDER`, `KMET_MODEL`
 
+With the default paths, global settings live in
+`~/.kmet/agent/settings.edn`, credentials entered with `/login` live in
+`~/.kmet/agent/auth.edn`, and session transcripts live in `~/.kmet/sessions/`
+unless `:session-dir` changes that location. Project settings and resources
+can live under `.kmet/`; the global agent directory can be relocated with
+`KMET_CODING_AGENT_DIR`.
+
 Example `~/.kmet/agent/settings.edn`:
 
 ```clojure
@@ -491,7 +559,7 @@ freshly built binary (`--list-models` plus `--version`) before publishing.
 Both hosts name artifacts by one scheme:
 `kmet-<version>-<host><host-version>-<platform>[-dev]` (plus `.exe` on
 Windows; `-dev` marks a jolt `--dev` build), so one `dist/` lines the hosts up
-per platform — `kmet-0.8.0-56-g63374117-bb1.13.222-linux-amd64` next to
+per platform — `kmet-0.8.0-56-g63374117-bb1.13.224-linux-amd64` next to
 `kmet-0.8.0-56-g63374117-jolt0.8.6-86-g234f460b-linux-amd64`. The platform is
 the jolt-style `<os>-<arch>` name (`linux-amd64`, `linux-aarch64`,
 `macos-amd64`, `macos-aarch64`, `windows-amd64`; jolt can also cross-compile

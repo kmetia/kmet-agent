@@ -73,7 +73,7 @@
   runtime's `java.util.zip`). A Maven copy would only risk shadowing the vendored one,
   so kmet relies on both hosts' built-ins.
   Tooling deps (`cljfmt`, plus its `org.clojure/spec.alpha` and `rewrite-clj`
-  companions on jolt) in `bb.edn` `:deps` and `deps.edn`; JLine **4.4.0** bundled with Babashka (see
+  companions on jolt) in `bb.edn` `:deps` and `deps.edn`; JLine **4.4.5** bundled with Babashka (see
   babashka `deps.edn`: `org.jline/jline-terminal`, `org.jline/jline-reader`) as the
   bb/JVM terminal backend — the Jolt terminal backend uses no dependency: termios /
   kernel32 through `jolt.ffi`. The Windows clipboard backend works the same way —

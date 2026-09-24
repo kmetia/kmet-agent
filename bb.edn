@@ -1,4 +1,4 @@
-{:min-bb-version "1.13.222"
+{:min-bb-version "1.13.224"
  ;; tasks/ is a second source root, not part of the app: every bb-task
  ;; implementation lives there (see AGENTS.md § File layout). Both hosts
  ;; resolve kmet.tasks.* from it, and neither artifact carries it — the
