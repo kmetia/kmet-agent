@@ -286,9 +286,7 @@
 
 (defn- mirror-files
   [view]
-  (let [root (:dir view)]
-    (concat (fs/glob root glob-pattern)
-            (fs/glob root (str "**/" glob-pattern)))))
+  (fs/glob (:dir view) glob-pattern))
 
 (defn- projection?
   "True when CONTENT reads differently under VIEW than clj-kondo reads it raw:
