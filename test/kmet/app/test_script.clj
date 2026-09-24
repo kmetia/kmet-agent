@@ -43,6 +43,12 @@
     (t/is (str/includes? (:content r) "42")))
   (t/is (= "(no output)" (:content (run "nil")))))
 
+(t/deftest test-script-emit-compact-result
+  (let [r (run "(sandbox/emit {:count 2 :items [1 2]})")]
+    (t/is (not (:is-error r)))
+    (t/is (= "{:count 2, :items [1 2]}" (str/trim (:content r))))
+    (t/is (nil? (:truncation r)))))
+
 (t/deftest test-script-error
   (let [r (run "(this-does-not-exist 1)")]
     (t/is (:is-error r))
@@ -55,6 +61,53 @@
     (t/is (str/includes? (:content r) "timed out"))
     (t/is (= :timeout (get-in r [:details :error])))
     (t/is (= 0.3 (get-in r [:details :timeout])))))
+
+(t/deftest ^:slow test-script-await-all-honors-timeout
+  (let [release (promise)]
+    (with-custom-tool {:name "script-test-block"
+                       :label "Block"
+                       :description "Blocks until released"
+                       :execute (fn [_] @release {:content "late"})}
+      (fn []
+        (try
+          (let [started-at (System/currentTimeMillis)
+                r (run (str "(tools/await-all (tools/call-many "
+                            "[{:name \"script-test-block\" :args {}}]))")
+                       {:timeout 0.2})]
+            (t/is (:is-error r))
+            (t/is (= :timeout (get-in r [:details :error])))
+            (t/is (< (- (System/currentTimeMillis) started-at) 1000)
+                  "await-all observes the deadline without waiting for the tool"))
+          (finally
+            (deliver release true)
+            (Thread/sleep 50)))))))
+
+(t/deftest ^:slow test-script-await-all-honors-escape
+  (let [signal (atom false)
+        release (promise)]
+    (with-custom-tool {:name "script-test-block"
+                       :label "Block"
+                       :description "Blocks until released"
+                       :execute (fn [_] @release {:content "late"})}
+      (fn []
+        (try
+          (let [started-at (System/currentTimeMillis)
+                f (future
+                    (tools/execute-tool
+                     "script"
+                     {:code (str "(tools/await-all (tools/call-many "
+                                 "[{:name \"script-test-block\" :args {}}]))")}
+                     {:signal signal}))]
+            (Thread/sleep 100)
+            (reset! signal true)
+            (let [r (deref f 3000 nil)]
+              (t/is (some? r))
+              (t/is (:is-error r))
+              (t/is (= :aborted (get-in r [:details :error])))
+              (t/is (< (- (System/currentTimeMillis) started-at) 1000))))
+          (finally
+            (deliver release true)
+            (Thread/sleep 50)))))))
 
 (t/deftest test-script-signal-abort
   (let [signal (atom false)
@@ -79,6 +132,12 @@
   (let [r (run "@(sandbox/spawn (fn [] (println \"from-future\"))) :done")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (str/includes? (:content r) "from-future"))))
+
+(t/deftest test-script-emit-from-spawn
+  (let [r (run "@(sandbox/spawn (fn [] (sandbox/emit :from-future))) :done")]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (str/includes? (:content r) ":from-future"))
+    (t/is (str/includes? (:content r) ":done"))))
 
 (t/deftest test-script-capabilities
   (let [r (run (str "[(fs/exists? \"deps.edn\")"
@@ -128,6 +187,33 @@
     (t/is (> (get-in r [:truncation :total-lines]) 2000))
     (t/is (str/includes? (:content r) "truncated"))))
 
+(t/deftest test-script-output-budget
+  (let [r (run "(dotimes [i 1000] (println (apply str (repeat 100 \"x\"))))"
+               {:max-output-bytes 1024 :max-output-lines 2000})]
+    (t/is (not (:is-error r)))
+    (t/is (= 1024 (get-in r [:truncation :max-bytes])))
+    (t/is (= :bytes (get-in r [:truncation :truncated-by])))
+    (t/is (str/includes? (:content r) "Script output truncated")))
+  (let [r (run "(dotimes [i 100] (println \"line\"))"
+               {:max-output-bytes 16384 :max-output-lines 10})]
+    (t/is (not (:is-error r)))
+    (t/is (= 10 (get-in r [:truncation :max-lines])))
+    (t/is (= :lines (get-in r [:truncation :truncated-by]))))
+  (let [r (run "(dotimes [i 1000] (println (apply str (repeat 100 \"x\"))))")]
+    (t/is (= (* 16 1024) (get-in r [:truncation :max-bytes]))
+          "the script default is smaller than bash's shared cap")))
+
+(t/deftest test-script-output-limit-normalization
+  (let [r (run "(dotimes [i 1000] (println (apply str (repeat 100 \"x\"))))"
+               {:max-output-bytes 999999})]
+    (t/is (= (* 50 1024) (get-in r [:truncation :max-bytes]))
+          "limits clamp to the tool-wide byte cap"))
+  (let [r (run "(dotimes [i 1000] (println (apply str (repeat 100 \"x\"))))"
+               {:max-output-bytes 0 :max-output-lines -1})]
+    (t/is (= (* 16 1024) (get-in r [:truncation :max-bytes])))
+    (t/is (= 2000 (get-in r [:truncation :max-lines]))
+          "invalid limits fall back to the defaults")))
+
 (t/deftest test-script-streaming
   (let [updates (atom [])
         r (run "(dotimes [i 4] (println i) (sandbox/sleep 50))"
@@ -163,6 +249,35 @@
         (t/is (not (:is-error r)) (:content r))
         (t/is (= "[true true]" (:content r)))
         (t/is (= 2 (count (get-in r [:details :calls]))))))))
+
+(t/deftest test-script-call-many-and-await-all
+  (with-custom-tool {:name "script-test-echo"
+                     :label "Echo"
+                     :description "Echo args"
+                     :execute (fn [args] {:content (str "echo-" (:n args))})}
+    (fn []
+      (let [r (run (str "(let [ps (tools/call-many [{:name \"script-test-echo\""
+                        " :args {:n 1}} [\"script-test-echo\" {:n 2}]])]"
+                        "  (mapv :content (tools/await-all ps)))"))]
+        (t/is (not (:is-error r)) (:content r))
+        (t/is (= "[\"echo-1\" \"echo-2\"]" (:content r)))
+        (t/is (= 2 (count (get-in r [:details :calls]))))
+        (t/is (every? :ok (get-in r [:details :calls])))))))
+
+(t/deftest test-script-call-many-validates-before-dispatch
+  (let [ran (atom 0)]
+    (with-custom-tool {:name "script-test-echo"
+                       :label "Echo"
+                       :description "Echo args"
+                       :execute (fn [args]
+                                  (swap! ran inc)
+                                  {:content (pr-str args)})}
+      (fn []
+        (let [r (run (str "(tools/call-many [{:name \"script-test-echo\""
+                          " :args {:n 1}} 42])"))]
+          (t/is (:is-error r))
+          (t/is (zero? @ran))
+          (t/is (empty? (get-in r [:details :calls]))))))))
 
 (t/deftest test-script-fan-out-exceeds-worker-pool
   ;; the bridge drains through a bounded worker pool; a fan-out larger than
@@ -493,12 +608,22 @@
                                "  (boolean (:is-error x)))"))))))
 
 (t/deftest ^:slow test-script-output-limit
-  ;; the 16 MiB capture bound is reachable: it counts what the readers saw
+  ;; the per-call 1 MiB capture bound is reachable: it counts what the readers saw
   (let [r (run (str "(dotimes [i 200] (println (apply str (repeat 100000 \"x\"))))"
                     " (sandbox/sleep 1500)"))]
     (t/is (:is-error r) (:content r))
     (t/is (= :output-limit (get-in r [:details :error])))
+    (t/is (str/includes? (:content r) "1.0MB"))
     (t/is (str/includes? (:content r) "exceeded"))))
+
+(t/deftest ^:slow test-script-capture-budget-option
+  (let [r (run (str "(println (apply str (repeat 100000 \"x\")))"
+                    " (sandbox/sleep 500))")
+               {:max-capture-bytes 1024})]
+    (t/is (:is-error r) (:content r))
+    (t/is (= :output-limit (get-in r [:details :error])))
+    (t/is (str/includes? (:content r) "1.0KB"))))
+
 (t/deftest ^:slow test-script-abort-during-slow-before-hook-skips-call
   ;; the admission check runs again after the before hook: a hook that ran
   ;; past the abort cannot let its call start

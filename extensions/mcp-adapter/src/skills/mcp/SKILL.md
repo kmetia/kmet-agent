@@ -70,6 +70,12 @@ separate runtime retired into this engine):
       b (tools/call "server_b_query" {:q "y"})]
   (println (:content @a))
   (println (:content @b)))
+
+;; shorter ordered batches: call-many submits, await-all waits
+(mapv :content
+      (tools/await-all
+       (tools/call-many [{:name "server_a_query" :args {:q "x"}}
+                         {:name "server_b_query" :args {:q "y"}}])))
 ```
 
 - MCP tools appear by their prefixed names (`server_toolname`) from the
@@ -77,8 +83,11 @@ separate runtime retired into this engine):
   auth and the output guard match the `mcp` proxy. A server that has
   never been connected has no cache entry yet, so connect it once
   (`mcp({connect: "name"})`) before scripting it.
-- Print with `println`; the script's return value is reported too.
-  `(emit ...)`/`console.log` no longer exist — they were mcpScript's API.
+- Print with `println`; the script's return value is reported too. For one
+  compact result, `(sandbox/emit value)` prints the value and returns `nil`,
+  avoiding duplicate stdout/return output. The old unqualified `emit` and
+  `console.log` APIs remain retired. `tools/await-all` waits in input order
+  while observing the script cancellation signal.
 - `timeout` (seconds; omit or 0 = no deadline, like bash) bounds the whole
   script; calls still in
   flight appear in `:details :calls` as `incomplete` with their elapsed

@@ -10,8 +10,9 @@
    execute-tool, drained by a shared bounded worker pool). The script runs on
    a daemon thread whose SCI :interrupt-fn aborts interpreted code on the run
    signal or the deadline; *out*/*err* are captured to bounded temp files,
-   streamed through on-update, and assembled into the result (tools' 50 KiB /
-   2000-line convention, tail truncation)."
+   streamed through on-update, and assembled into the result (a 16 KiB /
+   2000-line default budget, configurable per call, with a bounded capture
+   tail)."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.app.bash-executor :as bash-exec]
@@ -43,9 +44,13 @@
   (let [q (quot ms 1000)]
     (if (= ms (* q 1000)) q (/ ms 1000.0))))
 
-(def ^:private max-output-bytes bash-exec/DEFAULT-MAX-BYTES)
-(def ^:private max-output-lines bash-exec/DEFAULT-MAX-LINES)
-(def ^:private max-capture-bytes (* 16 1024 1024))
+(def ^:private tool-max-output-bytes bash-exec/DEFAULT-MAX-BYTES)
+(def ^:private tool-max-output-lines bash-exec/DEFAULT-MAX-LINES)
+
+(def ^:private default-script-output-bytes (* 16 1024))
+(def ^:private tool-max-capture-bytes (* 16 1024 1024))
+
+(def ^:private default-capture-bytes (* 1 1024 1024))
 (def ^:private max-tail-bytes (* 128 1024))
 ;; Bound on printed collections (the script's own printing and the return
 ;; value). Generous on purpose: it exists to stop an unbounded seq from
@@ -53,6 +58,8 @@
 (def ^:private print-length-limit 100000)
 (def ^:private print-level-limit 30)
 (def ^:private update-throttle-ms 100)
+
+(def ^:private await-poll-ms 25)
 (def ^:private drain-timeout-ms 2000)
 (def ^:private interrupt-grace-ms 1500)
 (def ^:private error-preview-chars 300)
@@ -144,6 +151,33 @@
     (when (and secs (pos? secs))
       (-> (* 1000.0 secs) Math/round (max 1) (min max-timeout-ms)))))
 
+(defn- normalize-limit
+  "Normalize an output limit to a positive integer no larger than the tool-wide cap."
+  [v fallback upper]
+  (let [n (try (long v) (catch Exception _ nil))]
+    (cond
+      (or (nil? n) (not (pos? n))) fallback
+      :else (min n upper))))
+
+(defn- output-limits [max-bytes max-lines]
+  {:bytes (normalize-limit max-bytes
+                           default-script-output-bytes
+                           tool-max-output-bytes)
+   :lines (normalize-limit max-lines
+                           tool-max-output-lines
+                           tool-max-output-lines)})
+
+(defn- capture-limit
+  "Normalize the per-call capture budget to the tool-wide safety cap."
+  [v]
+  (normalize-limit v default-capture-bytes tool-max-capture-bytes))
+
+(defn- script-limits
+  "Resolve result and capture budgets once, before the script starts."
+  [max-bytes max-lines max-capture-bytes]
+  (let [limits (output-limits max-bytes max-lines)]
+    (assoc limits :capture-bytes (capture-limit max-capture-bytes))))
+
 (defn- combined-signal
   "The cancel signal a script's inner calls observe: true when the run's
    cancel signal (Escape) fired or the script itself aborted
@@ -190,8 +224,9 @@
 ;; exists on both hosts — Jolt has no PipedWriter, and proxy is unavailable
 ;; here). A reader thread per file drains it as the eval thread writes,
 ;; keeping a bounded tail for the result and streaming throttled updates.
-;; Past max-capture-bytes the run is aborted (:output-limit), so a runaway
-;; print loop stays bounded in memory and on disk.
+;; Past the per-call capture budget (1 MiB default, 16 MiB hard cap) the run
+;; is aborted (:output-limit), so a runaway print loop stays bounded in memory
+;; and on disk.
 
 (defn- tail-text
   "The suffix of S holding at most BUDGET UTF-8 bytes (cut on char
@@ -320,16 +355,14 @@
 
 (defn- make-progress
   "The throttled on-update emitter shared by both readers. Also enforces the
-   total *seen* capture bound — the retained tail is capped by
-   max-tail-bytes, so the running total must come from the seen counters. A
-   still-running script past max-capture-bytes is aborted (a finished one is
-   only truncated — the limit must not turn a successful script into an error
-   after the fact)."
-  [out-state err-state on-update abort closed?]
+   per-call capture bound — the retained tail is capped by max-tail-bytes, so
+   the running total must come from the seen counters. A still-running script
+   past CAPTURE-LIMIT is aborted; a finished one is only truncated."
+  [out-state err-state on-update abort closed? capture-limit]
   (let [last-at (atom 0)]
     (fn []
       (let [total (+ (:seen-bytes @out-state) (:seen-bytes @err-state))]
-        (when (and abort (nil? @abort) (not @closed?) (> total max-capture-bytes))
+        (when (and abort (nil? @abort) (not @closed?) (> total capture-limit))
           (reset! abort :output-limit))
         (when on-update
           (let [now (System/currentTimeMillis)]
@@ -341,7 +374,7 @@
                                           (when (seq err) (str "\n[stderr]\n" err)))
                             :is-partial true})))))))))
 
-(defn- start-capture [on-update abort]
+(defn- start-capture [on-update abort capture-limit]
   (let [dir (str (temp-root) "/kmet-script-" (System/nanoTime))
         _ (fs/create-dirs dir)
         out-file (str dir "/out.log")
@@ -349,7 +382,7 @@
         closed? (atom false)
         out-state (atom {:chunks [] :bytes 0 :lines 0 :seen-bytes 0 :seen-lines 0})
         err-state (atom {:chunks [] :bytes 0 :lines 0 :seen-bytes 0 :seen-lines 0})
-        progress (make-progress out-state err-state on-update abort closed?)]
+        progress (make-progress out-state err-state on-update abort closed? capture-limit)]
     {:dir dir
      :closed? closed?
      :out-w (java.io.OutputStreamWriter. (java.io.FileOutputStream. out-file) "UTF-8")
@@ -456,11 +489,24 @@
       (contains? fns 'shell) (update 'shell with-dir)
       (contains? fns 'process) (update 'process #(tracked (with-dir %))))))
 
+(defn- emit-value
+  "Write one compact script result to the captured writer; host println is not bound to SCI output on Jolt."
+  [out-w v]
+  (binding [*out* out-w
+            *print-length* print-length-limit
+            *print-level* print-level-limit]
+    (println (if (string? v) v (pr-str v)))))
+
 (defn- sandbox-fns [cwd writers]
   {'cwd (fn [] cwd)
    'env (fn [k] (System/getenv (str k)))
    'now (fn [] (System/currentTimeMillis))
    'sleep (fn [ms] (Thread/sleep (long ms)))
+   'emit (fn [v]
+           (if-let [{:keys [out-w]} @writers]
+             (emit-value out-w v)
+             (throw (ex-info "Script output is not initialized"
+                             {:type :script/no-output}))))
    ;; a derefable result on a daemon thread (babashka/jolt futures are
    ;; daemon-backed; SCI's own future is unavailable in a value-shared ctx).
    ;; The writers are re-bound: a future does not convey SCI's var bindings
@@ -669,8 +715,47 @@
                           (deliver p result)))))))
         p))))
 
+(defn- call-spec
+  "Normalize one call-many descriptor to [tool-name args]."
+  [spec]
+  (cond
+    (map? spec) [(:name spec) (:args spec)]
+    (sequential? spec) [(first spec) (second spec)]
+    :else (throw (ex-info "call-many expects {:name ... :args ...} or [name args]"
+                          {:type :script/invalid-call}))))
+
+(defn- call-many
+  "Validate the complete batch before dispatching any descriptor."
+  [opts calls]
+  (let [calls (mapv call-spec calls)]
+    (mapv (fn [[name args]] (dispatch! opts name args)) calls)))
+
+(defn- abort-await! [abort]
+  (when abort
+    (compare-and-set! abort nil :aborted))
+  (throw (ex-info "Script aborted while waiting for tool calls"
+                  {:type :script/await-aborted
+                   :reason :aborted})))
+
+(defn- await-one
+  "Wait for one tool promise in short polls so script cancellation reaches the interpreter."
+  [signal abort promise]
+  (loop []
+    (if (and signal @signal)
+      (abort-await! abort)
+      (let [value (deref promise await-poll-ms ::await-pending)]
+        (cond
+          (and signal @signal) (abort-await! abort)
+          (not= ::await-pending value) value
+          :else (recur))))))
+
+(defn- await-all [signal abort promises]
+  (mapv (fn [promise] (await-one signal abort promise)) promises))
+
 (defn- bridge-fns [opts]
   {'call (fn [name & [args]] (dispatch! opts name args))
+   'call-many (fn [calls] (call-many opts calls))
+   'await-all (fn [promises] (await-all (:signal opts) (:abort opts) promises))
    'read (fn [& [args]] (dispatch! opts "read" args))
    'write (fn [& [args]] (dispatch! opts "write" args))
    'edit (fn [& [args]] (dispatch! opts "edit" args))
@@ -697,16 +782,18 @@
        " lines. Print less or return distilled data instead.]"))
 
 (defn- bound-content
-  "Cap BODY at the tools' 50 KiB / 2000-line convention (bash-executor's tail
+  "Cap BODY at the per-call byte/line budget (bash-executor's tail
    truncation — the end holds the return value). TOTALS carries the capture's
    full byte/line counts, which the retained tail no longer knows."
-  [body totals]
-  (let [t (bash-exec/truncate-tail body)
+  [body totals max-bytes max-lines]
+  (let [t (bash-exec/truncate-tail body
+                                   :max-bytes max-bytes
+                                   :max-lines max-lines)
         total-bytes (max (:total-bytes t) (:bytes totals))
         total-lines (max (:total-lines t) (:lines totals))
         truncated? (or (:truncated t)
-                       (> total-bytes max-output-bytes)
-                       (> total-lines max-output-lines))]
+                       (> total-bytes max-bytes)
+                       (> total-lines max-lines))]
     (if truncated?
       {:content (str (:content t) "\n\n"
                      (truncation-notice {:total-lines total-lines
@@ -718,8 +805,8 @@
                     ;; :capture — the body fits, the capture tail dropped the
                     ;; rest (the totals above are the whole output)
                     :truncated-by (or (:truncated-by t) :capture)
-                    :max-bytes max-output-bytes
-                    :max-lines max-output-lines}}
+                    :max-bytes max-bytes
+                    :max-lines max-lines}}
       {:content body :truncation nil})))
 
 (defn- trace-snapshot
@@ -792,7 +879,8 @@
    reports, e.g. a catch that rethrows) cannot outlive its deadline.
    TIMEOUT-MS nil = no deadline (bash parity) and the result's :timeout is
    nil; ELAPSED-MS is the measured wall clock of the whole call."
-  [{:keys [res capture timeout-ms trace abort-reason elapsed-ms]}]
+  [{:keys [res capture timeout-ms trace abort-reason elapsed-ms
+           output-bytes output-lines capture-bytes]}]
   (let [{:keys [out err out-bytes out-lines err-bytes err-lines]} capture
         status (or abort-reason (:status res))
         value (when (= :ok status) (:value res))
@@ -801,7 +889,7 @@
                      :timeout (str "Script timed out after " (ms->sec timeout-ms) "s")
                      :aborted "Script aborted"
                      :output-limit (str "Script output exceeded "
-                                        (bash-exec/format-size max-capture-bytes)
+                                        (bash-exec/format-size capture-bytes)
                                         " — stopped")
                      :error (:error res)
                      nil)
@@ -813,7 +901,7 @@
         body (if (seq parts) (str/join "\n" parts) "(no output)")
         totals {:bytes (+ out-bytes err-bytes (byte-length ret) (byte-length error-text))
                 :lines (+ out-lines err-lines (text-lines ret) (text-lines error-text))}
-        {:keys [content truncation]} (bound-content body totals)
+        {:keys [content truncation]} (bound-content body totals output-bytes output-lines)
         calls (trace-snapshot trace)]
     (cond-> {:content content
              :is-error (not= :ok status)
@@ -827,8 +915,9 @@
       truncation (assoc :truncation truncation))))
 
 (defn- run-script
-  [{:keys [code timeout signal ctx on-update get-all-tools get-contributed-tools
-           select-tools execute-tool generation-fn]}]
+  [{:keys [code timeout limits signal ctx on-update
+           get-all-tools get-contributed-tools select-tools execute-tool
+           generation-fn]}]
   (let [timeout-ms (normalize-timeout timeout)
         started-at (System/currentTimeMillis)
         cwd (tool-util/cwd)
@@ -856,6 +945,7 @@
         bridge (bridge-fns {:surface surface
                             :execute-tool execute-tool
                             :signal cancelled
+                            :abort abort
                             :ctx ctx
                             :cwd cwd
                             :session-env-fn session-env-fn
@@ -869,7 +959,7 @@
                :namespaces (fork-namespaces cwd bridge writers)
                :sci-opts {:interrupt-fn (interrupt-fn abort signal deadline)}})
         fork-ctx (loader/context fork)
-        capture (start-capture on-update abort)
+        capture (start-capture on-update abort (:capture-bytes limits))
         _ (reset! writers capture)
         {:keys [done result]} (start-eval-thread! fork-ctx code capture)]
     (if timeout-ms
@@ -893,6 +983,9 @@
         (assemble-result {:res res
                           :capture snapshot
                           :timeout-ms timeout-ms
+                          :output-bytes (:bytes limits)
+                          :output-lines (:lines limits)
+                          :capture-bytes (:capture-bytes limits)
                           :trace trace
                           :abort-reason @abort
                           :elapsed-ms (- (System/currentTimeMillis) started-at)}))
@@ -901,31 +994,9 @@
 ;; ─── Tool record ──────────────────────────────────────────────────────────
 
 (def ^:private description
-  (str "Run a Clojure script in a sandbox with kmet's tools bridged in. Use it to run a "
-       "multi-step task as one call — fan tool calls out in parallel, loop, chain, filter, "
-       "scan files — so N tool results cost one round trip and only the script's distilled "
-       "output enters the conversation; inner results return to the script, never to the "
-       "model.\n\n"
-       "Tool calls return promises — deref when the value is needed:\n"
-       "  @(tools/call \"name\" {...})   ;; any active tool, by name (string/keyword/symbol)\n"
-       "  @(tools/bash {...}) @(tools/read {...}) @(tools/write {...}) @(tools/edit {...})\n"
-       "  (tools/list) (tools/describe \"name\")   ;; discovery (synchronous)\n"
-       "Start independent calls before derefing any of them so they run in parallel; "
-       "(deref p ms ::timeout) bounds a call. The surface is every active tool plus "
-       "extension-contributed sandbox tools (e.g. MCP server tools). A call settles with "
-       "the tool's own result map {:content :is-error :details :truncation :images} — "
-       "branch on :is-error and read :content; don't pr-str the whole map (an image read "
-       "carries base64).\n\n"
-       "Preloaded aliases (no require needed): fs (babashka.fs), str/set/edn/walk "
-       "(clojure.*), json (kmet.libs.json), p (babashka.process), plus tools and sandbox "
-       "(cwd/env/now/sleep/spawn); clojure.core carries slurp/spit/file-seq/pmap. No Java "
-       "interop and no other requires. Print with println; the last expression's value is "
-       "reported too. Errors are Exceptions — catch with (catch Exception e ...); Throwable "
-       "is not a class here. Relative paths in slurp/spit/sh resolve against the session cwd "
-       "((sandbox/cwd)); babashka.fs uses the process directory. No timeout by default, like "
-       "bash: omit :timeout or pass 0 for no deadline; a positive :timeout is seconds "
-       "(fractional ok, capped at a day) and on timeout the output so far is returned, "
-       "inner calls are cancelled, and the result carries :elapsed-ms."))
+  (str "Run a Clojure script for bulk scans, filtering, and multi-step workflows; inner results stay in the script and only its distilled output enters the conversation.\n\n"
+       "Tool calls are async: @(tools/call \"name\" args). Fire independent calls before derefing them; use (deref p ms ::timeout) when needed. For batches, use (tools/await-all (tools/call-many [{:name \"read\" :args {...}} ...])). Discover active tools with (tools/list) and (tools/describe \"name\"). (sandbox/emit value) prints one compact result and returns nil. Calls settle as {:content :is-error :details :truncation :images}; branch on :is-error and read :content.\n\n"
+       "Aliases: fs, str/set/edn/walk, json, p, tools, and sandbox; core adds slurp/spit/file-seq/pmap. No Java interop. `fs` is process-relative; `slurp`/`spit`/`sh` use the session cwd. Catch `Exception` (`Throwable` is unavailable); `:content` may be a block vector/image. Extension-contributed tools join the active surface. :timeout is seconds (0 or omitted means no deadline). Output is capped at 16 KiB/2000 lines by default; :max-output-bytes and :max-output-lines tune the result, while :max-capture-bytes tunes capture (default 1 MiB, hard cap 16 MiB)."))
 
 (defn title
   "Quiet one-liner body for the script tool: the first code line, shortened."
@@ -953,22 +1024,32 @@
    :description description
    :prompt-snippet "Orchestrate tool calls and bulk file work in one Clojure script, printing only distilled results"
    :prompt-guidelines
-   ["Use script to collapse a multi-step workflow into one call — a search/read/verify chain, a loop over many files, or several tool calls belong in one script, not in N round-trips."
-    "Fire independent inner calls before derefing any of them: every tools/call returns a promise and runs in parallel; deref only when a value is needed."
-    "Route file work through script when the raw output is large or needs filtering (rg/cat/head/wc/sed/awk pipelines, many read calls): scan, filter and aggregate in Clojure and print only the distilled lines — raw output is re-sent every later turn."
-    "A quick one-off command with small output still belongs in bash; issue it alongside the script call in the same message, not in a separate turn."
-    "Prefer read for exactly one file and edit/write for reviewable changes; script is for bulk edits and data that would bloat the transcript."]
+   ["Use script for a search/read/verify chain, a loop over many files, or several tool calls; use bash for one small command and read for one file."
+    "Fire independent inner calls before derefing them; tools/call-many and tools/await-all keep batch code short."
+    "Filter and aggregate locally, then use sandbox/emit (or return one distilled value) instead of printing raw file/search output."]
    :params {:code {:type :string :description "Clojure code to run"}
             :timeout {:type :number
                       :description (str "Timeout in seconds — like bash's :timeout: omit or 0 "
                                         "= no deadline; fractional ok, capped at a day")
-                      :optional? true}}
+                      :optional? true}
+            :max-output-bytes {:type :number
+                               :description "Maximum result bytes (default 16 KiB; capped at 50 KiB)"
+                               :optional? true}
+            :max-output-lines {:type :number
+                               :description "Maximum result lines (default 2000; capped at 2000)"
+                               :optional? true}
+            :max-capture-bytes {:type :number
+                                :description "Maximum captured bytes (default 1 MiB; capped at 16 MiB)"
+                                :optional? true}}
    :execute (fn [args on-update signal ctx]
               (let [code (some-> (:code args) str)]
                 (if (str/blank? code)
                   {:content "No code provided." :is-error true}
                   (run-script {:code code
                                :timeout (:timeout args)
+                               :limits (script-limits (:max-output-bytes args)
+                                                      (:max-output-lines args)
+                                                      (:max-capture-bytes args))
                                :signal signal
                                :ctx ctx
                                :on-update on-update

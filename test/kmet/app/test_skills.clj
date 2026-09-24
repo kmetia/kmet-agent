@@ -44,7 +44,7 @@
   (t/testing "parallel tool-call batching guideline (kmet addition)"
     (let [result (skills/build-system-prompt :cwd "/tmp")]
       (t/is (str/includes? result "- When a turn needs several tool calls, batch the independent ones into one message"))
-      (t/is (str/includes? result "- Use script to collapse a multi-step workflow into one call"))))
+      (t/is (str/includes? result "- Use script for a search/read/verify chain, a loop over many files, or several tool calls"))))
   (t/testing "skills are listed as available_skills XML"
     (let [name "test-prompt-skill"
           description "Prompt skill description."

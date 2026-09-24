@@ -1014,7 +1014,8 @@ landed and every deliberate deviation from the text above.
     sandbox contexts). Settings `:script-mode false` drops the
     contribution. The old surface changes shipped with it: kmet result
     maps + explicit `@` deref instead of `{:ok :data}` envelopes,
-    `println` instead of `emit`/`console.*`, the shared in-process SCI
+    `println` plus the compact `sandbox/emit` helper instead of the retired
+    unqualified `emit`/`console.*` surface, the shared in-process SCI
     sandbox instead of a `bb` subprocess, and the mcpScript renderer's
     place taken by the shared script renderer. Loading `:env` on stdio
     servers was fixed in the same pass (`connect-stdio` used

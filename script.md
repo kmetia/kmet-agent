@@ -12,13 +12,20 @@ result-token attribution — so the build/no-build decision can be made on data.
 
 Status: **T1, T2 and T4 implemented** in this tree —
 `src/kmet/app/tools/script.cljc`, a builtin (read/write/edit/bash + `script`),
-`kmet.app.test-script` (42 tests: 33 fast + 9 `^:slow`, smoke-verified on
+`kmet.app.test-script` (52 tests: 39 fast + 13 `^:slow`, smoke-verified on
 babashka and jolt); the mcp-adapter's `mcpScript` tool and `bb`-subprocess
 runtime retired into the same engine (its catalog joins the sandbox as a
 contributed tool source — T2 below). T4 shares the invocation pipeline with
 the loop (`kmet.app.tools.invoke`), so scripted calls fire the run's tool
 hooks and a script abort cancels inner calls. Only the plan's last item, the
 post-adoption T0 re-measurement, remains (⏳ below).
+
+A follow-up efficiency pass is also landed: `sandbox/emit` provides a
+single compact result path, `tools/call-many`/`tools/await-all` shorten
+ordered fan-out, per-call output budgets default to 16 KiB, capture budgets
+default to 1 MiB and are configurable up to 16 MiB, and the provider-facing
+description/guidelines are substantially shorter.
+
 **T0 measured and analysed** (results below); the numbers rewrote the premise
 rather than killed it: maki's read-share did not transfer — bash dominates —
 but ~75% of all result tokens are still the find/read workload; it leaks
@@ -245,7 +252,8 @@ on jolt if a script evaluator wants `:interrupt-fn` uniformly.
     `tool_proxy.clj` (search/describe envelopes, TS-shape renderer,
     rank-suggestions, paginate) were deleted with the runtime.
   - **Surface carried over:** kmet result map + explicit `@` deref instead of
-    `{:ok :data}` envelopes; `println` instead of `emit`/`console.*`;
+    `{:ok :data}` envelopes; `println` plus the compact `sandbox/emit` helper
+    (the old unqualified `emit`/`console.*` surface is retired);
     progress notifications still stream (the bridge now passes the script's
     `on-update` to inner `:streams?` calls). Isolation consequence as
     recorded: scripted MCP code is T1's in-process SCI — strictly sandboxier
@@ -290,11 +298,14 @@ Decisions from the design pass, so implementation doesn't re-derive them.
 
 ```
 (tools/call "name" args)               ; every active tool by name — returns a promise
+(tools/call-many [{:name "name" :args args} ...]) ; submit a batch, preserving order
+(tools/await-all promises)              ; deref submitted calls in input order
 (tools/read args) (tools/write args)    ; builtins, sugar over tools/call (same promise)
 (tools/edit args) (tools/bash args)
 (tools/list) (tools/describe "name")    ; discovery; synchronous bridge-local reads
 (sandbox/cwd) (sandbox/env k)           ; runtime cwd; env vars
 (sandbox/now) (sandbox/sleep ms)        ; time
+(sandbox/emit value)                    ; print one compact result; returns nil
 (sandbox/spawn f)                       ; host future (derefable)
 ```
 
@@ -305,11 +316,18 @@ The namespace is `tools` (mcpScript's surface, so T2's skill snippets survive);
 to `require` beyond that vocabulary. The script's printed output and its
 return value are reported together — strings raw, other data `pr-str` (a
 Clojure sandbox reports Clojure data; T2 formats MCP envelopes itself).
+For a single compact result, `(sandbox/emit value)` prints the value and
+returns `nil`, so the final expression does not duplicate it.
 
 - **Call fns return promises.** The call returns immediately with a promise
   that settles with the verbatim result map; the script derefs when it needs
-  the value (`@(tools/call "bash" {...})`). The mechanism is the mcpScript
-  child runtime's existing one (per-id `pending` promises, one reader thread;
+  the value (`@(tools/call "bash" {...})`). `call-many` submits a sequence
+  of descriptors and returns their promises; the complete batch is validated
+  before any descriptor is dispatched. `await-all` derefs them in input order
+  after all have been submitted, polling the combined cancel signal so a
+  timeout/Escape is observed even when a tool ignores cancellation. The
+  mechanism is the mcpScript child
+  runtime's existing one (per-id `pending` promises, one reader thread;
   concurrent calls from `future`s are safe) ported in-process — except the
   bridge hands the script the promise instead of derefing internally, which
   makes fan-out idiomatic: fire N calls, scan files locally meanwhile, deref.
@@ -431,7 +449,7 @@ jolt pin): value-shared `babashka.*` namespaces work in a context with **no
 | cwd/env | `(sandbox/cwd)` (the runtime cwd), `(sandbox/env k)` | SCI has no `System/getenv`. slurp/spit/file-seq and sh/shell/process resolve relative paths against the runtime cwd like the tools; **babashka.fs stays process-relative** (no wrapper can safely guess which args are paths) — build paths from `(sandbox/cwd)` |
 | time | `(sandbox/now)` / `(sandbox/sleep ms)` | any polling or scan-timeout loop needs them |
 | reader features | the host's own feature (`:bb` or `:jolt`) | kmet's convention — `:clj` matches both hosts and is not exposed |
-| output | `*out*`/`*err*` captured + the script's return value | captured to bounded temp files: a reader per stream keeps a 128 KiB tail for the result, streams throttled `on-update`s, and aborts the run past 16 MiB (`:output-limit`) so a print loop can't OOM or fill the disk. The result is tail-truncated at the tools' 50 KiB/2000-line convention |
+| output | `*out*`/`*err*` captured + the script's return value | captured to bounded temp files: a reader per stream keeps a 128 KiB tail for the result, streams throttled `on-update`s, and aborts the run past its per-call capture budget (1 MiB default, configurable up to the 16 MiB hard cap) so a print loop can't OOM or fill the disk. The result defaults to a 16 KiB/2000-line tail; `:max-output-bytes` and `:max-output-lines` can tune it up to the 50 KiB/2000-line tool-wide cap; `:max-capture-bytes` tunes capture separately |
 
 Excluded deliberately: class access (empty `:classes`/`:imports` — host fns
 hide their own; SCI's default reflective instance-method calls on host values
@@ -469,9 +487,11 @@ additions; pi has no parallel-tool-call guidance.
   through `get-all-tools` (custom shadows built-in), so listing and dispatch
   can never disagree. Landed as T1 prep.
 - **Inner calls always async, never inline.** `tools/call` (and its sugars)
-  returns a promise the script derefs; dispatch never blocks the interpreter,
-  and the run `:signal` reaches the inner call so Escape cancels it. Scripts
-  fan out freely — one `script` call can run N inner calls in parallel.
+  returns a promise the script derefs; `call-many` validates and submits a
+  batch, and `await-all` polls cancellation while waiting in input order.
+  Dispatch never blocks the interpreter, and the run `:signal` reaches the
+  inner call so Escape cancels it. Scripts fan out freely — one `script` call
+  can run N inner calls in parallel.
 - **Hooks (T4).** Script-inner calls run through the *same* agent-level
   before/after hooks as the loop's batches (`script/*tool-hooks*` and the
   per-batch `script/*assistant-message*`, bound in `run-agent-turn` and
@@ -498,8 +518,8 @@ The plan above is now the record of what landed:
 
 1. ✅ **Tool** — `src/kmet/app/tools/script.cljc` (`.cljc` for the
    jolt/bb `sci/binding` split), a `script` record (params `code` +
-   `timeout` in seconds — bash's unit —, `:streams? true`, `:contextual?
-   true`), registered at the
+   `timeout` in seconds — bash's unit — plus optional result and capture
+   budgets, `:streams? true`, `:contextual? true`), registered at the
    bottom of `registry.clj` — after the registry fns — carrying seams
    (`:get-all-tools`, `:execute-tool`, `:generation-fn` =
    `tool-registry-generation`) so it never requires the registry back.
@@ -512,31 +532,40 @@ The plan above is now the record of what landed:
 3. ✅ **Capabilities** — the table above as value maps; `pmap` patched into
    `clojure.core` alongside slurp/spit/file-seq; json aliased as `json`; a
    per-fork prelude (on the eval thread) aliases fs/str/set/edn/walk/json/p so
-   scripts are body-only; `sandbox` for cwd/env/now/sleep/spawn; the process
-   wrappers add the cwd default and pid tracking; `:features` is the host's
-   own; no `:classes`/`:imports`.
-4. ✅ **Bridge** — `tools/call` (+ variadic args) and the four sugars over
-   `execute-tool` on the shared bridge worker pool (16 daemon workers + FIFO
-   queue; `concurrent/spawn` runs the workers, a task is `.offer`ed per
-   call); the gate over the surface; `:signal`/`:ctx` passed through; the
-   trace collected at `:details {:calls [...]}`; never
-   `execute-tool-calls-*`, never the hooks.
+   scripts are body-only; `sandbox` for cwd/env/now/sleep/emit/spawn; the
+   process wrappers add the cwd default and pid tracking; `tools/call-many`
+   validates a complete batch before dispatch, while `tools/await-all` polls
+   cancellation while preserving input order; `:features` is the host's own;
+   no `:classes`/`:imports`.
+4. ✅ **Bridge** — `tools/call` (+ variadic args), ordered `tools/call-many` /
+   `tools/await-all`, and the four sugars over `execute-tool` on the shared
+   bridge worker pool (16 daemon workers + FIFO queue; `concurrent/spawn` runs
+   the workers, a task is `.offer`ed per call); the gate over the surface;
+   `:signal`/`:ctx` passed through; the trace collected at `:details {:calls
+   [...]}`; never `execute-tool-calls-*`, never the hooks.
 5. ✅ **Deadlines** — eval on a daemon thread; `:interrupt-fn` checks the
    abort atom (signal/deadline/output-limit) and throws; when `:timeout` is
    set the host waits that deadline + a 1.5 s interrupt grace, then abandons
    the thread. With no deadline the wait is unbounded except for Escape: a
    host-blocked script (which the interrupt cannot reach) is abandoned after
-   the same 1.5 s grace once the cancel signal fires. The result reports the
-   effective `:timeout` (seconds, nil = no deadline) and the measured total
-   `:elapsed-ms` in `:details` — wall clock for the whole call, so it
-   includes that grace and the capture drain, not just script runtime.
+   the same 1.5 s grace once the cancel signal fires. `await-all` polls the
+   combined signal while waiting, so it does not hold the interpreter until a
+   non-cooperative tool finishes. The result reports the effective `:timeout`
+   (seconds, nil = no deadline) and the measured total `:elapsed-ms` in
+   `:details` — wall clock for the whole call, so it includes that grace and
+   the capture drain, not just script runtime.
 6. ✅ **Output** — `*out*`/`*err*` bound to temp files; daemon reader
    threads drain them per burst (a stream that has seen EOF stays at EOF —
    hence reopen-per-burst) and keep the last 128 KiB: `append-chunk` trims an
    oversized burst's own tail instead of dropping it whole, and *seen*
-   bytes/lines (which never shrink) feed both the 16 MiB abort
-   (`make-progress`) and the truncation totals — the retained tail no longer
-   knows them. The result body is capped at the tools' 50 KiB / 2000 lines.
+   bytes/lines (which never shrink) feed both the per-call capture abort
+   (`make-progress`; 1 MiB default, configurable up to the 16 MiB hard cap)
+   and the truncation totals — the retained tail no longer knows them. The
+   result body defaults to a 16 KiB / 2000-line tail and can be tuned per call
+   with `:max-output-bytes` / `:max-output-lines` (up to the shared 50 KiB /
+   2000-line tool cap); `:max-capture-bytes` tunes the capture budget
+   separately. `(sandbox/emit value)` provides a compact result path that
+   returns `nil` and avoids stdout/return-value duplication.
    Line counting and the head trim are native (`String.split`, `tail-text`'s
    ASCII fast path): the readers run on the babashka interpreter, where a
    per-char scan makes them fall behind a fast writer, and a lagging reader
@@ -551,24 +580,21 @@ The plan above is now the record of what landed:
    summary from `:details :calls` and the elapsed/took line, and strips the
    model-facing truncation notice in favor of its own warn line.
 7. ✅ **Tests** — `test/kmet/app/test_script.clj`, registered in
-   `kmet.tasks.runner/all-namespaces`: 29 tests (25 fast, 4 `^:slow`) covering
-   return/output, errors, timeout, signal abort, a caught interrupt still
-   reporting its abort, capabilities (incl. the preloaded aliases and an
-   explicit `require`), cwd resolution, stderr, truncation,
-   streaming, promise fan-out, spawned-future output capture, the gate,
-   discovery (with `:execute` sanitized), the excluded surface, fork
-   isolation, the capture edges (an oversized burst keeps its tail, the totals
-   count everything seen, the 16 MiB abort), the print bounds (an infinite seq
-   prints a bounded prefix) and the tool-name forms, plus the three subprocess
-   cases (inner bash, the runtime-cwd binding reaching the worker, and the
-   `babashka.process` wrapper shapes); T2 added five more (34 tests: 30 fast):
-   the contributed-source surface/describe/dispatch, the exclusion and
-   registry shadowing of contributions, the `set-active-tools!` bypass,
-   unregister + generation invalidation, a throwing source, and inner-call
-   progress streaming.
+   `kmet.tasks.runner/all-namespaces`: 39 fast tests and 13 `^:slow` tests
+   covering return/output, compact `sandbox/emit` (including spawned output),
+   ordered `call-many` / cancellation-aware `await-all`, batch validation,
+   per-call output and configurable capture budgets, errors, timeout, signal abort,
+   a caught interrupt still reporting its abort, capabilities (incl. the
+   preloaded aliases and an explicit `require`), cwd resolution, stderr,
+   truncation, streaming, promise fan-out, the gate, discovery (with
+   `:execute` sanitized), the excluded surface, fork isolation, the capture
+   edges, the print bounds and the tool-name forms, plus the subprocess and
+   contributed-source cases.
 8. ⏳ **Verify** — after adoption, re-run the T0 measurement (`/session` Tool
    Results against the 54.8%/41.6% split; the `--debug` per-tool report): bash
-   file-view/search share is the number the tool exists to move.
+   file-view/search share is the number the tool exists to move. The compact
+   output path and per-call budgets should be included in that before/after
+   comparison.
 9. ✅ **T2 seam** — the tool takes its registry through seams; T2 passes
    extension-contributed sources through the same map instead of a new path.
 
