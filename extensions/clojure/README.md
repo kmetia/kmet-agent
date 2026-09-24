@@ -88,6 +88,35 @@ in replacement/match content via the shared `kmet.extensions.clojure.edit-util` 
 complete, balanced forms. Use `clojure_paren_repair` to fix a file whose
 delimiters are broken.
 
+## Planned: nREPL evaluation
+
+A future `clojure-nrepl-eval` tool would port the nREPL evaluator from
+[clojure-mcp-light](https://github.com/bhauman/clojure-mcp-light). It is not
+currently implemented.
+
+The official `nrepl.core` Maven client is not usable in the extension SCI
+context because it requires `nrepl.tls` and the unavailable
+`java.security.cert.Certificate` class. The planned implementation uses the
+small bencode-based client from clojure-mcp-light instead, with only bundled
+`bencode.core` and `java.net.*` dependencies. The port can omit that project's
+timbre/statistics/temp-session-file behavior; kmet has no corresponding
+session persistence.
+
+Planned features:
+
+- Connect to a running nREPL server.
+- Discover ports through `.nrepl-port` and `lsof`.
+- Keep persistent sessions per host and port.
+- Repair delimiters with `parinferish` before evaluation.
+- Detect Clojure, Babashka, Shadow-CLJS, and Basilisp environments.
+- Apply evaluation timeouts.
+
+Planned parameters:
+
+- `port` — nREPL port; auto-discover when omitted.
+- `code` — Clojure code to evaluate.
+- `timeout` — timeout in milliseconds.
+
 ## Skill
 
 ### `clojure-edit`
