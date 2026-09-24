@@ -5,7 +5,8 @@
    (kmet.app.loop/run-agent-turn) and routed to the UI (:on-event callback)
    and the extension system (emit-event!).
 
-   Mirrors pi's extension event types — see pi-alignment.md, Appendix: Event
+   Mirrors pi's extension event types — see
+   docs/development/pi-alignment.md, Appendix: Event
    Type Vocabulary — and pi's core/event-bus.js.")
 
 (def event-types

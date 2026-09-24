@@ -2,7 +2,7 @@
   "Package manager + resource resolution (pi: core/package-manager.ts + the
    package part of core/resource-loader.ts — the local directory/file source
    subset; npm and git installs are deliberately out of scope, see
-   pi-alignment.md).
+   docs/development/pi-alignment.md).
 
    A fifth, app-provided layer sits after packages: the bundled extensions
    (kmet.app.bundled-extensions) — the shipped

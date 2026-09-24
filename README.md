@@ -365,6 +365,7 @@ tasks/kmet/tasks/       — every bb-task implementation (a classpath root, not
                           test runner, clean, lint). Neither artifact carries
                           it — the uberjar walks src/, jolt embeds src/.
 test/kmet/tasks/        — their tests
+docs/examples/          — copyable, non-auto-loaded settings and complete theme EDN
 ```
 
 The full annotated layout (every file) lives in `AGENTS.md`.
@@ -401,6 +402,10 @@ Example `~/.kmet/agent/settings.edn`:
  :system-prompt "You are a helpful assistant."   ; replaces the default system prompt
  :append-system-prompt "Follow the project conventions." ; appended after it}
 ```
+
+A copyable starting point with the current keys is available in
+[`docs/examples/settings.edn`](docs/examples/settings.edn); see the
+[examples guide](docs/examples/README.md#settings) for installation and notes.
 
 `kmet` reads its provider catalog from `src/kmet/ai/model_data/*.edn`
 (40 providers: opencode-go, deepseek, anthropic, google, groq, cerebras,
@@ -457,7 +462,11 @@ many recent tokens to keep. `/compact [instructions]` triggers it manually.
 
 ## Themes
 
-Create EDN theme files in `~/.kmet/agent/themes/`. See `examples/themes/` for format.
+Create EDN theme files in `~/.kmet/agent/themes/` for global use or
+`.kmet/themes/` for a project. The
+[examples guide](docs/examples/README.md#themes) documents the current schema,
+color values, installation, and live reload; complete starting points are in
+[`docs/examples/themes/`](docs/examples/themes/).
 
 ## Skills & Extensions
 

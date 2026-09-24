@@ -1141,9 +1141,9 @@ while a reaction's per-read cache verification costs about twice an atom
 deref and every subscriber pays it on every frame's check. Construction-time
 snapshot reads (`get-current-theme`) remain valid.
 
-Theme definitions are EDN files (`examples/themes/` for format); the
-color mode (`:truecolor` / `:256color`) comes from the shared
-`kmet.libs.terminal-image` capability detection at construction (`COLORTERM`
+Theme definitions are EDN files; `docs/examples/themes/` contains complete
+current dark/light examples. The color mode (`:truecolor` / `:256color`) comes
+from the shared `kmet.libs.terminal-image` capability detection at construction (`COLORTERM`
 plus the known true-color terminal programs; no true-color → 256-color, the
 safe default) and is baked into the resolved ANSI strings, so a theme built
 on a non-truecolor terminal never emits truecolor codes that would degrade.
@@ -1491,7 +1491,8 @@ embedded field.
 ## 15. Design non-goals and rationale
 
 Deliberate boundaries, recorded so the analysis behind them is not redone.
-This is not the gap tracker — kmet↔pi follow-ups live in `pi-alignment.md`;
+This is not the gap tracker — kmet↔pi follow-ups live in
+`docs/development/pi-alignment.md`;
 anything listed here changes only on an explicit request.
 
 ### 15.1 Features deliberately out of scope

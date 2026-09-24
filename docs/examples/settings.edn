@@ -1,0 +1,28 @@
+{:provider :opencode-go
+ :model "deepseek-v4-flash"
+ :theme "light/dark"
+ :thinking :off
+ :session-dir "~/.kmet/sessions"
+ :auto-compact true
+ :compact-token-threshold nil
+ :compact-reserve-tokens 16384
+ :keep-recent-tokens 20000
+ :retry {:enabled true
+         :max-retries 3
+         :base-delay-ms 2000}
+ :loop-guard {:enabled true
+              :threshold 3}
+ :thinking-loop-guard-enabled true
+ :steering-mode :all
+ :follow-up-mode :all
+ :http-idle-timeout-ms 300000
+ :http-total-timeout-ms nil
+ :http-transport :platform
+ :shell-path nil
+ :shell-command-prefix nil
+ :terminal {:show-images true
+            :image-width-cells 60
+            :clear-on-shrink false}
+ :images {:block-images false}
+ :system-prompt nil
+ :append-system-prompt nil}

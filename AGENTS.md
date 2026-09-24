@@ -263,6 +263,11 @@ extensions/ — Shipped opt-in extensions (single .clj files or manifest dirs;
               kmet.extension contract): extensions/extensions.md — MUST be
               kept up to date with any behavior it describes
 
+docs/examples/ — Copyable settings and complete dark/light theme EDN examples.
+              These are documentation only and are never auto-loaded. Keep the
+              guide (docs/examples/README.md) aligned with the current config
+              and theme schemas.
+
 jolt/      — kmet's RFC 0014 provider scaffolding (Jolt-only; see the contract
               below). Own deps.edn + src/jolt/kmet/providers.clj, pulled in
               from the root deps.edn as {:local/root "jolt"}. Empty by design

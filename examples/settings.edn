@@ -1,9 +1,0 @@
-{:provider :openai
- ;; :model "gpt-4o"
- :theme "dark"
- :thinking :off
- :session-dir "~/.local/share/kmet/sessions"
- :max-session-entries 500
- :compact-threshold 400
- :providers {:openai {:model "gpt-4o"}
-             :anthropic {:model "claude-sonnet-4-20250514"}}}
