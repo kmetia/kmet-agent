@@ -584,7 +584,11 @@
             :content (str "Failed to create gist: " (:error result))}
 
            :else
-           {:role :info :label "Share" :content (str "Share URL: " (:url result))}))))))
+           {:role :info :label "Share" :content (str "Share URL: " (:url result))}))
+        ;; The status clear may have requested a frame before the message
+        ;; was appended; request again after the untracked chat mutation.
+        (when-let [t (:tui cs)]
+          (tui/tui-request-render t))))))
 
 ;; ─── Login/logout (pi getLoginProviderOptions / showLoginAuthTypeSelector /
 ;;    showLoginDialog / showApiKeyLoginDialog / OAuthSelectorComponent) ──────
@@ -3505,10 +3509,16 @@
       ;; atom, which schedules the frame itself (§3.4).
       (when-let [comp (get @pending-tool-comps (:tool-call-id evt))]
         (when-let [content (:content evt)]
-          (reset! (:content-atom comp) content)))
+          (reset! (:content-atom comp) content)
+          ;; A newly-created component has no watch until its first render.
+          ;; Keep the normal reactive path after that, but cover an update
+          ;; racing the mount frame as well.
+          (when (nil? @(:cache-atom comp))
+            (tui/tui-request-render tui))))
       :tool-execution-end
-      ;; Pi: update the component by id and remove it from pendingTools
-      ;; (watched atoms schedule their own frame — §3.4)
+      ;; Pi: update the component by id and remove it from pendingTools.
+      ;; The explicit request covers a tool that finishes before its first
+      ;; frame, when no track! watch exists yet to schedule completion.
       (when-let [comp (get @pending-tool-comps (:tool-call-id evt))]
         (let [result (:result evt)]
           (reset! (:content-atom comp) (:content result))
@@ -3519,7 +3529,8 @@
             (reset! (:details-atom comp) details))
           (when-let [images (:images result)]
             (ui/tool-execution-set-images! comp images))
-          (swap! pending-tool-comps dissoc (:tool-call-id evt))))
+          (swap! pending-tool-comps dissoc (:tool-call-id evt))
+          (tui/tui-request-render tui)))
       :status
       ;; Pi: agent status changes keep the footer/status
       ;; layer in sync via the :status event (update-footer!'s invalidate
@@ -3530,10 +3541,12 @@
       ;; Repeat-loop guard tripped (kmet-specific): show a warning line in
       ;; the transcript — the run has already settled (the final text
       ;; carries the explanation)
-      (ui/chat-history-add-message!
-       chat-history
-       {:role :warning
-        :content (or (:details evt) "Stopped: repeat-loop guard tripped")})
+      (do
+        (ui/chat-history-add-message!
+         chat-history
+         {:role :warning
+          :content (or (:details evt) "Stopped: repeat-loop guard tripped")})
+        (tui/tui-request-render tui))
       :agent-end
       ;; Pi: maybeShowCacheMissNotice — a significant
       ;; prompt-cache miss on the completed turn (only
@@ -5009,7 +5022,11 @@
                             (extensions/get-entry-renderer (:custom-type entry)) entry)]
          (ui/chat-history-add-message!
           (:chat-history cs)
-          (renderer-result->message rendered)))))
+          (renderer-result->message rendered))
+         ;; The sink appends to the untracked chat message vector; request
+         ;; a frame after the append rather than relying on an older watch.
+         (when t
+           (tui/tui-request-render t)))))
     registry))
 
 ;; ─── Run ───────────────────────────────────────────────────────────────────

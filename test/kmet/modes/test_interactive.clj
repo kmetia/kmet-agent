@@ -34,6 +34,8 @@
             [kmet.tui.core :as tui]
             [kmet.tui.keybindings :as tui-kb]
             [babashka.fs :as fs]
+            [babashka.process :as proc]
+            [kmet.app.session-export :as session-export]
             [clojure.string :as str]))
 
 (defn- make-handler
@@ -258,6 +260,141 @@
             :is-error false})
         (is (empty? @pending)
             "all tools removed from pending after their end events")))))
+
+(deftest fast-parallel-tool-completions-request-a-frame
+  (testing "parallel tools that finish before their first frame still request a completion frame
+            (their new components have no track! watches yet)"
+    (let [render-requested? (atom false)
+          pending (atom {})
+          h ((var inter/make-agent-event-handler)
+             {:chat-history (ui/make-chat-history)
+              :tui {:render-requested? render-requested?}
+              :cs-ref (atom nil)
+              :pending-tool-comps pending})]
+      (doseq [[id command] [["t1" "command-one"] ["t2" "command-two"]]]
+        (h {:type :tool-execution-start
+            :tool-call-id id :tool-name "bash" :args {:command command}}))
+      ;; Model the mount frame consuming the start request before either
+      ;; tool finishes; neither component has rendered, so neither owns a
+      ;; track! watch that can request its completion frame.
+      (reset! render-requested? false)
+      (h {:type :tool-execution-update :tool-call-id "t1"
+          :content "partial" :is-partial true})
+      (is (true? @render-requested?)
+          "a pre-mount update also requests its frame")
+      (reset! render-requested? false)
+      (let [components (select-keys @pending ["t1" "t2"])]
+        (doseq [[id content] [["t1" "result-one"] ["t2" "result-two"]]]
+          (h {:type :tool-execution-end
+              :tool-call-id id :tool-name "bash"
+              :args {}
+              :result {:content content :is-error false}
+              :is-error false}))
+        (is (true? @render-requested?)
+            "the completion frame is requested even before the components first render")
+        (is (every? #(some? @(:ended-at-atom %)) (vals components))
+            "both fast tools are marked complete")
+        (doseq [[id content] [["t1" "result-one"] ["t2" "result-two"]]]
+          (is (str/includes? (str/join "\n" (protocols/render (get components id) 60))
+                             content)
+              (str id " renders its result")))))))
+
+(deftest loop-guard-message-requests-frame
+  (testing "the loop-guard warning requests a frame after appending to the chat"
+    (let [render-requested? (atom false)
+          chat-history (ui/make-chat-history)
+          h ((var inter/make-agent-event-handler)
+             {:chat-history chat-history
+              :tui {:render-requested? render-requested?}
+              :cs-ref (atom nil)
+              :pending-tool-comps (atom {})})]
+      (h {:type :loop-guard
+          :reason :tool-calls
+          :details "Stopped: repeated identical tool calls"})
+      (is (true? @render-requested?))
+      (is (= [{:role :warning
+               :content "Stopped: repeated identical tool calls"}]
+             (mapv #(select-keys % [:role :content])
+                   @(:messages-atom chat-history)))))))
+
+(deftest share-completion-requests-frame-after-message
+  (testing "the async share reply requests a frame after appending its chat message"
+    (let [dir (str (fs/create-temp-dir {:prefix "test-share-render-" :dir "target"}))
+          sess (session/create-session dir)
+          render-requested? (atom false)
+          request-message-counts (atom [])
+          completed (promise)
+          tui* {:render-requested? render-requested?
+                :running? (atom false)}
+          cs {:session-atom (atom sess)
+              :chat-history (ui/make-chat-history)
+              :tui tui*
+              :status-indicator (ui/make-status-indicator)
+              :status-current (atom nil)
+              :running-turn? (atom false)}]
+      (try
+        (with-redefs [proc/process
+                      (fn [& _]
+                        (future {:exit 0 :out "https://gist.example\n" :err ""}))
+                      session-export/export-to-html! (fn [& _] nil)
+                      tui/tui-request-render
+                      (fn [_]
+                        (reset! render-requested? true)
+                        (swap! request-message-counts conj
+                               (count @(:messages-atom (:chat-history cs))))
+                        (deliver completed true))]
+          ((var inter/share-session!) cs)
+          (is (true? (deref completed 2000 false))
+              "the share worker completed")
+          (is (some #(str/includes? (str (:content %)) "https://gist.example")
+                    @(:messages-atom (:chat-history cs)))
+              "the share URL is present")
+          (is (some pos? @request-message-counts)
+              "the share request was made after the reply was appended"))
+        (finally
+          (fs/delete-tree dir))))))
+
+(deftest custom-entry-sink-requests-frame-after-append
+  (testing "a rendered custom entry requests a frame after appending to chat"
+    (let [dir (str (fs/create-temp-dir {:prefix "test-entry-render-" :dir "target"}))
+          sess (session/create-session dir)
+          render-requested? (atom false)
+          request-message-counts (atom [])
+          tui* {:render-requested? render-requested?}
+          chat-history (ui/make-chat-history)
+          cs {:tui tui*
+              :chat-history chat-history
+              :session-atom (atom sess)
+              :agent-state (atom (agent/make-agent-state))}
+          dereg (extensions/register-entry-renderer!
+                 "test-entry-render"
+                 (fn [_]
+                   {:role :info :label "Entry" :content "rendered entry"}))]
+      (try
+        ((var inter/build-extension-ui-registry)
+         {:tui tui* :cs cs}
+         {:ch chat-history}
+         nil)
+        (extensions/set-session! sess)
+        (with-redefs [tui/tui-request-render
+                      (fn [_]
+                        (reset! render-requested? true)
+                        (swap! request-message-counts conj
+                               (count @(:messages-atom chat-history))))]
+          (extensions/append-custom-entry! "test-entry-render" {}))
+        (is (true? @render-requested?))
+        (is (some #(and (= :info (:role %))
+                        (= "rendered entry" (:content %)))
+                  @(:messages-atom chat-history)))
+        (is (some pos? @request-message-counts)
+            "the entry request was made after the message was appended")
+        (finally
+          (dereg)
+          (extensions/set-session! nil)
+          (extensions/set-context-sink! nil)
+          (extensions/set-entry-sink! nil)
+          (extensions/clear-ui-registry!)
+          (fs/delete-tree dir))))))
 
 (deftest replay-branch-restores-tool-rendering
   (testing "replaying a session branch restores tool executions with their
