@@ -101,7 +101,17 @@
                  (select-keys (first descs) [:kind :prefix])))
         (t/is (= {:kind :resource-file :path "extensions/ext-single/hello_ext.clj"}
                  (select-keys (second descs) [:kind :path])))
-        (t/is (every? :bundled? descs))))))
+        (t/is (every? :bundled? descs))
+        (t/testing "a supported Jolt native root is attached to directory artifacts"
+          (with-redefs [bundled/native-embedded-root
+                        (fn [key] (str "embed:" key))]
+            (let [native (bundled/resource-descriptors manifest)]
+              (t/is (= "embed:extensions/ext-dir" (:native (first native))))
+              (t/is (nil? (:native (second native)))
+                    "single-file resources stay on SCI"))))
+        (t/testing "without embedded-root support the descriptor stays resource-only"
+          (with-redefs [bundled/native-embedded-root (constantly nil)]
+            (t/is (nil? (:native (first (bundled/resource-descriptors manifest)))))))))))
 
 (t/deftest test-malformed-manifest-resolves-to-nothing
   ;; never throws: a broken bundle must not keep the app from starting

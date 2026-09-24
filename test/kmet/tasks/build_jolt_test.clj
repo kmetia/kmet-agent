@@ -4,6 +4,7 @@
   ;; jolt's CLI in a subprocess and is not unit-tested here; only the host's
   ;; own artifact can smoke-test, which the packager does as part of the build.
   (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kmet.tasks.build :as build]
             [kmet.tasks.build-jolt :as jbuild]))
@@ -182,3 +183,17 @@
                (str (@#'jbuild/write-launcher! glibc "linux-aarch64")))
             "a glibc artifact gets the launcher"))
       (finally (fs/delete-tree dir)))))
+
+(deftest smoke-agent-dir-enables-a-native-bundled-extension
+  (let [dir (str "target/test-jolt-smoke-agent-" (System/currentTimeMillis))]
+    (fs/delete-tree dir)
+    (try
+      (let [agent-dir (@#'jbuild/prepare-smoke-agent-dir dir)
+            settings (slurp (str (fs/path agent-dir "settings.edn")))]
+        (is (= dir (str (fs/parent agent-dir))))
+        (is (str/includes? settings ":bundled-extensions")
+            "the app smoke runs with an extension enabled")
+        (is (str/includes? settings "\"clojure\"")
+            "a bundled directory extension exercises the native embedded root"))
+      (finally
+        (fs/delete-tree dir)))))

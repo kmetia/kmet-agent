@@ -9,6 +9,10 @@
      {:name \"clojure\" :kind :resource-dir  :prefix \"extensions/clojure/src\"}
      {:name \"tools\"   :kind :resource-file :path \"extensions/tools.clj\"}
 
+   On a Jolt runtime with embedded loader roots, an artifact-mode directory
+   descriptor also carries `:native \"embed:<prefix>\"`; older Jolt releases
+   keep the resource descriptor on kmet's SCI fallback.
+
    In a source checkout the manifest resource answers a `file:` URL (both
    hosts, verified on jolt dev) and the repo root derives from that URL —
    four `fs/parent` steps up — so the artifacts are the real `extensions/`
@@ -148,13 +152,27 @@
                     d))))
         (:artifacts manifest)))
 
+(defn- native-embedded-root
+  "The native embedded root for resource KEY when this Jolt runtime supports
+   embedded loader roots; nil on babashka and older Jolt releases."
+  [key]
+  (when (and (find-var 'clojure.core/*jolt-version*)
+             ((requiring-resolve 'kmet.loader.jolt-loader/embedded-roots?)))
+    (str "embed:" key)))
+
 (defn- resource-descriptor
-  "One artifact-mode descriptor, or nil when the resource probe misses."
+  "One artifact-mode descriptor, or nil when the resource probe misses.
+   Directory descriptors carry a native embedded root when the host Jolt
+   supports one; single-file descriptors stay on the SCI backend because
+   the native root API addresses prefixes, not one exact resource key."
   [{:keys [name kind root]}]
-  (let [key (str resource-prefix "/" root)]
+  (let [key (str resource-prefix "/" root)
+        native (native-embedded-root key)]
     (if (= kind :dir)
       (when (io/resource (str key "/extension.edn"))
-        {:name name :kind :resource-dir :prefix key :path key :bundled? true})
+        (cond-> {:name name :kind :resource-dir :prefix key
+                 :path key :bundled? true}
+          native (assoc :native native)))
       (when (io/resource key)
         {:name name :kind :resource-file :path key :bundled? true}))))
 

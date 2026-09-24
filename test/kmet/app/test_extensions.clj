@@ -296,6 +296,37 @@
             (t/is (nil? (:extension-dir loaded)))))))
     (finally (extensions/unload-all-extensions!))))
 
+(t/deftest test-resource-dir-native-root-survives-resolution
+  ;; The descriptor carries the host capability, but the resolved artifact is
+  ;; what create-jolt-loader/forced-loader-kind receive. Dropping :native here
+  ;; would leave the Phase B switch unreachable.
+  (with-extension-resources
+    (fn []
+      (let [resolved (@#'extensions/resolve-extension-descriptor
+                      {:name "ext-dir" :kind :resource-dir
+                       :prefix "extensions/ext-dir" :path "extensions/ext-dir"
+                       :native "embed:extensions/ext-dir" :bundled? true})]
+        (t/is (= "embed:extensions/ext-dir" (:native (:artifact resolved))))
+        (t/is (= :resource-dir (:kind resolved)))))))
+
+(t/deftest test-resource-dir-native-capability-selects-jolt
+  (if (host/jolt?)
+    (with-extension-resources
+      (fn []
+        (let [resolved (@#'extensions/resolve-extension-descriptor
+                        {:name "ext-dir" :kind :resource-dir
+                         :prefix "extensions/ext-dir" :path "extensions/ext-dir"
+                         :native "embed:extensions/ext-dir" :bundled? true})
+              probe (requiring-resolve 'kmet.app.extensions/embedded-roots?)]
+          (with-redefs-fn {probe (constantly true)}
+            (fn []
+              (t/is (= :jolt (@#'extensions/forced-loader-kind resolved [:sci :jolt])))
+              (t/is (= :sci (@#'extensions/forced-loader-kind resolved [:sci]))
+                    "a sci-only bundled directory keeps its required fallback")))
+          (with-redefs-fn {probe (constantly false)}
+            #(t/is (= :sci (@#'extensions/forced-loader-kind resolved [:sci :jolt])))))))
+    (t/is true "skipped: embedded loader roots are Jolt-only")))
+
 (t/deftest test-load-resource-file-descriptor
   ;; a single-file bundled artifact: SCI on every host (D10), and its
   ;; extension identity is the file name (what a user's own copy carries)

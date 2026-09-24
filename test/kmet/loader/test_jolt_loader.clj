@@ -141,3 +141,14 @@
                    " extension callbacks rely on for their own bundled files")))
       (fs/delete-tree d))
     (t/is true "skipped: the adapter is Jolt-only")))
+
+(deftest adapter-probes-embedded-loader-roots
+  ;; The public adapter probe is the migration gate for bundled resource
+  ;; directories: false on Jolt releases predating jolt.loader/embedded-root?,
+  ;; true once the feature exists. A binary --smoke gate requires the true
+  ;; branch, but source tests remain valid on the older runtime.
+  (if (boolean (find-var 'clojure.core/*jolt-version*))
+    (let [probe (requiring-resolve 'kmet.loader.jolt-loader/embedded-roots?)]
+      (t/is (boolean? (probe)))
+      (t/is (= (some? (resolve 'jolt.loader/embedded-root?)) (probe))))
+    (t/is true "skipped: the adapter is Jolt-only")))

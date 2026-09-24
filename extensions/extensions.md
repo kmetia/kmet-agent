@@ -112,9 +112,12 @@ Bundled extensions are not packages: `kmet install`/`remove`/`list` cannot
 see or affect them, and they are never extracted to disk. The artifact root
 is the same path in every mode — `extensions/<name>/src` for directory
 artifacts, `extensions/<file>.clj` for single files; in a checkout they load
-from the real files (directory artifacts natively on Jolt), in a built
-artifact through the bundled resource tree with the SCI backend until the
-Jolt embedded-root loader exists (extension-bundle.md Phase B).
+from the real files (directory artifacts natively on Jolt), and in a built
+artifact through the bundled resource tree. On Jolt with embedded loader
+roots, directory artifacts use the native loader over `embed:<prefix>`;
+older Jolt releases fall back to SCI. Single-file resource artifacts remain
+SCI because an embedded root names a prefix, not one exact file key
+(extension-bundle.md D10).
 
 The shipped set is enumerated in `src/kmet/bundled-extensions/manifest.edn`;
 `bb check-bundled-extensions` validates it (every artifact under

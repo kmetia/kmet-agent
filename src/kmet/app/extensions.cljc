@@ -22,10 +22,12 @@
    required from there. Bundled extensions (extension-bundle.md) resolve
    through a descriptor instead of a path (kmet.app.bundled-extensions): a
    checkout's real artifact root, or — in a built artifact — a resource
-   tree under extensions/<root>. A resource artifact loads through the SCI
-   backend until the Jolt embedded-root feature exists (forced-loader-kind);
-   a single-file bundled artifact always stays SCI. Each extension
-   evaluates in its own isolated
+   tree under extensions/<root>. On Jolt with embedded loader roots, a
+   resource-directory descriptor carries an `embed:<prefix>` root and loads
+   through the native backend; older Jolt releases fall back to SCI, and a
+   single-file bundled artifact always stays SCI (the root API addresses
+   prefixes, not one exact embedded file). Each extension evaluates in its
+   own isolated
    context: a fork of one shared SCI base carrying the injected host layers
    and the seeded classes (see shared-context) on babashka, or a set of real
    Jolt namespaces served by the runtime's native loader when the manifest
@@ -1515,11 +1517,12 @@
   "Resolve a bundled descriptor (kmet.app.bundled-extensions/artifacts) into
    the resolve-extension shape. Descriptor kinds :dir/:file/:jar are
    checkout artifacts and resolve exactly like paths (:root names them);
-   :resource-dir reads its manifest from the resource prefix, and
+   :resource-dir reads its manifest from the resource prefix and carries a
+   descriptor-supplied :native root when the host supports embedded roots;
    :resource-file is the resource itself (its ns is read from the file at
    load, like any single-file extension). DESCRIPTOR's :path is the
    synthetic identity used for display and dedupe."
-  [{:keys [kind root prefix path name]}]
+  [{:keys [kind root prefix path name native]}]
   (case kind
     (:dir :file :jar) (assoc (resolve-extension root) :bundled? true)
 
@@ -1531,7 +1534,8 @@
               (manifest-info manifest-key m name)]
           {:name name
            :kind :resource-dir
-           :artifact {:kind :resource-dir :prefix prefix}
+           :artifact (cond-> {:kind :resource-dir :prefix prefix}
+                       native (assoc :native native))
            :entry-ns entry-ns
            :declared-loaders declared-loaders
            :legacy-loader? legacy-loader?
@@ -2269,20 +2273,18 @@
 
 (defn- forced-loader-kind
   "The loader-kind a bundled resource artifact must use, or nil when the
-   manifest does not declare it (the caller then reports
-   :unsupported-loader like any other backend mismatch). Resource artifacts
-   load through SCI on every host until the Jolt embedded-root feature
-   exists (D6); with it, a :resource-dir descriptor carrying a :native
-   embedded root loads through the native Jolt loader on Jolt (D7), while a
-   single-file artifact always stays SCI (D10)."
+   manifest declares none. A :resource-dir carrying a :native root prefers
+   Jolt's native loader behind the embedded-root capability probe; a bundled
+   directory that does not declare :jolt still falls back to its required
+   :sci backend (D6/D8/D10)."
   [{:keys [kind artifact]} declared-loaders]
   (when (resource-kind? kind)
-    (let [forced (if (= kind :resource-dir)
+    (let [native (if (= kind :resource-dir)
                    #?(:jolt (if (and (:native artifact) (embedded-roots?)) :jolt :sci)
                       :default :sci)
                    :sci)]
-      (when (contains? (set declared-loaders) forced)
-        forced))))
+      (first (filter #(contains? (set declared-loaders) %)
+                     [native :sci])))))
 
 (defn- create-loader
   "Build the isolated loader for one extension on the selected backend
@@ -2516,9 +2518,10 @@
    (kmet.app.bundled-extensions/artifacts). Same contract as
    load-extension!: in a source checkout the descriptor resolves to the
    real extensions/ path and loads exactly as load-extension! would; in a
-   built artifact the artifact files come from the
-   extensions/ resource prefix and load through the SCI
-   backend (see forced-loader-kind)."
+   built artifact the files come from the extensions/ resource prefix. On
+   Jolt with embedded loader roots, directory descriptors use their native
+   `embed:<prefix>` root; older Jolt releases and single-file resources use
+   SCI (see forced-loader-kind)."
   [descriptor]
   (let [path (:path descriptor)]
     (try

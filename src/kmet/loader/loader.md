@@ -21,8 +21,9 @@ self-containment guard (`kmet.loader.test-self-contained`) so
 Phase 2, the **native Jolt backend**, is implemented in the *Jolt* repo
 (`stdlib/jolt/loader.clj`), tracked in jolt-lang/jolt#912 (the
 classloader-lite request) and jolt-lang/jolt#1039 (the implementation),
-with `test/chez/loaderconf-test.clj` as its writ — the 20-case suite
-`make loaderconf` runs, baseline empty. kmet consumes it through its own
+with `test/chez/loaderconf-test.clj` as its writ — the 36-case suite
+`make loaderconf` runs, baseline empty, including embedded loader roots.
+kmet consumes it through its own
 adapter, `src/kmet/loader/jolt_loader.jolt`, and the extension system evaluates
 natively on Jolt through it when the manifest declares `:jolt` (the fallback
 to the SCI backend for `:sci`-only manifests is the Phase 1 backend, on Jolt
@@ -472,7 +473,7 @@ globals — one field, defaulted, at a record already threaded everywhere.
 | provider tables: `lib-class-providers`, `lib-pending-claims-tbl`, `lib-provider-owned-tbl`, latches | host-static.ss:337–700 | per-ctx | M2 |
 | `type-registry`, `jolt-proto-epoch`, record descriptors | protocols.ss:66,143; records*.ss | per-ctx | M2 |
 | `global-hierarchy`, multimethod tables | refs (clojure.core var), multimethods.ss | per-ctx + dispatch rule (§6.1.5) | M2 |
-| `jch` class hierarchy, reader builtins, embedded source store | class-hierarchy.ss, reader.ss, loader.ss | **global** (boot) | — |
+| `jch` class hierarchy, reader builtins, embedded source store | class-hierarchy.ss, reader.ss, loader.ss | **global** backing store; loader roots reference prefixes | — |
 | `*ns*`, dyn bindings, current source/positions | dyn-binding.ss, compile-eval.ss | per-thread (unchanged) | — |
 
 #### 6.1.3 The pipeline: where the loader plugs in
@@ -487,6 +488,9 @@ read → analyze → emit → eval, with one funnel already in place:
   (hc-resolve-global), and — on a miss — the loader's provider latch (M2).
 - **read**: `resolve-on-roots`/`find-ns-file`/`ldr-read-source`
   (loader.ss:340–380) walk the loader's roots; `rdr-features` bind per read.
+  A root may also be `embed:<prefix>`, which resolves the same strict
+  namespace/resource paths in the runtime's embedded-resource table without a
+  filesystem directory.
 - **emit**: `host-static-call`/`host-static-ref`
   (backend_scheme.clj:2712–2715,3063) take a ctx when the form needs one
   (§6.1.4); var sites are already hoisted (`hoist-var-cell`,
@@ -739,7 +743,7 @@ backend's own namespace.
 
 Host-agnostic, written against the protocol; must pass on every backend
 that serves the kind in question. The **executable spec** is
-`test/chez/loaderconf-test.clj` in the Jolt repo — 27 cases, `make
+`test/chez/loaderconf-test.clj` in the Jolt repo — 36 cases, `make
 loaderconf`, empty baseline — mirrored on the kmet side by
 `test/kmet/loader/test_core.clj` (data-path cases, any backend) and
 `test/kmet/loader/test_sci_loader.clj` (code-path cases, SCI). Cases marked
@@ -830,6 +834,14 @@ loaderconf`, empty baseline — mirrored on the kmet side by
     delegate re-reads there, in place, because the reload intent is keyed by
     name; and the delegate's own link table holds the namespace's var links, not
     just the namespace.
+34. *(native)* **Embedded-root marker and validation** —
+    `embedded-root?` recognizes `embed:<prefix>`, a non-blank but empty prefix
+    is a valid root, `embed:` alone fails eagerly, and `status` reports the
+    marker unchanged.
+35. *(native)* **An empty embedded prefix is an ordinary miss** — find answers
+    no hits and load fails with `:loader/miss`, never a filesystem error.
+36. *(native)* **A resource hit opens its own location** — an embedded hit
+    opens by its full key, not by re-resolving the request's relative name.
 
 Cases 1–8, 10, 11, 13–16, 18 and 21 are expressible against SCI on bb and jolt
 today, which is the point: pin the semantics before any runtime work, the
@@ -916,8 +928,17 @@ ctx-propagation mechanisms §6.1.4, gotchas §6.1.9, stage table §6.1.10).
 Shipped in the Jolt repo rather than here: `stdlib/jolt/loader.clj` plus
 the host seams (`clojure.java.io/resource` 2-arity, `RT/baseLoader`, the
 tagged-table classloader facade), with `test/chez/loaderconf-test.clj` as
-the writ — `make loaderconf`, 27 cases, empty baseline. Tracked in
-jolt-lang/jolt#912 and jolt-lang/jolt#1039.
+the writ — `make loaderconf`, 36 cases, empty baseline, including the
+embedded-root cases. Tracked in jolt-lang/jolt#912 and jolt-lang/jolt#1039.
+
+**Embedded roots.** Jolt's loader also accepts `embed:<prefix>`, a prefix
+into the resource table baked by `:jolt/build {:embed [...]}`. Namespace and
+resource hits carry the embedded key as their own location; a resource hit
+carries `:embedded? true`, so opening reads that key rather than re-resolving
+the request's relative name. `jolt.loader/embedded-root?` is the public
+capability probe. This is the root kind kmet's built bundled directory
+extensions use on Jolt; Babashka, older Jolt releases, and single-file
+resource artifacts stay on SCI.
 
 **What landed, and how it differs from M0–M4.** The substrate is one
 global namespace registry (rt.ss's var-table), so a context is built *out
