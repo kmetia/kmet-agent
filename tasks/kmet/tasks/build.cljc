@@ -608,8 +608,8 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" --jar \"$BIN\" -- \"$
 (defn- discover-bundled-roots
   "Every shippable artifact root under DIR (default: the checkout's
    extensions/), relative to it: top-level .clj files and <name>/src
-   directories carrying extension.edn. README/extensions.md/dev wrappers
-   are not artifacts."
+   directories carrying extension.edn. Development wrappers outside an
+   artifact root are not artifacts."
   ([] (discover-bundled-roots "extensions"))
   ([dir]
    (let [d (io/file dir)]

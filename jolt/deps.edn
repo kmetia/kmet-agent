@@ -1,4 +1,4 @@
-{;; kmet's RFC 0014 provider lib (see README.md in this dir). EMPTY BY
+{;; kmet's RFC 0014 provider lib (see src/jolt/kmet/README.md). EMPTY BY
  ;; DESIGN: every JDK gap this lib was created for is runtime surface now
  ;; (jolt-bugs.md records the closures), so it claims and installs nothing.
  ;; The scaffolding stays — the next gap adds its class below and its

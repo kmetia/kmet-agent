@@ -65,7 +65,7 @@
                                          :git/sha "29385f28fac5a139ef090c2d806e1122123ce386"}
         ;; cljfmt / spec.alpha / rewrite-clj serve the format tasks
         ;; (kmet.tasks.format — one code path on both hosts) AND the fixed
-        ;; bundled extension set (kmet.app.extension-libs, extensions.md §
+        ;; bundled extension set (kmet.app.extension-libs, src/kmet/extension.md §
         ;; Bundled extension libraries): jolt dist AOT-compiles them in,
         ;; and extension contexts share the loaded namespaces by reference.
         ;; bb.edn carries the same cljfmt version for babashka; bb's

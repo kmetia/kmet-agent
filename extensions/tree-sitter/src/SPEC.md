@@ -239,7 +239,7 @@ find_callees — driven by `:details {:count n :label "symbols"
 
 All of this lives in one `renderers.clj` namespace inside the extension,
 built from `kmet.tui.components.text` + `kmet.tui.theme` only (shared-by-
-reference libraries, per extensions.md) — no dependency on host app UI
+reference libraries, per src/kmet/extension.md) — no dependency on host app UI
 namespaces, unlike the clojure extension which reuses
 `kmet.app.ui.tool-renderers` because its tools are edit-shaped; ours have
 custom shapes and own the whole renderer.

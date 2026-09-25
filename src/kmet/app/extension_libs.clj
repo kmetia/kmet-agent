@@ -1,6 +1,6 @@
 (ns kmet.app.extension-libs
   "The fixed set of bundled libraries kmet provides to extension contexts on
-   both hosts — see extensions.md § Bundled extension libraries.
+   both hosts — see src/kmet/extension.md § Bundled extension libraries.
 
    The requires below are the set's enumeration of third-party roots. There
    is no code here: loading the namespace is the point. On Jolt it is

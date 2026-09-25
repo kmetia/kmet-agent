@@ -54,13 +54,13 @@ global agent directory can be changed with `KMET_CODING_AGENT_DIR`.
 | `:shell-path`, `:shell-command-prefix` | Custom bash executable and a line prepended to every bash command. |
 | `:system-prompt`, `:append-system-prompt` | Replace or extend the system prompt. A value naming an existing file is read as that file's contents. |
 
-See the repository [configuration reference](../../README.md#configuration)
+See the [configuration guide](../configuration.md)
 for discovery rules, provider model catalogs, resource paths, and the full
 behavior of these options.
 
 API keys do not belong in `settings.edn`. Use the provider environment
-variables listed in the main [README](../../README.md#prerequisites) or store
-credentials through `/login` in `~/.kmet/agent/auth.edn`.
+variables listed in the [provider and authentication reference](../providers.md),
+or store credentials through `/login` in `~/.kmet/agent/auth.edn`.
 
 ## Themes
 

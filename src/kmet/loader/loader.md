@@ -35,7 +35,7 @@ last: the JVM host already gets isolation through SCI) and Phase 4
 (promotion).
 
 Related docs (repo-root relative): `jolt-port.md` §B3,
-`extensions/extensions.md` (the extension contract), `src/kmet/tui/tui.md`
+`src/kmet/extension.md` (the extension contract), `src/kmet/tui/tui.md`
 (house style for a package reference doc).
 
 ---

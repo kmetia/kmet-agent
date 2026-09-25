@@ -112,7 +112,7 @@
 (defn render-tool-path
   "Pi: renderToolPath — accent path (shortened + hyperlinked when supported);
    '...' toolOutput when empty; '[invalid arg]' error when the arg is not a string.
-   Public: shared extension surface (see extensions.md §Custom renderers)."
+   Public: shared extension surface (see src/kmet/extension.md §Custom renderers)."
   [raw-path theme cwd]
   (let [s (tool-path-str raw-path)]
     (if (nil? s)

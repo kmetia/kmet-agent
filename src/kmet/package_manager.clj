@@ -6,7 +6,7 @@
    kmet has no project-trust model, so -l/--local always works and the
    -a/--approve and -na/--no-approve flags parse as no-ops (they exist for
    pi CLI parity; project files load unconditionally, see
-   docs/development/pi-alignment.md)."
+   src/kmet/development/pi-alignment.md)."
   (:require [clojure.string :as str]
             [babashka.fs :as fs]
             [kmet.app.packages :as pkgs]

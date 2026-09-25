@@ -8,8 +8,9 @@ namespace, `kmet.extension`, and are loaded, reloaded and unloaded at runtime.
 This document is the authoritative guide for writing extensions. Keep it up to
 date whenever the described behavior changes.
 
-Related docs: [`README.md`](README.md) (loading rules, layout, building UI) and
-the shipped examples in `extensions/` (see the catalog table there).
+Related docs: [`../../extensions/README.md`](../../extensions/README.md)
+(loading rules, layout, building UI) and the shipped examples in `extensions/`
+(see the catalog table there).
 
 ## The contract
 
@@ -138,7 +139,7 @@ code `kmet.extensions.<name>.*` with the manifest `:entry` at
 
 Single-file extensions ship without tests (they must stay small and
 self-contained); directory-based extensions are separate projects with
-their own tests. See [`README.md`](README.md).
+their own tests. See [`../../extensions/README.md`](../../extensions/README.md).
 
 ### Single-file extensions
 

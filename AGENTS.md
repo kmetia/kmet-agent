@@ -218,7 +218,7 @@ src/kmet/
 │   └── ui/     — App-specific TUI components (Pi's coding-agent layer)
 ├── bundled-extensions/ — the committed bundled-extensions manifest (a
 │              resource, not a namespace: kmet/bundled-extensions/manifest.edn,
-│              read by kmet.app.bundled-extensions; see extensions/extensions.md).
+│              read by kmet.app.bundled-extensions; see src/kmet/extension.md).
 │              The shipped set lives in extensions/ at the repo root and is
 │              staged by the packagers under the same relative paths
 │              (target/kmet-bundled/extensions/<root>)
@@ -260,13 +260,18 @@ extensions/ — Shipped opt-in extensions (single .clj files or manifest dirs;
               `bb check-bundled-extensions`; the packagers stage each
               artifact root under target/kmet-bundled/extensions/<root>.
               Extension authoring guide (the full
-              kmet.extension contract): extensions/extensions.md — MUST be
+              kmet.extension contract): src/kmet/extension.md — MUST be
               kept up to date with any behavior it describes
 
+docs/          — User-facing guides and references (the root README stays a
+                short project entry point). Keep implementation/design notes
+                beside their source package instead.
 docs/examples/ — Copyable settings and complete dark/light theme EDN examples.
-              These are documentation only and are never auto-loaded. Keep the
-              guide (docs/examples/README.md) aligned with the current config
-              and theme schemas.
+                These are documentation only and are never auto-loaded. Keep the
+                guide (docs/examples/README.md) aligned with the current config
+                and theme schemas.
+src/kmet/development/ — Cross-package development analysis (pi alignment).
+src/kmet/README.md — Application package layout and contributor workflow.
 
 jolt/      — kmet's RFC 0014 provider scaffolding (Jolt-only; see the contract
               below). Own deps.edn + src/jolt/kmet/providers.clj, pulled in
@@ -279,6 +284,8 @@ jolt/      — kmet's RFC 0014 provider scaffolding (Jolt-only; see the contract
 Root-level files: core.clj (CLI entry, arg parsing, mode dispatch), config.clj
 (configuration loading), debug.clj (debug/error logging), extension.clj (the
 extension contract root: namespaces extensions depend on, init/shutdown, api).
+Temporary implementation notes (`script.md`, `perf.md`, `jolt-bugs.md`, and
+`jolt-port.md`) intentionally remain at the project root.
 ```
 
 ### jolt/ — the RFC 0014 provider contract
@@ -287,7 +294,8 @@ The bundled-extension native path requires a Jolt runtime exposing
 `jolt.loader/embedded-root?`; until the first tagged release carrying it lands,
 that capability probe is the floor and kmet falls back to SCI. Single-file
 resources use the Jolt adapter's exact namespace-to-embedded-key mapping.
-`jolt/` is kmet's RFC 0014 provider slot (details: jolt/README.md). **Empty by design**: the JDK gaps it was built for —
+`jolt/` is kmet's RFC 0014 provider slot (details:
+`jolt/src/jolt/kmet/README.md`). **Empty by design**: the JDK gaps it was built for —
 the `java.net.http.HttpTimeoutException` ctor, the multi-arg
 `java.net.URI` ctors, `ProcessBuilder` File redirects,
 `SocketOutputStream.write(byte[])`, `LinkedBlockingQueue` and the Base64

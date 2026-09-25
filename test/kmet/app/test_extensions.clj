@@ -4,7 +4,7 @@
    (kmet.extension/create-nullable-api) for testing extensions in isolation.
    Contexts are per host — SCI on bb/JVM, the runtime's own loader on Jolt —
    and the suite runs on both. The remaining ^:bb-only test is the packed-
-   clojure jar roundtrip, a dependency-closure fixture (extensions.md §
+   clojure jar roundtrip, a dependency-closure fixture (src/kmet/extension.md §
    bb-bundled ports)."
   (:require [clojure.test :as t :refer [testing]]
             [clojure.string :as str]
@@ -598,7 +598,7 @@
     (extensions/unload-all-extensions!)))
 
 (t/deftest test-extension-fixed-bundled-set
-  ;; the fixed bundled set (kmet.app.extension-libs; extensions.md § Bundled
+  ;; the fixed bundled set (kmet.app.extension-libs; src/kmet/extension.md § Bundled
   ;; extension libraries) needs no deps.edn: a single-file extension requires
   ;; every third-party member and calls each one — same result on both hosts.
   (extensions/clear-extensions!)

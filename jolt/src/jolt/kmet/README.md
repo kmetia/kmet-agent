@@ -8,7 +8,7 @@ classpath ever requires a `jolt.kmet.*` namespace, and the class
 registrations below are jolt-only hooks.
 
 **EMPTY BY DESIGN.** Every JDK gap this lib was created for is runtime
-surface now (jolt-bugs.md records the closures): `HttpTimeoutException`'s
+surface now (`jolt-bugs.md` records the closures): `HttpTimeoutException`'s
 ctor, the multi-arg `java.net.URI` ctors, `ProcessBuilder`'s `File`
 redirects, `SocketOutputStream.write(byte[])`, `LinkedBlockingQueue` and the
 Base64 MIME pair all come from the runtime, so nothing is claimed and

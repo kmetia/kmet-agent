@@ -1,5 +1,5 @@
 (ns jolt.kmet.providers
-  "kmet's RFC 0014 provider namespace (jolt/README.md).
+  "kmet's RFC 0014 provider namespace (jolt/src/jolt/kmet/README.md).
 
    EMPTY BY DESIGN: every gap this lib was created for is runtime surface
    now (jolt-bugs.md records the closures) — the

@@ -143,7 +143,7 @@ Editing guidelines pulled on demand when working with Clojure files. Covers:
 ## Dependencies
 
 No `deps.edn` — everything is served by kmet's fixed bundled set
-(`extensions.md` § Bundled extension libraries), shared by reference on both
+(`src/kmet/extension.md` § Bundled extension libraries), shared by reference on both
 hosts:
 
 - cljfmt 0.16.5 — code formatting (`cljfmt.edn` discovery and its `#re`

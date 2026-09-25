@@ -5,7 +5,7 @@
  ;; scope via the :bundled-extensions settings key.
  ;;
  ;; :root is relative to the repo's extensions/ directory and is the
- ;; artifact root exactly as pack-extension / extensions.md define it
+ ;; artifact root exactly as pack-extension / src/kmet/extension.md define it
  ;; (directory artifacts use the src/ wrapper as their root; single-file
  ;; artifacts are the .clj file itself).
  :artifacts

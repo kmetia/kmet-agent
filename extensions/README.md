@@ -12,14 +12,15 @@ all: `kmet config` lists every extension under “Bundled with kmet”
 the `:bundled-extensions` key (`["clojure" "-mcp-adapter"]` globally,
 `["+mcp-adapter"]` as a project delta). Bundled extensions are not
 packages — `kmet install`/`remove`/`list` cannot touch them — and nothing is
-ever extracted to disk (see `extensions/extensions.md`).
+ever extracted to disk (see `src/kmet/extension.md`).
 
 Extensions also load from the global dir (`~/.kmet/agent/extensions/`) and
 the project-local dir (`.kmet/extensions/`) at startup and on `/reload`.
 Use this for local development against an edited copy: symlink or copy the
 extension into one of those — or install it as a **package** with
-`kmet install <path>` (records the source in settings; see README “Package
-subcommands” and `extensions/extensions.md`):
+`kmet install <path>` (records the source in settings; see
+[`docs/usage.md`](../docs/usage.md#package-subcommands) and
+`src/kmet/extension.md`):
 
 ```bash
 # one-time setup: make the shipped extension a package (user scope)
@@ -76,7 +77,7 @@ never ship.
   namespaces (`kmet.app.ui.tool-renderers`, `kmet.app.keybindings`),
   `clojure.*` / `babashka.*` builtins and the fixed bundled set
   (rewrite-clj, edamame, clojure.tools.reader, clojure.spec.alpha, cljfmt,
-  parinferish — see `extensions.md` § Bundled extension libraries). They
+  parinferish — see `src/kmet/extension.md` § Bundled extension libraries). They
   have **no tests** — the code is expected to
   stay small and self-contained; validate changes by loading the file
   against `kmet.extension/create-nullable-api` or the real runtime.
@@ -87,12 +88,12 @@ never ship.
   `kmet.extensions.<name>.*`, the manifest entry at
   `kmet.extensions.<name>.core`. `:loader` lists the loader backends the extension
   supports (`:sci` / `:jolt`; the host picks its own preference — see
-  `extensions.md` § Loader compatibility). They may carry a `deps.edn` for
+  `src/kmet/extension.md` § Loader compatibility). They may carry a `deps.edn` for
   library dependencies (`:deps` only) and their own tests (run them from
   inside the directory, e.g. `bb test` against the extension's own deps).
 - **Jar/zip extensions** — the same layout packed as a single archive
   (`extension.edn` + `deps.edn` at the root, code at ns paths, resources by
-  exact name). The loader serves them unexpanded. See `extensions.md` for
+  exact name). The loader serves them unexpanded. See `src/kmet/extension.md` for
   the format.
 
 All extension files — source **and any tests they carry** — are covered by
@@ -138,8 +139,8 @@ terminal background).
 ## Shipped extensions
 
 The extension authoring guide — the full `kmet.extension` API contract —
-lives in [`extensions.md`](extensions.md); keep it up to date whenever the
-contract changes.
+lives in [`src/kmet/extension.md`](../src/kmet/extension.md); keep it up to
+date whenever the contract changes.
 
 | Extension | Description |
 |-----------|-------------|

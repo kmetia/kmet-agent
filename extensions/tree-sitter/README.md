@@ -6,8 +6,7 @@ validation hooks that block broken writes and warn on broken edits.
 
 Feature parity target: rab's native tree-sitter extension and pi's
 `pi-tree-sitter` package. Design facts and validated constraints live in
-[`SPEC.md`](SPEC.md); the ordered build plan is [`../../tree-sitter.md`](../../tree-sitter.md)
-at the repo root.
+[`SPEC.md`](src/SPEC.md) for the design and implementation specification.
 
 ## Tools
 
@@ -70,4 +69,4 @@ validated.
 
 Note: tree-sitter error recovery is tolerant — most syntax mistakes produce
 parse errors the hooks catch, but a few recoverable ones may slip through.
-See [`SPEC.md`](SPEC.md) §Hook policy.
+See [`SPEC.md`](src/SPEC.md) §Hook policy.

@@ -240,7 +240,7 @@ on jolt if a script evaluator wants `:interrupt-fn` uniformly.
     contributed name goes through the same normalization/`:streams?`/
     `:contextual?` handling without joining `get-tool`/`get-all-tools`.
     The extension API (`:register-tool-source!`/`:unregister-tool-source!`,
-    tracked for unload) is documented in `extensions/extensions.md`.
+    tracked for unload) is documented in `src/kmet/extension.md`.
   - **Adapter: the catalog as a source.**
     `tool-proxy/script-tool-records` builds records from the metadata cache
     (prefixed name → `{:name :label :description :parameters :streams?
