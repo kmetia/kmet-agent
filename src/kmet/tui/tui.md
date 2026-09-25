@@ -1295,8 +1295,19 @@ Scroll-region/diff bugs are invisible at the lines level. Capture the
 session's raw output — `scripts/tmux_capture.sh` or
 `scripts/pty_capture.py` — and replay it through the minimal ANSI emulator:
 `python3 scripts/term_dump.py out.raw` prints the frames (with colors) at
-sync boundaries. See AGENTS.md ("Debugging scripts") for the exact
-invocations.
+sync boundaries.
+
+The repository capture helpers are:
+
+- `tmux_capture.sh <session> <send-after> <text> <timeout> <outfile> <cmd...>`
+  captures a tmux session; `tmux_repro.sh <name> <outfile> <cmd...>` runs a
+  fixed resize/input sequence.
+- `pty_capture.py` is a tmux-free PTY capture with configurable columns, rows,
+  text, timeout, and output path.
+- `kmet_sanity.sh <outfile>` exercises startup, scrolling, and exit;
+  `kmet_verify.sh <outfile>` measures streaming/scroll behavior.
+- `term_dump.py <raw-capture>` replays raw bytes through the ANSI emulator and
+  prints frames at sync boundaries.
 
 ## 12. Testing & performance invariants
 

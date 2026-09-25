@@ -21,7 +21,7 @@ RSA is jolt.crypto's — it provides `Signature` / `KeyPairGenerator` /
 `KeyFactory` for RSA (and EC) and claims those classes itself. A *member*
 of a class the runtime IMPLEMENTS but does not fully supply cannot be
 claimed at all; that needs the guarded-require convention instead
-(AGENTS.md's `jolt/` section). When even a registration cannot back the
+(the guarded-require convention below). When even a registration cannot back the
 member — `java.lang.Object`'s `wait`/`notify` pair (a gap until v0.8.8-53,
 now runtime surface — `kmet.tui.wake` parks on the object monitor).
 
@@ -67,6 +67,22 @@ order requirements:
 
 Nothing. The table is empty while the lib is a no-op; a future shim adds a
 row and the matching `install!` registration.
+
+## Guarded integration
+
+When a source namespace needs a member of a class that Jolt implements but
+does not fully supply, add this as the first form after `ns`:
+
+```clojure
+(when (find-var 'clojure.core/*jolt-version*)
+  (require 'jolt.kmet.providers))
+```
+
+A class that the runtime implements cannot be claimed through
+`:jolt/provides`; the guarded require is the only install path for that kind
+of member. Classes declared in `:jolt/provides` autoload their install
+namespace on first reference and need no guard. No kmet source namespace needs
+this convention today.
 
 ## Verification
 

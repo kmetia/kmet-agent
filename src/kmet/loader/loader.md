@@ -1113,7 +1113,7 @@ one exception: they are stored and compared by identity.
    registry).
 5. Changed-file gates (`bb test-changed` / `lint-changed` /
    `format-changed`) during development; full gates only on request
-   (AGENTS.md).
+   (see the development workflow in `../README.md`).
 
 ## 11. Non-goals (v1)
 
