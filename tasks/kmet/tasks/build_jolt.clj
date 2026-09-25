@@ -297,11 +297,12 @@
    link invocation. The staged directory is added because Jolt's archive
    preload command has no -L; the SSL preload DLL also receives libcrypto.a
    because Jolt creates each static preload independently. The final executable
-   already links both archives in order."
+   already links both archives in order. Paths are slash-normalized before the
+   directory is derived, so a Windows path yields the same -L on either host."
   [cc crypto-archive]
   (let [driver (str/replace (str cc) "\\" "/")
         archive (str/replace (str crypto-archive) "\\" "/")
-        libdir (str/replace (str (fs/parent crypto-archive)) "\\" "/")
+        libdir (str/replace (str (fs/parent archive)) "\\" "/")
         flags (str/join " " static-native-system-link-flags)
         support (str "-L\"" libdir "\" " flags)]
     (str "#!/bin/sh\n"
