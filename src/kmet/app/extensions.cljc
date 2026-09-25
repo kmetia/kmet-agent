@@ -2131,7 +2131,9 @@
          (for [f (->> (concat (fs/list-dir root) (fs/glob root "**/*"))
                       (filter fs/regular-file?)
                       distinct)
-               :let [rel (str (fs/normalize (fs/relativize root (str f))))]
+               :let [rel (str/replace
+                          (str (fs/normalize (fs/relativize root (str f))))
+                          "\\" "/")]
                :when (contains? #{"clj" "cljc" "jolt"} (fs/extension rel))]
            {:rel rel :display (str f) :source (slurp (str f))})
          (for [rel (jar-entry-names root)
