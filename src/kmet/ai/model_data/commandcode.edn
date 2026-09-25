@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-24T07:02:29Z"
+ :generated-at "2026-09-25T18:13:32Z"
  :provider {:id :commandcode
             :name "Command Code"
             :env-vars ["CMD_API_KEY"]
@@ -855,8 +855,8 @@
     :reasoning true
     :thinking-level-map {:off nil}
     :input [:text]
-    :cost {:input 0.1 :output 0.3 :cache-read 0.02 :cache-write 0}
-    :context-window 1000000
+    :cost {:input 0.09 :output 0.3 :cache-read 0.02 :cache-write 0}
+    :context-window 262144
     :max-tokens 65536
     :compat {:thinking-format :openrouter}}
    "stepfun/Step-3.7-Flash"

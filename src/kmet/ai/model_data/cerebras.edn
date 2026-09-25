@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-06T20:10:23Z"
+ :generated-at "2026-09-25T18:13:32Z"
  :provider {:id :cerebras
             :name "Cerebras"
             :env-vars ["CEREBRAS_API_KEY"]
@@ -43,8 +43,8 @@
                          :xhigh nil}
     :input [:text :image]
     :cost {:input 0.99 :output 1.49 :cache-read 0 :cache-write 0}
-    :context-window 65536
-    :max-tokens 32768
+    :context-window 131072
+    :max-tokens 40960
     :compat {:supports-store false
              :supports-developer-role false
              :max-tokens-field :max-tokens}}}}}

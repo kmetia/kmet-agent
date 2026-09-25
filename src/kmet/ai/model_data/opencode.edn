@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-24T07:02:29Z"
+ :generated-at "2026-09-25T18:13:32Z"
  :provider {:id :opencode
             :name "OpenCode (Zen)"
             :env-vars ["OPENCODE_API_KEY"]
@@ -679,6 +679,21 @@
              :supports-developer-role false
              :max-tokens-field :max-tokens
              :supports-strict-mode true}}
+   "qwen3.8-max"
+   {:id "qwen3.8-max"
+    :name "Qwen3.8 Max"
+    :provider :opencode
+    :api :openai-completions
+    :base-url "https://opencode.ai/zen/v1"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 2 :output 6 :cache-read 0.25 :cache-write 2.5}
+    :context-window 262144
+    :max-tokens 131072
+    :compat {:supports-store false
+             :supports-developer-role false
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
    "space-bunny-free"
    {:id "space-bunny-free"
     :name "Space Bunny Free"
@@ -1273,25 +1288,6 @@
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 1.25 :output 4.25 :cache-read 0.15 :cache-write 0}
-    :context-window 1048576
-    :max-tokens 131072
-    :compat {:session-affinity-format :openai-nosession}}
-   "muse-spark-1.2-contributor-free"
-   {:id "muse-spark-1.2-contributor-free"
-    :name "Muse Spark 1.2 Free"
-    :provider :opencode
-    :api :openai-responses
-    :base-url "https://opencode.ai/zen/v1"
-    :reasoning true
-    :thinking-level-map {:high "high"
-                         :low "low"
-                         :max nil
-                         :medium "medium"
-                         :minimal "minimal"
-                         :off nil
-                         :xhigh "xhigh"}
-    :input [:text :image]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:session-affinity-format :openai-nosession}}
