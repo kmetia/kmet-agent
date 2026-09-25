@@ -1,4 +1,10 @@
-{:paths ["src" "tasks"]
+{:jolt/min-version "0.8.11"
+ ;; 0.8.11 is the first fixed Jolt line for :jolt/native :static archives
+ ;; (0.8.9/0.8.10 failed non-PIC Linux links). Static dist builds additionally
+ ;; verify Jolt emitted process-symbol loads for every file-backed native, so
+ ;; an older compiler cannot silently produce a dynamic-dependent artifact.
+
+ :paths ["src" "tasks"]
  ;; tasks/ (the bb-task implementations) is a source root but deliberately NOT
  ;; an embed root: :paths are runtime source roots resolved against JOLT_PWD
  ;; (and the app's own require closure decides what compiles), so task code is
@@ -20,6 +26,34 @@
  ;; the same path in a binary as in a checkout. A
  ;; missing root embeds nothing — the runtime then offers no bundled set.
  :jolt/build {:embed ["src" "target/kmet-version" "target/kmet-bundled"]}
+
+ ;; OpenSSL stays dynamically loaded for run/repl and for the default dist mode
+ ;; on Linux (including WSL), macOS, and other non-Windows platforms. Windows
+ ;; defaults to static; --static/--dynamic override either default. The specs
+ ;; keep runtime candidates for dynamic builds and add per-platform archives for
+ ;; static ones. The project-level specs are first through Jolt's name-keyed
+ ;; reconciliation, so they also retain the dependency libraries' candidates.
+ ;; kmet's dist task stages the selected platform's archives before invoking
+ ;; `jolt build` and verifies the generated native loads. The process-native
+ ;; socket entry needs no archive.
+ :jolt/native [{:name "crypto"
+                :static {:linux   {:archive "target/jolt-native/linux/libcrypto.a"}
+                         :darwin  {:archive "target/jolt-native/darwin/libcrypto.a"}
+                         :windows {:archive "target/jolt-native/windows/libcrypto.a"}}
+                :darwin ["/opt/homebrew/opt/openssl@3/lib/libcrypto.dylib"
+                         "/usr/lib/libcrypto.dylib" "libcrypto.dylib"]
+                :linux ["libcrypto.so.3" "libcrypto.so.1.1" "libcrypto.so"]
+                :windows ["libcrypto-3-x64.dll" "libcrypto-3.dll"
+                          "libcrypto-1_1-x64.dll" "libcrypto.dll"]}
+               {:name "ssl"
+                :static {:linux   {:archive "target/jolt-native/linux/libssl.a"}
+                         :darwin  {:archive "target/jolt-native/darwin/libssl.a"}
+                         :windows {:archive "target/jolt-native/windows/libssl.a"}}
+                :darwin ["/opt/homebrew/opt/openssl@3/lib/libssl.dylib"
+                         "/usr/lib/libssl.dylib" "libssl.dylib"]
+                :linux ["libssl.so.3" "libssl.so.1.1" "libssl.so"]
+                :windows ["libssl-3-x64.dll" "libssl-3.dll"
+                          "libssl-1_1-x64.dll" "libssl.dll"]}]
 
  :deps {        ;; babashka.fs / babashka.process are deliberately NOT deps: babashka
         ;; bundles them, and jolt vendors the same namespaces (built-in,
@@ -43,8 +77,8 @@
         ;; (MessageDigest, Mac, Cipher, SecureRandom, EC + RSA
         ;; Signature/KeyPairGenerator/KeyFactory — RFC 0014; inert on bb/JVM).
         ;; RSA (keygen + SHA*withRSA + RSA KeyFactory) comes from the library,
-        ;; as do the libcrypto/libssl candidates — declared for all three
-        ;; platforms, so kmet carries no project-level :jolt/native block.
+        ;; as do the libcrypto/libssl runtime candidates. The project-level
+        ;; specs above retain those candidates and add static archives.
         io.github.jolt-lang/crypto {:git/url "https://github.com/jolt-lang/crypto.git"
                                     :git/sha "8d821a9dcdca2fd909e2bedc215d523775b16073"}
         ;; babashka.http-client on Jolt: the jolt-lang/http-client library's

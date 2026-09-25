@@ -2,7 +2,7 @@
 
 Only currently open Jolt upstream issues relevant to kmet are listed here.
 Closed tickets and completed work are intentionally omitted. Status checked
-against GitHub on 2026-09-24.
+against GitHub on 2026-09-25.
 
 ## Open
 
@@ -38,9 +38,22 @@ removed.
 
 Jolt reports that it cannot find `ssl` even when `libssl-3-x64.dll` is beside
 `jolt.exe`; startup eventually succeeds but continues to emit the warning.
-This could affect kmet's Windows crypto/HTTPS startup because the Jolt
-dependency graph declares OpenSSL native libraries. Direct TLS-context and RSA
-signature lookups succeed on the installed
-`v0.8.11-19-g6a224b0b`, but that is not an end-to-end reproduction of the
-reported app-startup search path. No kmet workaround is identified; keep this
-open pending upstream investigation.
+This affects the Jolt development CLI/runtime path. kmet's default Windows
+`dist` artifact no longer takes it: its OpenSSL members come from the staged
+static archives and `--smoke` runs with only Windows `System32` on `PATH`.
+`jolt dist --dynamic` deliberately takes the runtime path again. Keep the issue
+open for the Jolt executable's own dynamic-native path.
+
+### Unfiled — Windows static-native builds need dependency-aware preload and link flags
+
+Verified on `jolt v0.8.12-24-gfe2a4ab2`, Windows 11, 2026-09-25. Jolt preloads
+each `:static {:archive …}` independently, so `libssl.a` cannot resolve the
+`libcrypto.a` symbols during its build-time preload DLL. Its Windows launcher
+link also omits OpenSSL's CryptoAPI dependency, and a drive-rooted missing
+`<out>.build` reached `bld-mkdir-p` with a non-string parent. kmet's
+`kmet.tasks.build-jolt` works around all three by precreating the build dir,
+prepending a build-only `cc` shim, and staging static lz4/zlib in the native
+directory. The final executable was smoke-run without the OpenSSL/lz4 DLLs and
+its PE imports contained Windows system DLLs only. Recheck when filing upstream;
+remove the shim once Jolt handles dependent native archives and their link
+libraries directly.

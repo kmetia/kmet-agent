@@ -11,12 +11,13 @@
  ;; java.security.Signature / KeyPairGenerator / KeyFactory live in
  ;; crypto's own :jolt/provides (jolt allows a class only one provider).
  ;;
- ;; The native libs (libcrypto/libssl) and the crypto java.* classes come
- ;; from io.github.jolt-lang/crypto. This lib does NOT require it: crypto's
- ;; own :jolt/provides claims resolve its classes on the first reference,
- ;; whatever loaded first — RFC 0014 gives a class one provider, and a
- ;; declared provider owns the members it registers. jolt dedupes natives by
- ;; :name, so the app declaring crypto once is enough.
+ ;; The crypto java.* classes come from io.github.jolt-lang/crypto. This lib
+ ;; does NOT require it: crypto's own :jolt/provides claims resolve its classes
+ ;; on the first reference, whatever loaded first — RFC 0014 gives a class one
+ ;; provider, and a declared provider owns the members it registers. Its
+ ;; libcrypto/libssl declarations are overlaid by kmet's project-level specs,
+ ;; which keep the runtime candidates and add per-platform archives for
+ ;; static dist builds.
  ;;
  ;; Inert on bb/JVM: nothing in the bb classpath ever requires a jolt.kmet.*
  ;; namespace.

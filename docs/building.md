@@ -33,10 +33,47 @@ jolt dist --target tarm64le --target-pack "$TMPDIR/pack"   # Cross-compile (use 
 On Termux, set `TMPDIR` to the Termux temporary directory (or choose another
 writable path); `/tmp` is not available there.
 
+### Native linking
+
+`jolt dist` supports `--static` and `--dynamic`. They are mutually exclusive
+and override the platform default:
+
+| Platform | Default | Override |
+|----------|---------|----------|
+| Windows | `--static` | `jolt dist --dynamic` for runtime loading |
+| Linux/WSL, macOS, Termux, other | `--dynamic` | `jolt dist --static` for archive linking |
+
+A static build asks `cc` for `libcrypto.a` and `libssl.a`, stages them under
+`target/jolt-native/<platform>/`, and verifies Jolt's generated Scheme uses
+static process-symbol loads for every file-backed `:jolt/native`. Windows
+static builds also stage lz4/zlib and need an MSYS2 MINGW64 toolchain:
+
+```sh
+pacman -S --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-openssl mingw-w64-x86_64-lz4
+jolt dist --smoke                 # Windows default: static
+jolt dist --dynamic --smoke       # Windows override: dynamic
+```
+
+Set `KMET_OPENSSL_STATIC_DIR` to override static OpenSSL archive discovery.
+Static native cross-builds are rejected: Jolt cannot yet link
+target-architecture archives while compiling on another host.
+
+A dynamic build passes `--dynamic` to Jolt, needs no C toolchain during
+packaging, and loads the native libraries named in Jolt's build output at run
+time; the binary is not self-contained. Its smoke test keeps `PATH`, since
+those runtime libraries must be reachable. A Windows static smoke test instead
+limits `PATH` to `System32`, proving no OpenSSL/lz4/zlib DLL is needed beside
+the artifact.
+
+A direct `jolt build -m kmet.core` is still the one-off compiler command on
+Unix. Use `jolt dist` when you want kmet's mode defaults, archive staging, and
+post-build verification.
+
 `jolt dist --help` lists every option: build modes, `--boot fast|small|plain`
-(startup versus size), `--closed-world` and `--dynamic`, cross-compiling with
-`--target`/`--target-pack`, `-o PATH`, `--force`, and `--smoke` to run the
-freshly built binary (`--list-models` plus `--version`) before publishing.
+(startup versus size), `--closed-world`, `--static` / `--dynamic`,
+cross-compiling with `--target`/`--target-pack`, `-o PATH`, `--force`, and
+`--smoke` to run the freshly built binary (`--list-models` plus `--version`)
+before publishing.
 
 ## Artifact names and versions
 

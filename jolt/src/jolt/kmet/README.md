@@ -63,6 +63,19 @@ order requirements:
   / `KeyFactory` (EC and RSA) and the spec classes — a dependent referencing
   one of those autoloads crypto directly, with no kmet involvement.
 
+## Native link packaging
+
+The root `deps.edn` overlays crypto's name-keyed `crypto` and `ssl` native
+specs. It keeps their run/repl candidates and adds per-platform
+`:static {:archive …}` entries for `libcrypto.a` and `libssl.a`; the process
+socket native needs no archive. `kmet dist` defaults to static on Windows and
+dynamic elsewhere, with `--static` / `--dynamic` overriding either default. A
+static build stages the selected platform's archives, plus static lz4/zlib on
+Windows, and checks the generated Scheme for one process-symbol load per
+resolved native. A dynamic build forwards `--dynamic` and needs the listed
+libraries on the host. User-facing setup and smoke semantics live in
+`docs/building.md` § Native linking.
+
 ## What is provided
 
 Nothing. The table is empty while the lib is a no-op; a future shim adds a

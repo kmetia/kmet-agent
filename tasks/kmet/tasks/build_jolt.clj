@@ -1,5 +1,5 @@
 (ns kmet.tasks.build-jolt
-  "Build the self-contained kmet executable for the jolt host — the jolt half
+  "Build the kmet executable for the jolt host — the jolt half
    of the `dist` task (bb.edn branches on *jolt-version*: `jolt dist` lands
    here, `bb dist` lands in kmet.tasks.build).
 
@@ -15,6 +15,9 @@
      dist/ carries both hosts' artifacts side by side);
    - a stable scratch dir under target/jolt/, so jolt's incremental build (and
      its <out>.build payload dir) survives across runs and never lands in dist/;
+   - the native link mode: static by default on Windows, dynamic elsewhere,
+     with `--static` / `--dynamic` overriding either default; static builds
+     stage and verify the archives named by deps.edn;
    - a smoke test that runs the artifact away from the checkout, which is what
      proves the model catalogs were embedded and not merely found on disk;
    - a Termux launcher, like the babashka packager's, when the local link is
@@ -28,7 +31,8 @@
      :jolt/native specs, the output-path rules — against internal vars. The
      subprocess speaks the documented CLI instead, which also leaves `jolt
      build` itself the compiler command (`jolt build -m NS --opt` still works
-     for one-off builds in this repo).
+     for one-off non-Windows builds in this repo; on Windows use `jolt dist`,
+     which stages and verifies the required static archives).
    - the task is `dist` on both hosts, never `build`: a task called `build`
      either loses to jolt's built-in (jolt warns about the shadowed task on
      every `jolt build`) or, with :override-builtin true, displaces it — and
@@ -68,6 +72,40 @@
   ["extension loaded: clojure kind=resource-dir loader=jolt bundled=true"
    "extension loaded: deepseek-peak.clj kind=resource-file loader=jolt bundled=true"])
 
+(defn- static-native-root
+  "Project-relative directory for one platform's staged :static archive paths."
+  [platform]
+  (fs/path "target/jolt-native" platform))
+
+(def ^:private openssl-static-libs
+  "The complete set of file-backed OpenSSL :jolt/native entries."
+  ["libcrypto.a" "libssl.a"])
+
+(def ^:private windows-static-runtime-libs
+  "Static lz4/zlib archives Jolt's Windows launcher link needs. Staging them
+   beside OpenSSL lets its -L prefer .a files over MSYS2 import libraries."
+  ["liblz4.a" "libz.a"])
+
+(def ^:private static-native-system-link-flags
+  "OpenSSL's static archive uses Winsock, CryptoAPI, and zlib. Jolt's Windows
+   runtime link list carries the first and third but not CryptoAPI; append all
+   three after the static native archives so their symbols and transitive
+   dependencies resolve."
+  ["-lws2_32" "-lcrypt32" "-lz"])
+
+(def ^:private static-cc-wrapper-root
+  "Build-only PATH entry whose cc shim delegates to the discovered compiler
+   and appends static-native's system dependencies. It is target/ scratch and
+   never becomes an application resource."
+  "target/jolt-native/windows-toolchain")
+
+(def ^:private static-native-process-line
+  "Jolt emits this process-symbol load for a :process native and for every
+   native compiled from a :static archive. A runtime :req/:opt native instead
+   carries its DLL candidate list, so counting these lines proves Jolt did not
+   silently fall back to dynamic loading."
+  #"\(jolt-build-load-native\s+'\(\)\s+#f\s+#t\)")
+
 ;; ─── naming ───────────────────────────────────────────────────────────────
 
 (defn host-platform
@@ -103,6 +141,218 @@
    for an nt target, and the packager must name the file it will find)."
   [platform]
   (str/starts-with? (str platform) "windows-"))
+
+(defn- static-native-libs
+  "All archives the requested platform's static build must stage."
+  [platform]
+  (cond-> (vec openssl-static-libs)
+    (windows-platform? platform) (into windows-static-runtime-libs)))
+
+(defn- native-platform
+  "Jolt's :jolt/native platform key for a dist platform."
+  [platform]
+  (cond
+    (windows-platform? platform) :windows
+    (str/starts-with? platform "macos-") :darwin
+    (str/starts-with? platform "linux-") :linux
+    :else nil))
+
+(defn- static-link
+  "The static link Jolt will choose for SPEC on PLATFORM, or nil. A flat
+   :static map applies everywhere; a platform map contributes that key."
+  [platform spec]
+  (let [static (:static spec)]
+    (cond
+      (:process spec) :process
+      (or (:archive static) (:lib static)) static
+      (map? static) (get static platform)
+      :else nil)))
+
+(defn- project-natives
+  "The reconciled :jolt/native graph Jolt will pass to `jolt build`. nil on
+   Babashka, where Jolt's resolver namespace does not exist."
+  []
+  (when-let [resolve-project (requiring-resolve 'jolt.deps/resolve-project)]
+    (:natives (resolve-project (or (System/getenv "JOLT_PWD") ".")))))
+
+(defn- validate-static-build!
+  "Refuse a static build unless every file-backed native has a static link for
+   this platform. Process entries are exempt: they bind the executable's own
+   symbols."
+  [platform natives]
+  (let [key (native-platform platform)
+        unlinked (remove #(static-link key %) natives)
+        names (mapv #(or (:name %) "?") unlinked)]
+    (when (seq unlinked)
+      (throw (ex-info (str "static artifact has native libraries without a "
+                           (or key :platform)
+                           " :static link: "
+                           (str/join ", " names))
+                      {:type ::non-static-native
+                       :native-platform key
+                       :natives names})))))
+
+(defn- native-link-mode
+  "The requested native link mode, defaulting per platform: Windows static,
+   every other platform dynamic."
+  [platform requested]
+  (or requested
+      (if (windows-platform? platform) :static :dynamic)))
+
+(defn- cross-static-build?
+  "True when a static build names a platform other than the current host."
+  [platform target]
+  (and target (not= platform (host-platform))))
+
+(defn- validate-build!
+  "Apply the platform rules the raw Jolt CLI cannot express. Jolt cannot
+   cross-link target-architecture native archives yet; a static build must
+   also have a static declaration for every file-backed native."
+  [platform target native-link]
+  (when (and (= :static native-link)
+             (cross-static-build? platform target))
+    (throw (ex-info "static-native cross builds are not supported; build for the current host platform"
+                    {:type ::usage :target target :platform platform})))
+  (when (= :static native-link)
+    (validate-static-build! platform (project-natives))))
+
+(defn- static-library-source
+  "Locate FILENAME without guessing at ABI compatibility. An explicit
+   KMET_OPENSSL_STATIC_DIR wins, then CC's own answer, then pkg-config's
+   OpenSSL libdir (Homebrew on macOS). The result matches the toolchain and
+   package configuration Jolt will use for the final link."
+  [cc filename]
+  (let [override (not-empty (str/trim (str (System/getenv "KMET_OPENSSL_STATIC_DIR"))))
+        override-source (when override (fs/path override filename))]
+    (or (when (and override-source (fs/regular-file? override-source))
+          override-source)
+        (let [{:keys [exit out]}
+              (p/sh {:continue true :out :string :err :string}
+                    cc (str "-print-file-name=" filename))
+              printed (str/trim (str out))]
+          (when (and (zero? exit)
+                     (seq printed)
+                     (not= filename printed)
+                     (fs/regular-file? printed))
+            (fs/path printed)))
+        (when-let [pkg-config (fs/which "pkg-config")]
+          (let [{:keys [exit out]}
+                (p/sh {:continue true :out :string :err :string}
+                      pkg-config "--variable=libdir" "openssl")
+                libdir (str/trim (str out))
+                candidate (when (seq libdir) (fs/path libdir filename))]
+            (when (and (zero? exit)
+                       candidate
+                       (fs/regular-file? candidate))
+              candidate))))))
+
+(defn- ensure-static-native-libs!
+  "Stage this platform's static archives under the project-relative paths in
+   deps.edn. The toolchain must provide archives matching the compiler Jolt
+   uses for the final link."
+  [platform]
+  (let [cc (fs/which "cc")
+        packages (if (windows-platform? platform)
+                   "mingw-w64-x86_64-gcc mingw-w64-x86_64-openssl mingw-w64-x86_64-lz4"
+                   "a C compiler with static libcrypto.a and libssl.a")
+        _ (when-not cc
+            (throw (ex-info (str "static-native builds need cc on PATH; install "
+                                 packages)
+                            {:type ::missing-static-toolchain :platform platform})))
+        libs (static-native-libs platform)
+        sources (into {}
+                      (map (fn [filename]
+                             [filename (static-library-source cc filename)]))
+                      libs)
+        missing (filterv (fn [filename]
+                           (not (some-> (get sources filename) fs/regular-file?)))
+                         libs)
+        _ (when (seq missing)
+            (throw (ex-info (str "cc could not locate the static native archive(s): "
+                                 (str/join ", " missing)
+                                 "; set KMET_OPENSSL_STATIC_DIR for OpenSSL and make cc find the remaining archives")
+                            {:type ::missing-static-archive
+                             :platform platform
+                             :missing missing :cc (str cc)})))
+        root (static-native-root platform)
+        destinations (mapv #(fs/path root %) libs)]
+    (fs/create-dirs root)
+    (doseq [filename libs]
+      (fs/copy (get sources filename) (fs/path root filename)
+               {:replace-existing true}))
+    (println "staged static native archives:" (str/join ", " (map str destinations)))
+    destinations))
+
+(defn- compiler-driver
+  "Resolve a cc alias to the real driver beside it. The w64devkit cc.exe (and
+   common cc symlinks) derive their library prefix from argv[0]; calling one
+   through a shim named cc would otherwise make it search target/ instead of
+   the toolchain. A cc that is already a driver is returned unchanged."
+  [cc]
+  (let [siblings (map #(fs/path (fs/parent cc) %) ["gcc.exe" "clang.exe"])]
+    (or (first (filter fs/regular-file? siblings)) cc)))
+
+(defn- compiler-wrapper-command
+  "POSIX-sh command for the compiler shim. \"$@\" preserves Jolt's complete
+   link invocation. The staged directory is added because Jolt's archive
+   preload command has no -L; the SSL preload DLL also receives libcrypto.a
+   because Jolt creates each static preload independently. The final executable
+   already links both archives in order."
+  [cc crypto-archive]
+  (let [driver (str/replace (str cc) "\\" "/")
+        archive (str/replace (str crypto-archive) "\\" "/")
+        libdir (str/replace (str (fs/parent crypto-archive)) "\\" "/")
+        flags (str/join " " static-native-system-link-flags)
+        support (str "-L\"" libdir "\" " flags)]
+    (str "#!/bin/sh\n"
+         "case \" $* \" in\n"
+         "  *-shared*libssl.a*)\n"
+         "    exec \"" driver "\" \"$@\""
+         " -Wl,--whole-archive \"" archive "\" -Wl,--no-whole-archive " support "\n"
+         "    ;;\n"
+         "  *)\n"
+         "    exec \"" driver "\" \"$@\" " support "\n"
+         "    ;;\n"
+         "esac\n")))
+
+(defn- windows-static-build-env
+  "PATH for Jolt's Windows static build subprocess. The wrapper delegates to
+   the same CC used to find the archives and supplies OpenSSL's
+   Winsock/CryptoAPI/zlib dependencies to the final link."
+  [platform]
+  (let [cc (fs/which "cc")
+        root (fs/path static-cc-wrapper-root)
+        wrapper (fs/path root "cc")]
+    (when-not cc
+      (throw (ex-info "Windows static-native builds need cc on PATH"
+                      {:type ::missing-static-toolchain})))
+    (fs/create-dirs root)
+    (spit (str wrapper) (compiler-wrapper-command
+                         (compiler-driver cc)
+                         (fs/absolutize (fs/path (static-native-root platform)
+                                                 "libcrypto.a"))))
+    (p/sh "chmod" "+x" (str wrapper))
+    {"PATH" (str root ";" (System/getenv "PATH"))}))
+
+(defn- verify-static-native-build!
+  "Check Jolt's generated Scheme after a static compile. Every validated
+   native must have become a process-symbol load backed by a static archive;
+   a runtime candidate load would mean an older Jolt, a stale incremental
+   build, or an ignored :static entry produced a non-static artifact."
+  [bin natives]
+  (let [flat (fs/path (str bin ".build") "flat.ss")
+        expected (count natives)
+        actual (if (fs/regular-file? flat)
+                 (count (re-seq static-native-process-line (slurp (str flat))))
+                 -1)]
+    (when-not (= expected actual)
+      (throw (ex-info (str "jolt build did not statically link every native "
+                           "(expected " expected ", found " actual "); retry with --force on Jolt >= 0.8.11")
+                      {:type ::non-static-build
+                       :flat (str flat)
+                       :expected expected
+                       :actual actual})))
+    true))
 
 (defn jolt-version
   "The compiling jolt's version, filename-safe and without the leading v —
@@ -165,6 +415,18 @@
       (throw (ex-info (str flag " needs a value") {:type ::usage :option flag})))
     v))
 
+(defn- set-native-link
+  "Record an explicit --static/--dynamic choice, rejecting the conflicting pair."
+  [opts mode option]
+  (when-let [existing (:native-link opts)]
+    (when (not= existing mode)
+      (throw (ex-info (str "choose either --static or --dynamic, not both (already chose "
+                           (name existing) ")")
+                      {:type ::usage
+                       :option option
+                       :native-link existing}))))
+  (assoc opts :native-link mode))
+
 (defn parse-args
   "CLI args -> options map. Unknown options and bare arguments throw ex-info
    with :type ::usage — unlike the babashka packager there are no positional
@@ -172,9 +434,9 @@
    download."
   [args]
   (loop [args args
-         opts {:mode "release" :flags [] :boot nil :target nil :target-pack nil
-               :out nil :jolt nil :force? false :no-smoke? true :test? false
-               :help? false}]
+         opts {:mode "release" :flags [] :native-link nil :boot nil :target nil
+               :target-pack nil :out nil :jolt nil :force? false
+               :no-smoke? true :test? false :help? false}]
     (if-some [arg (first args)]
       (let [more (rest args)]
         (case arg
@@ -182,8 +444,10 @@
           "--dev" (recur more (assoc opts :mode "dev"))
           "--opt" (recur more (assoc opts :mode "optimized"))
           ;; forwarded verbatim: knobs the packager has no opinion about
-          ("--closed-world" "--tree-shake" "--dynamic" "--direct-link" "--no-direct-link")
+          ("--closed-world" "--tree-shake" "--direct-link" "--no-direct-link")
           (recur more (update opts :flags conj arg))
+          "--static" (recur more (set-native-link opts :static arg))
+          "--dynamic" (recur more (set-native-link opts :dynamic arg))
           "--boot" (let [v (opt-value arg more)]
                      (when-not (#{"fast" "small" "plain"} v)
                        (throw (ex-info "--boot needs fast, small or plain"
@@ -210,10 +474,12 @@
   "The `jolt build` argv for OPTS: the CLI's own flags, with the entry and
    output pinned by the packager. Passed to the CLI undeclared flags stay
    undeclared — jolt would skip an unknown option silently, which is why
-   parse-args validates them instead. A --test build selects :kmet-test first:
+   parse-args validates them instead. Dynamic natives are forwarded as
+   `--dynamic`; static is Jolt's own build default. A --test build selects
+   :kmet-test first:
    test/ and the generated entry root (deps.edn) join the project's own roots,
    so the suite reaches the require closure the AOT walk starts from."
-  [{:keys [mode flags boot target target-pack test?] :as opts}]
+  [{:keys [mode flags native-link boot target target-pack test?] :as opts}]
   (cond-> (vec (concat (when test? ["-A:kmet-test"])
                        ["build"
                         "-m" (or (:entry opts) (if test? test-entry-ns entry-ns))
@@ -221,6 +487,7 @@
     (= mode "dev") (conj "--dev")
     (= mode "optimized") (conj "--opt")
     (seq flags) (into flags)
+    (= :dynamic native-link) (conj "--dynamic")
     boot (into ["--boot" boot])
     target (into ["--target" target])
     target-pack (into ["--target-pack" target-pack])))
@@ -238,16 +505,18 @@
     f))
 
 (defn- run-jolt-build!
-  "Run the compile, streaming jolt's output. Throws ::no-jolt when the
-   executable can't be started and ::build-failed on a non-zero exit."
-  [jolt argv]
+  "Run the compile, streaming jolt's output. ENV is merged into the build
+   subprocess; Windows uses it for the static-native cc shim. Throws ::no-jolt
+   when the executable can't be started and ::build-failed on a non-zero exit."
+  [jolt argv env]
   (println "$" (str/join " " (cons jolt argv)))
   (let [{:keys [exit]}
         (try
-          (apply p/shell {:continue true :out :inherit :err :inherit} jolt argv)
+          (apply p/sh {:continue true :out :inherit :err :inherit :extra-env env}
+                 jolt argv)
           (catch Exception e
             (throw (ex-info (str "cannot run " jolt " — is jolt on PATH? (--jolt PATH overrides)")
-                            {:type ::no-jolt :jolt jolt} e))))]
+                            {:type :no-jolt :jolt jolt} e))))]
     (when-not (zero? exit)
       (throw (ex-info (str "jolt build failed (exit " exit ")")
                       {:type ::build-failed :exit exit :argv (vec argv)})))))
@@ -350,6 +619,16 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
           (pr-str {:bundled-extensions ["clojure" "deepseek-peak"]}))
     agent-dir))
 
+(defn- windows-smoke-path
+  "PATH for a Windows artifact smoke run. System32 is enough for Windows'
+   own DLLs; excluding the Git/Jolt directories makes a missing libcrypto or
+   libssl archive fail at runtime instead of being supplied from the build
+   machine's OpenSSL DLLs."
+  []
+  (str (str/replace (or (not-empty (System/getenv "SystemRoot")) "C:/Windows")
+                    "/" "\\")
+       "\\System32"))
+
 (defn- smoke-test!
   "Run the freshly built current-host artifact. An app artifact: run it with
    --debug and the --list-models smoke args, require exit 0, and assert an
@@ -364,8 +643,10 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
    falls back to JOLT_PWD-relative source roots, so a run from the checkout
    would pass on the tree even when the catalog was never embedded — and the
    empty dir is what makes the --version check prove the bake, since the
-   checkout's describe is unreachable there."
-  [artifact platform {:keys [no-smoke? test?]}]
+   checkout's describe is unreachable there. A Windows static build also runs
+   with PATH reduced to System32, so the build machine's OpenSSL DLLs cannot
+   mask a missed static link; a dynamic build keeps PATH for its runtime DLLs."
+  [artifact platform {:keys [no-smoke? test? static-link?]}]
   (when (and (not no-smoke?) (= platform (host-platform)))
     (let [launcher (fs/path (fs/parent artifact) (str (fs/file-name artifact) ".sh"))
           cmd (if (and (build/termux?) (fs/exists? launcher))
@@ -376,8 +657,10 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
                 (fn [& args]
                   (apply p/sh {:continue true :out :string :err :string
                                :dir (str dir)
-                               :extra-env {"JOLT_PWD" (str dir)
-                                           "KMET_CODING_AGENT_DIR" agent-dir}}
+                               :extra-env (cond-> {"JOLT_PWD" (str dir)
+                                                   "KMET_CODING_AGENT_DIR" agent-dir}
+                                            (and (windows-platform? platform) static-link?)
+                                            (assoc "PATH" (windows-smoke-path)))}
                          cmd args)))]
       (try
         (if test?
@@ -435,10 +718,10 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
 (defn -main
   "jolt dist [options]
 
-   Build kmet's self-contained Jolt executable into dist/: one native binary
-   with the runtime, clojure.core, the stdlib, the dependencies and kmet
-   itself compiled in (the entry is kmet.core). Nothing has to be installed on
-   the machine that runs it — no jolt, no jar, no classpath.
+   Build kmet's Jolt executable into dist/: one native binary with the
+   runtime, clojure.core, the stdlib, the dependencies and kmet itself
+   compiled in (the entry is kmet.core). A static build is self-contained; a
+   dynamic one needs its native libraries on the host.
 
    --test builds the compiled test runner instead: the same pipeline with the
    generated kmet.tasks.test-main entry, every test namespace statically
@@ -451,6 +734,14 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
    same app for the babashka host and names its artifact for the same
    platform, so one dist/ can carry both hosts' binaries side by side.
 
+   Native libraries default to static linking on Windows and dynamic linking
+   on every other platform (Linux/WSL, macOS, Termux). `--static` and
+   `--dynamic` override that default; they are mutually exclusive. A static
+   build stages `libcrypto.a` and `libssl.a` from `cc` and verifies Jolt's
+   generated loads. Windows static builds additionally need MSYS2's `gcc`,
+   OpenSSL, and lz4 packages and no OpenSSL DLL beside the artifact; a dynamic
+   build needs its platform's native libraries on the host at run time.
+
    Options:
      --dev                     unoptimized build, quickest to produce; vars
                                stay redefinable (a development build)
@@ -460,10 +751,13 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
                                optimizations, with backtraces)
      --closed-world            drop definitions unreachable from the entry
                                point (alias: --tree-shake) — a smaller binary
-     --dynamic                 load :jolt/native libraries at run time instead
-                               of linking their archives in; the binary then
-                               needs those libraries where it runs, so it is
-                               no longer self-contained (the build lists them)
+     --static                  link :jolt/native archives into the binary.
+                               Default on Windows; requires `cc` and matching
+                               static OpenSSL archives on any platform
+     --dynamic                 load :jolt/native libraries at run time (the
+                               default everywhere except Windows). The binary
+                               then needs those libraries where it runs and
+                               is no longer self-contained; the build lists them
      --direct-link             direct linking is already on in release and
                                optimized builds — this is a redundant alias.
                                With it a plain def is frozen into the binary
@@ -482,7 +776,9 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
                                (macos-amd64), tarm64osx (macos-aarch64), ta6nt
                                (windows-amd64), tarm64nt (windows-aarch64).
                                Needs --target-pack DIR (or the JOLT_TARGET_PACK
-                               env var)
+                               env var). A static native target must be the
+                               current host platform; Jolt cannot yet link
+                               target-architecture archives from another host
      --target-pack DIR         the prepared pack for --target MACHINE
      -o, --out PATH            write the artifact here instead of
                                dist/kmet-<ver>-jolt<jv>-<platform>[-dev][.exe]
@@ -501,13 +797,16 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
                                list the models, assert bundled directory
                                and single-file resources used native mapped
                                roots, and check --version against the version
-                               baked in — the check to run before publishing. A --test
+                               baked in. A Windows static build also runs with
+                               PATH reduced to System32, so a missed static
+                               OpenSSL link cannot be masked by the build host
+                               — the check to run before publishing. A --test
                                artifact runs `--test kmet.libs.test-num`
                                instead (proving the suite is compiled in). A
                                cross build skips it (only this host's own
                                platform can run here)
-     --no-smoke                skip that verification (the default, so a plain
-                               `jolt dist` is quick and side-effect free)
+     --no-smoke                skip that runtime verification (the default, so
+                               a plain `jolt dist` does not launch the artifact)
      --jolt PATH               the jolt executable that performs the compile
                                (default: jolt from PATH)
      -h, --help                this text
@@ -515,6 +814,8 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
    Examples:
      jolt dist                          release build for this machine
      jolt dist --smoke                  ... and verify the artifact runs
+     jolt dist --dynamic                force runtime native loading
+     jolt dist --static                 force archive linking
      jolt dist --test                   compiled test runner (release)
      jolt dist --test --smoke           ... and smoke-run its suite
      jolt dist --dev -o dist/kmet-dev   quick development build, own path
@@ -528,7 +829,7 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
    the binary); a jolt linked with the bionic cc runs directly, and a cross
    build gets none either."
   [& args]
-  (let [{:keys [mode target target-pack out force? no-smoke? jolt help? test?] :as opts}
+  (let [{:keys [mode native-link target target-pack out force? no-smoke? jolt help? test?] :as opts}
         (parse-args args)]
     (when help?
       (println (:doc (meta #'-main)))
@@ -536,6 +837,7 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
     (let [jolt-bin (or jolt "jolt")
           jver (jolt-version)
           platform (target-platform target)
+          link-mode (native-link-mode platform native-link)
           ver (build/version)
           bin (scratch-bin platform mode {:test? test?})
           artifact (if out
@@ -547,7 +849,9 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
       (when (and target (nil? target-pack) (str/blank? (str (System/getenv "JOLT_TARGET_PACK"))))
         (throw (ex-info "--target needs a target pack: --target-pack DIR (or $JOLT_TARGET_PACK)"
                         {:type ::usage :target target})))
-      (println (format "kmet%s %s | jolt %s | %s%s" (if test? "-test" "") ver jver platform
+      (validate-build! platform target link-mode)
+      (println (format "kmet%s %s | jolt %s | %s | %s%s"
+                       (if test? "-test" "") ver jver platform (name link-mode)
                        (if (= mode "release") "" (str " | " mode))))
       (when force?
         (println "clearing scratch:" (str (fs/parent bin)))
@@ -559,19 +863,38 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
       ;; lists ("target/kmet-bundled"); staging
       ;; validates the manifest first, so a broken bundle fails the build
       (build/stage-bundled-extensions!)
+      (when (= :static link-mode)
+        (ensure-static-native-libs! platform))
+      ;; Jolt's recursive mkdir reaches a #f parent for a drive-rooted
+      ;; Windows scratch path when <out>.build is absent; precreate it for
+      ;; both native link modes.
+      (when (windows-platform? platform)
+        (fs/create-dirs (fs/path (str bin ".build"))))
       ;; the version resource the build bakes in (kmet --version reports it);
       ;; removed again afterwards so a later direct `jolt build` cannot bake a
       ;; previous run's version from the leftover file
       (let [baked (bake-version!)]
         (try
-          (run-jolt-build! jolt-bin (build-argv (assoc opts :out (str (fs/absolutize bin)))))
+          (run-jolt-build! jolt-bin
+                           (build-argv (assoc opts
+                                              :out (str (fs/absolutize bin))
+                                              :native-link link-mode))
+                           (if (and (windows-platform? platform)
+                                    (= :static link-mode))
+                             (windows-static-build-env platform)
+                             {}))
           (finally
             (fs/delete-if-exists baked))))
       (when-not (fs/exists? bin)
         (throw (ex-info (str "jolt build reported success but " bin " is missing")
                         {:type ::no-binary :path (str bin)})))
+      (when (= :static link-mode)
+        (verify-static-native-build! bin (project-natives)))
       (assemble! bin artifact platform)
       (when-let [launcher (write-launcher! artifact platform)]
         (println "launcher:" (str launcher)))
-      (smoke-test! artifact platform {:no-smoke? no-smoke? :test? test?})
+      (smoke-test! artifact platform
+                   {:no-smoke? no-smoke?
+                    :test? test?
+                    :static-link? (= :static link-mode)})
       (println "built:" (str artifact)))))

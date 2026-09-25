@@ -4,6 +4,7 @@
   ;; jolt's CLI in a subprocess and is not unit-tested here; only the host's
   ;; own artifact can smoke-test, which the packager does as part of the build.
   (:require [babashka.fs :as fs]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kmet.tasks.build :as build]
@@ -43,6 +44,89 @@
   (is (true? (jbuild/windows-platform? "windows-aarch64")))
   (is (false? (jbuild/windows-platform? "linux-amd64"))))
 
+(deftest static-native-specs-must-be-static
+  (let [validate #'jbuild/validate-static-build!
+        crypto {:name "crypto"
+                :static {:linux {:archive "linux/libcrypto.a"}
+                         :darwin {:archive "darwin/libcrypto.a"}
+                         :windows {:archive "windows/libcrypto.a"}}}
+        process {:name "libc" :process true}]
+    (is (nil? (validate "windows-amd64" [crypto process])))
+    (is (nil? (validate "linux-amd64" [crypto process])))
+    (is (nil? (validate "macos-aarch64" [crypto process])))
+    (testing "a file-backed native without this platform's static link fails closed"
+      (is (thrown-with-msg? Exception #":linux :static link: ssl"
+                            (validate "linux-amd64"
+                                      [crypto {:name "ssl" :linux ["libssl.so"]}]))))
+    (testing "process natives need no archive"
+      (is (nil? (validate "windows-amd64" [process]))))))
+
+(deftest native-link-mode-defaults-per-platform
+  (let [mode #'jbuild/native-link-mode]
+    (is (= :static (mode "windows-amd64" nil)))
+    (is (= :dynamic (mode "linux-amd64" nil)))
+    (is (= :dynamic (mode "macos-aarch64" nil)))
+    (testing "an explicit choice overrides the platform default"
+      (is (= :dynamic (mode "windows-amd64" :dynamic)))
+      (is (= :static (mode "linux-amd64" :static))))))
+
+(deftest static-cross-build-detection-is-host-relative
+  (let [cross? #'jbuild/cross-static-build?]
+    (with-redefs [jbuild/host-platform (constantly "windows-amd64")]
+      (is (false? (cross? "windows-amd64" "ta6nt")))
+      (is (true? (cross? "linux-amd64" "ta6le")))
+      (is (not (cross? "windows-amd64" nil))))))
+
+(deftest deps-declare-static-archives-and-runtime-candidates
+  (let [config (edn/read-string (slurp "deps.edn"))
+        by-name (into {} (map (juxt :name identity) (:jolt/native config)))]
+    (is (= "0.8.11" (:jolt/min-version config)))
+    (is (= ["crypto" "ssl"] (mapv :name (:jolt/native config))))
+    (doseq [[lib-name filename] [["crypto" "libcrypto.a"] ["ssl" "libssl.a"]]
+            [key prefix] [[:linux "target/jolt-native/linux/"]
+                          [:darwin "target/jolt-native/darwin/"]
+                          [:windows "target/jolt-native/windows/"]]]
+      (is (= {:archive (str prefix filename)}
+             (get-in by-name [lib-name :static key]))
+          (name key))
+      (is (seq (get-in by-name [lib-name key])) lib-name))))
+
+(deftest windows-compiler-wrapper-closes-openssl-link-cycles
+  (let [command (@#'jbuild/compiler-wrapper-command
+                 "C:\\MinGW\\bin\\cc.exe"
+                 "C:\\kmet\\target\\jolt-native\\windows\\libcrypto.a")]
+    (is (str/starts-with? command "#!/bin/sh\n"))
+    (is (str/includes? command "*-shared*libssl.a*)"))
+    (is (str/includes? command
+                       "-Wl,--whole-archive \"C:/kmet/target/jolt-native/windows/libcrypto.a\""))
+    (is (str/includes? command "exec \"C:/MinGW/bin/cc.exe\" \"$@\""))
+    (is (str/includes? command "-L\"C:/kmet/target/jolt-native/windows\""))
+    (is (str/includes? command "-lws2_32 -lcrypt32 -lz"))))
+
+(deftest generated-scheme-proves-natives-were-static
+  (let [dir "target/test-jolt-static-natives"
+        bin (str dir "/kmet.exe")
+        flat (str dir "/kmet.exe.build/flat.ss")
+        verify #'jbuild/verify-static-native-build!
+        natives [{:name "crypto" :static {:windows {:archive "crypto.a"}}}
+                 {:name "ssl" :static {:windows {:archive "ssl.a"}}}
+                 {:name "libc" :process true}]]
+    (fs/delete-tree dir)
+    (fs/create-dirs (fs/parent flat))
+    (try
+      (spit flat (str "(jolt-build-load-native '() #f #t)\n"
+                      "(jolt-build-load-native '() #f #t)\n"
+                      "(jolt-build-load-native '() #f #t)\n"))
+      (is (true? (verify bin natives)))
+      (testing "a dynamic fallback is detected even when the binary exists"
+        (spit flat (str "(jolt-build-load-native (list \"libcrypto-3-x64.dll\") #f #f)\n"
+                        "(jolt-build-load-native '() #f #t)\n"
+                        "(jolt-build-load-native '() #f #t)\n"))
+        (is (thrown-with-msg? Exception #"did not statically link every native"
+                              (verify bin natives))))
+      (finally
+        (fs/delete-tree dir)))))
+
 (deftest artifact-base-mirrors-the-babashka-naming
   (is (= "kmet-1.2.3-jolt0.8.6-linux-amd64"
          (jbuild/artifact-base "1.2.3" "0.8.6" "linux-amd64" {})))
@@ -63,16 +147,20 @@
            (jbuild/artifact-base "1.2.3" nil "linux-amd64" {})))))
 
 (deftest parse-args-defaults-to-a-release-host-build
-  (is (= {:mode "release" :flags [] :boot nil :target nil :target-pack nil
-          :out nil :jolt nil :force? false :no-smoke? true :test? false
-          :help? false}
+  (is (= {:mode "release" :flags [] :native-link nil :boot nil :target nil
+          :target-pack nil :out nil :jolt nil :force? false :no-smoke? true
+          :test? false :help? false}
          (jbuild/parse-args []))))
 
 (deftest parse-args-reads-modes-and-passthrough-flags
   (is (= "dev" (:mode (jbuild/parse-args ["--dev"]))))
   (is (= "optimized" (:mode (jbuild/parse-args ["--opt"]))))
-  (is (= ["--closed-world" "--dynamic"] (:flags
-                                         (jbuild/parse-args ["--closed-world" "--dynamic"]))))
+  (is (= ["--closed-world"] (:flags
+                             (jbuild/parse-args ["--closed-world"]))))
+  (testing "native linking is an explicit pair, not a passthrough flag"
+    (is (= :static (:native-link (jbuild/parse-args ["--static"]))))
+    (is (= :dynamic (:native-link (jbuild/parse-args ["--dynamic"]))))
+    (is (= :static (:native-link (jbuild/parse-args ["--static" "--static"])))))
   (is (= ["--tree-shake"] (:flags (jbuild/parse-args ["--tree-shake"]))))
   (is (= "small" (:boot (jbuild/parse-args ["--boot" "small"]))))
   (testing "an option's value is not read as a positional argument"
@@ -97,6 +185,11 @@
 (deftest parse-args-rejects-bad-input
   (is (thrown-with-msg? Exception #"unknown option"
                         (jbuild/parse-args ["--optt"])))
+  (testing "the native-link modes are mutually exclusive"
+    (is (thrown-with-msg? Exception #"either --static or --dynamic"
+                          (jbuild/parse-args ["--static" "--dynamic"])))
+    (is (thrown-with-msg? Exception #"either --static or --dynamic"
+                          (jbuild/parse-args ["--dynamic" "--static"]))))
   (testing "no positional targets: a jolt cross build needs a pack, not a download"
     (is (thrown-with-msg? Exception #"unexpected argument"
                           (jbuild/parse-args ["linux-amd64"]))))
@@ -143,6 +236,11 @@
              (argv {:mode "dev" :flags ["--closed-world"] :out "/o"})))
       (is (= ["build" "-m" "kmet.core" "-o" "/o" "--opt" "--boot" "small"]
              (argv {:mode "optimized" :boot "small" :flags [] :out "/o"}))))
+    (testing "native link mode is explicit only when dynamic"
+      (is (= ["build" "-m" "kmet.core" "-o" "/o" "--dynamic"]
+             (argv {:mode "release" :flags [] :native-link :dynamic :out "/o"})))
+      (is (= ["build" "-m" "kmet.core" "-o" "/o"]
+             (argv {:mode "release" :flags [] :native-link :static :out "/o"}))))
     (testing "cross builds carry the target and its pack"
       (is (= ["build" "-m" "kmet.core" "-o" "/o" "--target" "tarm64le" "--target-pack" "/p"]
              (argv {:mode "release" :flags [] :out "/o"
@@ -175,7 +273,8 @@
       (is (not (@#'jbuild/glibc-linked? bionic)))
       (spit launcher "#!/bin/sh\n")
       (with-redefs [build/termux? (constantly true)
-                    jbuild/host-platform (constantly "linux-aarch64")]
+                    jbuild/host-platform (constantly "linux-aarch64")
+                    fs/set-posix-file-permissions (fn [_ _])]
         (is (nil? (@#'jbuild/write-launcher! bionic "linux-aarch64"))
             "bionic artifact gets no launcher")
         (is (not (fs/exists? launcher)) "...and the stale one is removed")
@@ -190,7 +289,8 @@
     (try
       (let [agent-dir (@#'jbuild/prepare-smoke-agent-dir dir)
             settings (slurp (str (fs/path agent-dir "settings.edn")))]
-        (is (= dir (str (fs/parent agent-dir))))
+        (is (= (str/replace dir "\\" "/")
+               (str/replace (str (fs/parent agent-dir)) "\\" "/")))
         (is (str/includes? settings ":bundled-extensions")
             "the app smoke runs with an extension enabled")
         (is (str/includes? settings "\"clojure\"")
