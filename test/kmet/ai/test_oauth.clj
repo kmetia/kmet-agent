@@ -17,7 +17,8 @@
             [kmet.app.ui.chat-history :as chat-history]
             [kmet.config :as cfg]
             [kmet.tui.core :as tui]
-            [kmet.modes.interactive :as inter]))
+            [kmet.modes.interactive :as inter]
+            [kmet.modes.interactive.auth :as interactive-auth]))
 
 ;; ─── Device-code poll state machine (pi pollOAuthDeviceCodeFlow) ───────────
 
@@ -600,7 +601,7 @@
 
 (t/deftest test-login-provider-options
   (models/load-catalogs!)
-  (let [options ((var inter/login-provider-options))]
+  (let [options ((var interactive-auth/login-provider-options))]
     (testing "one entry per offered auth type, sorted by display name"
       (t/is (= options (sort-by :name options))))
     (testing "github-copilot offers oauth + api-key entries"
@@ -614,7 +615,7 @@
 
 (t/deftest test-find-login-provider-options
   (models/load-catalogs!)
-  (let [find (var inter/find-login-provider-options)]
+  (let [find (var interactive-auth/find-login-provider-options)]
     (testing "exact id match"
       (t/is (= ["deepseek"] (mapv :id (find "deepseek")))))
     (testing "exact name match, case-insensitive (both auth-type entries)"
@@ -643,8 +644,8 @@
                                 (reset! sel-ref component)
                                 (fn []))
                   tui/tui-request-render (fn [_] nil)
-                  inter/oauth-login! (fn [_ prov] (reset! started [:oauth prov]))
-                  inter/api-key-login! (fn [_ prov] (reset! started [:api-key prov]))]
+                  interactive-auth/oauth-login! (fn [_ prov] (reset! started [:oauth prov]))
+                  interactive-auth/api-key-login! (fn [_ prov] (reset! started [:api-key prov]))]
       (testing "bare /login opens the auth-type selector (pi)"
         (reset! started nil)
         ((:handler (commands/find-command "login")) cs "")
@@ -676,8 +677,8 @@
                                 (reset! sel-ref component)
                                 (fn []))
                   tui/tui-request-render (fn [_] nil)
-                  inter/oauth-login! (fn [_ prov] (reset! started [:oauth prov]))
-                  inter/api-key-login! (fn [_ prov] (reset! started [:api-key prov]))]
+                  interactive-auth/oauth-login! (fn [_ prov] (reset! started [:oauth prov]))
+                  interactive-auth/api-key-login! (fn [_ prov] (reset! started [:api-key prov]))]
       (testing "an exact id reference starts directly (pi findLoginProviderOptions)"
         (reset! started nil)
         ((:handler (commands/find-command "login")) cs "deepseek")

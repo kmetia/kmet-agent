@@ -23,6 +23,12 @@ src/kmet/
 │                         file locks, hashing, highlighting, markdown,
 │                         crypto, AWS SigV4, ...)
 ├── modes/              — Entry modes: interactive TUI + print mode
+│   ├── interactive.clj — interactive TUI entry, layout wiring, handlers
+│   │                     (pi: modes/interactive/interactive-mode.ts)
+│   └── interactive/    — sections split out of interactive.clj:
+│       ├── state.clj   — CoreState record, config ref, session/format
+│       │                 helpers, footer/title/border updaters
+│       └── auth.clj    — login/logout flows + provider options
 ├── ai/                 — Provider/auth subsystem (pi: packages/ai — a standalone
 │   │                     library the agent depends on; self-contained)
 │   ├── models.clj      — Provider/model registry + committed EDN catalogs
