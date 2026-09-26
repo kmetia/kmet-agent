@@ -458,7 +458,8 @@ one file; still do it as its own commit to isolate review noise.
 - [x] T1 — `interactive.clj` reduced to `run` + wiring (150 lines);
       modules: `state`, `auth`, `status`, `turn`, `session_admin`, `commands`,
       `resources`, `layout`, `ui_registry`
-- [ ] T4 — `extensions.cljc` split; `extension.md` updated
+- [x] T4 — `extensions.cljc` split; `extension.md` updated
+      (2,755 → `extensions.cljc` 1,228 + `extensions/context.cljc` 1,544)
 - [ ] T2 — `tui/core.clj` reduced to lifecycle + facade; `tui.md` updated
 - [ ] Full gates after the last task: `bb test`, `bb test-ext`, `bb lint`,
       `bb format-check`

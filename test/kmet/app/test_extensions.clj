@@ -16,6 +16,7 @@
             [kmet.config :as cfg]
             [kmet.ai.models :as models]
             [kmet.app.extensions :as extensions]
+            [kmet.app.extensions.context :as ext-context]
             [kmet.app.commands :as commands]
             [kmet.app.event-bus :as event-bus]
             [kmet.app.prompts :as prompts]
@@ -302,7 +303,7 @@
   ;; would leave the Phase B switch unreachable.
   (with-extension-resources
     (fn []
-      (let [resolved (@#'extensions/resolve-extension-descriptor
+      (let [resolved (@#'ext-context/resolve-extension-descriptor
                       {:name "ext-dir" :kind :resource-dir
                        :prefix "extensions/ext-dir" :path "extensions/ext-dir"
                        :native "embed:extensions/ext-dir" :bundled? true})]
@@ -313,18 +314,18 @@
   (if (host/jolt?)
     (with-extension-resources
       (fn []
-        (let [resolved (@#'extensions/resolve-extension-descriptor
+        (let [resolved (@#'ext-context/resolve-extension-descriptor
                         {:name "ext-dir" :kind :resource-dir
                          :prefix "extensions/ext-dir" :path "extensions/ext-dir"
                          :native "embed:extensions/ext-dir" :bundled? true})
               probe (requiring-resolve 'kmet.app.extensions/embedded-roots?)]
           (with-redefs-fn {probe (constantly true)}
             (fn []
-              (t/is (= :jolt (@#'extensions/forced-loader-kind resolved [:sci :jolt])))
-              (t/is (= :sci (@#'extensions/forced-loader-kind resolved [:sci]))
+              (t/is (= :jolt (@#'ext-context/forced-loader-kind resolved [:sci :jolt])))
+              (t/is (= :sci (@#'ext-context/forced-loader-kind resolved [:sci]))
                     "a sci-only bundled directory keeps its required fallback")))
           (with-redefs-fn {probe (constantly false)}
-            #(t/is (= :sci (@#'extensions/forced-loader-kind resolved [:sci :jolt])))))))
+            #(t/is (= :sci (@#'ext-context/forced-loader-kind resolved [:sci :jolt])))))))
     (t/is true "skipped: embedded loader roots are Jolt-only")))
 
 (t/deftest test-load-resource-file-descriptor
@@ -351,7 +352,7 @@
   (if (host/jolt?)
     (with-extension-resources
       (fn []
-        (let [resolved (@#'extensions/resolve-extension-descriptor
+        (let [resolved (@#'ext-context/resolve-extension-descriptor
                         {:name "hello-ext" :kind :resource-file
                          :path "extensions/ext-single/hello_ext.clj"
                          :native "extensions/ext-single/hello_ext.clj"
@@ -362,7 +363,7 @@
           (t/is (= 'hello-ext (:entry-ns artifact)))
           (t/is (= (:path resolved) (:path artifact)))
           (with-redefs-fn {probe (constantly true)}
-            #(t/is (= :jolt (@#'extensions/forced-loader-kind resolved [:sci :jolt])))))))
+            #(t/is (= :jolt (@#'ext-context/forced-loader-kind resolved [:sci :jolt])))))))
     (t/is true "skipped: embedded loader roots are Jolt-only")))
 
 (t/deftest test-resource-dir-deps-lookup
@@ -373,8 +374,8 @@
     (fn []
       (t/is (= {'dev.weavejester/cljfmt {:mvn/version "0.16.5"
                                          :exclusions ['rewrite-clj/rewrite-clj]}}
-               (@#'extensions/deps-of-root {:kind :resource-dir
-                                            :prefix "extensions/ext-cljfmt"}))))))
+               (@#'ext-context/deps-of-root {:kind :resource-dir
+                                             :prefix "extensions/ext-cljfmt"}))))))
 
 (t/deftest test-duplicate-name-skipped
   ;; D11: the bundled layer ranks last — a same-name extension already

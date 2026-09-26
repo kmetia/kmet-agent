@@ -27,10 +27,12 @@
  ;; path), so the namespace-name-mismatch linter is off repo-wide; all other
  ;; linters still apply to extension code, which is part of `lint`.
  :linters {:namespace-name-mismatch {:level :off}}
- ;; kmet.app.extensions branches on the host at one seam (loader-aware: the
- ;; ambient Jolt binding is the jolt branch's, the :default branch is the
- ;; handler itself), so each view sees one branch's binding go unused. The other
- ;; view lints it with the binding used, so an unused one is still caught there.
- :config-in-ns {kmet.app.extensions {:linters {:unused-binding {:level :off}}}}
+ ;; kmet.app.extensions and its context machinery branch on the host at
+ ;; their seams (loader-aware wraps a handler only on Jolt; track-cached-jar!
+ ;; pins a jar only off Jolt; create-loader's params feed one branch each), so
+ ;; each view sees the other branch's bindings go unused. The other view lints
+ ;; it with the binding used, so an unused one is still caught there.
+ :config-in-ns {kmet.app.extensions {:linters {:unused-binding {:level :off}}}
+                kmet.app.extensions.context {:linters {:unused-binding {:level :off}}}}
  :hooks {:analyze-call {kmet.tui.macros/defcomponent hooks.kmet-macros/defcomponent
                         kmet.tui.macros/with-let     hooks.kmet-macros/with-let}}}

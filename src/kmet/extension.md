@@ -461,6 +461,12 @@ A failing `init` is rolled back: the loader unloads whatever was registered
 before the error and reports `{:extension nil :error msg}` — no partial state
 lingers.
 
+Implementation note: the entry points above live in `kmet.app.extensions`,
+together with the registries they wire the API into. The isolation machinery
+they drive — artifact/jar discovery, class seeding, the shared SCI base,
+loader construction, and source evaluation — lives in
+`kmet.app.extensions.context`.
+
 ## The API surface
 
 `api` carries identity plus the capability maps. The `ext/...` wrappers call

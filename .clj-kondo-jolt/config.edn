@@ -43,4 +43,7 @@
   kmet.app.extensions {:linters {:unresolved-namespace {:exclude [sci]}
                                  :unused-namespace {:exclude [kmet.loader.sci-loader]}
                                  :unused-private-var {:level :off}}}
+  kmet.app.extensions.context {:linters {:unresolved-namespace {:exclude [sci]}
+                                         :unused-namespace {:exclude [kmet.loader.sci-loader]}
+                                         :unused-private-var {:level :off}}}
   kmet.tasks.build {:linters {:unresolved-namespace {:exclude [bcp]}}}}}

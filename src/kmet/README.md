@@ -59,7 +59,8 @@ src/kmet/
 │   ├── loop.clj        — the agent loop; retry.clj — retry/error policy;
 │   │                     loop_guard.clj — repeat-loop guard; session.clj — EDNL sessions
 │   ├── commands.clj / keybindings.clj / packages.clj / extensions.cljc —
-│   │                     slash commands, keymap, package + extension loading
+│   │                     slash commands, keymap, package + extension loading;
+│   │                     extensions/context.cljc — per-extension SCI isolation
 │   ├── model_resolver.clj — model pattern/CLI resolution
 │   ├── tools/          — built-in tools: read, write, edit, bash
 │   │                     (grep/find/ls ship as opt-in extensions in
