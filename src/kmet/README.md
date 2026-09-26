@@ -23,7 +23,7 @@ src/kmet/
 │                         file locks, hashing, highlighting, markdown,
 │                         crypto, AWS SigV4, ...)
 ├── modes/              — Entry modes: interactive TUI + print mode
-│   ├── interactive.clj — interactive TUI entry, layout wiring, handlers
+│   ├── interactive.clj — interactive TUI entry: run + session start-up
 │   │                     (pi: modes/interactive/interactive-mode.ts)
 │   └── interactive/    — sections split out of interactive.clj:
 │       ├── state.clj   — CoreState record, config ref, session/format
@@ -33,7 +33,9 @@ src/kmet/
 │       ├── turn.clj    — agent events, submit/cancel, compaction queue
 │       ├── session_admin.clj — renderers, resume/import, tree, fork/clone
 │       ├── commands.clj — builtin commands, /session, /share, /reload
-│       └── resources.clj — loaded-resources sections
+│       ├── resources.clj — loaded-resources sections
+│       ├── layout.clj — agent event handler + build-layout widget tree
+│       └── ui_registry.clj — ExtensionUIContext (widgets, dialogs, editor)
 ├── ai/                 — Provider/auth subsystem (pi: packages/ai — a standalone
 │   │                     library the agent depends on; self-contained)
 │   ├── models.clj      — Provider/model registry + committed EDN catalogs

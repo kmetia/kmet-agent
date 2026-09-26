@@ -11,6 +11,8 @@
   (:require [clojure.test :as t :refer [deftest is testing]]
             [kmet.modes.interactive :as inter]
             [kmet.modes.interactive.commands :as builtins]
+            [kmet.modes.interactive.layout :as layout]
+            [kmet.modes.interactive.ui-registry :as ui-registry]
             [kmet.modes.interactive.state :as state]
             [kmet.modes.interactive.status :as status]
             [kmet.modes.interactive.turn :as turn]
@@ -53,7 +55,7 @@
    cs-dependent clauses (footer/status indicators) no-op through a nil
    cs-ref; tool-execution events correlate through an empty pending map."
   []
-  ((var inter/make-agent-event-handler)
+  ((var layout/make-agent-event-handler)
    {:chat-history (chat-history/make-chat-history)
     :tui {:render-requested? (atom false)}
     :cs-ref (atom nil)
@@ -230,7 +232,7 @@
   (testing "parallel tool calls each own a component; end events correlate by id
             and clear their own elapsed ticker (pi: pendingTools Map)"
     (let [pending (atom {})
-          h ((var inter/make-agent-event-handler)
+          h ((var layout/make-agent-event-handler)
              {:chat-history (chat-history/make-chat-history)
               :tui {:render-requested? (atom false)}
               :cs-ref (atom nil)
@@ -276,7 +278,7 @@
             (their new components have no track! watches yet)"
     (let [render-requested? (atom false)
           pending (atom {})
-          h ((var inter/make-agent-event-handler)
+          h ((var layout/make-agent-event-handler)
              {:chat-history (chat-history/make-chat-history)
               :tui {:render-requested? render-requested?}
               :cs-ref (atom nil)
@@ -313,7 +315,7 @@
   (testing "the loop-guard warning requests a frame after appending to the chat"
     (let [render-requested? (atom false)
           chat-history (chat-history/make-chat-history)
-          h ((var inter/make-agent-event-handler)
+          h ((var layout/make-agent-event-handler)
              {:chat-history chat-history
               :tui {:render-requested? render-requested?}
               :cs-ref (atom nil)
@@ -381,7 +383,7 @@
                  (fn [_]
                    {:role :info :label "Entry" :content "rendered entry"}))]
       (try
-        ((var inter/build-extension-ui-registry)
+        ((var ui-registry/build-extension-ui-registry)
          {:tui tui* :cs cs}
          {:ch chat-history}
          nil)
@@ -755,7 +757,7 @@
   ;; the live compaction rebuild carries role-preserving context messages,
   ;; so the dedicated summary component renders without a reload
   (let [ch (chat-history/make-chat-history)
-        handler ((var inter/make-agent-event-handler)
+        handler ((var layout/make-agent-event-handler)
                  {:chat-history ch
                   :tui {:render-requested? (atom false)}
                   :cs-ref (atom nil)

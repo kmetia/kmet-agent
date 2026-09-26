@@ -16,6 +16,8 @@
             [kmet.tui.core :as tui]
             [kmet.modes.interactive :as inter]
             [kmet.modes.interactive.commands :as builtins]
+            [kmet.modes.interactive.layout :as layout]
+            [kmet.modes.interactive.ui-registry :as ui-registry]
             [kmet.modes.interactive.state :as state]
             [kmet.modes.interactive.status :as status]
             [kmet.modes.interactive.turn :as turn]
@@ -66,10 +68,10 @@
   {:images nil :true-color true :hyperlinks false})
 
 (defn- transfer-editor! [app-ed custom-ed kb]
-  ((var inter/transfer-editor!) app-ed custom-ed kb))
+  ((var ui-registry/transfer-editor!) app-ed custom-ed kb))
 
 (defn- normalize [x]
-  ((var inter/normalize-autocomplete-provider) x))
+  ((var ui-registry/normalize-autocomplete-provider) x))
 
 (deftest test-normalize-autocomplete-provider-protocol
   (testing "an AutocompleteProvider passes through unchanged"
@@ -1369,7 +1371,7 @@
           cs {:agent-state (atom ag)
               :config cfg/default-config
               :session-atom (atom nil)}
-          registry ((var inter/build-extension-ui-registry)
+          registry ((var ui-registry/build-extension-ui-registry)
                     {:tui nil :cs cs}
                     {:fdp (fdp/make-footer-data-provider)}
                     nil)
@@ -1420,7 +1422,7 @@
               _ (fdp/fdp-set-session! fdp-provider
                                       (session/create-session
                                        (str (fs/cwd) "/target")))
-              registry ((var inter/build-extension-ui-registry)
+              registry ((var ui-registry/build-extension-ui-registry)
                         {:tui nil :cs cs}
                         {:fdp fdp-provider}
                         nil)
@@ -1469,10 +1471,10 @@
             nothing while empty, dispose unwinds cleanly"
     (let [above (atom {})
           below (atom {})
-          mk (fn [label] ((var inter/make-extension-widget-component) nil
-                                                                      [:text {:padding-x 1 :padding-y 0} label]))
-          above-root (hiccup/root ((var inter/make-widget-area-above) above))
-          below-root (hiccup/root ((var inter/make-widget-area-below) below))]
+          mk (fn [label] ((var ui-registry/make-extension-widget-component) nil
+                                                                            [:text {:padding-x 1 :padding-y 0} label]))
+          above-root (hiccup/root ((var ui-registry/make-widget-area-above) above))
+          below-root (hiccup/root ((var ui-registry/make-widget-area-below) below))]
       (try
         (swap! above assoc :w1 (mk "widget one"))
         (let [lines (strip-ansi-lines (protocols/render above-root 40))]
@@ -1504,7 +1506,7 @@
                        (macros/with-let [_ (swap! cleanups inc)]
                          [:text {:padding-x 0 :padding-y 0} "owned"]
                          (finally (swap! cleanups dec))))
-          w ((var inter/make-extension-widget-component)
+          w ((var ui-registry/make-extension-widget-component)
              nil [:container {}
                   [:text {:padding-x 1 :padding-y 0} "tree widget"]
                   [cleanup-fn {}]])]
@@ -1525,7 +1527,7 @@
                        (macros/with-let [_ (swap! cleanups inc)]
                          [:text {:padding-x 0 :padding-y 0} "dialog body"]
                          (finally (swap! cleanups dec))))
-          comp (var-get #'inter/normalize-custom-component)
+          comp (var-get #'ui-registry/normalize-custom-component)
           c (comp [:container {}
                    [:text {:padding-x 1 :padding-y 0} "MCP OAuth"]
                    [cleanup-fn {}]])]
@@ -1537,7 +1539,7 @@
       (t/is (= 1 @cleanups))
       ;; the host's close/replace/shutdown sites all funnel through
       ;; dispose-dialog-component! — prove THAT path unwinds tree dialogs
-      ((var-get #'inter/dispose-dialog-component!) c)
+      ((var-get #'ui-registry/dispose-dialog-component!) c)
       (t/is (= 0 @cleanups) "dispose unwinds on dialog close"))))
 
 (deftest test-dispose-dialog-component-shapes
@@ -1545,7 +1547,7 @@
             dispose-component!) handles every component shape: duck-typed
             maps via their :dispose key, records via the protocol, nil
             no-op — and a throwing foreign dispose never propagates"
-    (let [dispose! (var-get #'inter/dispose-dialog-component!)
+    (let [dispose! (var-get #'ui-registry/dispose-dialog-component!)
           called (atom 0)]
       (dispose! {:render (fn [_] ["duck"]) :dispose (fn [] (swap! called inc))})
       (t/is (= 1 @called) "duck-typed :dispose invoked")
@@ -1564,7 +1566,7 @@
             they fail tree compilation loudly instead of silently rendering
             text lines"
     (t/is (thrown? Exception
-                   ((var inter/make-extension-widget-component) nil ["just" "lines"])))))
+                   ((var ui-registry/make-extension-widget-component) nil ["just" "lines"])))))
 
 ;; ─── Compaction queue (pi: queueCompactionMessage / flushCompactionQueue) ──
 
@@ -1695,7 +1697,7 @@
 (deftest test-compaction-end-handler-flushes
   (testing "the :compaction-end event handler flushes the queue"
     (let [cs (compaction-cs)
-          h ((var inter/make-agent-event-handler)
+          h ((var layout/make-agent-event-handler)
              {:chat-history (:chat-history cs)
               :tui {:render-requested? (atom false)}
               :cs-ref (atom cs)
