@@ -358,8 +358,8 @@
 
 (def references
   "SCBench calibration rows (arXiv:2603.24755): 473 maintained human Python
-   repositories and 2,869 agent checkpoints, mean +/- one standard deviation.
-   Lower is better."
+   repositories and 2,869 agent checkpoints. Ranges are mean - one standard
+   deviation to mean + one standard deviation. Lower is better."
   {:verbosity {:human {:mean 0.19 :sd 0.11} :agent {:mean 0.44 :sd 0.18}}
    :erosion {:human {:mean 0.34 :sd 0.22} :agent {:mean 0.68 :sd 0.20}}})
 
@@ -376,11 +376,15 @@
    :elevated "elevated vs human"
    :agent-level "agent-level"})
 
+(defn- one-sigma-range [{:keys [mean sd]}] [(- mean sd) (+ mean sd)])
+
 (defn- ref-line [v metric]
   (let [{:keys [human agent]} (get references metric)
+        [human-lo human-hi] (one-sigma-range human)
+        [agent-lo agent-hi] (one-sigma-range agent)
         z (/ (- v (:mean human)) (:sd human))]
-    (format "  reference: human %.2f +/- %.2f | agent %.2f +/- %.2f | verdict: %s (z=%+.2f vs human)"
-            (:mean human) (:sd human) (:mean agent) (:sd agent)
+    (format "  reference: human %.2f-%.2f | agent %.2f-%.2f | verdict: %s (z=%+.2f vs human)"
+            human-lo human-hi agent-lo agent-hi
             (verdict-labels (verdict v human agent)) z)))
 
 (defn- rel-path [root f]

@@ -167,8 +167,8 @@
              (let [text (slop/format-report (slop/scan dir {}))]
                (is (str/includes? text "VERBOSITY"))
                (is (str/includes? text "EROSION"))
-               (is (str/includes? text "reference: human 0.19"))
-               (is (str/includes? text "reference: human 0.34"))
+               (is (str/includes? text "reference: human 0.08-0.30"))
+               (is (str/includes? text "reference: human 0.12-0.56"))
                (is (str/includes? text "below human mean"))
                (is (str/includes? text "outlier files: none"))
                (is (str/includes? text "outlier functions: none"))))))
