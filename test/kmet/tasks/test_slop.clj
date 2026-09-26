@@ -1,6 +1,6 @@
 (ns kmet.tasks.test-slop
   "Tests for kmet.tasks.slop (the `bb slop` task): tokenizer and clone
-   detection, Clojure CC/cognitive extraction, source discovery,
+   detection, Clojure CC extraction, source discovery,
    parse-failure handling and the reference comparison on small temp trees."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
@@ -68,21 +68,6 @@
                  (is (pos? (:erosion report)))
                  (is (= 1 (count (:outliers report)))))))))
 
-(deftest cognitive-complexity-adds-nesting
-  (in-tree {"nest.clj" "(defn f [x] (if x (if x (if x 1 2) 3) 4))\n"}
-           (fn [dir]
-             (let [report (slop/scan dir {})]
-               (is (= 4 (:max-cc report)))
-               (is (= 6 (:max-cog report)))
-               (is (zero? (:high-cog report))))))
-  (in-tree {"deep.clj" "(defn f [x] (if x (if x (if x (if x (if x 1 2) 3) 4) 5) 6))\n"}
-           (fn [dir]
-             (let [report (slop/scan dir {})]
-               (is (= 6 (:max-cc report)))
-               (is (= 15 (:max-cog report)))
-               (is (= 1 (:high-cog report)))
-               (is (pos? (:cog-erosion report)))))))
-
 (deftest cc-counts-clojure-decision-heads
   (in-tree {"heads.clj" (str "(defn f [a b] (and a (or b a)))\n"
                              "(defn g [x] (cond x 1 :else 2))\n"
@@ -125,7 +110,6 @@
              (let [text (slop/format-report (slop/scan dir {}))]
                (is (str/includes? text "VERBOSITY"))
                (is (str/includes? text "EROSION"))
-               (is (str/includes? text "COGNITIVE EROSION"))
                (is (str/includes? text "reference: human 0.19"))
                (is (str/includes? text "reference: human 0.34"))
                (is (str/includes? text "below human mean"))

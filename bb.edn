@@ -106,7 +106,7 @@
   check-bundled-extensions {:doc "Validate the committed bundled-extensions manifest against extensions/\n\nChecks completeness, extension.edn shape, strict ns layout and deps.edn restrictions; the same check the packagers run before staging."
                             :requires ([kmet.tasks.build :as build])
                             :task (help/with-help (build/check-bundled-extensions!))}
-  slop    {:doc "SCBench-style slop metrics over a Clojure tree: verbosity, erosion, cognitive erosion\n\nOutliers only, compared to the paper's human/agent reference rows; `bb slop --help` for the path argument, --k (clone window) and --top."
+  slop    {:doc "SCBench-style slop metrics over a Clojure tree: verbosity, erosion\n\nOutliers only, compared to the paper's human/agent reference rows; `bb slop --help` for the path argument, --k (clone window) and --top."
            :requires ([kmet.tasks.slop :as slop])
            :task (apply slop/-main *command-line-args*)}
   lint    {:doc "Lint the tree with clj-kondo over BOTH reader views (babashka + jolt)\n\nEither this or `jolt lint` covers common, bb and jolt code; the babashka view sees the :clj branches, the jolt view the :jolt branches and jolt/. Optionally: specific files/dirs."

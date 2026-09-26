@@ -24,11 +24,6 @@
        own functions; multi-arity definitions count as one function.
        Reader conditionals are read with the #{:clj :bb} feature view.
 
-     cognitive erosion = the same mass share over cognitive complexity
-       (Sonar-style: each break in the linear flow costs 1 + its nesting
-       depth, cond/case clauses are siblings, and/or sequences cost 1).
-       scb-check reports it; the paper publishes no reference row for it.
-
    Reference rows for verbosity/erosion are the paper's calibration panel:
    473 maintained human Python repositories and 2,869 agent checkpoints.
    Lower is better.
@@ -242,7 +237,6 @@
 
 (defn- fn-form? [f] (and (seq? f) (contains? fn-heads (first f))))
 (defn- type-form? [f] (and (seq? f) (contains? type-heads (first f))))
-(defn- named? [x s] (and (symbol? x) (= (name x) s)))
 
 (defn cc
   "Cyclomatic complexity increment of a form. Nested functions contribute 0
@@ -264,74 +258,6 @@
     (coll? form) (reduce + 0 (map cc form))
     :else 0))
 
-(def ^:private cog-nesting
-  #{"if" "if-let" "if-some" "if-not" "when" "when-let" "when-some" "when-not"
-    "when-first" "while" "loop" "doseq" "dotimes" "for"})
-
-(defn- cog-walk
-  "Sonar-style cognitive complexity of FORM at nesting DEPTH. Each break in
-   the linear flow costs 1 + depth; cond/case/condp clauses are siblings
-   (no compounding depth); and/or and some-> sequences cost 1 each. Nested
-   functions contribute 0 (they are counted as their own function)."
-  [form depth]
-  (cond
-    (or (fn-form? form) (type-form? form)) 0
-    (seq? form)
-    (let [nm (when (symbol? (first form)) (name (first form)))]
-      (cond
-        (contains? cog-nesting nm)
-        (+ 1 depth
-           (cog-walk (second form) depth)
-           (reduce + 0 (map #(cog-walk % (inc depth)) (drop 2 form))))
-
-        (= nm "cond")
-        (reduce + 0
-                (map (fn [[t r]]
-                       (+ 1 depth (cog-walk t depth) (cog-walk r (inc depth))))
-                     (partition 2 (rest form))))
-
-        (= nm "condp")
-        (+ (cog-walk (second form) depth)
-           (cog-walk (nth form 2) depth)
-           (reduce + 0
-                   (map (fn [[t r]]
-                          (+ 1 depth (cog-walk t depth) (cog-walk r (inc depth))))
-                        (partition 2 (drop 3 form)))))
-
-        (= nm "case")
-        (let [clauses (drop 2 form)
-              pairs (partition 2 clauses)
-              default (when (odd? (count clauses)) (last clauses))]
-          (+ (cog-walk (second form) depth)
-             (reduce + 0
-                     (map (fn [[t r]]
-                            (+ 1 depth (cog-walk t depth) (cog-walk r (inc depth))))
-                          pairs))
-             (if default (+ 1 depth (cog-walk default (inc depth))) 0)))
-
-        (or (= nm "cond->") (= nm "cond->>"))
-        (+ (cog-walk (second form) depth)
-           (reduce + 0 (map (fn [x] (+ 1 depth (cog-walk x (inc depth))))
-                            (drop 2 form))))
-
-        (or (= nm "and") (= nm "or") (= nm "some->") (= nm "some->>"))
-        (+ 1 (reduce + 0 (map #(cog-walk % depth) (rest form))))
-
-        (= nm "try")
-        (let [catches (filter #(and (seq? %) (named? (first %) "catch"))
-                              (rest form))]
-          (+ (count catches)
-             (reduce + 0 (map #(cog-walk % (inc depth)) (rest form)))))
-
-        :else (reduce + 0 (map #(cog-walk % depth) (rest form)))))
-    (coll? form) (reduce + 0 (map #(cog-walk % depth) form))
-    :else 0))
-
-(defn cog
-  "Cognitive complexity increment of a form. Nested functions contribute 0."
-  [form]
-  (cog-walk form 0))
-
 (defn- collect-method-forms [form]
   (when (coll? form)
     (if (and (seq? form) (symbol? (first form)) (vector? (second form)))
@@ -350,7 +276,6 @@
     :else nil))
 
 (defn- own-cc [form] (reduce (fn [a x] (+ a (cc x))) 1 (rest form)))
-(defn- own-cog [form] (reduce (fn [a x] (+ a (cog-walk x 0))) 0 (rest form)))
 
 (defn- fn-label [form]
   (let [h (first form) nm (second form)]
@@ -392,18 +317,16 @@
 
 (defn file-fns
   "Functions in a parsed file ({:file :lines :forms}) as maps with :cc,
-   :cog, :sloc and the two mass values."
+   :sloc and :mass."
   [{:keys [file lines forms]}]
   (for [form (mapcat collect-fns forms)
         :let [m (meta form) row (:row m) end-row (:end-row m)]
         :when (and row end-row)]
     (let [c (own-cc form)
-          g (own-cog form)
           sloc (max 1 (form-sloc lines row end-row))]
-      {:file file :row row :cc c :cog g :sloc sloc
+      {:file file :row row :cc c :sloc sloc
        :label (fn-label form)
-       :mass (* c (Math/sqrt (double sloc)))
-       :cog-mass (* g (Math/sqrt (double sloc)))})))
+       :mass (* c (Math/sqrt (double sloc)))})))
 
 ;; ------------------------------------------------------------------- scan
 
@@ -481,11 +404,8 @@
                                     token-stats))
         union-lines (reduce + 0 (vals union-by-file))
         hi (filter #(> (:cc %) 10) fns)
-        hi-cog (filter #(> (:cog %) 10) fns)
         total-mass (reduce + 0.0 (map :mass fns))
         hi-mass (reduce + 0.0 (map :mass hi))
-        total-cog-mass (reduce + 0.0 (map :cog-mass fns))
-        hi-cog-mass (reduce + 0.0 (map :cog-mass hi-cog))
         outlier-files (->> union-by-file
                            (filter (fn [[_ n]] (pos? n)))
                            (map (fn [[file n]]
@@ -518,13 +438,7 @@
      :total-mass total-mass
      :hi-mass hi-mass
      :erosion (if (pos? total-mass) (/ hi-mass total-mass) 0.0)
-     :outliers (vec (take top (sort-by :mass > hi)))
-     :high-cog (count hi-cog)
-     :max-cog (reduce max 0 (map :cog fns))
-     :total-cog-mass total-cog-mass
-     :hi-cog-mass hi-cog-mass
-     :cog-erosion (if (pos? total-cog-mass) (/ hi-cog-mass total-cog-mass) 0.0)
-     :cog-outliers (vec (take top (sort-by :cog-mass > hi-cog)))}))
+     :outliers (vec (take top (sort-by :mass > hi)))}))
 
 ;; --------------------------------------------------------------- references
 
@@ -565,8 +479,7 @@
    outliers only."
   [{:keys [root files sloc clone-lines rule-lines union-lines overlap rule-counts
            outlier-files functions failures
-           high-cc max-cc total-mass hi-mass verbosity erosion outliers
-           high-cog max-cog total-cog-mass hi-cog-mass cog-erosion cog-outliers k]}]
+           high-cc max-cc total-mass hi-mass verbosity erosion outliers k]}]
   (str/join
    "\n"
    (concat
@@ -605,20 +518,6 @@
                            (:cc f) (:sloc f) (:mass f) (:label f)
                            (rel-path root (:file f)) (:row f)))
                  outliers))
-      ["  outlier functions: none"])
-    [""
-     (format "COGNITIVE EROSION  %.3f  (mass share of cog>10 functions; mass = cog * sqrt(SLOC))"
-             cog-erosion)
-     (format "  %d of %d functions cog>10 | max cog %d | mass %.1f of %.1f"
-             high-cog functions max-cog hi-cog-mass total-cog-mass)
-     "  reference: none published for cognitive erosion"]
-    (if (seq cog-outliers)
-      (cons (format "  outlier functions (top %d of %d by cog mass):" (count cog-outliers) high-cog)
-            (map (fn [f]
-                   (format "    cog=%-3d sloc=%-4d mass=%6.1f  %s  (%s:%d)"
-                           (:cog f) (:sloc f) (:cog-mass f) (:label f)
-                           (rel-path root (:file f)) (:row f)))
-                 cog-outliers))
       ["  outlier functions: none"])
     (when (seq failures)
       (cons (format "PARSE FAILURES  %d" (count failures))
