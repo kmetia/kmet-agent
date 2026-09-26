@@ -10,6 +10,7 @@
    and the UI stayed on \"Working...\" forever while print mode kept working."
   (:require [clojure.test :as t :refer [deftest is testing]]
             [kmet.modes.interactive :as inter]
+            [kmet.modes.interactive.commands :as builtins]
             [kmet.modes.interactive.state :as state]
             [kmet.modes.interactive.status :as status]
             [kmet.modes.interactive.turn :as turn]
@@ -352,7 +353,7 @@
                         (swap! request-message-counts conj
                                (count @(:messages-atom (:chat-history cs))))
                         (deliver completed true))]
-          ((var inter/share-session!) cs)
+          ((var builtins/share-session!) cs)
           (is (true? (deref completed 2000 false))
               "the share worker completed")
           (is (some #(str/includes? (str (:content %)) "https://gist.example")
@@ -832,7 +833,7 @@
                       extensions/clear-extensions! (fn [] nil)
                       extensions/discover-resources! (fn [_ _] nil)
                       event-bus/emit-event! (fn [_] nil)]
-          ((var inter/handle-reload) cs nil))
+          ((var builtins/handle-reload) cs nil))
         (is (= {:show-images true :image-width-cells 120} @subs/image-settings-atom)
             "live image settings re-seeded from the reloaded config")
         (is (true? (:block-images @(:cfg ag)))
@@ -874,7 +875,7 @@
                                  extensions/clear-extensions! (fn [] nil)
                                  extensions/discover-resources! (fn [_ _] nil)
                                  event-bus/emit-event! (fn [_] nil)]
-                     ((var inter/handle-reload) cs nil)))]
+                     ((var builtins/handle-reload) cs nil)))]
       (try
         (reload :expanded)
         (is (= :expanded (chat-history/chat-history-get-tool-display-mode ch)))
@@ -925,7 +926,7 @@
                     extensions/clear-extensions! (fn [] nil)
                     extensions/discover-resources! (fn [_ _] nil)
                     event-bus/emit-event! (fn [_] nil)]
-        ((var inter/handle-reload) cs nil))
+        ((var builtins/handle-reload) cs nil))
       (is (= (str (fs/cwd)) @loader-cwd)
           "context files load from the launch dir, not the active session's cwd")
       (is (= runtime-cwd (get-in @(:system-prompt-opts ag) [:cwd]))
@@ -1051,7 +1052,7 @@
                                   :content [{:type :tool_result :tool_use_id "t2"
                                              :content (pad 400)}]})
       (session/append-entry sess {:role :assistant :content "ok"})
-      (let [text ((var inter/session-info-text) sess)]
+      (let [text ((var builtins/session-info-text) sess)]
         (is (str/includes? text "Tool Results")
             "the section names itself (omitted only when there are no tool results)")
         (is (str/includes? text "read:") "read's row is present")
@@ -1065,4 +1066,4 @@
       (testing "the section is omitted when the session has no tool results"
         (let [bare (session/create-session (str sess-dir "-bare"))]
           (session/append-entry bare {:role :user :content "hi"})
-          (is (not (str/includes? ((var inter/session-info-text) bare) "Tool Results"))))))))
+          (is (not (str/includes? ((var builtins/session-info-text) bare) "Tool Results"))))))))

@@ -17,7 +17,7 @@
             [kmet.app.ui.chat-history :as chat-history]
             [kmet.config :as cfg]
             [kmet.tui.core :as tui]
-            [kmet.modes.interactive :as inter]
+            [kmet.modes.interactive.commands :as builtins]
             [kmet.modes.interactive.auth :as interactive-auth]))
 
 ;; ─── Device-code poll state machine (pi pollOAuthDeviceCodeFlow) ───────────
@@ -632,7 +632,7 @@
 (t/deftest test-login-command-auth-type-selection
   (commands/clear-commands!)
   (models/load-catalogs!)
-  ((var inter/register-builtin-commands!) cfg/default-config)
+  ((var builtins/register-builtin-commands!) cfg/default-config)
   (let [started (atom nil)
         sel-ref (atom nil)
         cs {:chat-history nil
@@ -665,7 +665,7 @@
 (t/deftest test-login-command-reference-resolution
   (commands/clear-commands!)
   (models/load-catalogs!)
-  ((var inter/register-builtin-commands!) cfg/default-config)
+  ((var builtins/register-builtin-commands!) cfg/default-config)
   (let [started (atom nil)
         sel-ref (atom nil)
         cs {:chat-history nil
@@ -699,7 +699,7 @@
 (t/deftest test-logout-removes-oauth-credential
   (commands/clear-commands!)
   (models/load-catalogs!)
-  ((var inter/register-builtin-commands!) cfg/default-config)
+  ((var builtins/register-builtin-commands!) cfg/default-config)
   (with-auth-file
     (fn [_]
       (let [msgs (atom [])

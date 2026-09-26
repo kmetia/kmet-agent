@@ -15,6 +15,7 @@
             [kmet.tui.terminal :as terminal]
             [kmet.tui.core :as tui]
             [kmet.modes.interactive :as inter]
+            [kmet.modes.interactive.commands :as builtins]
             [kmet.modes.interactive.state :as state]
             [kmet.modes.interactive.status :as status]
             [kmet.modes.interactive.turn :as turn]
@@ -133,7 +134,7 @@
   (testing "login/logout are real builtins inside register-builtin-commands!
             (not dropped or left as top-level forms)"
     (commands/clear-commands!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [login (commands/find-command "login")
           logout (commands/find-command "logout")]
       (t/is (some? login) "login registered")
@@ -150,7 +151,7 @@
     (commands/clear-commands!)
     (commands/register-command!
      {:name "tools" :description "extension version" :handler (fn [_ _] nil)})
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (t/is (= "extension version" (:description (commands/find-command "tools")))
           "extension command survives builtin registration")
     (t/is (some? (commands/find-command "model")) "unclaimed builtins still register")))
@@ -159,7 +160,7 @@
   (testing "an unmatched /login reference opens the provider selector pre-filled;
            /logout always opens the stored-credential selector (pi)"
     (commands/clear-commands!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [sel-ref (atom nil)]
       (with-redefs [dock/mount! (fn [_ component & _]
                                   (reset! sel-ref component)
@@ -184,7 +185,7 @@
   (testing "/model resolves provider/model patterns and switches the agent"
     (commands/clear-commands!)
     (m/load-catalogs!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [ag (agent/make-agent-state :provider :opencode-go :model "deepseek-v4-flash")
           cs {:agent-state (atom ag)
               :chat-history nil
@@ -216,7 +217,7 @@
 (deftest test-thinking-command-registered
   (testing "/thinking is a real builtin inside register-builtin-commands!"
     (commands/clear-commands!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [c (commands/find-command "thinking")]
       (t/is (some? c) "thinking registered")
       (t/is (= "Set thinking level" (:description c)))
@@ -230,7 +231,7 @@
             selectThinkingLevel without persist — no settings write)"
     (commands/clear-commands!)
     (m/load-catalogs!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [ag (agent/make-agent-state :provider :deepseek :model "deepseek-v4-pro")
           status (atom nil)
           saved (atom ::none)
@@ -267,7 +268,7 @@
             a model without supported levels gets the cycle status"
     (commands/clear-commands!)
     (m/load-catalogs!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [status (atom nil)
           sel-ref (atom nil)
           reasoning-cs {:agent-state (atom (agent/make-agent-state :provider :deepseek
@@ -307,7 +308,7 @@
             selectThinkingLevel(level, true))"
     (commands/clear-commands!)
     (m/load-catalogs!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [ag (agent/make-agent-state :provider :deepseek :model "deepseek-v4-pro")
           saved (atom nil)
           sel-ref (atom nil)
@@ -340,7 +341,7 @@
 (deftest test-continue-registered
   (testing "/continue is a real builtin inside register-builtin-commands!"
     (commands/clear-commands!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [c (commands/find-command "continue")]
       (t/is (some? c) "continue registered")
       (t/is (= "Continue where the agent left off (e.g. after a network error)"
@@ -350,7 +351,7 @@
 (deftest test-continue-refuses-while-running
   (testing "/continue refuses while the agent is running"
     (commands/clear-commands!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [ag (agent/make-agent-state)
           msg (atom nil)
           cs {:agent-state (atom ag)
@@ -368,7 +369,7 @@
 (deftest test-continue-refuses-empty-context
   (testing "/continue refuses when there is no conversation to continue"
     (commands/clear-commands!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [ag (agent/make-agent-state)
           msg (atom nil)
           cs {:agent-state (atom ag)
@@ -384,7 +385,7 @@
             user message — the model picks up the interrupted turn (e.g. after
             a network error the last entry is an unanswered user message)"
     (commands/clear-commands!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [ag (agent/make-agent-state)
           _ (swap! (:messages ag) conj
                    {:role :user :content [{:type :text :text "fix the bug"}]})
@@ -634,7 +635,7 @@
 (deftest test-scoped-models-settings-registered
   (testing "scoped-models and settings are real builtins"
     (commands/clear-commands!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [scoped (commands/find-command "scoped-models")
           settings (commands/find-command "settings")]
       (t/is (some? scoped))
@@ -648,7 +649,7 @@
             which shows wired actions only"
     (commands/clear-commands!)
     (install-app-keybindings!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [hotkeys (commands/find-command "hotkeys")]
       (t/is (some? hotkeys) "hotkeys registered")
       (t/is (= "Show all keyboard shortcuts" (:description hotkeys)))
@@ -674,14 +675,14 @@
   (testing "wired-hotkey? answers from the editor's installed actions"
     (let [ed (editor/make-editor)]
       (editor/editor-set-on-action! ed "app.tools.expand" (fn [] nil))
-      (let [wired? ((var inter/make-hotkey-wired?) {:editor ed})]
+      (let [wired? ((var builtins/make-hotkey-wired?) {:editor ed})]
         (t/is (wired? "tui.editor.cursorUp") "TUI ids are the editor's own")
         (t/is (wired? "app.tools.expand") "installed on the editor")
         (t/is (wired? "app.quit") "the global quit listener owns it")
         (t/is (not (wired? "app.suspend")) "declared, never installed")
         (t/is (not (wired? "app.message.copy")) "tree-selector-only in kmet"))
       (testing "no editor: only the global-listener action survives"
-        (let [wired? ((var inter/make-hotkey-wired?) nil)]
+        (let [wired? ((var builtins/make-hotkey-wired?) nil)]
           (t/is (wired? "app.quit"))
           (t/is (not (wired? "app.tools.expand"))))))))
 
@@ -744,7 +745,7 @@
             Error: lines before any confirmation is mounted"
     (commands/clear-commands!)
     (install-app-keybindings!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [cmd (commands/find-command "import")
           dir (str (fs/absolutize (str "target/test-import-errors-" (System/currentTimeMillis))))]
       (t/is (some? cmd) "registered — /import is no longer a placeholder")
@@ -788,7 +789,7 @@
             resumes it when the Yes/No confirm is accepted"
     (commands/clear-commands!)
     (install-app-keybindings!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [dir (str (fs/absolutize (str "target/test-import-flow-" (System/currentTimeMillis))))
           foreign (str dir "/foreign-project")]
       (try
@@ -851,7 +852,7 @@
             confirmation is declined, escaped, or cancelled by an extension"
     (commands/clear-commands!)
     (install-app-keybindings!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [dir (str (fs/absolutize (str "target/test-import-cancel-" (System/currentTimeMillis))))]
       (try
         (let [src (session/create-session (str dir "/src"))]
@@ -906,7 +907,7 @@
             for a fallback cwd)"
     (commands/clear-commands!)
     (install-app-keybindings!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [dir (str (fs/absolutize (str "target/test-import-gone-cwd-" (System/currentTimeMillis))))
           gone (str dir "/gone-project")]
       (try
@@ -938,7 +939,7 @@
             cwd; kmet's runtime cwd follows the session)"
     (commands/clear-commands!)
     (install-app-keybindings!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [dir (str (fs/absolutize (str "target/test-export-cwd-" (System/currentTimeMillis))))
           project (str dir "/project")]
       (try
@@ -982,7 +983,7 @@
             switches; kmet waits instead)"
     (commands/clear-commands!)
     (install-app-keybindings!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [dir (str (fs/absolutize (str "target/test-mid-turn-guards-"
                                        (System/currentTimeMillis))))]
       (try
@@ -1059,7 +1060,7 @@
             settings :enabled-models patterns, else nil (all enabled)"
     (commands/clear-commands!)
     (m/load-catalogs!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [ag (agent/make-agent-state :provider :opencode-go :model "deepseek-v4-flash")
           cs {:agent-state (atom ag)
               :chat-history nil
@@ -1104,7 +1105,7 @@
     (install-app-keybindings!)
     (commands/clear-commands!)
     (m/load-catalogs!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [ag (agent/make-agent-state :provider :opencode-go :model "deepseek-v4-flash")
           cs {:agent-state (atom ag)
               :chat-history nil
@@ -1135,7 +1136,7 @@
     (install-app-keybindings!)
     (commands/clear-commands!)
     (m/load-catalogs!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [ag (agent/make-agent-state :provider :opencode-go :model "deepseek-v4-flash"
                                      :thinking :off)
           cs {:agent-state (atom ag)
@@ -1171,7 +1172,7 @@
     (install-app-keybindings!)
     (commands/clear-commands!)
     (m/load-catalogs!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [ag (agent/make-agent-state :provider :opencode-go :model "deepseek-v4-flash")
           cs {:agent-state (atom ag)
               :chat-history nil
@@ -1206,7 +1207,7 @@
     (install-app-keybindings!)
     (commands/clear-commands!)
     (m/load-catalogs!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [ag (agent/make-agent-state :provider :opencode-go :model "deepseek-v4-flash")
           cs {:agent-state (atom ag)
               :chat-history nil
@@ -1275,7 +1276,7 @@
     (install-app-keybindings!)
     (commands/clear-commands!)
     (m/load-catalogs!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [ag (agent/make-agent-state :provider :opencode-go :model "deepseek-v4-flash")
           cs {:agent-state (atom ag)
               :chat-history nil
@@ -1316,7 +1317,7 @@
     (install-app-keybindings!)
     (commands/clear-commands!)
     (m/load-catalogs!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [saved (atom nil)
           msg (atom nil)
           tc-ctrl (atom nil)]
@@ -1761,7 +1762,7 @@
 (deftest test-followup-command-registered
   (testing "/followup is a real builtin inside register-builtin-commands!"
     (commands/clear-commands!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [c (commands/find-command "followup")]
       (t/is (some? c) "followup registered")
       (t/is (= "Queue a follow-up message (like Alt+Enter)" (:description c)))
@@ -1773,7 +1774,7 @@
             follow-up (pi: handleFollowUp semantics) — nothing reaches the
             chat or context until the loop consumes it"
     (commands/clear-commands!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [cs (compaction-cs)]
       (reset! (:running-turn? cs) true)
       (with-redefs [tui/tui-request-render (fn [_] nil)
@@ -1789,7 +1790,7 @@
   (testing "/followup <text> while idle starts a run with the args as the
             message — Alt+Enter's idle path (pi: handleFollowUp → submit)"
     (commands/clear-commands!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [cs (compaction-cs)
           started (atom [])]
       (with-redefs [chat-history/chat-history-add-message! (fn [_ _] nil)
@@ -1811,7 +1812,7 @@
   (testing "/followup <text> during compaction queues as follow-up (pi:
             handleFollowUp → queueCompactionMessage(text, followUp))"
     (commands/clear-commands!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [cs (compaction-cs)]
       (reset! (:compacting? @(:agent-state cs)) true)
       (with-redefs [tui/tui-request-render (fn [_] nil)
@@ -1824,7 +1825,7 @@
 (deftest test-followup-command-blank-args-usage
   (testing "/followup with no args shows usage instead of queueing anything"
     (commands/clear-commands!)
-    ((var inter/register-builtin-commands!) cfg/default-config)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [cs (compaction-cs)
           msg (atom nil)]
       (reset! (:running-turn? cs) true)
