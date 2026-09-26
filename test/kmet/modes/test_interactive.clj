@@ -13,6 +13,7 @@
             [kmet.modes.interactive.state :as state]
             [kmet.modes.interactive.status :as status]
             [kmet.modes.interactive.turn :as turn]
+            [kmet.modes.interactive.session-admin :as session-admin]
             [kmet.app.event-bus :as event-bus]
             [kmet.app.loop :as agent]
             [kmet.app.session :as session]
@@ -132,7 +133,7 @@
           _ (event-bus/on-event :session-shutdown
                                 (fn [ev] (swap! shutdown-events conj ev)))]
       (try
-        ((var inter/handle-new-session) cs)
+        ((var session-admin/handle-new-session) cs)
         (let [ag' @(:agent-state cs)
               new-sess @(:session-atom cs)]
           (is (not= (:id old-sess) (:id new-sess)) "a fresh session is created")
@@ -197,7 +198,7 @@
           _ (event-bus/on-event :session-shutdown
                                 (fn [ev] (swap! shutdown-events conj ev)))]
       (try
-        ((var inter/handle-new-session) cs)
+        ((var session-admin/handle-new-session) cs)
         (is (= old-sess @(:session-atom cs)) "session NOT swapped")
         (is (= old-sess (:session @(:agent-state cs))) "agent still points at the old session")
         (is (= 2 (count @(:messages @(:agent-state cs)))) "conversation untouched")
@@ -440,7 +441,7 @@
         (let [loaded (session/load-session (:file sess))
               ch (chat-history/make-chat-history)
               cs (inter/map->CoreState {:chat-history ch})]
-          ((var inter/replay-branch!) cs loaded)
+          ((var session-admin/replay-branch!) cs loaded)
           (let [msgs @(:messages-atom ch)
                 tools (filterv #(= :tool (:role %)) msgs)
                 [t1 t2] tools]
@@ -482,7 +483,7 @@
               prev-caps (timg/get-capabilities)]
           (timg/set-capabilities! {:images nil :true-color true :hyperlinks true})
           (try
-            ((var inter/replay-branch!) cs loaded)
+            ((var session-admin/replay-branch!) cs loaded)
             (let [msg (first @(:messages-atom ch))
                   lines (protocols/render (:component msg) 60)]
               (is (some? msg))
@@ -514,7 +515,7 @@
         (let [loaded (session/load-session (:file sess))
               ch (chat-history/make-chat-history)
               cs (inter/map->CoreState {:chat-history ch})]
-          ((var inter/replay-branch!) cs loaded)
+          ((var session-admin/replay-branch!) cs loaded)
           (let [msgs @(:messages-atom ch)
                 tools (filterv #(= :tool (:role %)) msgs)]
             (is (= 1 (count tools)) "one component for the dangling call")
@@ -540,7 +541,7 @@
         (let [loaded (session/load-session (:file sess))
               ch (chat-history/make-chat-history)
               cs (inter/map->CoreState {:chat-history ch})]
-          ((var inter/replay-branch!) cs loaded)
+          ((var session-admin/replay-branch!) cs loaded)
           (let [tools (filterv #(= :tool (:role %)) @(:messages-atom ch))]
             (is (= 1 (count tools)))
             (is (some #(str/includes? % "Aborted")
@@ -583,7 +584,7 @@
               prev-caps (timg/get-capabilities)]
           (timg/set-capabilities! {:images nil :true-color true :hyperlinks true})
           (try
-            ((var inter/replay-branch!) cs loaded)
+            ((var session-admin/replay-branch!) cs loaded)
             (let [msg (first (filter #(= :tool (:role %)) @(:messages-atom ch)))
                   lines (protocols/render (:component msg) 60)]
               (is (some? msg))
@@ -616,7 +617,7 @@
         (let [loaded (session/load-session (:file sess))
               ch (chat-history/make-chat-history)
               cs (inter/map->CoreState {:chat-history ch})]
-          ((var inter/replay-branch!) cs loaded)
+          ((var session-admin/replay-branch!) cs loaded)
           (let [bashes (filterv #(= :bash (:role %)) @(:messages-atom ch))
                 rendered (mapv (fn [m]
                                  (str/join "\n" (protocols/render (:component m) 100)))
@@ -649,7 +650,7 @@
           (let [loaded (session/load-session (:file sess))
                 ch (chat-history/make-chat-history)
                 cs (inter/map->CoreState {:chat-history ch})]
-            ((var inter/replay-branch!) cs loaded)
+            ((var session-admin/replay-branch!) cs loaded)
             (is (= [:compaction :user :user :assistant]
                    (mapv :role @(:messages-atom ch)))
                 "only the compaction + kept tail replay")
@@ -676,7 +677,7 @@
 (deftest run-message-renderer-falls-back-to-the-default-box
   ;; pi: CustomMessageComponent rebuild — a throwing or empty renderer
   ;; result keeps the default labeled box instead of an empty component
-  (let [run #'inter/run-message-renderer]
+  (let [run #'session-admin/run-message-renderer]
     (is (nil? (run nil {:role :custom})) "no renderer")
     (is (nil? (run (fn [_] nil) {:role :custom})) "nil result")
     (is (nil? (run (fn [_] (throw (ex-info "boom" {}))) {:role :custom}))
@@ -686,7 +687,7 @@
 (deftest run-entry-renderer-catches-and-reports
   ;; pi: CustomEntryComponent rebuild — a throwing entry renderer renders
   ;; `[type] renderer failed: message` instead of crashing the replay
-  (let [run #'inter/run-entry-renderer]
+  (let [run #'session-admin/run-entry-renderer]
     (is (nil? (run nil {:custom-type :note})) "no renderer")
     (is (nil? (run (fn [_] nil) {:custom-type :note})) "nil result")
     (is (= {:role :notice :style :error
@@ -700,7 +701,7 @@
   ;; map? test would treat a bare component as a message map (regression:
   ;; the documented bare-component renderer result produced an empty
   ;; fallback instead of the component)
-  (let [wrap #'inter/renderer-result->message
+  (let [wrap #'session-admin/renderer-result->message
         comp (container/make-container)]
     (is (identical? comp (:component (wrap comp))))
     (is (= {:role :info :content "x"} (wrap {:role :info :content "x"})))))
@@ -725,7 +726,7 @@
             (let [loaded (session/load-session (:file sess))
                   ch (chat-history/make-chat-history)
                   cs (inter/map->CoreState {:chat-history ch})]
-              ((var inter/replay-branch!) cs loaded)
+              ((var session-admin/replay-branch!) cs loaded)
               (let [text (str/join "\n"
                                    (map #(str/join "\n" (protocols/render (:component %) 100))
                                         @(:messages-atom ch)))]
@@ -736,7 +737,7 @@
         (finally (dereg-boom) (dereg-comp))))))
 
 (deftest compaction-cost-notice-follows-usage-and-setting
-  (let [notice #'inter/compaction-cost-notice]
+  (let [notice #'session-admin/compaction-cost-notice]
     (with-redefs [cfg/get-show-cache-miss-notices (constantly true)]
       (is (= {:role :notice :style :warning
               :content "Compaction: 12k tokens billed (~$0.01)"}
@@ -780,7 +781,7 @@
         (let [loaded (session/load-session (:file sess))
               ch (chat-history/make-chat-history)
               cs (inter/map->CoreState {:chat-history ch})]
-          ((var inter/replay-branch!) cs loaded)
+          ((var session-admin/replay-branch!) cs loaded)
           (is (= [:user :branch-summary :assistant] (mapv :role @(:messages-atom ch))))
           (let [comp (:component (second @(:messages-atom ch)))
                 collapsed (str/join "\n" (protocols/render comp 100))]

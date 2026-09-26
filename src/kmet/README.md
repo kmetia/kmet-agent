@@ -30,7 +30,8 @@ src/kmet/
 │       │                 helpers, footer/title/border updaters
 │       ├── auth.clj    — login/logout flows + provider options
 │       ├── status.clj  — anim timer, status indicator, pending messages
-│       └── turn.clj    — agent events, submit/cancel, compaction queue
+│       ├── turn.clj    — agent events, submit/cancel, compaction queue
+│       └── session_admin.clj — renderers, resume/import, tree, fork/clone
 ├── ai/                 — Provider/auth subsystem (pi: packages/ai — a standalone
 │   │                     library the agent depends on; self-contained)
 │   ├── models.clj      — Provider/model registry + committed EDN catalogs

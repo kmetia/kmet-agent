@@ -18,6 +18,7 @@
             [kmet.modes.interactive.state :as state]
             [kmet.modes.interactive.status :as status]
             [kmet.modes.interactive.turn :as turn]
+            [kmet.modes.interactive.session-admin :as session-admin]
             [kmet.app.commands :as commands]
             [kmet.app.extensions :as extensions]
             [kmet.app.keybindings :as app-kb]
@@ -729,7 +730,7 @@
   (testing "pi: getPathCommandArgument (shared with /export) — quotes are
             stripped, trailing arguments ignored, an unterminated quote is
             no argument at all"
-    (let [parse (var inter/parse-path-argument)]
+    (let [parse (var session-admin/parse-path-argument)]
       (t/is (nil? (parse "")))
       (t/is (nil? (parse "   ")))
       (t/is (= "a.ednl" (parse "a.ednl")))
@@ -966,7 +967,7 @@
   (testing "a quoted but empty path argument reads as none (pi:
             getPathCommandArgument) — /export falls back to its default and
             /import to its usage line instead of resolving the process cwd"
-    (let [parse (var inter/parse-path-argument)]
+    (let [parse (var session-admin/parse-path-argument)]
       (t/is (nil? (parse "")))
       (t/is (nil? (parse "   ")))
       (t/is (nil? (parse "\"\"")))
@@ -1018,7 +1019,7 @@
           (with-redefs [dock/mount! (capture-mount! sel-ref)
                         tui/tui-request-render (fn [_])]
             (testing "Summarize branch? selector is framed in the dock with all options"
-              ((var inter/ask-branch-summary) cs sess entry)
+              ((var session-admin/ask-branch-summary) cs sess entry)
               (let [text (str/join "\n" (map strip-ansi
                                              (protocols/render @sel-ref 80)))]
                 (t/is (str/includes? text "Summarize branch?") "framed title")
@@ -1027,7 +1028,7 @@
                       "all three options render (a bare overlay with :height 3 cut the third)")
                 (t/is (str/includes? text "─") "border drawn")))
             (testing "custom instructions open a framed input in the dock"
-              ((var inter/prompt-custom-summary!) cs sess entry)
+              ((var session-admin/prompt-custom-summary!) cs sess entry)
               (let [text (str/join "\n" (map strip-ansi
                                              (protocols/render @sel-ref 80)))]
                 (t/is (str/includes? text "Custom branch summarization instructions"))
@@ -1048,7 +1049,7 @@
               fdp* (fdp/make-footer-data-provider :cwd-atom (atom spelled))
               cs (inter/map->CoreState {:footer-provider fdp*
                                         :agent-state (atom (agent/make-agent-state))})]
-          (t/is (= spelled ((var inter/apply-session-cwd!) cs sess))
+          (t/is (= spelled ((var session-admin/apply-session-cwd!) cs sess))
                 "the cwd in effect is returned unchanged")
           (t/is (= spelled @(:cwd-atom fdp*)) "and kept as spelled"))
         (finally (fs/delete-tree dir))))))
