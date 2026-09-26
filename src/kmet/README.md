@@ -43,7 +43,8 @@ src/kmet/
 │   │                     constraints, injectable provider-event slots
 │   ├── http.clj        — provider streams over the kmet.libs.http boundary
 ├── app/                — App business logic (pi: dist/core/)
-│   ├── loop.clj        — the agent loop; session.clj — EDNL sessions
+│   ├── loop.clj        — the agent loop; retry.clj — retry/error policy;
+│   │                     loop_guard.clj — repeat-loop guard; session.clj — EDNL sessions
 │   ├── commands.clj / keybindings.clj / packages.clj / extensions.cljc —
 │   │                     slash commands, keymap, package + extension loading
 │   ├── model_resolver.clj — model pattern/CLI resolution

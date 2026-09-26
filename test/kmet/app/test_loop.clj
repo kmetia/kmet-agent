@@ -17,6 +17,8 @@
             [kmet.app.event-bus :as event-bus]
             [kmet.app.session :as session]
             [kmet.app.loop :as loop]
+            [kmet.app.loop-guard :as guard]
+            [kmet.app.retry :as retry]
             [kmet.config :as cfg]
             [kmet.app.ui.chat-history :as ui]
             [kmet.tui.theme :as th]
@@ -1438,68 +1440,68 @@
 ;; ─── Retry classification ─────────────────────────────────────────────────
 
 (t/deftest test-loop-retryable-error?
-  (t/is (loop/retryable-error? "rate limit exceeded"))
-  (t/is (loop/retryable-error? "429 Too Many Requests"))
-  (t/is (loop/retryable-error? "503 service unavailable"))
-  (t/is (loop/retryable-error? "Internal Server Error"))
-  (t/is (loop/retryable-error? "connection refused"))
-  (t/is (loop/retryable-error? "ECONNRESET: socket hang up"))
+  (t/is (retry/retryable-error? "rate limit exceeded"))
+  (t/is (retry/retryable-error? "429 Too Many Requests"))
+  (t/is (retry/retryable-error? "503 service unavailable"))
+  (t/is (retry/retryable-error? "Internal Server Error"))
+  (t/is (retry/retryable-error? "connection refused"))
+  (t/is (retry/retryable-error? "ECONNRESET: socket hang up"))
   ;; Network transport failures — the llm layer reports these with a stable
   ;; 'network error' token (java.net.http ConnectExceptions carry a nil
   ;; message on this JDK; see kmet.ai.llm/transport-error-message)
-  (t/is (loop/retryable-error? "network error: ConnectException"))
-  (t/is (loop/retryable-error? "network error: Connection reset"))
-  (t/is (loop/retryable-error? "network error: request timed out"))
-  (t/is (loop/retryable-error? "Request timed out"))
-  (t/is (loop/retryable-error? "HTTP/1.1 header parser received no bytes"))
-  (t/is (loop/retryable-error? "Provider returned error: upstream connect"))
+  (t/is (retry/retryable-error? "network error: ConnectException"))
+  (t/is (retry/retryable-error? "network error: Connection reset"))
+  (t/is (retry/retryable-error? "network error: request timed out"))
+  (t/is (retry/retryable-error? "Request timed out"))
+  (t/is (retry/retryable-error? "HTTP/1.1 header parser received no bytes"))
+  (t/is (retry/retryable-error? "Provider returned error: upstream connect"))
   ;; HTTP/2 RST_STREAM (java.net.http throws a plain IOException whose
   ;; message is "Received RST_STREAM: <code>") — same class of transport
   ;; reset as "Connection reset", so it must be retried too; both the raw
   ;; llm-layer message and the sse read-path "Stream error: ..." prefix.
-  (t/is (loop/retryable-error? "Received RST_STREAM: Protocol error"))
-  (t/is (loop/retryable-error? "Stream error: Received RST_STREAM: Protocol error"))
-  (t/is (loop/retryable-error? "Received RST_STREAM: CANCEL"))
-  (t/is (loop/retryable-error? "Stream error: Connection reset"))
+  (t/is (retry/retryable-error? "Received RST_STREAM: Protocol error"))
+  (t/is (retry/retryable-error? "Stream error: Received RST_STREAM: Protocol error"))
+  (t/is (retry/retryable-error? "Received RST_STREAM: CANCEL"))
+  (t/is (retry/retryable-error? "Stream error: Connection reset"))
   ;; Other JVM transport-reset phrasings (OS/JDK-specific) surfacing on the
   ;; sse read path without the 'network error' token.
-  (t/is (loop/retryable-error? "Software caused connection abort: recv failed"))
-  (t/is (loop/retryable-error? "Stream error: Software caused connection abort"))
-  (t/is (loop/retryable-error? "An existing connection was forcibly closed by the remote host"))
-  (t/is (loop/retryable-error? "Broken pipe"))
+  (t/is (retry/retryable-error? "Software caused connection abort: recv failed"))
+  (t/is (retry/retryable-error? "Stream error: Software caused connection abort"))
+  (t/is (retry/retryable-error? "An existing connection was forcibly closed by the remote host"))
+  (t/is (retry/retryable-error? "Broken pipe"))
   ;; Mid-stream close on the sse read path — java.net.http surfaces a
   ;; dropped connection as a bare "closed" IOException, wrapped by kmet's
   ;; 'Stream error: ' prefix (no other token in the message)
-  (t/is (loop/retryable-error? "Stream error: closed"))
-  (t/is (loop/retryable-error? "Stream error: Connection is closed"))
+  (t/is (retry/retryable-error? "Stream error: closed"))
+  (t/is (retry/retryable-error? "Stream error: Connection is closed"))
   ;; premature EOF on the response stream — same mid-drop family as the
   ;; stream-close / connection-lost tokens ('EOF reached while reading' is
   ;; the JDK HTTP client's wording for a connection that ended mid-body)
-  (t/is (loop/retryable-error? "Error: EOF reached while reading"))
-  (t/is (loop/retryable-error? "Unexpected EOF"))
-  (t/is (not (loop/retryable-error? "EOF Exception: quota exceeded")))
+  (t/is (retry/retryable-error? "Error: EOF reached while reading"))
+  (t/is (retry/retryable-error? "Unexpected EOF"))
+  (t/is (not (retry/retryable-error? "EOF Exception: quota exceeded")))
   ;; non-close stream errors stay non-retryable
-  (t/is (not (loop/retryable-error? "Stream error: Bedrock stream frame CRC mismatch")))
+  (t/is (not (retry/retryable-error? "Stream error: Bedrock stream frame CRC mismatch")))
   ;; OpenRouter upstream-routing failure — transient even without a status
   ;; token in the body (with one, the 'HTTP 5xx: ' prefix matches first)
-  (t/is (loop/retryable-error? "Upstream request failed: Endpoint  is unavailable."))
-  (t/is (loop/retryable-error? "HTTP 503: Upstream request failed: Endpoint  is unavailable."))
-  (t/is (not (loop/retryable-error? "insufficient_quota")))
-  (t/is (not (loop/retryable-error? "Monthly usage limit reached")))
-  (t/is (not (loop/retryable-error? "GoUsageLimitError")))
-  (t/is (not (loop/retryable-error? "Invalid API key provided")))
-  (t/is (not (loop/retryable-error? nil)))
-  (t/is (not (loop/retryable-error? ""))))
+  (t/is (retry/retryable-error? "Upstream request failed: Endpoint  is unavailable."))
+  (t/is (retry/retryable-error? "HTTP 503: Upstream request failed: Endpoint  is unavailable."))
+  (t/is (not (retry/retryable-error? "insufficient_quota")))
+  (t/is (not (retry/retryable-error? "Monthly usage limit reached")))
+  (t/is (not (retry/retryable-error? "GoUsageLimitError")))
+  (t/is (not (retry/retryable-error? "Invalid API key provided")))
+  (t/is (not (retry/retryable-error? nil)))
+  (t/is (not (retry/retryable-error? ""))))
 
 (t/deftest test-loop-context-overflow?
-  (t/is (loop/context-overflow? "prompt is too long: 213462 tokens > 200000 maximum"))
-  (t/is (loop/context-overflow? "This model's maximum context length is 128000 tokens"))
-  (t/is (loop/context-overflow? "Your input exceeds the context window of this model"))
-  (t/is (loop/context-overflow? "context_length_exceeded"))
-  (t/is (loop/context-overflow? "exceeded model token limit: 100000 (requested: 200000)"))
-  (t/is (not (loop/context-overflow? "rate limit exceeded")))
-  (t/is (not (loop/context-overflow? "Throttling error: Too many tokens, please wait")))
-  (t/is (not (loop/context-overflow? nil))))
+  (t/is (retry/context-overflow? "prompt is too long: 213462 tokens > 200000 maximum"))
+  (t/is (retry/context-overflow? "This model's maximum context length is 128000 tokens"))
+  (t/is (retry/context-overflow? "Your input exceeds the context window of this model"))
+  (t/is (retry/context-overflow? "context_length_exceeded"))
+  (t/is (retry/context-overflow? "exceeded model token limit: 100000 (requested: 200000)"))
+  (t/is (not (retry/context-overflow? "rate limit exceeded")))
+  (t/is (not (retry/context-overflow? "Throttling error: Too many tokens, please wait")))
+  (t/is (not (retry/context-overflow? nil))))
 
 ;; ─── Repeat-loop guard (circuit breaker) ────────────────────────────────
 
@@ -1511,7 +1513,7 @@
 (t/deftest test-loop-guard-filter-same-call
   ;; The 3rd identical call (threshold 3) is suppressed.
   (let [r (reduce (fn [st _]
-                    (:state (loop/loop-guard-filter st 3 [(loop-guard-tc "bash" {:command "ls"})])))
+                    (:state (guard/loop-guard-filter st 3 [(loop-guard-tc "bash" {:command "ls"})])))
                   {:window [] :suppressed 0} (range 3))]
     (t/is (= 1 (:suppressed r)) "3rd identical call suppressed")))
 
@@ -1519,7 +1521,7 @@
   ;; 1,2,1,2,1,2 → the 3rd "1" (call 5) is suppressed — alternation is
   ;; caught by the per-signature window count, not just consecutive runs.
   (let [r (reduce (fn [st i]
-                    (:state (loop/loop-guard-filter
+                    (:state (guard/loop-guard-filter
                              st 3 [(loop-guard-tc "bash" {:command (str "cmd" (inc (mod i 2)))})])))
                   {:window [] :suppressed 0} (range 6))]
     (t/is (= 2 (:suppressed r)) "1,2,1,2,1,2 trips at the 3rd occurrence of each sig")))
@@ -1527,13 +1529,13 @@
 (t/deftest test-loop-guard-filter-cycle
   ;; 1,2,3,1,2,3 → the 3rd "1" (call 7) is suppressed.
   (let [r (reduce (fn [st i]
-                    (:state (loop/loop-guard-filter
+                    (:state (guard/loop-guard-filter
                              st 3 [(loop-guard-tc "bash" {:command (str "c" (inc (mod i 3)))})])))
                   {:window [] :suppressed 0} (range 7))]
     (t/is (= 1 (:suppressed r)) "1,2,3,1,2,3 trips at call 7"))
   ;; 1,2,3,4 ×3 → window 13 catches the 3rd "1" at call 9.
   (let [r (reduce (fn [st i]
-                    (:state (loop/loop-guard-filter
+                    (:state (guard/loop-guard-filter
                              st 3 [(loop-guard-tc "bash" {:command (str "c" (inc (mod i 4)))})])))
                   {:window [] :suppressed 0} (range 9))]
     (t/is (= 1 (:suppressed r)) "4-cycle trips at call 9")))
@@ -1541,25 +1543,25 @@
 (t/deftest test-loop-guard-filter-read-exempt
   ;; read never trips the guard — re-reading a file is legitimate work.
   (let [r (reduce (fn [st _]
-                    (:state (loop/loop-guard-filter st 3 [(loop-guard-tc "read" {:path "a"})])))
+                    (:state (guard/loop-guard-filter st 3 [(loop-guard-tc "read" {:path "a"})])))
                   {:window [] :suppressed 0} (range 10))]
     (t/is (= 0 (:suppressed r)) "read is exempt")
     (t/is (= 0 (count (:window r))) "read never enters the window")))
 
 (t/deftest test-loop-guard-filter-key-order-canonical
   ;; Argument maps differing only in key order count as identical.
-  (t/is (= (loop/loop-guard-signature "edit" {:path "x" :edits [{:oldText "a" :newText "b"}]})
-           (loop/loop-guard-signature "edit" {:edits [{:newText "b" :oldText "a"}] :path "x"}))
+  (t/is (= (guard/loop-guard-signature "edit" {:path "x" :edits [{:oldText "a" :newText "b"}]})
+           (guard/loop-guard-signature "edit" {:edits [{:newText "b" :oldText "a"}] :path "x"}))
         "key-sorted canonical JSON ignores key order"))
 
 (t/deftest test-loop-thinking-loop-detection
-  (t/is (loop/thinking-loop? "Let me analyze this problem carefully. Let me analyze this problem carefully. Let me analyze this problem carefully."))
-  (t/is (not (loop/thinking-loop? "First check the file. Then read imports. Then run tests.")))
-  (t/is (not (loop/thinking-loop? "ok. ok. ok. ok."))
+  (t/is (guard/thinking-loop? "Let me analyze this problem carefully. Let me analyze this problem carefully. Let me analyze this problem carefully."))
+  (t/is (not (guard/thinking-loop? "First check the file. Then read imports. Then run tests.")))
+  (t/is (not (guard/thinking-loop? "ok. ok. ok. ok."))
         "segments below the min span don't trip")
-  (t/is (not (loop/thinking-loop? nil)) "nil is total — no NPE")
-  (t/is (not (loop/thinking-loop? "")) "empty is false")
-  (t/is (loop/thinking-loop? (str (apply str (repeat 3 "我们需要继续深入分析这个问题的根本原因和潜在影响。"))))
+  (t/is (not (guard/thinking-loop? nil)) "nil is total — no NPE")
+  (t/is (not (guard/thinking-loop? "")) "empty is false")
+  (t/is (guard/thinking-loop? (str (apply str (repeat 3 "我们需要继续深入分析这个问题的根本原因和潜在影响。"))))
         "CJK full-stop delimiters trip — multilingual reasoning loops are caught"))
 
 (t/deftest test-loop-guard-mixed-batch-source-order
@@ -3582,36 +3584,36 @@
 
 (t/deftest test-normalize-llm-result
   (t/testing "provider :error stop-reason folds into :error (pi mapStopReason)"
-    (let [out (#'loop/normalize-llm-result
+    (let [out (#'retry/normalize-llm-result
                {:stop-reason :error :error-message "content filter"})]
       (t/is (= "content filter" (:error out)))))
   (t/testing "missing error-message gets a generic provider-stopped text"
-    (let [out (#'loop/normalize-llm-result {:stop-reason :error})]
+    (let [out (#'retry/normalize-llm-result {:stop-reason :error})]
       (t/is (= "Provider stopped with: error" (:error out)))))
   (t/testing "normal results and the :timeout sentinel pass through untouched"
     (let [r {:stop-reason :end_turn :content [{:type :text :text "hi"}]}]
-      (t/is (= r (#'loop/normalize-llm-result r))))
-    (t/is (= :timeout (#'loop/normalize-llm-result :timeout)))))
+      (t/is (= r (#'retry/normalize-llm-result r))))
+    (t/is (= :timeout (#'retry/normalize-llm-result :timeout)))))
 
 (t/deftest test-retry-decision
   (t/testing "context overflow with session and no prior recovery compacts first"
     (t/is (= {:kind :overflow-recover}
-             (#'loop/retry-decision
+             (#'retry/retry-decision
               {:err "prompt is too long" :retry-count 0 :max-retries 3
                :base-delay-ms 2000 :overflow-recovered false :has-session true}))))
   (t/testing "overflow is compaction territory even with retries left"
     (t/is (= {:kind :overflow-recover}
-             (#'loop/retry-decision
+             (#'retry/retry-decision
               {:err "prompt is too long" :retry-count 1 :max-retries 3
                :base-delay-ms 2000 :overflow-recovered false :has-session true}))))
   (t/testing "second overflow (already recovered) falls through to classification"
     (t/is (= {:kind :terminal}
-             (#'loop/retry-decision
+             (#'retry/retry-decision
               {:err "prompt is too long" :retry-count 0 :max-retries 3
                :base-delay-ms 2000 :overflow-recovered true :has-session true}))
           "overflow errors are not retryable-error? matches"))
   (t/testing "retryable within budget backs off exponentially, same turn"
-    (let [d (#'loop/retry-decision
+    (let [d (#'retry/retry-decision
              {:err "rate limited" :retry-count 1 :max-retries 3
               :base-delay-ms 2000 :overflow-recovered false :has-session true})]
       (t/is (= :backoff (:kind d)))
@@ -3620,16 +3622,16 @@
       (t/is (= 3 (:max-attempts d)) "budget snapshot rides the decision")))
   (t/testing "exhausted budget or non-retryable errors are terminal"
     (t/is (= {:kind :terminal}
-             (#'loop/retry-decision
+             (#'retry/retry-decision
               {:err "rate limited" :retry-count 3 :max-retries 3
                :base-delay-ms 2000 :overflow-recovered false :has-session true})))
     (t/is (= {:kind :terminal}
-             (#'loop/retry-decision
+             (#'retry/retry-decision
               {:err "quota exceeded for project" :retry-count 0 :max-retries 3
                :base-delay-ms 2000 :overflow-recovered false :has-session true}))))
   (t/testing "overflow without a session cannot recover — terminal here"
     (t/is (= {:kind :terminal}
-             (#'loop/retry-decision
+             (#'retry/retry-decision
               {:err "prompt is too long" :retry-count 0 :max-retries 3
                :base-delay-ms 2000 :overflow-recovered false :has-session false})))))
 
@@ -3638,18 +3640,18 @@
 (t/deftest test-loop-total-timeout-ms
   (t/testing "nil total falls back to the idle timeout (default)"
     (let [agent (loop/make-agent-state :http-idle-timeout-ms 300000)]
-      (t/is (= 300000 (#'loop/llm-total-timeout-ms agent)))))
+      (t/is (= 300000 (#'retry/llm-total-timeout-ms @(:cfg agent))))))
   (t/testing "explicit total wins over the idle-derived default"
     (let [agent (loop/make-agent-state :http-idle-timeout-ms 300000
                                        :http-total-timeout-ms 120000)]
-      (t/is (= 120000 (#'loop/llm-total-timeout-ms agent)))))
+      (t/is (= 120000 (#'retry/llm-total-timeout-ms @(:cfg agent))))))
   (t/testing "0 total falls back to idle (pi: timeoutMs ?? httpIdleTimeoutMs)"
     (let [agent (loop/make-agent-state :http-idle-timeout-ms 300000
                                        :http-total-timeout-ms 0)]
-      (t/is (= 300000 (#'loop/llm-total-timeout-ms agent)))))
+      (t/is (= 300000 (#'retry/llm-total-timeout-ms @(:cfg agent))))))
   (t/testing "no idle and no explicit total → disabled (MAX_VALUE)"
     (let [agent (loop/make-agent-state :http-idle-timeout-ms 0)]
-      (t/is (= Integer/MAX_VALUE (#'loop/llm-total-timeout-ms agent))))))
+      (t/is (= Integer/MAX_VALUE (#'retry/llm-total-timeout-ms @(:cfg agent)))))))
 
 (t/deftest test-loop-set-http-total-timeout-ms!
   (let [agent (loop/make-agent-state)]

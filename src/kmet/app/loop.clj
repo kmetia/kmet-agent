@@ -78,6 +78,8 @@
             [clojure.string :as str]
             [kmet.ai.llm :as llm]
             [kmet.app.compaction :as compaction]
+            [kmet.app.loop-guard :as loop-guard]
+            [kmet.app.retry :as retry]
             [kmet.app.skills :as skills]
             [kmet.app.tools.core :as tools]
             [kmet.app.tools.invoke :as invoke]
@@ -220,11 +222,6 @@ Be precise and concise in your responses."}}]
                     :loop-guard (atom {:window [] :suppressed 0})}))
 
 ;; ─── Active tools (pi: ctx.setActiveTools) ──────────────────────
-
-;; Forward declaration — call-llm (the LLM call wrapper below) computes the
-;; transport total deadline via llm-total-timeout-ms, defined later with the
-;; other timeout helpers.
-(declare llm-total-timeout-ms)
 
 (defn- active-tools
   "The tools sent to the LLM: the registry filtered to the :enabled-tools
@@ -433,300 +430,10 @@ Be precise and concise in your responses."}}]
                       :else m))))
           messages)))
 
-(def ^:private non-retryable-error-regex
-  "Combined regex for quota/billing/account-limit error messages — never retried.
-   Mirrors pi's NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN
-   (packages/ai/src/utils/retry.ts)."
-  (re-pattern (str "(?i)"
-                   (str/join "|"
-                             ["GoUsageLimitError"
-                              "FreeUsageLimitError"
-                              "Monthly usage limit reached"
-                              "available balance"
-                              "insufficient_quota"
-                              "out of budget"
-                              "quota exceeded"
-                              "billing"]))))
-
-(def ^:private retryable-error-regex
-  "Combined regex for transient provider/transport error messages — retryable.
-   Mirrors pi's RETRYABLE_PROVIDER_ERROR_PATTERN (packages/ai/src/utils/retry.ts)."
-  (re-pattern (str "(?i)"
-                   (str/join "|"
-                             ["overloaded"
-                              "rate.?limit"
-                              "too many requests"
-                              "429" "500" "502" "503" "504" "524"
-                              "service.?unavailable"
-                              "server.?error"
-                              "internal.?error"
-                              "provider.?returned.?error"
-                              ;; OpenRouter buffer-limit wrapper failures mid-request
-                              ;; (pi RETRYABLE_PROVIDER_ERROR_PATTERN)
-                              "exceeded request buffer limit while retrying upstream"
-                              "network.?error"
-                              "connection.?error"
-                              "connection.?refused"
-                              "connection.?lost"
-                              "connection.?reset"
-                              "connection.?abort"
-                              "broken pipe"
-                              "forcibly closed"
-                              "other side closed"
-                              "fetch failed"
-                              "getaddrinfo"
-                              "ENOTFOUND"
-                              "EAI_AGAIN"
-                              "upstream.?connect"
-                              ;; OpenRouter upstream-routing failures without a status
-                              ;; token in the body ('Upstream request failed: Endpoint
-                              ;; <name> is unavailable.')
-                              "upstream.*unavailable"
-                              "reset before headers"
-                              "socket hang up"
-                              "socket connection was closed"
-                              ;; kmet's SSE wrapper over a mid-stream close (java.net.http
-                              ;; surfaces a dropped connection as a bare "closed")
-                              "stream error: .*closed"
-                              ;; premature end of the response stream (e.g. the JDK
-                              ;; HTTP client's 'EOF reached while reading')
-                              "eof"
-                              "timed? out"
-                              "timeout"
-                              "terminated"
-                              "websocket.?closed"
-                              "websocket.?error"
-                              "ended without"
-                              "header parser received no bytes"
-                              "stream ended before message_stop"
-                              "stream ended before a terminal response event"
-                              "http2 request did not get a response"
-                              "rst.?stream"
-                              "retry delay"
-                              "you can retry your request"
-                              "try your request again"
-                              "please retry your request"
-                              "ResourceExhausted"]))))
-
-(def ^:private overflow-error-regex
-  "Combined regex for context-window overflow error messages.
-   Mirrors pi's OVERFLOW_PATTERNS (packages/ai/src/utils/overflow.ts)."
-  (re-pattern (str "(?i)"
-                   (str/join "|"
-                             ["prompt is too long"
-                              "request_too_large"
-                              "input is too long for requested model"
-                              "exceeds the context window"
-                              "exceeds (?:the )?(?:model'?s )?maximum context length(?: of [\\d,]+ tokens?|\\s*\\([\\d,]+\\))"
-                              "input token count.*exceeds the maximum"
-                              "maximum prompt length is \\d+"
-                              "reduce the length of the messages"
-                              "maximum context length is \\d+ tokens"
-                              "exceeds (?:the )?maximum allowed input length of [\\d,]+ tokens?"
-                              "input \\(\\d+ tokens\\) is longer than the model'?s context length \\(\\d+ tokens\\)"
-                              "exceeds the limit of \\d+"
-                              "exceeds the available context size"
-                              "greater than the context length"
-                              "context window exceeds limit"
-                              "exceeded model token limit"
-                              "too large for model with \\d+ maximum context length"
-                              "prompt has [\\d,]+ tokens?, but the configured context size is [\\d,]+ tokens?"
-                              "model_context_window_exceeded"
-                              "prompt too long; exceeded (?:max )?context length"
-                              "range of input length should be"
-                              "context[_ ]length[_ ]exceeded"
-                              "too many tokens"
-                              "token limit exceeded"
-                              "^4(?:00|13)\\s*(?:status code)?\\s*\\(no body\\)"]))))
-
-(def ^:private non-overflow-error-regex
-  "Combined regex for errors that look like overflow but are actually throttling
-   (e.g. Bedrock 'Throttling error: Too many tokens'). Mirrors pi's
-   NON_OVERFLOW_PATTERNS."
-  (re-pattern (str "(?i)"
-                   (str/join "|"
-                             ["^(Throttling error|Service unavailable):"
-                              "rate limit"
-                              "too many requests"]))))
-
-(defn retryable-error?
-  "True if an error message looks like a transient provider/transport failure
-   worth retrying (rate limit, 5xx, connection loss, timeout, ...).
-   Quota/billing/account-limit errors are never retried.
-   Mirrors pi's isRetryableAssistantError."
-  [error-message]
-  (and (string? error-message)
-       (not (re-find non-retryable-error-regex error-message))
-       (re-find retryable-error-regex error-message)))
-
-(defn context-overflow?
-  "True if an error message indicates a context-window overflow. Overflow is
-   NOT auto-retried (it needs compaction) — mirrors pi's isContextOverflow
-   error-message case."
-  [error-message]
-  (and (string? error-message)
-       (not (re-find non-overflow-error-regex error-message))
-       (re-find overflow-error-regex error-message)))
-
-;; ─── Repeat-loop guard (circuit breaker) ────────────────────────────────────
-;; Detects a model stuck emitting identical tool calls (or repeating its
-;; reasoning) and stops the run instead of burning tokens on a dead end.
-;; kmet-specific — no pi counterpart (dirge has a StormBreaker; research:
-;; MukundaKatta/tool-loop-guard, isr4el-silv4/loop-guard).
-
-(def ^:private loop-guard-exempt-tools
-  "Tools that never trip the repeat-loop guard regardless of repetition
-   count. Read-only inspectors are cheap and harmless — re-reading the same
-   file (or read → edit → read verify patterns) is legitimate work."
-  #{"read"})
-
-(def ^:private loop-guard-reset-tools
-  "Tools whose successful execution resets the repeat-loop guard's memory of
-   other calls. Writes change the world, so a repeated call afterwards (e.g.
-   re-running a test after an edit) observes new state and is not a loop.
-   Only successful (non-error) executions reset; failed or blocked writes
-   change nothing and keep the history. Each writer's own signature is kept,
-   so repeating the identical write itself still trips. Accepted evasion:
-   alternating a repeat with a novel successful write never trips — each
-   successful write counts as progress."
-  #{"write" "edit"})
-
-(declare canonical-json)
-
-(defn loop-guard-signature
-  "Canonical repeat-loop key for a tool call: `name \\0 key-sorted JSON
-   args`. Argument maps differing only in key order count as identical
-   (deep key-sort, pi/dirge canonical_json). Returns nil for exempt tools
-   (read) — they never enter the window."
-  [tool-name args]
-  (when-not (contains? loop-guard-exempt-tools tool-name)
-    (let [args (if (string? args)
-                 ;; OpenAI wire format: the whole args arrive as a JSON string
-                 (let [parsed (try (json/parse-string args true) (catch Exception _ nil))]
-                   (if (map? parsed) parsed args))
-                 args)]
-      (str tool-name "\u0000" (canonical-json args)))))
-
-(defn- canonical-json
-  "Canonical JSON for repeat-loop comparison: keys recursively sorted, so
-   {:a 1 :b 2} and {:b 2 :a 1} compare equal. Args may be a map (Anthropic/
-   Google), a string (OpenAI raw JSON — parsed ONLY at the top level, since
-   only the whole args string arrives as JSON from the provider), or a
-   vector (nested arrays — key-sorted recursively so edit batches with
-   reordered maps still match). Values keep their JSON types (a string
-   \"5\" never collides with the number 5; a nested string containing JSON
-   text stays a string and never collides with a real nested map)."
-  [args]
-  (cond
-    (map? args)
-    (json/generate-string
-     (into (sorted-map)
-           (map (fn [[k v]] [(name k) (canonical-json v)]))
-           args))
-    (vector? args)
-    (json/generate-string (mapv canonical-json args))
-    (string? args)
-    (pr-str args)
-    :else (pr-str args)))
-
-(def ^:private thinking-loop-error
-  "Error message used when the thinking-loop guard cuts a stream. A
-   distinct sentinel so the loop's error path can recognize it without
-   string-matching a provider error."
-  "thinking-loop guard: repeated reasoning detected")
-
-(def ^:private thinking-loop-min-span
-  "Minimum length (chars) of a repeated thinking segment before the guard
-   considers it a loop. Below this, short repeated phrases in normal
-   reasoning pass. Mirrors ollama-loop-guard's repeat-span-min (24)."
-  24)
-
-(def ^:private thinking-loop-delimiters
-  "Chars that end a thinking-loop segment: ASCII sentence/line ends plus
-   CJK full stops (。！？) — a multilingual reasoning loop (e.g. Chinese)
-   repeats with 。-terminated segments and would otherwise be invisible
-   (ollama-loop-guard / llama.cpp use \".!?\\n\"; the CJK additions cover
-   the other major script)."
-  #{\. \! \? \newline \。 \！ \？})
-
-(def ^:private thinking-loop-ws
-  "Whitespace consumed after a segment delimiter (Java \\s, ASCII six)."
-  #{\space \tab \newline \u000B \formfeed \return})
-
-(defn- split-thinking-segments
-  "Split TAIL on thinking-loop delimiters without regex: jolt's irregex is
-   pathological on the lookbehind this replaces (~1 s for a 4000-char
-   buffer there vs ~1.5 ms here). Each segment keeps its delimiter plus
-   following whitespace; thinking-loop? trims anyway, so this is
-   downstream-identical to the old str/split (pinned across a 38-case
-   corpus incl. CJK, CRLF and blank runs on both hosts)."
-  [tail]
-  (let [n (count tail)]
-    (if (zero? n)
-      []
-      (loop [i 0 start 0 out []]
-        (if (>= i n)
-          (let [seg (subs tail start n)]
-            (if (and (seq out) (= "" seg)) out (conj out seg)))
-          (if (contains? thinking-loop-delimiters (nth tail i))
-            (let [j (loop [k (inc i)]
-                      (if (and (< k n) (contains? thinking-loop-ws (nth tail k)))
-                        (recur (inc k))
-                        k))]
-              (recur j j (conj out (subs tail start j))))
-            (recur (inc i) start out)))))))
-
-(defn thinking-loop?
-  "True when the recent THINKING text contains a repeated segment: the same
-   segment (split on sentence/line delimiters, incl. CJK full stops)
-   appearing >= 3 times within the trailing MAX-CHARS window. Catches
-   degenerate reasoning loops where the model repeats the same analysis
-   without producing content (research: ollama-loop-guard, llama.cpp
-   line-level repetition). Pure and total (nil/empty → false)."
-  [thinking & {:keys [max-chars] :or {max-chars 4000}}]
-  (when (string? thinking)
-    (let [tail (subs thinking (max 0 (- (count thinking) max-chars)))
-          segments (->> (split-thinking-segments tail)
-                        (map str/trim)
-                        (remove #(or (empty? %) (< (count %) thinking-loop-min-span))))
-          counts (frequencies segments)]
-      (boolean (some #(>= % 3) (vals counts))))))
-
-(defn loop-guard-filter
-  "Pure repeat-loop detection for one tool-call batch.
-   STATE — {:window [signature...] :suppressed n} (window is newest-last,
-   capped at 4×threshold+1).
-   Returns {:suppressed [tool-call...] :survivors [tool-call...]
-            :state next-state}.
-   A call is suppressed when its signature already appears (threshold-1)
-   times in the window — i.e. the threshold-th identical call. The window
-   is big enough (4×threshold+1) that alternating/cyclic patterns
-   (1,2,1,2,1,2 / 1,2,3,1,2,3 / up to 2×threshold distinct calls) also
-   trip: each signature's occurrences accumulate in the window until one
-   reaches threshold. Exempt tools (read) never count."
-  [{:keys [window suppressed]} threshold tool-calls]
-  (let [window-size (inc (* 4 threshold))
-        result (reduce (fn [{:keys [window suppressed-calls] :as acc} tc]
-                         (if-let [sig (loop-guard-signature (:name tc) (:arguments tc))]
-                           (let [count-in-window (count (filter #(= sig %) window))]
-                             (if (>= count-in-window (dec threshold))
-                               (assoc acc :suppressed-calls (conj suppressed-calls tc))
-                               (assoc acc :window (conj window sig))))
-                           acc))
-                       {:window window :suppressed-calls []}
-                       tool-calls)
-        ;; window trimmed to window-size (drop oldest)
-        window (let [w (:window result)]
-                 (if (> (count w) window-size) (subvec w (- (count w) window-size)) w))
-        ;; survivors are the non-suppressed calls in source order — rebuild
-        ;; from the input so :survivors stays in original order
-        suppressed-calls (:suppressed-calls result)
-        suppressed-set (set (map :id suppressed-calls))
-        survivors (into [] (remove #(contains? suppressed-set (:id %))) tool-calls)]
-    {:suppressed suppressed-calls
-     :survivors survivors
-     :state {:window window
-             :suppressed (+ suppressed (count suppressed-calls))}}))
+;; ─── Repeat-loop guard: trip handling ──────────────────────────────────────
+;; Detection (signatures, sliding window, thinking-loop) lives in
+;; kmet.app.loop-guard; settling the run stays here because it emits the
+;; :loop-guard UI event.
 
 (defn loop-guard-give-up!
   "Settle the run after the repeat-loop guard trips: set the explanation as
@@ -1186,7 +893,7 @@ Be precise and concise in your responses."}}]
       ;; / curl --max-time) — pi: timeoutMs ?? httpIdleTimeoutMs. The idle
       ;; timeout above is the separate per-byte read deadline (undici
       ;; bodyTimeout) that resets on every received byte.
-      :total-timeout-ms (llm-total-timeout-ms agent)
+      :total-timeout-ms (retry/llm-total-timeout-ms @(:cfg agent))
       :thinking @(:thinking agent)
       :session-id (some-> (:session agent) :id)
       :on-text (fn [t]
@@ -1221,10 +928,10 @@ Be precise and concise in your responses."}}]
                      ;; must NOT be retryable (terminal-error! path).
                      (when (and (:thinking-loop-guard-enabled @(:cfg agent))
                                 (not (realized? done-promise))
-                                (thinking-loop? @thinking-buf))
+                                (loop-guard/thinking-loop? @thinking-buf))
                        (reset! guard-trip true)
                        (deliver done-promise
-                                {:error thinking-loop-error
+                                {:error loop-guard/thinking-loop-error
                                  :text @text-buf
                                  :thinking (str/trim @thinking-buf)
                                  :tool-calls (tc-flush)
@@ -1720,78 +1427,6 @@ Be precise and concise in your responses."}}]
     (kf @(:provider agent))
     (cfg/get-api-key @(:provider agent))))
 
-(defn- backoff-sleep!
-  "Sleep delay-ms in 100ms increments, aborting early if the cancel signal is
-   set. Returns true if the full delay elapsed, false if cancelled."
-  [agent delay-ms]
-  (let [end-ms (+ (System/currentTimeMillis) delay-ms)]
-    (loop []
-      (if @(:signal agent)
-        false
-        (let [remaining (- end-ms (System/currentTimeMillis))]
-          (if (<= remaining 0)
-            true
-            (do (Thread/sleep (min 100 remaining))
-                (recur))))))))
-
-(defn- llm-total-timeout-ms
-  "Total request deadline for one LLM call (pi: SDK timeoutMs ??
-   httpIdleTimeoutMs — the whole-request wall-clock the transport enforces;
-   the per-byte idle timeout is separate and resets on every received byte).
-   Mirrors the transport's own resolution (call-llm → api builders): the
-   configured :http-total-timeout-ms wins when positive, else the idle
-   timeout, else no deadline (MAX_VALUE so the deref never fires early — the
-   transport gets nil and waits forever, pi: httpIdleTimeoutMs 0 →
-   effectively disabled)."
-  [agent]
-  (let [total (:http-total-timeout-ms @(:cfg agent))
-        idle (or (:http-idle-timeout-ms @(:cfg agent)) 0)]
-    (cond
-      (and total (pos? total)) total
-      (pos? idle) idle
-      :else Integer/MAX_VALUE)))
-
-(defn- normalize-llm-result
-  "Fold a provider-delivered :error stop-reason (content_filter /
-   network_error / unknown — pi mapStopReason) that reached the loop
-   without an :error key (e.g. another wire delivered it via on-done)
-   into :error so the retry/error path engages (pi pushes {type: \"error\"}
-   for these instead of done). Pure."
-  [raw-result]
-  (if (and (nil? (:error raw-result))
-           (= :error (:stop-reason raw-result)))
-    (assoc raw-result :error
-           (or (:error-message raw-result)
-               (str "Provider stopped with: " (name (:stop-reason raw-result)))))
-    raw-result))
-
-(defn- retry-decision
-  "Classify an errored LLM result into the recovery action (pure — no side
-   effects; the caller performs them):
-     {:kind :overflow-recover} — context overflow, not yet recovered:
-       compact once, then retry the same turn
-     {:kind :backoff :attempt n :delay-ms ms :max-attempts max-retries} —
-       retryable within budget: exponential backoff, same turn
-     {:kind :terminal} — non-retryable or retries exhausted"
-  [{:keys [err retry-count max-retries base-delay-ms overflow-recovered
-           has-session]}]
-  (cond
-    (and (not overflow-recovered)
-         (context-overflow? err)
-         has-session)
-    {:kind :overflow-recover}
-
-    (and (<= (inc retry-count) max-retries)
-         (not (context-overflow? err))
-         (retryable-error? err))
-    (let [attempt (inc retry-count)
-          delay-ms (* base-delay-ms
-                      (long (Math/pow 2 (dec attempt))))]
-      {:kind :backoff :attempt attempt :delay-ms delay-ms
-       :max-attempts max-retries})
-
-    :else {:kind :terminal}))
-
 (defn- prepare-run!
   "Per-run setup (pi: _systemPromptOverride / _overflowRecoveryAttempted
    resets, the submitted user message, before-agent-start hook overrides +
@@ -1862,7 +1497,7 @@ Be precise and concise in your responses."}}]
           guard-enabled? (:loop-guard-enabled @(:cfg agent))
           {:keys [suppressed survivors state]}
           (if guard-enabled?
-            (loop-guard-filter @(:loop-guard agent) threshold tool-calls)
+            (loop-guard/loop-guard-filter @(:loop-guard agent) threshold tool-calls)
             {:suppressed [] :survivors tool-calls :state @(:loop-guard agent)})
           suppressed? (seq suppressed)
           guard-result (fn [tc]
@@ -1890,9 +1525,9 @@ Be precise and concise in your responses."}}]
           reset-sigs (if guard-enabled?
                        (into #{}
                              (keep (fn [[tc res]]
-                                     (when (and (contains? loop-guard-reset-tools (:name tc))
+                                     (when (and (contains? loop-guard/loop-guard-reset-tools (:name tc))
                                                 (not (:is-error res)))
-                                       (loop-guard-signature (:name tc) (:arguments tc)))))
+                                       (loop-guard/loop-guard-signature (:name tc) (:arguments tc)))))
                              (map vector survivors exec-results))
                        #{})
           ;; Single state write: the pre-exec intermediate is unobservable
@@ -2085,8 +1720,8 @@ Be precise and concise in your responses."}}]
                                         (do (reset! text-buf "")
                                             (call-llm agent (resolve-api-key agent) text-buf on-text on-thinking))]
                                     (reset! (:active-call agent) call)
-                                    (let [result (normalize-llm-result
-                                                  (deref promise (llm-total-timeout-ms agent) :timeout))]
+                                    (let [result (retry/normalize-llm-result
+                                                  (deref promise (retry/llm-total-timeout-ms @(:cfg agent)) :timeout))]
                                       (reset! (:active-call agent) nil)
                                       (cond
                                         (:cancelled result)
@@ -2106,7 +1741,7 @@ Be precise and concise in your responses."}}]
                                         ;; surfaces after exhaustion) — never a
                                         ;; silent hard abort.
                                         (let [err (str "LLM call timed out after "
-                                                       (llm-total-timeout-ms agent) "ms")]
+                                                       (retry/llm-total-timeout-ms @(:cfg agent)) "ms")]
                                           ;; The deref sentinel (:timeout) carries no
                                           ;; partials — synthesize an errored result so
                                           ;; the abandoned-attempt recording and the
@@ -2114,7 +1749,7 @@ Be precise and concise in your responses."}}]
                                           (record-abandoned-attempt!
                                            agent (assoc {} :error err) :error)
                                           (let [{:keys [kind] :as action}
-                                                (retry-decision
+                                                (retry/retry-decision
                                                  {:err err
                                                   :retry-count @(:retry-count agent)
                                                   :max-retries (:max-retries @(:cfg agent))
@@ -2129,7 +1764,7 @@ Be precise and concise in your responses."}}]
                                                              :max-attempts max-attempts
                                                              :delay-ms delay-ms
                                                              :error-message err})
-                                                (if (backoff-sleep! agent delay-ms)
+                                                (if (retry/backoff-sleep! (:signal agent) delay-ms)
                                                   ;; Same turn, same context — no new user message
                                                   (recur t prev-tool-calls must-run)
                                                   ;; Cancelled during backoff
@@ -2145,7 +1780,7 @@ Be precise and concise in your responses."}}]
                                               (terminal-error! agent err on-error agent-end))))
 
                                         (:error result)
-                                        (if (= thinking-loop-error (:error result))
+                                        (if (= loop-guard/thinking-loop-error (:error result))
                                           ;; Thinking-loop guard tripped: not a transient
                                           ;; error — settle the run with the explanation
                                           ;; (no auto-retry, no red error line; the
@@ -2164,7 +1799,7 @@ Be precise and concise in your responses."}}]
                                               ;; keeping it in the file)
                                                 _ (record-abandoned-attempt! agent result :error)
                                                 {:keys [kind] :as action}
-                                                (retry-decision
+                                                (retry/retry-decision
                                                  {:err err
                                                   :retry-count @(:retry-count agent)
                                                   :max-retries (:max-retries @(:cfg agent))
@@ -2188,7 +1823,7 @@ Be precise and concise in your responses."}}]
                                                              :max-attempts max-attempts
                                                              :delay-ms delay-ms
                                                              :error-message err})
-                                                (if (backoff-sleep! agent delay-ms)
+                                                (if (retry/backoff-sleep! (:signal agent) delay-ms)
                                                 ;; Same turn, same context — no new user message
                                                   (recur t prev-tool-calls must-run)
                                                 ;; Cancelled during backoff

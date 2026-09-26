@@ -6,6 +6,7 @@
             [babashka.fs :as fs]
             [kmet.libs.sse :as sse]
             [kmet.ai.auth :as auth]
+            [kmet.app.retry :as retry]
             [kmet.libs.aws-sigv4 :as aws-sigv4]
             [kmet.libs.dynamic-value :as dynamic-value]
             [kmet.ai.llm :as llm]
@@ -804,9 +805,9 @@
       (t/is (= "Exceptional status code: 400" (te (http-err nil)))
             "missing body keeps the original message")
       ;; the surfaced overflow message must classify as a context overflow
-      (t/is (loop/context-overflow? (te (http-err overflow)))
+      (t/is (retry/context-overflow? (te (http-err overflow)))
             "the surfaced body feeds the overflow classifier")
-      (t/is (not (loop/context-overflow? (te (http-err pairing))))
+      (t/is (not (retry/context-overflow? (te (http-err pairing))))
             "other provider errors are not misclassified as overflow"))
     ;; 429/5xx get an 'HTTP <status>: ' prefix — the retry classifier's
     ;; status-code patterns must match even opaque gateway bodies that carry
@@ -817,7 +818,7 @@
                                  {:status status :body body}))]
       (t/is (= "HTTP 500: ext_proc failed: no more response messages"
                (te (http-status 500 "ext_proc failed: no more response messages"))))
-      (t/is (loop/retryable-error?
+      (t/is (retry/retryable-error?
              (te (http-status 500 "ext_proc failed: no more response messages")))
             "opaque 500 bodies classify as retryable via the status token")
       (t/is (= "HTTP 502: Bad Gateway" (te (http-status 502 "Bad Gateway"))))
@@ -825,8 +826,8 @@
       (t/is (= "HTTP 504: Gateway Timeout" (te (http-status 504 "Gateway Timeout"))))
       (t/is (= "HTTP 429: slow down" (te (http-status 429 "slow down")))
             "429 is prefixed too — the regex's '429' token now always matches")
-      (t/is (loop/retryable-error? (te (http-status 429 "slow down"))))
-      (t/is (loop/retryable-error?
+      (t/is (retry/retryable-error? (te (http-status 429 "slow down"))))
+      (t/is (retry/retryable-error?
              "Proxy request failed: exceeded request buffer limit while retrying upstream")
             "OpenRouter buffer-limit wrapper failures retry (pi RETRYABLE pattern)")
       ;; JSON error bodies keep the provider message, prefixed
@@ -834,7 +835,7 @@
                (te (http-status 500 "{\"error\":{\"message\":\"something exploded\"}}"))))
       ;; quota/billing bodies stay non-retryable even on 5xx (the
       ;; non-retryable quota patterns take precedence over the status token)
-      (t/is (not (loop/retryable-error? (te (http-status 500 "billing suspended"))))))))
+      (t/is (not (retry/retryable-error? (te (http-status 500 "billing suspended"))))))))
 
 ;; ─── Thinking level machinery (pi: clampThinkingLevel) ─────────────────────
 
