@@ -5,7 +5,7 @@
             [clojure.test :as t]
             [kmet.core :as core]
             [kmet.ai.models :as models]
-            [kmet.libs.version :as version]))
+            [kmet.version :as version]))
 
 (t/deftest test-format-token-count
   (t/is (= "200K" (@#'core/format-token-count 200000)))

@@ -1,10 +1,10 @@
-(ns kmet.libs.test-context
+(ns kmet.app.test-context
   (:require [clojure.test :as t]
             [clojure.string :as str]
             [clojure.java.io :as io]
             [babashka.fs :as fs]
             [babashka.process :as proc]
-            [kmet.libs.context :as context]
+            [kmet.app.context :as context]
             [kmet.test-utils :refer [slash]]))
 
 (defn- tmp-dir

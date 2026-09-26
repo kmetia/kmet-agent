@@ -15,8 +15,8 @@
             [kmet.libs.aws-sigv4 :as aws-sigv4]
             [kmet.libs.edn-store :as cred]
             [kmet.libs.dynamic-value :as dynamic-value]
-            [kmet.libs.hooks :as hooks]
-            [kmet.libs.num :as num]
+            [kmet.ai.hooks :as hooks]
+            [kmet.libs.host :as host]
             [kmet.ai.google-adc :as google-adc]))
 
 ;; ─── Env var table (pi env-api-keys.ts) ────────────────────────────────────
@@ -145,7 +145,7 @@
        (if (= :oauth (:type credential))
          (and (string? (:access credential))
               (string? (:refresh credential))
-              (num/finite? (:expires credential)))
+              (host/finite? (:expires credential)))
          (or (nil? (:key credential)) (string? (:key credential))))))
 
 (defn load-auth!

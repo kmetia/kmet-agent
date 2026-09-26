@@ -42,9 +42,9 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             ;; shared with the babashka packager: one artifact-version rule
-            ;; (kmet.libs.version) and one termux probe
+            ;; (kmet.version) and one termux probe
             [kmet.tasks.build :as build]
-            [kmet.libs.version :as version-lib]))
+            [kmet.version :as version-lib]))
 
 (def ^:private dist-dir "dist")
 (def ^:private scratch-root "target/jolt")

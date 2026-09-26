@@ -6,7 +6,7 @@
    exceeds the terminal height the render loop scrolls it natively into the
    terminal scrollback, keeping the viewport pinned to the document end."
   (:require [kmet.tui.protocols :as protocols]
-            [kmet.libs.num :as num]))
+            [kmet.libs.host :as host]))
 
 ;; ─── Stack entries ─────────────────────────────────────────────────────────
 
@@ -35,7 +35,7 @@
   (cond
     (nil? v) fallback
     (not (number? v)) fallback
-    (not (num/finite? v)) fallback
+    (not (host/finite? v)) fallback
     :else (max 0 (long (Math/floor (double v))))))
 
 (defn- clamp-size

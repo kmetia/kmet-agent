@@ -41,7 +41,7 @@
             [kmet.app.ui.status-indicator :as status-indicator]
             [kmet.app.ui.subs :as subs]
             [kmet.app.ui.tool-execution :as tool-execution]
-            [kmet.libs.context :as context]
+            [kmet.app.context :as context]
             [kmet.modes.interactive.commands :as builtins]
             [kmet.modes.interactive.resources :as resources]
             [kmet.modes.interactive.session-admin :as session-admin]

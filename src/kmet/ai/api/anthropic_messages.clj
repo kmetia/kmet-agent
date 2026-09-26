@@ -4,7 +4,7 @@
    [kmet.ai.auth :as auth]
    [kmet.libs.json :as json]
    [kmet.ai.http :as ai-http]
-   [kmet.libs.sse :as sse]
+   [kmet.ai.api.sse :as sse]
    [clojure.string :as str]
    [kmet.ai.api.shared :refer [anthropic-thinking bash-execution-text endpoint-url image-block? apply-before-provider-request-hook request-headers tool->anthropic-schema transport-error-message usage-with-cost]]))
 

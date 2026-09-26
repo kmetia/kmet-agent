@@ -904,7 +904,7 @@
       (let [result (load "tui" "(ns good-tui\n  (:require [kmet.tui.components.text :as text]\n            [kmet.tui.protocols :as protocols]))\n(defn init [api]\n  (let [c (text/make-text \"hi\")]\n    (when-not (vector? (protocols/render c 20))\n      (throw (ex-info \"render failed\" {})))))\n")]
         (t/is (nil? (:error result)) (str "loaded: " (:error result)))))
     (testing "valid kmet.libs.* requires load and share the real library"
-      (let [result (load "lib" "(ns good-lib\n  (:require [kmet.libs.hash :as hash]\n            [kmet.libs.yaml :as yaml]))\n(defn init [api]\n  (let [s (hash/short-hash \"hi\")]\n    (when-not (string? s)\n      (throw (ex-info \"hash failed\" {})))))\n")]
+      (let [result (load "lib" "(ns good-lib\n  (:require [kmet.libs.host :as host]\n            [kmet.libs.yaml :as yaml]))\n(defn init [api]\n  (let [s (host/runtime-name)]\n    (when-not (string? s)\n      (throw (ex-info \"host failed\" {})))))\n")]
         (t/is (nil? (:error result)) (str "loaded: " (:error result)))))
     (testing "kmet.libs.archive loads from SCI and extracts zips (no ZipFile interop in extensions)"
       (let [result (load "archive" (str "(ns good-archive\n  (:require [babashka.fs :as fs]\n"

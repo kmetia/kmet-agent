@@ -3,7 +3,7 @@
   (:require
    [kmet.libs.json :as json]
    [kmet.ai.http :as ai-http]
-   [kmet.libs.sse :as sse]
+   [kmet.ai.api.sse :as sse]
    [clojure.string :as str]
    [kmet.libs.aws-sigv4 :as aws-sigv4]
    [kmet.ai.constrained-sampling :as cs]

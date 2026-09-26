@@ -10,9 +10,9 @@
    [kmet.libs.json :as json]
    [kmet.libs.http :as lib-http]
    [kmet.ai.models :as models]
-   [kmet.libs.usage :as usage]
+   [kmet.ai.usage :as usage]
    [kmet.ai.constrained-sampling :as cs]
-   [kmet.libs.hash :as hash]
+   [kmet.ai.hash :as hash]
    [clojure.string :as str]))
 
 ;; ─── Provider-event hooks (pi: context / before_provider_request) ────────

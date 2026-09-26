@@ -3,7 +3,7 @@
   (:require
    [kmet.libs.json :as json]
    [kmet.ai.http :as ai-http]
-   [kmet.libs.sse :as sse]
+   [kmet.ai.api.sse :as sse]
    [clojure.string :as str]
    [kmet.ai.constrained-sampling :as cs]
    [kmet.ai.api.shared :refer [bash-execution-text content-text effort-value endpoint-url image-block? off-explicitly-null? apply-before-provider-request-hook request-headers responses-events-handler transport-error-message]]))

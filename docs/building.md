@@ -95,7 +95,7 @@ Windows 10+). Jolt compiles under `target/jolt/<platform>/<mode>/`; `--smoke` ru
 built binary (`--list-models` plus `--version`) before it is announced.
 
 Versioning: artifacts are stamped with **jolt's checkout rule**
-(`kmet.libs.version`, jolt's `tools/version.sh`), so the base version reads
+(`kmet.version`, jolt's `tools/version.sh`), so the base version reads
 like the compiler's — the nearest `v<digit>` release tag as
 `git describe --tags --dirty` reports it (`v0.8.0` on the tag,
 `v0.8.0-56-g63374117` past it, `-dirty` with uncommitted edits), `dev-g<sha>`

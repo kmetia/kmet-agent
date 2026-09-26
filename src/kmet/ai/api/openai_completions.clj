@@ -3,7 +3,7 @@
   (:require
    [kmet.libs.json :as json]
    [kmet.ai.http :as ai-http]
-   [kmet.libs.sse :as sse]
+   [kmet.ai.api.sse :as sse]
    [kmet.ai.api.shared :refer [endpoint-url max-tokens-key openai-messages openai-messages-with-reasoning openai-thinking-params resolved-openai-compat apply-before-provider-request-hook request-headers tool->openai-schema transport-error-message usage-with-cost]]))
 
 (defn openai-payload

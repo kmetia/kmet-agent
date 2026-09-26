@@ -1,10 +1,10 @@
 (ns kmet.ai.test-llm
   (:require [clojure.test :as t]
-            [kmet.libs.hash :as hash]
+            [kmet.ai.hash :as hash]
             [kmet.libs.json :as json]
             [clojure.string :as str]
             [babashka.fs :as fs]
-            [kmet.libs.sse :as sse]
+            [kmet.ai.api.sse :as sse]
             [kmet.ai.auth :as auth]
             [kmet.app.retry :as retry]
             [kmet.libs.aws-sigv4 :as aws-sigv4]

@@ -234,30 +234,22 @@
     kmet.libs.aws-sigv4
     kmet.libs.clipboard
     kmet.libs.concurrent
-    kmet.libs.context
     kmet.libs.crypto
-    kmet.libs.diff
     kmet.libs.dynamic-value
     kmet.libs.edit-diff
     kmet.libs.edn-store
-    kmet.libs.edn-writer
-    kmet.libs.hash
     kmet.libs.highlight
-    kmet.libs.hooks
     kmet.libs.host
     kmet.libs.http
     kmet.libs.json
     kmet.libs.jsonrpc
     kmet.libs.markdown
-    kmet.libs.num
     kmet.libs.oauth
     kmet.libs.process
     kmet.libs.reakt
     kmet.libs.sse
     kmet.libs.terminal
     kmet.libs.terminal-image
-    kmet.libs.usage
-    kmet.libs.version
     kmet.libs.yaml])
 
 (defn- ns-path

@@ -3,7 +3,7 @@
   (:require
    [kmet.libs.json :as json]
    [kmet.ai.http :as ai-http]
-   [kmet.libs.sse :as sse]
+   [kmet.ai.api.sse :as sse]
    [clojure.string :as str]
    [kmet.ai.constrained-sampling :as cs]
    [kmet.ai.api.shared :refer [bash-execution-text content-text endpoint-url google-supports-strict-tool-sampling? image-block? apply-before-provider-request-hook request-headers tool->google-schema transport-error-message usage-with-cost]]))

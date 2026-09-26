@@ -1,4 +1,4 @@
-(ns kmet.libs.edn-writer
+(ns kmet.ai.edn-writer
   "Deterministic EDN serialization for committed data files (the model-catalog
    generators): canonical key ordering, normalized number literals, and a
    stable width-limited layout — the same data always renders to the same

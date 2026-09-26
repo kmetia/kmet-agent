@@ -12,7 +12,7 @@
   (:require [clojure.string :as str]
             [clojure.edn :as edn]
             [kmet.app.session :as session]
-            [kmet.libs.usage :as usage]))
+            [kmet.ai.usage :as usage]))
 
 (def ^:private image-chars 4800)
 (def ^:private tool-result-max-chars 2000)

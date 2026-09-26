@@ -4,7 +4,7 @@
   (:require [clojure.string :as str]
             [babashka.fs :as fs]
             [kmet.config :as cfg]
-            [kmet.libs.context :as context]
+            [kmet.app.context :as context]
             [kmet.app.skills :as skills]
             [kmet.app.prompts :as prompts]
             [kmet.app.extensions :as extensions]))

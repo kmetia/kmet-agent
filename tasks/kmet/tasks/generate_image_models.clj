@@ -15,7 +15,7 @@
   (:require [babashka.fs :as fs]
             [kmet.libs.json :as json]
             [clojure.edn :as edn]
-            [kmet.libs.edn-writer :as edn-w]
+            [kmet.ai.edn-writer :as edn-w]
             [kmet.libs.http :as http]))
 
 (def openrouter-base-url "https://openrouter.ai/api/v1")
@@ -80,7 +80,7 @@
     (parse-openrouter-image-models (json/parse-string (:body response) true) strict)))
 
 (defn- write-catalog!
-  "Deterministic EDN for the committed catalog via kmet.libs.edn-writer —
+  "Deterministic EDN for the committed catalog via kmet.ai.edn-writer —
    the same canonical key order / normalized numbers / escaping as the
    provider catalogs (no hand-built string buffer). Sorted by id, one
    :generated-at timestamp. Content-sensitive: when only the timestamp

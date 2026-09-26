@@ -8,7 +8,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [kmet.libs.version :as version-lib]
+            [kmet.version :as version-lib]
             [kmet.tasks.build :as build]))
 
 (deftest ^:bb-only platform-for-names-os-and-arch
@@ -110,7 +110,7 @@
         (testing "the jar has the generated entry, the runner and the tests"
           (is (contains? entries "kmet/tasks/test_main.clj"))
           (is (contains? entries "kmet/tasks/runner.clj"))
-          (is (contains? entries "kmet/libs/test_num.clj"))
+          (is (contains? entries "kmet/ai/test_sse.clj"))
           (is (contains? entries "kmet/core.clj")))
         (testing "the entry point is the test runner"
           (is (str/includes? manifest "Main-Class: kmet.tasks.test-main")))))))

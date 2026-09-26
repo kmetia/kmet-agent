@@ -1,4 +1,4 @@
-(ns kmet.libs.version
+(ns kmet.version
   "kmet's checkout version — jolt's rule (jolt tools/version.sh), so the base
    version kmet stamps on artifacts (`kmet-<ver>-<host><host-ver>-<platform>`)
    and reports from `kmet --version` reads like the compiler's:

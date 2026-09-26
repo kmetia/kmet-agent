@@ -1,4 +1,4 @@
-(ns kmet.libs.hash
+(ns kmet.ai.hash
   "Deterministic hashing helpers (pi: packages/ai/src/utils/hash.ts).
    Pure Clojure — no JDK interop — so this namespace loads on both
    babashka and Jolt.")

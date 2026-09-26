@@ -27,7 +27,7 @@
             [kmet.app.ui.model-selector :refer [sync-footer-model!]]
             [kmet.app.ui.tree-selector :refer [show-session-tree]]
             [kmet.app.skills :as skills]
-            [kmet.libs.usage :as usage]
+            [kmet.ai.usage :as usage]
             [kmet.modes.interactive.state :as state]
             [kmet.modes.interactive.status :as status]))
 

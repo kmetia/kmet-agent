@@ -22,7 +22,7 @@
             [kmet.libs.json :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]
-            [kmet.libs.edn-writer :as edn-w]
+            [kmet.ai.edn-writer :as edn-w]
             [kmet.libs.http :as http]))
 
 ;; ─── Provider metadata (kmet decisions, not derivable from models.dev) ─────

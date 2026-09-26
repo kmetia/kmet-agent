@@ -1,5 +1,6 @@
 (ns kmet.libs.host
-  "Which runtime hosts this kmet process.
+  "Which runtime hosts this kmet process, plus the portable runtime predicates
+   that paper over host differences.
 
    kmet runs on babashka and on Jolt: Jolt defines the
    clojure.core/*jolt-version* var (jolt-port.md), babashka does not — the
@@ -7,7 +8,8 @@
    UI surfaces that name or badge the host (the welcome header logo, the
    footer's К mark) share this one detection instead of repeating it, and
    platform-specific branches (the terminal backend pick, app seams) share
-   windows?."
+   windows?. finite? is the same kind of shim: Double/isFinite is unshimmed
+   on Jolt, so the isNaN/isInfinite statics compose it portably."
   (:require [babashka.fs :as fs]))
 
 (defn jolt?
@@ -34,3 +36,12 @@
    the runtime name's initial — \"b\" on babashka, \"j\" on Jolt."
   []
   (subs (runtime-name) 0 1))
+
+(defn finite?
+  "True when V is a finite number (portable replacement for
+   Double/isFinite — composes the isNaN/isInfinite statics)."
+  [v]
+  (and (number? v)
+       (let [d (double v)]
+         (not (or (Double/isNaN d) (Double/isInfinite d))))))
+

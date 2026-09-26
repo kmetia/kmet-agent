@@ -2,7 +2,7 @@
   "EDNL session storage — line-delimited EDN with parent-child IDs for tree branching.
    Each entry is an EDN map on one line: {:id str :parent-id str-or-nil :role keyword ...}
    Port of @earendil-works/pi-agent session storage."
-  (:require [kmet.libs.usage :as usage]
+  (:require [kmet.ai.usage :as usage]
             [clojure.java.io :as io]
             [clojure.edn :as edn]
             [clojure.string :as str]

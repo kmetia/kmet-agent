@@ -6,7 +6,7 @@
    [kmet.ai.http :as ai-http]
    [kmet.ai.google-adc :as google-adc]
    [kmet.ai.auth :as auth]
-   [kmet.libs.sse :as sse]
+   [kmet.ai.api.sse :as sse]
    [clojure.string :as str]
    [kmet.ai.constrained-sampling :as cs]
    [kmet.ai.api.google-generative-ai :refer [google-messages google-thinking-config]]

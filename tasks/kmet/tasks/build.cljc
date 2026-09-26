@@ -28,7 +28,7 @@
             [clojure.string :as str]
             [kmet.libs.archive :as archive]
             [kmet.libs.http :as http]
-            [kmet.libs.version :as version-lib]))
+            [kmet.version :as version-lib]))
 
 (def ^:private gh-api-url
   "https://api.github.com/repos/babashka/babashka/releases/latest")
@@ -146,7 +146,7 @@
 ;; ─── Version ───────────────────────────────────────────────────────────────
 
 (defn version
-  "Artifact version string: kmet.libs.version/artifact-version (jolt's
+  "Artifact version string: kmet.version/artifact-version (jolt's
    checkout rule, `v` stripped) — the base version artifact names carry."
   []
   (version-lib/artifact-version))

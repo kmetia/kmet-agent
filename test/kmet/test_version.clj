@@ -1,11 +1,11 @@
-(ns kmet.libs.test-version
-  "kmet.libs.version — jolt's checkout-version rule (jolt tools/version.sh):
+(ns kmet.test-version
+  "kmet.version — jolt's checkout-version rule (jolt tools/version.sh):
    the one definition behind artifact names and `kmet --version`."
   (:require [babashka.fs :as fs]
             [babashka.process :as p]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [kmet.libs.version :as version]))
+            [kmet.version :as version]))
 
 (deftest describe-normalization
   (testing "a release tag stands as git describe reports it, v kept"

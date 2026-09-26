@@ -1,4 +1,4 @@
-(ns kmet.libs.context
+(ns kmet.app.context
   "Project context files (AGENTS.md/CLAUDE.md) loaded into the system prompt.
    pi: core/resource-loader.js loadProjectContextFiles + loadContextFileFromDir
    + findShadowedContextFile + findGitPaths (footer-data-provider.js)."

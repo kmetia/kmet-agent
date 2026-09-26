@@ -8,7 +8,7 @@
             [kmet.ai.models :as models]
             [kmet.app.skills :as skills]
             [kmet.app.tools.core :as tools]
-            [kmet.libs.context :as context]
+            [kmet.app.context :as context]
             [kmet.app.prompts :as prompts]
             [kmet.app.extensions :as extensions]
             [kmet.app.packages :as packages]

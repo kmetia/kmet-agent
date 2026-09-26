@@ -17,11 +17,11 @@ src/kmet/
 ├── debug.clj           — Debug/error logging
 ├── extension.clj       — the extension contract root (`kmet.extension`)
 ├── package_manager.clj — the install/remove/list/config CLI
-├── libs/               — Generic, self-contained helpers (diff, process tree,
-│                         SSE parsing, the outbound-HTTP boundary, terminal
-│                         protocol + images, YAML frontmatter, EDN store +
-│                         file locks, hashing, highlighting, markdown,
-│                         crypto, AWS SigV4, ...)
+├── libs/               — Generic, self-contained helpers (edit diffing,
+│                         process tree, SSE framing, the outbound-HTTP
+│                         boundary, terminal protocol + images, YAML
+│                         frontmatter, EDN store + file locks, highlighting,
+│                         markdown, crypto, AWS SigV4, ...)
 ├── modes/              — Entry modes: interactive TUI + print mode
 │   ├── interactive.clj — interactive TUI entry: run + session start-up
 │   │                     (pi: modes/interactive/interactive-mode.ts)
@@ -47,10 +47,13 @@ src/kmet/
 │   ├── oauth.clj       — OAuthAuth record, device-code + PKCE loopback flows
 │   ├── llm.clj + api/  — LLM dispatcher + per-wire API builders
 │   │                     (openai/anthropic/google/responses/codex/azure/
-│   │                     bedrock/vertex/mistral)
+│   │                     bedrock/vertex/mistral; api/sse.clj holds the
+│   │                     provider stream parsers over kmet.libs.sse)
 │   ├── image_models.clj — image-generation registry + :openrouter-images
 │   │                     wire (image_model_data/ catalog)
 │   ├── google_adc.clj  — vertex Application Default Credentials
+│   ├── usage.clj       — provider usage normalization (pi: normalizeUsage)
+│   ├── edn_writer.clj / hash.clj — deterministic catalog EDN, pi-parity hashes
 │   ├── attribution.clj / constrained_sampling.clj / hooks.clj —
 │   │                     provider attribution headers, tool JSON-schema
 │   │                     constraints, injectable provider-event slots

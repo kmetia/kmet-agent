@@ -42,7 +42,7 @@
             [kmet.app.ui.subs :as subs]
             [kmet.app.ui.thinking-selector :as thinking-selector]
             [kmet.libs.clipboard :as clipboard]
-            [kmet.libs.context :as context]
+            [kmet.app.context :as context]
             [kmet.libs.process :as process]
             [kmet.libs.terminal :as lib-term]
             [kmet.modes.interactive.auth :as auth]

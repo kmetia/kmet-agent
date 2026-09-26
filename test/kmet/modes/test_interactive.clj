@@ -31,7 +31,7 @@
             [kmet.app.packages :as packages]
             [kmet.app.skills :as skills]
             [kmet.app.prompts :as prompts]
-            [kmet.libs.context :as context]
+            [kmet.app.context :as context]
             [kmet.libs.host :as host]
             [kmet.app.extensions :as extensions]
             [kmet.app.theme-controller :as theme-ctrl]

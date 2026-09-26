@@ -6,7 +6,7 @@
   (:require [clojure.string :as str]
             [babashka.process :as proc]
             [kmet.app.session :as session]
-            [kmet.libs.usage :as usage]
+            [kmet.ai.usage :as usage]
             [kmet.app.compaction :as compaction]))
 
 (defrecord FooterDataProvider [cwd-atom git-branch-atom git-branch-resolved?-atom

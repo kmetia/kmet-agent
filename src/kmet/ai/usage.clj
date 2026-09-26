@@ -1,4 +1,4 @@
-(ns kmet.libs.usage
+(ns kmet.ai.usage
   "Usage normalization (pi: normalizeUsage — packages/ai). Normalizes a
    message :usage map (OpenAI chat, OpenAI responses, Anthropic, Google or
    Bedrock shapes) into {:input :output :cache-read :cache-write :cost},

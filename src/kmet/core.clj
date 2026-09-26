@@ -14,7 +14,7 @@
             [kmet.ai.models :as models]
             [kmet.app.model-resolver :as resolver]
             [kmet.debug :as debug]
-            [kmet.libs.version :as version]
+            [kmet.version :as version]
             [kmet.tui.fuzzy :as fuzzy]
             [clojure.java.io :as io]
             [clojure.string :as str]))
@@ -34,7 +34,7 @@
 (defn- kmet-version
   "The version this kmet is: the baked kmet/version.txt when one is packaged
    (bb dist writes it into the uberjar, jolt dist embeds it), else the
-   checkout's describe (kmet.libs.version) — a source run answers the same
+   checkout's describe (kmet.version) — a source run answers the same
    rule from git. A packaged binary missing its bake (a bare `jolt build`
    without the packager) says `dev` rather than describe whatever repository
    the process happens to sit in."

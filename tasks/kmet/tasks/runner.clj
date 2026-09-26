@@ -58,7 +58,7 @@
     kmet.ai.test-models
     kmet.app.test-model-resolver
     kmet.libs.test-dynamic-value
-    kmet.libs.test-version
+    kmet.test-version
     kmet.ai.test-model-config
     kmet.ai.test-provider-composer
     kmet.ai.test-auth
@@ -140,6 +140,7 @@
     kmet.loader.test-jolt-loader
     kmet.loader.test-sci-loader
     kmet.libs.test-host
+    kmet.ai.test-sse
     kmet.libs.test-crypto
     kmet.libs.test-sse
     kmet.libs.test-terminal
@@ -156,8 +157,7 @@
     kmet.libs.test-http
     kmet.libs.test-archive
     kmet.libs.test-aws-sigv4
-    kmet.libs.test-num
-    kmet.libs.test-context
+    kmet.app.test-context
     kmet.app.ui.test-chat-history
     kmet.app.ui.test-user-message
     kmet.app.ui.test-image-block
