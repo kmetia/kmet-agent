@@ -130,6 +130,52 @@
         (recur (dec end))
         (subvec lines 0 end)))))
 
+(defn- wrap-line-prefix
+  "Wrap as much of LINE as NEED visual lines require. The first pass wraps a
+   char prefix of (inc need) × width — enough for unstyled text, because
+   every wrapped visual line consumes at most width visible columns; the
+   prefix doubles while ANSI escapes (zero-width chars) make it under-fill.
+   A 50 KB single line costs ~0.2 ms here vs ~13 ms wrapped whole (~300 ms
+   fg-styled, whose ANSI forces the per-char path). Widths ≤ 0 render
+   nothing (no columns to fill; the budget could not grow). Returns
+   {:wrapped [...] :whole? bool}: :whole? true only when WRAPPED is the
+   line's complete wrap (the prefix reached the line's end)."
+  [line need width]
+  (if (<= width 0)
+    {:wrapped [] :whole? false}
+    (let [n (count line)]
+      (loop [budget (* (inc need) width)]
+        (let [wrapped (utils/wrap-text-with-ansi (subs line 0 (min n budget)) width)]
+          (cond
+            (> (count wrapped) need) {:wrapped (vec (take need wrapped)) :whole? false}
+            (>= budget n) {:wrapped (vec wrapped) :whole? true}
+            :else (recur (* 2 budget))))))))
+
+(defn- bounded-head-visual-lines
+  "Bounded head VISUAL-line truncation over logical LINES. Wraps each line
+   only as far as MAX-VISUAL requires (see wrap-line-prefix), so the cost is
+   O(shown head) instead of O(content) — the full-wrap sibling
+   utils/truncate-head-to-visual-lines costs ~80 ms on a 135 KB body vs
+   ~0.6 ms here because it wraps everything to report the exact skipped
+   VISUAL count. This variant instead lets the caller report logical lines:
+   :consumed counts lines shown in FULL (a line cut mid-wrap is not
+   consumed), so (- total consumed) is the pi-style \"N more lines\" hint
+   count. Returns {:visual-lines [...] :consumed n}."
+  [lines max-visual width]
+  (loop [remaining lines
+         consumed 0
+         acc []
+         visual 0]
+    (if (or (>= visual max-visual) (empty? remaining))
+      {:visual-lines acc :consumed consumed}
+      (let [room (- max-visual visual)
+            {:keys [wrapped whole?]}
+            (wrap-line-prefix (first remaining) room width)]
+        (if whole?
+          (recur (rest remaining) (inc consumed) (into acc wrapped)
+                 (+ visual (count wrapped)))
+          {:visual-lines (into acc wrapped) :consumed consumed})))))
+
 ;; ─── Compact read classification (pi: read.ts getCompactReadClassification) ─
 
 (def ^:private compact-resource-file-names
@@ -506,11 +552,15 @@
         :else nil))))
 
 (defn render-read-result
-  "Collapsed: spacer + up to 10 output lines + expand hint + truncation warn.
+  "Collapsed: spacer + up to 10 visual output lines + expand hint + truncation
+   warn. The cap counts VISUAL lines at the render width, not logical lines —
+   a long wrapped line must not push the preview past its budget. The bounded
+   wrap stops at the cap; the hint reports the logical lines not shown in
+   full.
    Pi: formatReadResult — when expanded, content is syntax-highlighted
    by path language (highlightCode); unknown languages and errors fall back
    to toolOutput color."
-  [content is-error theme _width expanded? _started-at _ended-at truncation context]
+  [content is-error theme width expanded? _started-at _ended-at truncation context]
   (if (and (not expanded?) (not is-error))
     nil
     (let [args (:args context)
@@ -521,10 +571,12 @@
                   (trim-trailing-empty-lines
                    (theme/render-highlighted theme normalized lang))
                   (trim-trailing-empty-lines (str/split-lines normalized)))
-          n (count lines)
-          max-lines (if expanded? n 10)
-          show (take max-lines lines)
-          more (- n max-lines)
+          total (count lines)
+          {:keys [visual-lines consumed]}
+          (if expanded?
+            {:visual-lines lines :consumed total}
+            (bounded-head-visual-lines lines 10 width))
+          remaining (- total consumed)
           truncation-warn
           (when (seq lines)
             (let [{:keys [first-line-exceeds-limit truncated-by output-lines
@@ -543,10 +595,12 @@
           kids (concat
                 (when (seq lines)
                   (concat
-                   (tool-text-lines (if lang show (mapv #(theme/fg theme :tool-output %) show)))
-                   (when (pos? more)
+                   (tool-text-lines (if lang
+                                      visual-lines
+                                      (mapv #(theme/fg theme :tool-output %) visual-lines)))
+                   (when (pos? remaining)
                      [(tool-text
-                       (str (theme/fg theme :muted (str "... (" more " more lines,"))
+                       (str (theme/fg theme :muted (str "... (" remaining " more lines,"))
                             " " (app-kb/key-hint "app.tools.expand" "to toggle")
                             (theme/fg theme :muted ")")))])
                    (when truncation-warn
@@ -558,8 +612,14 @@
          update-write-highlight-cache
          write-rendered-lines)
 
+(def ^:private write-preview-lines
+  "Collapsed cap on the rendered file body, in visual lines — a wrapped
+   line counts once, so a long line cannot push the preview past its
+   budget."
+  10)
+
 (defn render-write-call
-  [name args theme _width context]
+  [name args theme width context]
   (let [name (if (seq name) name "write")
         raw-path (:file_path args (:path args))
         content (:content args)
@@ -584,12 +644,17 @@
                            (set-state! (assoc state :write-cache cache)))
                        lines (write-rendered-lines theme cache content)
                        total (count lines)
-                       max-lines (if (:expanded context) total 10)
-                       show (take max-lines lines)
-                       remaining (- total max-lines)]
+                       {:keys [visual-lines consumed]}
+                       (if (:expanded context)
+                         {:visual-lines lines :consumed total}
+                         (bounded-head-visual-lines lines write-preview-lines width))
+                       ;; :consumed counts lines shown in full, so :remaining
+                       ;; includes a line cut mid-wrap — the hint's budget is
+                       ;; "not fully shown" lines, matching the logical total
+                       remaining (- total consumed)]
                    (into [title [:spacer {:lines 1}] [:spacer {:lines 1}]]
                          (concat
-                          (tool-text-lines show)
+                          (tool-text-lines visual-lines)
                           (when (pos? remaining)
                             [(tool-text
                               (str (theme/fg theme :muted
@@ -1067,20 +1132,26 @@
 
 (defn render-default-result
   "Default render-result: show collapsed preview (5 lines) with expand hint,
-   full content when expanded."
-  [content _is-error theme _width expanded? & _]
+   full content when expanded. The preview cap counts VISUAL lines at the
+   render width — wrap first, then take the head — because the Text component
+   wraps long lines at render time, so a logical-line cap would let a few
+   long lines fill the transcript. The bounded wrap stops at the cap (hidden
+   lines are never wrapped); the hint reports the logical lines not shown in
+   full. (Pi's fallback slices logical lines, so this deliberately diverges
+   on the cap.)"
+  [content _is-error theme width expanded? & _]
   (let [lines (-> (or content "") str/split-lines trim-trailing-empty-lines)
-        n (count lines)
-        max-preview 5
-        show (take (if expanded? n max-preview) lines)
-        more (- n max-preview)
+        total (count lines)
+        {:keys [visual-lines consumed]}
+        (if expanded?
+          {:visual-lines lines :consumed total}
+          (bounded-head-visual-lines lines 5 width))
+        remaining (- total consumed)
         kids (concat
-              (when (seq lines)
-                (concat
-                 (tool-text-lines (mapv #(theme/fg theme :tool-output %) show))
-                 (when (and (not expanded?) (pos? more))
-                   [(tool-text
-                     (str (theme/fg theme :muted (str "... (" more " more lines,"))
-                          " " (app-kb/key-hint "app.tools.expand" "to toggle")
-                          (theme/fg theme :muted ")")))]))))]
+              (tool-text-lines (mapv #(theme/fg theme :tool-output %) visual-lines))
+              (when (pos? remaining)
+                [(tool-text
+                  (str (theme/fg theme :muted (str "... (" remaining " more lines,"))
+                       " " (app-kb/key-hint "app.tools.expand" "to toggle")
+                       (theme/fg theme :muted ")")))]))]
     (h/compile-tree (into [:container {} [:spacer {:lines 1}]] kids))))

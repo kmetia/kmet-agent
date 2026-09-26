@@ -77,6 +77,12 @@
       (is (= 12 (count lines)) "spacer + 10 lines + more-hint")
       (is (str/starts-with? (second lines) "line-0"))
       (is (str/includes? (peek lines) "... (20 more lines,"))))
+  (testing "collapsed error caps a long unbreakable line by visual lines"
+    (let [content (apply str (repeat 700 "x"))
+          lines (plain (r/render-read-result content true th 60 false nil nil nil {}) 60)]
+      (is (= 12 (count lines)) "spacer + 10 visual lines + hint")
+      (is (str/includes? (peek lines) "... (1 more lines,")
+          "the line not shown in full is the one hidden line reported")))
   (testing "truncation warn renders on the visible path"
     (let [content (str/join "\n" (mapv #(str "l" %) (range 5)))
           truncation {:truncated-by :lines :output-lines 5 :total-lines 99 :max-lines 5}
@@ -123,6 +129,19 @@
           lines (plain (r/render-write-call "write" {:file_path "f" :content content} th 60 {}) 60)]
       (is (= 14 (count lines)) "title + 2 spacers + 10 lines + hint")
       (is (str/includes? (peek lines) "... (15 more lines,"))))
+  (testing "a long line is capped by visual lines, not logical lines"
+    (let [content (str "head " (str/join " " (repeat 200 "word")))
+          lines (plain (r/render-write-call "write" {:file_path "f" :content content} th 60 {}) 60)]
+      (is (= 14 (count lines)) "title + 2 spacers + 10 wrapped visual lines + hint")
+      (is (str/includes? (peek lines) "... (1 more lines, 1 total,")
+          "the line cut mid-wrap is reported as not fully shown")))
+  (testing "a long first line hides the following lines behind the same budget"
+    (let [content (str "head " (str/join " " (repeat 200 "word")) "\nshort-a\nshort-b")
+          lines (plain (r/render-write-call "write" {:file_path "f" :content content} th 60 {}) 60)]
+      (is (= 14 (count lines)))
+      (is (str/includes? (peek lines) "... (3 more lines, 3 total,"))
+      (is (not-any? #(str/includes? % "short-") lines)
+          "the short tail lines stay hidden")))
   (testing "error result renders content"
     (let [lines (plain (r/render-write-result "disk full" true th 40 false) 40)]
       (is (some #(str/includes? % "disk full") lines)))
@@ -212,7 +231,27 @@
     (testing "expanded shows everything"
       (let [content (str/join "\n" (mapv #(str "d-" %) (range 9)))
             lines (plain (r/render-default-result content false th 60 true) 60)]
-        (is (= 10 (count lines)))))))
+        (is (= 10 (count lines)))))
+    (testing "a long unbreakable line is capped by visual lines, not logical lines"
+      (let [content (apply str (repeat 370 "x"))
+            lines (plain (r/render-default-result content false th 60 false) 60)]
+        (is (= 7 (count lines)) "spacer + 5 visual lines + hint")
+        (is (str/includes? (peek lines) "... (1 more lines,")
+            "the line not shown in full is the one hidden line reported")))
+    (testing "fully shown head lines are consumed; only the cut line remains"
+      (let [content (str "a\nb\n" (apply str (repeat 700 "x")))
+            lines (plain (r/render-default-result content false th 60 false) 60)]
+        (is (= 7 (count lines)) "spacer + 5 visual lines + hint")
+        (is (= ["a" "b"] (mapv str/trim [(second lines) (nth lines 2)]))
+            "the two short lines render in full")
+        (is (str/includes? (peek lines) "... (1 more lines,")
+            "only the partially shown long line is counted as hidden")))
+    (testing "an ANSI-dense line under-fills the first prefix; doubling still caps it"
+      (let [content (apply str (for [i (range 3000)]
+                                 (str (if (even? i) "\u001b[31m" "\u001b[32m") "ab")))
+            lines (plain (r/render-default-result content false th 60 false) 60)]
+        (is (= 7 (count lines)) "spacer + 5 visual lines + hint")
+        (is (str/includes? (peek lines) "... (1 more lines,"))))))
 
 (deftest test-edit-preview-follows-the-runtime-cwd
   (testing "a relative edit path previews the file in the render context's
