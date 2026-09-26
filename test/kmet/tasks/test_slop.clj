@@ -31,9 +31,9 @@
     (is (= ["(" "def" "x" "\"a;b\"" ")"] tokens))
     (is (= [2 2 2 2 2] lines))))
 
-(deftest identical-files-are-clones
-  (let [giant (str "(def huge [" (str/join " " (range 80)) "])")]
-    (in-tree {"a.clj" giant "b.clj" giant}
+(deftest identical-functions-are-clones
+  (let [src "(defn f [v] (let [s (clean v)] (println s) s))\n"]
+    (in-tree {"a.clj" src "b.clj" src}
              (fn [dir]
                (let [report (slop/scan dir {})]
                  (is (pos? (:clone-lines report)))
@@ -45,6 +45,63 @@
             "b.clj" "(defn g [y] (* y 2))"}
            (fn [dir]
              (is (zero? (:clone-lines (slop/scan dir {})))))))
+
+(deftest renamed-functions-and-literals-are-structural-clones
+  (in-tree {"a.clj" "(defn first [left right] (let [r (+ left 1)] (println r) (* r 2)))\n"
+            "b.clj" "(defn second [alpha beta] (let [t (+ alpha 2)] (println t) (* t 2)))\n"}
+           (fn [dir]
+             (is (pos? (:clone-lines (slop/scan dir {})))))))
+
+(deftest different-operators-are-not-clones
+  (in-tree {"a.clj" "(defn add [a b] (let [r (+ a b)] (println r) r))\n"
+            "b.clj" "(defn sub [a b] (let [r (- a b)] (println r) r))\n"}
+           (fn [dir]
+             (is (zero? (:clone-lines (slop/scan dir {})))))))
+
+(deftest single-statement-bodies-do-not-clone
+  (in-tree {"a.clj" "(defn f [x] (g x))\n"
+            "b.clj" "(defn h [y] (g y))\n"}
+           (fn [dir]
+             (is (zero? (:clone-lines (slop/scan dir {})))))))
+
+(deftest partial-overlap-in-non-candidate-code-is-not-a-clone
+  ;; The reference node set has no plain-block type: shared let scaffolding
+  ;; inside bodies that differ elsewhere is a partial overlap, not a clone.
+  (in-tree {"a.clj" (str "(defn f [x]\n"
+                         "  (let [y (inc x)\n"
+                         "        z (str y)]\n"
+                         "    (println y)\n"
+                         "    (+ z 1)))\n")
+            "b.clj" (str "(defn g [x]\n"
+                         "  (let [y (inc x)\n"
+                         "        z (str y)]\n"
+                         "    (println y)\n"
+                         "    (+ z 1)\n"
+                         "    (println y)))\n")}
+           (fn [dir]
+             (is (zero? (:clone-lines (slop/scan dir {})))))))
+
+(deftest nested-block-duplicates-clone-inside-different-functions
+  ;; Candidate blocks are matched independently of their enclosing function,
+  ;; so a duplicated if body is a clone even when the defns differ.
+  (in-tree {"a.clj" "(defn f [x] (println x) (if x (do (println x) (inc x)) 0))\n"
+            "b.clj" "(defn g [y] (println y) (println y) (if y (do (println y) (inc y)) 0))\n"}
+           (fn [dir]
+             (is (pos? (:clone-lines (slop/scan dir {})))))))
+
+(deftest docstrings-do-not-affect-clone-hashes
+  (in-tree {"a.clj" "(defn first \"doc\" [v] (let [x (inc v)] (println x) x))\n"
+            "b.clj" "(defn second [v] (let [x (inc v)] (println x) x))\n"}
+           (fn [dir]
+             (is (pos? (:clone-lines (slop/scan dir {})))))))
+
+(deftest clone-lines-are-sloc-lines-of-the-clone-span
+  ;; The cloned defn spans lines 1-4 in a.clj, but only lines 1 and 4 hold
+  ;; code - the comment and blank line inside the span are not clone lines.
+  (in-tree {"a.clj" "(defn f [v]\n  ;; note\n\n  (let [s (clean v)] (println s) s))\n"
+            "b.clj" "(defn g [v] (let [s (clean v)] (println s) s))\n"}
+           (fn [dir]
+             (is (= 3 (:clone-lines (slop/scan dir {})))))))
 
 (deftest verbosity-counts-rule-flagged-lines
   (in-tree {"sloppy.clj" "(defn f [x] (if (not x) 1 2))\n"}

@@ -4,14 +4,18 @@
    Measures the SlopCodeBench (arXiv:2603.24755) trajectory metrics:
 
      verbosity = |clone lines union rule-flagged lines| / SLOC
-       Clone lines are the distinct lines covered by a duplicated window
-       of K tokens (K = 50 by default) over an exact token stream - no
-       identifier normalization, counted repo-wide. Rule-flagged lines
-       come from kmet.tasks.slop.rules, a Clojure adaptation of SCBench's
-       Python ast-grep pack (boolean/comparison, conditionals, defensive,
-       dict, loop/comprehension and abstraction rules plus the structural
-       trivial-wrapper). SCBench's exact 137 rules are Python-only, so
-       this pack is the Clojure leg of the union.
+       Clone lines come from kmet.tasks.slop.clones, a Clojure port of
+       scb-check's normalized-AST clone detection: candidate blocks
+       (function definitions, conditionals, loops, try and
+       binding-with-resource forms) are compared by their normalized AST -
+       identifiers positionally renamed, literal values erased - and every
+       block with a duplicate instance contributes its SLOC lines.
+       Rule-flagged lines come from kmet.tasks.slop.rules, a Clojure
+       adaptation of SCBench's Python ast-grep pack (boolean/comparison,
+       conditionals, defensive, dict, loop/comprehension and abstraction
+       rules plus the structural trivial-wrapper). SCBench's exact 137
+       rules are Python-only, so this pack is the Clojure leg of the
+       union.
 
      erosion = high-CC mass share
        mass(f) = CC(f) * sqrt(SLOC(f)); erosion is the mass of functions
@@ -28,29 +32,27 @@
    473 maintained human Python repositories and 2,869 agent checkpoints.
    Lower is better.
 
-   Usage: bb slop [path] [--k N] [--top N]"
+   Usage: bb slop [path] [--top N]"
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [edamame.core :as e]
+            [kmet.tasks.slop.clones :as clones]
             [kmet.tasks.slop.rules :as rules]))
 
 ;; ------------------------------------------------------------------ options
 
 (def ^:private usage
-  (str "bb slop [path] [--k N] [--top N]\n\n"
+  (str "bb slop [path] [--top N]\n\n"
        "  path  directory (or single source file) to scan; default: .\n"
-       "  --k   token window size for clone detection (default 50)\n"
        "  --top number of outliers to list per metric (default 15)"))
 
 (defn- parse-args [args]
-  (loop [as (seq args) opts {:path "." :k 50 :top 15}]
+  (loop [as (seq args) opts {:path "." :top 15}]
     (if (empty? as)
       opts
       (let [a (first as)]
         (cond
           (or (= a "--help") (= a "-h")) (assoc opts :help true)
-          (str/starts-with? a "--k=") (recur (rest as) (assoc opts :k (parse-long (subs a 4))))
-          (= a "--k") (recur (drop 2 as) (assoc opts :k (parse-long (second as))))
           (str/starts-with? a "--top=") (recur (rest as) (assoc opts :top (parse-long (subs a 6))))
           (= a "--top") (recur (drop 2 as) (assoc opts :top (parse-long (second as))))
           :else (recur (rest as) (assoc opts :path a)))))))
@@ -100,8 +102,9 @@
           (recur (inc j)))))))
 
 (defn tokenize
-  "Tokenize Clojure text for clone detection. Delimiters are tokens;
-   comments are dropped; string and char literals are single tokens.
+  "Tokenize Clojure text. Delimiters are tokens; comments are dropped;
+   string and char literals are single tokens. The token line numbers are
+   the scan's SLOC lines (no blank or comment-only lines).
    Returns {:tokens [str ...] :lines [int ...]}."
   [text]
   (let [n (count text)]
@@ -134,98 +137,11 @@
             (let [j (scan-atom text n i)]
               (recur j line (conj! toks (subs text i j)) (conj! tls line)))))))))
 
-;; ------------------------------------------------------------ clone windows
-
-(def ^:private M1 1000000007)
-(def ^:private M2 1000000009)
-(def ^:private P1 131)
-(def ^:private P2 137)
-(def ^:private KEY-SCALE 2000000011)
-
-(defn- p-pow [p m k]
-  (reduce (fn [a _] (mod (* a p) m)) 1 (range (dec k))))
-
-(defn- init-hash [ids k p m]
-  (reduce (fn [h tid] (mod (+ (* h p) tid) m)) 0 (subvec ids 0 k)))
-
-(defn token-ids [tokens]
-  (loop [ts (seq tokens), m (transient {}), next-id 1, out (transient [])]
-    (if ts
-      (let [t (first ts)]
-        (if-some [id (get m t)]
-          (recur (next ts) m next-id (conj! out id))
-          (recur (next ts) (assoc! m t next-id) (inc next-id) (conj! out next-id))))
-      (persistent! out))))
-
-(defn- kgram-counts
-  "Map window hash -> number of occurrences of that K-token window."
-  [ids k]
-  (let [n (count ids)]
-    (if (< n k)
-      {}
-      (let [pk1 (p-pow P1 M1 k) pk2 (p-pow P2 M2 k)]
-        (loop [s 0
-               h1 (init-hash ids k P1 M1)
-               h2 (init-hash ids k P2 M2)
-               acc (transient {})]
-          (let [key (+ (* h1 KEY-SCALE) h2)
-                acc (assoc! acc key (inc (get acc key 0)))]
-            (if (= s (- n k))
-              (persistent! acc)
-              (let [old (nth ids s)
-                    new (nth ids (+ s k))
-                    h1 (mod (+ (* (mod (- h1 (* old pk1)) M1) P1) new) M1)
-                    h2 (mod (+ (* (mod (- h2 (* old pk2)) M2) P2) new) M2)]
-                (recur (inc s) h1 h2 acc)))))))))
-
-(defn- clone-lines
-  "Set of line numbers participating in a duplicated K-token window."
-  [ids lines counts k]
-  (let [n (count ids) nw (- n k -1)]
-    (if (or (< n k) (<= nw 0))
-      #{}
-      (let [pk1 (p-pow P1 M1 k) pk2 (p-pow P2 M2 k)
-            marked (loop [s 0
-                          h1 (init-hash ids k P1 M1)
-                          h2 (init-hash ids k P2 M2)
-                          mv (transient (vec (repeat nw false)))]
-                     (let [key (+ (* h1 KEY-SCALE) h2)
-                           mv (if (>= (get counts key 0) 2) (assoc! mv s true) mv)]
-                       (if (= s (dec nw))
-                         (persistent! mv)
-                         (let [old (nth ids s)
-                               new (nth ids (+ s k))
-                               h1 (mod (+ (* (mod (- h1 (* old pk1)) M1) P1) new) M1)
-                               h2 (mod (+ (* (mod (- h2 (* old pk2)) M2) P2) new) M2)]
-                           (recur (inc s) h1 h2 mv)))))]
-        (loop [s 0, res (transient #{})]
-          (if (>= s nw)
-            (persistent! res)
-            (if (nth marked s)
-              (let [e (loop [e s]
-                        (if (and (< (inc e) nw) (nth marked (inc e)))
-                          (recur (inc e))
-                          e))]
-                (recur (inc e)
-                       (reduce (fn [r ti] (conj! r (nth lines ti)))
-                               res
-                               (range s (+ e k)))))
-              (recur (inc s) res))))))))
-
-(defn- file-token-stats
-  "Per-file token stream and SLOC for the global clone pass."
+(defn- file-sloc
+  "Per-file SLOC line set and count."
   [path]
-  (let [text (slurp (str path))
-        {:keys [tokens lines]} (tokenize text)]
-    {:file (str path)
-     :sloc (count (set lines))
-     :ids (token-ids tokens)
-     :lines lines}))
-
-(defn- merge-counts!
-  "Fold per-file window counts into the global transient counts map."
-  [acc counts]
-  (reduce-kv (fn [a key n] (assoc! a key (+ (get a key 0) n))) acc counts))
+  (let [lines (set (:lines (tokenize (slurp (str path)))))]
+    {:file (str path) :sloc-lines lines :sloc (count lines)}))
 
 ;; -------------------------------------------------------------- complexity
 
@@ -361,28 +277,28 @@
   (try
     (let [{:keys [file lines forms]} (parse-file path)]
       {:file file
+       :forms forms
        :fns (vec (file-fns {:file file :lines lines :forms forms}))
        :findings (mapv #(assoc % :file file) (rules/ast-findings forms))
        :defs (mapv #(assoc % :file file) (rules/definitions forms))})
     (catch Exception ex
       (swap! failures conj {:file (str path) :error (ex-message ex)})
-      {:file (str path) :fns [] :findings [] :defs []})))
+      {:file (str path) :forms [] :fns [] :findings [] :defs []})))
 
 (defn scan
   "Analyze every Clojure source under ROOT.
-   OPTS: :k clone window size (default 50), :top outlier count (default 15)."
-  [root {:keys [k top] :or {k 50 top 15}}]
+   OPTS: :top outlier count (default 15)."
+  [root {:keys [top] :or {top 15}}]
   (let [files (source-files root)
-        token-stats (mapv file-token-stats files)
-        counts (persistent! (reduce (fn [acc {:keys [ids]}]
-                                      (merge-counts! acc (kgram-counts ids k)))
-                                    (transient {})
-                                    token-stats))
-        clone-by-file (into {} (map (fn [{:keys [file lines ids]}]
-                                      [file (clone-lines ids lines counts k)])
-                                    token-stats))
+        sloc-stats (mapv file-sloc files)
+        sloc-by-file (into {} (map (juxt :file :sloc) sloc-stats))
+        sloc-lines-by-file (into {} (map (juxt :file :sloc-lines) sloc-stats))
         failures (atom [])
         parsed (mapv #(parse-scan % failures) files)
+        candidates (mapcat (fn [{:keys [file forms]}]
+                             (map #(assoc % :file file) (clones/candidates forms)))
+                           parsed)
+        clone-by-file (clones/clone-lines-by-file candidates sloc-lines-by-file)
         fns (vec (mapcat :fns parsed))
         defs (mapcat :defs parsed)
         wrappers (mapv (fn [w]
@@ -393,15 +309,14 @@
         rule-by-file (reduce (fn [m {:keys [file line]}]
                                (update m file (fnil conj #{}) line))
                              {} findings)
-        sloc-by-file (into {} (map (juxt :file :sloc) token-stats))
-        sloc (reduce + 0 (map :sloc token-stats))
+        sloc (reduce + 0 (map :sloc sloc-stats))
         clone-lines (reduce + 0 (map count (vals clone-by-file)))
         rule-lines (count (distinct (map (juxt :file :line) findings)))
         union-by-file (into {} (map (fn [{:keys [file]}]
                                       (let [c (get clone-by-file file #{})
                                             r (get rule-by-file file #{})]
                                         [file (count (into c r))]))
-                                    token-stats))
+                                    sloc-stats))
         union-lines (reduce + 0 (vals union-by-file))
         hi (filter #(> (:cc %) 10) fns)
         total-mass (reduce + 0.0 (map :mass fns))
@@ -421,7 +336,6 @@
                                 [r (count (distinct (map (juxt :file :line) fs)))]))
                          (sort-by second >))]
     {:root (str root)
-     :k k
      :files (count files)
      :sloc sloc
      :failures @failures
@@ -479,7 +393,7 @@
    outliers only."
   [{:keys [root files sloc clone-lines rule-lines union-lines overlap rule-counts
            outlier-files functions failures
-           high-cc max-cc total-mass hi-mass verbosity erosion outliers k]}]
+           high-cc max-cc total-mass hi-mass verbosity erosion outliers]}]
   (str/join
    "\n"
    (concat
@@ -489,8 +403,8 @@
      ""
      (format "VERBOSITY  %.3f  (SCBench: clone + rule-flagged lines / SLOC)"
              verbosity)
-     (format "  %d lines flagged: %d rules + %d clones (overlap %d) in %d SLOC (k=%d)"
-             union-lines rule-lines clone-lines overlap sloc k)
+     (format "  %d lines flagged: %d rules + %d clones (overlap %d) in %d SLOC"
+             union-lines rule-lines clone-lines overlap sloc)
      (if (seq rule-counts)
        (str "  top rules: "
             (str/join " | " (map (fn [[r n]] (str r " " n)) rule-counts)))
@@ -526,14 +440,14 @@
                  (take 5 failures)))))))
 
 (defn -main [& args]
-  (let [{:keys [path k top help] :as opts} (parse-args args)]
+  (let [{:keys [path top help] :as opts} (parse-args args)]
     (when help
       (println usage)
       (System/exit 0))
     (when-not (fs/exists? path)
       (println (str "bb slop: path not found: " path))
       (System/exit 1))
-    (when (or (nil? k) (nil? top) (< k 2) (< top 1))
-      (println (str "bb slop: --k and --top must be positive integers\n\n" usage))
+    (when (or (nil? top) (< top 1))
+      (println (str "bb slop: --top must be a positive integer\n\n" usage))
       (System/exit 1))
-    (println (format-report (scan path (select-keys opts [:k :top]))))))
+    (println (format-report (scan path (select-keys opts [:top]))))))
