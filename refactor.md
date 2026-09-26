@@ -203,46 +203,66 @@ real logic is ~2,450 lines.
 | 2076–2780 | Render loop (`run-render-loop!`) | `render` |
 | 2781–2993 | Re-exports (134 defs) | `core` (keep) |
 
-### Proposed target
+### Re-evaluation (measured)
+
+The dependency graph was measured per region with `(declare …)` seams and
+comments excluded, so the table is the real call graph:
+
+| Edge | Names |
+|---|---|
+| keep → overlays | `ghost-restore!` `overlay-restore-target` `set-focused-component!` |
+| overlays → keep | `IFocusable` `TUI` `render` `resolve-focus-home` `set-focused!` `tui-set-focus` `tui-set-focus-home!` |
+| keep → input | `dispatch-input!` |
+| input → keep | `TUI` `focused` `handle-input` `render` `tui-set-focus` |
+| keep → lifecycle | `tui-request-render` |
+| lifecycle → keep | `TUI` `invalidate` `render` `tui-flash-dispose!` |
+| input ↔ lifecycle | `tui-invalidate` `tui-request-render` ↔ `settle-osc-11-query!` |
+| input ↔ render | `tui-suspend!` ↔ `clear-incomplete-flush!` `clear-negotiation-timer!` `clear-terminal-response-timer!` `start-input-reader` |
+| input ↔ overlays | `get-topmost-visible-overlay` `overlay-restore-target` `overlay-visible?` ↔ `dispatch-input!` |
+| render → keep / lifecycle / overlays | one-way: logs, cursor/CSI, `tui-stop`, `composite-overlays` |
+| diff → keep / overlays | one-way: the `render` protocol, the `Overlay` type |
+
+Two facts decide the task:
+
+1. **Every extracted module needs the kernel.** `overlays`, `input`,
+   `lifecycle` and `render` all call the protocol suite (`IComponent`,
+   `IFocusable`, `render`, `handle-input`, `focused`, `set-focused!`) and
+   take/return the `TUI` record — both defined in `core`. A module that
+   requires `core` while `core` requires it (the alias facade, `keep`'s own
+   calls) is a require cycle.
+2. **Three small cycles sit on the seams the plan cut last:** input ↔
+   lifecycle, input ↔ render, input ↔ overlays. Each is 1–4 functions
+   (`settle-osc-11-query!`, the three `clear-*-timer!` helpers,
+   `start-input-reader`, `tui-suspend!`, `dispatch-input!`) — the dispatch-
+   lock and timer ownership the plan flagged. They are real edges, so the
+   last steps are a redesign of that ownership, not a move.
+
+### Verdict: T2 not executed
+
+A move-only split of `core.clj` along these lines is **not possible**.
+`core` is the TUI kernel — protocol suite, `TUI` record, accessors — under
+a 144-def alias facade. Splitting it is sound only after hoisting that
+kernel into a namespace the others can require without a cycle:
 
 ```
-kmet/tui/overlays.clj   overlay stack, layout resolution, visibility/focus
-                        state machine, OverlayHandle, default chrome (~380)
-kmet/tui/render.clj     diff, kitty image diff, run-render-loop! (~950)
-kmet/tui/input.clj      reader, buffer, lock, trace, kitty/paste
-                        normalization, terminal-response interception (~1,070)
-kmet/tui/core.clj       TUI record, cursor/CSI, flashes, crash logs,
-                        start/stop/suspend/resume, public facade (keep)
+T2' (sketch)  kmet.tui.kernel   protocols + TUI record + focus state
+                               (current lines 39–115 + 116–290) + key
+                               constants/parser
+then          overlays / input / render require it; core stays the facade
 ```
 
-### Migration steps
+That is a designed refactor with its own risk budget (record identity is
+public via `create-tui`; `test_core.clj` reaches into 31 private vars, the
+input internals among them), not a stage of a move-only series. It is
+deliberately skipped: `core.clj` is the library's stable public surface
+(33 changes / 300 commits, the lowest churn of the five god files) and the
+two seams that would move — input timers and the render loop's suspend
+join — are the ones unit tests cover least.
 
-1. Extract `overlays` first (leaf cluster, ~380 lines). It only needs the
-   `tui` record fields, which are keyword accessors — no function moves.
-2. Extract the diff + Kitty-image helpers (~130 lines) into `render`, keeping
-   `run-render-loop!` in `core` for now. This is the smallest safe step.
-3. Extract `input` (~1,070 lines). It is the riskiest: `dispatch-input!`, the
-   render loop, and `tui-suspend!` share the dispatch lock and per-TUI atoms.
-   Move the pure normalization helpers (trace, kitty duplicates, paste
-   detection, unit normalization) first, then the reader/buffer, then the
-   lock ownership as a final step with the render-loop move.
-4. Move `run-render-loop!` into `render` only after input is out; keep
-   `tui-start`/`tui-stop` in `core` calling into it.
-5. Keep `core` as the facade: every symbol currently re-exported stays
-   re-exported (the 134 aliases are the stable public API). Alternatively add
-   `kmet.tui.api` for aliases — do not do both in one task.
-
-### Risks / traps
-
-- **Lock interaction.** `acquire-dispatch-lock!` semantics (lines 1210–1223,
-  1614 for trace) are documented in comments; move comments with code.
-- **Per-TUI atom key names** are the de-facto interface between input and
-  render (`:previous-lines`, `:previous-normalized-in/out`, etc.). Moving
-  both in separate commits would hide breakage; keep one commit per
-  cross-file atom or add a small accessor namespace.
-- `tui.md` documents module-level behavior — update it with the new files.
-- Tests: `test/kmet/tui/test_render_loop.clj` and related — run
-  `bb test-changed` after each step.
+Cycle-free partial moves were considered and rejected as not worth a
+commit each: `diff` (5 defs, ~130 lines; needs the `render` protocol and
+the `Overlay` type) and the log cluster (`log-path`, `append-log!`,
+`write-crash-log!`, `tui-debug-dump!`, ~60 lines).
 
 ---
 
@@ -460,6 +480,8 @@ one file; still do it as its own commit to isolate review noise.
       `resources`, `layout`, `ui_registry`
 - [x] T4 — `extensions.cljc` split; `extension.md` updated
       (2,755 → `extensions.cljc` 1,228 + `extensions/context.cljc` 1,544)
-- [ ] T2 — `tui/core.clj` reduced to lifecycle + facade; `tui.md` updated
-- [ ] Full gates after the last task: `bb test`, `bb test-ext`, `bb lint`,
-      `bb format-check`
+- [~] T2 — `tui/core.clj` split: re-evaluated as not move-only
+      (cycles through the kernel; input↔render/lifecycle/overlays); T2'
+      sketch recorded above, not executed
+- [x] Full gates after the last task: `bb test` 2,667/17,563 ·
+      `bb test-ext` 113/543 · `bb lint` 0/0 · `bb format-check` clean
