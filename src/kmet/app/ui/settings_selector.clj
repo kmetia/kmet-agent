@@ -14,7 +14,9 @@
             [kmet.app.theme-controller :as theme-ctrl]
             [kmet.ai.api.shared :as shared]
             [kmet.ai.models :as models]
-            [kmet.app.ui :as ui]
+            [kmet.app.ui.chat-history :as chat-history]
+            [kmet.app.ui.footer :as footer]
+            [kmet.app.ui.loaded-resources :as loaded-resources]
             [kmet.app.ui.subs :as subs]
             [kmet.app.ui.dock :as dock]
             [kmet.app.ui.model-selector :as model-selector]
@@ -195,7 +197,7 @@
                                    :description "Hide thinking blocks in assistant responses"
                      ;; the live chat-history flag, not the startup config
                      ;; snapshot — Ctrl+T toggles it at runtime
-                                   :value (if (ui/chat-history-get-thinking-hidden (:chat-history cs)) "on" "off")
+                                   :value (if (chat-history/chat-history-get-thinking-hidden (:chat-history cs)) "on" "off")
                                    :values ["off" "on"]}
                                   {:id :tool-display-mode
                                    :label "Tool display"
@@ -203,7 +205,7 @@
                      ;; the live chat-history mode, not a startup snapshot
                      ;; — ctrl+o cycles it at runtime
                                    :value (name (or (when (:chat-history cs)
-                                                      (ui/chat-history-get-tool-display-mode (:chat-history cs)))
+                                                      (chat-history/chat-history-get-tool-display-mode (:chat-history cs)))
                                                     :collapsed))
                                    :values ["collapsed" "expanded" "quiet"]}
                                   {:id :editor-padding
@@ -288,7 +290,7 @@
                         (agent/set-auto-compact! ag on?)
                         (cfg/save-setting! [:auto-compact] on?)
                         (when-let [f (:footer-comp cs)]
-                          (ui/footer-set-auto-compact! f on?)))
+                          (footer/footer-set-auto-compact! f on?)))
                       :show-images
                       (let [on? (= value "true")]
                         (swap! subs/image-settings-atom assoc :show-images on?)
@@ -351,19 +353,19 @@
                         (model-selector/sync-footer-model! cs))
                       :hide-thinking
                       (let [hidden? (= value "on")]
-                        (ui/chat-history-set-thinking-hidden!
+                        (chat-history/chat-history-set-thinking-hidden!
                          (:chat-history cs) hidden?)
                         (cfg/set-hide-thinking-block! hidden?))
                       :tool-display-mode
                       (let [mode (keyword value)]
-                        (ui/chat-history-set-tool-display-mode!
+                        (chat-history/chat-history-set-tool-display-mode!
                          (:chat-history cs) mode)
                         (cfg/set-tool-display-mode! mode)
                         (when-let [hdr (:header-comp cs)]
                           (expandable-text/expandable-text-set-expanded!
                            hdr (= :expanded mode)))
                         (when-let [lr (:loaded-resources-comp cs)]
-                          (ui/loaded-resources-set-expanded!
+                          (loaded-resources/loaded-resources-set-expanded!
                            lr (= :expanded mode)))
                         (when (:tui cs)
                           (tui/tui-request-render (:tui cs) true)))
@@ -371,7 +373,7 @@
                       (do (set-editor-setting! cs #(protocols/editor-set-padding-x! % value))
                           (cfg/save-setting! [:editor-padding-x] value))
                       :output-padding
-                      (do (ui/chat-history-set-output-pad! (:chat-history cs) value)
+                      (do (chat-history/chat-history-set-output-pad! (:chat-history cs) value)
                           (cfg/save-setting! [:output-pad] value))
                       :autocomplete-max-visible
                       (do (set-editor-setting!

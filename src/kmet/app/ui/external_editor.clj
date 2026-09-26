@@ -5,7 +5,7 @@
    falling back to the field-based editor fns (duck-typed custom editors);
    handle-external-editor opens the editor content in $EDITOR on a temp
    file (pi: handleOpenExternalEditor)."
-  (:require [kmet.app.ui :as ui]
+  (:require [kmet.app.ui.chat-history :as chat-history]
             [kmet.app.ui.footer-data-provider :as fdp]
             [kmet.tui.core :as tui]
             [kmet.tui.protocols :as protocols]
@@ -56,10 +56,10 @@
                        (if (zero? exit-code) :ok :cancelled))
                      (catch Exception e
                        (debug/log "external editor error: " e)
-                       (ui/chat-history-add-message! (:chat-history cs)
-                                                     {:role :assistant
-                                                      :content (str "External editor failed to start: "
-                                                                    (ex-message e))})
+                       (chat-history/chat-history-add-message! (:chat-history cs)
+                                                               {:role :assistant
+                                                                :content (str "External editor failed to start: "
+                                                                              (ex-message e))})
                        :error))]
         (when (= result :ok)
           (let [new-content (try (slurp tmp-file) (catch Exception _ nil))]

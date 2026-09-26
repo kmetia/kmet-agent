@@ -793,3 +793,21 @@
   protocols/IFocusable
   (focused [_this] false)
   (set-focused! [_this _val]))
+
+;; ─── General UI helpers (pi: showError / showWarning) ─────────────────────
+
+(defn show-error!
+  "Display an error message in the chat history.
+   Pi: showError — adds spacer + Text with error color to chatContainer.
+   Rendered as a plain Spacer(1) + error Text (no background box), not
+   persisted (session persistence is driven by the agent loop)."
+  [chat msg]
+  (chat-history-add-message! chat {:role :error :content msg}))
+
+(defn show-warning!
+  "Display a warning message in the chat history.
+   Pi: showWarning — adds spacer + Text with warning color to chatContainer.
+   Rendered as a plain Spacer(1) + warning Text (no background box), not
+   persisted (session persistence is driven by the agent loop)."
+  [chat msg]
+  (chat-history-add-message! chat {:role :warning :content msg}))

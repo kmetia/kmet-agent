@@ -13,7 +13,11 @@
             [kmet.tui.hiccup :as hiccup]
             [kmet.libs.reakt :as r]
             [kmet.libs.host :as host]
-            [kmet.app.ui :as ui]
+            [kmet.app.ui.chat-history :as chat-history]
+            [kmet.app.ui.loaded-resources :as loaded-resources]
+            [kmet.app.ui.pending-messages :as pending-messages]
+            [kmet.app.ui.status-indicator :as status-indicator]
+            [kmet.app.ui.tool-execution :as tool-execution]
             [kmet.app.ui.subs :as subs]
             [kmet.app.ui.image-block :as image-block]
             [kmet.app.ui.custom-dialog-adapter :as cda]
@@ -317,7 +321,7 @@
    so every change here re-derives the footer and schedules the frame
    reactively (§3.4 hook)."
   [cs]
-  (ui/fdp-set-session! (:footer-provider cs) @(:session-atom cs))
+  (fdp/fdp-set-session! (:footer-provider cs) @(:session-atom cs))
   nil)
 
 (defn- update-terminal-title!
@@ -351,7 +355,7 @@
     (agent/set-thinking-level! ag level)
     (sync-footer-model! cs)
     (update-editor-border-color! cs level)
-    (ui/chat-history-show-status!
+    (chat-history/chat-history-show-status!
      (:chat-history cs)
      (str (if persist? "Default thinking level: " "Thinking level: ")
           (name level)))
@@ -370,8 +374,8 @@
       ;; listed); kmet's cycle parity — a single-level model gets the same
       ;; status as Shift+Tab instead of a one-row selector
       (if (<= (count levels) 1)
-        (ui/chat-history-show-status! (:chat-history cs)
-                                      "Current model does not support thinking")
+        (chat-history/chat-history-show-status! (:chat-history cs)
+                                                "Current model does not support thinking")
         (thinking-selector/show-thinking-selector
          cs
          :on-select (fn [level] (apply-thinking-level! cs level false))
@@ -380,7 +384,7 @@
             level (first (filter #(= (name %) wanted) levels))]
         (if level
           (apply-thinking-level! cs level false)
-          (ui/show-warning!
+          (chat-history/show-warning!
            (:chat-history cs)
            (str "Unknown thinking level \"" search-term
                 "\". Available levels: "
@@ -573,7 +577,7 @@
     (future
       (let [result (deref done 90000 :timeout)]
         (release-background-status! cs :share indicator)
-        (ui/chat-history-add-message!
+        (chat-history/chat-history-add-message!
          chat
          (cond
            (= result :timeout)
@@ -711,19 +715,19 @@
       (try
         (let [credential ((:login oauth) interaction)]
           (auth/set-oauth-credential! (:id provider) credential)
-          (ui/chat-history-add-message! (:chat-history cs)
-                                        {:role :assistant
-                                         :content (str "Logged in to " (:name provider)
-                                                       ". Credentials saved to "
-                                                       (auth/auth-file-path) ".")})
+          (chat-history/chat-history-add-message! (:chat-history cs)
+                                                  {:role :assistant
+                                                   :content (str "Logged in to " (:name provider)
+                                                                 ". Credentials saved to "
+                                                                 (auth/auth-file-path) ".")})
           (when (and (:session-atom cs) (:footer-comp cs) (:footer-provider cs))
             (update-footer! cs)))
         (catch Exception e
           ;; pi: silent on "Login cancelled", an error otherwise
           (when-not (str/includes? (or (ex-message e) "") "Login cancelled")
-            (ui/show-warning! (:chat-history cs)
-                              (str "Failed to login to " (:name provider) ": "
-                                   (ex-message e)))))
+            (chat-history/show-warning! (:chat-history cs)
+                                        (str "Failed to login to " (:name provider) ": "
+                                             (ex-message e)))))
         (finally
           (done)
           ;; release the dialog's content-tree reaction (rows watches) —
@@ -749,20 +753,20 @@
                               dlg (str "Enter " (:name p) " API key") nil)))]
           (if (seq key)
             (do (auth/set-credential! (:id p) key)
-                (ui/chat-history-add-message! (:chat-history cs)
-                                              {:role :assistant
-                                               :content (str "Saved API key for " (:name p)
-                                                             ". Credentials saved to "
-                                                             (auth/auth-file-path) ".")})
+                (chat-history/chat-history-add-message! (:chat-history cs)
+                                                        {:role :assistant
+                                                         :content (str "Saved API key for " (:name p)
+                                                                       ". Credentials saved to "
+                                                                       (auth/auth-file-path) ".")})
                 (when (and (:session-atom cs) (:footer-comp cs) (:footer-provider cs))
                   (update-footer! cs)))
-            (ui/show-warning! (:chat-history cs)
-                              "No API key entered — nothing saved.")))
+            (chat-history/show-warning! (:chat-history cs)
+                                        "No API key entered — nothing saved.")))
         (catch Exception e
           (when-not (str/includes? (or (ex-message e) "") "Login cancelled")
-            (ui/show-warning! (:chat-history cs)
-                              (str "Failed to save API key for " (:name p) ": "
-                                   (ex-message e)))))
+            (chat-history/show-warning! (:chat-history cs)
+                                        (str "Failed to save API key for " (:name p) ": "
+                                             (ex-message e)))))
         (finally
           (done)
           ;; release the dialog's content-tree reaction (rows watches) —
@@ -855,9 +859,9 @@
                    (contains? available-types :api-key) (conj api-key-login-label))]
      (cond
        (empty? options)
-       (ui/chat-history-add-message! (:chat-history cs)
-                                     {:role :assistant
-                                      :content "No login methods available."})
+       (chat-history/chat-history-add-message! (:chat-history cs)
+                                               {:role :assistant
+                                                :content "No login methods available."})
 
        (and provider-options (= 1 (count options)))
        (start-provider-login! cs (first provider-options))
@@ -894,12 +898,12 @@
    (let [entries (vec (cond->> (login-provider-options)
                         auth-type (filter #(= auth-type (:auth-type %)))))]
      (if (empty? entries)
-       (ui/chat-history-add-message! (:chat-history cs)
-                                     {:role :assistant
-                                      :content (case auth-type
-                                                 :oauth "No subscription providers available."
-                                                 :api-key "No API key providers available."
-                                                 "No login providers available.")})
+       (chat-history/chat-history-add-message! (:chat-history cs)
+                                               {:role :assistant
+                                                :content (case auth-type
+                                                           :oauth "No subscription providers available."
+                                                           :api-key "No API key providers available."
+                                                           "No login providers available.")})
        (let [sel-atom (atom nil)
              sel (auth-selector/make-auth-selector
                   :login entries
@@ -975,9 +979,9 @@
   [cs]
   (let [entries (logout-provider-options)]
     (if (empty? entries)
-      (ui/chat-history-add-message! (:chat-history cs)
-                                    {:role :assistant
-                                     :content "No stored credentials to remove. /logout only removes credentials saved by /login; environment variables are unchanged."})
+      (chat-history/chat-history-add-message! (:chat-history cs)
+                                              {:role :assistant
+                                               :content "No stored credentials to remove. /logout only removes credentials saved by /login; environment variables are unchanged."})
       (let [sel-atom (atom nil)
             sel (auth-selector/make-auth-selector
                  :logout entries
@@ -989,15 +993,15 @@
                        (when (and (:session-atom cs) (:footer-comp cs)
                                   (:footer-provider cs))
                          (update-footer! cs))
-                       (ui/chat-history-add-message! (:chat-history cs)
-                                                     {:role :assistant
-                                                      :content (if (= :oauth (:auth-type entry))
-                                                                 (str "Logged out of " (:name entry))
-                                                                 (str "Removed stored API key for " (:name entry)
-                                                                      ". Environment variables are unchanged."))})
+                       (chat-history/chat-history-add-message! (:chat-history cs)
+                                                               {:role :assistant
+                                                                :content (if (= :oauth (:auth-type entry))
+                                                                           (str "Logged out of " (:name entry))
+                                                                           (str "Removed stored API key for " (:name entry)
+                                                                                ". Environment variables are unchanged."))})
                        (catch Exception e
-                         (ui/show-warning! (:chat-history cs)
-                                           (str "Logout failed: " (ex-message e)))))
+                         (chat-history/show-warning! (:chat-history cs)
+                                                     (str "Logout failed: " (ex-message e)))))
                      (tui/tui-request-render (:tui cs))))
                  (fn []
                    (close-selector! sel-atom)
@@ -1046,13 +1050,13 @@
    {:name "help"
     :description "Show available commands and shortcuts"
     :handler (fn [cs _]
-               (ui/chat-history-add-message! (:chat-history cs)
-                                             {:role :assistant :content (help-text)}))})
+               (chat-history/chat-history-add-message! (:chat-history cs)
+                                                       {:role :assistant :content (help-text)}))})
   (register-builtin-command!
    {:name "hotkeys"
     :description "Show all keyboard shortcuts"
     :handler (fn [cs _]
-               (ui/chat-history-add-message!
+               (chat-history/chat-history-add-message!
                 (:chat-history cs)
                 {:component (hotkeys-ui/make-hotkeys-view
                              (make-hotkey-wired? cs))}))})
@@ -1060,8 +1064,8 @@
    {:name "tools"
     :description "List available tools with parameters"
     :handler (fn [cs _]
-               (ui/chat-history-add-message! (:chat-history cs)
-                                             {:role :assistant :content (tools-text)}))})
+               (chat-history/chat-history-add-message! (:chat-history cs)
+                                                       {:role :assistant :content (tools-text)}))})
   (register-builtin-command!
    {:name "model"
     :description "Switch model"
@@ -1116,9 +1120,9 @@
                ;; mid-turn refusal like the other switch commands (pi:
                ;; teardownCurrent aborts the run; kmet waits instead)
                (if (turn-running? cs)
-                 (ui/chat-history-add-message! (:chat-history cs)
-                                               {:role :assistant
-                                                :content "Wait for the current response to finish before resuming."})
+                 (chat-history/chat-history-add-message! (:chat-history cs)
+                                                         {:role :assistant
+                                                          :content "Wait for the current response to finish before resuming."})
                  (show-session-selector cs ensure-session-dir
                                         (fn [path]
                                           ;; pi: emitBeforeSwitch (reason :resume)
@@ -1130,9 +1134,9 @@
                                             (let [sess (session/load-session path)
                                                   short-id (subs (:id sess) 0 (min 8 (count (:id sess))))]
                                               (restore-session! cs sess true)
-                                              (ui/chat-history-add-message! (:chat-history cs)
-                                                                            {:role :assistant
-                                                                             :content (str "Resumed session " short-id ".")})
+                                              (chat-history/chat-history-add-message! (:chat-history cs)
+                                                                                      {:role :assistant
+                                                                                       :content (str "Resumed session " short-id ".")})
                                               (tui/tui-request-render (:tui cs))))))))})
   (register-builtin-command!
    {:name "continue"
@@ -1148,19 +1152,19 @@
                    ;; (:thinking/:executing, set by the run future) are checked.
                    (or @(:running-turn? cs)
                        (contains? #{:thinking :executing} @(:status agent-state)))
-                   (ui/chat-history-add-message! chat-history
-                                                 {:role :info :label "Continue"
-                                                  :content "Wait for the current response to finish before continuing."})
+                   (chat-history/chat-history-add-message! chat-history
+                                                           {:role :info :label "Continue"
+                                                            :content "Wait for the current response to finish before continuing."})
 
                    @(:compacting? agent-state)
-                   (ui/chat-history-add-message! chat-history
-                                                 {:role :info :label "Continue"
-                                                  :content "Wait for the in-progress compaction to finish before continuing."})
+                   (chat-history/chat-history-add-message! chat-history
+                                                           {:role :info :label "Continue"
+                                                            :content "Wait for the in-progress compaction to finish before continuing."})
 
                    (empty? (agent/get-context agent-state))
-                   (ui/chat-history-add-message! chat-history
-                                                 {:role :info :label "Continue"
-                                                  :content "No conversation to continue."})
+                   (chat-history/chat-history-add-message! chat-history
+                                                           {:role :info :label "Continue"
+                                                            :content "No conversation to continue."})
 
                    :else
                    (do (debug/log "/continue command")
@@ -1182,11 +1186,11 @@
                    ;; settles, shown in the pending display); when idle it
                    ;; submits like a regular message.
                    (when (= :queued (queue-follow-up-text! cs text))
-                     (ui/chat-history-show-status!
+                     (chat-history/chat-history-show-status!
                       (:chat-history cs)
                       "Queued follow-up message")
                      (tui/tui-request-render (:tui cs)))
-                   (ui/chat-history-add-message!
+                   (chat-history/chat-history-add-message!
                     (:chat-history cs)
                     {:role :info :label "Follow-up"
                      :content "Usage: /followup <message>"}))))})
@@ -1197,9 +1201,9 @@
                ;; mid-turn refusal like the other switch commands — branching
                ;; while a run streams would leave its events in the new branch
                (if (turn-running? cs)
-                 (ui/chat-history-add-message! (:chat-history cs)
-                                               {:role :assistant
-                                                :content "Wait for the current response to finish before navigating the tree."})
+                 (chat-history/chat-history-add-message! (:chat-history cs)
+                                                         {:role :assistant
+                                                          :content "Wait for the current response to finish before navigating the tree."})
                  (show-session-tree cs
                                     (fn [entry]
                                       (ask-branch-summary cs @(:session-atom cs) entry)))))})
@@ -1220,9 +1224,9 @@
     :handler (fn [cs args]
                (let [sess @(:session-atom cs)]
                  (if (nil? sess)
-                   (ui/chat-history-add-message! (:chat-history cs)
-                                                 {:role :assistant
-                                                  :content "No active session."})
+                   (chat-history/chat-history-add-message! (:chat-history cs)
+                                                           {:role :assistant
+                                                            :content "No active session."})
                    (if (seq args)
                      (let [sanitized (session/sanitize-session-name args)]
                        (session/append-session-info! sess sanitized)
@@ -1235,19 +1239,19 @@
                        (update-terminal-title! cs)
                        (when-not (= args sanitized)
                          ;; pi: warn when normalization changed the input
-                         (ui/show-warning!
+                         (chat-history/show-warning!
                           (:chat-history cs)
                           (str "Session name was normalized from " (pr-str args)
                                " to " (pr-str sanitized))))
-                       (ui/chat-history-add-message! (:chat-history cs)
-                                                     {:role :info :label "Name"
-                                                      :content (str "Session name set: " sanitized)}))
+                       (chat-history/chat-history-add-message! (:chat-history cs)
+                                                               {:role :info :label "Name"
+                                                                :content (str "Session name set: " sanitized)}))
                      (if-let [current (session/get-session-name sess)]
-                       (ui/chat-history-add-message! (:chat-history cs)
-                                                     {:role :info :label "Name"
-                                                      :content (str "Session name: " current)})
-                       (ui/show-warning! (:chat-history cs)
-                                         "Usage: /name <name>"))))))})
+                       (chat-history/chat-history-add-message! (:chat-history cs)
+                                                               {:role :info :label "Name"
+                                                                :content (str "Session name: " current)})
+                       (chat-history/show-warning! (:chat-history cs)
+                                                   "Usage: /name <name>"))))))})
   (register-builtin-command!
    {:name "session"
     :description "Show session info and stats"
@@ -1255,12 +1259,12 @@
                (let [sess @(:session-atom cs)
                      chat (:chat-history cs)]
                  (if (nil? sess)
-                   (ui/chat-history-add-message! chat
-                                                 {:role :info :label "Session"
-                                                  :content "No active session."})
-                   (ui/chat-history-add-message! chat
-                                                 {:role :assistant
-                                                  :content (session-info-text sess)}))))})
+                   (chat-history/chat-history-add-message! chat
+                                                           {:role :info :label "Session"
+                                                            :content "No active session."})
+                   (chat-history/chat-history-add-message! chat
+                                                           {:role :assistant
+                                                            :content (session-info-text sess)}))))})
   (register-builtin-command!
    {:name "export"
     :description "Export session to HTML (JSONL is not supported by design)"
@@ -1271,14 +1275,14 @@
                      arg (parse-path-argument args)]
                  (cond
                    (nil? sess)
-                   (ui/chat-history-add-message! chat
-                                                 {:role :info :label "Export"
-                                                  :content "No active session."})
+                   (chat-history/chat-history-add-message! chat
+                                                           {:role :info :label "Export"
+                                                            :content "No active session."})
 
                    (str/ends-with? (str/lower-case (or arg "")) ".jsonl")
-                   (ui/chat-history-add-message! chat
-                                                 {:role :info :label "Export"
-                                                  :content "JSONL export is not supported — kmet sessions are EDN-only. Use /export or /export <path.html>."})
+                   (chat-history/chat-history-add-message! chat
+                                                           {:role :info :label "Export"
+                                                            :content "JSONL export is not supported — kmet sessions are EDN-only. Use /export or /export <path.html>."})
 
                    :else
                    (try
@@ -1293,14 +1297,14 @@
                                   system-prompt (assoc :system-prompt system-prompt)
                                   (seq tool-defs) (assoc :tools tool-defs))
                            path (session-export/export-to-html! sess opts)]
-                       (ui/chat-history-add-message! chat
-                                                     {:role :info :label "Export"
-                                                      :content (str "Session exported to: " path)}))
+                       (chat-history/chat-history-add-message! chat
+                                                               {:role :info :label "Export"
+                                                                :content (str "Session exported to: " path)}))
                      (catch Exception e
-                       (ui/chat-history-add-message! chat
-                                                     {:role :info :label "Export"
-                                                      :content (str "Failed to export session: "
-                                                                    (or (ex-message e) (str e)))}))))))})
+                       (chat-history/chat-history-add-message! chat
+                                                               {:role :info :label "Export"
+                                                                :content (str "Failed to export session: "
+                                                                              (or (ex-message e) (str e)))}))))))})
   (register-builtin-command!
    ;; kmet keeps the path hint /export carries (pi hints neither; its usage
    ;; error spells the syntax out). kmet sessions are EDN, hence "from a
@@ -1316,25 +1320,25 @@
                (let [chat (:chat-history cs)]
                  (case (gh-auth-status)
                    :not-installed
-                   (ui/chat-history-add-message! chat
-                                                 {:role :info :label "Share"
-                                                  :content "GitHub CLI (gh) is not installed. Install it from https://cli.github.com/"})
+                   (chat-history/chat-history-add-message! chat
+                                                           {:role :info :label "Share"
+                                                            :content "GitHub CLI (gh) is not installed. Install it from https://cli.github.com/"})
 
                    :not-logged-in
-                   (ui/chat-history-add-message! chat
-                                                 {:role :info :label "Share"
-                                                  :content "GitHub CLI is not logged in. Run 'gh auth login' first."})
+                   (chat-history/chat-history-add-message! chat
+                                                           {:role :info :label "Share"
+                                                            :content "GitHub CLI is not logged in. Run 'gh auth login' first."})
 
                    :timed-out
-                   (ui/chat-history-add-message! chat
-                                                 {:role :info :label "Share"
-                                                  :content "GitHub CLI did not respond (timed out)."})
+                   (chat-history/chat-history-add-message! chat
+                                                           {:role :info :label "Share"
+                                                            :content "GitHub CLI did not respond (timed out)."})
 
                    :else
                    (if (nil? @(:session-atom cs))
-                     (ui/chat-history-add-message! chat
-                                                   {:role :info :label "Share"
-                                                    :content "No active session."})
+                     (chat-history/chat-history-add-message! chat
+                                                             {:role :info :label "Share"
+                                                              :content "No active session."})
                      (share-session! cs)))))})
   (register-builtin-command!
    {:name "copy"
@@ -1344,9 +1348,9 @@
                      chat (:chat-history cs)]
                  (cond
                    (nil? sess)
-                   (ui/chat-history-add-message! chat
-                                                 {:role :info :label "Copy"
-                                                  :content "No active session."})
+                   (chat-history/chat-history-add-message! chat
+                                                           {:role :info :label "Copy"
+                                                            :content "No active session."})
 
                    :else
                    (if-let [text (session/get-last-assistant-text sess)]
@@ -1357,10 +1361,10 @@
                        (if (lib-term/osc52-copy! (term/write-fn @(:terminal (:tui cs)))
                                                  text)
                          (tui/tui-flash! (:tui cs) "Copied!")
-                         (ui/show-warning! chat
-                                           "No clipboard tool available on this system.")))
-                     (ui/show-warning! chat
-                                       "No agent messages to copy yet.")))))})
+                         (chat-history/show-warning! chat
+                                                     "No clipboard tool available on this system.")))
+                     (chat-history/show-warning! chat
+                                                 "No agent messages to copy yet.")))))})
   (register-builtin-command!
    {:name "reload"
     :description "Reload keybindings, extensions, skills, prompts, themes, and context files"
@@ -1375,14 +1379,14 @@
                      instructions (when (seq args) args)]
                  (cond
                    (not= :idle @(:status agent-state))
-                   (ui/chat-history-add-message! chat-history
-                                                 {:role :info :label "Compact"
-                                                  :content "Wait for the current response to finish before compacting."})
+                   (chat-history/chat-history-add-message! chat-history
+                                                           {:role :info :label "Compact"
+                                                            :content "Wait for the current response to finish before compacting."})
 
                    @(:compacting? agent-state)
-                   (ui/chat-history-add-message! chat-history
-                                                 {:role :info :label "Compact"
-                                                  :content "Compaction already in progress."})
+                   (chat-history/chat-history-add-message! chat-history
+                                                           {:role :info :label "Compact"
+                                                            :content "Compaction already in progress."})
 
                    :else
                    ;; Runs on a future so the input thread stays live and
@@ -1396,7 +1400,7 @@
                          ;; compaction error — compaction_end surfaces it
                          ;; (showError for manual); the future only replies
                          ;; for success and nothing-to-compact.
-                         (ui/chat-history-add-message!
+                         (chat-history/chat-history-add-message!
                           chat-history
                           {:role :info :label "Compact"
                            :content (if result
@@ -1420,19 +1424,19 @@
                    (let [result (theme-ctrl/set-theme-name! tc name)]
                      (when (:success result)
                        (cfg/save-setting! [:theme] name))
-                     (ui/chat-history-add-message! (:chat-history cs)
-                                                   {:role :assistant
-                                                    :content (if (:success result)
-                                                               (str "Switched to theme \"" name "\".")
-                                                               (str "Failed to load theme \"" name "\": "
-                                                                    (:error result)))}))
-                   (ui/chat-history-add-message! (:chat-history cs)
-                                                 {:role :assistant
-                                                  :content (str "Current theme: "
-                                                                (theme-ctrl/get-active-theme-name tc)
-                                                                "\nAvailable themes: "
-                                                                (str/join ", " (sort (keys (th/get-all-themes))))
-                                                                "\nUsage: /theme <name>")}))))})
+                     (chat-history/chat-history-add-message! (:chat-history cs)
+                                                             {:role :assistant
+                                                              :content (if (:success result)
+                                                                         (str "Switched to theme \"" name "\".")
+                                                                         (str "Failed to load theme \"" name "\": "
+                                                                              (:error result)))}))
+                   (chat-history/chat-history-add-message! (:chat-history cs)
+                                                           {:role :assistant
+                                                            :content (str "Current theme: "
+                                                                          (theme-ctrl/get-active-theme-name tc)
+                                                                          "\nAvailable themes: "
+                                                                          (str/join ", " (sort (keys (th/get-all-themes))))
+                                                                          "\nUsage: /theme <name>")}))))})
   (register-builtin-command!
    {:name "login"
     :description "Configure provider authentication"
@@ -1455,9 +1459,9 @@
   (let [{:keys [chat-history]} cs
         agent-state @(:agent-state cs)]
     (if-not (= :idle @(:status agent-state))
-      (ui/chat-history-add-message! chat-history
-                                    {:role :info :label "Reload"
-                                     :content "Wait for the current response to finish before reloading."})
+      (chat-history/chat-history-add-message! chat-history
+                                              {:role :info :label "Reload"
+                                               :content "Wait for the current response to finish before reloading."})
       (try
         ;; pi: settingsManager.reload() + theme re-registration
         (let [config (cfg/init!)
@@ -1506,20 +1510,20 @@
           (theme-ctrl/set-config! (:theme-controller cs) config)
 ;; pi: restoreChatBeforeSessionStart — re-apply hideThinkingBlock
           ;; and the tool display mode from settings to existing chat messages
-          (ui/chat-history-set-thinking-hidden! chat-history
-                                                (cfg/get-hide-thinking-block config))
+          (chat-history/chat-history-set-thinking-hidden! chat-history
+                                                          (cfg/get-hide-thinking-block config))
           ;; the header and loaded resources follow the same mode as the chat
           ;; (the ctrl+o handler and the extension setter both keep them in
           ;; sync; reload must not leave them on a stale expansion)
           (let [mode (cfg/get-tool-display-mode config)]
-            (ui/chat-history-set-tool-display-mode! chat-history mode)
+            (chat-history/chat-history-set-tool-display-mode! chat-history mode)
             (when-let [hdr (:header-comp cs)]
               (expandable-text/expandable-text-set-expanded! hdr (= :expanded mode)))
             (when-let [lr (:loaded-resources-comp cs)]
-              (ui/loaded-resources-set-expanded! lr (= :expanded mode))))
+              (loaded-resources/loaded-resources-set-expanded! lr (= :expanded mode))))
           (reset! (:system agent-state) system-prompt)
           (reset! (:system-prompt-opts agent-state) system-prompt-opts)
-          (ui/loaded-resources-set-sections!
+          (loaded-resources/loaded-resources-set-sections!
            (:loaded-resources-comp cs) (build-loaded-resource-sections))
           ;; pi: settingsManager.reload() — re-seed the live image settings
           ;; (/settings persists to settings.edn, whose merged value can also
@@ -1543,35 +1547,35 @@
                  ;; reload) — extensions contribute skill/prompt/theme paths
                  (extensions/discover-resources! :reload)
                  (catch Exception e (debug/log "session-start: " e))))
-          (ui/chat-history-add-message! chat-history
-                                        {:role :info :label "Reload"
-                                         :content (str "Reloaded keybindings, extensions, skills, prompts, themes, context files, and models.edn."
-                                                       (when-let [err (models/get-model-config-error)]
-                                                         (str " [models.edn: " err "]"))
-                                                       (when-let [failures (seq (filter :error ext-results))]
-                                                         (str "\n\nFailed to load extension"
-                                                              (when (< 1 (count failures)) "s")
-                                                              ":\n"
-                                                              (str/join "\n"
-                                                                        (map (fn [{:keys [extension path error]}]
-                                                                               (str "- " (or extension path) ": " error))
-                                                                             failures))))
-                                                       (when-let [skipped (seq (filter :skipped ext-results))]
-                                                         (str "\n\nSkipped extension"
-                                                              (when (< 1 (count skipped)) "s")
-                                                              " (declared loaders this host does not offer):\n"
-                                                              (str/join "\n"
-                                                                        (map (fn [{:keys [extension declared-loaders available-loaders]}]
-                                                                               (str "- " extension " supports " (pr-str declared-loaders)
-                                                                                    ", " (pr-str available-loaders) " available"))
-                                                                             skipped)))))}))
+          (chat-history/chat-history-add-message! chat-history
+                                                  {:role :info :label "Reload"
+                                                   :content (str "Reloaded keybindings, extensions, skills, prompts, themes, context files, and models.edn."
+                                                                 (when-let [err (models/get-model-config-error)]
+                                                                   (str " [models.edn: " err "]"))
+                                                                 (when-let [failures (seq (filter :error ext-results))]
+                                                                   (str "\n\nFailed to load extension"
+                                                                        (when (< 1 (count failures)) "s")
+                                                                        ":\n"
+                                                                        (str/join "\n"
+                                                                                  (map (fn [{:keys [extension path error]}]
+                                                                                         (str "- " (or extension path) ": " error))
+                                                                                       failures))))
+                                                                 (when-let [skipped (seq (filter :skipped ext-results))]
+                                                                   (str "\n\nSkipped extension"
+                                                                        (when (< 1 (count skipped)) "s")
+                                                                        " (declared loaders this host does not offer):\n"
+                                                                        (str/join "\n"
+                                                                                  (map (fn [{:keys [extension declared-loaders available-loaders]}]
+                                                                                         (str "- " extension " supports " (pr-str declared-loaders)
+                                                                                              ", " (pr-str available-loaders) " available"))
+                                                                                       skipped)))))}))
         (catch Exception e
           (debug/log "reload failed: " e)
-          (ui/chat-history-add-message! chat-history
-                                        {:role :info :label "Reload"
-                                         :content (str "Reload failed: "
-                                                       (or (ex-message e)
-                                                           (.getName (class e))))}))))))
+          (chat-history/chat-history-add-message! chat-history
+                                                  {:role :info :label "Reload"
+                                                   :content (str "Reload failed: "
+                                                                 (or (ex-message e)
+                                                                     (.getName (class e))))}))))))
 
 ;; ─── Resume session ────────────────────────────────────────────────────────
 
@@ -1661,7 +1665,7 @@
    as completed BashExecutionComponents (pi: addMessageToChat case
    bashExecution)."
   [cs sess]
-  (ui/chat-history-clear! (:chat-history cs))
+  (chat-history/chat-history-clear! (:chat-history cs))
   (let [content-of
         (fn [e]
           (str/join
@@ -1687,8 +1691,8 @@
           ;; failure renders the pi error line instead of crashing the replay
           (when-let [rendered (run-entry-renderer
                                (extensions/get-entry-renderer (:custom-type e)) e)]
-            (ui/chat-history-add-message! (:chat-history cs)
-                                          (renderer-result->message rendered)))
+            (chat-history/chat-history-add-message! (:chat-history cs)
+                                                    (renderer-result->message rendered)))
 
           (= role :custom-message)
           ;; extension custom messages render only when display is set (pi:
@@ -1696,7 +1700,7 @@
           ;; or a block vector (pi CustomMessageEntry). A registered message
           ;; renderer overrides the default labeled info box.
           (when (:display e)
-            (ui/chat-history-add-message!
+            (chat-history/chat-history-add-message!
              (:chat-history cs)
              (if-let [rendered (run-message-renderer
                                 (extensions/get-message-renderer (:custom-type e)) e)]
@@ -1708,13 +1712,13 @@
 
           (= role :assistant)
           (do
-            (ui/chat-history-add-message! (:chat-history cs)
-                                          (cond-> {:role role :content (content-of e)}
-                                            (= role :assistant) (assoc :thinking (:thinking e)
+            (chat-history/chat-history-add-message! (:chat-history cs)
+                                                    (cond-> {:role role :content (content-of e)}
+                                                      (= role :assistant) (assoc :thinking (:thinking e)
                                                                        ;; replayed tool-call-only
                                                                        ;; messages render no
                                                                        ;; '(no response)' bubble
-                                                                       :tool-calls (:tool-calls e))))
+                                                                                 :tool-calls (:tool-calls e))))
             ;; Pi: create a ToolExecutionComponent per tool call declared in
             ;; the assistant message (name + args from the call — the same
             ;; fields the live :tool-execution-start event carries), then
@@ -1726,7 +1730,7 @@
             ;; never came (pi: renderInitialMessages updateResult error).
             (let [errored? (contains? #{:error :aborted} (:stop-reason e))]
               (doseq [tc (:tool-calls e)]
-                (when-let [comp (ui/chat-history-add-message!
+                (when-let [comp (chat-history/chat-history-add-message!
                                  (:chat-history cs)
                                  {:role :tool
                                   :name (:name tc)
@@ -1734,14 +1738,14 @@
                                   :content ""
                                   :is-error false})]
                   (reset! (:tool-call-id-atom comp) (:id tc))
-                  (ui/tool-execution-set-args-complete! comp)
+                  (tool-execution/tool-execution-set-args-complete! comp)
                   (if errored?
                     (do (reset! (:content-atom comp)
                                 (or (:error-message e)
                                     (if (= :aborted (:stop-reason e))
                                       "Aborted"
                                       "Error")))
-                        (ui/tool-execution-set-error! comp true))
+                        (tool-execution/tool-execution-set-error! comp true))
                     (swap! pending-tools assoc (:id tc) comp))))))
 
           (= role :tool)
@@ -1752,18 +1756,18 @@
               ;; matched result — fill the pending call component (pi:
               ;; updateResult by toolCallId)
               (do (reset! (:content-atom comp) (content-of e))
-                  (ui/tool-execution-set-error! comp (:is-error e false))
+                  (tool-execution/tool-execution-set-error! comp (:is-error e false))
                   (when-let [truncation (:truncation e)]
                     (reset! (:truncation-atom comp) truncation))
                   (when-let [details (:details e)]
                     (reset! (:details-atom comp) details))
                   (when-let [images (:images e)]
-                    (ui/tool-execution-set-images! comp images))
+                    (tool-execution/tool-execution-set-images! comp images))
                   (swap! pending-tools dissoc tc-id))
               ;; unpaired result (no matching tool call in the branch —
               ;; legacy sessions, extension tools) — standalone component
               ;; from the entry's own fields
-              (ui/chat-history-add-message!
+              (chat-history/chat-history-add-message!
                (:chat-history cs)
                (cond-> {:role :tool
                         :content (content-of e)
@@ -1789,23 +1793,23 @@
             (be/bash-execution-set-complete! comp (:exit-code e) (:cancelled e false)
                                              :truncation (when (:truncated e) {:truncated true})
                                              :full-output-path (:full-output-path e))
-            (ui/chat-history-add-message! (:chat-history cs)
-                                          {:role :bash :command (:command e) :component comp}))
+            (chat-history/chat-history-add-message! (:chat-history cs)
+                                                    {:role :bash :command (:command e) :component comp}))
 
           ;; pi: CompactionSummaryMessageComponent / BranchSummary — dedicated
           ;; collapsible summary boxes; a usage-carrying summary appends the
           ;; billing notice when :show-cache-miss-notices is on
           (contains? #{:compaction :branch-summary} role)
           (do
-            (ui/chat-history-add-message!
+            (chat-history/chat-history-add-message!
              (:chat-history cs)
              (cond-> {:role role :summary (:summary e) :tokens-before (:tokens-before e)}
                (:usage e) (assoc :usage (:usage e))))
             (when-let [notice (compaction-cost-notice (:config cs) role (:usage e))]
-              (ui/chat-history-add-message! (:chat-history cs) notice)))
+              (chat-history/chat-history-add-message! (:chat-history cs) notice)))
 
           :else
-          (ui/chat-history-add-message!
+          (chat-history/chat-history-add-message!
            (:chat-history cs)
            (cond-> {:role role :content (content-of e)}
              ;; user-attached images replay too — content-of keeps only the
@@ -1861,7 +1865,7 @@
           cwd)
 
       :else
-      (do (ui/chat-history-show-status!
+      (do (chat-history/chat-history-show-status!
            (:chat-history cs)
            (str "Session cwd " recorded " no longer exists — continuing in " current))
           current))))
@@ -1894,7 +1898,7 @@
   ;; the session file (any branch) contains compactions
   (let [n (count (filter #(= :compaction (:role %)) @(:entries sess)))]
     (when (pos? n)
-      (ui/chat-history-show-status!
+      (chat-history/chat-history-show-status!
        (:chat-history cs)
        (str "Session compacted " n (if (= n 1) " time" " times")))))
   ;; pi: createRuntime's cwd + footerDataProvider.setCwd — the session's
@@ -1968,8 +1972,8 @@
                                                   ;; project (pi: newSession keeps this.cwd)
                                                   {:cwd (runtime-cwd cs)})]
           (debug/log "new session created: " (:id new-session))
-          (ui/chat-history-clear! (:chat-history cs))
-          (ui/dispose-pending-bash! @(:pending-bash-components cs))
+          (chat-history/chat-history-clear! (:chat-history cs))
+          (be/dispose-pending-bash! @(:pending-bash-components cs))
           (container/container-clear (:pending-messages-container cs))
           ;; pi: a session switch drops the compaction queue
           ;; (compactionQueuedMessages = [])
@@ -2010,15 +2014,15 @@
           (update-footer! cs)
           (update-terminal-title! cs)
           (tui/tui-request-render (:tui cs))
-          (ui/chat-history-add-message! (:chat-history cs)
-                                        {:role :assistant :content "Started a new session."}))))))
+          (chat-history/chat-history-add-message! (:chat-history cs)
+                                                  {:role :assistant :content "Started a new session."}))))))
 
 ;; ─── Import (/import — pi: handleImportCommand) ───────────────────────────
 
 (defn- import-error!
   "pi: showError — the Error: line in the transcript."
   [chat message]
-  (ui/chat-history-add-message! chat {:role :error :content message}))
+  (chat-history/chat-history-add-message! chat {:role :error :content message}))
 
 (defn- import-failed!
   "pi: the catch in handleImportCommand — showError with pi's prefix."
@@ -2047,7 +2051,7 @@
                    (protocols/dispose dlg))
                  (tui/tui-request-render tui))
         cancelled! (fn []
-                     (ui/chat-history-show-status! chat "Import cancelled")
+                     (chat-history/chat-history-show-status! chat "Import cancelled")
                      (tui/tui-request-render tui))
         dlg (dialogs/make-selector-dialog
              (str title "\n" message)
@@ -2082,9 +2086,9 @@
       (import-error! chat "Usage: /import <path>")
 
       (turn-running? cs)
-      (ui/chat-history-add-message! chat
-                                    {:role :assistant
-                                     :content "Wait for the current response to finish before importing."})
+      (chat-history/chat-history-add-message! chat
+                                              {:role :assistant
+                                               :content "Wait for the current response to finish before importing."})
 
       :else
       (let [sess @(:session-atom cs)
@@ -2107,10 +2111,10 @@
                                {:type :session-before-switch
                                 :reason :resume
                                 :target-session-file (:path plan)}))
-                   (ui/chat-history-show-status! chat "Import cancelled")
+                   (chat-history/chat-history-show-status! chat "Import cancelled")
                    (do (session/copy-imported-session! plan)
                        (restore-session! cs (session/load-session (:path plan)) true)
-                       (ui/chat-history-show-status!
+                       (chat-history/chat-history-show-status!
                         chat (str "Session imported from: " (:source plan)))
                        (tui/tui-request-render (:tui cs))))
                  (catch Exception e
@@ -2169,17 +2173,17 @@
                 :old-leaf-id old-leaf
                 :from-extension? (boolean from-extension?)}
          summary-entry (assoc :summary-entry summary-entry)))
-      (ui/chat-history-add-message! (:chat-history cs)
-                                    {:role :assistant
-                                     :content (if summary-result
-                                                "Navigated to the selected point (branch summarized)."
-                                                "Navigated to the selected point.")})
+      (chat-history/chat-history-add-message! (:chat-history cs)
+                                              {:role :assistant
+                                               :content (if summary-result
+                                                          "Navigated to the selected point (branch summarized)."
+                                                          "Navigated to the selected point.")})
       (tui/tui-request-render (:tui cs)))
     (catch Exception e
       (debug/log "tree navigation failed: " e)
-      (ui/chat-history-add-message! (:chat-history cs)
-                                    {:role :info :label "Tree"
-                                     :content (str "Navigation failed: " (ex-message e))})
+      (chat-history/chat-history-add-message! (:chat-history cs)
+                                              {:role :info :label "Tree"
+                                               :content (str "Navigation failed: " (ex-message e))})
       (tui/tui-request-render (:tui cs)))))
 
 (defn- branch-summarize-and-apply!
@@ -2194,7 +2198,7 @@
   (let [ag @(:agent-state cs)
         ed (:editor cs)
         prev-interrupt (get @(:action-handlers ed) "app.interrupt")
-        indicator (ui/make-branch-summary-status-indicator)
+        indicator (status-indicator/make-branch-summary-status-indicator)
         done (promise)]
     ;; escape → abort (pi: defaultEditor.onEscape = abortBranchSummary)
     (editor/editor-set-on-action! ed "app.interrupt"
@@ -2220,19 +2224,19 @@
         (release-background-status! cs :branch-summary indicator)
         (cond
           (= result :timeout)
-          (ui/chat-history-add-message! (:chat-history cs)
-                                        {:role :info :label "Tree"
-                                         :content "Branch summarization timed out — branch unchanged."})
+          (chat-history/chat-history-add-message! (:chat-history cs)
+                                                  {:role :info :label "Tree"
+                                                   :content "Branch summarization timed out — branch unchanged."})
 
           (nil? result)
-          (ui/chat-history-add-message! (:chat-history cs)
-                                        {:role :info :label "Tree"
-                                         :content "Branch summarization failed — branch unchanged."})
+          (chat-history/chat-history-add-message! (:chat-history cs)
+                                                  {:role :info :label "Tree"
+                                                   :content "Branch summarization failed — branch unchanged."})
 
           (:aborted result)
-          (ui/chat-history-add-message! (:chat-history cs)
-                                        {:role :info :label "Tree"
-                                         :content "Branch summarization cancelled — branch unchanged."})
+          (chat-history/chat-history-add-message! (:chat-history cs)
+                                                  {:role :info :label "Tree"
+                                                   :content "Branch summarization cancelled — branch unchanged."})
 
           :else
           (complete-tree-navigation! cs sess old-leaf target-leaf
@@ -2282,9 +2286,9 @@
                                  false effective-label)
 
       (:cancel ext-result)
-      (ui/chat-history-add-message! (:chat-history cs)
-                                    {:role :info :label "Tree"
-                                     :content "Navigation cancelled by an extension."})
+      (chat-history/chat-history-add-message! (:chat-history cs)
+                                              {:role :info :label "Tree"
+                                               :content "Navigation cancelled by an extension."})
 
       (and wants-summary (:summary ext-result))
       (complete-tree-navigation! cs sess old-leaf target-leaf
@@ -2362,44 +2366,44 @@
    one."
   [cs entry-id]
   (if (turn-running? cs)
-    (ui/chat-history-add-message! (:chat-history cs)
-                                  {:role :assistant
-                                   :content "Wait for the current response to finish before forking."})
+    (chat-history/chat-history-add-message! (:chat-history cs)
+                                            {:role :assistant
+                                             :content "Wait for the current response to finish before forking."})
     (let [sess @(:session-atom cs)
           entry (session/get-entry sess entry-id)]
       (if (nil? entry)
-        (ui/chat-history-add-message! (:chat-history cs)
-                                      {:role :assistant :content "Invalid entry for forking."})
+        (chat-history/chat-history-add-message! (:chat-history cs)
+                                                {:role :assistant :content "Invalid entry for forking."})
         (try
           ;; pi: emitBeforeFork — extensions may cancel the fork; the
           ;; conversation stays untouched
           (if (:cancel (event-bus/emit-event! {:type :session-before-fork
                                                :entry-id entry-id
                                                :position :at}))
-            (ui/chat-history-add-message! (:chat-history cs)
-                                          {:role :assistant
-                                           :content "Fork cancelled by an extension."})
+            (chat-history/chat-history-add-message! (:chat-history cs)
+                                                    {:role :assistant
+                                                     :content "Fork cancelled by an extension."})
             (let [fork (if (:parent-id entry)
                          (session/fork-session sess (:parent-id entry))
                          (session/create-session (ensure-cwd-session-dir (runtime-cwd cs))
                                                  {:parent-session (:file sess)
                                                   :cwd (runtime-cwd cs)}))]
               (if (nil? fork)
-                (ui/chat-history-add-message! (:chat-history cs)
-                                              {:role :assistant :content "Failed to create forked session."})
+                (chat-history/chat-history-add-message! (:chat-history cs)
+                                                        {:role :assistant :content "Failed to create forked session."})
                 (do
                   (debug/log "forked session " (:id fork) " from " (:id sess))
                   (restore-session! cs fork false)
                   (editor-text-set! (:editor cs) (session/session-entry-text entry))
-                  (ui/chat-history-add-message! (:chat-history cs)
-                                                {:role :assistant
-                                                 :content (str "Forked to new session " (subs (:id fork) 0 8) ".")})
+                  (chat-history/chat-history-add-message! (:chat-history cs)
+                                                          {:role :assistant
+                                                           :content (str "Forked to new session " (subs (:id fork) 0 8) ".")})
                   (tui/tui-request-render (:tui cs))))))
           (catch Exception e
             (debug/log "fork failed: " e)
-            (ui/chat-history-add-message! (:chat-history cs)
-                                          {:role :info :label "Fork"
-                                           :content (str "Fork failed: " (ex-message e))})
+            (chat-history/chat-history-add-message! (:chat-history cs)
+                                                    {:role :info :label "Fork"
+                                                     :content (str "Fork failed: " (ex-message e))})
             (tui/tui-request-render (:tui cs))))))))
 
 (defn- clone-current-session!
@@ -2409,22 +2413,22 @@
   (let [sess @(:session-atom cs)]
     (cond
       (turn-running? cs)
-      (ui/chat-history-add-message! (:chat-history cs)
-                                    {:role :assistant
-                                     :content "Wait for the current response to finish before cloning."})
+      (chat-history/chat-history-add-message! (:chat-history cs)
+                                              {:role :assistant
+                                               :content "Wait for the current response to finish before cloning."})
 
       (nil? sess)
-      (ui/chat-history-add-message! (:chat-history cs)
-                                    {:role :assistant :content "No active session."})
+      (chat-history/chat-history-add-message! (:chat-history cs)
+                                              {:role :assistant :content "No active session."})
 
       (nil? @(:leaf-id sess))
-      (ui/chat-history-add-message! (:chat-history cs)
-                                    {:role :assistant :content "Nothing to clone yet."})
+      (chat-history/chat-history-add-message! (:chat-history cs)
+                                              {:role :assistant :content "Nothing to clone yet."})
 
       (not (fs/exists? (:file sess)))
-      (ui/chat-history-add-message! (:chat-history cs)
-                                    {:role :assistant
-                                     :content "Wait for the first assistant response before cloning."})
+      (chat-history/chat-history-add-message! (:chat-history cs)
+                                              {:role :assistant
+                                               :content "Wait for the first assistant response before cloning."})
 
       :else
       (try
@@ -2433,25 +2437,25 @@
         (if (:cancel (event-bus/emit-event! {:type :session-before-fork
                                              :entry-id @(:leaf-id sess)
                                              :position :at}))
-          (ui/chat-history-add-message! (:chat-history cs)
-                                        {:role :assistant
-                                         :content "Clone cancelled by an extension."})
+          (chat-history/chat-history-add-message! (:chat-history cs)
+                                                  {:role :assistant
+                                                   :content "Clone cancelled by an extension."})
           (let [fork (session/clone-session sess)]
             (if (nil? fork)
-              (ui/chat-history-add-message! (:chat-history cs)
-                                            {:role :assistant :content "Failed to clone session."})
+              (chat-history/chat-history-add-message! (:chat-history cs)
+                                                      {:role :assistant :content "Failed to clone session."})
               (do
                 (debug/log "cloned session " (:id fork) " from " (:id sess))
                 (restore-session! cs fork false)
-                (ui/chat-history-add-message! (:chat-history cs)
-                                              {:role :assistant
-                                               :content (str "Cloned to new session " (subs (:id fork) 0 8) ".")})
+                (chat-history/chat-history-add-message! (:chat-history cs)
+                                                        {:role :assistant
+                                                         :content (str "Cloned to new session " (subs (:id fork) 0 8) ".")})
                 (tui/tui-request-render (:tui cs))))))
         (catch Exception e
           (debug/log "clone failed: " e)
-          (ui/chat-history-add-message! (:chat-history cs)
-                                        {:role :info :label "Clone"
-                                         :content (str "Clone failed: " (ex-message e))})
+          (chat-history/chat-history-add-message! (:chat-history cs)
+                                                  {:role :info :label "Clone"
+                                                   :content (str "Clone failed: " (ex-message e))})
           (tui/tui-request-render (:tui cs)))))))
 
 ;; ─── Animation timer ────────────────────────────────────────────────────────
@@ -2521,7 +2525,7 @@
     (reset! (:anim-timer cs) nil)))
 
 ;; ─── Status indicator swap model (pi: showStatusIndicator/clearStatusIndicator) ──
-;; The status layer is a fn component (ui/make-status-area) mounted via
+;; The status layer is a fn component (status-indicator/make-status-area) mounted via
 ;; hiccup/root: it renders whichever indicator the :status-current atom
 ;; records ({:kind k :indicator c :driver f}), or the default working
 ;; StatusIndicator when nil — except while the active editor embeds the
@@ -2541,7 +2545,7 @@
    plain rule). The editor's top-border hook resolves this per render."
   [cs]
   (or (:indicator @(:status-current cs))
-      (when (ui/status-indicator-active? (:status-indicator cs))
+      (when (status-indicator/status-indicator-active? (:status-indicator cs))
         (:status-indicator cs))))
 
 (defn- show-status-indicator!
@@ -2554,7 +2558,7 @@
    timer already drives frames)."
   [cs kind indicator]
   (cancel-indicator-driver! cs)
-  (ui/status-indicator-stop! (:status-indicator cs))
+  (status-indicator/status-indicator-stop! (:status-indicator cs))
   (reset! (:status-current cs)
           {:kind kind
            :indicator indicator
@@ -2574,14 +2578,14 @@
   ;; anim timer once the turn runs.
   (cancel-indicator-driver! cs)
   (reset! (:status-current cs) nil)
-  (ui/status-indicator-start! (:status-indicator cs))
+  (status-indicator/status-indicator-start! (:status-indicator cs))
   ;; A background thread (share/branch-summary completion, an extension's
   ;; set-working-visible) can revive into a turn that just ended: teardown
   ;; (on-agent-done/on-agent-error) drops running-turn? BEFORE clearing
   ;; the status, so an activation interleaved with it can land after the
   ;; clear. Never leave a spinner with no turn behind it.
   (when-not @(:running-turn? cs)
-    (ui/status-indicator-stop! (:status-indicator cs))))
+    (status-indicator/status-indicator-stop! (:status-indicator cs))))
 
 (defn- release-background-status!
   "Release a long-running background status indicator (share, branch
@@ -2602,7 +2606,7 @@
     (clear-status-indicator! cs kind)
     (when (and @(:running-turn? cs)
                (nil? @(:status-current cs))
-               (not (ui/status-indicator-active? (:status-indicator cs))))
+               (not (status-indicator/status-indicator-active? (:status-indicator cs))))
       (activate-working-indicator! cs))))
 
 (defn- clear-status-indicator!
@@ -2626,7 +2630,7 @@
       ;; status-area root reaction; an already-idle clear needs no frame.
       (cancel-indicator-driver! cs)
       (reset! (:status-current cs) nil)
-      (ui/status-indicator-stop! (:status-indicator cs)))))
+      (status-indicator/status-indicator-stop! (:status-indicator cs)))))
 
 ;; ─── Pending messages display (pi: updatePendingMessagesDisplay) ──────────
 
@@ -2652,9 +2656,9 @@
         c-follow (mapv :text (filter #(= :follow-up (:mode %)) cq))]
     ;; set-queues! swaps track!-watched atoms — the watch invalidates the
     ;; component and schedules the frame (§3.4); no manual poke.
-    (ui/pending-messages-set-queues! (:pending-messages-comp cs)
-                                     (into (vec steering) c-steer)
-                                     (into (vec follow-up) c-follow))))
+    (pending-messages/pending-messages-set-queues! (:pending-messages-comp cs)
+                                                   (into (vec steering) c-steer)
+                                                   (into (vec follow-up) c-follow))))
 
 (defn- queue-compaction-message!
   "Queue a message typed during compaction (pi: queueCompactionMessage —
@@ -2664,7 +2668,7 @@
   [cs text mode]
   (swap! (:compaction-queued cs) conj {:text text :mode mode})
   (update-pending-messages! cs)
-  (ui/chat-history-show-status!
+  (chat-history/chat-history-show-status!
    (:chat-history cs) "Queued message for after compaction")
   (tui/tui-request-render (:tui cs)))
 
@@ -2799,7 +2803,7 @@
         (update-pending-messages! cs)
         (catch Exception e
           (restore!)
-          (ui/chat-history-show-status!
+          (chat-history/chat-history-show-status!
            (:chat-history cs)
            (str "Failed to send queued message"
                 (when (> (count msgs) 1) "s")
@@ -2843,7 +2847,7 @@
    needed here."
   [cs text]
   (try
-    (ui/chat-history-append-streaming-text! (:chat-history cs) text)
+    (chat-history/chat-history-append-streaming-text! (:chat-history cs) text)
     (catch Exception e
       (debug/log "on-agent-text callback: " e)
       (binding [*out* *err*] (println "on-agent-text error:" (ex-message e) (.getClass e))))))
@@ -2853,7 +2857,7 @@
    (pure data append — see on-agent-text)."
   [cs text]
   (try
-    (ui/chat-history-append-thinking-text! (:chat-history cs) text)
+    (chat-history/chat-history-append-thinking-text! (:chat-history cs) text)
     (catch Exception e
       (debug/log "on-agent-thinking callback: " e)
       (binding [*out* *err*] (println "on-agent-thinking error:" (ex-message e) (.getClass e))))))
@@ -2872,8 +2876,8 @@
     (stop-anim-timer! cs)
     (reset! (:running-turn? cs) false)
     (clear-status-indicator! cs)
-    (ui/chat-history-finalize-streaming! (:chat-history cs))
-    (ui/chat-history-finalize-thinking! (:chat-history cs))
+    (chat-history/chat-history-finalize-streaming! (:chat-history cs))
+    (chat-history/chat-history-finalize-thinking! (:chat-history cs))
     ;; Heal stale above-window scrollback now that the turn has ended: the turn
     ;; itself produced the stale lines (tool output and streamed text that
     ;; changed above the window), and the document is bottom-pinned with the
@@ -2904,12 +2908,12 @@
     ;; streamingComponent by reference).
     (let [ch (:chat-history cs)]
       (if (and @(:streaming-atom ch)
-               (ui/chat-history-streaming-empty? ch))
-        (ui/chat-history-remove-streaming-placeholder! ch)
-        (do (ui/chat-history-finalize-streaming! ch)
-            (ui/chat-history-finalize-thinking! ch))))
-    (ui/chat-history-add-message! (:chat-history cs)
-                                  {:role :assistant :content (th/fg th/dark-theme :error (str "Error: " error-msg))})
+               (chat-history/chat-history-streaming-empty? ch))
+        (chat-history/chat-history-remove-streaming-placeholder! ch)
+        (do (chat-history/chat-history-finalize-streaming! ch)
+            (chat-history/chat-history-finalize-thinking! ch))))
+    (chat-history/chat-history-add-message! (:chat-history cs)
+                                            {:role :assistant :content (th/fg th/dark-theme :error (str "Error: " error-msg))})
     ;; A failed turn still produced above-window changes while streaming, so
     ;; heal here too (gated on streaming-free; no-op unless dirty).
     (heal-stale-scrollback-when-idle! cs)
@@ -2933,8 +2937,8 @@
   (if @(:bash-running? cs)
     (do
       (debug/log "bash: already running, ignoring")
-      (ui/show-warning! (:chat-history cs)
-                        "A bash command is already running. Press Escape to cancel it first."))
+      (chat-history/show-warning! (:chat-history cs)
+                                  "A bash command is already running. Press Escape to cancel it first."))
     (do
       (reset! (:bash-signal cs) false)
       (reset! (:bash-running? cs) true)
@@ -2980,9 +2984,9 @@
           (do
             (container/container-add-child (:pending-messages-container cs) bash-comp)
             (swap! (:pending-bash-components cs) conj bash-comp))
-          (ui/chat-history-add-message! (:chat-history cs)
-                                        {:role :bash :command command
-                                         :component bash-comp}))
+          (chat-history/chat-history-add-message! (:chat-history cs)
+                                                  {:role :bash :command command
+                                                   :component bash-comp}))
 
         (update-footer! cs)
         (tui/tui-request-render (:tui cs))
@@ -3024,8 +3028,8 @@
                   (when (seq @pending)
                     (doseq [comp @pending]
                       (container/container-remove-child (:pending-messages-container cs) comp)
-                      (ui/chat-history-add-message! (:chat-history cs)
-                                                    {:role :bash :command command :component comp}))
+                      (chat-history/chat-history-add-message! (:chat-history cs)
+                                                              {:role :bash :command command :component comp}))
                     (reset! pending []))))
 
               (reset! (:bash-running? cs) false)
@@ -3036,7 +3040,7 @@
               (let [err-msg (or (ex-message e) "Unknown error")]
                 (debug/log "bash command error: " e)
                 (be/bash-execution-set-complete! bash-comp nil false)
-                (ui/show-error! (:chat-history cs) err-msg)
+                (chat-history/show-error! (:chat-history cs) err-msg)
                 (reset! (:bash-running? cs) false)
                 (update-footer! cs)
                 (tui/tui-request-render (:tui cs))))))))))
@@ -3249,8 +3253,8 @@
               command (str/trim (subs trimmed (if exclude-from-context? 2 1)))]
           (when (seq command)
             (if @(:bash-running? cs)
-              (ui/chat-history-add-message! (:chat-history cs)
-                                            {:role :assistant :content "A bash command is already running. Cancel it first."})
+              (chat-history/chat-history-add-message! (:chat-history cs)
+                                                      {:role :assistant :content "A bash command is already running. Cancel it first."})
               (do
                 (editor/editor-push-history! (:editor cs) trimmed)
                 (editor/editor-set-text! (:editor cs) "")
@@ -3342,7 +3346,7 @@
    messages to the editor, combined with the current text."
   [cs]
   (let [restored (restore-queued-messages! cs)]
-    (ui/chat-history-show-status!
+    (chat-history/chat-history-show-status!
      (:chat-history cs)
      (if (pos? restored)
        (str "Restored " restored " queued message"
@@ -3391,12 +3395,12 @@
             (when-let [s @(:streaming-atom ch)]
               (if (and (empty? @(:text-atom (:component s)))
                        (empty? @(:thinking-text-atom (:component s))))
-                (ui/chat-history-remove-streaming-placeholder! ch)
-                (do (ui/chat-history-finalize-streaming! ch) (ui/chat-history-finalize-thinking! ch)))))
-          (ui/chat-history-add-message! (:chat-history cs)
-                                        {:role :assistant :content (th/dim "(cancelled)")})
+                (chat-history/chat-history-remove-streaming-placeholder! ch)
+                (do (chat-history/chat-history-finalize-streaming! ch) (chat-history/chat-history-finalize-thinking! ch)))))
+          (chat-history/chat-history-add-message! (:chat-history cs)
+                                                  {:role :assistant :content (th/dim "(cancelled)")})
           (when (pos? restored)
-            (ui/chat-history-show-status!
+            (chat-history/chat-history-show-status!
              (:chat-history cs)
              (str "Restored " restored " queued message"
                   (when (> restored 1) "s") " to editor"))))
@@ -3484,15 +3488,15 @@
                  :args (:args evt {})
                  :content ""
                  :is-error false}]
-        (ui/chat-history-mark-streaming-tool-calls! chat-history)
-        (ui/chat-history-finalize-streaming! chat-history)
-        (let [comp (ui/chat-history-add-message! chat-history msg)]
+        (chat-history/chat-history-mark-streaming-tool-calls! chat-history)
+        (chat-history/chat-history-finalize-streaming! chat-history)
+        (let [comp (chat-history/chat-history-add-message! chat-history msg)]
           ;; Store tool call ID for correlation
           (reset! (:tool-call-id-atom comp) (:tool-call-id evt))
           ;; Args are complete when received (kmet: no streaming args)
-          (ui/tool-execution-set-args-complete! comp)
+          (tool-execution/tool-execution-set-args-complete! comp)
           ;; Mark execution started so pending bg + timer activate now
-          (ui/tool-execution-mark-execution-started! comp)
+          (tool-execution/tool-execution-mark-execution-started! comp)
           ;; Pi: pendingTools.set(toolCallId, component) — parallel tool
           ;; calls each own a component; updates/ends correlate by id
           (swap! pending-tool-comps assoc (:tool-call-id evt) comp))
@@ -3522,13 +3526,13 @@
       (when-let [comp (get @pending-tool-comps (:tool-call-id evt))]
         (let [result (:result evt)]
           (reset! (:content-atom comp) (:content result))
-          (ui/tool-execution-set-error! comp (:is-error result false))
+          (tool-execution/tool-execution-set-error! comp (:is-error result false))
           (when-let [truncation (:truncation result)]
             (reset! (:truncation-atom comp) truncation))
           (when-let [details (:details result)]
             (reset! (:details-atom comp) details))
           (when-let [images (:images result)]
-            (ui/tool-execution-set-images! comp images))
+            (tool-execution/tool-execution-set-images! comp images))
           (swap! pending-tool-comps dissoc (:tool-call-id evt))
           (tui/tui-request-render tui)))
       :status
@@ -3542,7 +3546,7 @@
       ;; the transcript — the run has already settled (the final text
       ;; carries the explanation)
       (do
-        (ui/chat-history-add-message!
+        (chat-history/chat-history-add-message!
          chat-history
          {:role :warning
           :content (or (:details evt) "Stopped: repeat-loop guard tripped")})
@@ -3588,7 +3592,7 @@
       (when-let [cs @cs-ref]
         (show-status-indicator!
          cs :retry
-         (ui/make-retry-status-indicator
+         (status-indicator/make-retry-status-indicator
           (:attempt evt) (:max-attempts evt) (:delay-ms evt)
           :cancel-hint (fmt-key-display
                         (app-kb/key-text "app.interrupt")))))
@@ -3609,7 +3613,7 @@
             (set-terminal-progress! cs true)
             (show-status-indicator!
              cs :compaction
-             (ui/make-compaction-status-indicator
+             (status-indicator/make-compaction-status-indicator
               :message (compaction-status-message
                         (:reason evt)))))
           (tui/tui-request-render tui))
@@ -3628,18 +3632,18 @@
               ;; pi: compaction_end aborted — manual: error line; auto:
               ;; dim status
               (if (= :manual (:reason evt))
-                (ui/chat-history-show-status!
+                (chat-history/chat-history-show-status!
                  chat-history "Compaction cancelled")
-                (ui/chat-history-show-status!
+                (chat-history/chat-history-show-status!
                  chat-history "Auto-compaction cancelled")))
             ;; pi: compaction_end errorMessage — a failed summarization is
             ;; surfaced BEFORE the queue flush (manual: error line; auto:
             ;; dim status), so the error precedes any run the flush starts.
             (when-let [err (:error-message evt)]
               (if (= :manual (:reason evt))
-                (ui/chat-history-add-message!
+                (chat-history/chat-history-add-message!
                  chat-history {:role :error :content err})
-                (ui/chat-history-show-status! chat-history err)))
+                (chat-history/chat-history-show-status! chat-history err)))
             ;; pi: compaction_end → flushCompactionQueue — messages queued
             ;; during compaction are delivered now (queued into the retrying
             ;; turn when will-retry, else the first prompts a fresh run).
@@ -3650,7 +3654,7 @@
       ;; context; custom messages honor the display flag
       ;; (pi: display controls TUI rendering — hidden
       ;; ones stay in the LLM context only)
-      (do (ui/chat-history-rebuild!
+      (do (chat-history/chat-history-rebuild!
            chat-history
            (mapcat (fn [m]
                      (let [m (if (and (= :custom (:role m)) (:display m))
@@ -3685,13 +3689,13 @@
       ;; is normalized from text blocks to a string for
       ;; the info box.
       (case (:role (:message evt))
-        :user (do (ui/chat-history-add-message! chat-history (:message evt))
+        :user (do (chat-history/chat-history-add-message! chat-history (:message evt))
                   (when-let [cs @cs-ref]
                     (update-pending-messages! cs))
                   (tui/tui-request-render tui))
-        :assistant (do (ui/chat-history-finalize-streaming! chat-history)
-                       (ui/chat-history-finalize-thinking! chat-history)
-                       (ui/chat-history-start-streaming! chat-history)
+        :assistant (do (chat-history/chat-history-finalize-streaming! chat-history)
+                       (chat-history/chat-history-finalize-thinking! chat-history)
+                       (chat-history/chat-history-start-streaming! chat-history)
                        (tui/tui-request-render tui))
         :info (let [m (:message evt)
                     text (if (string? (:content m))
@@ -3700,10 +3704,10 @@
                             (for [b (:content m)
                                   :when (= :text (:type b))]
                               (:text b))))]
-                (ui/chat-history-insert-before-streaming! chat-history
-                                                          (assoc m
-                                                                 :content text
-                                                                 :images (image-block/content-images (:content m))))
+                (chat-history/chat-history-insert-before-streaming! chat-history
+                                                                    (assoc m
+                                                                           :content text
+                                                                           :images (image-block/content-images (:content m))))
                 (tui/tui-request-render tui))
                             ;; extension custom messages (pi: custom messages
                             ;; render when display=true — a registered message
@@ -3711,7 +3715,7 @@
                             ;; rule as the session-restore path)
         :custom (do (when (:display (:message evt))
                       (let [m (:message evt)]
-                        (ui/chat-history-insert-before-streaming!
+                        (chat-history/chat-history-insert-before-streaming!
                          chat-history
                          (if-let [rendered (run-message-renderer
                                             (extensions/get-message-renderer
@@ -3807,7 +3811,7 @@
                    :image-width-cells (cfg/get-image-width-cells config)})
         ;; no :theme — message components subscribe to ui.subs/theme-sub
         ;; themselves (Stage 5)
-        ch (ui/make-chat-history
+        ch (chat-history/make-chat-history
             :cwd-fn #(deref cwd-atom)
             :thinking-hidden (cfg/get-hide-thinking-block config)
             :tool-display-mode (cfg/get-tool-display-mode config)
@@ -3910,10 +3914,10 @@
                fmt-header-compact fmt-header-full
                :expanded? (= :expanded mode) :padding-x 1 :padding-y 0))
         ;; B.2: loaded resources between header and chat (pi: showLoadedResources)
-        lr (ui/make-loaded-resources :theme (cfg/get-theme config)
-                                     :expanded? (= :expanded (cfg/get-tool-display-mode config)))
+        lr (loaded-resources/make-loaded-resources :theme (cfg/get-theme config)
+                                                   :expanded? (= :expanded (cfg/get-tool-display-mode config)))
         ;; B.3: queued steering/follow-up display (pi: updatePendingMessagesDisplay)
-        pm (ui/make-pending-messages
+        pm (pending-messages/make-pending-messages
             :hint (fmt-key-display (app-kb/key-text "app.message.dequeue")))
         ;; B.5: editor dynamic height — max(5, rows*0.3) via :terminal-rows;
         ;; the fixed :height fallback stays at the default 12;
@@ -3926,7 +3930,7 @@
                                         (or @(:thinking ag) :off)))
         ;; B.6: footer data provider + footer (pi: FooterComponent; the
         ;; model line wraps to its own line when the stats line is too narrow)
-        fdp (ui/make-footer-data-provider
+        fdp (fdp/make-footer-data-provider
              :cwd-atom cwd-atom
              :session session
              :provider-count (count (distinct (map :provider (model-catalog/scoped-or-available-models ag))))
@@ -3937,11 +3941,11 @@
              :model @(:model ag) :provider @(:provider ag) :thinking @(:thinking ag)
              ;; pi: the thinking suffix renders only for reasoning models
              :reasoning (boolean (:reasoning (models/get-model provider model))))
-        ftr (ui/make-footer :theme (cfg/get-theme config)
-                            :provider fdp
+        ftr (footer/make-footer :theme (cfg/get-theme config)
+                                :provider fdp
                             ;; pi: the "(auto)" badge reflects the autoCompact
                             ;; setting; overflow-only recovery doesn't count
-                            :auto-compact (get config :auto-compact true))
+                                :auto-compact (get config :auto-compact true))
 
         ;; Core state (status-indicator/status-root filled in after layout)
         ;; the active editor lives behind an atom so custom editors can swap
@@ -3975,7 +3979,7 @@
                             :dock-current dock-current})]
 
     ;; Initial loaded-resources sections (rebuilt on /reload)
-    (ui/loaded-resources-set-sections! lr (build-loaded-resource-sections))
+    (loaded-resources/loaded-resources-set-sections! lr (build-loaded-resource-sections))
 
     ;; Focus editor
     (tui/tui-set-focus t ed)
@@ -4015,7 +4019,7 @@
     ;; Status indicator: the default editor embeds the active status in its
     ;; own top border (pi: embedWorkingStatus); the standalone layer above
     ;; the editor only appears for a custom editor without a top-border fn.
-    (let [si (ui/make-status-indicator
+    (let [si (status-indicator/make-status-indicator
               :theme (cfg/get-theme config)
               ;; Embedded color (pi: showWorkingStatusIndicator's colorFn):
               ;; while the ACTIVE editor carries the status, the spinner and
@@ -4025,7 +4029,7 @@
               :border-color-fn
               (fn []
                 (let [active @current-editor-atom]
-                  (when (ui/editor-embeds-status? active)
+                  (when (status-indicator/editor-embeds-status? active)
                     (when-some [bf (:border-fn active)] @bf)))))
           ;; Theme controller (pi: InteractiveThemeController) — created in
           ;; the layout so CoreState carries it for all handlers (slash
@@ -4046,9 +4050,9 @@
                   ;; transcript components subscribe to ui.subs/theme-sub —
                   ;; no walk needed (Stage 5); footer/indicator/resources
                   ;; keep their setter paths
-                  (ui/footer-set-theme! ftr current-theme)
-                  (ui/status-indicator-set-theme! si current-theme)
-                  (ui/loaded-resources-set-theme! lr current-theme)
+                  (footer/footer-set-theme! ftr current-theme)
+                  (status-indicator/status-indicator-set-theme! si current-theme)
+                  (loaded-resources/loaded-resources-set-theme! lr current-theme)
                   (expandable-text/expandable-text-rebuild! hdr)
                   (editor/editor-set-autocomplete-theme!
                    ed (th/get-select-list-theme current-theme))
@@ -4067,7 +4071,7 @@
           _ (editor/editor-set-top-border-fn!
              ed
              (fn [{:keys [width hidden-line-count rule border-fn]}]
-               (ui/editor-top-border
+               (status-indicator/editor-top-border
                 {:indicator (current-status-indicator cs)
                  :width width
                  :hidden-line-count hidden-line-count
@@ -4098,9 +4102,9 @@
           ;; renders nothing while the active editor embeds the status in
           ;; its top border (the default editor), and the standalone
           ;; indicator otherwise (custom editors).
-          status-root (hiccup/root (ui/make-status-area (:status-current cs)
-                                                        si
-                                                        (:current-editor-atom cs)))
+          status-root (hiccup/root (status-indicator/make-status-area (:status-current cs)
+                                                                      si
+                                                                      (:current-editor-atom cs)))
           ;; Widget areas as mounted DSL trees (dsl.md stage 4, pi:
           ;; renderWidgets): the widget maps are read tracked, so a
           ;; :set-widget swap re-derives exactly once; the leading spacer is
@@ -4181,27 +4185,27 @@
           ;; the loaded-resources sections (getStartupExpansionState) —
           ;; extended: ctrl+o cycles collapsed → expanded → quiet. Header,
           ;; resources and the info banner treat quiet as collapsed.
-                                      (let [mode (ui/chat-history-cycle-tool-display! ch)
+                                      (let [mode (chat-history/chat-history-cycle-tool-display! ch)
                                             expanded? (= :expanded mode)]
                                         (try (cfg/set-tool-display-mode! mode)
                                              (catch Exception e
                                                (debug/log "Failed to persist tool-display-mode: " e)))
                                         (expandable-text/expandable-text-set-expanded! hdr expanded?)
-                                        (ui/loaded-resources-set-expanded! lr expanded?)
-                                        (ui/chat-history-show-status! ch
-                                                                      (str "Tool display: " (name mode)))
+                                        (loaded-resources/loaded-resources-set-expanded! lr expanded?)
+                                        (chat-history/chat-history-show-status! ch
+                                                                                (str "Tool display: " (name mode)))
                                         (request-global-reflow-render! cs))))
       (editor/editor-set-on-action! ed "app.thinking.toggle"
                                     (fn []
           ;; pi: showStatus feedback on toggle + persist hideThinkingBlock to
           ;; settings so the state survives restarts (SettingsManager.save;
           ;; write errors are recorded — the toggle still applies)
-                                      (let [hidden? (ui/chat-history-toggle-thinking-hidden! ch)]
+                                      (let [hidden? (chat-history/chat-history-toggle-thinking-hidden! ch)]
                                         (try (cfg/set-hide-thinking-block! hidden?)
                                              (catch Exception e
                                                (debug/log "Failed to persist hide-thinking-block: " e)))
-                                        (ui/chat-history-show-status! ch
-                                                                      (str "Thinking blocks: " (if hidden? "hidden" "visible")))
+                                        (chat-history/chat-history-show-status! ch
+                                                                                (str "Thinking blocks: " (if hidden? "hidden" "visible")))
                                         (request-global-reflow-render! cs))))
       ;; pi: cycleThinkingLevel — Shift+Tab cycles through available levels
       (editor/editor-set-on-action! ed "app.thinking.cycle"
@@ -4212,7 +4216,7 @@
                                                      (shared/get-supported-thinking-levels model)
                                                      [:off])]
                                         (if (<= (count levels) 1)
-                                          (ui/chat-history-show-status! ch "Current model does not support thinking")
+                                          (chat-history/chat-history-show-status! ch "Current model does not support thinking")
                                           (let [current @(:thinking ag)
                                                 idx (or (first (keep-indexed (fn [i l] (when (= l current) i)) levels))
                                                         0)
@@ -4221,7 +4225,7 @@
                                             (cfg/save-setting! [:thinking] next-level)
                                             (sync-footer-model! cs)
                                             (update-editor-border-color! cs next-level)
-                                            (ui/chat-history-show-status! ch (str "Thinking level: " (name next-level)))
+                                            (chat-history/chat-history-show-status! ch (str "Thinking level: " (name next-level)))
                                             (tui/tui-request-render t))))))
       (editor/editor-set-on-action! ed "app.editor.external"
                                     (fn [] (handle-external-editor cs)))
@@ -4244,7 +4248,7 @@
                                         (do (cfg/set-default-model! @(:provider @(:agent-state cs))
                                                                     @(:model @(:agent-state cs)))
                                             (sync-footer-model! cs))
-                                        (ui/chat-history-show-status!
+                                        (chat-history/chat-history-show-status!
                                          (:chat-history cs)
                                          (if (seq @(:scoped-models @(:agent-state cs)))
                                            "Only one model in scope"
@@ -4255,7 +4259,7 @@
                                         (do (cfg/set-default-model! @(:provider @(:agent-state cs))
                                                                     @(:model @(:agent-state cs)))
                                             (sync-footer-model! cs))
-                                        (ui/chat-history-show-status!
+                                        (chat-history/chat-history-show-status!
                                          (:chat-history cs)
                                          (if (seq @(:scoped-models @(:agent-state cs)))
                                            "Only one model in scope"
@@ -4503,7 +4507,7 @@
          ;; overlay and nothing to dismiss (never sent to the LLM, never
          ;; persisted to the session; pi has no equivalent — kmet-specific).
          :chat-info (fn [label content]
-                      (ui/chat-history-add-message!
+                      (chat-history/chat-history-add-message!
                        ch {:role :info :label label :content (str content)})
                       (tui/tui-request-render t)
                       nil)
@@ -4565,7 +4569,7 @@
          ;; footer-set-extension-status! swaps a track!-watched atom —
          ;; the watch schedules the frame (§3.4), no manual poke
          :set-status (fn [key text]
-                       (ui/footer-set-extension-status! ftr key text))
+                       (footer/footer-set-extension-status! ftr key text))
          :set-widget (fn [key content options]
                        (let [placement (or (:placement options) :above-editor)
                              m (if (= :below-editor placement) widgets-below-atom widgets-above-atom)
@@ -4630,8 +4634,8 @@
                                    (:spinner (:status-indicator cs)) options)
                                   (tui/tui-request-render t))
          :set-working-message (fn [message]
-                                (ui/status-indicator-set-text! (:status-indicator cs)
-                                                               (or message "Working"))
+                                (status-indicator/status-indicator-set-text! (:status-indicator cs)
+                                                                             (or message "Working"))
                                 (tui/tui-request-render t))
          :set-working-visible (fn [visible?]
                                 ;; Pi: setWorkingVisible — clearStatusIndicator("working")
@@ -4645,14 +4649,14 @@
                                 ;; guarded :status-current swap when real
                                 (if visible?
                                   (when (and @(:running-turn? cs)
-                                             (not (ui/status-indicator-active?
+                                             (not (status-indicator/status-indicator-active?
                                                    (:status-indicator cs))))
                                     (activate-working-indicator! cs))
                                   (clear-status-indicator! cs :working)))
          :set-hidden-thinking-label (fn [label]
                                       ;; one reset! on the shared label atom;
                                       ;; assistant messages' watches schedule
-                                      (ui/chat-history-set-hidden-thinking-label!
+                                      (chat-history/chat-history-set-hidden-thinking-label!
                                        ch label))
          :set-editor-component (fn [factory]
                                  (let [current-text (editor-text-get @current-editor-atom)]
@@ -4684,24 +4688,24 @@
                       (if (instance? kmet.tui.theme.Theme theme-or-name)
                         (theme-ctrl/set-theme-instance! theme-controller theme-or-name)
                         (theme-ctrl/set-theme-name! theme-controller theme-or-name true)))
-         :get-tools-expanded (fn [] (ui/chat-history-get-tool-expanded ch))
+         :get-tools-expanded (fn [] (chat-history/chat-history-get-tool-expanded ch))
          :set-tools-expanded (fn [expanded?]
                                ;; the flag swap invalidates every tool
                                ;; component's watch, which schedules the frame
-                               (let [current? (ui/chat-history-get-tool-expanded ch)]
+                               (let [current? (chat-history/chat-history-get-tool-expanded ch)]
                                  (when (not= current? expanded?)
-                                   (ui/chat-history-toggle-tool-expanded! ch)
+                                   (chat-history/chat-history-toggle-tool-expanded! ch)
                                    (request-global-reflow-render! cs))))
-         :get-tool-display-mode (fn [] (ui/chat-history-get-tool-display-mode ch))
+         :get-tool-display-mode (fn [] (chat-history/chat-history-get-tool-display-mode ch))
          :set-tool-display-mode (fn [mode]
-                                  (when (not= mode (ui/chat-history-get-tool-display-mode ch))
-                                    (ui/chat-history-set-tool-display-mode! ch mode)
+                                  (when (not= mode (chat-history/chat-history-get-tool-display-mode ch))
+                                    (chat-history/chat-history-set-tool-display-mode! ch mode)
                                     (try (cfg/set-tool-display-mode! mode)
                                          (catch Exception e
                                            (debug/log "Failed to persist tool-display-mode: " e)))
                                     (expandable-text/expandable-text-set-expanded!
                                      (:header-comp cs) (= :expanded mode))
-                                    (ui/loaded-resources-set-expanded!
+                                    (loaded-resources/loaded-resources-set-expanded!
                                      (:loaded-resources-comp cs) (= :expanded mode))
                                     (request-global-reflow-render! cs)))
          ;; pi: registerShortcut — a raw key-id bound as a priority editor
@@ -4989,10 +4993,10 @@
                     (try (unsub) (catch Exception _)))
                   (reset! terminal-input-unsubscribers [])
                   (doseq [key (keys @(:extension-statuses-atom ftr))]
-                    (ui/footer-set-extension-status! ftr key nil))
+                    (footer/footer-set-extension-status! ftr key nil))
                   (spinner/spinner-set-indicator! (:spinner (:status-indicator cs)) nil)
-                  (ui/status-indicator-set-text! (:status-indicator cs) "Working")
-                  (ui/chat-history-set-hidden-thinking-label! ch nil)
+                  (status-indicator/status-indicator-set-text! (:status-indicator cs) "Working")
+                  (chat-history/chat-history-set-hidden-thinking-label! ch nil)
                   (reset! extension-autocomplete-factories [])
                   (rebuild-autocomplete-provider!)
                   (when @editor-factory-atom
@@ -5020,7 +5024,7 @@
      (fn [entry]
        (when-let [rendered (run-entry-renderer
                             (extensions/get-entry-renderer (:custom-type entry)) entry)]
-         (ui/chat-history-add-message!
+         (chat-history/chat-history-add-message!
           (:chat-history cs)
           (renderer-result->message rendered))
          ;; The sink appends to the untracked chat message vector; request
@@ -5044,7 +5048,7 @@
     (when-let [sess @(:session-atom cs)]
       (when-let [miss (session/detect-cache-miss (session/get-branch sess))]
         (when (>= (:missed-tokens miss) 20000)
-          (ui/chat-history-add-message!
+          (chat-history/chat-history-add-message!
            (:chat-history cs)
            {:role :info
             :label (if (:model-changed miss)
@@ -5101,9 +5105,9 @@
                                      (let [sess (session/load-session path)
                                            short-id (subs (:id sess) 0 (min 8 (count (:id sess))))]
                                        (restore-session! cs sess true)
-                                       (ui/chat-history-add-message! (:chat-history cs)
-                                                                     {:role :assistant
-                                                                      :content (str "Resumed session " short-id ".")})
+                                       (chat-history/chat-history-add-message! (:chat-history cs)
+                                                                               {:role :assistant
+                                                                                :content (str "Resumed session " short-id ".")})
                                        (tui/tui-request-render (:tui cs)))))))
         ;; start the UI before initializing extensions so session_start
         ;; handlers can use interactive dialogs — kmet loads extensions

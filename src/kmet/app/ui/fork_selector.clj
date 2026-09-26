@@ -9,7 +9,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.app.session :as session]
-            [kmet.app.ui :as ui]
+            [kmet.app.ui.chat-history :as chat-history]
             [kmet.app.ui.dock :as dock]
             [kmet.tui.hiccup :as h]
             [kmet.tui.keybindings :as kb]
@@ -106,20 +106,20 @@
   (let [sess @(:session-atom cs)]
     (cond
       (nil? sess)
-      (ui/chat-history-add-message! (:chat-history cs)
-                                    {:role :assistant :content "No active session."})
+      (chat-history/chat-history-add-message! (:chat-history cs)
+                                              {:role :assistant :content "No active session."})
 
       (not (fs/exists? (:file sess)))
-      (ui/chat-history-add-message! (:chat-history cs)
-                                    {:role :assistant
-                                     :content "Wait for the first assistant response before forking."})
+      (chat-history/chat-history-add-message! (:chat-history cs)
+                                              {:role :assistant
+                                               :content "Wait for the first assistant response before forking."})
 
       :else
       (let [messages (collect-messages sess)]
         (if (empty? messages)
-          (ui/chat-history-add-message! (:chat-history cs)
-                                        {:role :assistant
-                                         :content "No messages to fork from."})
+          (chat-history/chat-history-add-message! (:chat-history cs)
+                                                  {:role :assistant
+                                                   :content "No messages to fork from."})
           (let [th (theme/get-current-theme)
                 ;; pi: start at the most recent message unless an initial id
                 ;; is given

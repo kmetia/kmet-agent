@@ -18,7 +18,7 @@
   (:require [clojure.string :as str]
             [kmet.app.keybindings :as app-kb]
             [kmet.app.session :as session]
-            [kmet.app.ui :as ui]
+            [kmet.app.ui.chat-history :as chat-history]
             [kmet.app.ui.dock :as dock]
             [kmet.config :as cfg]
             [kmet.libs.clipboard :as clipboard]
@@ -1058,12 +1058,12 @@
    (let [sess @(:session-atom cs)]
      (cond
        (nil? sess)
-       (ui/chat-history-add-message! (:chat-history cs)
-                                     {:role :assistant :content "No active session."})
+       (chat-history/chat-history-add-message! (:chat-history cs)
+                                               {:role :assistant :content "No active session."})
 
        (empty? (selector-tree sess))
-       (ui/chat-history-add-message! (:chat-history cs)
-                                     {:role :assistant :content "Session is empty."})
+       (chat-history/chat-history-add-message! (:chat-history cs)
+                                               {:role :assistant :content "Session is empty."})
 
        :else
        (let [panel-theme (th/get-current-theme)
@@ -1084,13 +1084,13 @@
                                              (@close-ref)
                                              (cond
                                                (= (:id entry) leaf-id)
-                                               (ui/chat-history-add-message!
+                                               (chat-history/chat-history-add-message!
                                                 (:chat-history cs)
                                                 {:role :assistant
                                                  :content "Already at this point."})
 
                                                @(:running-turn? cs)
-                                               (ui/chat-history-add-message!
+                                               (chat-history/chat-history-add-message!
                                                 (:chat-history cs)
                                                 {:role :assistant
                                                  :content "Wait for the current response to finish before navigating the session tree."})
@@ -1099,7 +1099,7 @@
                                                (on-navigate entry)))
                                 :on-cancel (fn [] (@close-ref))
                                 :on-copy (fn [text]
-                                           (ui/chat-history-add-message!
+                                           (chat-history/chat-history-add-message!
                                             (:chat-history cs)
                                             (if-not text
                                               {:role :assistant

@@ -19,7 +19,10 @@
             [kmet.app.extensions :as extensions]
             [kmet.app.keybindings :as app-kb]
             [kmet.app.theme-controller :as theme-ctrl]
-            [kmet.app.ui :as ui]
+            [kmet.app.ui.footer :as footer]
+            [kmet.app.ui.pending-messages :as pending-messages]
+            [kmet.app.ui.scoped-models-selector :as scoped-models-selector]
+            [kmet.app.ui.status-indicator :as status-indicator]
             [kmet.app.ui.chat-history :as chat-history]
             [kmet.app.ui.dock :as dock]
             [kmet.app.ui.model-catalog :as model-catalog]
@@ -158,8 +161,8 @@
                                   (reset! sel-ref component)
                                   (fn []))
                     tui/tui-request-render (fn [_] nil)
-                    ui/chat-history-add-message! (fn [_ _] nil)
-                    ui/show-warning! (fn [_ _] nil)
+                    chat-history/chat-history-add-message! (fn [_ _] nil)
+                    chat-history/show-warning! (fn [_ _] nil)
                     auth/get-credentials (fn [] {:github-copilot {:type :oauth
                                                                   :access "a" :refresh "r"
                                                                   :expires 9e99}})]
@@ -234,7 +237,7 @@
               :footer-provider nil
               :config cfg/default-config
               :tui nil}]
-      (with-redefs [ui/chat-history-show-status! (fn [_ m] (reset! status m))
+      (with-redefs [chat-history/chat-history-show-status! (fn [_ m] (reset! status m))
                     model-selector/sync-footer-model! (fn [_] nil)
                     cfg/save-setting! (fn [_ _] (reset! saved ::called))
                     tui/tui-request-render (fn [_])]
@@ -248,7 +251,7 @@
           (t/is (= :max @(:thinking ag))))
         (testing "an unsupported level warns with the available list"
           (let [warning (atom nil)]
-            (with-redefs [ui/show-warning! (fn [_ m] (reset! warning m))]
+            (with-redefs [chat-history/show-warning! (fn [_ m] (reset! warning m))]
               ((:handler (commands/find-command "thinking")) cs "medium")
               (t/is (= "Unknown thinking level \"medium\". Available levels: off, high, max."
                        @warning)
@@ -277,7 +280,7 @@
                     :editor (editor/make-editor)
                     :config cfg/default-config
                     :tui nil}]
-      (with-redefs [ui/chat-history-show-status! (fn [_ m] (reset! status m))
+      (with-redefs [chat-history/chat-history-show-status! (fn [_ m] (reset! status m))
                     chat-history/chat-history-add-message! (fn [_ _] nil)
                     ;; deterministic default — must not depend on the real
                     ;; ~/.kmet/agent/settings.edn on the dev machine
@@ -311,7 +314,7 @@
               :footer-provider nil
               :config cfg/default-config
               :tui nil}]
-      (with-redefs [ui/chat-history-show-status! (fn [_ _] nil)
+      (with-redefs [chat-history/chat-history-show-status! (fn [_ _] nil)
                     thinking-selector/default-thinking-level (fn [_] :off)
                     cfg/save-setting! (fn [path value] (reset! saved [path value]))
                     model-selector/sync-footer-model! (fn [_] nil)
@@ -352,7 +355,7 @@
               :tui nil}]
       (reset! (:status ag) :thinking)
       (swap! (:messages ag) conj {:role :user :content [{:type :text :text "hi"}]})
-      (with-redefs [ui/chat-history-add-message! (fn [_ m] (reset! msg m))]
+      (with-redefs [chat-history/chat-history-add-message! (fn [_ m] (reset! msg m))]
         ((:handler (commands/find-command "continue")) cs ""))
       (t/is (= "Wait for the current response to finish before continuing."
                (:content @msg))
@@ -368,7 +371,7 @@
               :chat-history nil
               :running-turn? (atom false)
               :tui nil}]
-      (with-redefs [ui/chat-history-add-message! (fn [_ m] (reset! msg m))]
+      (with-redefs [chat-history/chat-history-add-message! (fn [_ m] (reset! msg m))]
         ((:handler (commands/find-command "continue")) cs ""))
       (t/is (= "No conversation to continue." (:content @msg))))))
 
@@ -392,8 +395,8 @@
               :status-indicator nil
               :status-current (atom nil)
               :anim-timer (atom nil)}]
-      (with-redefs [ui/chat-history-add-message! (fn [_ _] nil)
-                    ui/chat-history-start-streaming! (fn [_] nil)
+      (with-redefs [chat-history/chat-history-add-message! (fn [_ _] nil)
+                    chat-history/chat-history-start-streaming! (fn [_] nil)
                     agent/run-agent-turn (fn [a opts]
                                            (reset! started [a opts])
                                            (future))
@@ -421,14 +424,14 @@
    The editor atom holds no editor — a custom editor that cannot embed the
    status, so the standalone layer renders."
   []
-  (let [si (ui/make-status-indicator :text "Working")
+  (let [si (status-indicator/make-status-indicator :text "Working")
         cur (atom nil)
         ced (atom nil)]
     {:tui {:render-requested? (atom false)}
      :status-indicator si
      :status-current cur
      :current-editor-atom ced
-     :status-root (hiccup/root (ui/make-status-area cur si ced))
+     :status-root (hiccup/root (status-indicator/make-status-area cur si ced))
      :running-turn? (atom true)}))
 
 (defn- status-lines [cs]
@@ -454,7 +457,7 @@
         (t/is (working-status? cs)))
       (testing "auto-retry-start swaps in the retry countdown"
         ((var inter/show-status-indicator!) cs :retry
-                                            (ui/make-retry-status-indicator 1 3 2000))
+                                            (status-indicator/make-retry-status-indicator 1 3 2000))
         (t/is (not (working-status? cs))))
       (testing "turn-start after the backoff revives the working indicator"
         ((var inter/activate-working-indicator!) cs)
@@ -473,7 +476,7 @@
     (let [cs (test-status-cs)]
       ((var inter/activate-working-indicator!) cs)
       ((var inter/show-status-indicator!) cs :compaction
-                                          (ui/make-compaction-status-indicator))
+                                          (status-indicator/make-compaction-status-indicator))
       (t/is (not (working-status? cs)))
       ((var inter/clear-status-indicator!) cs :compaction)
       (t/is (blank-status? cs))
@@ -485,7 +488,7 @@
     (let [cs (test-status-cs)]
       ((var inter/activate-working-indicator!) cs)
       ((var inter/show-status-indicator!) cs :compaction
-                                          (ui/make-compaction-status-indicator))
+                                          (status-indicator/make-compaction-status-indicator))
       ;; auto-retry-end arriving while compaction is active must no-op
       ((var inter/clear-status-indicator!) cs :retry)
       (t/is (not (working-status? cs)))
@@ -506,7 +509,7 @@
       ((var inter/activate-working-indicator!) cs)
       (t/is (identical? (:status-indicator cs)
                         ((var inter/current-status-indicator) cs)))
-      (let [retry (ui/make-retry-status-indicator 1 3 2000)]
+      (let [retry (status-indicator/make-retry-status-indicator 1 3 2000)]
         ((var inter/show-status-indicator!) cs :retry retry)
         (t/is (identical? retry ((var inter/current-status-indicator) cs))))
       ((var inter/clear-status-indicator!) cs)
@@ -522,7 +525,7 @@
                           :render-requested? (atom false)})
           tui (:tui cs)]
       ((var inter/show-status-indicator!) cs :compaction
-                                          (ui/make-compaction-status-indicator))
+                                          (status-indicator/make-compaction-status-indicator))
       (let [first-driver (:driver @(:status-current cs))]
         (t/is (some? first-driver) "the driver is recorded on the status entry")
         (reset! (:render-requested? tui) false)
@@ -530,7 +533,7 @@
         (t/is (true? @(:render-requested? tui)) "frames are requested while it is up")
         (testing "swapping in the next indicator retires the previous driver"
           ((var inter/show-status-indicator!) cs :retry
-                                              (ui/make-retry-status-indicator 1 3 2000))
+                                              (status-indicator/make-retry-status-indicator 1 3 2000))
           (let [next-driver (:driver @(:status-current cs))]
             (t/is (some? next-driver))
             (t/is (not (identical? first-driver next-driver)))
@@ -552,7 +555,7 @@
             clear leaves it"
     (let [cs (test-status-cs)]
       ((var inter/show-status-indicator!) cs :compaction
-                                          (ui/make-compaction-status-indicator))
+                                          (status-indicator/make-compaction-status-indicator))
       ((var inter/clear-status-indicator!) cs :working)
       (t/is (= :compaction (:kind @(:status-current cs)))))))
 
@@ -579,7 +582,7 @@
           share (spinner/make-spinner :text "Creating gist..." :active true)]
       ((var inter/show-status-indicator!) cs :share share)
       ((var inter/show-status-indicator!) cs :retry
-                                          (ui/make-retry-status-indicator 1 3 2000))
+                                          (status-indicator/make-retry-status-indicator 1 3 2000))
       ((var inter/release-background-status!) cs :share share)
       (t/is (= :retry (:kind @(:status-current cs))))))
   (testing "only the indicator the flow installed is released (a second
@@ -612,7 +615,7 @@
       (with-redefs-fn {(var inter/activate-working-indicator!)
                        (fn [c] (reset! (:running-turn? c) false) (real c))}
         (fn [] ((var inter/release-background-status!) cs :share share)))
-      (t/is (not (ui/status-indicator-active? (:status-indicator cs)))
+      (t/is (not (status-indicator/status-indicator-active? (:status-indicator cs)))
             "the revived spinner is stopped again"))))
 
 ;; ─── /scoped-models + /settings (missing slash commands) ───────────────────
@@ -647,7 +650,7 @@
       (t/is (= "Show all keyboard shortcuts" (:description hotkeys)))
       (t/is (some? (:handler hotkeys)))
       (let [ed (editor/make-editor)
-            ch (ui/make-chat-history)]
+            ch (chat-history/make-chat-history)]
         ;; wire one app action; app.suspend / app.message.copy stay unwired
         (editor/editor-set-on-action! ed "app.tools.expand" (fn [] nil))
         ((:handler hotkeys) {:chat-history ch :editor ed} "")
@@ -690,7 +693,7 @@
    session's working directory)."
   [active-sess]
   (let [cwd-atom (atom (or (session/session-cwd active-sess) (str (fs/cwd))))
-        ch (ui/make-chat-history :cwd-fn #(deref cwd-atom))
+        ch (chat-history/make-chat-history :cwd-fn #(deref cwd-atom))
         prov (fdp/make-footer-data-provider :cwd-atom cwd-atom :session active-sess)
         ed (editor/make-editor)
         opts {:cwd (deref cwd-atom)
@@ -708,7 +711,7 @@
       :compaction-queued (atom [])
       :running-turn? (atom false)
       :footer-provider prov
-      :footer-comp (ui/make-footer :provider prov)})))
+      :footer-comp (footer/make-footer :provider prov)})))
 
 (defn- last-message [ch] (select-keys (peek @(:messages-atom ch)) [:role :content]))
 
@@ -979,7 +982,7 @@
     (let [dir (str (fs/absolutize (str "target/test-mid-turn-guards-"
                                        (System/currentTimeMillis))))]
       (try
-        (let [ch (ui/make-chat-history)
+        (let [ch (chat-history/make-chat-history)
               cs (inter/map->CoreState
                   {:running-turn? (atom true)
                    :chat-history ch
@@ -1070,19 +1073,19 @@
                     tui/tui-request-render (fn [_])]
         (testing "no session scoped models and no patterns → all enabled"
           ((:handler (commands/find-command "scoped-models")) cs "")
-          (t/is (nil? (ui/scoped-models-get-enabled-ids @sel-ref))))
+          (t/is (nil? (scoped-models-selector/scoped-models-get-enabled-ids @sel-ref))))
         (testing "session scoped models win"
           (agent/set-scoped-models! ag ["opencode-go/deepseek-v4-flash"])
           ((:handler (commands/find-command "scoped-models")) cs "")
           (t/is (= ["opencode-go/deepseek-v4-flash"]
-                   (ui/scoped-models-get-enabled-ids @sel-ref))))
+                   (scoped-models-selector/scoped-models-get-enabled-ids @sel-ref))))
         (testing "settings :enabled-models patterns resolve"
           (agent/set-scoped-models! ag [])
           (with-redefs [cfg/get-enabled-models-live
                         (fn [_] ["opencode-go/deepseek-v4-flash"])]
             ((:handler (commands/find-command "scoped-models")) cs "")
             (t/is (= ["opencode-go/deepseek-v4-flash"]
-                     (ui/scoped-models-get-enabled-ids @sel-ref)))))
+                     (scoped-models-selector/scoped-models-get-enabled-ids @sel-ref)))))
         (testing "unresolved patterns survive as [unavailable] rows alongside
                   resolved ones (pi: no-match diagnostics appended)"
           (agent/set-scoped-models! ag [])
@@ -1090,7 +1093,7 @@
                         (fn [_] ["opencode-go/deepseek-v4-flash" "ghost/model"])]
             ((:handler (commands/find-command "scoped-models")) cs "")
             (t/is (= ["opencode-go/deepseek-v4-flash" "ghost/model"]
-                     (ui/scoped-models-get-enabled-ids @sel-ref)))))))))
+                     (scoped-models-selector/scoped-models-get-enabled-ids @sel-ref)))))))))
 
 (deftest test-scoped-models-edit-updates-session
   (testing "selector edits write the session scoped list and clear on all-enabled"
@@ -1142,7 +1145,7 @@
       (with-redefs [auth/configured? (fn [_] true)
                     timg/get-capabilities (constantly no-image-caps)
                     model-selector/sync-footer-model! (fn [_] nil)
-                    ui/chat-history-get-thinking-hidden (fn [_] false)
+                    chat-history/chat-history-get-thinking-hidden (fn [_] false)
                     cfg/save-setting! (fn [path value] (reset! saved [path value]))
                     dock/mount! (capture-mount! sl-ref)
                     tui/tui-set-focus (fn [_ _])
@@ -1176,7 +1179,7 @@
           saved (atom nil)]
       (with-redefs [auth/configured? (fn [_] true)
                     timg/get-capabilities (constantly no-image-caps)
-                    ui/chat-history-get-thinking-hidden (fn [_] false)
+                    chat-history/chat-history-get-thinking-hidden (fn [_] false)
                     cfg/save-setting! (fn [path value] (reset! saved [path value]))
                     dock/mount! (capture-mount! sl-ref)
                     tui/tui-set-focus (fn [_ _])
@@ -1211,7 +1214,7 @@
           saved (atom nil)]
       (with-redefs [auth/configured? (fn [_] true)
                     timg/get-capabilities (constantly no-image-caps)
-                    ui/chat-history-get-thinking-hidden (fn [_] false)
+                    chat-history/chat-history-get-thinking-hidden (fn [_] false)
                     cfg/get-retry-settings-live
                     (fn [_] {:enabled true :max-retries 3 :base-delay-ms 2000})
                     cfg/save-setting! (fn [path value] (reset! saved [path value]))
@@ -1280,7 +1283,7 @@
           saved (atom nil)]
       (with-redefs [auth/configured? (fn [_] true)
                     timg/get-capabilities (constantly no-image-caps)
-                    ui/chat-history-get-thinking-hidden (fn [_] false)
+                    chat-history/chat-history-get-thinking-hidden (fn [_] false)
                     cfg/save-setting! (fn [path value] (reset! saved [path value]))
                     dock/mount! (capture-mount! sl-ref)
                     tui/tui-set-focus (fn [_ _])
@@ -1319,7 +1322,7 @@
                     ;; covers the /theme argument handling); stub the forced
                     ;; render notify-changed! now issues too
                     tui/tui-request-render (fn [& _] nil)
-                    ui/chat-history-add-message! (fn [_ m] (reset! msg m))
+                    chat-history/chat-history-add-message! (fn [_ m] (reset! msg m))
                     cfg/save-setting! (fn [path value] (reset! saved [path value]))]
         (reset! tc-ctrl (theme-ctrl/make-theme-controller {:theme "dark"} nil nil (fn [])))
         (let [cs {:config cfg/default-config
@@ -1363,7 +1366,7 @@
               :session-atom (atom nil)}
           registry ((var inter/build-extension-ui-registry)
                     {:tui nil :cs cs}
-                    {:fdp (ui/make-footer-data-provider)}
+                    {:fdp (fdp/make-footer-data-provider)}
                     nil)
           ctx ((:build-context registry))]
       (t/is (= :interactive (:mode ctx)))
@@ -1408,7 +1411,7 @@
           (t/is (true? ((:is-idle ctx))))
           (t/is (nil? ((:wait-for-idle ctx))))))
       (testing "get-context-usage reports the active session (pi parity)"
-        (let [fdp-provider (ui/make-footer-data-provider)
+        (let [fdp-provider (fdp/make-footer-data-provider)
               _ (fdp/fdp-set-session! fdp-provider
                                       (session/create-session
                                        (str (fs/cwd) "/target")))
@@ -1436,7 +1439,7 @@
             cs {:tui {}
                 :dock-current (atom nil)
                 :current-editor-atom (atom ed)}
-            panel-a (ui/make-status-indicator)
+            panel-a (status-indicator/make-status-indicator)
             panel-b (editor/make-editor)
             ;; A mounts, then B replaces it
             done-a (dock/mount! cs panel-a)]
@@ -1564,9 +1567,9 @@
   "A CoreState-like map for compaction-queue tests."
   []
   (let [ag (agent/make-agent-state)
-        ch (ui/make-chat-history)
+        ch (chat-history/make-chat-history)
         ed (editor/make-editor)
-        si (ui/make-status-indicator :text "Working")
+        si (status-indicator/make-status-indicator :text "Working")
         cur (atom nil)
         ;; a plain editor (no top-border fn) cannot embed the status, so
         ;; the standalone layer renders for these tests
@@ -1582,10 +1585,10 @@
      :bash-signal (atom false)
      :status-indicator si
      :status-current cur
-     :status-root (hiccup/root (ui/make-status-area cur si ced))
+     :status-root (hiccup/root (status-indicator/make-status-area cur si ced))
      :footer-comp nil
      :footer-provider nil
-     :pending-messages-comp (ui/make-pending-messages)
+     :pending-messages-comp (pending-messages/make-pending-messages)
      :session-atom (atom (session/create-session
                           (str "target/test-compaction-queue-" (System/currentTimeMillis))))}))
 
@@ -1628,7 +1631,7 @@
                     inter/start-anim-timer! (fn [_] nil)
                     inter/update-footer! (fn [_] nil)
                     tui/tui-request-render (fn [_] nil)
-                    ui/chat-history-start-streaming! (fn [_] nil)]
+                    chat-history/chat-history-start-streaming! (fn [_] nil)]
         ((var inter/flush-compaction-queue!) cs false))
       (t/is (seq @started) "a run started for the first message")
       (t/is (= "first" (get-in @started [1 :message])) "run carries the first message")
@@ -1699,7 +1702,7 @@
                     inter/start-anim-timer! (fn [_] nil)
                     inter/update-footer! (fn [_] nil)
                     tui/tui-request-render (fn [_] nil)
-                    ui/chat-history-start-streaming! (fn [_] nil)]
+                    chat-history/chat-history-start-streaming! (fn [_] nil)]
         (h {:type :compaction-end :reason :threshold :result true :will-retry false}))
       (t/is (seq @started) "queued message prompted a run after compaction"))))
 
@@ -1770,7 +1773,7 @@
     (let [cs (compaction-cs)]
       (reset! (:running-turn? cs) true)
       (with-redefs [tui/tui-request-render (fn [_] nil)
-                    ui/chat-history-show-status! (fn [_ _] nil)]
+                    chat-history/chat-history-show-status! (fn [_ _] nil)]
         ((:handler (commands/find-command "followup")) cs "do the thing"))
       (let [{:keys [steering follow-up]} (agent/queued-messages @(:agent-state cs))]
         (t/is (= [] steering) "not steered into the running turn")
@@ -1785,8 +1788,8 @@
     ((var inter/register-builtin-commands!) cfg/default-config)
     (let [cs (compaction-cs)
           started (atom [])]
-      (with-redefs [ui/chat-history-add-message! (fn [_ _] nil)
-                    ui/chat-history-start-streaming! (fn [_] nil)
+      (with-redefs [chat-history/chat-history-add-message! (fn [_ _] nil)
+                    chat-history/chat-history-start-streaming! (fn [_] nil)
                     agent/run-agent-turn (fn [a opts] (reset! started [a opts]) (future))
                     inter/activate-working-indicator! (fn [_] nil)
                     inter/start-anim-timer! (fn [_] nil)
@@ -1808,7 +1811,7 @@
     (let [cs (compaction-cs)]
       (reset! (:compacting? @(:agent-state cs)) true)
       (with-redefs [tui/tui-request-render (fn [_] nil)
-                    ui/chat-history-show-status! (fn [_ _] nil)]
+                    chat-history/chat-history-show-status! (fn [_ _] nil)]
         ((:handler (commands/find-command "followup")) cs "later msg"))
       (t/is (= [{:text "later msg" :mode :follow-up}]
                @(:compaction-queued cs))
@@ -1821,7 +1824,7 @@
     (let [cs (compaction-cs)
           msg (atom nil)]
       (reset! (:running-turn? cs) true)
-      (with-redefs [ui/chat-history-add-message! (fn [_ m] (reset! msg m))]
+      (with-redefs [chat-history/chat-history-add-message! (fn [_ m] (reset! msg m))]
         ((:handler (commands/find-command "followup")) cs ""))
       (t/is (= "Usage: /followup <message>" (:content @msg))
             "usage info shown")
@@ -1841,11 +1844,11 @@
       (with-redefs [inter/stop-anim-timer! (fn [_] nil)
                     inter/clear-status-indicator! (fn [_] nil)
                     inter/update-footer! (fn [_] nil)
-                    ui/chat-history-add-message! (fn [_ _] nil)
-                    ui/chat-history-show-status! (fn [_ _] nil)
-                    ui/chat-history-finalize-streaming! (fn [_] nil)
-                    ui/chat-history-finalize-thinking! (fn [_] nil)
-                    ui/chat-history-remove-streaming-placeholder! (fn [_] nil)
+                    chat-history/chat-history-add-message! (fn [_ _] nil)
+                    chat-history/chat-history-show-status! (fn [_ _] nil)
+                    chat-history/chat-history-finalize-streaming! (fn [_] nil)
+                    chat-history/chat-history-finalize-thinking! (fn [_] nil)
+                    chat-history/chat-history-remove-streaming-placeholder! (fn [_] nil)
                     agent/cancel-turn (fn [_] (swap! cancelled inc))]
         ;; first escape: compaction aborted only
         ((var inter/handle-cancel) cs)

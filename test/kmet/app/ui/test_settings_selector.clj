@@ -1,7 +1,7 @@
 (ns kmet.app.ui.test-settings-selector
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
-            [kmet.app.ui :as ui]
+            [kmet.app.ui.chat-history :as chat-history]
             [kmet.app.theme-controller :as theme-ctrl]
             [kmet.app.ui.settings-selector :as ss]
             [kmet.app.ui.subs :as subs]
@@ -80,7 +80,7 @@
                                    :max-retries 0
                                    :base-delay-ms 1000})})
    :config {}
-   :chat-history (ui/make-chat-history)
+   :chat-history (chat-history/make-chat-history)
    :dock-current (atom nil)
    :current-editor-atom (atom (editor/make-editor))})
 

@@ -14,7 +14,7 @@
             [kmet.app.ui.dock :as dock]
             [kmet.ai.models :as models]
             [kmet.ai.oauth :as oauth]
-            [kmet.app.ui :as ui]
+            [kmet.app.ui.chat-history :as chat-history]
             [kmet.config :as cfg]
             [kmet.tui.core :as tui]
             [kmet.modes.interactive :as inter]))
@@ -708,8 +708,8 @@
                 :footer-comp nil
                 :footer-provider nil
                 :tui nil}]
-        (with-redefs [ui/chat-history-add-message! (fn [_ msg] (swap! msgs conj msg))
-                      ui/show-warning! (fn [_ _] nil)
+        (with-redefs [chat-history/chat-history-add-message! (fn [_ msg] (swap! msgs conj msg))
+                      chat-history/show-warning! (fn [_ _] nil)
                       dock/mount! (fn [_ component & _]
                                     (reset! sel-ref component)
                                     (fn []))

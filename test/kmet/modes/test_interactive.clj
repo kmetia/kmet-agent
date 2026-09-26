@@ -13,7 +13,12 @@
             [kmet.app.event-bus :as event-bus]
             [kmet.app.loop :as agent]
             [kmet.app.session :as session]
-            [kmet.app.ui :as ui]
+            [kmet.app.ui.bash-execution :as bash-execution]
+            [kmet.app.ui.chat-history :as chat-history]
+            [kmet.app.ui.footer :as footer]
+            [kmet.app.ui.loaded-resources :as loaded-resources]
+            [kmet.app.ui.pending-messages :as pending-messages]
+            [kmet.app.ui.status-indicator :as status-indicator]
             [kmet.app.ui.footer-data-provider :as fdp]
             [kmet.app.ui.subs :as subs]
             [kmet.app.packages :as packages]
@@ -44,7 +49,7 @@
    cs-ref; tool-execution events correlate through an empty pending map."
   []
   ((var inter/make-agent-event-handler)
-   {:chat-history (ui/make-chat-history)
+   {:chat-history (chat-history/make-chat-history)
     :tui {:render-requested? (atom false)}
     :cs-ref (atom nil)
     :pending-tool-comps (atom {})}))
@@ -92,12 +97,12 @@
           _ (swap! (:messages ag) conj {:role :user :content "old message"})
           _ (swap! (:messages ag) conj {:role :assistant :content "old reply"})
           tui-stub {:render-requested? (atom false)}
-          ch (ui/make-chat-history)
-          fdp (ui/make-footer-data-provider :session old-sess)
-          ftr (ui/make-footer :provider fdp)
+          ch (chat-history/make-chat-history)
+          fdp (fdp/make-footer-data-provider :session old-sess)
+          ftr (footer/make-footer :provider fdp)
           ed (editor/make-editor)
           _ (editor/editor-set-text! ed "draft")
-          parked-bash (ui/make-bash-execution :command "sleep 10")
+          parked-bash (bash-execution/make-bash-execution :command "sleep 10")
           pending-bash (atom [parked-bash])
           cs (inter/map->CoreState
               {:tui tui-stub
@@ -113,10 +118,10 @@
                :session-atom (atom old-sess)
                :pending-messages-container (container/make-container)
                :pending-bash-components pending-bash
-               :pending-messages-comp (ui/make-pending-messages)
+               :pending-messages-comp (pending-messages/make-pending-messages)
                :status-current (atom nil)
                :status-root nil
-               :status-indicator (ui/make-status-indicator)
+               :status-indicator (status-indicator/make-status-indicator)
                :footer-comp ftr
                :footer-provider fdp})
           shutdown-events (atom [])
@@ -157,7 +162,7 @@
           _ (swap! (:messages ag) conj {:role :user :content "old message"})
           _ (swap! (:messages ag) conj {:role :assistant :content "old reply"})
           tui-stub {:render-requested? (atom false)}
-          ch (ui/make-chat-history)
+          ch (chat-history/make-chat-history)
           ed (editor/make-editor)
           _ (editor/editor-set-text! ed "draft")
           cs (inter/map->CoreState
@@ -176,7 +181,7 @@
                :pending-bash-components (atom [])
                :status-current (atom nil)
                :status-root nil
-               :status-indicator (ui/make-status-indicator)
+               :status-indicator (status-indicator/make-status-indicator)
                :footer-comp nil
                :footer-provider nil})
           shutdown-events (atom [])
@@ -221,7 +226,7 @@
             and clear their own elapsed ticker (pi: pendingTools Map)"
     (let [pending (atom {})
           h ((var inter/make-agent-event-handler)
-             {:chat-history (ui/make-chat-history)
+             {:chat-history (chat-history/make-chat-history)
               :tui {:render-requested? (atom false)}
               :cs-ref (atom nil)
               :pending-tool-comps pending})]
@@ -267,7 +272,7 @@
     (let [render-requested? (atom false)
           pending (atom {})
           h ((var inter/make-agent-event-handler)
-             {:chat-history (ui/make-chat-history)
+             {:chat-history (chat-history/make-chat-history)
               :tui {:render-requested? render-requested?}
               :cs-ref (atom nil)
               :pending-tool-comps pending})]
@@ -302,7 +307,7 @@
 (deftest loop-guard-message-requests-frame
   (testing "the loop-guard warning requests a frame after appending to the chat"
     (let [render-requested? (atom false)
-          chat-history (ui/make-chat-history)
+          chat-history (chat-history/make-chat-history)
           h ((var inter/make-agent-event-handler)
              {:chat-history chat-history
               :tui {:render-requested? render-requested?}
@@ -327,9 +332,9 @@
           tui* {:render-requested? render-requested?
                 :running? (atom false)}
           cs {:session-atom (atom sess)
-              :chat-history (ui/make-chat-history)
+              :chat-history (chat-history/make-chat-history)
               :tui tui*
-              :status-indicator (ui/make-status-indicator)
+              :status-indicator (status-indicator/make-status-indicator)
               :status-current (atom nil)
               :running-turn? (atom false)}]
       (try
@@ -361,7 +366,7 @@
           render-requested? (atom false)
           request-message-counts (atom [])
           tui* {:render-requested? render-requested?}
-          chat-history (ui/make-chat-history)
+          chat-history (chat-history/make-chat-history)
           cs {:tui tui*
               :chat-history chat-history
               :session-atom (atom sess)
@@ -430,7 +435,7 @@
         (session/append-entry sess {:role :assistant
                                     :content [{:type :text :text "Done."}]})
         (let [loaded (session/load-session (:file sess))
-              ch (ui/make-chat-history)
+              ch (chat-history/make-chat-history)
               cs (inter/map->CoreState {:chat-history ch})]
           ((var inter/replay-branch!) cs loaded)
           (let [msgs @(:messages-atom ch)
@@ -469,7 +474,7 @@
         (session/append-entry sess {:role :assistant
                                     :content [{:type :text :text "ok"}]})
         (let [loaded (session/load-session (:file sess))
-              ch (ui/make-chat-history)
+              ch (chat-history/make-chat-history)
               cs (inter/map->CoreState {:chat-history ch})
               prev-caps (timg/get-capabilities)]
           (timg/set-capabilities! {:images nil :true-color true :hyperlinks true})
@@ -504,7 +509,7 @@
                                :stop-reason :error
                                :error-message "upstream connect error"})
         (let [loaded (session/load-session (:file sess))
-              ch (ui/make-chat-history)
+              ch (chat-history/make-chat-history)
               cs (inter/map->CoreState {:chat-history ch})]
           ((var inter/replay-branch!) cs loaded)
           (let [msgs @(:messages-atom ch)
@@ -530,7 +535,7 @@
                                              :arguments {:command "ls"}}]
                                :stop-reason :aborted})
         (let [loaded (session/load-session (:file sess))
-              ch (ui/make-chat-history)
+              ch (chat-history/make-chat-history)
               cs (inter/map->CoreState {:chat-history ch})]
           ((var inter/replay-branch!) cs loaded)
           (let [tools (filterv #(= :tool (:role %)) @(:messages-atom ch))]
@@ -570,7 +575,7 @@
                                :tool-name "read" :is-error false
                                :images [{:data "AA" :mime-type "image/png"}]})
         (let [loaded (session/load-session (:file sess))
-              ch (ui/make-chat-history)
+              ch (chat-history/make-chat-history)
               cs (inter/map->CoreState {:chat-history ch})
               prev-caps (timg/get-capabilities)]
           (timg/set-capabilities! {:images nil :true-color true :hyperlinks true})
@@ -606,7 +611,7 @@
         (session/append-entry sess {:role :assistant
                                     :content [{:type :text :text "done"}]})
         (let [loaded (session/load-session (:file sess))
-              ch (ui/make-chat-history)
+              ch (chat-history/make-chat-history)
               cs (inter/map->CoreState {:chat-history ch})]
           ((var inter/replay-branch!) cs loaded)
           (let [bashes (filterv #(= :bash (:role %)) @(:messages-atom ch))
@@ -639,7 +644,7 @@
           (session/append-entry sess {:role :assistant
                                       :content [{:type :text :text "after"}]})
           (let [loaded (session/load-session (:file sess))
-                ch (ui/make-chat-history)
+                ch (chat-history/make-chat-history)
                 cs (inter/map->CoreState {:chat-history ch})]
             ((var inter/replay-branch!) cs loaded)
             (is (= [:compaction :user :user :assistant]
@@ -659,7 +664,7 @@
               (is (str/includes? collapsed "Compacted from 12,345 tokens"))
               (is (not (str/includes? collapsed "THE SUMMARY"))
                   "collapsed by default (pi: setExpanded(toolOutputExpanded))")
-              (ui/chat-history-set-tool-display-mode! ch :expanded)
+              (chat-history/chat-history-set-tool-display-mode! ch :expanded)
               (is (str/includes? (str/join "\n" (protocols/render comp 100))
                                  "THE SUMMARY")
                   "ctrl+o expands it"))))
@@ -715,7 +720,7 @@
             (session/append-entry sess {:role :assistant
                                         :content [{:type :text :text "a"}]})
             (let [loaded (session/load-session (:file sess))
-                  ch (ui/make-chat-history)
+                  ch (chat-history/make-chat-history)
                   cs (inter/map->CoreState {:chat-history ch})]
               ((var inter/replay-branch!) cs loaded)
               (let [text (str/join "\n"
@@ -744,7 +749,7 @@
 (deftest context-replaced-renders-summary-roles-live
   ;; the live compaction rebuild carries role-preserving context messages,
   ;; so the dedicated summary component renders without a reload
-  (let [ch (ui/make-chat-history)
+  (let [ch (chat-history/make-chat-history)
         handler ((var inter/make-agent-event-handler)
                  {:chat-history ch
                   :tui {:render-requested? (atom false)}
@@ -770,7 +775,7 @@
         (session/append-entry sess {:role :assistant
                                     :content [{:type :text :text "a"}]})
         (let [loaded (session/load-session (:file sess))
-              ch (ui/make-chat-history)
+              ch (chat-history/make-chat-history)
               cs (inter/map->CoreState {:chat-history ch})]
           ((var inter/replay-branch!) cs loaded)
           (is (= [:user :branch-summary :assistant] (mapv :role @(:messages-atom ch))))
@@ -780,7 +785,7 @@
             (is (str/includes? collapsed "[branch]"))
             (is (str/includes? collapsed "Branch summary"))
             (is (not (str/includes? collapsed "BRANCH SUM")) "collapsed by default")
-            (ui/chat-history-set-tool-display-mode! ch :expanded)
+            (chat-history/chat-history-set-tool-display-mode! ch :expanded)
             (is (str/includes? (str/join "\n" (protocols/render comp 100)) "BRANCH SUM"))))
         (finally (fs/delete-tree sess-dir))))))
 
@@ -788,7 +793,7 @@
   (testing "/reload re-reads the image settings and the provider image-blocking
             knob from the reloaded config (pi: settingsManager.reload)"
     (let [ag (agent/make-agent-state)
-          ch (ui/make-chat-history)
+          ch (chat-history/make-chat-history)
           cs {:agent-state (atom ag)
               :chat-history ch
               :theme-controller nil
@@ -817,8 +822,8 @@
                       packages/load-skills! (fn [] nil)
                       packages/load-prompts! (fn [] nil)
                       context/load-project-context-files (fn [_ _] [])
-                      ui/chat-history-set-thinking-hidden! (fn [_ _] nil)
-                      ui/loaded-resources-set-sections! (fn [_ _] nil)
+                      chat-history/chat-history-set-thinking-hidden! (fn [_ _] nil)
+                      loaded-resources/loaded-resources-set-sections! (fn [_ _] nil)
                       extensions/ui-reset! (fn [] nil)
                       extensions/clear-extensions! (fn [] nil)
                       extensions/discover-resources! (fn [_ _] nil)
@@ -834,10 +839,10 @@
   (testing "/reload applies the reloaded tool display mode to the chat, the
             header and the loaded resources — the ctrl+o handler and the
             extension setter keep all three in sync, reload must too"
-    (let [ch (ui/make-chat-history :tool-display-mode :collapsed)
+    (let [ch (chat-history/make-chat-history :tool-display-mode :collapsed)
           hdr (expandable-text/make-expandable-text (constantly "compact")
                                                     (constantly "full"))
-          lr (ui/make-loaded-resources)
+          lr (loaded-resources/make-loaded-resources)
           cs {:agent-state (atom (agent/make-agent-state))
               :chat-history ch
               :header-comp hdr
@@ -868,11 +873,11 @@
                      ((var inter/handle-reload) cs nil)))]
       (try
         (reload :expanded)
-        (is (= :expanded (ui/chat-history-get-tool-display-mode ch)))
+        (is (= :expanded (chat-history/chat-history-get-tool-display-mode ch)))
         (is (true? @(:expanded?-atom hdr)) "header follows the reloaded mode")
         (is (true? @(:expanded?-atom lr)) "resources follow the reloaded mode")
         (reload :quiet)
-        (is (= :quiet (ui/chat-history-get-tool-display-mode ch)))
+        (is (= :quiet (chat-history/chat-history-get-tool-display-mode ch)))
         (is (false? @(:expanded?-atom hdr)) "quiet projects to collapsed")
         (is (false? @(:expanded?-atom lr)) "quiet projects to collapsed")
         (finally
@@ -886,7 +891,7 @@
     (let [ag (agent/make-agent-state)
           runtime-cwd "/fake/runtime-project"
           cs {:agent-state (atom ag)
-              :chat-history (ui/make-chat-history)
+              :chat-history (chat-history/make-chat-history)
               :footer-provider (fdp/make-footer-data-provider
                                 :cwd-atom (atom runtime-cwd))
               :theme-controller nil
@@ -910,8 +915,8 @@
                     (fn [_ cwd]
                       (reset! loader-cwd cwd)
                       [{:path "AGENTS.md" :content "LAUNCH CONTEXT"}])
-                    ui/chat-history-set-thinking-hidden! (fn [_ _] nil)
-                    ui/loaded-resources-set-sections! (fn [_ _] nil)
+                    chat-history/chat-history-set-thinking-hidden! (fn [_ _] nil)
+                    loaded-resources/loaded-resources-set-sections! (fn [_ _] nil)
                     extensions/ui-reset! (fn [] nil)
                     extensions/clear-extensions! (fn [] nil)
                     extensions/discover-resources! (fn [_ _] nil)
@@ -992,7 +997,7 @@
                    :running-turn? (atom true)
                    :bash-running? (atom bash?)
                    :agent-state (atom {:compacting? (atom false)})
-                   :chat-history (ui/make-chat-history)
+                   :chat-history (chat-history/make-chat-history)
                    :tui {:scrollback-dirty? (atom dirty?)
                          :force-redraw? (atom false)
                          :render-requested? (atom false)}})]

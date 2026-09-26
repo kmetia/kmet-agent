@@ -454,7 +454,7 @@ one file; still do it as its own commit to isolate review noise.
 ## Progress checklist
 
 - [x] T3 — `app.retry` + `app.loop_guard` extracted; loop tests pass
-- [ ] T5 — `app.ui` facade decision executed; tree updated
+- [x] T5 — `app.ui` facade decision executed; tree updated
 - [ ] T1 — `interactive.clj` reduced to `run` + wiring; modules created
 - [ ] T4 — `extensions.cljc` split; `extension.md` updated
 - [ ] T2 — `tui/core.clj` reduced to lifecycle + facade; `tui.md` updated

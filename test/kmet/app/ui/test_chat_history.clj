@@ -6,7 +6,7 @@
             [kmet.tui.macros :as macros]
             [kmet.tui.protocols :as protocols]
             [kmet.libs.terminal-image :as timg]
-            [kmet.app.ui :as ui]
+            [kmet.app.ui.bash-execution :as be]
             [kmet.app.ui.tool-execution :as te]
             [kmet.app.ui.chat-history :as ch]))
 
@@ -186,7 +186,7 @@
       (is (= "" (ch/chat-history-get-streaming-text ch)))))
   (testing "clear disposes message components so owned drivers stop"
     (let [ch (ch/make-chat-history)
-          bash-comp (ui/make-bash-execution :command "sleep 10")]
+          bash-comp (be/make-bash-execution :command "sleep 10")]
       ;; Mount through the chat (the production path) so the root reaction
       ;; owns the state watch. After clear!, the driver is stopped (done set,
       ;; future cancelled) — assert on those, not on hook traffic, which the
@@ -710,8 +710,8 @@
 (deftest test-show-error-warning
   (testing "show-error! / show-warning! render plain spacer + colored text (pi: showError/showWarning)"
     (let [ch (ch/make-chat-history)
-          _ (ui/show-warning! ch "bash already running")
-          _ (ui/show-error! ch "command failed")
+          _ (ch/show-warning! ch "bash already running")
+          _ (ch/show-error! ch "command failed")
           lines (plain-lines ch 40)]
       (is (some #(re-find #"Warning: bash already running" %) lines))
       (is (some #(re-find #"Error: command failed" %) lines))
