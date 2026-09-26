@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-25T18:13:32Z"
+ :generated-at "2026-09-26T20:28:40Z"
  :provider {:id :opencode
             :name "OpenCode (Zen)"
             :env-vars ["OPENCODE_API_KEY"]
@@ -585,6 +585,21 @@
     :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
     :context-window 262144
     :max-tokens 32768
+    :compat {:supports-store false
+             :supports-developer-role false
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
+   "longcat-2.5-preview-free"
+   {:id "longcat-2.5-preview-free"
+    :name "LongCat 2.5 Preview Free"
+    :provider :opencode
+    :api :openai-completions
+    :base-url "https://opencode.ai/zen/v1"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1000000
+    :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
              :max-tokens-field :max-tokens

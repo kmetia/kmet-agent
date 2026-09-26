@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-25T18:13:32Z"
+ :generated-at "2026-09-26T20:28:40Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -1028,18 +1028,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
-    :context-window 256000
-    :max-tokens 32000}
-   "inclusionai/ling-3.0-flash-fin-free"
-   {:id "inclusionai/ling-3.0-flash-fin-free"
-    :name "Ling 3.0 Flash Fin (Free)"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning true
-    :input [:text]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :cost {:input 0.06 :output 0.18 :cache-read 0.012 :cache-write 0}
     :context-window 256000
     :max-tokens 32000}
    "inclusionai/ling-3.0-flash-sante"
@@ -1446,7 +1435,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.95 :output 4 :cache-read 0.16 :cache-write 0}
+    :cost {:input 0.95 :output 4 :cache-read 0.19 :cache-write 0}
     :context-window 256000
     :max-tokens 32768}
    "moonshotai/kimi-k2.7-code-highspeed"
@@ -2551,7 +2540,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.5 :output 1.2 :cache-read 0.1 :cache-write 0}
+    :cost {:input 0.45 :output 1.2 :cache-read 0.1 :cache-write 0}
     :context-window 1000000
     :max-tokens 1000000}
    "xiaomi/mimo-v2.5"
@@ -2661,7 +2650,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text]
-    :cost {:input 0.6 :output 2.2 :cache-read 0.12 :cache-write 0}
+    :cost {:input 0.6 :output 2.2 :cache-read 0 :cache-write 0}
     :context-window 200000
     :max-tokens 120000}
    "zai/glm-4.7-flash"
