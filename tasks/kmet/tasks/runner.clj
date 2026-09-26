@@ -189,6 +189,7 @@
     kmet.test-core
     kmet.tasks.test-changed
     kmet.tasks.test-clean
+    kmet.tasks.test-slop
     kmet.tasks.format-test
     kmet.tasks.test-lint
     kmet.tasks.test-runner])
