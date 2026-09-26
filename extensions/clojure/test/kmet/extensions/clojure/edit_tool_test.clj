@@ -62,12 +62,57 @@
     (is (str/includes? (:content result) "form_identifier"))))
 
 (deftest test-missing-content
+  ;; content stays required (same convention as the edit tool's newText):
+  ;; omitting it is an error, deletion uses an explicit empty string.
   (let [path (write-test-file! "missing-content" "(defn foo [] nil)")
         result (edit-tool/execute {:file_path path
                                    :form_type "defn"
                                    :form_identifier "foo"})]
     (is (:is-error result))
-    (is (str/includes? (:content result) "content"))))
+    (is (str/includes? (:content result) "content"))
+    (is (str/includes? (:content result) "empty string"))
+    (is (str/includes? (read-test-file path) "(defn foo [] nil)"))))
+
+(deftest test-delete-with-empty-content
+  ;; Deletion follows the edit tool's convention: a blank content with
+  ;; operation "replace" removes the form and its line.
+  (let [path (write-test-file! "delete-empty"
+                               "(defn a [] 1)\n\n(defn b [] 2)\n\n(defn c [] 3)\n")
+        result (edit-tool/execute (edit-opts path "defn" "b" ""))]
+    (is (not (:is-error result)))
+    (is (str/includes? (:content result) "Edit applied"))
+    (let [content (read-test-file path)]
+      (is (not (str/includes? content "defn b")))
+      (is (str/includes? content "(defn a [] 1)\n\n(defn c [] 3)")))))
+
+(deftest test-delete-first-form
+  (let [path (write-test-file! "delete-first"
+                               "(defn a [] 1)\n\n(defn b [] 2)\n")
+        result (edit-tool/execute (edit-opts path "defn" "a" ""))]
+    (is (not (:is-error result)))
+    (let [content (read-test-file path)]
+      (is (not (str/includes? content "defn a")))
+      (is (str/includes? content "(defn b [] 2)")))))
+
+(deftest test-delete-last-form
+  (let [path (write-test-file! "delete-last"
+                               "(defn a [] 1)\n\n(defn b [] 2)\n")
+        result (edit-tool/execute (edit-opts path "defn" "b" ""))]
+    (is (not (:is-error result)))
+    (let [content (read-test-file path)]
+      (is (not (str/includes? content "defn b")))
+      (is (str/includes? content "(defn a [] 1)")))))
+
+(deftest test-insert-with-empty-content-rejected
+  ;; Insert operations need content; an empty content cannot insert.
+  (doseq [op ["insert_before" "insert_after"]]
+    (testing op
+      (let [path (write-test-file! (str "insert-empty-" op)
+                                   "(defn foo [] nil)\n")
+            result (edit-tool/execute (edit-opts path "defn" "foo" "" op))]
+        (is (:is-error result))
+        (is (str/includes? (:content result) "content"))
+        (is (str/includes? (read-test-file path) "(defn foo [] nil)"))))))
 
 (deftest test-file-not-found
   (let [result (edit-tool/execute {:file_path "target/nonexistent-xyz.clj"

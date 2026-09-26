@@ -108,7 +108,12 @@
        :message         (str "Could not find form '" dname "' of type '" tag "'")
        :similar-matches similar-matches}
       (let [updated (case edit-type
-                      :replace       (util/replace-form zloc content-str)
+                      ;; an empty content with :replace deletes the form
+                      ;; (edit tool convention); z/remove also trims the
+                      ;; surrounding whitespace so no blank line is left
+                      :replace       (if (str/blank? content-str)
+                                       (z/remove zloc)
+                                       (util/replace-form zloc content-str))
                       :insert-before (util/insert-before-form zloc content-str)
                       :insert-after  (util/insert-after-form zloc content-str))]
         {:zloc updated :similar-matches similar-matches}))))
@@ -154,7 +159,12 @@
                 "replace"       :replace
                 "insert_before" :insert-before
                 "insert_after"  :insert-after
-                :replace)]
+                :replace)
+        ;; Deletion follows the edit tool's convention: content stays
+        ;; required, and an empty (blank) value with "replace" removes the
+        ;; form; a missing content is still an error.
+        missing-content? (nil? content)
+        blank-content?   (and (not missing-content?) (str/blank? content))]
     (cond
       (str/blank? file_path)
       {:content "Missing required parameter: file_path" :is-error true}
@@ -171,8 +181,18 @@
       (str/blank? form_identifier)
       {:content "Missing required parameter: form_identifier" :is-error true}
 
-      (str/blank? content)
-      {:content "Missing required parameter: content" :is-error true}
+      missing-content?
+      {:content (str "Missing required parameter: content"
+                     (if (= op-kw :replace)
+                       " — pass \"\" (empty string) to delete the form."
+                       " — insert_before/insert_after need the content to insert."))
+       :is-error true}
+
+      (and blank-content? (not= op-kw :replace))
+      {:content (str "content cannot be empty for operation \"" operation
+                     "\" — insert_before/insert_after need the content to insert. "
+                     "An empty content deletes only with operation \"replace\".")
+       :is-error true}
 
       (not (fs/exists? file_path))
       {:content (str "File not found: " file_path) :is-error true}
@@ -210,23 +230,27 @@
              :is-error true}
             (let [enhanced-name (enhance-defmethod-name form_type form_identifier content)
                   find-edit (fn [zloc]
-                              (let [result (edit-top-level-form zloc form_type enhanced-name
-                                                                content op-kw)]
-                                (if (:error result)
-                                  result
-                                  (let [found-zloc (:zloc result)
-                                        form-col   (second (z/position found-zloc))
+                              (if blank-content?
+                                ;; deletion: nothing to parse or re-indent
+                                (edit-top-level-form zloc form_type enhanced-name
+                                                     content op-kw)
+                                (let [result (edit-top-level-form zloc form_type enhanced-name
+                                                                  content op-kw)]
+                                  (if (:error result)
+                                    result
+                                    (let [found-zloc (:zloc result)
+                                          form-col   (second (z/position found-zloc))
                                 ;; Re-indent the replacement to the found
                                 ;; form's column, then re-edit
-                                        content'' (if form-col
-                                                    (util/format-form-in-isolation
-                                                     content form-col
-                                                     (util/project-fmt-opts file_path))
-                                                    content)
-                                        result2 (edit-top-level-form
-                                                 zloc form_type enhanced-name
-                                                 content'' op-kw)]
-                                    result2))))]
+                                          content'' (if form-col
+                                                      (util/format-form-in-isolation
+                                                       content form-col
+                                                       (util/project-fmt-opts file_path))
+                                                      content)
+                                          result2 (edit-top-level-form
+                                                   zloc form_type enhanced-name
+                                                   content'' op-kw)]
+                                      result2)))))]
               (util/edit-pipeline file_path find-edit))))))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════════
@@ -240,7 +264,7 @@
    {:name            "clojure_edit"
     :label           "Clojure form edit"
     :description
-    "Edits a top-level form (`defn`, `def`, `defmethod`, `ns`, `deftest`) in a Clojure file using the specified operation.\n\nPREFER this tool over generic file editing tools for Clojure files (`.clj` `.cljs` `.cljc` `.cljd` `.bb` `.edn` `.lpy`). It rejects other file types.\n\nThis tool MAKES it EASIER to match a definition that exists in the file AS you only have to match the type of definition `form_type` and the complete identifier `form_identifier` of the definition. This prevents the repeated mismatch errors that occur when trying match an entire string of text for replacement.\nThis tool validates the structure of the Clojure code that is being inserted into the file and will provide linting feedback for things such as parenthetical errors.\n\nNOTE: `content` must be a complete, balanced Clojure form. Unbalanced delimiters are REJECTED with an error — pass the complete form exactly as it should appear in the file.\n\nOperations:\n- \"replace\": Replaces the form with new content\n- \"insert_before\": Inserts content before the form\n- \"insert_after\": Inserts content after the form\n\nFor insert_before/insert_after, pass ONLY the new content (never repeat the anchor form). The inserted form lands outside the anchor's own line: a same-line trailing comment stays with the anchor form, and a comment on its own line stays with the next form.\n\nThe form is identified by its type (defn, def, deftest, s/def, ns, defmethod etc.) and complete identifier. Alias-qualified macros (t/deftest, s/def) match by their plain keyword (deftest, def).\n\nExample: Replace a function definition:\n- file_path: \"/path/to/file.clj\"\n- form_identifier: \"example-fn\"\n- form_type: \"defn\"\n- operation: \"replace\"\n- content: \"(defn example-fn [x] (* x 2))\"\n\nExample: Insert a helper function before a function:\n- file_path: \"/path/to/file.clj\"\n- form_identifier: \"example-fn\"\n- form_type: \"defn\"\n- operation: \"insert_before\"\n- content: \"(defn helper-fn [x] (* x 2))\"\n\nExample: Edit a namespace declaration (form_identifier is the namespace name):\n- file_path: \"/path/to/file.clj\"\n- form_identifier: \"my.app.core\"\n- form_type: \"ns\"\n- operation: \"replace\"\n- content: \"(ns my.app.core (:require [clojure.string :as str]))\"\n\nFor `defmethod` forms, include the dispatch value (`area :rectangle`) in `form_identifier`.\nMany `defmethod` definitions have qualified names like `shape/area`, so use the complete identifier.\n\nExample: Replace a specific `defmethod` implementation:\n- form_identifier: \"shape/area :square\"\n- form_type: \"defmethod\"\n- operation: \"replace\"\n- content: \"(defmethod shape/area :square [{:keys [w h]}] (* w h))\"\n\nThe tool returns a diff showing the changes made to the file."
+    "Edits a top-level form (`defn`, `def`, `defmethod`, `ns`, `deftest`) in a Clojure file using the specified operation.\n\nPREFER this tool over generic file editing tools for Clojure files (`.clj` `.cljs` `.cljc` `.cljd` `.bb` `.edn` `.lpy`). It rejects other file types.\n\nThis tool MAKES it EASIER to match a definition that exists in the file AS you only have to match the type of definition `form_type` and the complete identifier `form_identifier` of the definition. This prevents the repeated mismatch errors that occur when trying match an entire string of text for replacement.\nThis tool validates the structure of the Clojure code that is being inserted into the file and will provide linting feedback for things such as parenthetical errors.\n\nNOTE: `content` must be a complete, balanced Clojure form. Unbalanced delimiters are REJECTED with an error — pass the complete form exactly as it should appear in the file.\n\nOperations:\n- \"replace\": Replaces the form with new content (pass \"\" to delete the form)\n- \"insert_before\": Inserts content before the form\n- \"insert_after\": Inserts content after the form\n\nFor insert_before/insert_after, pass ONLY the new content (never repeat the anchor form). The inserted form lands outside the anchor's own line: a same-line trailing comment stays with the anchor form, and a comment on its own line stays with the next form.\n\nThe form is identified by its type (defn, def, deftest, s/def, ns, defmethod etc.) and complete identifier. Alias-qualified macros (t/deftest, s/def) match by their plain keyword (deftest, def).\n\nExample: Replace a function definition:\n- file_path: \"/path/to/file.clj\"\n- form_identifier: \"example-fn\"\n- form_type: \"defn\"\n- operation: \"replace\"\n- content: \"(defn example-fn [x] (* x 2))\"\n\nExample: Insert a helper function before a function:\n- file_path: \"/path/to/file.clj\"\n- form_identifier: \"example-fn\"\n- form_type: \"defn\"\n- operation: \"insert_before\"\n- content: \"(defn helper-fn [x] (* x 2))\"\n\nExample: Edit a namespace declaration (form_identifier is the namespace name):\n- file_path: \"/path/to/file.clj\"\n- form_identifier: \"my.app.core\"\n- form_type: \"ns\"\n- operation: \"replace\"\n- content: \"(ns my.app.core (:require [clojure.string :as str]))\"\n\nFor `defmethod` forms, include the dispatch value (`area :rectangle`) in `form_identifier`.\nMany `defmethod` definitions have qualified names like `shape/area`, so use the complete identifier.\n\nExample: Replace a specific `defmethod` implementation:\n- form_identifier: \"shape/area :square\"\n- form_type: \"defmethod\"\n- operation: \"replace\"\n- content: \"(defmethod shape/area :square [{:keys [w h]}] (* w h))\"\n\nThe tool returns a diff showing the changes made to the file."
     :render-call renderers/render-edit-call
     :render-result renderers/render-edit-result
     :render-shell :self
@@ -251,7 +275,7 @@
      "form_identifier is the complete identifier; for defmethod use 'method-name dispatch-value' (e.g. 'area :rectangle')."
      "Many defmethod forms use qualified names (e.g. 'shape/area :square') — always use the complete identifier."
      "When replacing a defmethod, the dispatch value is extracted from content if not in form_identifier."
-     "content must be a complete, balanced Clojure form — unbalanced delimiters are rejected with an error."
+     "content must be a complete, balanced Clojure form — unbalanced delimiters are rejected with an error. Pass \"\" (empty string) with operation \"replace\" to delete the form; insert operations require content."
      "Use the edit tool instead when making multiple small text replacements across a file."
      "Prefer clojure_edit for targeted changes to a known function, macro, or spec definition."]
     :parameters
@@ -268,5 +292,5 @@
                          :enum        ["replace" "insert_before" "insert_after"]
                          :description "The editing operation to perform"}
       "content"         {:type        "string"
-                         :description "New content to use for the operation"}}}
+                         :description "New content to use for the operation. Pass \"\" (empty string) with operation \"replace\" to delete the form (same convention as the edit tool's empty newText); insert_before/insert_after require non-empty content."}}}
     :execute execute :title title}))

@@ -73,12 +73,77 @@
     (is (str/includes? (:content result) "match_form"))))
 
 (deftest test-missing-new-form
+  ;; new_form stays required (same convention as the edit tool's newText):
+  ;; omitting it is an error, deletion uses an explicit empty string.
   (let [path (write-test-file! "missing-new" "(+ x 1)")
         result (sexp-tool/execute {:file_path path
                                    :match_form "(+ x 1)"
                                    :operation "replace"})]
     (is (:is-error result))
-    (is (str/includes? (:content result) "new_form"))))
+    (is (str/includes? (:content result) "new_form"))
+    (is (str/includes? (:content result) "empty string"))
+    (is (str/includes? (read-test-file path) "(+ x 1)"))))
+
+(deftest test-delete-with-empty-new-form
+  ;; Deletion follows the edit tool's convention: an empty new_form with
+  ;; operation "replace" removes the matched expression.
+  (let [path (write-test-file! "delete-empty"
+                               "(defn f []\n  (println \"debug\")\n  42)\n")
+        result (sexp-tool/execute
+                (sexp-opts path "(println \"debug\")" ""))]
+    (is (not (:is-error result)))
+    (is (str/includes? (:content result) "Edit applied"))
+    (let [content (read-test-file path)]
+      (is (not (str/includes? content "println")))
+      (is (str/includes? content "42")))))
+
+(deftest test-delete-with-blank-new-form
+  ;; Whitespace-only new_form carries zero complete expressions — same as "".
+  (let [path (write-test-file! "delete-blank"
+                               "(defn f []\n  (println \"debug\")\n  42)\n")
+        result (sexp-tool/execute
+                (sexp-opts path "(println \"debug\")" "  \n  "))]
+    (is (not (:is-error result)))
+    (let [content (read-test-file path)]
+      (is (not (str/includes? content "println")))
+      (is (str/includes? content "42")))))
+
+(deftest test-delete-multiple-expressions
+  ;; A multi-expression match with an empty new_form removes the whole block.
+  (let [path (write-test-file! "delete-multi"
+                               "(defn f []\n  (validate x)\n  (transform x)\n  x)\n")
+        result (sexp-tool/execute
+                (sexp-opts path "(validate x)\n(transform x)" ""))]
+    (is (not (:is-error result)))
+    (let [content (read-test-file path)]
+      (is (not (str/includes? content "validate")))
+      (is (not (str/includes? content "transform")))
+      (is (str/includes? content "x)")))))
+
+(deftest test-delete-with-replace-all
+  ;; Empty new_form + replace_all removes every occurrence.
+  (let [path (write-test-file! "delete-all"
+                               "(defn a [] (inc x))\n(defn b [] (inc x))\n")
+        result (sexp-tool/execute
+                (sexp-opts path "(inc x)" "" :replace_all true))]
+    (is (not (:is-error result)))
+    (let [content (read-test-file path)]
+      (is (not (str/includes? content "inc")))
+      (is (str/includes? content "(defn a"))
+      (is (str/includes? content "(defn b")))))
+
+(deftest test-insert-with-empty-new-form-rejected
+  ;; Insert operations need content; an empty new_form cannot insert.
+  (doseq [op ["insert_before" "insert_after"]]
+    (testing op
+      (let [path (write-test-file! (str "insert-empty-" op)
+                                   "(defn first [] 1)\n")
+            result (sexp-tool/execute
+                    (sexp-opts path "(defn first [] 1)" ""
+                               :operation op))]
+        (is (:is-error result))
+        (is (str/includes? (:content result) "new_form"))
+        (is (str/includes? (read-test-file path) "(defn first [] 1)"))))))
 
 (deftest test-match-form-whitespace-only
   (let [path (write-test-file! "whitespace-match" "(+ x 1)")

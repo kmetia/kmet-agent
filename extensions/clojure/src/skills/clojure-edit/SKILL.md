@@ -15,8 +15,8 @@ These tools understand Clojure syntax and prevent common errors.
 - Target forms by name rather than trying to match exact text
 
 ## Core Tools to Use
-- `clojure_edit` — Replace entire top-level forms
-- `clojure_edit_replace_sexp` — Modify expressions within top-level forms
+- `clojure_edit` — Replace entire top-level forms (an empty `content` deletes them)
+- `clojure_edit_replace_sexp` — Modify expressions within top-level forms (an empty `new_form` deletes them)
 - `clojure_paren_repair` — Fix unbalanced delimiters (parens/brackets/braces) in a file
 
 `clojure_edit` and `clojure_edit_replace_sexp` REJECT unbalanced delimiters in
@@ -78,7 +78,9 @@ Remember to include dispatch values:
 | Use case | Tool |
 |---|---|
 | Replace a whole function | `clojure_edit` |
+| Delete a whole function/form | `clojure_edit` with `content: ""` (like edit's empty `newText`) |
 | Change one expression inside a function | `clojure_edit_replace_sexp` |
+| Delete an expression inside a function | `clojure_edit_replace_sexp` with `new_form: ""` (like edit's empty `newText`) |
 | Insert a new function before/after another | `clojure_edit` |
 | Rename a symbol everywhere in a file | `clojure_edit_replace_sexp` with `replace_all` |
 | Edit an ns declaration | `clojure_edit` |

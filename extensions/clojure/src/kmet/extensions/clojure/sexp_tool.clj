@@ -96,24 +96,35 @@
 (defn- zright-n [zloc n]
   (iterate-to-n z/right zloc n))
 
-(defn- remove-match-expr [zloc match-exp]
-  (loop [zloc' zloc]
-    (when (and zloc' (not (z/end? zloc')))
-      (let [node (z/node zloc')]
-        (when (and (semantic-nodes? node)
-                   (not= match-exp (node->match-expr node)))
-          (throw (ex-info "Bad match state" {:node      (n/string node)
-                                             :match-exp match-exp})))
-        (if (and (semantic-nodes? node)
-                 (= match-exp (node->match-expr node)))
-          (z/remove* zloc')
-          (recur (-> zloc' z/remove* z/next*)))))))
+(defn- remove-match-expr
+  "Remove the matched expression at ZLOC with REMOVE-FN — z/remove* while
+   truncating for a replacement; z/remove for deletion, which also trims
+   the surrounding whitespace so a deleted expression takes its line with
+   it instead of leaving a blank one. Whitespace between the scan start
+   and the match is removed raw."
+  [zloc match-exp & [remove-fn]]
+  (let [remove-fn (or remove-fn z/remove*)]
+    (loop [zloc' zloc]
+      (when (and zloc' (not (z/end? zloc')))
+        (let [node (z/node zloc')]
+          (when (and (semantic-nodes? node)
+                     (not= match-exp (node->match-expr node)))
+            (throw (ex-info "Bad match state" {:node      (n/string node)
+                                               :match-exp match-exp})))
+          (if (and (semantic-nodes? node)
+                   (= match-exp (node->match-expr node)))
+            (remove-fn zloc')
+            (recur (-> zloc' z/remove* z/next*))))))))
 
-(defn- remove-match-exprs [zloc match-exprs]
+(defn- remove-match-exprs
+  "Remove each expression in MATCH-EXPRS starting at ZLOC, optionally with
+   REMOVE-FN (default z/remove*; deletion passes z/remove so the removed
+   expressions take their lines with them)."
+  [zloc match-exprs & [remove-fn]]
   (let [end (last match-exprs)]
     (reduce
      (fn [zloc' match-expr]
-       (let [zl (remove-match-expr zloc' match-expr)]
+       (let [zl (remove-match-expr zloc' match-expr remove-fn)]
          (cond
            (= match-expr end) zl
            (not (z/end? zl)) (z/next* zl))))
@@ -136,7 +147,9 @@
 
 (defn- replace-multi [zloc match-sexprs content-str]
   (if (or (nil? content-str) (zero? (count content-str)))
-    (let [after-loc (remove-match-exprs zloc match-sexprs)]
+    ;; deletion: z/remove also trims the surrounding whitespace, so the
+    ;; removed expression(s) take their line(s) with them
+    (let [after-loc (remove-match-exprs zloc match-sexprs z/remove)]
       {:edit-span-loc after-loc :after-loc after-loc})
     (let [edit-span-loc (replace-multi-helper zloc match-sexprs content-str)]
       {:edit-span-loc edit-span-loc
@@ -237,15 +250,21 @@
         replace-all? (and (boolean replace_all)
                           (not= op-kw :insert-before)
                           (not= op-kw :insert-after))
+        ;; Deletion follows the edit tool's convention: new_form stays
+        ;; required, and an empty (blank) value with operation "replace"
+        ;; removes the matched expression(s) — zero complete expressions.
+        missing-new? (nil? new_form)
+        blank-new?   (and (not missing-new?) (str/blank? new_form))
+        content-form (when-not (or missing-new? blank-new?) new_form)
         ;; Parse problems are detected once, up front, so every rejection
         ;; below can state the actual error (kind + line/col report).
         match-problem (when match_form (util/parse-problem "match_form" match_form))
-        new-problem   (when new_form (util/parse-problem "new_form" new_form))
-        shape-error   (when new_form
+        new-problem   (when content-form (util/parse-problem "new_form" content-form))
+        shape-error   (when content-form
                         (let [head (second (re-find #"^\((defn|defn-|defmacro|defmacro-|def|deftest|deftest-|defmethod|defprotocol|defrecord|ns)([ )])"
-                                                    (str/trim new_form)))]
+                                                    (str/trim content-form)))]
                           (when head
-                            (util/validate-form-shape head new_form))))]
+                            (util/validate-form-shape head content-form))))]
     (cond
       (str/blank? file_path)
       {:content "Missing required parameter: file_path" :is-error true}
@@ -276,8 +295,20 @@
       {:content "match_form must contain at least one valid S-expression (not just comments or whitespace)"
        :is-error true}
 
-      (str/blank? new_form)
-      {:content "Missing required parameter: new_form" :is-error true}
+;; new_form stays required (edit tool convention): an empty string deletes
+;; with "replace"; insertion has nothing to insert with an empty value.
+      missing-new?
+      {:content (str "Missing required parameter: new_form"
+                     (if (= op-kw :replace)
+                       " — pass \"\" (empty string) to delete the matched expression(s)."
+                       " — insert_before/insert_after need the content to insert."))
+       :is-error true}
+
+      (and blank-new? (not= op-kw :replace))
+      {:content (str "new_form cannot be empty for operation \"" operation
+                     "\" — insert_before/insert_after need the content to insert. "
+                     "An empty new_form deletes only with operation \"replace\".")
+       :is-error true}
 
 ;; Any parse problem in new_form is rejected outright — no auto-repair.
       new-problem
@@ -299,7 +330,7 @@
       :else
       (let [find-edit (fn [zloc]
                         (find-and-edit-multi-sexp
-                         zloc match_form new_form
+                         zloc match_form content-form
                          {:operation op-kw :all? replace-all?}))]
         (util/edit-pipeline file_path find-edit)))))
 
@@ -313,7 +344,7 @@
    {:name            "clojure_edit_replace_sexp"
     :label           "Clojure s-expression edit"
     :description
-    "Replaces Clojure expressions in a file (only .clj/.cljs/.cljc/.cljd/.bb/.edn/.lpy files are accepted; other types are rejected).\n\nThis tool provides targeted replacement of Clojure expressions within forms. For complete top-level form operations, use clojure_edit instead.\n\nKEY BENEFITS:\n- Syntax-aware matching that understands Clojure code structure\n- Ignores whitespace differences by default, focusing on actual code meaning\n- Matches expressions regardless of formatting, indentation, or spacing\n- Prevents errors from mismatched text or irrelevant formatting differences\n- Can replace all occurrences with replace_all: true\n\nCONSTRAINTS:\n- match_form must contain one or more complete Clojure expressions\n- new_form must contain zero or more complete Clojure expressions\n- Both must be valid Clojure code that can be parsed\n- Unbalanced delimiters in match_form/new_form are REJECTED — pass complete, balanced expressions exactly as they appear in the file.\n\nFor insert_before/insert_after, pass ONLY the new content (never repeat the matched form). The inserted form lands outside the match's own line: a same-line trailing comment stays with the matched form, and a comment on its own line stays with the next form.\n\nExamples:\n- Replace a calculation: match_form: (+ x 2)  new_form: (* x 2)\n- Rename a symbol everywhere: match_form: old-name  new_form: new-name  replace_all: true\n- Remove debug statements: match_form: (println \"Debug\")  new_form: (empty)\n- Replace multiple expressions: match_form: (validate x) (transform x)  new_form: (-> x validate transform)"
+    "Replaces Clojure expressions in a file (only .clj/.cljs/.cljc/.cljd/.bb/.edn/.lpy files are accepted; other types are rejected).\n\nThis tool provides targeted replacement of Clojure expressions within forms. For complete top-level form operations, use clojure_edit instead.\n\nKEY BENEFITS:\n- Syntax-aware matching that understands Clojure code structure\n- Ignores whitespace differences by default, focusing on actual code meaning\n- Matches expressions regardless of formatting, indentation, or spacing\n- Prevents errors from mismatched text or irrelevant formatting differences\n- Can replace all occurrences with replace_all: true\n\nCONSTRAINTS:\n- match_form must contain one or more complete Clojure expressions\n- new_form must contain zero or more complete Clojure expressions; an empty new_form with operation \"replace\" deletes the match, like the edit tool's empty newText\n- Both must be valid Clojure code that can be parsed\n- Unbalanced delimiters in match_form/new_form are REJECTED — pass complete, balanced expressions exactly as they appear in the file.\n\nFor insert_before/insert_after, pass ONLY the new content (never repeat the matched form). The inserted form lands outside the match's own line: a same-line trailing comment stays with the matched form, and a comment on its own line stays with the next form.\n\nExamples:\n- Replace a calculation: match_form: (+ x 2)  new_form: (* x 2)\n- Rename a symbol everywhere: match_form: old-name  new_form: new-name  replace_all: true\n- Delete an expression: match_form: (println \"Debug\")  new_form: \"\" (empty string, like edit's empty newText)\n- Replace multiple expressions: match_form: (validate x) (transform x)  new_form: (-> x validate transform)"
     :render-call renderers/render-edit-call
     :render-result renderers/render-edit-result
     :render-shell :self
@@ -322,7 +353,7 @@
     ["Use clojure_edit_replace_sexp to change a specific expression inside a function without touching the surrounding code."
      "Use clojure_edit when replacing an entire top-level form (defn, defmethod, etc.)."
      "match_form must be a valid, parseable Clojure expression (not just comments or whitespace)."
-     "new_form must be valid Clojure code."
+     "new_form must be valid Clojure code; pass \"\" (empty string) with operation \"replace\" to delete the matched expression(s), like the edit tool's empty newText — insert operations require content."
      "replace_all is forced to false for insert_before and insert_after."
      "Multiple consecutive expressions in match_form are matched as a sequence."]
     :parameters
@@ -334,7 +365,7 @@
       "match_form"  {:type        "string"
                      :description "The s-expression to find (include # for anonymous functions)"}
       "new_form"    {:type        "string"
-                     :description "The s-expression to use for the operation"}
+                     :description "The s-expression(s) to use for the operation. Pass \"\" (empty string) with operation \"replace\" to delete the matched expression(s), like the edit tool's empty newText; insert_before/insert_after require non-empty content."}
       "replace_all" {:type        "boolean"
                      :description "Whether to replace all occurrences (default: false)"}
       "operation"   {:type        "string"

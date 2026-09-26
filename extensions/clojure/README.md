@@ -21,7 +21,7 @@ clojure_edit:
 - `file_path` — path to .clj/.cljs/.cljc/.bb/.edn file
 - `form_type` — `defn`, `defmethod`, `def`, `defmacro`, `deftest`, `ns`, `s/def`, etc.
 - `form_identifier` — form name; for defmethod use `"method-name dispatch-value"`
-- `content` — replacement Clojure source code
+- `content` — replacement Clojure source code; pass `""` with `operation: "replace"` to delete the form (same convention as the edit tool's empty `newText`)
 - `operation` — `replace` (default), `insert_before`, `insert_after`
 
 The tools always apply their edits; preview-only and unified-diff modes are not supported.
@@ -29,6 +29,7 @@ The tools always apply their edits; preview-only and unified-diff modes are not 
 **Features:**
 - defmethod dispatch-value matching (`"shape/area :square"`)
 - Unbalanced delimiter rejection (edamame detection — content must be balanced)
+- Deletion: an empty `content` with `operation: "replace"` removes the form
 - cljfmt formatting
 - Similar-match suggestions when form not found
 
@@ -47,7 +48,7 @@ clojure_edit_replace_sexp:
 **Parameters:**
 - `file_path` — path to file
 - `match_form` — s-expression(s) to find
-- `new_form` — replacement s-expression(s)
+- `new_form` — replacement s-expression(s); pass `""` with `operation: "replace"` to delete the match (same convention as the edit tool's empty `newText`)
 - `replace_all` — replace all occurrences (default false)
 - `operation` — `replace`, `insert_before`, `insert_after` (required)
 
@@ -57,6 +58,7 @@ The tools always apply their edits; preview-only and unified-diff modes are not 
 - Whitespace-normalized matching (ignores formatting differences)
 - Multi-expression matching (consecutive expressions)
 - `replace_all` for renaming symbols across a file
+- Deletion: an empty `new_form` with `operation: "replace"` removes the matched expression(s), including multi-expression matches and with `replace_all`
 - Standard edit-style file call, full numbered diff, and colored result rendering
 
 Both tools reuse the host's `render-edit-call` and `render-edit-result` renderers.
