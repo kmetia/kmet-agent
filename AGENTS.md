@@ -28,6 +28,8 @@ to their source package. The temporary notes `script.md`, `perf.md`,
 - `bb clean` removes build output and caches; `bb clean --dry-run` lists what
   it would remove. `jolt clean` is the native-host equivalent.
 - `bb nrepl` starts the development server on port 1667 and blocks.
+- `bb tasks` lists the one-line task summaries; `bb <task> --help` prints a
+  task's full usage (the details `bb tasks` leaves out).
 - Use the changed-file tasks for the normal loop:
 
   ```sh

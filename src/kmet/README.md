@@ -151,8 +151,11 @@ bb generate-image-models # Regenerate the image model catalog (network)
 bb check-model-data      # Offline catalog validation
 bb slop                # SCBench verbosity (clones+rules)/erosion vs. reference rows, outliers only
 bb pack-extension <src-dir> [out.jar]  # Verify + pack an extension artifact root
-bb help            # Show task help
+bb help            # Show task entry points
 ```
+
+`bb tasks` prints one-line summaries; `bb <task> --help` (the same task works
+under `jolt`) prints a task's full usage, arguments and notes.
 
 The `*-changed` tasks are the iteration loop — they cover only the current
 changes (git diff vs HEAD + untracked, plus the namespaces/tests that
