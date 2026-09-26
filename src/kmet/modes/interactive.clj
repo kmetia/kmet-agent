@@ -14,6 +14,7 @@
             [kmet.libs.reakt :as r]
             [kmet.modes.interactive.state :as state]
             [kmet.modes.interactive.auth :as auth]
+            [kmet.modes.interactive.status :as status]
             [kmet.app.ui.chat-history :as chat-history]
             [kmet.app.ui.loaded-resources :as loaded-resources]
             [kmet.app.ui.pending-messages :as pending-messages]
@@ -76,8 +77,6 @@
          handle-import-command
          build-extension-ui-registry ask-branch-summary
          build-loaded-resource-sections start-agent-run!
-         show-status-indicator! clear-status-indicator! release-background-status!
-         stop-anim-timer!
          maybe-show-cache-miss-notice!
          make-widget-area-above make-widget-area-below
          send-message submit-message apply-hooks
@@ -299,7 +298,7 @@
         chat (:chat-history cs)
         indicator (spinner/make-spinner :text "Creating gist..." :active true)
         done (promise)]
-    (show-status-indicator! cs :share indicator)
+    (status/show-status-indicator! cs :share indicator)
     ;; spinner animation rides the transient-indicator frame driver while
     ;; :share is up (cleared below on completion/timeout)
     (future
@@ -327,7 +326,7 @@
         (deliver done result)))
     (future
       (let [result (deref done 90000 :timeout)]
-        (release-background-status! cs :share indicator)
+        (status/release-background-status! cs :share indicator)
         (chat-history/chat-history-add-message!
          chat
          (cond
@@ -1299,8 +1298,8 @@
           (reset! (:signal ag) false))
         (when was-running
           (reset! (:running-turn? cs) false)
-          (stop-anim-timer! cs)
-          (clear-status-indicator! cs))
+          (status/stop-anim-timer! cs)
+          (status/clear-status-indicator! cs))
         ;; pi: teardownCurrent — after the run is settled, tell extensions the
         ;; runtime is being torn down (reason :new, destination session file)
         ;; so they can persist state before the swap.
@@ -1542,7 +1541,7 @@
     ;; escape → abort (pi: defaultEditor.onEscape = abortBranchSummary)
     (editor/editor-set-on-action! ed "app.interrupt"
                                   (fn [] (reset! abort-atom true)))
-    (show-status-indicator! cs :branch-summary indicator)
+    (status/show-status-indicator! cs :branch-summary indicator)
     (tui/tui-request-render (:tui cs))
     ;; render driver: tick the indicator while the summarization runs
     (future
@@ -1560,7 +1559,7 @@
     (future
       (let [result (deref done 120000 :timeout)]
         (editor/editor-set-on-action! ed "app.interrupt" prev-interrupt)
-        (release-background-status! cs :branch-summary indicator)
+        (status/release-background-status! cs :branch-summary indicator)
         (cond
           (= result :timeout)
           (chat-history/chat-history-add-message! (:chat-history cs)
@@ -1797,207 +1796,7 @@
                                                    :content (str "Clone failed: " (ex-message e))})
           (tui/tui-request-render (:tui cs)))))))
 
-;; ─── Animation timer ────────────────────────────────────────────────────────
-;; Drives re-renders while the agent turn is running, so the separate
-;; StatusIndicator (Pi-style) between chat and editor animates smoothly.
-
-(defn- start-anim-timer!
-  "Start requesting renders every 80ms while the agent turn runs.
-   Powers the StatusIndicator spinner animation (Pi-style: separate layer
-   between chat and editor)."
-  [cs]
-  (let [t (future
-            (try
-              (loop []
-                (when (and @(:running? (:tui cs))
-                           @(:running-turn? cs))
-                  (Thread/sleep 80)
-                  (tui/tui-request-render (:tui cs))
-                  (recur)))
-              ;; The timer is stopped via future-cancel — the interrupt it
-              ;; raises on Thread/sleep is expected, not an error.
-              (catch InterruptedException _)
-              (catch Exception e
-                (debug/log "anim timer: " e))))]
-    (reset! (:anim-timer cs) t)))
-
-(defn- start-indicator-driver!
-  "Request renders every 80ms while a TRANSIENT status indicator is up.
-   Covers indicators shown outside agent turns (manual /compact, /share)
-   — the elapsed-time/countdown indicators render from wall-clock time per
-   pass and otherwise sit on a single static frame when no anim timer is
-   running (during turns the anim timer already drives frames). The future
-   is recorded on the indicator's :status-current entry: the driver's
-   lifetime is the indicator's, so there is no separate cell to initialize
-   (or forget) and a clear cancels exactly the driver it owns. Self-exits
-   when the TUI stops or the indicator it was started for is no longer
-   current; cancel-indicator-driver! stops it eagerly on a clear/swap."
-  [cs indicator]
-  (future
-    (try
-      (loop []
-        (Thread/sleep 80)
-        (when (and (some-> (:tui cs) :running? deref)
-                   (identical? indicator (:indicator @(:status-current cs))))
-          (tui/tui-request-render (:tui cs))
-          (recur)))
-      ;; cancelled via future-cancel — the interrupt raised on Thread/sleep
-      ;; is expected, not an error
-      (catch InterruptedException _)
-      (catch Exception e
-        (debug/log "indicator driver: " e)))))
-
-(defn- cancel-indicator-driver!
-  "Cancel the current status entry's frame driver (idempotent; read the
-   entry before clearing :status-current so the driver is still there to
-   cancel)."
-  [cs]
-  (when-some [t (:driver @(:status-current cs))]
-    (future-cancel t))
-  nil)
-
-(defn- stop-anim-timer!
-  "Cancel the animation timer."
-  [cs]
-  (when-let [t @(:anim-timer cs)]
-    (future-cancel t)
-    (reset! (:anim-timer cs) nil)))
-
-;; ─── Status indicator swap model (pi: showStatusIndicator/clearStatusIndicator) ──
-;; The status layer is a fn component (status-indicator/make-status-area) mounted via
-;; hiccup/root: it renders whichever indicator the :status-current atom
-;; records ({:kind k :indicator c :driver f}), or the default working
-;; StatusIndicator when nil — except while the active editor embeds the
-;; status in its own top border (the default editor), when the layer renders
-;; nothing. A swap
-;; is a pure reset! on that atom — reconcile diffs the tree and swaps the
-;; child record; no container clear/add dance. The working indicator's
-;; start/stop stays imperative (spinner lifecycle, dsl.md §5). The kind
-;; rides in the recorded map so a stale end event can't stop an indicator
-;; that was already replaced (pi: clearStatusIndicator(kind) checks the
-;; active kind and no-ops on mismatch).
-
-(defn- current-status-indicator
-  "The indicator the session is showing right now: the transient swap
-   recorded in :status-current when one is up, else the default working
-   indicator while it is active, else nil (the editor border then draws its
-   plain rule). The editor's top-border hook resolves this per render."
-  [cs]
-  (or (:indicator @(:status-current cs))
-      (when (status-indicator/status-indicator-active? (:status-indicator cs))
-        (:status-indicator cs))))
-
-(defn- show-status-indicator!
-  "Record INDICATOR as the active status (pi: showStatusIndicator —
-   disposes the active indicator). KIND records which indicator is active
-   for kind-gated clears. No manual render request for the SWAP itself —
-   the tracked :status-current read schedules that frame (§3.4) — but the
-   transient indicators animate from wall-clock time, so the entry carries
-   an 80ms frame driver (start-indicator-driver!; during turns the anim
-   timer already drives frames)."
-  [cs kind indicator]
-  (cancel-indicator-driver! cs)
-  (status-indicator/status-indicator-stop! (:status-indicator cs))
-  (reset! (:status-current cs)
-          {:kind kind
-           :indicator indicator
-           :driver (start-indicator-driver! cs indicator)}))
-
-(defn- activate-working-indicator!
-  "Restore the default working StatusIndicator as the current status and
-   activate it (pi: agent_start → showStatusIndicator(new
-   WorkingStatusIndicator)). Used when a new LLM call starts after a retry
-   backoff or compaction, which swapped in a transient indicator."
-  [cs]
-  ;; The nil swap schedules the frame through the status-area root's
-  ;; reaction when a transient indicator was shown; start-agent-run! (the
-  ;; one cold-start path where current is already nil) requests its own
-  ;; frame right after, covering the spinner activation. The transient
-  ;; indicator's frame driver stops — the working spinner animates via the
-  ;; anim timer once the turn runs.
-  (cancel-indicator-driver! cs)
-  (reset! (:status-current cs) nil)
-  (status-indicator/status-indicator-start! (:status-indicator cs))
-  ;; A background thread (share/branch-summary completion, an extension's
-  ;; set-working-visible) can revive into a turn that just ended: teardown
-  ;; (on-agent-done/on-agent-error) drops running-turn? BEFORE clearing
-  ;; the status, so an activation interleaved with it can land after the
-  ;; clear. Never leave a spinner with no turn behind it.
-  (when-not @(:running-turn? cs)
-    (status-indicator/status-indicator-stop! (:status-indicator cs))))
-
-(defn- release-background-status!
-  "Release a long-running background status indicator (share, branch
-   summarization) once its work finishes, and give the working spinner
-   back while the agent turn is still streaming — taking the status slot
-   stopped it, and the next :turn-start (the only other revival point) can
-   be arbitrarily far away.
-
-   IDENT is the indicator the flow installed: only it may be cleared, so a
-   later /share or a transient (retry/compaction) that claimed the slot
-   meanwhile is left alone. The working spinner returns only when the turn
-   is still running, nothing else claimed the slot in the meantime, and it
-   isn't already spinning (re-activation would reset its animation
-   clock). The activation itself re-checks the running-turn flag, so a
-   turn ending mid-revival cannot leave a spinner behind."
-  [cs kind ident]
-  (when (identical? ident (:indicator @(:status-current cs)))
-    (clear-status-indicator! cs kind)
-    (when (and @(:running-turn? cs)
-               (nil? @(:status-current cs))
-               (not (status-indicator/status-indicator-active? (:status-indicator cs))))
-      (activate-working-indicator! cs))))
-
-(defn- clear-status-indicator!
-  "Clear the active status: the standalone layer falls back to the idle
-   two-row shape; with the status embedded in the editor border the border
-   returns to its plain rule (pi: clearStatusIndicator → idleStatus).
-   With KIND, only clears when that indicator is currently active — a stale
-   end event (e.g. auto-retry-end arriving after the working indicator was
-   revived) then no-ops instead of stopping the working spinner. The
-   working indicator is the IMPLICIT status (no :status-current entry), so
-   a :working clear matches exactly when no transient is swapped in —
-   pi: the active indicator's kind is \"working\" during a turn, and
-   setWorkingVisible(false) clears it; a transient retry/compaction/share
-   indicator is left alone."
-  [cs & [kind]]
-  (let [current @(:status-current cs)]
-    (when (or (nil? kind)
-              (= kind (:kind current))
-              (and (= :working kind) (nil? current)))
-      ;; A real swap (transient → idle) schedules its own frame through the
-      ;; status-area root reaction; an already-idle clear needs no frame.
-      (cancel-indicator-driver! cs)
-      (reset! (:status-current cs) nil)
-      (status-indicator/status-indicator-stop! (:status-indicator cs)))))
-
-;; ─── Pending messages display (pi: updatePendingMessagesDisplay) ──────────
-
-(defn- fmt-key-display
-  "Pi: formatKeyText capitalize — 'alt+up' → 'Alt+Up'."
-  [k]
-  (->> (str/split (or k "") #"\+")
-       (map (fn [part]
-              (if (seq part)
-                (str (str/upper-case (subs part 0 1)) (subs part 1))
-                part)))
-       (str/join "+")))
-
-(defn- update-pending-messages!
-  "Refresh the queued steering/follow-up display (pi:
-   updatePendingMessagesDisplay). Combines the agent's steering/follow-up
-   queues with the compaction queue (pi: getAllQueuedMessages — messages
-   queued during compaction display alongside the session queue)."
-  [cs]
-  (let [{:keys [steering follow-up]} (agent/queued-messages @(:agent-state cs))
-        cq @(:compaction-queued cs)
-        c-steer (mapv :text (filter #(= :steer (:mode %)) cq))
-        c-follow (mapv :text (filter #(= :follow-up (:mode %)) cq))]
-    ;; set-queues! swaps track!-watched atoms — the watch invalidates the
-    ;; component and schedules the frame (§3.4); no manual poke.
-    (pending-messages/pending-messages-set-queues! (:pending-messages-comp cs)
-                                                   (into (vec steering) c-steer)
-                                                   (into (vec follow-up) c-follow))))
+;; ─── Compaction queue + turn progress (moves with interactive.turn) ───────
 
 (defn- queue-compaction-message!
   "Queue a message typed during compaction (pi: queueCompactionMessage —
@@ -2006,7 +1805,7 @@
    pending area and is flushed by the :compaction-end handler."
   [cs text mode]
   (swap! (:compaction-queued cs) conj {:text text :mode mode})
-  (update-pending-messages! cs)
+  (status/update-pending-messages! cs)
   (chat-history/chat-history-show-status!
    (:chat-history cs) "Queued message for after compaction")
   (tui/tui-request-render (:tui cs)))
@@ -2114,7 +1913,7 @@
                      ;; not delivered again when the queue is re-flushed
                      (agent/clear-queues! @(:agent-state cs))
                      (reset! (:compaction-queued cs) msgs)
-                     (update-pending-messages! cs))]
+                     (status/update-pending-messages! cs))]
       (try
         (if will-retry
           ;; Overflow compaction: the turn retries — queue everything into it
@@ -2139,7 +1938,7 @@
                   (queue-compaction-message-into-turn! cs m)))
               ;; all extension commands — execute them all
               (doseq [m msgs] (execute-extension-command! (:text m))))))
-        (update-pending-messages! cs)
+        (status/update-pending-messages! cs)
         (catch Exception e
           (restore!)
           (chat-history/chat-history-show-status!
@@ -2153,7 +1952,7 @@
   "Pi: CompactionStatusIndicator label — reason-specific, with the cancel
    hint (escape aborts compaction)."
   [reason]
-  (let [cancel (str " (" (fmt-key-display (app-kb/key-text "app.interrupt"))
+  (let [cancel (str " (" (status/fmt-key-display (app-kb/key-text "app.interrupt"))
                     " to cancel)")]
     (case reason
       :manual (str "Compacting context..." cancel)
@@ -2204,7 +2003,7 @@
 (defn- on-agent-done
   "Called when the LLM turn completes.
    Drop the running-turn flag FIRST — a background status completion
-   (share, branch summary: release-background-status!) racing this teardown
+   (share, branch summary: status/release-background-status!) racing this teardown
    must see the turn over before it may revive the working spinner; the
    flag-first order plus its post-revival re-check makes a stuck spinner
    impossible. Then finalize streaming FIRST (captures thinking text),
@@ -2212,9 +2011,9 @@
    internally."
   [cs]
   (try
-    (stop-anim-timer! cs)
+    (status/stop-anim-timer! cs)
     (reset! (:running-turn? cs) false)
-    (clear-status-indicator! cs)
+    (status/clear-status-indicator! cs)
     (chat-history/chat-history-finalize-streaming! (:chat-history cs))
     (chat-history/chat-history-finalize-thinking! (:chat-history cs))
     ;; Heal stale above-window scrollback now that the turn has ended: the turn
@@ -2235,10 +2034,10 @@
   "Called when an error occurs during the agent turn."
   [cs error-msg]
   (try
-    (stop-anim-timer! cs)
+    (status/stop-anim-timer! cs)
     ;; flag before the status clear — see on-agent-done
     (reset! (:running-turn? cs) false)
-    (clear-status-indicator! cs)
+    (status/clear-status-indicator! cs)
     ;; If streaming placeholder is still empty, remove it
     ;; so we don't get a blank assistant entry before the error message.
     ;; Removed by identity — a consumed steering/follow-up message or a
@@ -2453,8 +2252,8 @@
    model must pick up)."
   [cs & [message]]
   (reset! (:running-turn? cs) true)
-  (activate-working-indicator! cs)
-  (start-anim-timer! cs)
+  (status/activate-working-indicator! cs)
+  (status/start-anim-timer! cs)
   (state/update-footer! cs)
   (tui/tui-request-render (:tui cs))
   (agent/run-agent-turn @(:agent-state cs)
@@ -2478,7 +2277,7 @@
     (do
       (debug/log "user steered: " text)
       (agent/steer! @(:agent-state cs) text)
-      (update-pending-messages! cs)
+      (status/update-pending-messages! cs)
       (state/update-footer! cs)
       (tui/tui-request-render (:tui cs)))
     (do
@@ -2641,7 +2440,7 @@
     ;; as a user message when the loop consumes it (:message-start,
     ;; pi: message_start → addMessageToChat).
     (do (agent/follow-up! @(:agent-state cs) text)
-        (update-pending-messages! cs)
+        (status/update-pending-messages! cs)
         :queued)
 
     :else
@@ -2677,7 +2476,7 @@
         (agent/clear-queues! @(:agent-state cs))
         (reset! (:compaction-queued cs) [])
         (editor-text-set! ed combined)
-        (update-pending-messages! cs)))
+        (status/update-pending-messages! cs)))
     (count all)))
 
 (defn- handle-dequeue
@@ -2719,8 +2518,8 @@
         ;; flag before the status clear — see on-agent-done: a background
         ;; revive racing this teardown must see the turn over
         (reset! (:running-turn? cs) false)
-        (stop-anim-timer! cs)
-        (clear-status-indicator! cs)
+        (status/stop-anim-timer! cs)
+        (status/clear-status-indicator! cs)
     ;; pi: restoreQueuedMessagesToEditor({abort: true}) — queued steering/
     ;; follow-up messages return to the editor instead of vanishing when
     ;; cancel-turn clears the queues (they reach the chat only once the
@@ -2905,7 +2704,7 @@
       ;; queue_update → updatePendingMessagesDisplay; the tracked-atom
       ;; swap schedules the frame)
       (when-let [cs @cs-ref]
-        (update-pending-messages! cs))
+        (status/update-pending-messages! cs))
       :turn-start
       ;; A new LLM call is starting. After a retry backoff
       ;; or compaction the status container holds a
@@ -2921,7 +2720,7 @@
       (when-let [cs @cs-ref]
         (when (and @(:running-turn? cs)
                    (not= :working (:kind @(:status-current cs))))
-          (activate-working-indicator! cs)))
+          (status/activate-working-indicator! cs)))
       :auto-retry-start
       ;; Show the retry countdown; the failed attempt's partial
       ;; text stays visible (pi: auto_retry_start only swaps in a
@@ -2929,11 +2728,11 @@
       ;; chat and the retried stream opens a fresh message below it)
       ;; (the :status-current swap schedules its own frame)
       (when-let [cs @cs-ref]
-        (show-status-indicator!
+        (status/show-status-indicator!
          cs :retry
          (status-indicator/make-retry-status-indicator
           (:attempt evt) (:max-attempts evt) (:delay-ms evt)
-          :cancel-hint (fmt-key-display
+          :cancel-hint (status/fmt-key-display
                         (app-kb/key-text "app.interrupt")))))
       :auto-retry-end
       ;; Retry finished (pi: auto_retry_end →
@@ -2943,14 +2742,14 @@
       ;; the working spinner keeps spinning.) The kind-gated nil-swap
       ;; schedules its own frame.
       (when-let [cs @cs-ref]
-        (clear-status-indicator! cs :retry))
+        (status/clear-status-indicator! cs :retry))
       :compaction-start
       ;; Session compaction in progress (pi:
       ;; compaction_start → CompactionStatusIndicator + terminal progress);
       ;; the hint is truthful — escape aborts it
       (do (when-let [cs @cs-ref]
             (set-terminal-progress! cs true)
-            (show-status-indicator!
+            (status/show-status-indicator!
              cs :compaction
              (status-indicator/make-compaction-status-indicator
               :message (compaction-status-message
@@ -2966,7 +2765,7 @@
       ;; report.
       (do (when-let [cs @cs-ref]
             (set-terminal-progress! cs false)
-            (clear-status-indicator! cs :compaction)
+            (status/clear-status-indicator! cs :compaction)
             (when (:aborted evt)
               ;; pi: compaction_end aborted — manual: error line; auto:
               ;; dim status
@@ -3030,7 +2829,7 @@
       (case (:role (:message evt))
         :user (do (chat-history/chat-history-add-message! chat-history (:message evt))
                   (when-let [cs @cs-ref]
-                    (update-pending-messages! cs))
+                    (status/update-pending-messages! cs))
                   (tui/tui-request-render tui))
         :assistant (do (chat-history/chat-history-finalize-streaming! chat-history)
                        (chat-history/chat-history-finalize-thinking! chat-history)
@@ -3257,7 +3056,7 @@
                                                    :expanded? (= :expanded (cfg/get-tool-display-mode config)))
         ;; B.3: queued steering/follow-up display (pi: updatePendingMessagesDisplay)
         pm (pending-messages/make-pending-messages
-            :hint (fmt-key-display (app-kb/key-text "app.message.dequeue")))
+            :hint (status/fmt-key-display (app-kb/key-text "app.message.dequeue")))
         ;; B.5: editor dynamic height — max(5, rows*0.3) via :terminal-rows;
         ;; the fixed :height fallback stays at the default 12;
         ;; border color reflects the current thinking level (pi: updateEditorBorderColor)
@@ -3411,7 +3210,7 @@
              ed
              (fn [{:keys [width hidden-line-count rule border-fn]}]
                (status-indicator/editor-top-border
-                {:indicator (current-status-indicator cs)
+                {:indicator (status/current-status-indicator cs)
                  :width width
                  :hidden-line-count hidden-line-count
                  :rule rule
@@ -3990,8 +3789,8 @@
                                   (when (and @(:running-turn? cs)
                                              (not (status-indicator/status-indicator-active?
                                                    (:status-indicator cs))))
-                                    (activate-working-indicator! cs))
-                                  (clear-status-indicator! cs :working)))
+                                    (status/activate-working-indicator! cs))
+                                  (status/clear-status-indicator! cs :working)))
          :set-hidden-thinking-label (fn [label]
                                       ;; one reset! on the shared label atom;
                                       ;; assistant messages' watches schedule
@@ -4123,7 +3922,7 @@
                                       (agent/steer! ag text)
                                       (agent/follow-up! ag text))))
                                 ;; both updates schedule their own frames
-                                (update-pending-messages! cs)
+                                (status/update-pending-messages! cs)
                                 (state/update-footer! cs)
                                 nil))
          ;; pi: sendMessage — a custom message: persisted as a custom_message
@@ -4162,7 +3961,7 @@
                                   nil
                                   (agent/follow-up! ag msg))))
                             ;; both updates schedule their own frames
-                            (update-pending-messages! cs)
+                            (status/update-pending-messages! cs)
                             (state/update-footer! cs)
                             true))
          :get-active-tools (fn []

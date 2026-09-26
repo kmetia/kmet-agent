@@ -11,6 +11,7 @@
   (:require [clojure.test :as t :refer [deftest is testing]]
             [kmet.modes.interactive :as inter]
             [kmet.modes.interactive.state :as state]
+            [kmet.modes.interactive.status :as status]
             [kmet.app.event-bus :as event-bus]
             [kmet.app.loop :as agent]
             [kmet.app.session :as session]
@@ -980,8 +981,8 @@
                        :force-redraw? (atom false)
                        :render-requested? (atom false)}})]
         (with-redefs [agent/run-agent-turn noop
-                      inter/activate-working-indicator! noop
-                      inter/start-anim-timer! noop
+                      status/activate-working-indicator! noop
+                      status/start-anim-timer! noop
                       state/update-footer! noop]
           ((var inter/start-agent-run!) cs))
         (is (true? @(:running-turn? cs)) "the turn still starts")
@@ -1002,8 +1003,8 @@
                    :tui {:scrollback-dirty? (atom dirty?)
                          :force-redraw? (atom false)
                          :render-requested? (atom false)}})]
-          (with-redefs [inter/stop-anim-timer! noop
-                        inter/clear-status-indicator! noop
+          (with-redefs [status/stop-anim-timer! noop
+                        status/clear-status-indicator! noop
                         state/update-footer! noop]
             (call cs))
           (is (= expected @(get-in cs [:tui :force-redraw?]))

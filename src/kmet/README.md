@@ -28,7 +28,8 @@ src/kmet/
 │   └── interactive/    — sections split out of interactive.clj:
 │       ├── state.clj   — CoreState record, config ref, session/format
 │       │                 helpers, footer/title/border updaters
-│       └── auth.clj    — login/logout flows + provider options
+│       ├── auth.clj    — login/logout flows + provider options
+│       └── status.clj  — anim timer, status indicator, pending messages
 ├── ai/                 — Provider/auth subsystem (pi: packages/ai — a standalone
 │   │                     library the agent depends on; self-contained)
 │   ├── models.clj      — Provider/model registry + committed EDN catalogs

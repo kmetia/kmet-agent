@@ -16,6 +16,7 @@
             [kmet.tui.core :as tui]
             [kmet.modes.interactive :as inter]
             [kmet.modes.interactive.state :as state]
+            [kmet.modes.interactive.status :as status]
             [kmet.app.commands :as commands]
             [kmet.app.extensions :as extensions]
             [kmet.app.keybindings :as app-kb]
@@ -401,8 +402,8 @@
                     agent/run-agent-turn (fn [a opts]
                                            (reset! started [a opts])
                                            (future))
-                    inter/activate-working-indicator! (fn [_] nil)
-                    inter/start-anim-timer! (fn [_] nil)
+                    status/activate-working-indicator! (fn [_] nil)
+                    status/start-anim-timer! (fn [_] nil)
                     state/update-footer! (fn [_] nil)
                     tui/tui-request-render (fn [_] nil)]
         ((:handler (commands/find-command "continue")) cs ""))
@@ -454,51 +455,51 @@
             continue() re-shows WorkingStatusIndicator)"
     (let [cs (test-status-cs)]
       (testing "submit activates the working indicator"
-        ((var inter/activate-working-indicator!) cs)
+        ((var status/activate-working-indicator!) cs)
         (t/is (working-status? cs)))
       (testing "auto-retry-start swaps in the retry countdown"
-        ((var inter/show-status-indicator!) cs :retry
-                                            (status-indicator/make-retry-status-indicator 1 3 2000))
+        ((var status/show-status-indicator!) cs :retry
+                                             (status-indicator/make-retry-status-indicator 1 3 2000))
         (t/is (not (working-status? cs))))
       (testing "turn-start after the backoff revives the working indicator"
-        ((var inter/activate-working-indicator!) cs)
+        ((var status/activate-working-indicator!) cs)
         (t/is (working-status? cs)))
       (testing "auto-retry-end no-ops once the working indicator is active"
-        ((var inter/clear-status-indicator!) cs :retry)
+        ((var status/clear-status-indicator!) cs :retry)
         (t/is (working-status? cs))
         (t/is (nil? @(:status-current cs))))
       (testing "turn end clears to the idle two rows"
-        ((var inter/clear-status-indicator!) cs)
+        ((var status/clear-status-indicator!) cs)
         (t/is (blank-status? cs))))))
 
 (deftest test-status-indicator-survives-compaction
   (testing "in-loop compaction clears at compaction-end and the following
             turn-start revives the working indicator"
     (let [cs (test-status-cs)]
-      ((var inter/activate-working-indicator!) cs)
-      ((var inter/show-status-indicator!) cs :compaction
-                                          (status-indicator/make-compaction-status-indicator))
+      ((var status/activate-working-indicator!) cs)
+      ((var status/show-status-indicator!) cs :compaction
+                                           (status-indicator/make-compaction-status-indicator))
       (t/is (not (working-status? cs)))
-      ((var inter/clear-status-indicator!) cs :compaction)
+      ((var status/clear-status-indicator!) cs :compaction)
       (t/is (blank-status? cs))
-      ((var inter/activate-working-indicator!) cs)
+      ((var status/activate-working-indicator!) cs)
       (t/is (working-status? cs)))))
 
 (deftest test-status-indicator-kind-gated-clear
   (testing "a stale end event cannot stop an indicator it didn't own"
     (let [cs (test-status-cs)]
-      ((var inter/activate-working-indicator!) cs)
-      ((var inter/show-status-indicator!) cs :compaction
-                                          (status-indicator/make-compaction-status-indicator))
+      ((var status/activate-working-indicator!) cs)
+      ((var status/show-status-indicator!) cs :compaction
+                                           (status-indicator/make-compaction-status-indicator))
       ;; auto-retry-end arriving while compaction is active must no-op
-      ((var inter/clear-status-indicator!) cs :retry)
+      ((var status/clear-status-indicator!) cs :retry)
       (t/is (not (working-status? cs)))
       (t/is (= :compaction (:kind @(:status-current cs))))
       (testing "cancel during backoff clears unconditionally; the late
                 retry-end no-ops"
-        ((var inter/clear-status-indicator!) cs)
+        ((var status/clear-status-indicator!) cs)
         (t/is (blank-status? cs))
-        ((var inter/clear-status-indicator!) cs :retry)
+        ((var status/clear-status-indicator!) cs :retry)
         (t/is (blank-status? cs))
         (t/is (nil? @(:status-current cs)))))))
 
@@ -506,15 +507,15 @@
   (testing "the editor-border hook's status source: the transient swap when
             one is up, else the active working indicator, else nil"
     (let [cs (test-status-cs)]
-      (t/is (nil? ((var inter/current-status-indicator) cs)))
-      ((var inter/activate-working-indicator!) cs)
+      (t/is (nil? ((var status/current-status-indicator) cs)))
+      ((var status/activate-working-indicator!) cs)
       (t/is (identical? (:status-indicator cs)
-                        ((var inter/current-status-indicator) cs)))
+                        ((var status/current-status-indicator) cs)))
       (let [retry (status-indicator/make-retry-status-indicator 1 3 2000)]
-        ((var inter/show-status-indicator!) cs :retry retry)
-        (t/is (identical? retry ((var inter/current-status-indicator) cs))))
-      ((var inter/clear-status-indicator!) cs)
-      (t/is (nil? ((var inter/current-status-indicator) cs))))))
+        ((var status/show-status-indicator!) cs :retry retry)
+        (t/is (identical? retry ((var status/current-status-indicator) cs))))
+      ((var status/clear-status-indicator!) cs)
+      (t/is (nil? ((var status/current-status-indicator) cs))))))
 
 (deftest ^:slow test-transient-indicator-drives-frames
   (testing "a transient indicator shown outside an agent turn arms its own
@@ -525,39 +526,39 @@
                     :tui {:running? (atom true)
                           :render-requested? (atom false)})
           tui (:tui cs)]
-      ((var inter/show-status-indicator!) cs :compaction
-                                          (status-indicator/make-compaction-status-indicator))
+      ((var status/show-status-indicator!) cs :compaction
+                                           (status-indicator/make-compaction-status-indicator))
       (let [first-driver (:driver @(:status-current cs))]
         (t/is (some? first-driver) "the driver is recorded on the status entry")
         (reset! (:render-requested? tui) false)
         (Thread/sleep 120)
         (t/is (true? @(:render-requested? tui)) "frames are requested while it is up")
         (testing "swapping in the next indicator retires the previous driver"
-          ((var inter/show-status-indicator!) cs :retry
-                                              (status-indicator/make-retry-status-indicator 1 3 2000))
+          ((var status/show-status-indicator!) cs :retry
+                                               (status-indicator/make-retry-status-indicator 1 3 2000))
           (let [next-driver (:driver @(:status-current cs))]
             (t/is (some? next-driver))
             (t/is (not (identical? first-driver next-driver)))
             (t/is (future-cancelled? first-driver))
             (testing "clearing cancels the driver with the status"
-              ((var inter/clear-status-indicator!) cs)
+              ((var status/clear-status-indicator!) cs)
               (t/is (future-cancelled? next-driver)))))))))
 
 (deftest test-clear-working-status
   (testing ":working clears the implicit working status — pi:
             setWorkingVisible(false) → clearStatusIndicator('working')"
     (let [cs (test-status-cs)]
-      ((var inter/activate-working-indicator!) cs)
+      ((var status/activate-working-indicator!) cs)
       (t/is (working-status? cs))
-      ((var inter/clear-status-indicator!) cs :working)
+      ((var status/clear-status-indicator!) cs :working)
       (t/is (blank-status? cs))
       (t/is (nil? @(:status-current cs)))))
   (testing "a transient indicator is not the working status — a :working
             clear leaves it"
     (let [cs (test-status-cs)]
-      ((var inter/show-status-indicator!) cs :compaction
-                                          (status-indicator/make-compaction-status-indicator))
-      ((var inter/clear-status-indicator!) cs :working)
+      ((var status/show-status-indicator!) cs :compaction
+                                           (status-indicator/make-compaction-status-indicator))
+      ((var status/clear-status-indicator!) cs :working)
       (t/is (= :compaction (:kind @(:status-current cs)))))))
 
 (deftest ^:slow test-release-background-status
@@ -565,57 +566,57 @@
             gives the working spinner back while the turn still streams"
     (let [cs (test-status-cs)
           share (spinner/make-spinner :text "Creating gist..." :active true)]
-      ((var inter/activate-working-indicator!) cs)
-      ((var inter/show-status-indicator!) cs :share share)
+      ((var status/activate-working-indicator!) cs)
+      ((var status/show-status-indicator!) cs :share share)
       (t/is (not (working-status? cs)))
-      ((var inter/release-background-status!) cs :share share)
+      ((var status/release-background-status!) cs :share share)
       (t/is (nil? @(:status-current cs)))
       (t/is (working-status? cs))))
   (testing "no revive when the turn ended"
     (let [cs (test-status-cs)
           share (spinner/make-spinner :text "Creating gist..." :active true)]
       (reset! (:running-turn? cs) false)
-      ((var inter/show-status-indicator!) cs :share share)
-      ((var inter/release-background-status!) cs :share share)
+      ((var status/show-status-indicator!) cs :share share)
+      ((var status/release-background-status!) cs :share share)
       (t/is (blank-status? cs))))
   (testing "a newer transient owns the slot — neither cleared nor displaced"
     (let [cs (test-status-cs)
           share (spinner/make-spinner :text "Creating gist..." :active true)]
-      ((var inter/show-status-indicator!) cs :share share)
-      ((var inter/show-status-indicator!) cs :retry
-                                          (status-indicator/make-retry-status-indicator 1 3 2000))
-      ((var inter/release-background-status!) cs :share share)
+      ((var status/show-status-indicator!) cs :share share)
+      ((var status/show-status-indicator!) cs :retry
+                                           (status-indicator/make-retry-status-indicator 1 3 2000))
+      ((var status/release-background-status!) cs :share share)
       (t/is (= :retry (:kind @(:status-current cs))))))
   (testing "only the indicator the flow installed is released (a second
             /share keeps its spinner)"
     (let [cs (test-status-cs)
           first-share (spinner/make-spinner :text "one" :active true)
           second-share (spinner/make-spinner :text "two" :active true)]
-      ((var inter/show-status-indicator!) cs :share first-share)
-      ((var inter/show-status-indicator!) cs :share second-share)
-      ((var inter/release-background-status!) cs :share first-share)
+      ((var status/show-status-indicator!) cs :share first-share)
+      ((var status/show-status-indicator!) cs :share second-share)
+      ((var status/release-background-status!) cs :share first-share)
       (t/is (identical? second-share (:indicator @(:status-current cs))))))
   (testing "an already-revived working spinner is not restarted (its
             animation clock survives)"
     (let [cs (test-status-cs)
           share (spinner/make-spinner :text "Creating gist..." :active true)]
-      ((var inter/show-status-indicator!) cs :share share)
+      ((var status/show-status-indicator!) cs :share share)
       ;; a :turn-start revived the working spinner while the background op
       ;; ran — the late release must not touch it
-      ((var inter/activate-working-indicator!) cs)
+      ((var status/activate-working-indicator!) cs)
       (let [start @(:start-atom (:spinner (:status-indicator cs)))]
         (Thread/sleep 5)
-        ((var inter/release-background-status!) cs :share share)
+        ((var status/release-background-status!) cs :share share)
         (t/is (= start @(:start-atom (:spinner (:status-indicator cs))))))))
   (testing "a turn ending mid-revival must not leave a spinner behind (the
             post-revival re-check rolls it back)"
     (let [cs (test-status-cs)
           share (spinner/make-spinner :text "Creating gist..." :active true)
-          real (var-get (var inter/activate-working-indicator!))]
-      ((var inter/show-status-indicator!) cs :share share)
-      (with-redefs-fn {(var inter/activate-working-indicator!)
+          real (var-get (var status/activate-working-indicator!))]
+      ((var status/show-status-indicator!) cs :share share)
+      (with-redefs-fn {(var status/activate-working-indicator!)
                        (fn [c] (reset! (:running-turn? c) false) (real c))}
-        (fn [] ((var inter/release-background-status!) cs :share share)))
+        (fn [] ((var status/release-background-status!) cs :share share)))
       (t/is (not (status-indicator/status-indicator-active? (:status-indicator cs)))
             "the revived spinner is stopped again"))))
 
@@ -1628,8 +1629,8 @@
               [{:text "first" :mode :steer}
                {:text "second" :mode :follow-up}])
       (with-redefs [agent/run-agent-turn (fn [a opts] (reset! started [a opts]) (future))
-                    inter/activate-working-indicator! (fn [_] nil)
-                    inter/start-anim-timer! (fn [_] nil)
+                    status/activate-working-indicator! (fn [_] nil)
+                    status/start-anim-timer! (fn [_] nil)
                     state/update-footer! (fn [_] nil)
                     tui/tui-request-render (fn [_] nil)
                     chat-history/chat-history-start-streaming! (fn [_] nil)]
@@ -1699,8 +1700,8 @@
           started (atom [])]
       (reset! (:compaction-queued cs) [{:text "after" :mode :steer}])
       (with-redefs [agent/run-agent-turn (fn [a opts] (reset! started [a opts]) (future))
-                    inter/activate-working-indicator! (fn [_] nil)
-                    inter/start-anim-timer! (fn [_] nil)
+                    status/activate-working-indicator! (fn [_] nil)
+                    status/start-anim-timer! (fn [_] nil)
                     state/update-footer! (fn [_] nil)
                     tui/tui-request-render (fn [_] nil)
                     chat-history/chat-history-start-streaming! (fn [_] nil)]
@@ -1716,8 +1717,8 @@
       (reset! (:compacting? @(:agent-state cs)) true)
       (reset! (:signal @(:agent-state cs)) false)
       (reset! (:running-turn? cs) true)
-      (with-redefs [inter/stop-anim-timer! (fn [_] nil)
-                    inter/clear-status-indicator! (fn [_] nil)
+      (with-redefs [status/stop-anim-timer! (fn [_] nil)
+                    status/clear-status-indicator! (fn [_] nil)
                     state/update-footer! (fn [_] nil)
                     agent/cancel-turn (fn [_] (throw (ex-info "must not cancel the turn" {})))]
         ((var inter/handle-cancel) cs))
@@ -1792,8 +1793,8 @@
       (with-redefs [chat-history/chat-history-add-message! (fn [_ _] nil)
                     chat-history/chat-history-start-streaming! (fn [_] nil)
                     agent/run-agent-turn (fn [a opts] (reset! started [a opts]) (future))
-                    inter/activate-working-indicator! (fn [_] nil)
-                    inter/start-anim-timer! (fn [_] nil)
+                    status/activate-working-indicator! (fn [_] nil)
+                    status/start-anim-timer! (fn [_] nil)
                     state/update-footer! (fn [_] nil)
                     tui/tui-request-render (fn [_] nil)]
         ((:handler (commands/find-command "followup")) cs "wrap it up"))
@@ -1842,8 +1843,8 @@
       (reset! (:compacting? @(:agent-state cs)) true)
       (reset! (:signal @(:agent-state cs)) false)
       (reset! (:running-turn? cs) true)
-      (with-redefs [inter/stop-anim-timer! (fn [_] nil)
-                    inter/clear-status-indicator! (fn [_] nil)
+      (with-redefs [status/stop-anim-timer! (fn [_] nil)
+                    status/clear-status-indicator! (fn [_] nil)
                     state/update-footer! (fn [_] nil)
                     chat-history/chat-history-add-message! (fn [_ _] nil)
                     chat-history/chat-history-show-status! (fn [_ _] nil)

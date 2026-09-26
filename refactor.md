@@ -456,7 +456,7 @@ one file; still do it as its own commit to isolate review noise.
 - [x] T3 — `app.retry` + `app.loop_guard` extracted; loop tests pass
 - [x] T5 — `app.ui` facade decision executed; tree updated
 - [ ] T1 — `interactive.clj` reduced to `run` + wiring; modules created
-      (staged: `interactive/state.clj`, `interactive/auth.clj` extracted — remainder pending)
+      (staged: `state.clj`, `auth.clj`, `status.clj` extracted — remainder pending)
 - [ ] T4 — `extensions.cljc` split; `extension.md` updated
 - [ ] T2 — `tui/core.clj` reduced to lifecycle + facade; `tui.md` updated
 - [ ] Full gates after the last task: `bb test`, `bb test-ext`, `bb lint`,
