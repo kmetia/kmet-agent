@@ -12,7 +12,7 @@
             [kmet.tui.components.container :as container]
             [kmet.tui.hiccup :as hiccup]
             [kmet.libs.reakt :as r]
-            [kmet.libs.host :as host]
+            [kmet.modes.interactive.state :as state]
             [kmet.app.ui.chat-history :as chat-history]
             [kmet.app.ui.loaded-resources :as loaded-resources]
             [kmet.app.ui.pending-messages :as pending-messages]
@@ -86,257 +86,10 @@
          queue-follow-up-text!
          heal-stale-scrollback-when-idle!)
 
-;; ─── Global config ref ────────────────────────────────────────────────────
-
-(defonce ^:private global-config (atom nil))
-
-;; ─── Session helpers ───────────────────────────────────────────────────────
-
-(defn- get-session-dir []
-  (if-let [c @global-config]
-    (cfg/get-session-dir c)
-    (str (System/getProperty "user.home") "/.kmet/sessions")))
-
-(defn- ensure-session-dir
-  "The base sessions dir (created). Listings (resume-session) walk it plus
-   its cwd-encoded subdirectories (pi: listAll — G2), so legacy flat session
-   files remain visible alongside per-project ones."
-  []
-  (let [d (get-session-dir)]
-    (fs/create-dirs d)
-    d))
-
-(defn- ensure-cwd-session-dir
-  "The sessions dir for a cwd — where new sessions are placed:
-   BASE/<--cwd-->/ (pi: getDefaultSessionDir — per-project isolation, G2).
-   The 0-arity uses the process cwd (startup, --continue); callers with a
-   live session pass the runtime cwd (runtime-cwd), so a session resumed or
-   imported from another project keeps creating its sessions in that
-   project's dir (pi: newSession uses the runtime cwd, not process.cwd)."
-  ([] (ensure-cwd-session-dir (str (fs/cwd))))
-  ([cwd]
-   (let [d (session/session-dir-for-cwd (get-session-dir) cwd)]
-     (fs/create-dirs d)
-     d)))
-
-(defn- runtime-cwd
-  "The working directory of CS's runtime (pi: AgentSession._cwd, seeded from
-   the active session's recorded cwd): the footer data provider's cwd — the
-   live value the footer pwd, the extension ctx.cwd, and tool components
-   read — else the process cwd (tests, headless)."
-  [cs]
-  (or (some-> (:footer-provider cs) fdp/fdp-get-cwd) (str (fs/cwd))))
-
-(defn- turn-running?
-  "True when a response is streaming (the CoreState turn flag) — the
-   condition the switch commands refuse on. Nil-safe: a CS without the flag
-   (test stubs, extension contexts built over reduced state) counts as idle."
-  [cs]
-  (boolean (some-> (:running-turn? cs) deref)))
-
-(defn- find-session
-  "Most recent session for the current cwd (pi: continueRecent →
-   findMostRecentSession — header-based discovery in the cwd-encoded dir;
-   legacy headerless sessions and other-cwd files are excluded, no fallback).
-   Used by --continue so the current project's last session is resumed."
-  []
-  (session/find-most-recent-session (ensure-cwd-session-dir) (str (fs/cwd))))
-
-(defn- quote-if-needed
-  "pi quoteIfNeeded — leave safe shell tokens bare, else single-quote with
-   escaped single quotes."
-  [value]
-  (if (and (seq value)
-           (every? (fn [c]
-                     (or (Character/isLetterOrDigit ^char c)
-                         (contains? #{\_ \- \. \/ \~ \: \@} c)))
-                   value))
-    value
-    (str "'" (str/replace value "'" "'\\''") "'")))
-
-(defn- format-resume-command
-  "pi formatResumeCommand — build 'kmet --session <id>' (with --session-dir
-   when non-default) or nil when stdout is not a tty, the session is not
-   persisted (no file yet), or the file is missing."
-  [sess config]
-  (when (and sess (:file sess) (fs/exists? (:file sess)))
-    (when (some? (System/console))
-      (let [base-dir (cfg/get-session-dir config)
-            default-base (cfg/expand-path "~/.kmet/sessions")
-            base-is-default? (try
-                               (= (str (fs/canonicalize base-dir))
-                                  (str (fs/canonicalize default-base)))
-                               (catch Exception _
-                                 (= base-dir default-base)))
-            actual-dir (str (fs/parent (:file sess)))
-            ;; the recorded header cwd, not session/session-cwd (which checks
-            ;; existence): the hint needs the directory the session *belongs*
-            ;; to even when it is gone — expected-dir below is derived from it
-            sess-cwd (or (get-in sess [:header :cwd]) (str (fs/cwd)))
-            expected-dir (session/session-dir-for-cwd base-dir sess-cwd)
-            ;; Pi's usesDefaultSessionDir: true only when sessionDir equals
-            ;; the encoded default for its cwd. For kmet that is actual-dir
-            ;; == expected-dir *and* the base itself is the default base.
-            ;; A custom base is always non-default even when the per-cwd
-            ;; dir matches. An out-of-tree file (absolute --session path)
-            ;; is also non-default.
-            uses-default? (and base-is-default?
-                               (try
-                                 (= (str (fs/canonicalize actual-dir))
-                                    (str (fs/canonicalize expected-dir)))
-                                 (catch Exception _
-                                   (= actual-dir expected-dir))))
-            session-dir-arg (when-not uses-default?
-                              (if (not base-is-default?)
-                                base-dir
-                                actual-dir))
-            args (cond-> ["kmet"]
-                   session-dir-arg (into ["--session-dir" (quote-if-needed session-dir-arg)])
-                   true (into ["--session" (:id sess)]))]
-        (str/join " " args)))))
-
-(defn- resolve-session-arg
-  "Resolve a --session arg to a session file path. Path-like values
-   (containing / \\ or ending with .ednl/.jsonl) resolve relative to cwd;
-   otherwise the arg is treated as a session id or id prefix and searched
-   among all sessions under BASE-DIR (pi: resolveSessionPath). Returns the
-   canonical path or nil when not found."
-  [arg base-dir]
-  (let [arg (cfg/expand-path (str arg))
-        cwd (str (fs/cwd))]
-    (if (or (str/includes? arg "/")
-            (str/includes? arg "\\")
-            (str/ends-with? arg ".ednl")
-            (str/ends-with? arg ".jsonl"))
-      (let [p (if (fs/absolute? arg) arg (str (fs/path cwd arg)))]
-        (when (fs/exists? p)
-          (str (fs/canonicalize p))))
-      (let [infos (session/list-sessions-info base-dir)
-            exact (some #(when (= (:id %) arg) (:path %)) infos)
-            prefix (some #(when (str/starts-with? (:id %) arg) (:path %)) infos)]
-        (or exact prefix)))))
-
-;; ─── Core state ────────────────────────────────────────────────────────────
-
-(defrecord CoreState [tui
-                      agent-state
-                      chat-history
-                      editor
-                      current-editor-atom
-                      header-comp
-                      loaded-resources-comp
-                      anim-timer
-                      footer-comp
-                      footer-provider
-                      status-indicator
-                      status-root
-                      status-current
-                      pending-messages-comp
-                      session-atom
-                      running-turn?
-                      compaction-queued
-                      config
-                      pending-tool-comps
-                      bash-running?
-                      bash-signal
-                      pending-bash-components
-                      pending-messages-container
-                      dock-root
-                      dock-current
-                      theme-controller])
-
-;; ─── Formatting helpers ────────────────────────────────────────────────────
-
-(defn- fmt-key-hint
-  "Pi: keyHint — dim key + muted description, from the live keybindings."
-  [id desc]
-  (app-kb/key-hint id desc))
-
-(defn- fmt-raw-hint
-  "Pi: rawKeyHint — dim literal key text + muted description."
-  [key desc]
-  (str (th/dim key) (th/fg (th/get-current-theme) :muted (str " " desc))))
-
-(defn- fmt-header-logo
-  "Pi: logo — bold accent app name, followed by the hosting runtime in
-   parentheses (kmet deviation)."
-  []
-  (th/bold (th/fg (th/get-current-theme) :accent
-                  (str "kmet (" (host/runtime-name) ")"))))
-
-(defn- fmt-header-compact
-  "Compact welcome header (pi: compactInstructions + compactOnboarding)."
-  []
-  (let [expand-key (or (app-kb/key-text "app.tools.expand") "Ctrl+O")
-        compact-instructions
-        (str/join (th/dim " · ")
-                  [(fmt-key-hint "app.interrupt" "interrupt")
-                   (fmt-raw-hint (str (or (app-kb/key-text "app.clear") "Ctrl+C")
-                                      "/" (or (app-kb/key-text "app.exit") "Ctrl+D"))
-                                 "clear/exit")
-                   (fmt-raw-hint "/" "commands")
-                   (fmt-raw-hint "!" "bash")
-                   (fmt-key-hint "app.tools.expand" "more")])
-        compact-onboarding (th/dim (str "Press " expand-key " to show full startup help and loaded resources."))]
-    (str (fmt-header-logo) "\n" compact-instructions "\n" compact-onboarding)))
-
-(defn- fmt-header-full
-  "Full welcome header (pi: expandedInstructions)."
-  []
-  (let [clear-key (or (app-kb/key-text "app.clear") "Ctrl+C")
-        expanded-instructions
-        (str/join "\n"
-                  [(fmt-key-hint "app.interrupt" "to interrupt")
-                   (fmt-key-hint "app.clear" "to clear")
-                   (fmt-raw-hint (str clear-key " twice") "to exit")
-                   (fmt-key-hint "app.exit" "to exit (empty)")
-                   (fmt-key-hint "app.quit" "to quit anywhere")
-                   (fmt-key-hint "app.thinking.cycle" "to cycle thinking level")
-                   (fmt-key-hint "app.model.cycleForward" "to cycle models")
-                   (fmt-key-hint "app.model.select" "to select model")
-                   (fmt-key-hint "app.tools.expand" "to cycle tool display")
-                   (fmt-key-hint "app.thinking.toggle" "to expand thinking")
-                   (fmt-key-hint "app.editor.external" "for external editor")
-                   (fmt-raw-hint "/" "for commands")
-                   (fmt-raw-hint "!" "to run bash")
-                   (fmt-raw-hint "!!" "to run bash (no context)")
-                   (fmt-key-hint "app.message.followUp" "to queue follow-up")
-                   (fmt-key-hint "app.message.dequeue" "to edit all queued messages")])
-        onboarding (th/dim "kmet can explain its own features. Ask it how to use or extend kmet.")]
-    (str (fmt-header-logo) "\n" expanded-instructions "\n\n" onboarding)))
-
-(defn- update-editor-border-color!
-  "Update the editor border color to reflect the given thinking LEVEL.
-   Pi: updateEditorBorderColor — sets borderColor based on session.thinkingLevel.
-   Reads the ACTIVE theme (not the config :theme setting, which is a stale
-   startup snapshot after /theme), so a theme switch re-styles the border."
-  [cs level]
-  (reset! (:border-fn (:editor cs))
-          (th/get-thinking-border-color (th/get-current-theme) level)))
-
-(defn- update-footer!
-  "Sync the footer's session data source (cs → fdp bridge). No explicit
-   invalidation: the footer's track! pass declares the fdp atoms — and the
-   live session :entries vector, which mutates in place — as track-deps,
-   so every change here re-derives the footer and schedules the frame
-   reactively (§3.4 hook)."
-  [cs]
-  (fdp/fdp-set-session! (:footer-provider cs) @(:session-atom cs))
-  nil)
-
-(defn- update-terminal-title!
-  "Set the terminal window title to \"kmet - <session name> - <cwd basename>\"
-   (pi: updateTerminalTitle — the session's runtime cwd, not the process
-   cwd). The session display name is included when set (/name); an explicit
-   empty name clears it, falling back to just app + cwd. No-ops when the
-   TUI/terminal isn't live (e.g. tests with a stub tui)."
-  [cs]
-  (let [title (str "kmet"
-                   (when-let [name (session/get-session-name @(:session-atom cs))]
-                     (str " - " name))
-                   " - " (fs/file-name (runtime-cwd cs)))]
-    (when-let [term (:terminal (:tui cs))]
-      (term/set-title! @term title))))
+;; CoreState lives in kmet.modes.interactive.state; the constructors
+;; stay re-exported here for consumers of this namespace (tests).
+(def ->CoreState state/->CoreState)
+(def map->CoreState state/map->CoreState)
 
 ;; ─── Command handling ──────────────────────────────────────────────────────
 
@@ -354,7 +107,7 @@
   (let [ag @(:agent-state cs)]
     (agent/set-thinking-level! ag level)
     (sync-footer-model! cs)
-    (update-editor-border-color! cs level)
+    (state/update-editor-border-color! cs level)
     (chat-history/chat-history-show-status!
      (:chat-history cs)
      (str (if persist? "Default thinking level: " "Thinking level: ")
@@ -601,20 +354,6 @@
 
 (declare show-login-provider-selector!)
 
-(defn- mount-selector!
-  "Swap SEL into CS's editor dock, recording the mount's done and the
-   selector itself on SEL-ATOM so close-selector! can unwind both."
-  [cs sel-atom sel]
-  (reset! sel-atom {:done (dock/mount! cs sel) :sel sel}))
-
-(defn- close-selector!
-  "Run the mount's done (restores the editor) and dispose the selector —
-   the dock drops foreign records without disposing them, so the root
-   reaction + foreign inputs would otherwise outlive the panel."
-  [sel-atom]
-  ((:done @sel-atom))
-  (when-let [s (:sel @sel-atom)] (protocols/dispose s)))
-
 (defn- oauth-prompt!
   "Show PROMPT inside the dock-mounted login dialog and block for the
    entered string (pi showAuthPrompt → LoginDialogComponent.showPrompt /
@@ -637,16 +376,16 @@
           sel (auth-selector/make-auth-method-selector
                (:message prompt) labels
                (fn [label]
-                 (close-selector! sel-atom)
+                 (state/close-selector! sel-atom)
                  (restore)
                  (deliver p (or (:id (first (filter #(= label (:label %)) (:options prompt))))
                                 label)))
                (fn []
-                 (close-selector! sel-atom)
+                 (state/close-selector! sel-atom)
                  (restore)
                  (deliver p (ex-info "Login cancelled" {:type :login-cancelled}))))]
       (reset! prompt-state {:promise p})
-      (mount-selector! cs sel-atom sel)
+      (state/mount-selector! cs sel-atom sel)
       (login-dialog/await-prompt! p))
 
     :manual-code
@@ -721,7 +460,7 @@
                                                                  ". Credentials saved to "
                                                                  (auth/auth-file-path) ".")})
           (when (and (:session-atom cs) (:footer-comp cs) (:footer-provider cs))
-            (update-footer! cs)))
+            (state/update-footer! cs)))
         (catch Exception e
           ;; pi: silent on "Login cancelled", an error otherwise
           (when-not (str/includes? (or (ex-message e) "") "Login cancelled")
@@ -759,7 +498,7 @@
                                                                        ". Credentials saved to "
                                                                        (auth/auth-file-path) ".")})
                 (when (and (:session-atom cs) (:footer-comp cs) (:footer-provider cs))
-                  (update-footer! cs)))
+                  (state/update-footer! cs)))
             (chat-history/show-warning! (:chat-history cs)
                                         "No API key entered — nothing saved.")))
         (catch Exception e
@@ -875,7 +614,7 @@
              sel (auth-selector/make-auth-method-selector
                   title options
                   (fn [label]
-                    (close-selector! sel-atom)
+                    (state/close-selector! sel-atom)
                     (let [auth-type (if (= label subscription-label)
                                       :oauth :api-key)]
                       (if provider-options
@@ -884,9 +623,9 @@
                           (start-provider-login! cs entry))
                         (show-login-provider-selector! cs auth-type))))
                   (fn []
-                    (close-selector! sel-atom)
+                    (state/close-selector! sel-atom)
                     (tui/tui-request-render (:tui cs))))]
-         (mount-selector! cs sel-atom sel))))))
+         (state/mount-selector! cs sel-atom sel))))))
 
 (defn- show-login-provider-selector!
   "pi showLoginProviderSelector: the searchable provider selector over the
@@ -908,7 +647,7 @@
              sel (auth-selector/make-auth-selector
                   :login entries
                   (fn [provider-id selected-type]
-                    (close-selector! sel-atom)
+                    (state/close-selector! sel-atom)
                     (if-let [entry (some #(when (and (= provider-id (:id %))
                                                      (= selected-type (:auth-type %)))
                                             %)
@@ -916,12 +655,12 @@
                       (start-provider-login! cs entry)
                       (tui/tui-request-render (:tui cs))))
                   (fn []
-                    (close-selector! sel-atom)
+                    (state/close-selector! sel-atom)
                     (if auth-type
                       (show-login-auth-type-selector! cs)
                       (tui/tui-request-render (:tui cs))))
                   search)]
-         (mount-selector! cs sel-atom sel))))))
+         (state/mount-selector! cs sel-atom sel))))))
 
 (defn- login-argument-completions
   "pi getArgumentCompletions for /login (getLoginProviderCompletionOptions +
@@ -986,13 +725,13 @@
             sel (auth-selector/make-auth-selector
                  :logout entries
                  (fn [provider-id _selected-type]
-                   (close-selector! sel-atom)
+                   (state/close-selector! sel-atom)
                    (if-let [entry (some #(when (= provider-id (:id %)) %) entries)]
                      (try
                        (auth/remove-credential! (keyword provider-id))
                        (when (and (:session-atom cs) (:footer-comp cs)
                                   (:footer-provider cs))
-                         (update-footer! cs))
+                         (state/update-footer! cs))
                        (chat-history/chat-history-add-message! (:chat-history cs)
                                                                {:role :assistant
                                                                 :content (if (= :oauth (:auth-type entry))
@@ -1004,9 +743,9 @@
                                                      (str "Logout failed: " (ex-message e)))))
                      (tui/tui-request-render (:tui cs))))
                  (fn []
-                   (close-selector! sel-atom)
+                   (state/close-selector! sel-atom)
                    (tui/tui-request-render (:tui cs))))]
-        (mount-selector! cs sel-atom sel)))))
+        (state/mount-selector! cs sel-atom sel)))))
 
 (defn- register-builtin-command!
   "Register a builtin slash command unless an extension already took the
@@ -1119,11 +858,11 @@
                (debug/log "/resume command")
                ;; mid-turn refusal like the other switch commands (pi:
                ;; teardownCurrent aborts the run; kmet waits instead)
-               (if (turn-running? cs)
+               (if (state/turn-running? cs)
                  (chat-history/chat-history-add-message! (:chat-history cs)
                                                          {:role :assistant
                                                           :content "Wait for the current response to finish before resuming."})
-                 (show-session-selector cs ensure-session-dir
+                 (show-session-selector cs state/ensure-session-dir
                                         (fn [path]
                                           ;; pi: emitBeforeSwitch (reason :resume)
                                           ;; — extensions may cancel the switch
@@ -1200,7 +939,7 @@
     :handler (fn [cs _]
                ;; mid-turn refusal like the other switch commands — branching
                ;; while a run streams would leave its events in the new branch
-               (if (turn-running? cs)
+               (if (state/turn-running? cs)
                  (chat-history/chat-history-add-message! (:chat-history cs)
                                                          {:role :assistant
                                                           :content "Wait for the current response to finish before navigating the tree."})
@@ -1236,7 +975,7 @@
                         {:type :session-info-changed
                          :session-file (:file sess)
                          :name sanitized})
-                       (update-terminal-title! cs)
+                       (state/update-terminal-title! cs)
                        (when-not (= args sanitized)
                          ;; pi: warn when normalization changed the input
                          (chat-history/show-warning!
@@ -1293,7 +1032,7 @@
                                   ;; without an explicit path the export lands in
                                   ;; the session's runtime cwd (where its tools work),
                                   ;; not the launch directory
-                                  (not arg) (assoc :cwd (runtime-cwd cs))
+                                  (not arg) (assoc :cwd (state/runtime-cwd cs))
                                   system-prompt (assoc :system-prompt system-prompt)
                                   (seq tool-defs) (assoc :tools tool-defs))
                            path (session-export/export-to-html! sess opts)]
@@ -1500,13 +1239,13 @@
                                   ;; from another project may be active); context
                                   ;; files and everything else project-scoped stay
                                   ;; with the launch dir
-                                  :cwd (runtime-cwd cs)
+                                  :cwd (state/runtime-cwd cs)
                                   :context-files (context/load-project-context-files
                                                   (cfg/get-agent-dir) (str (fs/cwd)))
                                   :tools active-tools}
               system-prompt (apply skills/build-system-prompt
                                    (mapcat identity system-prompt-opts))]
-          (reset! global-config config)
+          (state/set-global-config! config)
           (theme-ctrl/set-config! (:theme-controller cs) config)
 ;; pi: restoreChatBeforeSessionStart — re-apply hideThinkingBlock
           ;; and the tool display mode from settings to existing chat messages
@@ -1537,7 +1276,7 @@
           ;; (the /settings row writes both the flag and the runtime)
           (when (:tui cs)
             (tui/tui-set-clear-on-shrink! (:tui cs) (cfg/get-clear-on-shrink config)))
-          (update-footer! cs)
+          (state/update-footer! cs)
           ;; pi: reload re-emits session_start so extensions re-register UI.
           ;; Runs on a future — handlers may block on dialog promises, which
           ;; must never happen on the input thread.
@@ -1911,8 +1650,8 @@
   ;; (pi: navigateTree/switchSession reuse the same editor instance).
   (when apply-settings?
     (editor/editor-set-history! (:editor cs) (session/get-prompt-history sess)))
-  (update-footer! cs)
-  (update-terminal-title! cs))
+  (state/update-footer! cs)
+  (state/update-terminal-title! cs))
 
 (defn- handle-new-session
   "Pi: handleClearCommand → runtimeHost.newSession. Fully reset the
@@ -1967,10 +1706,10 @@
         ;; so they can persist state before the swap.
         (event-bus/emit-event! {:type :session-shutdown :reason :new
                                 :target-session-file previous-file})
-        (let [new-session (session/create-session (ensure-cwd-session-dir (runtime-cwd cs))
+        (let [new-session (session/create-session (state/ensure-cwd-session-dir (state/runtime-cwd cs))
                                                   ;; the new session belongs to the runtime's
                                                   ;; project (pi: newSession keeps this.cwd)
-                                                  {:cwd (runtime-cwd cs)})]
+                                                  {:cwd (state/runtime-cwd cs)})]
           (debug/log "new session created: " (:id new-session))
           (chat-history/chat-history-clear! (:chat-history cs))
           (be/dispose-pending-bash! @(:pending-bash-components cs))
@@ -2011,8 +1750,8 @@
               ;; startup for non-reload session starts)
               (extensions/discover-resources! :startup)
               (catch Exception e (debug/log "session-start: " e))))
-          (update-footer! cs)
-          (update-terminal-title! cs)
+          (state/update-footer! cs)
+          (state/update-terminal-title! cs)
           (tui/tui-request-render (:tui cs))
           (chat-history/chat-history-add-message! (:chat-history cs)
                                                   {:role :assistant :content "Started a new session."}))))))
@@ -2085,7 +1824,7 @@
       (nil? path-arg)
       (import-error! chat "Usage: /import <path>")
 
-      (turn-running? cs)
+      (state/turn-running? cs)
       (chat-history/chat-history-add-message! chat
                                               {:role :assistant
                                                :content "Wait for the current response to finish before importing."})
@@ -2096,7 +1835,7 @@
             ;; session's directory; a not-yet-persisted session still carries
             ;; its computed :file (lazy creation)
             dest-dir (or (some-> (:file sess) fs/parent str)
-                         (ensure-cwd-session-dir))]
+                         (state/ensure-cwd-session-dir))]
         (try
           (let [plan (session/plan-session-import path-arg dest-dir)]
             (show-import-confirm!
@@ -2166,7 +1905,7 @@
       (when (and user-msg-text
                  (str/blank? (editor-text-get (:editor cs))))
         (editor-text-set! (:editor cs) user-msg-text))
-      (update-footer! cs)
+      (state/update-footer! cs)
       (event-bus/emit-event!
        (cond-> {:type :session-tree
                 :new-leaf-id @(:leaf-id sess)
@@ -2315,14 +2054,14 @@
         dlg (dialogs/make-input-dialog
              "Custom branch summarization instructions"
              (fn [instructions]
-               (close-selector! sel-atom)
+               (state/close-selector! sel-atom)
                (tui/tui-request-render (:tui cs))
                (navigate-tree! cs sess entry true (str/trim instructions) false nil))
              (fn []
-               (close-selector! sel-atom)
+               (state/close-selector! sel-atom)
                (ask-branch-summary cs sess entry))
              (th/get-current-theme))]
-    (mount-selector! cs sel-atom dlg)
+    (state/mount-selector! cs sel-atom dlg)
     (tui/tui-request-render (:tui cs))))
 
 (defn- ask-branch-summary
@@ -2333,14 +2072,14 @@
   [cs sess entry]
   (let [sel-atom (atom nil)
         on-select (fn [choice]
-                    (close-selector! sel-atom)
+                    (state/close-selector! sel-atom)
                     (tui/tui-request-render (:tui cs))
                     (case choice
                       "No summary" (navigate-tree! cs sess entry false nil false nil)
                       "Summarize" (navigate-tree! cs sess entry true nil false nil)
                       "Summarize with custom prompt" (prompt-custom-summary! cs sess entry)))
         on-escape (fn []
-                    (close-selector! sel-atom)
+                    (state/close-selector! sel-atom)
                     ;; re-open with the highlight on the entry being
                     ;; navigated to (pi showTreeSelector initialSelectedId)
                     (show-session-tree cs
@@ -2353,7 +2092,7 @@
              on-select
              on-escape
              (th/get-current-theme))]
-    (mount-selector! cs sel-atom dlg)
+    (state/mount-selector! cs sel-atom dlg)
     (tui/tui-request-render (:tui cs))))
 
 ;; ─── Fork / clone (pi: /fork, /clone) ─────────────────────────────────────
@@ -2365,7 +2104,7 @@
    first user message (no parent) starts an empty session linked to this
    one."
   [cs entry-id]
-  (if (turn-running? cs)
+  (if (state/turn-running? cs)
     (chat-history/chat-history-add-message! (:chat-history cs)
                                             {:role :assistant
                                              :content "Wait for the current response to finish before forking."})
@@ -2385,9 +2124,9 @@
                                                      :content "Fork cancelled by an extension."})
             (let [fork (if (:parent-id entry)
                          (session/fork-session sess (:parent-id entry))
-                         (session/create-session (ensure-cwd-session-dir (runtime-cwd cs))
+                         (session/create-session (state/ensure-cwd-session-dir (state/runtime-cwd cs))
                                                  {:parent-session (:file sess)
-                                                  :cwd (runtime-cwd cs)}))]
+                                                  :cwd (state/runtime-cwd cs)}))]
               (if (nil? fork)
                 (chat-history/chat-history-add-message! (:chat-history cs)
                                                         {:role :assistant :content "Failed to create forked session."})
@@ -2412,7 +2151,7 @@
   [cs]
   (let [sess @(:session-atom cs)]
     (cond
-      (turn-running? cs)
+      (state/turn-running? cs)
       (chat-history/chat-history-add-message! (:chat-history cs)
                                               {:role :assistant
                                                :content "Wait for the current response to finish before cloning."})
@@ -2885,7 +2624,7 @@
     ;; the turn transition. Gated on streaming-free — a user `!` bash command
     ;; or a compaction may still be live — and a no-op unless dirty.
     (heal-stale-scrollback-when-idle! cs)
-    (update-footer! cs)
+    (state/update-footer! cs)
     (tui/tui-request-render (:tui cs))
     (debug/log "agent turn completed")
     (catch Exception e
@@ -2917,7 +2656,7 @@
     ;; A failed turn still produced above-window changes while streaming, so
     ;; heal here too (gated on streaming-free; no-op unless dirty).
     (heal-stale-scrollback-when-idle! cs)
-    (update-footer! cs)
+    (state/update-footer! cs)
     (tui/tui-request-render (:tui cs))
     (debug/log "agent turn error: " error-msg)
     (catch Exception e
@@ -2968,12 +2707,12 @@
                         bash-tool/*session-env-fn* (constantly session-env)
                         ;; relative paths in extension bash/tool calls resolve
                         ;; against the runtime cwd, as in an agent run
-                        tools-util/*cwd* (runtime-cwd cs)]
+                        tools-util/*cwd* (state/runtime-cwd cs)]
                 (event-bus/emit-event!
                  {:type :user-bash
                   :command command
                   :exclude-from-context? exclude-from-context?
-                  :cwd (runtime-cwd cs)}))
+                  :cwd (state/runtime-cwd cs)}))
 
             ;; ── Spawn hook (pi: BashSpawnHook) — extensions can modify command ──
             spawn-hook nil]
@@ -2988,7 +2727,7 @@
                                                   {:role :bash :command command
                                                    :component bash-comp}))
 
-        (update-footer! cs)
+        (state/update-footer! cs)
         (tui/tui-request-render (:tui cs))
 
         ;; Execute in background
@@ -2996,7 +2735,7 @@
           (try
             (let [result (bash-exec/execute-bash
                           {:command command
-                           :cwd (runtime-cwd cs)
+                           :cwd (state/runtime-cwd cs)
                            :env session-env
                            :on-chunk (fn [chunk]
                                        ;; pure data append: the component's
@@ -3033,7 +2772,7 @@
                     (reset! pending []))))
 
               (reset! (:bash-running? cs) false)
-              (update-footer! cs)
+              (state/update-footer! cs)
               (tui/tui-request-render (:tui cs)))
 
             (catch Exception e
@@ -3042,7 +2781,7 @@
                 (be/bash-execution-set-complete! bash-comp nil false)
                 (chat-history/show-error! (:chat-history cs) err-msg)
                 (reset! (:bash-running? cs) false)
-                (update-footer! cs)
+                (state/update-footer! cs)
                 (tui/tui-request-render (:tui cs))))))))))
 
 ;; ─── Message submission (pi: session.prompt input event + agent run) ──────
@@ -3116,7 +2855,7 @@
   (reset! (:running-turn? cs) true)
   (activate-working-indicator! cs)
   (start-anim-timer! cs)
-  (update-footer! cs)
+  (state/update-footer! cs)
   (tui/tui-request-render (:tui cs))
   (agent/run-agent-turn @(:agent-state cs)
                         (cond-> {:on-text #(on-agent-text cs %)
@@ -3140,7 +2879,7 @@
       (debug/log "user steered: " text)
       (agent/steer! @(:agent-state cs) text)
       (update-pending-messages! cs)
-      (update-footer! cs)
+      (state/update-footer! cs)
       (tui/tui-request-render (:tui cs)))
     (do
       (debug/log "user submitted: " text)
@@ -3165,7 +2904,7 @@
         (if-let [c (commands/find-command cmd)]
           (if-let [eh (:extension-handler c)]
             (do (eh (extensions/build-extension-context) args)
-                (update-footer! cs)
+                (state/update-footer! cs)
                 nil ;; consumed — nothing to send
                 )
             text) ;; builtin command — not dispatched here (pi parity)
@@ -3230,7 +2969,7 @@
                   ;; (pi: handler(args, ctx)); builtins keep CoreState
                   (eh (extensions/build-extension-context) args)
                   ((:handler c) cs args))
-                (update-footer! cs))
+                (state/update-footer! cs))
             ;; pi: input hooks → skill command → prompt template → fall
             ;; through to the agent (unknown /cmd is sent as a message).
             ;; During compaction the raw text queues like a plain message —
@@ -3374,7 +3113,7 @@
         (debug/log "bash command cancelled by user")
         (reset! (:bash-signal cs) true)
         (reset! (:bash-running? cs) false)
-        (update-footer! cs))
+        (state/update-footer! cs))
       (when @(:running-turn? cs)
         (debug/log "agent turn cancelled by user")
         ;; flag before the status clear — see on-agent-done: a background
@@ -3408,7 +3147,7 @@
         ;; Escape keypress itself could not — the input listener ran while the
         ;; turn was still marked running). Gated + no-op unless dirty.
         (heal-stale-scrollback-when-idle! cs)
-        (update-footer! cs)))))
+        (state/update-footer! cs)))))
 
 ;; ─── External editor (pi: handleOpenExternalEditor) ────────────────────────
 
@@ -3540,7 +3279,7 @@
       ;; layer in sync via the :status event (update-footer!'s invalidate
       ;; schedules the frame)
       (when-let [cs @cs-ref]
-        (update-footer! cs))
+        (state/update-footer! cs))
       :loop-guard
       ;; Repeat-loop guard tripped (kmet-specific): show a warning line in
       ;; the transcript — the run has already settled (the final text
@@ -3911,7 +3650,7 @@
         ;; (pi: builtInHeader), toggled by app.tools.expand
         hdr (let [mode (cfg/get-tool-display-mode config)]
               (expandable-text/make-expandable-text
-               fmt-header-compact fmt-header-full
+               state/fmt-header-compact state/fmt-header-full
                :expanded? (= :expanded mode) :padding-x 1 :padding-y 0))
         ;; B.2: loaded resources between header and chat (pi: showLoadedResources)
         lr (loaded-resources/make-loaded-resources :theme (cfg/get-theme config)
@@ -3953,30 +3692,30 @@
         ;; dock selector outranks the editor (tui-set-focus-home!)
         current-editor-atom (atom ed)
         dock-current (atom nil)
-        cs (map->CoreState {:tui t
-                            :agent-state (atom ag)
-                            :chat-history ch
-                            :editor ed
-                            :current-editor-atom current-editor-atom
-                            :header-comp hdr
-                            :loaded-resources-comp lr
-                            :anim-timer (atom nil)
-                            :footer-comp ftr
-                            :footer-provider fdp
-                            :status-indicator nil
-                            :status-current (atom nil)
-                            :status-root nil
-                            :pending-messages-comp pm
-                            :session-atom (atom session)
-                            :running-turn? (atom false)
-                            :compaction-queued (atom [])
-                            :config config
-                            :pending-tool-comps pending-tool-comps
-                            :bash-running? (atom false)
-                            :bash-signal (atom false)
-                            :pending-bash-components (atom [])
-                            :pending-messages-container (container/make-container [pm])
-                            :dock-current dock-current})]
+        cs (state/map->CoreState {:tui t
+                                  :agent-state (atom ag)
+                                  :chat-history ch
+                                  :editor ed
+                                  :current-editor-atom current-editor-atom
+                                  :header-comp hdr
+                                  :loaded-resources-comp lr
+                                  :anim-timer (atom nil)
+                                  :footer-comp ftr
+                                  :footer-provider fdp
+                                  :status-indicator nil
+                                  :status-current (atom nil)
+                                  :status-root nil
+                                  :pending-messages-comp pm
+                                  :session-atom (atom session)
+                                  :running-turn? (atom false)
+                                  :compaction-queued (atom [])
+                                  :config config
+                                  :pending-tool-comps pending-tool-comps
+                                  :bash-running? (atom false)
+                                  :bash-signal (atom false)
+                                  :pending-bash-components (atom [])
+                                  :pending-messages-container (container/make-container [pm])
+                                  :dock-current dock-current})]
 
     ;; Initial loaded-resources sections (rebuilt on /reload)
     (loaded-resources/loaded-resources-set-sections! lr (build-loaded-resource-sections))
@@ -4224,7 +3963,7 @@
                                             (agent/set-thinking-level! ag next-level)
                                             (cfg/save-setting! [:thinking] next-level)
                                             (sync-footer-model! cs)
-                                            (update-editor-border-color! cs next-level)
+                                            (state/update-editor-border-color! cs next-level)
                                             (chat-history/chat-history-show-status! ch (str "Thinking level: " (name next-level)))
                                             (tui/tui-request-render t))))))
       (editor/editor-set-on-action! ed "app.editor.external"
@@ -4267,7 +4006,7 @@
 
       ;; Initialize footer (header content is produced lazily by the
       ;; ExpandableText fns on first render)
-      (update-footer! cs)
+      (state/update-footer! cs)
 
       ;; Extension UI registry (pi: ExtensionUIContext) — installed after the
       ;; layout is live so extensions can drive the UI from event handlers
@@ -4744,7 +4483,7 @@
                             (agent/set-thinking-level! ag new-thinking)
                             (cfg/set-default-model! (:provider model) (:id model))
                             (sync-footer-model! cs)
-                            (update-editor-border-color! cs new-thinking)
+                            (state/update-editor-border-color! cs new-thinking)
                             (tui/tui-request-render (:tui cs)))
                           true)
                         false))
@@ -4753,7 +4492,7 @@
                                                   :high :xhigh :max} level)
                                  (agent/set-thinking-level! @(:agent-state cs) level)
                                  (sync-footer-model! cs)
-                                 (update-editor-border-color! cs level)
+                                 (state/update-editor-border-color! cs level)
                                  (tui/tui-request-render (:tui cs)))
                                nil)
          :get-thinking-level (fn []
@@ -4785,7 +4524,7 @@
                                       (agent/follow-up! ag text))))
                                 ;; both updates schedule their own frames
                                 (update-pending-messages! cs)
-                                (update-footer! cs)
+                                (state/update-footer! cs)
                                 nil))
          ;; pi: sendMessage — a custom message: persisted as a custom_message
          ;; session entry, injected into the agent context (sent to the LLM
@@ -4824,7 +4563,7 @@
                                   (agent/follow-up! ag msg))))
                             ;; both updates schedule their own frames
                             (update-pending-messages! cs)
-                            (update-footer! cs)
+                            (state/update-footer! cs)
                             true))
          :get-active-tools (fn []
                              @(:enabled-tools @(:agent-state cs)))
@@ -4901,7 +4640,7 @@
                                                             ;; session's), context files stay the launch dir's
                                                             {:custom-prompt (cfg/get-custom-prompt config)
                                                              :append-prompt (cfg/get-append-system-prompt config)
-                                                             :cwd (runtime-cwd cs)
+                                                             :cwd (state/runtime-cwd cs)
                                                              :context-files (context/load-project-context-files
                                                                              (cfg/get-agent-dir)
                                                                              (str (fs/cwd)))}))
@@ -4929,7 +4668,7 @@
                                                                       label]}]]
                                               ;; a run in flight would render its events into
                                               ;; the new branch (the /tree command refuses too)
-                                              (if (turn-running? cs)
+                                              (if (state/turn-running? cs)
                                                 {:cancelled true}
                                                 (if-let [sess @(:session-atom cs)]
                                                   (if-let [entry (session/get-entry sess
@@ -4945,7 +4684,7 @@
                              :switch-session (fn [session-path & _]
                                                ;; a run in flight would render its events into the
                                                ;; switched session (the /resume command refuses too)
-                                               (if (turn-running? cs)
+                                               (if (state/turn-running? cs)
                                                  {:cancelled true}
                                                  (try
                                                    (let [sess (session/load-session session-path)
@@ -5070,18 +4809,18 @@
 
       ;; Apply command-line overrides
       (let [config (cfg/apply-cli-overrides config opts)
-            _ (reset! global-config config)
+            _ (state/set-global-config! config)
             session (cond
                       (:session opts)
                       (let [base-dir (cfg/get-session-dir config)
-                            path (resolve-session-arg (:session opts) base-dir)]
+                            path (state/resolve-session-arg (:session opts) base-dir)]
                         (if path
                           (session/load-session path)
                           (do (binding [*out* *err*]
                                 (println (str "No session found matching '" (:session opts) "'")))
                               (System/exit 1))))
                       (:resume opts) nil
-                      (:continue opts) (if-let [path (find-session)]
+                      (:continue opts) (if-let [path (state/find-session)]
                                          ;; find-session returns the session
                                          ;; file path — load it into a Session
                                          ;; record so the context and chat can
@@ -5089,12 +4828,12 @@
                                          (session/load-session path)
                                          ;; pi: continueRecent — no session to
                                          ;; continue → start a fresh one
-                                         (session/create-session (ensure-cwd-session-dir)))
-                      :else (session/create-session (ensure-cwd-session-dir)))
+                                         (session/create-session (state/ensure-cwd-session-dir)))
+                      :else (session/create-session (state/ensure-cwd-session-dir)))
             cs (build-layout config session)]
         (reset! tui-ref (:tui cs))
         (when (:resume opts)
-          (show-session-selector cs ensure-session-dir
+          (show-session-selector cs state/ensure-session-dir
                                  (fn [path]
                                    ;; pi: emitBeforeSwitch (reason :resume) —
                                    ;; extensions may cancel the switch
@@ -5165,12 +4904,12 @@
                   (Thread/sleep 20)
                   (recur)))
               (when @(:running? (:tui cs))
-                (update-terminal-title! cs)))
+                (state/update-terminal-title! cs)))
             (catch Exception e
               (debug/log "terminal title: " e))))
         (tui/tui-start (:tui cs))
         (process/kill-tracked-children!)
-        (when-let [resume (format-resume-command @(:session-atom cs) config)]
+        (when-let [resume (state/format-resume-command @(:session-atom cs) config)]
           (println (str (th/dim "To resume this session:") " " resume)))
         (:tui cs))
       (catch Exception e

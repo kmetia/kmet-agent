@@ -10,6 +10,7 @@
    and the UI stayed on \"Working...\" forever while print mode kept working."
   (:require [clojure.test :as t :refer [deftest is testing]]
             [kmet.modes.interactive :as inter]
+            [kmet.modes.interactive.state :as state]
             [kmet.app.event-bus :as event-bus]
             [kmet.app.loop :as agent]
             [kmet.app.session :as session]
@@ -83,7 +84,7 @@
 
 (deftest header-logo-names-the-host
   (testing "the welcome header logo names the hosting runtime after kmet"
-    (let [logo ((var inter/fmt-header-logo))]
+    (let [logo ((var state/fmt-header-logo))]
       (is (str/includes? logo (str "kmet (" (host/runtime-name) ")"))
           "logo reads 'kmet (babashka)' / 'kmet (jolt)'"))))
 
@@ -981,7 +982,7 @@
         (with-redefs [agent/run-agent-turn noop
                       inter/activate-working-indicator! noop
                       inter/start-anim-timer! noop
-                      inter/update-footer! noop]
+                      state/update-footer! noop]
           ((var inter/start-agent-run!) cs))
         (is (true? @(:running-turn? cs)) "the turn still starts")
         (is (false? @(get-in cs [:tui :force-redraw?]))
@@ -1003,7 +1004,7 @@
                          :render-requested? (atom false)}})]
           (with-redefs [inter/stop-anim-timer! noop
                         inter/clear-status-indicator! noop
-                        inter/update-footer! noop]
+                        state/update-footer! noop]
             (call cs))
           (is (= expected @(get-in cs [:tui :force-redraw?]))
               (str label " / " case-label
