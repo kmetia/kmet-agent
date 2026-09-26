@@ -17,6 +17,7 @@
             [kmet.modes.interactive :as inter]
             [kmet.modes.interactive.state :as state]
             [kmet.modes.interactive.status :as status]
+            [kmet.modes.interactive.turn :as turn]
             [kmet.app.commands :as commands]
             [kmet.app.extensions :as extensions]
             [kmet.app.keybindings :as app-kb]
@@ -1262,9 +1263,9 @@
           cs {:config {:show-terminal-progress false}
               :tui {:terminal (atom term)}}]
       (with-redefs [cfg/global-settings-path (fn [] missing)]
-        ((var inter/set-terminal-progress!) cs false)
+        ((var turn/set-terminal-progress!) cs false)
         (t/is (= [false] @calls) "the clear passes while disabled")
-        ((var inter/set-terminal-progress!) cs true)
+        ((var turn/set-terminal-progress!) cs true)
         (t/is (= [false] @calls) "activation is still settings-gated")))))
 
 (deftest test-settings-http-transport-row
@@ -1600,7 +1601,7 @@
     (let [cs (compaction-cs)]
       (reset! (:compacting? @(:agent-state cs)) true)
       (with-redefs [tui/tui-request-render (fn [_] nil)]
-        ((var inter/handle-submit) cs "hello during compaction"))
+        ((var turn/handle-submit) cs "hello during compaction"))
       (t/is (= [{:text "hello during compaction" :mode :steer}]
                @(:compaction-queued cs))
             "message queued with steer mode")
@@ -1615,7 +1616,7 @@
       (editor/editor-set-text! ed "later message")
       (reset! (:compacting? @(:agent-state cs)) true)
       (with-redefs [tui/tui-request-render (fn [_] nil)]
-        ((var inter/handle-follow-up) cs))
+        ((var turn/handle-follow-up) cs))
       (t/is (= [{:text "later message" :mode :follow-up}]
                @(:compaction-queued cs))
             "message queued with follow-up mode"))))
@@ -1634,7 +1635,7 @@
                     state/update-footer! (fn [_] nil)
                     tui/tui-request-render (fn [_] nil)
                     chat-history/chat-history-start-streaming! (fn [_] nil)]
-        ((var inter/flush-compaction-queue!) cs false))
+        ((var turn/flush-compaction-queue!) cs false))
       (t/is (seq @started) "a run started for the first message")
       (t/is (= "first" (get-in @started [1 :message])) "run carries the first message")
       (t/is (empty? @(:compaction-queued cs)) "queue drained")
@@ -1651,7 +1652,7 @@
               [{:text "steer-msg" :mode :steer}
                {:text "follow-msg" :mode :follow-up}])
       (with-redefs [tui/tui-request-render (fn [_] nil)]
-        ((var inter/flush-compaction-queue!) cs true))
+        ((var turn/flush-compaction-queue!) cs true))
       (let [{:keys [steering follow-up]} (agent/queued-messages @(:agent-state cs))]
         (t/is (= ["steer-msg"] steering) "steer-mode queued into steering")
         (t/is (= ["follow-msg"] follow-up) "follow-up-mode queued into follow-up"))
@@ -1670,7 +1671,7 @@
       (reset! (:compacting? @(:agent-state cs)) true)
       (with-redefs [tui/tui-request-render (fn [_] nil)
                     state/update-footer! (fn [_] nil)]
-        ((var inter/handle-submit) cs "/my-ext-cmd arg1"))
+        ((var turn/handle-submit) cs "/my-ext-cmd arg1"))
       (t/is (= "arg1" @ran) "extension command executed immediately")
       (t/is (empty? @(:compaction-queued cs)) "not queued")
       (commands/clear-commands!))))
@@ -1683,7 +1684,7 @@
       (agent/steer! @(:agent-state cs) "steer-msg")
       (reset! (:compaction-queued cs) [{:text "compact-msg" :mode :steer}])
       (editor/editor-set-text! ed "draft")
-      (let [n ((var inter/restore-queued-messages!) cs)]
+      (let [n ((var turn/restore-queued-messages!) cs)]
         (t/is (= 2 n) "both queues restored")
         (t/is (= "steer-msg\n\ncompact-msg\n\ndraft" (editor/editor-get-text ed))
               "messages combined with current editor text")
@@ -1721,7 +1722,7 @@
                     status/clear-status-indicator! (fn [_] nil)
                     state/update-footer! (fn [_] nil)
                     agent/cancel-turn (fn [_] (throw (ex-info "must not cancel the turn" {})))]
-        ((var inter/handle-cancel) cs))
+        ((var turn/handle-cancel) cs))
       (t/is (true? @(:signal @(:agent-state cs))) "compaction aborted via signal")
       (t/is (true? @(:running-turn? cs)) "the turn is NOT cancelled"))))
 
@@ -1732,7 +1733,7 @@
       (reset! (:signal @(:agent-state cs)) false)
       (reset! (:running-turn? cs) false)
       (with-redefs [state/update-footer! (fn [_] nil)]
-        ((var inter/handle-cancel) cs))
+        ((var turn/handle-cancel) cs))
       (t/is (true? @(:signal @(:agent-state cs))) "compaction aborted"))))
 
 (deftest test-follow-up-extension-command-executes-during-compaction
@@ -1749,7 +1750,7 @@
       (editor/editor-set-text! ed "/my-fu-cmd arg")
       (reset! (:compacting? @(:agent-state cs)) true)
       (with-redefs [tui/tui-request-render (fn [_] nil)]
-        ((var inter/handle-follow-up) cs))
+        ((var turn/handle-follow-up) cs))
       (t/is (= "arg" @ran) "extension command executed immediately")
       (t/is (empty? @(:compaction-queued cs)) "not queued")
       (commands/clear-commands!))))
@@ -1853,11 +1854,11 @@
                     chat-history/chat-history-remove-streaming-placeholder! (fn [_] nil)
                     agent/cancel-turn (fn [_] (swap! cancelled inc))]
         ;; first escape: compaction aborted only
-        ((var inter/handle-cancel) cs)
+        ((var turn/handle-cancel) cs)
         (t/is (true? @(:signal @(:agent-state cs))) "compaction aborted")
         (t/is (true? @(:running-turn? cs)) "turn still running")
         (t/is (zero? @cancelled) "turn not cancelled")
         ;; compaction-end resets the flag; second escape cancels the turn
         (reset! (:compacting? @(:agent-state cs)) false)
-        ((var inter/handle-cancel) cs)
+        ((var turn/handle-cancel) cs)
         (t/is (= 1 @cancelled) "second escape cancels the turn")))))

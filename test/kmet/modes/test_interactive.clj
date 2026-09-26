@@ -12,6 +12,7 @@
             [kmet.modes.interactive :as inter]
             [kmet.modes.interactive.state :as state]
             [kmet.modes.interactive.status :as status]
+            [kmet.modes.interactive.turn :as turn]
             [kmet.app.event-bus :as event-bus]
             [kmet.app.loop :as agent]
             [kmet.app.session :as session]
@@ -549,7 +550,7 @@
 
 (deftest submit-command-line-gate
   (testing "multiline submit text (e.g. pasted blocks) is never a command"
-    (let [command-line? @#'inter/command-line?]
+    (let [command-line? @#'turn/command-line?]
       ;; single-line slash/bang input stays a command
       (is (true? (command-line? "/model gpt-4o")))
       (is (true? (command-line? "/model")))
@@ -945,15 +946,15 @@
                          :render-requested? (atom false)}}))
           healed? (fn [cs] (true? @(get-in cs [:tui :force-redraw?])))]
       (let [cs (make false false false true)]
-        ((var inter/heal-stale-scrollback-when-idle!) cs)
+        ((var turn/heal-stale-scrollback-when-idle!) cs)
         (is (healed? cs) "idle + dirty requests the heuristic full redraw"))
       (doseq [[label cs] [["mid agent turn" (make true false false true)]
                           ["mid bash command" (make false true false true)]
                           ["mid compaction" (make false false true true)]]]
-        ((var inter/heal-stale-scrollback-when-idle!) cs)
+        ((var turn/heal-stale-scrollback-when-idle!) cs)
         (is (not (healed? cs)) (str label " must not emit the destructive 3J clear")))
       (let [cs (make false false false false)]
-        ((var inter/heal-stale-scrollback-when-idle!) cs)
+        ((var turn/heal-stale-scrollback-when-idle!) cs)
         (is (not (healed? cs)) "a clean scrollback is a no-op")))))
 
 (deftest request-global-reflow-render-forces
@@ -963,7 +964,7 @@
                 {:running-turn? (atom running)
                  :tui {:force-redraw? (atom false)
                        :render-requested? (atom false)}})]
-        ((var inter/request-global-reflow-render!) cs)
+        ((var turn/request-global-reflow-render!) cs)
         (is (true? @(get-in cs [:tui :force-redraw?]))
             (str label " — the scrollback is rebuilt, not left stale"))
         (is (true? @(get-in cs [:tui :render-requested?]))
@@ -984,13 +985,13 @@
                       status/activate-working-indicator! noop
                       status/start-anim-timer! noop
                       state/update-footer! noop]
-          ((var inter/start-agent-run!) cs))
+          ((var turn/start-agent-run!) cs))
         (is (true? @(:running-turn? cs)) "the turn still starts")
         (is (false? @(get-in cs [:tui :force-redraw?]))
             "a dirty scrollback is left for the turn end, not cleared at the start"))
       ;; Turn end (done and error): heal, but only when streaming-free.
-      (doseq [[label call] [["on-agent-done" #((var inter/on-agent-done) %)]
-                            ["on-agent-error" #((var inter/on-agent-error) % "boom")]]
+      (doseq [[label call] [["on-agent-done" #((var turn/on-agent-done) %)]
+                            ["on-agent-error" #((var turn/on-agent-error) % "boom")]]
               [case-label bash? dirty? expected] [["streaming-free" false true true]
                                                   ["mid bash command" true true false]
                                                   ["clean scrollback" false false false]]]
@@ -1019,7 +1020,7 @@
       (try
         (tui-kb/set-global-keybindings! (app-kb/make-agent-keybindings-manager))
         (let [tui-stub {:stopped? (atom false)}
-              listener ((var inter/global-quit-listener) tui-stub)
+              listener ((var turn/global-quit-listener) tui-stub)
               stopped (atom nil)]
           (with-redefs [tui/tui-stop (fn [t] (reset! stopped t))]
             (is (= {:consume true} (listener "\u0011"))
