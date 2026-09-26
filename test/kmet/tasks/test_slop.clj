@@ -1,7 +1,7 @@
 (ns kmet.tasks.test-slop
   "Tests for kmet.tasks.slop (the `bb slop` task): tokenizer and clone
-   detection, Clojure CC extraction, source discovery, parse-failure
-   handling and the reference comparison on small temp trees."
+   detection, Clojure CC/cognitive extraction, source discovery,
+   parse-failure handling and the reference comparison on small temp trees."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t :refer [deftest is]]
@@ -38,13 +38,22 @@
                (let [report (slop/scan dir {})]
                  (is (pos? (:clone-lines report)))
                  (is (pos? (:verbosity report)))
-                 (is (seq (:clone-files report))))))))
+                 (is (seq (:outlier-files report))))))))
 
 (deftest unique-short-code-is-not-cloned
   (in-tree {"a.clj" "(defn f [x] (inc x))"
             "b.clj" "(defn g [y] (* y 2))"}
            (fn [dir]
              (is (zero? (:clone-lines (slop/scan dir {})))))))
+
+(deftest verbosity-counts-rule-flagged-lines
+  (in-tree {"sloppy.clj" "(defn f [x] (if (not x) 1 2))\n"}
+           (fn [dir]
+             (let [report (slop/scan dir {})]
+               (is (zero? (:clone-lines report)))
+               (is (pos? (:rule-lines report)))
+               (is (pos? (:verbosity report)))
+               (is (contains? (set (map first (:rule-counts report))) "if-not"))))))
 
 (deftest erosion-is-the-high-cc-mass-share
   (let [ifs (str/join "" (repeat 12 "(if x "))
@@ -58,6 +67,21 @@
                  (is (= 1 (:high-cc report)))
                  (is (pos? (:erosion report)))
                  (is (= 1 (count (:outliers report)))))))))
+
+(deftest cognitive-complexity-adds-nesting
+  (in-tree {"nest.clj" "(defn f [x] (if x (if x (if x 1 2) 3) 4))\n"}
+           (fn [dir]
+             (let [report (slop/scan dir {})]
+               (is (= 4 (:max-cc report)))
+               (is (= 6 (:max-cog report)))
+               (is (zero? (:high-cog report))))))
+  (in-tree {"deep.clj" "(defn f [x] (if x (if x (if x (if x (if x 1 2) 3) 4) 5) 6))\n"}
+           (fn [dir]
+             (let [report (slop/scan dir {})]
+               (is (= 6 (:max-cc report)))
+               (is (= 15 (:max-cog report)))
+               (is (= 1 (:high-cog report)))
+               (is (pos? (:cog-erosion report)))))))
 
 (deftest cc-counts-clojure-decision-heads
   (in-tree {"heads.clj" (str "(defn f [a b] (and a (or b a)))\n"
@@ -101,6 +125,7 @@
              (let [text (slop/format-report (slop/scan dir {}))]
                (is (str/includes? text "VERBOSITY"))
                (is (str/includes? text "EROSION"))
+               (is (str/includes? text "COGNITIVE EROSION"))
                (is (str/includes? text "reference: human 0.19"))
                (is (str/includes? text "reference: human 0.34"))
                (is (str/includes? text "below human mean"))

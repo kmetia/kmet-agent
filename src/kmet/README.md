@@ -149,7 +149,7 @@ bb generate-models     # Regenerate provider catalogs (network)
 kmet --generate-models # Refresh the user-level catalog cache (network)
 bb generate-image-models # Regenerate the image model catalog (network)
 bb check-model-data      # Offline catalog validation
-bb slop                # SCBench verbosity/erosion vs. reference rows, outliers only
+bb slop                # SCBench verbosity (clones+rules)/erosion vs. reference rows, outliers only
 bb pack-extension <src-dir> [out.jar]  # Verify + pack an extension artifact root
 bb help            # Show task help
 ```

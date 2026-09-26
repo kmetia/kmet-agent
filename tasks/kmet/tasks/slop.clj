@@ -1,15 +1,17 @@
 (ns kmet.tasks.slop
   "SCBench-style sloppiness metrics for a Clojure tree - the `bb slop` task.
 
-   Measures the two SlopCodeBench (arXiv:2603.24755) trajectory metrics:
+   Measures the SlopCodeBench (arXiv:2603.24755) trajectory metrics:
 
-     verbosity = clone lines / SLOC
+     verbosity = |clone lines union rule-flagged lines| / SLOC
        Clone lines are the distinct lines covered by a duplicated window
        of K tokens (K = 50 by default) over an exact token stream - no
-       identifier normalization. SCBench also folds in lines flagged by
-       its 137 ast-grep rules; that rule pack is Python-only, so Clojure
-       contributes clone lines only (the same treatment scb-check gives
-       every non-Python language).
+       identifier normalization, counted repo-wide. Rule-flagged lines
+       come from kmet.tasks.slop.rules, a Clojure adaptation of SCBench's
+       Python ast-grep pack (boolean/comparison, conditionals, defensive,
+       dict, loop/comprehension and abstraction rules plus the structural
+       trivial-wrapper). SCBench's exact 137 rules are Python-only, so
+       this pack is the Clojure leg of the union.
 
      erosion = high-CC mass share
        mass(f) = CC(f) * sqrt(SLOC(f)); erosion is the mass of functions
@@ -22,13 +24,20 @@
        own functions; multi-arity definitions count as one function.
        Reader conditionals are read with the #{:clj :bb} feature view.
 
-   Reference rows are the paper's calibration panel: 473 maintained human
-   Python repositories and 2,869 agent checkpoints. Lower is better.
+     cognitive erosion = the same mass share over cognitive complexity
+       (Sonar-style: each break in the linear flow costs 1 + its nesting
+       depth, cond/case clauses are siblings, and/or sequences cost 1).
+       scb-check reports it; the paper publishes no reference row for it.
+
+   Reference rows for verbosity/erosion are the paper's calibration panel:
+   473 maintained human Python repositories and 2,869 agent checkpoints.
+   Lower is better.
 
    Usage: bb slop [path] [--k N] [--top N]"
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
-            [edamame.core :as e]))
+            [edamame.core :as e]
+            [kmet.tasks.slop.rules :as rules]))
 
 ;; ------------------------------------------------------------------ options
 
@@ -223,7 +232,7 @@
   [acc counts]
   (reduce-kv (fn [a key n] (assoc! a key (+ (get a key 0) n))) acc counts))
 
-;; -------------------------------------------------------------- erosion/CC
+;; -------------------------------------------------------------- complexity
 
 (def ^:private fn-heads '#{defn defn- defmacro defmethod fn fn*})
 (def ^:private type-heads '#{deftype defrecord reify})
@@ -233,6 +242,7 @@
 
 (defn- fn-form? [f] (and (seq? f) (contains? fn-heads (first f))))
 (defn- type-form? [f] (and (seq? f) (contains? type-heads (first f))))
+(defn- named? [x s] (and (symbol? x) (= (name x) s)))
 
 (defn cc
   "Cyclomatic complexity increment of a form. Nested functions contribute 0
@@ -254,6 +264,74 @@
     (coll? form) (reduce + 0 (map cc form))
     :else 0))
 
+(def ^:private cog-nesting
+  #{"if" "if-let" "if-some" "if-not" "when" "when-let" "when-some" "when-not"
+    "when-first" "while" "loop" "doseq" "dotimes" "for"})
+
+(defn- cog-walk
+  "Sonar-style cognitive complexity of FORM at nesting DEPTH. Each break in
+   the linear flow costs 1 + depth; cond/case/condp clauses are siblings
+   (no compounding depth); and/or and some-> sequences cost 1 each. Nested
+   functions contribute 0 (they are counted as their own function)."
+  [form depth]
+  (cond
+    (or (fn-form? form) (type-form? form)) 0
+    (seq? form)
+    (let [nm (when (symbol? (first form)) (name (first form)))]
+      (cond
+        (contains? cog-nesting nm)
+        (+ 1 depth
+           (cog-walk (second form) depth)
+           (reduce + 0 (map #(cog-walk % (inc depth)) (drop 2 form))))
+
+        (= nm "cond")
+        (reduce + 0
+                (map (fn [[t r]]
+                       (+ 1 depth (cog-walk t depth) (cog-walk r (inc depth))))
+                     (partition 2 (rest form))))
+
+        (= nm "condp")
+        (+ (cog-walk (second form) depth)
+           (cog-walk (nth form 2) depth)
+           (reduce + 0
+                   (map (fn [[t r]]
+                          (+ 1 depth (cog-walk t depth) (cog-walk r (inc depth))))
+                        (partition 2 (drop 3 form)))))
+
+        (= nm "case")
+        (let [clauses (drop 2 form)
+              pairs (partition 2 clauses)
+              default (when (odd? (count clauses)) (last clauses))]
+          (+ (cog-walk (second form) depth)
+             (reduce + 0
+                     (map (fn [[t r]]
+                            (+ 1 depth (cog-walk t depth) (cog-walk r (inc depth))))
+                          pairs))
+             (if default (+ 1 depth (cog-walk default (inc depth))) 0)))
+
+        (or (= nm "cond->") (= nm "cond->>"))
+        (+ (cog-walk (second form) depth)
+           (reduce + 0 (map (fn [x] (+ 1 depth (cog-walk x (inc depth))))
+                            (drop 2 form))))
+
+        (or (= nm "and") (= nm "or") (= nm "some->") (= nm "some->>"))
+        (+ 1 (reduce + 0 (map #(cog-walk % depth) (rest form))))
+
+        (= nm "try")
+        (let [catches (filter #(and (seq? %) (named? (first %) "catch"))
+                              (rest form))]
+          (+ (count catches)
+             (reduce + 0 (map #(cog-walk % (inc depth)) (rest form)))))
+
+        :else (reduce + 0 (map #(cog-walk % depth) (rest form)))))
+    (coll? form) (reduce + 0 (map #(cog-walk % depth) form))
+    :else 0))
+
+(defn cog
+  "Cognitive complexity increment of a form. Nested functions contribute 0."
+  [form]
+  (cog-walk form 0))
+
 (defn- collect-method-forms [form]
   (when (coll? form)
     (if (and (seq? form) (symbol? (first form)) (vector? (second form)))
@@ -272,6 +350,7 @@
     :else nil))
 
 (defn- own-cc [form] (reduce (fn [a x] (+ a (cc x))) 1 (rest form)))
+(defn- own-cog [form] (reduce (fn [a x] (+ a (cog-walk x 0))) 0 (rest form)))
 
 (defn- fn-label [form]
   (let [h (first form) nm (second form)]
@@ -288,26 +367,43 @@
                        (and (seq t) (not (str/starts-with? t ";")))))
                    (subvec lines lo hi)))))
 
+;; ------------------------------------------------------------------ parse
+
 (def ^:private parse-opts
   {:all true
    :read-cond :allow
    :features #{:clj :bb}
    :auto-resolve (fn [alias] (or alias 'kmet.slop))})
 
-(defn file-fns
-  "Functions under PATH as {:file :row :cc :sloc :label :mass} maps."
+(defn parse-text
+  "Parse Clojure source TEXT with reader conditionals read as #{:clj :bb};
+   keeps edamame's row/end-row metadata."
+  [text]
+  (e/parse-string-all text parse-opts))
+
+(defn parse-file
+  "Read PATH into {:file :lines :forms}; throws for unreadable or malformed
+   input."
   [path]
-  (let [text (slurp (str path))
-        lines (vec (str/split-lines text))
-        forms (e/parse-string-all text parse-opts)]
-    (for [form (mapcat collect-fns forms)
-          :let [m (meta form) row (:row m) end-row (:end-row m)]
-          :when (and row end-row)]
-      (let [c (own-cc form)
-            sloc (max 1 (form-sloc lines row end-row))]
-        {:file (str path) :row row :cc c :sloc sloc
-         :label (fn-label form)
-         :mass (* c (Math/sqrt (double sloc)))}))))
+  (let [text (slurp (str path))]
+    {:file (str path)
+     :lines (vec (str/split-lines text))
+     :forms (parse-text text)}))
+
+(defn file-fns
+  "Functions in a parsed file ({:file :lines :forms}) as maps with :cc,
+   :cog, :sloc and the two mass values."
+  [{:keys [file lines forms]}]
+  (for [form (mapcat collect-fns forms)
+        :let [m (meta form) row (:row m) end-row (:end-row m)]
+        :when (and row end-row)]
+    (let [c (own-cc form)
+          g (own-cog form)
+          sloc (max 1 (form-sloc lines row end-row))]
+      {:file file :row row :cc c :cog g :sloc sloc
+       :label (fn-label form)
+       :mass (* c (Math/sqrt (double sloc)))
+       :cog-mass (* g (Math/sqrt (double sloc)))})))
 
 ;; ------------------------------------------------------------------- scan
 
@@ -335,6 +431,20 @@
            (remove #(skipped-path? root-path %))
            (sort-by str)))))
 
+(defn- parse-scan
+  "Parse one file into {:file :fns :findings :defs}; failures are recorded
+   and yield empty results instead of aborting the scan."
+  [path failures]
+  (try
+    (let [{:keys [file lines forms]} (parse-file path)]
+      {:file file
+       :fns (vec (file-fns {:file file :lines lines :forms forms}))
+       :findings (mapv #(assoc % :file file) (rules/ast-findings forms))
+       :defs (mapv #(assoc % :file file) (rules/definitions forms))})
+    (catch Exception ex
+      (swap! failures conj {:file (str path) :error (ex-message ex)})
+      {:file (str path) :fns [] :findings [] :defs []})))
+
 (defn scan
   "Analyze every Clojure source under ROOT.
    OPTS: :k clone window size (default 50), :top outlier count (default 15)."
@@ -345,35 +455,63 @@
                                       (merge-counts! acc (kgram-counts ids k)))
                                     (transient {})
                                     token-stats))
-        clone-stats (mapv (fn [{:keys [file sloc ids lines]}]
-                            (let [cl (count (clone-lines ids lines counts k))]
-                              {:file file
-                               :sloc sloc
-                               :clone-lines cl
-                               :clone-fraction (if (pos? sloc)
-                                                 (/ (double cl) sloc)
-                                                 0.0)}))
-                          token-stats)
+        clone-by-file (into {} (map (fn [{:keys [file lines ids]}]
+                                      [file (clone-lines ids lines counts k)])
+                                    token-stats))
         failures (atom [])
-        fns (vec (mapcat (fn [f]
-                           (try (file-fns f)
-                                (catch Exception ex
-                                  (swap! failures conj {:file f :error (ex-message ex)})
-                                  [])))
-                         files))
-        sloc (reduce + 0 (map :sloc clone-stats))
-        clone-lines (reduce + 0 (map :clone-lines clone-stats))
+        parsed (mapv #(parse-scan % failures) files)
+        fns (vec (mapcat :fns parsed))
+        defs (mapcat :defs parsed)
+        wrappers (mapv (fn [w]
+                         {:file (:file w) :line (:row w)
+                          :rule "trivial-wrapper" :category "abstractions"})
+                       (rules/trivial-wrappers defs))
+        findings (vec (concat (mapcat :findings parsed) wrappers))
+        rule-by-file (reduce (fn [m {:keys [file line]}]
+                               (update m file (fnil conj #{}) line))
+                             {} findings)
+        sloc-by-file (into {} (map (juxt :file :sloc) token-stats))
+        sloc (reduce + 0 (map :sloc token-stats))
+        clone-lines (reduce + 0 (map count (vals clone-by-file)))
+        rule-lines (count (distinct (map (juxt :file :line) findings)))
+        union-by-file (into {} (map (fn [{:keys [file]}]
+                                      (let [c (get clone-by-file file #{})
+                                            r (get rule-by-file file #{})]
+                                        [file (count (into c r))]))
+                                    token-stats))
+        union-lines (reduce + 0 (vals union-by-file))
         hi (filter #(> (:cc %) 10) fns)
+        hi-cog (filter #(> (:cog %) 10) fns)
         total-mass (reduce + 0.0 (map :mass fns))
-        hi-mass (reduce + 0.0 (map :mass hi))]
+        hi-mass (reduce + 0.0 (map :mass hi))
+        total-cog-mass (reduce + 0.0 (map :cog-mass fns))
+        hi-cog-mass (reduce + 0.0 (map :cog-mass hi-cog))
+        outlier-files (->> union-by-file
+                           (filter (fn [[_ n]] (pos? n)))
+                           (map (fn [[file n]]
+                                  {:file file
+                                   :flagged n
+                                   :sloc (get sloc-by-file file 1)
+                                   :clone-lines (count (get clone-by-file file #{}))
+                                   :rule-lines (count (get rule-by-file file #{}))}))
+                           (sort-by :flagged >))
+        rule-counts (->> findings
+                         (group-by :rule)
+                         (map (fn [[r fs]]
+                                [r (count (distinct (map (juxt :file :line) fs)))]))
+                         (sort-by second >))]
     {:root (str root)
      :k k
      :files (count files)
      :sloc sloc
+     :failures @failures
      :clone-lines clone-lines
-     :verbosity (if (pos? sloc) (/ (double clone-lines) sloc) 0.0)
-     :clone-files (vec (take top (sort-by :clone-lines >
-                                          (filter #(pos? (:clone-lines %)) clone-stats))))
+     :rule-lines rule-lines
+     :union-lines union-lines
+     :overlap (- (+ clone-lines rule-lines) union-lines)
+     :verbosity (if (pos? sloc) (/ (double union-lines) sloc) 0.0)
+     :rule-counts (vec (take 8 rule-counts))
+     :outlier-files (vec (take top outlier-files))
      :functions (count fns)
      :high-cc (count hi)
      :max-cc (reduce max 0 (map :cc fns))
@@ -381,7 +519,12 @@
      :hi-mass hi-mass
      :erosion (if (pos? total-mass) (/ hi-mass total-mass) 0.0)
      :outliers (vec (take top (sort-by :mass > hi)))
-     :failures @failures}))
+     :high-cog (count hi-cog)
+     :max-cog (reduce max 0 (map :cog fns))
+     :total-cog-mass total-cog-mass
+     :hi-cog-mass hi-cog-mass
+     :cog-erosion (if (pos? total-cog-mass) (/ hi-cog-mass total-cog-mass) 0.0)
+     :cog-outliers (vec (take top (sort-by :cog-mass > hi-cog)))}))
 
 ;; --------------------------------------------------------------- references
 
@@ -420,8 +563,10 @@
 (defn format-report
   "Render a `scan` report as plain text: summary, reference comparison and
    outliers only."
-  [{:keys [root files sloc clone-lines clone-files functions high-cc max-cc
-           total-mass hi-mass verbosity erosion outliers failures k]}]
+  [{:keys [root files sloc clone-lines rule-lines union-lines overlap rule-counts
+           outlier-files functions failures
+           high-cc max-cc total-mass hi-mass verbosity erosion outliers
+           high-cog max-cog total-cog-mass hi-cog-mass cog-erosion cog-outliers k]}]
   (str/join
    "\n"
    (concat
@@ -429,18 +574,23 @@
      (format "  %d files | %d SLOC | %d functions | %d parse failures"
              files sloc functions (count failures))
      ""
-     (format "VERBOSITY  %.3f  (clone-only: SCBench's ast-grep rule pack is Python-only)"
+     (format "VERBOSITY  %.3f  (SCBench: clone + rule-flagged lines / SLOC)"
              verbosity)
-     (format "  %d clone lines / %d SLOC in duplicated %d-token windows"
-             clone-lines sloc k)
+     (format "  %d lines flagged: %d rules + %d clones (overlap %d) in %d SLOC (k=%d)"
+             union-lines rule-lines clone-lines overlap sloc k)
+     (if (seq rule-counts)
+       (str "  top rules: "
+            (str/join " | " (map (fn [[r n]] (str r " " n)) rule-counts)))
+       "  top rules: none")
      (ref-line verbosity :verbosity)]
-    (if (seq clone-files)
-      (cons (format "  outlier files (top %d by clone lines):" (count clone-files))
-            (map (fn [c]
-                   (format "    clone=%-6d %5.1f%% of file  %s"
-                           (:clone-lines c) (* 100.0 (:clone-fraction c))
-                           (rel-path root (:file c))))
-                 clone-files))
+    (if (seq outlier-files)
+      (cons (format "  outlier files (top %d by flagged lines):" (count outlier-files))
+            (map (fn [f]
+                   (format "    flagged=%-5d clone=%-5d rule=%-5d %5.1f%% of file  %s"
+                           (:flagged f) (:clone-lines f) (:rule-lines f)
+                           (* 100.0 (/ (double (:flagged f)) (max 1 (:sloc f))))
+                           (rel-path root (:file f))))
+                 outlier-files))
       ["  outlier files: none"])
     [""
      (format "EROSION  %.3f  (mass share of CC>10 functions; mass = CC * sqrt(SLOC))"
@@ -455,6 +605,20 @@
                            (:cc f) (:sloc f) (:mass f) (:label f)
                            (rel-path root (:file f)) (:row f)))
                  outliers))
+      ["  outlier functions: none"])
+    [""
+     (format "COGNITIVE EROSION  %.3f  (mass share of cog>10 functions; mass = cog * sqrt(SLOC))"
+             cog-erosion)
+     (format "  %d of %d functions cog>10 | max cog %d | mass %.1f of %.1f"
+             high-cog functions max-cog hi-cog-mass total-cog-mass)
+     "  reference: none published for cognitive erosion"]
+    (if (seq cog-outliers)
+      (cons (format "  outlier functions (top %d of %d by cog mass):" (count cog-outliers) high-cog)
+            (map (fn [f]
+                   (format "    cog=%-3d sloc=%-4d mass=%6.1f  %s  (%s:%d)"
+                           (:cog f) (:sloc f) (:cog-mass f) (:label f)
+                           (rel-path root (:file f)) (:row f)))
+                 cog-outliers))
       ["  outlier functions: none"])
     (when (seq failures)
       (cons (format "PARSE FAILURES  %d" (count failures))
