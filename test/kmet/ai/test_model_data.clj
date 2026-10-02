@@ -138,6 +138,20 @@
                     :supports-additional-tools true}
                    (:compat (#'mg/apply-compat-metadata model)))))))))
 
+(t/deftest test-openai-gpt-56-standard-costs
+  "Regression: the GPT-5.6 entries in the Codex catalog and the direct
+   OpenAI fallback use the authoritative standard costs (pi
+   OPENAI_STANDARD_COSTS), not the pre-reduction rates."
+  (let [expected {"gpt-5.6-sol" {:input 4 :output 20 :cache-read 0.4 :cache-write 5}
+                  "gpt-5.6-terra" {:input 2 :output 12 :cache-read 0.2 :cache-write 2.5}
+                  "gpt-5.6-luna" {:input 0.2 :output 1.2 :cache-read 0.02 :cache-write 0.25}}
+        base (fn [mm] (select-keys (:cost mm) [:input :output :cache-read :cache-write]))
+        fallback (into {} (map (juxt :id identity) (#'mg/missing-openai-models #{})))
+        codex (into {} (map (juxt :id identity) (#'mg/process-codex)))]
+    (doseq [[id cost] expected]
+      (t/is (= cost (base (get fallback id))) (str "openai fallback " id))
+      (t/is (= cost (base (get codex id))) (str "codex " id)))))
+
 (t/deftest test-commandcode-refs-transfer-capabilities
   "Regression: the canonical-ref lookup in process-commandcode (get-in
    grouped [provider model-id]) must receive the {provider -> {model-id ->

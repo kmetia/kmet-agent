@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-29T16:15:58Z"
+ :generated-at "2026-10-02T10:35:48Z"
  :provider {:id :together
             :name "Together AI"
             :env-vars ["TOGETHER_API_KEY"]
@@ -136,29 +136,6 @@
              :max-tokens-field :max-tokens
              :supports-long-cache-retention false
              :supports-strict-mode false}}
-   "deepseek-ai/DeepSeek-V4-Pro"
-   {:id "deepseek-ai/DeepSeek-V4-Pro"
-    :name "DeepSeek V4 Pro"
-    :provider :together
-    :api :openai-completions
-    :base-url "https://api.together.ai/v1"
-    :reasoning true
-    :thinking-level-map {:high "high"
-                         :low nil
-                         :medium nil
-                         :minimal nil
-                         :xhigh nil}
-    :input [:text]
-    :cost {:input 1.74 :output 3.48 :cache-read 0.2 :cache-write 0}
-    :context-window 512000
-    :max-tokens 384000
-    :compat {:supports-store false
-             :supports-developer-role false
-             :supports-reasoning-effort true
-             :thinking-format :together
-             :max-tokens-field :max-tokens
-             :supports-long-cache-retention false
-             :supports-strict-mode false}}
    "deepseek-ai/DeepSeek-V4-Pro-0813"
    {:id "deepseek-ai/DeepSeek-V4-Pro-0813"
     :name "DeepSeek V4 Pro 0813"
@@ -190,29 +167,6 @@
     :cost {:input 0.3 :output 1.2 :cache-read 0.006 :cache-write 0}
     :context-window 1048576
     :max-tokens 384000
-    :compat {:supports-store false
-             :supports-developer-role false
-             :supports-reasoning-effort false
-             :thinking-format :together
-             :max-tokens-field :max-tokens
-             :supports-long-cache-retention false
-             :supports-strict-mode false}}
-   "google/gemma-4-31B-it"
-   {:id "google/gemma-4-31B-it"
-    :name "Gemma 4 31B Instruct"
-    :provider :together
-    :api :openai-completions
-    :base-url "https://api.together.ai/v1"
-    :reasoning true
-    :thinking-level-map {:high "HIGH"
-                         :low nil
-                         :medium nil
-                         :minimal "MINIMAL"
-                         :off nil}
-    :input [:text :image]
-    :cost {:input 0.39 :output 0.97 :cache-read 0 :cache-write 0}
-    :context-window 262144
-    :max-tokens 131072
     :compat {:supports-store false
              :supports-developer-role false
              :supports-reasoning-effort false
@@ -292,31 +246,6 @@
                          :xhigh nil}
     :input [:text]
     :cost {:input 0.15 :output 0.6 :cache-read 0 :cache-write 0}
-    :context-window 131072
-    :max-tokens 131072
-    :compat {:supports-store false
-             :supports-developer-role false
-             :supports-reasoning-effort true
-             :thinking-format :openai
-             :max-tokens-field :max-tokens
-             :supports-long-cache-retention false
-             :supports-strict-mode false}}
-   "openai/gpt-oss-20b"
-   {:id "openai/gpt-oss-20b"
-    :name "GPT OSS 20B"
-    :provider :together
-    :api :openai-completions
-    :base-url "https://api.together.ai/v1"
-    :reasoning true
-    :thinking-level-map {:high "high"
-                         :low "low"
-                         :max nil
-                         :medium "medium"
-                         :minimal nil
-                         :off nil
-                         :xhigh nil}
-    :input [:text]
-    :cost {:input 0.05 :output 0.2 :cache-read 0 :cache-write 0}
     :context-window 131072
     :max-tokens 131072
     :compat {:supports-store false

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-30T20:07:26Z"
+ :generated-at "2026-10-02T10:35:48Z"
  :provider {:id :opencode
             :name "OpenCode (Zen)"
             :env-vars ["OPENCODE_API_KEY"]
@@ -420,6 +420,28 @@
     :compat {:supports-store false
              :supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
+             :max-tokens-field :max-tokens
+             :supports-strict-mode true}}
+   "fledge-alpha-free"
+   {:id "fledge-alpha-free"
+    :name "Fledge Alpha Free"
+    :provider :opencode
+    :api :openai-completions
+    :base-url "https://opencode.ai/zen/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max "max"
+                         :medium nil
+                         :minimal nil
+                         :off nil
+                         :xhigh nil}
+    :input [:text :image]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072
+    :compat {:supports-store false
+             :supports-developer-role false
              :max-tokens-field :max-tokens
              :supports-strict-mode true}}
    "glm-5"
@@ -1181,7 +1203,7 @@
                          :max "max"
                          :medium "medium"
                          :minimal nil
-                         :off nil
+                         :off "none"
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 0.1
@@ -1205,7 +1227,7 @@
                          :max "max"
                          :medium "medium"
                          :minimal nil
-                         :off nil
+                         :off "none"
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 2

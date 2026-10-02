@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-30T20:07:26Z"
+ :generated-at "2026-10-02T10:35:48Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -2643,7 +2643,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.14 :output 0.28 :cache-read 0.0028 :cache-write 0}
+    :cost {:input 0.04 :output 1.28 :cache-read 0.04 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072}
    "xiaomi/mimo-v2.6-pro"

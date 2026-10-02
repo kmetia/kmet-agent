@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-29T16:15:58Z"
+ :generated-at "2026-10-02T10:35:48Z"
  :provider {:id :cloudflare-ai-gateway
             :name "Cloudflare AI Gateway"
             :env-vars ["CLOUDFLARE_API_KEY" "CLOUDFLARE_ACCOUNT_ID" "CLOUDFLARE_GATEWAY_ID"]
@@ -502,7 +502,7 @@
                          :max "max"
                          :medium "medium"
                          :minimal nil
-                         :off nil
+                         :off "none"
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 0.1
@@ -525,7 +525,7 @@
                          :max "max"
                          :medium "medium"
                          :minimal nil
-                         :off nil
+                         :off "none"
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 2

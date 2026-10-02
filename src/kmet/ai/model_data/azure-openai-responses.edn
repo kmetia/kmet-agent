@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-30T20:07:26Z"
+ :generated-at "2026-10-02T10:35:48Z"
  :provider {:id :azure-openai-responses
             :name "Azure OpenAI"
             :env-vars ["AZURE_OPENAI_API_KEY"]
@@ -458,7 +458,7 @@
                          :max "max"
                          :medium "medium"
                          :minimal nil
-                         :off nil
+                         :off "none"
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 0.1 :output 0.5 :cache-read 0.01 :cache-write 0.125}
@@ -477,7 +477,7 @@
                          :max "max"
                          :medium "medium"
                          :minimal nil
-                         :off nil
+                         :off "none"
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}

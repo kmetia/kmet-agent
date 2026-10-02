@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-29T16:15:58Z"
+ :generated-at "2026-10-02T10:35:48Z"
  :provider {:id :opencode-go
             :name "OpenCode Go"
             :env-vars ["OPENCODE_API_KEY"]
@@ -480,7 +480,7 @@
                          :max "max"
                          :medium "medium"
                          :minimal nil
-                         :off nil
+                         :off "none"
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 0.1

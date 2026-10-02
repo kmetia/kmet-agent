@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-30T20:07:26Z"
+ :generated-at "2026-10-02T10:35:48Z"
  :provider {:id :openai
             :name "OpenAI"
             :env-vars ["OPENAI_API_KEY"]
@@ -524,7 +524,7 @@
                          :max "max"
                          :medium "medium"
                          :minimal nil
-                         :off nil
+                         :off "none"
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 0.1
@@ -536,6 +536,8 @@
     :max-tokens 128000
     :compat {:supports-strict-mode true
              :supports-openai-grammar-tools true
+             :supports-tool-search true
+             :supports-additional-tools true
              :supports-explicit-prompt-cache-mode true}}
    "gpt-6-sol"
    {:id "gpt-6-sol"
@@ -549,7 +551,7 @@
                          :max "max"
                          :medium "medium"
                          :minimal nil
-                         :off nil
+                         :off "none"
                          :xhigh "xhigh"}
     :input [:text :image]
     :cost {:input 2
@@ -561,6 +563,8 @@
     :max-tokens 128000
     :compat {:supports-strict-mode true
              :supports-openai-grammar-tools true
+             :supports-tool-search true
+             :supports-additional-tools true
              :supports-explicit-prompt-cache-mode true}}
    "gpt-6.1-sol"
    {:id "gpt-6.1-sol"
@@ -586,6 +590,8 @@
     :max-tokens 128000
     :compat {:supports-strict-mode true
              :supports-openai-grammar-tools true
+             :supports-tool-search true
+             :supports-additional-tools true
              :supports-explicit-prompt-cache-mode true}}
    "gpt-daybreak-blue-latest"
    {:id "gpt-daybreak-blue-latest"

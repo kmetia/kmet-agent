@@ -1,8 +1,17 @@
 {:schema-version 1
- :generated-at "2026-09-30T21:49:13Z"
+ :generated-at "2026-10-02T10:35:50Z"
  :provider {:id :openrouter :name "OpenRouter"}
  :models
- {"black-forest-labs/flux.2-flex"
+ {"black-forest-labs/flux-3-image"
+  {:id "black-forest-labs/flux-3-image"
+   :name "Black Forest Labs: FLUX.3 Image"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text :image]
+   :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+   :output [:image]}
+  "black-forest-labs/flux.2-flex"
   {:id "black-forest-labs/flux.2-flex"
    :name "Black Forest Labs: FLUX.2 Flex"
    :provider :openrouter
@@ -45,6 +54,15 @@
    :api :openrouter-images
    :base-url "https://openrouter.ai/api/v1"
    :input [:image :text]
+   :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+   :output [:image]}
+  "bytedance-seed/seedream-5-0-flash"
+  {:id "bytedance-seed/seedream-5-0-flash"
+   :name "ByteDance Seed: Seedream 5.0 Flash"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text :image]
    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
    :output [:image]}
   "bytedance-seed/seedream-5-0-lite"

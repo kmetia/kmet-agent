@@ -529,7 +529,7 @@
                       :base-url openai-base-url
                       :reasoning true :input [:text :image]
                       :cost (with-openai-long-context-pricing
-                              {:input 5 :output 30 :cache-read 0.5 :cache-write 6.25})
+                              (get openai-standard-costs "gpt-5.6-sol"))
                       :context-window openai-long-context-input-threshold
                       :max-tokens 128000)
            (array-map :id "gpt-5.6-terra" :name "GPT-5.6 Terra"
@@ -613,7 +613,7 @@
                 codex-context)
    (codex-model "gpt-5.6-sol" "GPT-5.6 Sol" [:text :image]
                 (with-openai-long-context-pricing
-                  (array-map :input 5 :output 30 :cache-read 0.5 :cache-write 6.25))
+                  (get openai-standard-costs "gpt-5.6-sol"))
                 codex-context)
    (codex-model "gpt-5.6-terra" "GPT-5.6 Terra" [:text :image]
                 (with-openai-long-context-pricing
