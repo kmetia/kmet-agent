@@ -52,7 +52,7 @@
          :default-model "grok-4.5"}
    :openai-codex {:name "OpenAI Codex"
                   :env-vars []            ;; OAuth (ChatGPT) — no env var
-                  :default-model "gpt-5.5"}
+                  :default-model "gpt-6.1-sol"}
    :azure-openai-responses {:name "Azure OpenAI"
                             :env-vars ["AZURE_OPENAI_API_KEY"]
                             :default-model "gpt-5.4"}
@@ -209,9 +209,12 @@
 
 ;; Models that accept `reasoning: {effort: "none"}` to disable thinking;
 ;; every other gpt-5* responses model pins :off to null (always-thinking).
+;; GPT-6 Sol/Luna are listed here for pi parity; the explicit GPT-6 rule
+;; above already maps their :off to "none".
 (def ^:private openai-responses-none-reasoning-models
   #{"gpt-5.1" "gpt-5.2" "gpt-5.3-codex" "gpt-5.4" "gpt-5.4-mini"
-    "gpt-5.4-nano" "gpt-5.5" "gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna"})
+    "gpt-5.4-nano" "gpt-5.5" "gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna"
+    "gpt-6-sol" "gpt-6-luna"})
 
 (def ^:private xai-responses-model-id "grok-4.5")
 

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-02T10:35:48Z"
+ :generated-at "2026-10-02T10:45:49Z"
  :provider {:id :openrouter
             :name "OpenRouter"
             :env-vars ["OPENROUTER_API_KEY"]
@@ -6421,7 +6421,7 @@
                          :off "none"
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 0.004575 :output 1.2 :cache-read 0.002115 :cache-write 0}
+    :cost {:input 0.004 :output 0.6 :cache-read 0.004 :cache-write 0}
     :context-window 1048576
     :max-tokens 943718
     :compat {:supports-developer-role false
@@ -6463,7 +6463,7 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.0077 :output 1.28 :cache-read 0.0077 :cache-write 0}
+    :cost {:input 0.005775 :output 1.6 :cache-read 0.005775 :cache-write 0}
     :context-window 1048576
     :max-tokens 943718
     :compat {:supports-developer-role false

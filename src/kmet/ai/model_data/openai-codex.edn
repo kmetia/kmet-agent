@@ -1,9 +1,9 @@
 {:schema-version 1
- :generated-at "2026-10-02T10:35:48Z"
+ :generated-at "2026-10-02T10:45:49Z"
  :provider {:id :openai-codex
             :name "OpenAI Codex"
             :env-vars []
-            :default-model "gpt-5.5"}
+            :default-model "gpt-6.1-sol"}
  :models
  {:openai-codex-responses
   {"gpt-5.3-codex-spark"

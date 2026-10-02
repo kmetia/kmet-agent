@@ -176,6 +176,7 @@
       (t/is (= ["OPENAI_API_KEY"] (:env-vars (m/get-provider :openai))))
       (t/is (= ["XAI_API_KEY"] (:env-vars (m/get-provider :xai))))
       (t/is (= "gpt-5.5" (:default-model (m/get-provider :openai))))
+      (t/is (= "gpt-6.1-sol" (:default-model (m/get-provider :openai-codex))))
       (t/is (= "grok-4.5" (:default-model (m/get-provider :xai))))
       (t/is (= #{:mistral-conversations} (:api-types (m/get-provider :mistral))))
       (t/is (= ["MISTRAL_API_KEY"] (:env-vars (m/get-provider :mistral))))
