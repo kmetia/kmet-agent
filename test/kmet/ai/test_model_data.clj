@@ -89,42 +89,54 @@
           (t/is (some #(re-find #"has no reasoning boolean" %) errors)
                 (str "expected a reasoning error, got: " errors)))))))
 
-(t/deftest test-openai-gpt-6-astra-context
-  (let [model (some #(when (= "gpt-6-astra" (:id %)) %)
-                    (#'mg/missing-openai-models #{}))
-        normalized (#'mg/normalize-openai model)]
-    (t/is (= 1050000 (:context-window model)))
-    (t/is (= 1050000 (:context-window normalized))
-          "the API context is not capped to the Codex subscription window")
-    (t/is (= 272000 (get-in normalized [:cost :tiers 0 :input-tokens-above])))))
+(t/deftest test-openai-gpt-6-context
+  "Direct OpenAI API models retain their 1.05M context; the separate Codex
+   catalog applies the ChatGPT subscription's 272K limit."
+  (let [models (into {} (map (juxt :id identity) (#'mg/missing-openai-models #{})))]
+    (doseq [id ["gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"]]
+      (let [model (get models id)
+            normalized (#'mg/normalize-openai model)]
+        (t/is (= 1050000 (:context-window model)))
+        (t/is (= 1050000 (:context-window normalized))
+              "direct API context must not be capped to the Codex subscription limit")
+        (t/is (= 272000 (get-in normalized [:cost :tiers 0 :input-tokens-above])))))))
 
-(t/deftest test-codex-gpt-6-astra
-  "GPT-6 Astra is a static ChatGPT OAuth catalog entry, not a model exposed
-   by the OAuth login response. Keep its Codex-specific wire metadata in
-   lockstep with pi's hardcoded codexModels entry."
-  (let [model (some #(when (= "gpt-6-astra" (:id %)) %)
-                    (#'mg/process-codex))]
-    (t/is (= "gpt-6-astra" (:id model)))
-    (t/is (= "GPT-6 Astra" (:name model)))
-    (t/is (= :openai-codex (:provider model)))
-    (t/is (= :openai-codex-responses (:api model)))
-    (t/is (= "https://chatgpt.com/backend-api" (:base-url model)))
-    (t/is (= true (:reasoning model)))
-    (t/is (= [:text :image] (:input model)))
-    (t/is (= {:input 10 :output 50 :cache-read 1 :cache-write 12.5
-              :tiers [{:input-tokens-above 272000
-                       :input 20.0 :output 75.0 :cache-read 2.0 :cache-write 25.0}]}
-             (:cost model)))
-    (t/is (= 272000 (:context-window model)))
-    (t/is (= 128000 (:max-tokens model)))
-    (let [model (#'mg/apply-thinking-maps model nil)]
-      (t/is (= {:off nil :minimal "low" :low "low" :medium "medium"
-                :high "high" :xhigh "xhigh" :max "max"}
-               (:thinking-level-map model)))
-      (t/is (= {:supports-openai-grammar-tools true
-                :supports-tool-search true
-                :supports-additional-tools true}
-               (:compat (#'mg/apply-compat-metadata model)))))))
+(t/deftest test-codex-gpt-6-models
+  "GPT-6 models are static ChatGPT OAuth catalog entries. Keep their
+   Codex-specific wire metadata in lockstep with pi's codexModels entries."
+  (let [models (into {} (map (juxt :id identity) (#'mg/process-codex)))]
+    (doseq [[id name cost off]
+            [["gpt-6-astra" "GPT-6 Astra"
+              {:input 10 :output 50 :cache-read 1 :cache-write 12.5} nil]
+             ["gpt-6-sol" "GPT-6 Sol"
+              {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5} "none"]
+             ["gpt-6-luna" "GPT-6 Luna"
+              {:input 0.1 :output 0.5 :cache-read 0.01 :cache-write 0.125} "none"]
+             ["gpt-6.1-sol" "GPT-6.1 Sol"
+              {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5} nil]]]
+      (let [model (get models id)
+            expected-cost (assoc cost :tiers [{:input-tokens-above 272000
+                                               :input (* 2.0 (:input cost))
+                                               :output (* 1.5 (:output cost))
+                                               :cache-read (* 2.0 (:cache-read cost))
+                                               :cache-write (* 2.0 (:cache-write cost))}])]
+        (t/is (= name (:name model)))
+        (t/is (= :openai-codex (:provider model)))
+        (t/is (= :openai-codex-responses (:api model)))
+        (t/is (= "https://chatgpt.com/backend-api" (:base-url model)))
+        (t/is (= true (:reasoning model)))
+        (t/is (= [:text :image] (:input model)))
+        (t/is (= expected-cost (:cost model)))
+        (t/is (= 272000 (:context-window model)))
+        (t/is (= 128000 (:max-tokens model)))
+        (let [model (#'mg/apply-thinking-maps model nil)]
+          (t/is (= {:off off :minimal "low" :low "low" :medium "medium"
+                    :high "high" :xhigh "xhigh" :max "max"}
+                   (:thinking-level-map model)))
+          (t/is (= {:supports-openai-grammar-tools true
+                    :supports-tool-search true
+                    :supports-additional-tools true}
+                   (:compat (#'mg/apply-compat-metadata model)))))))))
 
 (t/deftest test-commandcode-refs-transfer-capabilities
   "Regression: the canonical-ref lookup in process-commandcode (get-in

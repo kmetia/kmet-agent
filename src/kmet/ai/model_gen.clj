@@ -180,7 +180,8 @@
 
 (def ^:private openai-tool-search-model-ids
   #{"gpt-5.4" "gpt-5.4-mini" "gpt-5.4-pro" "gpt-5.5"
-    "gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna" "gpt-6-astra"})
+    "gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna"
+    "gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"})
 
 ;; Public OpenAI documents additional_tools for applications that load tools
 ;; outside the normal tool-search flow; the openai provider supports both.
@@ -191,14 +192,20 @@
 
 (def ^:private openai-long-context-pricing-model-ids
   #{"gpt-5.4" "gpt-5.4-pro" "gpt-5.5" "gpt-5.5-pro"
-    "gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna" "gpt-6-astra"})
+    "gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna"
+    "gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"})
 
-;; OpenAI reduced GPT-5.6 Terra and Luna prices on 2026-07-30. Keep these
-;; authoritative values until models.dev and passthrough catalogs catch up.
+;; Keep current OpenAI prices authoritative until models.dev and passthrough
+;; catalogs catch up.
 ;; https://developers.openai.com/api/docs/pricing
-(def ^:private openai-gpt-56-standard-costs
+(def ^:private openai-standard-costs
   {"gpt-5.6-luna" {:input 0.2 :output 1.2 :cache-read 0.02 :cache-write 0.25}
-   "gpt-5.6-terra" {:input 2 :output 12 :cache-read 0.2 :cache-write 2.5}})
+   "gpt-5.6-sol" {:input 4 :output 20 :cache-read 0.4 :cache-write 5}
+   "gpt-5.6-terra" {:input 2 :output 12 :cache-read 0.2 :cache-write 2.5}
+   "gpt-6-astra" {:input 10 :output 50 :cache-read 1 :cache-write 12.5}
+   "gpt-6-luna" {:input 0.1 :output 0.5 :cache-read 0.01 :cache-write 0.125}
+   "gpt-6-sol" {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
+   "gpt-6.1-sol" {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5}})
 
 ;; Models that accept `reasoning: {effort: "none"}` to disable thinking;
 ;; every other gpt-5* responses model pins :off to null (always-thinking).
@@ -485,12 +492,36 @@
 (defn- missing-openai-models
   [existing-ids]
   (remove (fn [mm] (contains? existing-ids (:id mm)))
-          [(array-map :id "gpt-6-astra" :name "GPT-6 Astra"
+          [(array-map :id "gpt-6.1-sol" :name "GPT-6.1 Sol"
                       :provider :openai :api :openai-responses
                       :base-url openai-base-url
                       :reasoning true :input [:text :image]
                       :cost (with-openai-long-context-pricing
-                              {:input 10 :output 50 :cache-read 1 :cache-write 12.5})
+                              (get openai-standard-costs "gpt-6.1-sol"))
+                      :context-window 1050000
+                      :max-tokens 128000)
+           (array-map :id "gpt-6-astra" :name "GPT-6 Astra"
+                      :provider :openai :api :openai-responses
+                      :base-url openai-base-url
+                      :reasoning true :input [:text :image]
+                      :cost (with-openai-long-context-pricing
+                              (get openai-standard-costs "gpt-6-astra"))
+                      :context-window 1050000
+                      :max-tokens 128000)
+           (array-map :id "gpt-6-sol" :name "GPT-6 Sol"
+                      :provider :openai :api :openai-responses
+                      :base-url openai-base-url
+                      :reasoning true :input [:text :image]
+                      :cost (with-openai-long-context-pricing
+                              (get openai-standard-costs "gpt-6-sol"))
+                      :context-window 1050000
+                      :max-tokens 128000)
+           (array-map :id "gpt-6-luna" :name "GPT-6 Luna"
+                      :provider :openai :api :openai-responses
+                      :base-url openai-base-url
+                      :reasoning true :input [:text :image]
+                      :cost (with-openai-long-context-pricing
+                              (get openai-standard-costs "gpt-6-luna"))
                       :context-window 1050000
                       :max-tokens 128000)
            (array-map :id "gpt-5.6-sol" :name "GPT-5.6 Sol"
@@ -506,7 +537,7 @@
                       :base-url openai-base-url
                       :reasoning true :input [:text :image]
                       :cost (with-openai-long-context-pricing
-                              (get openai-gpt-56-standard-costs "gpt-5.6-terra"))
+                              (get openai-standard-costs "gpt-5.6-terra"))
                       :context-window openai-long-context-input-threshold
                       :max-tokens 128000)
            (array-map :id "gpt-5.6-luna" :name "GPT-5.6 Luna"
@@ -514,7 +545,7 @@
                       :base-url openai-base-url
                       :reasoning true :input [:text :image]
                       :cost (with-openai-long-context-pricing
-                              (get openai-gpt-56-standard-costs "gpt-5.6-luna"))
+                              (get openai-standard-costs "gpt-5.6-luna"))
                       :context-window openai-long-context-input-threshold
                       :max-tokens 128000)
            (array-map :id "gpt-5-chat-latest" :name "GPT-5 Chat Latest"
@@ -543,13 +574,24 @@
              :context-window context :max-tokens codex-max-tokens))
 
 (defn- process-codex
-  "The hardcoded Codex catalog (pi codexModels; GPT-5.4/5.5/5.6 and GPT-6
-   Astra carry the long-context pricing tier; GPT-5.6 uses standard OpenAI
-   costs)."
+  "The hardcoded Codex catalog (pi codexModels); current GPT-5.6 and GPT-6
+   entries carry OpenAI's standard costs and long-context pricing tier."
   []
-  [(codex-model "gpt-6-astra" "GPT-6 Astra" [:text :image]
+  [(codex-model "gpt-6.1-sol" "GPT-6.1 Sol" [:text :image]
                 (with-openai-long-context-pricing
-                  (array-map :input 10 :output 50 :cache-read 1 :cache-write 12.5))
+                  (get openai-standard-costs "gpt-6.1-sol"))
+                codex-context)
+   (codex-model "gpt-6-astra" "GPT-6 Astra" [:text :image]
+                (with-openai-long-context-pricing
+                  (get openai-standard-costs "gpt-6-astra"))
+                codex-context)
+   (codex-model "gpt-6-sol" "GPT-6 Sol" [:text :image]
+                (with-openai-long-context-pricing
+                  (get openai-standard-costs "gpt-6-sol"))
+                codex-context)
+   (codex-model "gpt-6-luna" "GPT-6 Luna" [:text :image]
+                (with-openai-long-context-pricing
+                  (get openai-standard-costs "gpt-6-luna"))
                 codex-context)
    (codex-model "gpt-5.3-codex-spark" "GPT-5.3 Codex Spark" [:text]
                 (array-map :input 1.75 :output 14 :cache-read 0.175 :cache-write 0)
@@ -567,7 +609,7 @@
                 codex-context)
    (codex-model "gpt-5.6-luna" "GPT-5.6 Luna" [:text :image]
                 (with-openai-long-context-pricing
-                  (get openai-gpt-56-standard-costs "gpt-5.6-luna"))
+                  (get openai-standard-costs "gpt-5.6-luna"))
                 codex-context)
    (codex-model "gpt-5.6-sol" "GPT-5.6 Sol" [:text :image]
                 (with-openai-long-context-pricing
@@ -575,7 +617,7 @@
                 codex-context)
    (codex-model "gpt-5.6-terra" "GPT-5.6 Terra" [:text :image]
                 (with-openai-long-context-pricing
-                  (get openai-gpt-56-standard-costs "gpt-5.6-terra"))
+                  (get openai-standard-costs "gpt-5.6-terra"))
                 codex-context)])
 
 ;; ─── azure-openai-responses (pi: azureOpenAiModels — the mirror of the
@@ -1619,12 +1661,15 @@
       (and (contains? #{:openai-responses :azure-openai-responses} (:api mm))
            (str/starts-with? id "gpt-5"))
       (merge-thinking-level-map {:off nil})
-      ;; GPT-6 on Responses supports the full effort range, including off.
-      (and (str/starts-with? id "gpt-6")
+      ;; GPT-6 Responses models support the full effort range. Astra and
+      ;; GPT-6.1 Sol reject `none`; Sol and Luna accept it.
+      (and (contains? #{"gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"} id)
            (contains? #{:openai-responses :azure-openai-responses
                         :openai-codex-responses}
                       (:api mm)))
-      (merge-thinking-level-map {:off nil :minimal nil :low "low" :medium "medium"
+      (merge-thinking-level-map {:off (when (contains? #{"gpt-6-sol" "gpt-6-luna"} id)
+                                        "none")
+                                 :minimal nil :low "low" :medium "medium"
                                  :high "high" :xhigh "xhigh" :max "max"})
       (and (= :github-copilot provider) (str/starts-with? id "gpt-5"))
       (merge-thinking-level-map {:minimal "low"})
@@ -1737,13 +1782,14 @@
     mm))
 
 (def ^:private openai-codex-additional-tools-model-ids
-  #{"gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna" "gpt-6-astra"})
+  #{"gpt-5.6-sol" "gpt-5.6-terra" "gpt-5.6-luna"
+    "gpt-6-astra" "gpt-6-sol" "gpt-6-luna" "gpt-6.1-sol"})
 
 (defn- apply-openai-tool-search-metadata
   "pi applyOpenAIToolSearchMetadata: newer OpenAI Responses models can load
    tools at a specific point in the input (tool search) and accept
    additional_tools items (the Codex Responses family has its own GPT-5.6
-   and GPT-6 Astra additional-tools set)."
+   and GPT-6 additional-tools set)."
   [mm]
   (let [is-openai? (and (= :openai (:provider mm)) (= :openai-responses (:api mm)))
         is-codex? (and (= :openai-codex (:provider mm))
@@ -1797,7 +1843,7 @@
       (and (= :openai (:provider mm))
            (contains? openai-long-context-pricing-model-ids id))
       (assoc :cost (with-openai-long-context-pricing
-                     (or (get openai-gpt-56-standard-costs id)
+                     (or (get openai-standard-costs id)
                          (:cost mm))))
 
       ;; models.dev reports gpt-5-pro output as 272000 (a duplicate of the
