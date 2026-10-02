@@ -619,7 +619,7 @@
                                                            {:role :info :label "Share"
                                                             :content "GitHub CLI did not respond (timed out)."})
 
-                   :else
+                   :ok
                    (if (nil? @(:session-atom cs))
                      (chat-history/chat-history-add-message! chat
                                                              {:role :info :label "Share"

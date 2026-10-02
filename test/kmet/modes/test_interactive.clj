@@ -17,6 +17,7 @@
             [kmet.modes.interactive.status :as status]
             [kmet.modes.interactive.turn :as turn]
             [kmet.modes.interactive.session-admin :as session-admin]
+            [kmet.app.commands :as commands]
             [kmet.app.event-bus :as event-bus]
             [kmet.app.loop :as agent]
             [kmet.app.session :as session]
@@ -329,6 +330,32 @@
                :content "Stopped: repeated identical tool calls"}]
              (mapv #(select-keys % [:role :content])
                    @(:messages-atom chat-history)))))))
+
+(deftest share-command-dispatches-auth-status
+  (let [registered (atom {})]
+    (with-redefs [commands/find-command (constantly nil)
+                  commands/register-command! (fn [cmd]
+                                               (swap! registered assoc (:name cmd) cmd))]
+      (builtins/register-builtin-commands! {}))
+    (doseq [[auth-status sess expected-content expected-shares]
+            [[:ok {:id "session"} nil 1]
+             [:ok nil "No active session." 0]
+             [:not-installed {:id "session"}
+              "GitHub CLI (gh) is not installed. Install it from https://cli.github.com/" 0]
+             [:not-logged-in {:id "session"}
+              "GitHub CLI is not logged in. Run 'gh auth login' first." 0]
+             [:timed-out {:id "session"}
+              "GitHub CLI did not respond (timed out)." 0]]]
+      (testing (str "auth status " auth-status ", session " (some? sess))
+        (let [shared (atom [])
+              chat (chat-history/make-chat-history)
+              cs {:session-atom (atom sess) :chat-history chat}]
+          (with-redefs [builtins/gh-auth-status (constantly auth-status)
+                        builtins/share-session! (fn [cs] (swap! shared conj cs))]
+            ((:handler (get @registered "share")) cs ""))
+          (is (= (vec (repeat expected-shares cs)) @shared))
+          (is (= (if expected-content [expected-content] [])
+                 (mapv :content @(:messages-atom chat)))))))))
 
 (deftest share-completion-requests-frame-after-message
   (testing "the async share reply requests a frame after appending its chat message"
