@@ -2,9 +2,11 @@
 
 Status: draft. Order is deliberate: **Phase 0 (names consolidation + name
 assignment fix) → Phase 1 (extract `kmet.libs.mcp`) → Phase 2 (auth) →
-Phase 3 (optional hygiene) → Phase 4 (2026-07-28 protocol work)** — Phases 0,
-1 and 2 are landed; phases 3+ are tracked here but not started. The protocol
-revision lands last so the client is extracted and auth settled first.
+Phase 3 (2026-07-28 protocol work) → Phase 4 (optional hygiene)** — Phases 0,
+1 and 2 are landed; phase 3 is planned in full below (this section is its
+plan — there is no separate plan file), and phase 4 lands after it. The
+protocol revision lands before the hygiene pass so the client is extracted
+and auth settled first.
 
 Scope: `extensions/mcp-adapter/` and the shared `kmet.libs` layer. Phase 0 and
 Phase 1 change no protocol behavior; they move code so the stateless revision
@@ -45,7 +47,7 @@ depend on — and they can disagree.
 |---|---|---|
 | Transports (stdio, streamable HTTP, legacy SSE) + JSON-RPC client core + protocol constants/`_meta`/content | `kmet.libs.mcp.*` | Self-contained already (only `kmet.libs.*`, `babashka.process`, `io`, `core.async`); pi keeps them in a standalone `packages/mcp`; lib tests run under `bb test`/`jolt test` instead of manual scripts; the transport/era seam becomes an API boundary |
 | SSE wire framing | `kmet.libs.sse` — **already exists, unchanged** | Generic `parse-sse-line` / `body->reader` / `make-idle-reader` / `stream-loop`; shared with `kmet.ai.api.sse`. The MCP transports use it, never re-implement it |
-| MCP legacy SSE transport binding | `kmet.libs.mcp.transport.sse` | GET stream → `endpoint` event → POST URL + JSON-RPC correlation is MCP semantics, not generic SSE framing. **Frozen**: legacy SSE connections negotiate legacy protocol versions only, so Phase 4 must not touch it. Marked deprecated; removed when the HTTP+SSE off-ramp closes |
+| MCP legacy SSE transport binding | `kmet.libs.mcp.transport.sse` | GET stream → `endpoint` event → POST URL + JSON-RPC correlation is MCP semantics, not generic SSE framing. **Frozen**: legacy SSE connections negotiate legacy protocol versions only, so Phase 3 must not touch it. Marked deprecated; removed when the HTTP+SSE off-ramp closes |
 | Tool naming/selection + name *assignment* | `kmet.extensions.mcp-adapter.names` | Prefix modes, builtin collision, and include/exclude globs are adapter policy, not MCP protocol |
 | Auth | extension now; `kmet.libs.mcp.auth` in Phase 2 | `kmet.libs.oauth` already holds discovery/PKCE/device/DCR/exchange; the rest is MCP-auth policy plus an issuer-keyed store |
 | Config, metadata cache, catalog, direct tools, proxy, UI, prompts, output guard | extension | Host integration |
@@ -192,7 +194,7 @@ Wiring:
 Extract the transport-neutral MCP client from `client.clj` — stdio (80),
 streamable-http (151), request core (381), handshake/discovery (747), result
 formatting (918) — plus the legacy SSE transport. Behavior preserved; era
-neutrality deliberate (Phase 4 is 2026-07-28).
+neutrality deliberate (Phase 3 is 2026-07-28).
 
 Status: **landed** (1.0-1.5), plus the follow-up stdio swap: the transport
 now runs on `kmet.libs.jsonrpc` — line framing, id allocation and response
@@ -249,7 +251,7 @@ src/kmet/libs/mcp/transport/sse.clj       kmet.libs.mcp.transport.sse
   `list-page-timeout-ms`, `protocol-version`, `supported-protocol-versions`,
   `client-info`, `mcp-error`, `format-result` (content blocks →
   `{:text :is-error}`). This is where the era map, `_meta` decoration,
-  `resultType`, and `-32022` handling land in Phase 4.
+  `resultType`, and `-32022` handling land in Phase 3.
 - `client`: `progress-token`, `request!`, `notify!`, `close!`, `alive?`,
   `last-used`, `establish!` (handshake + capability-gated catalog fetch),
   `connect!` (all three transports), `list-all-tools`, `list-all-prompts`,
@@ -291,7 +293,7 @@ the lib (all three transports now live in the lib), so `core.clj`,
 `list-page-timeout-ms`, `header-value`, `connect!`, `request!`, `notify!`,
 `close!`, `alive?`, `last-used`, `list-all-*`, `get-prompt`, `read-resource`,
 `expand-uri-template`, `format-result`. Use plain `(def x lib/x)` aliases.
-The facade can be deleted in Phase 4 with callers pointed at the lib directly.
+The facade can be deleted in Phase 3 with callers pointed at the lib directly.
 
 ### 1.3. Wiring
 
@@ -437,32 +439,428 @@ baseline):
   the pre-existing overlay-input smoke, which needs lsp-adapter in the
   host's extension set (it fails the same way without this change).
 
-## Phase 3 — optional hygiene
+## Phase 3 — 2026-07-28 protocol work (the end goal)
+
+Status: **planned** — landings 3.1–3.8 below, in order; each leaves
+`scripts/validate-all.bb` and the repo gates green. Depends on Phase 1's
+era-neutral seam and Phase 2's auth plumbing (both landed).
+
+No pi reference: pi's current main still negotiates only `2025-11-25` and
+earlier (`packages/mcp/src/protocol/types.ts`, `SUPPORTED_PROTOCOL_VERSIONS`),
+and its conformance README says "2026-07-28 is not covered: it is a stateless
+protocol pi does not implement." Phase 3 is spec-driven — the lifecycle and
+versioning page, the stdio and streamable-HTTP bindings, `server/discover`,
+subscriptions and MRTR are the reference. Nothing to port; the fakes (3.1)
+are what pins the wire.
+
+### Protocol delta
+
+| # | Delta | Spec | Client work |
+|---|---|---|---|
+| 1 | `initialize`/`notifications/initialized` removed; every request/notification carries `_meta` (`io.modelcontextprotocol/protocolVersion`, `.../clientInfo`, `.../clientCapabilities`) | SEP-2575 | `protocol` meta helpers + `request!`/`notify!` decoration (3.2) |
+| 2 | `server/discover` → `{:resultType :supportedVersions :capabilities :instructions}` plus `_meta.io.modelcontextprotocol/serverInfo`; modern capabilities/identity source; stdio probe | SEP-2575 | `client/discover!`; stdio detection (3.3) |
+| 3 | `Mcp-Session-Id` and the GET stream removed | SEP-2567 | no session capture/echo on modern conns (3.4) |
+| 4 | `Mcp-Method`/`Mcp-Name` required on POSTs (`params.name`/`params.uri`; Base64 sentinel when not header-safe); `-32020` on mismatch | SEP-2243 | `transport.http` headers (3.4) |
+| 5 | `x-mcp-header` tool params mirrored to `Mcp-Param-*`; invalid annotations ⇒ the tool is excluded from `tools/list` (HTTP) | SEP-2243 | `transport.http` helpers + `list-all-tools` filtering (3.6) |
+| 6 | Every result carries `resultType` (`complete`/`input_required`); missing = `complete`; `input_required` = MRTR (`inputRequests`/`requestState`) | SEP-2322 | envelope check; `requestState`-only rounds retried, `inputRequests` refused (3.2) |
+| 7 | List/read/discover results carry `ttlMs`/`cacheScope` | SEP-2549 | hint only; optionally cap metadata-cache freshness (3.7) |
+| 8 | `subscriptions/listen` replaces the GET stream and `resources/subscribe`; ack-first; notifications tagged `_meta.io.modelcontextprotocol/subscriptionId` | SEP-2575 | `client/listen!` + transports (3.5) |
+| 9 | New error codes: `-32020` HeaderMismatch, `-32021` MissingRequiredClientCapability, `-32022` UnsupportedProtocolVersion (`data.supported`/`data.requested`) | changelog minor 12 | `protocol/modern-error-codes`; negotiation (3.2) |
+| 10 | `ping`, `logging/setLevel`, resumability (`Last-Event-ID`) removed; `notifications/cancelled` is stdio-only | SEP-2575 | cancel guards; no resumption code to write (3.4) |
+
+No work for the removed server→client requests (`roots/list`,
+`sampling/createMessage`, `elicitation/create`): the client declares `{}`
+capabilities and already refuses them with `-32601`.
+
+Era model (spec, Versioning and Compatibility): **modern** = per-request
+metadata (`2026-07-28`+); **legacy** = `initialize` handshake (`2025-11-25`
+and earlier, the existing `protocol/supported-protocol-versions`);
+**dual-era** = both. Era is a property of the server (stdio process / HTTP
+origin), cacheable per config, re-probed on failure. Detection must not be
+keyed to one error code: stdio probes `server/discover` and falls back on
+anything that is not a *recognized modern error* (`-32020`/`-32021`/`-32022`);
+HTTP attempts a modern request and inspects the body of a `400`.
+`transport.sse` never detects: legacy HTTP+SSE negotiates legacy versions
+only, so it is frozen out of every landing below.
+
+### 3.1. Baseline: modern fakes + `scripts/validate-protocol.bb`
+
+- `scripts/fake-mcp-server.bb` and `scripts/fake-http-mcp-server.bb` gain an
+  additive modern mode (stdio: argv flag/env — `--era modern` /
+  `KMET_FAKE_ERA`; HTTP: `?era=modern`): `server/discover` with
+  `DiscoverResult`; `_meta` required on every request (missing ⇒ `-32602`;
+  version not in `supportedVersions` ⇒ `-32022` with
+  `{:supported [...] :requested ...}`); every result
+  `resultType "complete"`; `subscriptions/listen` ack-first with
+  `io.modelcontextprotocol/subscriptionId` stamping; HTTP mode also
+  validates `MCP-Protocol-Version`/`Mcp-Method`/`Mcp-Name` (mismatch/absent
+  ⇒ `400` `-32020`), never sees a session header, answers GET/DELETE
+  `405`, and advertises cache fields.
+- Both fakes need a deterministic change trigger for the listen tests: the
+  stdio fake emits `notifications/tools/list_changed` on a later
+  `tools/call` (one channel); the HTTP fake needs a shared
+  pending-notification queue and a non-blocking request loop so a trigger
+  POST can deliver onto an already-open listen stream.
+- Legacy modes stay byte-for-byte what today's scripts assert — the modern
+  mode exists so the unchanged client still passes `validate-all.bb`
+  (nothing probes yet).
+- New `scripts/validate-protocol.bb` is the phase's end-to-end suite; add it
+  to `validate-all.bb`'s `runs` (both fakes) as the eighth script. In this
+  landing it asserts the fakes' own wire shape only (discover, `-32022`
+  data, header rejection, session/GET/DELETE behavior); client assertions
+  accumulate per landing.
+- Capture the baseline before 3.2: `validate-all.bb` output, and the
+  `validate-client.bb` "unsupported revision rejected" check — the fake's
+  `initialize` answers `2026-07-28` and the legacy parser must keep
+  refusing it (a legacy handshake must never select a modern revision).
+- No lib/adapter changes. Gates: `bb lint-changed`,
+  `bb format-check-changed` (or `bb format-changed`); `validate-all.bb`.
+
+### 3.2. Era core in `kmet.libs.mcp` (behavior-neutral)
+
+`protocol.clj`:
+
+- `modern-protocol-version "2026-07-28"`, `modern-supported-versions`
+  (the revisions the client can send), and `probe-timeout-ms` (10–15s),
+  next to the existing legacy `supported-protocol-versions` (whose
+  docstring loses "not reachable from here").
+- `meta-ns`/`meta-key` and `modern-request-meta` — the `_meta` map:
+  version, `io.modelcontextprotocol/clientInfo` = `client-info`, and
+  `io.modelcontextprotocol/clientCapabilities` `{}` (kmet implements no
+  elicitation/sampling/roots, so a conforming server can never send us an
+  `inputRequests` entry — see MRTR in 3.2).
+- `modern-error-codes` = `#{-32020 -32021 -32022}` and `(modern-error? ex-data)`.
+- `(negotiate-version supported)` → `{:era :modern|:legacy :version rev}`
+  for the newest mutually supported revision (our modern list first, then
+  the legacy list; the server's ordering is ignored) or nil when there is
+  no overlap. A server that answers `server/discover` but advertises only
+  legacy revisions is dual-era: fall back to `initialize` instead of
+  erroring (3.3/3.4).
+- a `result-type` accessor: absent or `"complete"` → `"complete"`, else the
+  raw value.
+
+`client.clj`:
+
+- Every conn carries an `:era` atom (`nil` = legacy until proven
+  otherwise). Transports do not change: `connect!` assocs it like it
+  already does `:capabilities`, and the `:conn-ref` repoint keeps
+  transport internals consistent. Public `(modern? conn)`.
+- `request!`/`notify!` merge `modern-request-meta` into `params._meta` when
+  the conn is modern (the spec carries `_meta` inside `params` on stdio and
+  HTTP alike).
+- After a transport result: missing/`"complete"` passes through; a modern
+  conn + `resultType "input_required"` is MRTR:
+  - **no `inputRequests`** (a `requestState`-only round) → retry the same
+    request with `requestState` echoed byte-for-byte, capped at two rounds,
+    then error. A capability-less client can serve this pattern.
+  - **with `inputRequests`** → throw `mcp-error` naming the keys and
+    methods (`{:result-type :input-required :input-requests ...}`). kmet
+    declares `{}` client capabilities, so a conforming server can never
+    send elicitation/sampling/roots requests; this fires only on
+    non-conformance, and refusing loudly beats looping. `inputResponses`
+    is never sent.
+- `notifications/cancelled` remains the stdio cancellation mechanism; on
+  modern HTTP conns it is suppressed (3.4) — there, closing the response
+  stream is the cancellation and the modern core defines no client→server
+  notification over HTTP. The stdio timeout path sends it from
+  `transport.stdio/translate-exception` via `jrpc/notify!`, bypassing
+  `client/notify!`, so that path must merge `modern-request-meta` itself on
+  a modern conn.
+
+Behavior-neutral: nothing sets an era to `:modern` yet, so every existing
+path is unchanged. Tests: `test_protocol.clj` (meta map, negotiation —
+including a server advertising only unknown revisions, error-code set,
+result-type accessor); `test_client.clj` (`_meta` merged on requests and
+notifications, none on a legacy conn; MRTR — `requestState`-only retry
+bounded, `inputRequests` refusal; `complete`/absent passthrough) with the
+transports' `request!` redefined as in Phase 1. Gates: `bb test` (lib
+namespaces), lint/format.
+
+### 3.3. stdio probe + modern establish
+
+- `client/connect!` gains an era-establish step before the catalog work:
+  - explicit hint (`:protocol-era` opt, 3.7) → skip detection: a modern
+    hint runs `discover!` directly, a legacy hint runs `initialize!`;
+    era-inconsistent failures fall into the shared re-probe (3.7);
+  - else `detect-stdio-era!`: send `server/discover` with `_meta` forced
+    (the era is still unknown — an internal `request-with-meta!`):
+    - a `DiscoverResult` → `negotiate-version` over `:supportedVersions`: a
+      modern result continues modern, a legacy result falls back to
+      `initialize!`, nil errors;
+    - a JSON-RPC error in `modern-error-codes` → modern; on `-32022`
+      negotiate over `data.supported` (retry with the negotiated modern
+      revision, or the legacy fallback — nil errors), on `-32020`/`-32021`
+      surface the error;
+    - any other error, process death, or timeout → legacy.
+  - the probe uses a dedicated `protocol/probe-timeout-ms` (10–15s), not
+    the 60s initialize timeout: a legacy server that answers unknown
+    methods (the common case) resolves immediately, and a silent one
+    stalls seconds rather than a minute. Cold-start recovery: when the
+    probe timed out and `initialize!` then fails with an *error* (not its
+    own timeout), run the modern `discover!` once more with the full
+    timeout before surfacing — a modern server that was still booting
+    comes back modern. This is the same "re-probe once on an era-ambiguous
+    failure" helper 3.7 needs.
+  - record `{:era :modern|:legacy :version rev}` in `@(:era conn)` and the
+    version in `@(:protocol-version conn)`.
+- `establish!` dispatches: modern → `discover!` supplies the capabilities
+  and identity (`:server-info` from
+  `_meta.io.modelcontextprotocol/serverInfo`; `:instructions` is read and
+  dropped — no adapter consumer today) — its result is reused when
+  detection just ran, and run here on a cached-modern hint — then the
+  existing capability-gated catalog fetches; legacy → `initialize!` exactly
+  as today.
+- A legacy `initialize` answer outside the legacy list still fails as
+  today — the only recovery here is the cold-start re-probe above; a
+  wrong cached hint is 3.7's.
+- Tests: `test_client.clj` detection table (discover / modern error /
+  `-32601` / timeout ⇒ legacy / timeout + failed `initialize` ⇒ recovery
+  re-probe), no `_meta` and `initialize` on the legacy path, no
+  `initialize` on the modern path; `test_transport_stdio.clj` `^:slow`
+  fake-server run covers probe → discover → list → call. Scripts:
+  `validate-protocol.bb` stdio modern + legacy; `validate-client.bb`,
+  `validate-script.bb`, `e2e.bb` prove the legacy fallback end to end.
+
+### 3.4. Streamable HTTP modern path
+
+`transport.http`:
+
+- `Mcp-Method` on every modern POST; `Mcp-Name` for `tools/call`
+  (`params.name`), `resources/read` (`params.uri`), `prompts/get`
+  (`params.name`); `encode-header-value` implements the spec's Base64
+  sentinel (`=?base64?…?=`, including a plain value that matches the
+  sentinel).
+- The probe carries `MCP-Protocol-Version` too: seed
+  `@(:protocol-version conn)` with the probe version (a cached hint's
+  revision, else `protocol/modern-protocol-version`) before
+  `server/discover`, clear it when detection falls back to `initialize!`
+  (a legacy initialize POST must not carry a modern version), and reseed
+  with the negotiated revision on a `-32022` retry.
+- After detection, every modern POST takes `MCP-Protocol-Version` from
+  `@(:protocol-version conn)` at the negotiated revision. Modern conns
+  never capture, echo or DELETE `Mcp-Session-Id`: the capture in
+  `http/request!` (today from any response) becomes era-aware, and
+  `terminate-http-session!` stays a no-op.
+- `parse-http-response`'s non-2xx path parses a JSON-RPC error body into the
+  thrown ex-info's ex-data (`:status :code :message :data`) instead of a
+  text-only message — the `400`-body inspection the HTTP era detection
+  needs, and generally more useful errors.
+- `transport/cancel!` skips `notifications/cancelled` for modern HTTP conns:
+  closing the response stream is the cancellation signal there, and the
+  modern core defines no client→server notification over HTTP (stdio keeps
+  it).
+- Auth is untouched: the probe goes through the same
+  `:auth-headers`/`:on-401` seam as every POST.
+
+`client/detect-http-era!`: attempt the modern `server/discover` POST (with
+the seeded version header, above).
+
+- result → `negotiate-version` over `:supportedVersions` (modern continues,
+  legacy falls back to `initialize!`, nil errors);
+- `400` whose body is a recognized modern error → modern: on `-32022`
+  negotiate over `data.supported` (retry the probe with the negotiated
+  modern revision, or the legacy fallback — nil errors), on `-32020`/`-32021`
+  surface the error;
+- anything else (empty/non-modern body, `404`/`405`, non-modern JSON-RPC
+  error, other status) → legacy → `initialize!`;
+- `401`/`403` after the auth retry abort detection with the auth error —
+  authentication is not an era signal.
+
+`:http-transport :sse` is excluded — it keeps building a legacy conn and
+initializing.
+
+Tests: `test_transport_http.clj` header table (method always, name per
+method, base64 encoding, no session echo or capture, probe version header),
+`400`-body ex-data, socket-free via `:request-fn` injection;
+`test_client.clj` detection outcomes (including 401 abort). Scripts:
+`validate-protocol.bb` HTTP modern happy path (fake validates the
+headers), `-32022` negotiation, legacy fallback; the 3.1 modern-rejection
+baseline unchanged.
+
+### 3.5. `subscriptions/listen` lifecycle
+
+- Lib: `client/listen! [conn filter & [{:keys [on-restored]}]]` opens one
+  long-lived subscription per conn and routes every notification to the
+  conn's `:on-notification` (the adapter's existing
+  `handle-list-changed!` resync then works unchanged). `filter` is the
+  spec filter: `:toolsListChanged`, `:promptsListChanged`,
+  `:resourcesListChanged`, `:resourceSubscriptions [uri ...]`.
+  - stdio: the listen request's result arrives only at graceful close, so
+    it must neither hold the per-conn `:req-lock` (that would block tool
+    calls for the session's life) nor time out. `jrpc/request!` today does
+    `(or timeout-ms default-timeout-ms)` and drops the pending entry on
+    timeout, and its pending map is private — a transport-local slot
+    cannot register a correlation, so the small additive jsonrpc change is
+    mandatory, not a time-boxed option: interpret a `:timeout-ms` sentinel
+    as "no deadline" (`(deref p)`), with a jsonrpc test. `stdio/listen!`
+    runs it on a spawned thread and bypasses `client/request!` (which
+    takes the lock). Notifications demux on
+    `_meta.io.modelcontextprotocol/subscriptionId` (one subscription makes
+    this trivial).
+  - streamable HTTP: `http/listen!` POSTs (with `:timeout nil`, which
+    disables curl's `--max-time`) and keeps the SSE response body open on
+    a background reader, dispatching notifications; the stream ends on the
+    graceful-close result or a drop. SSE comment lines (`:` keepalives)
+    yield no event in `kmet.libs.sse` and must not end the reader.
+  - `close!` stops the listener first (abort the HTTP stream; stdio sends
+    `notifications/cancelled`, which is the stdio cancellation mechanism),
+    and the idle reaper must not reap a conn with a live listener —
+    `touch!` on every line read, keepalives included (a comment yields no
+    frame), or an explicit `:listening?` exemption.
+  - stream end while the caller has not stopped the listener re-establishes
+    it with a bounded backoff (immediate, then 1s/5s/15s) rather than
+    waiting for the next connect. After a gap, invoke `:on-restored` once
+    (the adapter passes a callback that spawns the same generation-gated
+    `refresh-server-catalog!` the list_changed handler uses), and after
+    the budget mark the conn closed so `ensure-connected!` rebuilds it.
+    `close!` sets the stop flag before aborting so the loop exits.
+  - the ack (`notifications/subscriptions/acknowledged`) reaches
+    `:on-notification` like any other; the client checks it is the first
+    frame and (via `kmet.debug` in the adapter) notes requested types the
+    server dropped from the filter.
+- Adapter: after a modern connect, `connect-with-auth` starts one
+  subscription from the advertised `listChanged` capabilities
+  (`:tools`/`:prompts`/`:resources`) and passes the `:on-restored` resync
+  hook; `resourceSubscriptions` stays empty (kmet does not watch
+  individual resources). Legacy conns keep receiving the old
+  `notifications/*/list_changed` messages as today. Teardown
+  (`disconnect-server!`, session shutdown) closes the listener through
+  `client/close!`.
+- Non-goals here: multiple concurrent subscriptions, MRTR
+  elicitation/sampling/roots (3.2 refuses `inputRequests`),
+  `resources/subscribe` emulation (removed for modern; unused today), and
+  stream replay (resumability was removed).
+- Tests: `test_transport_http.clj` listen frames (ack first, notification,
+  graceful close, drop → re-listen → `:on-restored`, abort, keepalive
+  ignored), `test_transport_stdio.clj` subscription-id routing;
+  `validate-protocol.bb` end to end: the modern fake emits
+  `tools/list_changed` on the listen stream and the catalog resyncs. The
+  jsonrpc no-deadline change gets its own test;
+  `extensions/lsp-adapter/scripts/validate.bb` is re-run.
+
+### 3.6. `x-mcp-header` mirroring + invalid-definition filtering
+
+`x-mcp-header` is a MUST for streamable-HTTP clients (SEP-2243), so it lands
+before the era cache:
+
+- Pure helpers in `transport.http`: `x-mcp-param-headers [input-schema
+  arguments]` walks the `properties`-only chain, converts
+  string/integer/boolean per the spec, omits null/absent parameters, and
+  Base64-encodes unsafe values; `valid-x-mcp-header?` enforces the token
+  syntax, uniqueness, primitive type and static reachability.
+- `client/request!` opts gain `:http-headers`, threaded to the HTTP
+  transport (stdio/SSE ignore it). That changes the `request!` contract
+  every transport implements: update `kmet.libs.mcp.transport`'s docstring
+  and the three implementations in the same landing. The adapter's
+  tool-call path needs the resolved tool record's `:inputSchema` — verify
+  it survives into the proxy's record, and extend the record if not — and
+  passes `:http-headers (http/x-mcp-param-headers input-schema
+  arguments)`.
+- A tool definition with an invalid `x-mcp-header` is excluded from
+  `tools/list` for streamable-HTTP conns (the lib filters in
+  `list-all-tools`; the SHOULD-log is dropped there because `kmet.libs.*`
+  may not require `kmet.debug`).
+- Tests: pure derivation table (plain, non-ASCII, whitespace, sentinel
+  round-trip, nested properties, null/absent), invalid definitions dropped;
+  `validate-protocol.bb` calls an annotated tool through the HTTP fake and
+  asserts the `Mcp-Param-*` header arrived. If the adapter cannot supply
+  the schema at some call site, the degradation is "no custom headers"
+  (a conforming server then answers `-32020` for that annotated tool) —
+  keep schema lookup beside the call.
+
+### 3.7. Era caching in the metadata cache
+
+- `metadata.clj`: the entry gains `:protocol-era` (`{:era :modern|:legacy
+  :version rev}`). `update-entry!` stores it; `server-entry` returns it;
+  no version bump — an entry without the key means "unknown, probe". Both
+  callers change in the same landing: `core.clj`'s
+  `refresh-after-connect!` and `scripts/validate-config.bb`; the ns
+  docstring's cache shape is updated too.
+- `core.clj`: `connect-with-auth` passes the cached
+  `:protocol-era` as a connect opt (like the auth fns, it is adapter policy
+  mapped onto the lib's option map); `refresh-after-connect!` stores the
+  era the connect actually used. A hinted modern connect seeds
+  `@(:protocol-version conn)` with the cached revision before `discover!`
+  (3.4). The fingerprint already covers `:command`/`:args`/`:url`, so a
+  different server binary/origin is a different entry — the era is per
+  process/origin by construction.
+- Lib: `connect!` honors `:protocol-era` as a hint; when the era-specific
+  establish fails era-inconsistently it closes, discards the hint and runs
+  the shared full-probe-once helper ("re-probe on any failure instead of
+  trusting the cached assumption"): hinted modern but `server/discover`
+  answers `-32601`/a legacy-shaped error ⇒ re-probe; hinted legacy but
+  `initialize` answers a modern error/`-32022` ⇒ re-probe. The result
+  always carries the era actually used; a failed connect writes nothing,
+  so the next attempt probes again.
+- Optional: `establish!` can carry the `ttlMs`/`cacheScope` of the list and
+  discover results into the entry and cap the 7-day freshness at `ttlMs`
+  in `server-entry`. It is a hint, not a conformance requirement — do it
+  only after 3.4/3.5 are green and drop it if it spreads.
+- Tests: `validate-protocol.bb` seeds an entry with the wrong era and
+  asserts the re-probe; `validate-config.bb` keeps covering the
+  fingerprint.
+
+### 3.8. Facade deletion, docs, gates
+
+- Delete `extensions/mcp-adapter/src/kmet/extensions/mcp_adapter/client.clj`
+  (Phase 1.2's pure re-export); point `core.clj`, `tool_proxy.clj`,
+  `auth.clj`, `prompts.clj` at `kmet.libs.mcp.client` /
+  `kmet.libs.mcp.protocol`.
+- `scripts/validate-client.bb` is the only script requiring the facade —
+  switch it to `kmet.libs.mcp.client` (scripts run with `-cp ../../src:src`,
+  so the lib is present). Check the other scripts' transitive use in the
+  same pass.
+- `extensions/mcp-adapter/README.md`: replace the "stateless `2026-07-28` …
+  not reachable from here" paragraph with the era model (modern spoken,
+  legacy kept, detection and its failure modes).
+- Gates: `bb test`, `jolt test` (lib additions), `bb lint`,
+  `bb format-check`, `bb check`, `bb check-bundled-extensions`,
+  `bb test-ext`, `validate-all.bb` (eight scripts), plus
+  `extensions/lsp-adapter/scripts/validate.bb` if 3.5 touched jsonrpc.
+
+### Phase 3 risks
+
+- **No pi reference** (above): the spec plus the 3.1 fakes are the only
+  oracle; a wire detail the fakes encode wrong would pass our suite while
+  failing real servers. Keep the fakes strict (reject missing `_meta`,
+  validate headers) so conformance drift shows up locally.
+- **stdio `listen` needs a pending request that neither times out nor
+  blocks serialized stdio requests** — the jsonrpc no-deadline sentinel is
+  mandatory (its pending map is private, so there is no transport-local
+  fallback); it is additive and lsp-adapter is unaffected.
+- **HTTP `listen` is a long-lived stream** over the curl-backed
+  `kmet.libs.http` (`:timeout nil` disables `--max-time`): the idle reaper
+  (per-request `last-used`) would reap it — touch on every line read —
+  auth can only retry once at open, and a drop is not resumable: the
+  bounded re-listen plus `:on-restored` resync (3.5) is the recovery,
+  falling back to a full reconnect when the budget runs out.
+- **Probe latency vs cold starts**: the short `probe-timeout-ms` keeps
+  silent legacy servers fast but can misclassify a still-booting modern
+  server; the timeout-triggered recovery re-probe (3.3) is what makes that
+  acceptable.
+- **Detection false negatives are accepted per spec**: a timeout means
+  legacy, and if the hint was wrong the re-probe (3.7) is the recovery.
+  Never key the fallback on one code.
+- **Baseline updates are deliberate**: the 3.1 modern-rejection check must
+  stay green through 3.4 unless a fake's response shape is consciously
+  changed; record any such change in the landing.
+- **ttlMs/cacheScope is optional** — don't let it grow 3.7.
+
+## Phase 4 — optional hygiene
 
 `core.clj` lifecycle → `server.clj` / `direct_tools.clj` / `commands.clj`;
 `tool_proxy.clj` → `search.clj` + `status.clj`; drop
-`kmet.libs.mcp.transport.sse` once the deprecation window closes.
+`kmet.libs.mcp.transport.sse` once the deprecation window closes. Lands
+after Phase 3 — hygiene must not block or precede the protocol work.
 
-## Phase 4 — 2026-07-28 protocol work (deferred, the end goal)
-
-Inside `kmet.libs.mcp`: era map on the conn, per-request `_meta`, stdio
-`server/discover` probe + `initialize` fallback, HTTP modern-request/400-body
-detection + `-32022` retry, `Mcp-Method`/`Mcp-Name`, no session header,
-`resultType`/MRTR refusal, `subscriptions/listen` lifecycle; fakes gain a
-modern mode; `scripts/validate-protocol.bb`. **Era caching**: store the era in
-the metadata cache entry (`:protocol-era`) keyed to the config fingerprint — a
-different `:command`/`:url` can be a different server binary — and re-probe on
-any failure instead of trusting the cached assumption. `transport.sse` is not
-touched (legacy connections negotiate legacy versions only). Delete the
-extension facade here (callers go straight to the lib). Depends on Phase 1's
-era-neutral seam and Phase 2's auth plumbing.
+---
 
 ## Non-goals
 
 - No `config`, `metadata`, `output_guard`, or `tool_proxy` in `kmet.libs`.
 - No server-side MCP in `kmet.libs.mcp` (client use only).
-- Don't start Phase 3 hygiene before Phase 4 unless something there actually
-  blocks it.
+- Don't start Phase 4 hygiene before Phase 3 lands unless something there
+  actually blocks it.
 - Don't fix the collision-display divergence anywhere but 0.2.
 - Don't invest in `transport.sse` beyond the migration (deprecated).
 
@@ -504,5 +902,12 @@ era-neutral seam and Phase 2's auth plumbing.
 - [x] 2.4 flow split: lib step functions, host interaction stays in the extension
 - [x] 2.5 2026 hardening: issuer-keyed store + migration (SEP-2352), RFC 9207 `iss`, SEP-837 `application_type`
 - [x] 2.6 gates: `validate-oauth.bb` + `validate-client.bb` (401 retry), `bb test`, jolt, lint/format, `check-bundled-extensions` (test-ext clean apart from the pre-existing lsp-adapter-dependent overlay smoke)
-- [ ] 3 optional hygiene
-- [ ] 4 2026-07-28 protocol work (separate plan)
+- [ ] 3.1 fakes modern mode + `validate-protocol.bb` harness (baseline)
+- [ ] 3.2 era core: meta helpers, conn `:era`, `_meta` decoration, MRTR (`requestState`-only retry, `inputRequests` refusal) (behavior-neutral)
+- [ ] 3.3 stdio: `server/discover` probe + modern establish + legacy fallback
+- [ ] 3.4 streamable HTTP: routing headers, 400-body detection, `-32022` negotiation, no session
+- [ ] 3.5 `subscriptions/listen`: lib listen + HTTP long-lived stream + adapter wiring
+- [ ] 3.6 `x-mcp-header` mirroring + invalid-definition filtering
+- [ ] 3.7 `:protocol-era` in the metadata cache + re-probe on failure
+- [ ] 3.8 facade deletion + README + full gates
+- [ ] 4 optional hygiene (after 3)
