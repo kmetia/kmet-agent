@@ -1,12 +1,16 @@
 (ns kmet.libs.mcp.test-auth
   "Tests for the MCP authorization policy in kmet.libs.mcp.auth —
    resource canonicalization, the WWW-Authenticate challenge record,
-   scope/resource selection, the credential store and the token lifecycle
-   (bearer/machine grants/refresh plus make-auth-fns). Discovery and the
-   2026 hardening keep their socket-level coverage in the extension's
+   scope/resource selection, the credential store (issuer-keyed, with the
+   pre-SEP-2352 migration), the token lifecycle (bearer/machine
+   grants/refresh plus make-auth-fns), and the 2026 hardening: issuer
+   binding (SEP-2352), the SEP-837 application_type, and the RFC 9207
+   authorization-response `iss` validation. Discovery and the interactive
+   flows keep their socket-level coverage in the extension's
    validate-oauth.bb."
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kmet.libs.mcp.auth :as auth]
             [kmet.libs.oauth :as oauth]))
@@ -75,6 +79,9 @@
                  (try
                    (auth/store-server! "srv" {:tokens {}})
                    (catch Exception e (:type (ex-data e)))))))
+        (testing "logout of a server with nothing stored is a no-op"
+          (is (nil? (auth/logout! "srv")))
+          (is (nil? (auth/server-entry "srv"))))
         (finally (reset-storage!))))))
 
 (deftest file-store-with-a-bare-filename
@@ -187,6 +194,7 @@
                          :authorization_endpoint (str url "/authorize")}))]
         (let [m (auth/discover-meta "srv" {:url "https://mcp.example.com/mcp" :oauth {}})]
           (is (= "https://as.example.com" (:issuer m)))
+          (is (= "https://as.example.com" (::auth/issuer m)))
           (is (= "https://as.example.com/token" (:token_endpoint m)))
           (is (= prm (::auth/prm m))))))
     (testing "an issuer that does not match the document URL is rejected"
@@ -212,7 +220,9 @@
     (let [m (auth/discover-meta "srv" {:url "https://mcp.example.com/mcp"
                                        :oauth {:token-endpoint "https://as.example.com/token"}})]
       (is (= "https://as.example.com/token" (:token_endpoint m)))
-      (is (nil? (::auth/prm m)) "no protected-resource document was fetched"))))
+      (is (nil? (::auth/prm m)) "no protected-resource document was fetched")
+      (is (= "https://mcp.example.com/mcp" (::auth/issuer m))
+          "an explicit token endpoint has no issuer — the server url is the fallback"))))
 
 (deftest required-endpoint-reports-the-missing-key
   (is (= "t" (auth/required-endpoint {:token_endpoint "t"} :token_endpoint "srv")))
@@ -395,3 +405,412 @@
     (is (nil? (auth/challenge "test-auth-b")))
     (finally
       (auth/clear-challenges!))))
+
+;; ─── 2026 hardening: SEP-2352 / SEP-837 / RFC 9207 ───────────────────────
+
+(deftest issuer-keyed-store-and-binding
+  (let [dir (temp-dir)
+        path (str (fs/path dir "mcp-oauth.edn"))]
+    (try
+      (auth/configure-storage! {:mode :file :path path})
+      (auth/store-client-info! "srv" "https://as.example" {:client-id "c1"})
+      (auth/store-tokens! "srv" "https://as.example" {:access "a" :refresh "r" :expires-in 3600})
+      (testing "a bound entry reads back with its issuer"
+        (is (= "https://as.example" (auth/server-issuer "srv")))
+        (let [entry (auth/server-entry "srv")]
+          (is (= "https://as.example" (:issuer entry)))
+          (is (= "c1" (get-in entry [:client-info :client-id])))
+          (is (= "a" (get-in entry [:tokens :access])))
+          (is (= "r" (get-in entry [:tokens :refresh])))))
+      (testing "the file is issuer-keyed (v2)"
+        (let [store (edn/read-string (slurp path))]
+          (is (= 2 (:version store)))
+          (is (= "https://as.example" (get-in store [:servers "srv" :issuer])))
+          (is (= "c1" (get-in store [:issuers "https://as.example" :client-info :client-id])))
+          (is (= "a" (get-in store [:issuers "https://as.example" :tokens "srv" :access])))))
+      (testing "another server on the same issuer shares the registration"
+        (auth/store-tokens! "other" "https://as.example" {:access "b"})
+        (is (= "https://as.example" (auth/server-issuer "other")))
+        (is (= "c1" (get-in (auth/server-entry "other") [:client-info :client-id])))
+        (is (= "b" (get-in (auth/server-entry "other") [:tokens :access]))))
+      (testing "rebinding to a new issuer drops the old server tokens"
+        (auth/store-client-info! "srv" "https://new.example" {:client-id "c2"})
+        (let [entry (auth/server-entry "srv")]
+          (is (= "https://new.example" (:issuer entry)))
+          (is (= "c2" (get-in entry [:client-info :client-id])))
+          (is (nil? (get-in entry [:tokens])))))
+      (testing "logout! keeps a registration another server still uses"
+        (auth/store-tokens! "srv" "https://new.example" {:access "n"})
+        (auth/logout! "srv")
+        (is (nil? (auth/server-entry "srv")))
+        (is (= "c1" (get-in (auth/server-entry "other") [:client-info :client-id]))))
+      (finally
+        (auth/logout! "srv")
+        (auth/logout! "other")
+        (reset-storage!)
+        (fs/delete-tree dir)))))
+
+(deftest store-migrates-pre-sep-2352-entries-on-use
+  (let [dir (temp-dir)
+        path (str (fs/path dir "mcp-oauth.edn"))]
+    (try
+      (auth/configure-storage! {:mode :file :path path})
+      ;; a pre-SEP-2352 file: per server, no issuer stamp
+      (spit path (pr-str {:servers {"srv" {:client-info {:client-id "legacy"}
+                                           :tokens {:access "old" :refresh "r"}}}}))
+      (testing "an unstamped entry still reads back"
+        (is (= "legacy" (get-in (auth/server-entry "srv") [:client-info :client-id])))
+        (is (nil? (auth/server-issuer "srv"))))
+      (testing "the first authenticated use binds it to the resolved issuer"
+        (auth/store-tokens! "srv" "https://as.example" {:access "new"})
+        (is (= "https://as.example" (auth/server-issuer "srv")))
+        (let [entry (auth/server-entry "srv")]
+          (is (= "legacy" (get-in entry [:client-info :client-id])))
+          (is (= "new" (get-in entry [:tokens :access]))))
+        (let [store (edn/read-string (slurp path))]
+          (is (= 2 (:version store)))
+          (is (nil? (get-in store [:servers "srv" :tokens]))
+              "the unstamped per-server entry was claimed into the issuer")))
+      (finally
+        (auth/logout! "srv")
+        (reset-storage!)
+        (fs/delete-tree dir)))))
+
+(deftest shared-registration-survives-a-second-legacy-migration
+  ;; two pre-SEP-2352 servers on one AS: the first migration's client
+  ;; registration stays the shared one — a later legacy entry must not
+  ;; replace it under the server already using it
+  (let [dir (temp-dir)
+        path (str (fs/path dir "mcp-oauth.edn"))]
+    (try
+      (auth/configure-storage! {:mode :file :path path})
+      (spit path (pr-str {:servers
+                          {"a" {:client-info {:client-id "ca"}
+                                :tokens {:access "oa" :refresh "ra"}}
+                           "b" {:client-info {:client-id "cb"}
+                                :tokens {:access "ob" :refresh "rb"}}}}))
+      (auth/store-tokens! "a" "https://as.example" {:access "na" :expires-in 3600})
+      (testing "a second legacy server authorizes with the shared registration"
+        (is (= "ca" (auth/resolve-client-id! "b" {:oauth {}}
+                                             {:issuer "https://as.example"}
+                                             "http://127.0.0.1:1/cb"))))
+      (auth/store-tokens! "b" "https://as.example" {:access "nb" :expires-in 3600})
+      (is (= "ca" (get-in (auth/server-entry "a") [:client-info :client-id]))
+          "the first migrated server keeps its registration")
+      (is (= "ca" (get-in (auth/server-entry "b") [:client-info :client-id]))
+          "the second legacy server joins the shared registration")
+      (is (= "na" (get-in (auth/server-entry "a") [:tokens :access])))
+      (is (= "nb" (get-in (auth/server-entry "b") [:tokens :access])))
+      (testing "a new registration still wins over the shared one"
+        (auth/store-client-info! "b" "https://as.example" {:client-id "cb2"})
+        (is (= "cb2" (get-in (auth/server-entry "a") [:client-info :client-id]))))
+      (finally
+        (auth/logout! "a")
+        (auth/logout! "b")
+        (reset-storage!)
+        (fs/delete-tree dir)))))
+
+(deftest registration-without-tokens-is-not-authenticated
+  ;; an authorization-server change drops the old issuer's tokens but keeps
+  ;; the shared client registration: the request path must not send an
+  ;; empty "Bearer" for it
+  (let [dir (temp-dir)
+        path (str (fs/path dir "mcp-oauth.edn"))
+        definition {:auth :oauth :url "https://mcp.example.com/mcp"}]
+    (try
+      (auth/configure-storage! {:mode :file :path path})
+      (auth/store-client-info! "srv" "https://as.example" {:client-id "c1"})
+      (is (some? (auth/server-entry "srv"))
+          "the shared registration is stored")
+      (is (= :mcp-auth-required
+             (try ((:auth-headers (auth/make-auth-fns "srv" definition)))
+                  nil
+                  (catch Exception e (:type (ex-data e))))))
+      (is (= :mcp-auth-required
+             (try ((:on-401 (auth/make-auth-fns "srv" definition)) {:headers {}})
+                  nil
+                  (catch Exception e (:type (ex-data e))))))
+      (finally
+        (auth/logout! "srv")
+        (reset-storage!)
+        (fs/delete-tree dir)))))
+
+(deftest unstamped-registration-is-reused-before-its-first-write
+  ;; a pre-SEP-2352 entry keeps working: its DCR registration is reused
+  ;; and back-stamped on the first authenticated use, not re-registered
+  (let [dir (temp-dir)
+        path (str (fs/path dir "mcp-oauth.edn"))]
+    (try
+      (auth/configure-storage! {:mode :file :path path})
+      (spit path (pr-str {:servers {"srv" {:client-info {:client-id "legacy"}
+                                           :tokens {:access "old"}}}}))
+      (with-redefs [oauth/register-client
+                    (fn [& _] (throw (ex-info "must not register" {})))]
+        (is (= "legacy" (auth/resolve-client-id! "srv" {:oauth {}}
+                                                 {:issuer "https://as.example"}
+                                                 "http://127.0.0.1:1/cb"))))
+      (is (nil? (auth/server-issuer "srv"))
+          "resolve alone does not bind; the first write back-stamps")
+      (finally
+        (auth/logout! "srv")
+        (reset-storage!)
+        (fs/delete-tree dir)))))
+
+(deftest application-type-inference
+  (is (= "native" (auth/application-type ["http://127.0.0.1:8080/callback"])))
+  (is (= "native" (auth/application-type ["http://localhost:1/cb"])))
+  (is (= "native" (auth/application-type ["http://[::1]:1/cb"])))
+  (is (= "web" (auth/application-type ["https://app.example.com/cb"])))
+  (testing "disagreeing or unclassifiable URIs omit the parameter"
+    (is (nil? (auth/application-type ["http://127.0.0.1:1/cb" "https://app.example.com/cb"])))
+    (is (nil? (auth/application-type [])))
+    (is (nil? (auth/application-type ["not a uri"])))
+    (is (nil? (auth/application-type [nil])))
+    (is (nil? (auth/application-type ["ftp://example.com/cb"])))))
+
+(deftest client-registration-is-issuer-bound
+  (let [dir (temp-dir)
+        path (str (fs/path dir "mcp-oauth.edn"))
+        metadata {:issuer "https://as.example"
+                  :registration_endpoint "https://as.example/register"}
+        definition {:url "https://mcp.example.com/mcp" :oauth {}}
+        registered (atom nil)]
+    (try
+      (auth/configure-storage! {:mode :file :path path})
+      (testing "DCR sends the SEP-837 application_type and stores under the issuer"
+        (with-redefs [oauth/register-client
+                      (fn [_endpoint opts]
+                        (reset! registered opts)
+                        {:client_id "dcr-1"})]
+          (is (= "dcr-1" (auth/resolve-client-id! "srv" definition metadata
+                                                  "http://127.0.0.1:1/cb"))))
+        (is (= "native" (:application-type @registered)))
+        (is (= "https://as.example" (auth/server-issuer "srv")))
+        (is (= "dcr-1" (get-in (auth/server-entry "srv") [:client-info :client-id]))))
+      (testing "a server on the same issuer reuses the registration (no new DCR)"
+        (with-redefs [oauth/register-client
+                      (fn [& _] (throw (ex-info "must not register" {})))]
+          (is (= "dcr-1" (auth/resolve-client-id! "other" definition metadata
+                                                  "http://127.0.0.1:1/cb")))))
+      (testing "config :client-id wins and :application-type is overridable"
+        (with-redefs [oauth/register-client
+                      (fn [_endpoint opts]
+                        (reset! registered opts)
+                        {:client_id "dcr-2"})]
+          (is (= "cfg" (auth/resolve-client-id! "pre" {:oauth {:client-id "cfg"}}
+                                                metadata "http://127.0.0.1:1/cb")))
+          (is (= "dcr-2" (auth/resolve-client-id!
+                          "override"
+                          {:oauth {:application-type "web"}}
+                          {:issuer "https://as2.example"
+                           :registration_endpoint "https://as2.example/register"}
+                          "http://127.0.0.1:1/cb")))
+          (is (= "web" (:application-type @registered)))))
+      (testing "pre-registered credentials bound to another AS throw (SEP-2352)"
+        (auth/store-tokens! "pre" "https://other.example" {:access "a"})
+        (is (= :oauth-issuer-mismatch
+               (try (auth/resolve-client-id! "pre" {:oauth {:client-id "cfg"}}
+                                             metadata "http://127.0.0.1:1/cb")
+                    nil
+                    (catch Exception e (:type (ex-data e)))))))
+      (finally
+        (auth/logout! "srv")
+        (auth/logout! "other")
+        (auth/logout! "pre")
+        (auth/logout! "override")
+        (reset-storage!)
+        (fs/delete-tree dir)))))
+
+(deftest flow-selection
+  (is (= :pkce (auth/resolve-flow {:flow :pkce} {} {:has-ui true})))
+  (is (= :device (auth/resolve-flow {:flow :device} {} {:has-ui true})))
+  (is (= :pkce (auth/resolve-flow {} {} {:has-ui true})))
+  (testing "auto picks the device flow only when headless and advertised"
+    (is (= :device (auth/resolve-flow {} {:device_authorization_endpoint "x"}
+                                      {:has-ui false})))
+    (is (= :pkce (auth/resolve-flow {} {:device_authorization_endpoint "x"}
+                                    {:has-ui true})))
+    (is (= :pkce (auth/resolve-flow {} {} {:has-ui false}))))
+  (is (= :oauth-invalid-config
+         (try (auth/resolve-flow {:flow :bogus} {} {:has-ui true})
+              nil
+              (catch Exception e (:type (ex-data e)))))))
+
+(deftest rfc-9207-authorization-response-validation
+  (testing "a matching iss passes (simple string comparison)"
+    (is (nil? (auth/validate-authorization-response! {:code "c" :iss "https://as"}
+                                                     "https://as" false)))
+    (is (nil? (auth/validate-authorization-response! {:code "c" :iss "https://as"}
+                                                     "https://as" true))))
+  (testing "a mismatching iss is rejected"
+    (is (= :oauth-issuer-mismatch
+           (try (auth/validate-authorization-response! {:code "c" :iss "https://evil"}
+                                                       "https://as" false)
+                nil
+                (catch Exception e (:type (ex-data e)))))))
+  (testing "comparison is not normalized (case, trailing slash, default port)"
+    (doseq [bad ["" "https://AS" "https://as/" "https://as:443"]]
+      (is (= :oauth-issuer-mismatch
+             (try (auth/validate-authorization-response! {:code "c" :iss bad}
+                                                         "https://as" false)
+                  nil
+                  (catch Exception e (:type (ex-data e))))))))
+  (testing "an absent iss is rejected only when the server advertised support"
+    (is (= :oauth-iss-missing
+           (try (auth/validate-authorization-response! {:code "c"} "https://as" true)
+                nil
+                (catch Exception e (:type (ex-data e))))))
+    (is (nil? (auth/validate-authorization-response! {:code "c"} "https://as" false))))
+  (testing "an authorization error is surfaced only when authentic"
+    (is (= :oauth-authorization-error
+           (try (auth/validate-authorization-response!
+                 {:error "access_denied" :error_description "nope" :iss "https://as"}
+                 "https://as" false)
+                nil
+                (catch Exception e (:type (ex-data e))))))
+    (is (= :oauth-issuer-mismatch
+           (try (auth/validate-authorization-response!
+                 {:error "access_denied" :error_description "attacker text" :iss "https://evil"}
+                 "https://as" false)
+                nil
+                (catch Exception e (:type (ex-data e))))))
+    (is (not (str/includes?
+              (try
+                (auth/validate-authorization-response!
+                 {:error "access_denied" :error_description "attacker text"
+                  :iss "https://evil"}
+                 "https://as" false)
+                ""
+                (catch Exception e (ex-message e)))
+              "attacker text"))
+        "a mismatched response must not surface attacker-controlled error text")))
+
+(deftest prepare-and-complete-pkce-flow
+  (let [dir (temp-dir)
+        path (str (fs/path dir "mcp-oauth.edn"))
+        metadata {:issuer "https://as.example"
+                  :authorization_endpoint "https://as.example/authorize"
+                  :token_endpoint "https://as.example/token"
+                  :registration_endpoint "https://as.example/register"
+                  :authorization_response_iss_parameter_supported true
+                  ::auth/prm {:scopes_supported ["read" "write"]}}
+        definition {:url "https://mcp.example.com/mcp" :oauth {:flow :pkce}}
+        exchange (atom nil)]
+    (try
+      (auth/configure-storage! {:mode :file :path path})
+      (with-redefs [oauth/register-client (fn [_endpoint _opts] {:client_id "dcr-1"})]
+        (let [{:keys [url pending]} (auth/prepare-pkce-flow
+                                     "srv" definition metadata "http://127.0.0.1:1/cb")
+              params (oauth/parse-query-string (second (str/split url #"\?" 2)))]
+          (testing "the authorize URL carries PKCE, state, scope and resource"
+            (is (= "S256" (:code_challenge_method params)))
+            (is (seq (:code_challenge params)))
+            (is (= "read write" (:scope params)))
+            (is (= "https://mcp.example.com/mcp" (:resource params)))
+            (is (= (:state pending) (:state params))))
+          (testing "the pending record carries the RFC 9207 issuer"
+            (is (= "https://as.example" (:issuer pending)))
+            (is (true? (:iss-supported? pending))))
+          (testing "a wrong state is rejected"
+            (is (= :oauth-state-mismatch
+                   (try (auth/complete-pkce-flow! "srv" pending
+                                                  {:code "c" :state "nope" :iss "https://as.example"})
+                        nil
+                        (catch Exception e (:type (ex-data e)))))))
+          (testing "a missing iss is rejected when the server advertised support"
+            (is (= :oauth-iss-missing
+                   (try (auth/complete-pkce-flow! "srv" pending
+                                                  {:code "c" :state (:state pending)})
+                        nil
+                        (catch Exception e (:type (ex-data e)))))))
+          (testing "a matching response exchanges and stores under the issuer"
+            (with-redefs [oauth/exchange-authorization-code
+                          (fn [_endpoint opts]
+                            (reset! exchange opts)
+                            {:access "a" :refresh "r" :expires-in 3600})]
+              (is (= :logged-in (auth/complete-pkce-flow!
+                                 "srv" pending
+                                 {:code "c" :state (:state pending) :iss "https://as.example"})))
+              (is (= "dcr-1" (:client-id @exchange)))
+              (is (= "https://mcp.example.com/mcp" (:resource @exchange)))
+              (is (= "read write" (:scope @exchange)))
+              (is (= "https://as.example" (auth/server-issuer "srv")))
+              (is (= "a" (get-in (auth/server-entry "srv") [:tokens :access])))))))
+      (finally
+        (auth/logout! "srv")
+        (reset-storage!)
+        (fs/delete-tree dir)))))
+
+(deftest begin-and-complete-device-flow
+  (let [dir (temp-dir)
+        path (str (fs/path dir "mcp-oauth.edn"))
+        definition {:url "https://mcp.example.com/mcp" :oauth {:flow :device}}
+        metadata {:issuer "https://as.example"
+                  :device_authorization_endpoint "https://as.example/device"
+                  :token_endpoint "https://as.example/token"
+                  :registration_endpoint "https://as.example/register"}]
+    (try
+      (auth/configure-storage! {:mode :file :path path})
+      (with-redefs [oauth/register-client (fn [_endpoint _opts] {:client_id "dcr-1"})
+                    oauth/start-device-authorization
+                    (fn [_endpoint _opts]
+                      {:device-code "dev-1" :user-code "ABCD-EFGH"
+                       :verification-uri "https://as.example/verify"
+                       :interval 1 :expires-in 30})
+                    oauth/fetch-json
+                    (fn [_url _opts]
+                      {:status 200 :body {:access_token "tok" :expires_in 3600}})
+                    oauth/poll-oauth-device-code-flow
+                    (fn [opts]
+                      (let [r ((:poll opts))]
+                        (when (= :complete (:status r)) (:value r))))]
+        (let [started (auth/begin-device-flow! "dev" definition metadata
+                                               "http://127.0.0.1:1/cb")]
+          (is (= "ABCD-EFGH" (:user-code started)))
+          (is (= "https://as.example/verify" (:verification-uri started)))
+          (is (= :logged-in (auth/complete-device-flow! "dev" started (atom false))))
+          (is (= "https://as.example" (auth/server-issuer "dev")))
+          (is (= "tok" (get-in (auth/server-entry "dev") [:tokens :access])))))
+      (finally
+        (auth/logout! "dev")
+        (reset-storage!)
+        (fs/delete-tree dir)))))
+
+(deftest refresh-never-crosses-authorization-servers
+  (let [dir (temp-dir)
+        path (str (fs/path dir "mcp-oauth.edn"))
+        definition {:auth :oauth :url "https://mcp.example.com/mcp"}]
+    (try
+      (auth/configure-storage! {:mode :file :path path})
+      (auth/store-client-info! "srv" "https://as-a.example" {:client-id "c"})
+      (auth/store-tokens! "srv" "https://as-a.example"
+                          {:access "a" :refresh "r" :expires-in 3600})
+      (testing "a refresh token is not sent to a different authorization server"
+        (with-redefs [auth/discover-meta
+                      (fn [_name _definition]
+                        {::auth/issuer "https://as-b.example"
+                         :issuer "https://as-b.example"
+                         :token_endpoint "https://as-b.example/token"})
+                      oauth/refresh-access-token
+                      (fn [& _] (throw (ex-info "must not refresh" {})))]
+          (is (= :mcp-auth-required
+                 (try ((:on-401 (auth/make-auth-fns "srv" definition)) {:headers {}})
+                      nil
+                      (catch Exception e (:type (ex-data e))))))))
+      (testing "the same issuer refreshes and re-binds the stored tokens"
+        (with-redefs [auth/discover-meta
+                      (fn [_name _definition]
+                        {::auth/issuer "https://as-a.example"
+                         :issuer "https://as-a.example"
+                         :token_endpoint "https://as-a.example/token"})
+                      oauth/refresh-access-token
+                      (fn [_endpoint _opts] {:access "fresh" :expires-in 3600})]
+          (is (= "Bearer fresh"
+                 (get ((:on-401 (auth/make-auth-fns "srv" definition)) {:headers {}})
+                      "Authorization")))
+          (is (= "fresh" (get-in (auth/server-entry "srv") [:tokens :access])))
+          (is (= "https://as-a.example" (auth/server-issuer "srv")))))
+      (finally
+        (auth/logout! "srv")
+        (reset-storage!)
+        (fs/delete-tree dir)))))

@@ -2,9 +2,9 @@
 
 Status: draft. Order is deliberate: **Phase 0 (names consolidation + name
 assignment fix) → Phase 1 (extract `kmet.libs.mcp`) → Phase 2 (auth) →
-Phase 3 (optional hygiene) → Phase 4 (2026-07-28 protocol work)** — phases 2+
-are tracked here but not started. The protocol revision lands last so the
-client is extracted and auth settled first.
+Phase 3 (optional hygiene) → Phase 4 (2026-07-28 protocol work)** — Phases 0,
+1 and 2 are landed; phases 3+ are tracked here but not started. The protocol
+revision lands last so the client is extracted and auth settled first.
 
 Scope: `extensions/mcp-adapter/` and the shared `kmet.libs` layer. Phase 0 and
 Phase 1 change no protocol behavior; they move code so the stateless revision
@@ -352,12 +352,14 @@ Also `extensions/lsp-adapter/scripts/validate.bb` (jsonrpc change) and
 ## Phase 2 — auth
 
 `kmet.libs.mcp.auth`: challenge parse/record, RFC 8707 resource
-canonicalization, credential store incl. keyring backends, pre-emptive
-refresh + 401-once retry header provider — built on `kmet.libs.oauth`.
-Extension keeps config mapping, status, interaction map, `/mcp auth|logout`.
-Include the 2026 hardening: issuer binding (SEP-2352; migrate
-`mcp-oauth.edn` from server-keyed entries), `iss` validation (RFC 9207),
-DCR `application_type` (SEP-837).
+canonicalization, the issuer-keyed credential store incl. keyring
+backends, discovery, the flow steps, pre-emptive refresh + 401-once retry
+header provider — built on `kmet.libs.oauth`. The extension keeps config
+mapping, status, the interaction map and callback server, `/mcp
+auth|logout`. Status: **landed** (2.1–2.6), including the 2026 hardening:
+issuer binding (SEP-2352, with the `mcp-oauth.edn` migration from
+server-keyed entries), `iss` validation (RFC 9207), DCR
+`application_type` (SEP-837).
 
 Landing order (same discipline as Phase 1; `validate-oauth.bb` is the
 baseline):
@@ -402,13 +404,38 @@ baseline):
   `expires_in` is kept without an expiry (used until a 401); and
   `:auth :bearer` with no token throws instead of sending
   `Authorization: Bearer `.
-- 2.4 flow split: lib step functions; the extension keeps `run-flow!`'s
-  interaction map and the status text.
-- 2.5 2026 hardening: issuer-keyed store + `mcp-oauth.edn` read-side
-  migration (SEP-2352), RFC 9207 `iss` validation, SEP-837 DCR
-  `application_type`.
-- 2.6 gates: `validate-oauth.bb` + `validate-client.bb` (401 retry),
-  `bb test`/`test-ext`, jolt, lint/format, `check-bundled-extensions`.
+- **2.4 flow split — landed**: the flow steps moved into the lib:
+  `resolve-flow`, `verify-pkce-support!`, `resolve-client-id!` (issuer-bound
+  registration), `prepare-pkce-flow` / `complete-pkce-flow!`,
+  `begin-device-flow!` / `complete-device-flow!`, and `application-type`.
+  The extension's `run-flow!` keeps the interaction map, the callback
+  server + manual-paste race, and the status text. `validate-oauth.bb`
+  exercises the same public surface as before (plus the 2026 checks).
+- **2.5 2026 hardening — landed**:
+  - the `:file` store is issuer-keyed (`:version 2`: `:servers` holds the
+    server → issuer binding, `:issuers` the shared client registration and
+    per-server tokens) with a read-side migration — an unstamped
+    pre-SEP-2352 entry is back-stamped to the first issuer resolved on
+    authenticated use (its registration is claimed only when the issuer
+    has none, so a later legacy entry joins the shared registration
+    instead of replacing it);
+  - `resolve-client-id!` re-registers when the authorization server
+    changed and throws `:oauth-issuer-mismatch` for pre-registered
+    credentials instead of reusing them; `refresh-tokens!` never sends a
+    refresh token to a different issuer;
+  - RFC 9207 `iss` validation (`validate-authorization-response!`, keyed on
+    `authorization_response_iss_parameter_supported`; no normalization, and
+    error text is surfaced only for an authentic response);
+  - DCR sends the SEP-837 `application_type` (loopback → "native", remote
+    → "web", mixed → omitted; `:oauth {:application-type ...}` overrides).
+    The `:keyring` backend keeps per-server entries, stamped with the issuer
+    for the same cross-AS isolation.
+- **2.6 gates — landed**: `validate-oauth.bb` (SEP-2352 store/binding,
+  SEP-837 application_type, RFC 9207 accept/reject/missing) and
+  `validate-client.bb` (401 retry) green; `bb test`, jolt, lint/format,
+  and `check-bundled-extensions` green. `bb test-ext` is clean apart from
+  the pre-existing overlay-input smoke, which needs lsp-adapter in the
+  host's extension set (it fails the same way without this change).
 
 ## Phase 3 — optional hygiene
 
@@ -474,6 +501,8 @@ era-neutral seam and Phase 2's auth plumbing.
 - [x] 2.1 auth policy in the lib (challenge/resource/scope + tests)
 - [x] 2.2 store: file/keyring/auto backends + logout in the lib
 - [x] 2.3 discovery + token lifecycle + `make-auth-fns` in the lib
-- [ ] 2.4-2.5 flow split + 2026 hardening
+- [x] 2.4 flow split: lib step functions, host interaction stays in the extension
+- [x] 2.5 2026 hardening: issuer-keyed store + migration (SEP-2352), RFC 9207 `iss`, SEP-837 `application_type`
+- [x] 2.6 gates: `validate-oauth.bb` + `validate-client.bb` (401 retry), `bb test`, jolt, lint/format, `check-bundled-extensions` (test-ext clean apart from the pre-existing lsp-adapter-dependent overlay smoke)
 - [ ] 3 optional hygiene
 - [ ] 4 2026-07-28 protocol work (separate plan)

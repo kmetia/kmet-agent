@@ -9,8 +9,10 @@
    record, scope/resource selection, the credential store (:file and
    OS-keyring backends), RFC 9728/8414 discovery, the token lifecycle
    (bearer and machine grants, refresh) and the request-auth header
-   provider. The 2026 hardening (issuer binding, `iss` validation)
-   follows in the rest of Phase 2.
+   provider. The 2026 hardening is here: the issuer-keyed credential
+   store with a read-side migration from the per-server shape (SEP-2352),
+   the RFC 9207 authorization-response `iss` validation, and the SEP-837
+   `application_type` on dynamic client registration.
 
    Hosts: the namespace is loaded by the extension (loader [:jolt :sci]),
    so it stays plain maps and functions — no protocols or records — and
@@ -126,7 +128,22 @@
 ;;   :file    — a plaintext EDN file with 0600 perms and an atomic write, at
 ;;              the path the host configures (the extension passes
 ;;              <agent-dir>/mcp-oauth.edn). The only backend on
-;;              Termux/Android and hosts without a keyring tool.
+;;              Termux/Android and hosts without a keyring tool. Issuer-keyed
+;;              (SEP-2352):
+;;
+;;                {:version 2
+;;                 :servers {"name" {:issuer "https://as.example"}}
+;;                 :issuers {"https://as.example"
+;;                           {:client-info {:client-id .. :redirect-uris [..]}
+;;                            :tokens {"name" {:access .. :expires ..}}}}}
+;;
+;;              A registration is shared by every server resolving to the same
+;;              authorization server; tokens stay per server (they are
+;;              resource-bound). A pre-SEP-2352 entry has no :issuer: it is
+;;              read as-is and bound to the first issuer resolved after the
+;;              upgrade (back-stamp) — its registration is claimed only when
+;;              the issuer has none, so a later legacy entry joins the
+;;              registration already in use instead of replacing it.
 ;;   :keyring — the OS credential store via platform tools: macOS `security`
 ;;              (generic-password), Linux `secret-tool` (libsecret), Windows
 ;;              Credential Manager via a PowerShell P/Invoke
@@ -201,9 +218,15 @@
   (Object.))
 
 (defn- read-file-store
+  "The credential store, migrated to the v2 (issuer-keyed) shape on read.
+   A pre-SEP-2352 file keeps its per-server entries as-is — they are
+   unstamped and get bound to the first issuer resolved for them — with
+   only the :version marker and a :servers map added."
   []
   (locking store-lock
-    (or (read-edn (store-path)) {:servers {}})))
+    (let [raw (or (read-edn (store-path)) {})]
+      (cond-> (assoc raw :servers (or (:servers raw) {}))
+        (not= 2 (:version raw)) (assoc :version 2)))))
 
 (defn- write-file-store!
   [store]
@@ -420,31 +443,158 @@
   []
   (= :keyring (storage-kind)))
 
+;; ─── issuer-aware access (SEP-2352) ──────────────────────────────────────
+
+(defn- binding-issuer
+  "The authorization-server issuer a server's stored credentials are bound
+   to, or nil when none is recorded."
+  [store name]
+  (get-in store [:servers name :issuer]))
+
+(defn- drop-empty-issuer
+  "Drop an issuer entry that has neither client information nor tokens
+   left."
+  [store issuer]
+  (if (and issuer
+           (empty? (get-in store [:issuers issuer :tokens]))
+           (nil? (get-in store [:issuers issuer :client-info])))
+    (update store :issuers dissoc issuer)
+    store))
+
+(defn- claim-unstamped
+  "Move a server's unstamped pre-upgrade credentials under ISSUER: its
+   tokens always, and its client registration only when ISSUER has none
+   yet (an authorization server keeps one shared registration, so a later
+   legacy entry must not replace the one already in use). The caller
+   writes its new values on top, so they win over the claimed ones. The
+   unstamped entry is bound to the first issuer resolved after the
+   upgrade — the SEP-2352 back-stamp."
+  [store name issuer]
+  (let [raw (get-in store [:servers name])]
+    (if (and (map? raw) (or (:client-info raw) (:tokens raw)))
+      (cond-> (update store :servers dissoc name)
+        (and (:client-info raw)
+             (nil? (get-in store [:issuers issuer :client-info])))
+        (assoc-in [:issuers issuer :client-info] (:client-info raw))
+
+        (:tokens raw)
+        (assoc-in [:issuers issuer :tokens name] (:tokens raw)))
+      store)))
+
+(defn- rebind-issuer
+  "Point NAME at ISSUER, dropping tokens recorded for NAME under a
+   different issuer: credentials from one authorization server are never
+   reused at another (SEP-2352)."
+  [store name issuer]
+  (let [old (binding-issuer store name)]
+    (cond-> store
+      (and old (not= old issuer))
+      (-> (update-in [:issuers old :tokens] dissoc name)
+          (drop-empty-issuer old))
+
+      true
+      (assoc-in [:servers name] {:issuer issuer}))))
+
+(defn- store-file-bound!
+  [name issuer client-info tokens]
+  (locking store-lock
+    (write-file-store!
+     (cond-> (-> (read-file-store)
+                 (claim-unstamped name issuer)
+                 (rebind-issuer name issuer))
+       (some? client-info) (assoc-in [:issuers issuer :client-info] client-info)
+       (some? tokens) (assoc-in [:issuers issuer :tokens name] tokens)))))
+
+(defn- store-file-unbound!
+  [name entry]
+  (locking store-lock
+    (write-file-store! (assoc-in (read-file-store) [:servers name] (dissoc entry :issuer)))))
+
 (defn server-entry
-  "The stored {:tokens .. :client-info ..} entry for a server, or nil —
-   from the OS keyring in :keyring mode, else the plaintext file."
+  "The stored credential view for a server — {:issuer .. :client-info ..
+   :tokens ..} (omitting what is not stored) — or nil when it has no
+   stored credentials. A credential is keyed by the authorization server
+   that issued it (SEP-2352); an unstamped pre-upgrade entry reads back
+   as-is until the first authenticated use binds it."
   [name]
   (if (keyring-mode?)
-    (keyring-read name)
-    (get-in (read-file-store) [:servers name])))
+    (let [raw (keyring-read name)]
+      (when (and (map? raw) (or (:client-info raw) (:tokens raw)))
+        raw))
+    (let [store (read-file-store)
+          issuer (binding-issuer store name)]
+      (if issuer
+        (let [ie (get-in store [:issuers issuer])
+              client-info (:client-info ie)
+              tokens (get-in ie [:tokens name])]
+          (when (or client-info tokens)
+            (cond-> {:issuer issuer}
+              client-info (assoc :client-info client-info)
+              tokens (assoc :tokens tokens))))
+        (let [raw (get-in store [:servers name])]
+          (when (and (map? raw) (or (:client-info raw) (:tokens raw)))
+            (dissoc raw :issuer)))))))
+
+(defn server-issuer
+  "The authorization-server issuer identifier a server's stored
+   credentials are bound to (SEP-2352), or nil when nothing is stored (or
+   only an unstamped pre-upgrade entry)."
+  [name]
+  (if (keyring-mode?)
+    (:issuer (keyring-read name))
+    (binding-issuer (read-file-store) name)))
 
 (defn store-server!
-  "Persist the {:tokens .. :client-info ..} entry for a server."
+  "Persist a server's {:tokens .. :client-info ..} entry. An entry that
+   carries :issuer (what server-entry returns for a bound server) writes
+   into the issuer-keyed store and binds the server to that authorization
+   server; one without is kept as an unstamped pre-SEP-2352 entry until
+   the first authenticated use binds it."
   [name entry]
   (if (keyring-mode?)
-    (keyring-write! name entry)
-    (locking store-lock
-      (write-file-store! (assoc-in (read-file-store) [:servers name] entry)))))
+    (let [issuer (:issuer entry)
+          old (keyring-read name)
+          base (if (or (nil? issuer)
+                       (= issuer (:issuer old))
+                       (nil? (:issuer old)))
+                 old
+                 {})]
+      (keyring-write! name (merge base entry)))
+    (if-let [issuer (or (:issuer entry)
+                        (binding-issuer (read-file-store) name))]
+      (store-file-bound! name issuer (:client-info entry) (:tokens entry))
+      (store-file-unbound! name entry))))
+
+(defn store-client-info!
+  "Persist a server's OAuth client registration under the authorization
+   server ISSUER and bind the server to it (SEP-2352)."
+  [name issuer client-info]
+  (if (keyring-mode?)
+    (store-server! name {:issuer issuer :client-info client-info})
+    (store-file-bound! name issuer client-info nil)))
 
 (defn- clear-server!
-  "Forget a server's stored entry (both backends)."
+  "Forget a server's stored credentials: its tokens and binding, and —
+   when no other server is bound to the same authorization server — the
+   shared client registration (both backends). A server with no stored
+   entry is a no-op (and never initializes an unconfigured store)."
   [name]
   (if (keyring-mode?)
     (keyring-clear! name)
     (locking store-lock
       (let [store (read-file-store)]
         (when (contains? (:servers store) name)
-          (write-file-store! (update store :servers dissoc name)))))))
+          (let [issuer (binding-issuer store name)
+                store (update store :servers dissoc name)
+                store (if issuer
+                        (update-in store [:issuers issuer :tokens] dissoc name)
+                        store)
+                store (if (and issuer
+                               (not-any? (fn [[_ binding]] (= issuer (:issuer binding)))
+                                         (:servers store)))
+                        (update store :issuers dissoc issuer)
+                        store)]
+            (write-file-store! store)))))))
 
 (defn- origin-of
   "scheme://host of a URL."
@@ -543,7 +693,8 @@
    the resource server — and is skipped when
    :skip-issuer-metadata-validation is set. The map carries the
    protected-resource document (for scope selection) under ::prm — nil
-   when none was fetched."
+   when none was fetched — and the effective issuer identifier under
+   ::issuer (the metadata `issuer`, else the document URL)."
   [name definition]
   (let [cfg (:oauth definition)
         url (:url definition)
@@ -565,7 +716,9 @@
                              (:issuer metadata) " vs " discovered-from "). Set "
                              ":skip-issuer-metadata-validation true to override.")
                         {:type :oauth-issuer-mismatch}))))
-    (assoc metadata ::prm prm)))
+    (assoc metadata
+           ::prm prm
+           ::issuer (or (:issuer metadata) discovered-from))))
 
 (defn required-endpoint
   "One metadata endpoint or a clear error."
@@ -574,6 +727,327 @@
       (throw (ex-info (str "MCP auth failed: authorization server metadata for " name
                            " has no " key)
                       {:type :oauth-no-endpoint :endpoint key}))))
+
+(declare store-tokens!)
+
+(defn issuer-of
+  "The authorization server's issuer identifier for a discovered metadata
+   map: its `issuer` value, else the URL its document was discovered at
+   (discover-meta's ::issuer)."
+  [metadata]
+  (or (:issuer metadata) (::issuer metadata)))
+
+(defn application-type
+  "OIDC `application_type` inference for a vector of redirect URIs
+   (SEP-837): \"native\" when every URI is loopback (localhost, 127.0.0.1
+   or ::1), \"web\" when every URI is a remote http(s) URI, and nil when
+   they disagree (the parameter is then omitted). MCP clients must send an
+   appropriate type, because an OIDC authorization server defaults an
+   omitted one to \"web\" and can then reject the loopback redirect URIs a
+   native client uses."
+  [redirect-uris]
+  (let [classify (fn [uri]
+                   (try
+                     (let [u (java.net.URI. (str uri))
+                           host (some-> (.getHost u) str/lower-case)
+                           scheme (some-> (.getScheme u) str/lower-case)]
+                       (cond
+                         (contains? #{"localhost" "127.0.0.1" "::1" "[::1]"} host)
+                         :native
+
+                         (and (contains? #{"http" "https"} scheme) (seq host))
+                         :web
+
+                         :else nil))
+                     (catch Exception _ nil)))
+        kinds (mapv classify redirect-uris)]
+    (when (and (seq kinds) (apply = kinds) (contains? #{:native :web} (first kinds)))
+      (name (first kinds)))))
+
+(defn- client-info-for
+  "The client registration stored for an authorization-server ISSUER, or
+   nil. In :keyring mode there is no cross-server sharing — entries are
+   per server."
+  [issuer]
+  (when-not (keyring-mode?)
+    (get-in (read-file-store) [:issuers issuer :client-info])))
+
+(defn resolve-client-id!
+  "The OAuth client id for a server, bound to the resolved authorization
+   server ISSUER (SEP-2352):
+
+     - config :oauth {:client-id ..} (pre-registered) wins; when the
+       server is already bound to a different issuer this throws
+       :oauth-issuer-mismatch rather than reuse mismatched credentials —
+       the authorization server changed and the user must re-authenticate;
+     - else the DCR client registration stored for ISSUER, shared by every
+       server resolving to the same authorization server (an unstamped
+       pre-upgrade entry is reused only while ISSUER has none);
+     - else RFC 7591 dynamic registration at the metadata's
+       registration_endpoint, with the SEP-837 `application_type`
+       (config :oauth {:application-type ..} overrides the inference),
+       stored under ISSUER.
+
+   REDIRECT-URI is what DCR registers and the dedup lookup expects."
+  [name definition metadata redirect-uri]
+  (let [cfg (:oauth definition)
+        issuer (issuer-of metadata)]
+    (when-not (seq issuer)
+      (throw (ex-info "MCP auth failed: authorization server metadata has no issuer"
+                      {:type :oauth-no-issuer})))
+    (if-let [configured (:client-id cfg)]
+      (do (when-let [bound (server-issuer name)]
+            (when (not= bound issuer)
+              (throw (ex-info (str "MCP auth failed: " name " is bound to authorization server "
+                                   bound " but the server now points at " issuer
+                                   ". Run /mcp logout " name " and authenticate again.")
+                              {:type :oauth-issuer-mismatch
+                               :bound-issuer bound :issuer issuer}))))
+          configured)
+      (or (get-in (client-info-for issuer) [:client-id])
+          (let [entry (server-entry name)]
+            ;; an unstamped pre-upgrade entry whose issuer has no
+            ;; registration yet is bound to the first issuer resolved
+            ;; after the upgrade (SEP-2352 back-stamp): its own
+            ;; registration is claimed rather than re-registered. Once
+            ;; the issuer has one, the shared registration above wins so
+            ;; the authorization matches what a completed flow stores.
+            (when (and entry (or (nil? (:issuer entry)) (= issuer (:issuer entry))))
+              (get-in entry [:client-info :client-id])))
+          (let [registration-endpoint (:registration_endpoint metadata)]
+            (when-not registration-endpoint
+              (throw (ex-info (str "MCP auth failed: " name " has no OAuth client id and the "
+                                   "authorization server does not support dynamic client "
+                                   "registration. Set :oauth {:client-id ...} in mcp.edn.")
+                              {:type :oauth-no-registration})))
+            (when-not (seq redirect-uri)
+              (throw (ex-info (str "MCP auth failed: dynamic client registration for "
+                                   name " needs a redirect URI")
+                              {:type :oauth-invalid-config})))
+            (let [client (oauth/register-client
+                          registration-endpoint
+                          {:redirect-uris [redirect-uri]
+                           :client-name "kmet"
+                           :application-type (or (:application-type cfg)
+                                                 (application-type [redirect-uri]))
+                           :scope (scopes-string cfg)})
+                  client-id (:client_id client)]
+              (store-client-info! name issuer {:client-id client-id
+                                               :redirect-uris [redirect-uri]})
+              client-id))))))
+
+(defn resolve-flow
+  "Flow selection: config :flow (:pkce | :device | :auto default). :auto →
+   PKCE loopback; the device flow is auto-selected when the metadata
+   exposes a device endpoint and the host is headless (no UI to paste a
+   redirect URL)."
+  [cfg metadata interaction]
+  (let [forced (:flow cfg)
+        device-endpoint? (contains? metadata :device_authorization_endpoint)]
+    (case forced
+      :pkce :pkce
+      :device :device
+      :auto (if (and device-endpoint? (not (:has-ui interaction))) :device :pkce)
+      nil (if (and device-endpoint? (not (:has-ui interaction))) :device :pkce)
+      (throw (ex-info (str "MCP auth failed: unknown OAuth flow " forced
+                           " (expected :auto, :pkce or :device)")
+                      {:type :oauth-invalid-config})))))
+
+(defn verify-pkce-support!
+  "OAuth 2.1 requires PKCE for the authorization-code flow and says a
+   client MUST verify the authorization server supports it before
+   authorizing: an absent `code_challenge_methods_supported` means no
+   PKCE support, and we must refuse rather than send a challenge the
+   server will ignore. Only the PKCE flow is checked — the RFC 8628
+   device flow sends no challenge. Config :skip-pkce-verification
+   overrides for broken servers."
+  [name definition metadata]
+  (let [cfg (:oauth definition)]
+    (when (and (= :authorization-code (or (:grant cfg) :authorization-code))
+               (not (true? (:skip-pkce-verification cfg)))
+               (:authorization_endpoint metadata)
+               (nil? (:code_challenge_methods_supported metadata)))
+      (throw (ex-info (str "MCP auth failed: " name " does not advertise PKCE support "
+                           "(no code_challenge_methods_supported in its authorization "
+                           "server metadata) — refusing to authorize. Set "
+                           ":oauth {:skip-pkce-verification true} to override.")
+                      {:type :oauth-no-pkce})))))
+
+(defn- authorization-url
+  "The authorization endpoint URL with the PKCE challenge, state, scope,
+   redirect URI and the RFC 8707 resource indicator (mandatory in
+   authorization requests as well as token requests)."
+  [authorize-endpoint client-id redirect-uri challenge state scope resource]
+  (str authorize-endpoint
+       "?response_type=code"
+       "&client_id=" (oauth/url-encode client-id)
+       "&redirect_uri=" (oauth/url-encode redirect-uri)
+       "&code_challenge=" (oauth/url-encode challenge)
+       "&code_challenge_method=S256"
+       "&state=" (oauth/url-encode state)
+       (when (seq scope)
+         (str "&scope=" (oauth/url-encode scope)))
+       (when (seq resource)
+         (str "&resource=" (oauth/url-encode resource)))))
+
+(defn prepare-pkce-flow
+  "Build the PKCE authorization request for the loopback REDIRECT-URI and
+   the per-request record needed to complete it. RFC 9207 requires the
+   issuer the flow started against to be recorded with the same state that
+   stores the code verifier, so PENDING carries :issuer alongside
+   :verifier and :state.
+
+   Returns {:url .. :pending ..} — PENDING is
+   {:issuer :verifier :state :client-id :redirect-uri :scope :resource
+    :token-endpoint :iss-supported?}."
+  [name definition metadata redirect-uri]
+  (let [issuer (issuer-of metadata)
+        {:keys [verifier challenge]} (oauth/generate-pkce)
+        state (oauth/random-hex 16)
+        client-id (resolve-client-id! name definition metadata redirect-uri)
+        scope (effective-scopes name definition (::prm metadata))
+        resource (effective-resource definition)
+        authorize-endpoint (required-endpoint metadata :authorization_endpoint name)
+        token-endpoint (required-endpoint metadata :token_endpoint name)]
+    {:url (authorization-url authorize-endpoint client-id redirect-uri
+                             challenge state scope resource)
+     :pending {:issuer issuer
+               :verifier verifier
+               :state state
+               :client-id client-id
+               :redirect-uri redirect-uri
+               :scope scope
+               :resource resource
+               :token-endpoint token-endpoint
+               :iss-supported? (true? (:authorization_response_iss_parameter_supported
+                                       metadata))}}))
+
+(defn validate-authorization-response!
+  "RFC 9207 §2.4 validation of an authorization response against the
+   ISSUER recorded when the flow started, with ISS-SUPPORTED? the
+   metadata's `authorization_response_iss_parameter_supported`. RESPONSE
+   is the callback's query params ({:code :state :iss :error
+   :error_description}). A present `iss` must string-equal ISSUER — no
+   case folding, default-port elision or trailing-slash normalization —
+   and a missing one is rejected when the server advertised support. An
+   authorization `error` is surfaced only once the response is proven
+   authentic: on an issuer mismatch the client must not act on or display
+   the server's error text. Returns nil; throws with
+   :oauth-issuer-mismatch, :oauth-iss-missing or :oauth-authorization-error."
+  [response issuer iss-supported?]
+  (let [{:keys [iss error error-description]} response]
+    (when (and (some? iss) (not= iss issuer))
+      (throw (ex-info (str "OAuth authorization response issuer mismatch ("
+                           iss " vs " issuer ") — the response was not used.")
+                      {:type :oauth-issuer-mismatch :iss iss :issuer issuer})))
+    (when (and (nil? iss) (true? iss-supported?))
+      (throw (ex-info (str "OAuth authorization response is missing the iss parameter "
+                           "the authorization server advertised support for")
+                      {:type :oauth-iss-missing})))
+    (when error
+      (throw (ex-info (str "OAuth authorization failed: " error
+                           (when (seq error-description) (str " — " error-description)))
+                      {:type :oauth-authorization-error :error error})))
+    nil))
+
+(defn complete-pkce-flow!
+  "Validate an authorization RESPONSE (callback query params or parsed
+   manual input) against the PENDING record from prepare-pkce-flow, then
+   exchange its code for tokens and store them under the recorded issuer.
+   Returns :logged-in; throws on state/issuer/authorization/HTTP errors."
+  [name pending response]
+  (let [{:keys [issuer state verifier client-id redirect-uri scope resource
+                token-endpoint iss-supported?]} pending]
+    (when (and (:state response) (not= (:state response) state))
+      (throw (ex-info "OAuth state mismatch" {:type :oauth-state-mismatch})))
+    (validate-authorization-response! response issuer iss-supported?)
+    (when-not (seq (:code response))
+      (throw (ex-info "Missing authorization code" {:type :oauth-missing-code})))
+    (let [tokens (oauth/exchange-authorization-code
+                  token-endpoint
+                  {:client-id client-id
+                   :code (:code response)
+                   :code-verifier verifier
+                   :redirect-uri redirect-uri
+                   :scope scope
+                   :resource resource})]
+      (store-tokens! name issuer tokens)
+      :logged-in)))
+
+(defn begin-device-flow!
+  "Start the RFC 8628 device flow for a server: resolve the client id
+   (issuer-bound, SEP-2352), request a device code, and return
+   {:issuer :client-id :scope :resource :token-endpoint :device-code
+    :user-code :verification-uri :interval :expires-in}. REDIRECT-URI is
+   registered with DCR for a client that has none, keeping the loopback
+   callback available for a later PKCE flow."
+  [name definition metadata redirect-uri]
+  (let [issuer (issuer-of metadata)
+        client-id (resolve-client-id! name definition metadata redirect-uri)
+        scope (effective-scopes name definition (::prm metadata))
+        resource (effective-resource definition)
+        device (oauth/start-device-authorization
+                (required-endpoint metadata :device_authorization_endpoint name)
+                {:client-id client-id :scope scope :resource resource})]
+    (merge {:issuer issuer
+            :client-id client-id
+            :scope scope
+            :resource resource
+            :token-endpoint (required-endpoint metadata :token_endpoint name)}
+           (select-keys device [:device-code :user-code :verification-uri
+                                :interval :expires-in]))))
+
+(defn- device-token-poll
+  "One RFC 8628 token-endpoint poll, in the shape
+   poll-oauth-device-code-flow expects."
+  [{:keys [token-endpoint device-code client-id scope resource]}]
+  (let [body (:body (oauth/fetch-json
+                     token-endpoint
+                     {:method :post
+                      :headers {"Content-Type" "application/x-www-form-urlencoded"
+                                "Accept" "application/json"}
+                      :body (str "grant_type=urn:ietf:params:oauth:grant-type:device_code"
+                                 "&device_code=" (oauth/url-encode device-code)
+                                 "&client_id=" (oauth/url-encode client-id)
+                                 (when (seq scope)
+                                   (str "&scope=" (oauth/url-encode scope)))
+                                 (when (seq resource)
+                                   (str "&resource=" (oauth/url-encode resource))))
+                      :timeout 15000}))]
+    (cond
+      (string? (:access_token body))
+      {:status :complete :value body}
+
+      (string? (:error body))
+      (case (:error body)
+        "authorization_pending" {:status :pending}
+        "slow_down" {:status :slow_down :interval-seconds (:interval body)}
+        {:status :failed
+         :message (str "Device flow failed: " (:error body)
+                       (when (:error_description body)
+                         (str ": " (:error_description body))))})
+
+      :else
+      {:status :failed :message "Invalid device token response"})))
+
+(defn complete-device-flow!
+  "Poll the device-code grant from begin-device-flow! to completion, store
+   the tokens under the flow's issuer and return :logged-in. SIGNAL is the
+   interaction's cancel atom."
+  [name started signal]
+  (let [{:keys [issuer interval expires-in]} started
+        raw (oauth/poll-oauth-device-code-flow
+             {:interval-seconds interval
+              :expires-in-seconds expires-in
+              :wait-before-first-poll true
+              :signal signal
+              :poll (fn [] (device-token-poll started))})]
+    (store-tokens! name issuer
+                   {:access (:access_token raw)
+                    :refresh (:refresh_token raw)
+                    :expires-in (:expires_in raw)
+                    :scope (:scope raw)})
+    :logged-in))
 
 (defn- tokens->store
   "Normalize a lib token map {:access :refresh :expires-in :scope} into the
@@ -591,9 +1065,18 @@
 (defn store-tokens!
   "Normalize and persist a token response for a server under :tokens,
    keeping the rest of its entry (client info). TOKENS is the
-   kmet.libs.oauth response shape {:access :refresh :expires-in :scope}."
-  [name tokens]
-  (store-server! name (assoc (or (server-entry name) {}) :tokens (tokens->store tokens))))
+   kmet.libs.oauth response shape {:access :refresh :expires-in :scope}.
+
+   The two-argument form leaves the issuer binding as it is (an unstamped
+   pre-upgrade entry); the three-argument form keys the tokens to the
+   authorization server ISSUER and binds the server to it (SEP-2352)."
+  ([name tokens]
+   (store-server! name (assoc (or (server-entry name) {}) :tokens (tokens->store tokens))))
+  ([name issuer tokens]
+   (let [stored (tokens->store tokens)]
+     (if (keyring-mode?)
+       (store-server! name {:issuer issuer :tokens stored})
+       (store-file-bound! name issuer nil stored)))))
 
 (defn token-expired?
   "True when the stored tokens are expired (60s skew, pi's 5-min window
@@ -738,11 +1221,13 @@
 
 (defn- oauth-header
   "Authorization header from the stored tokens; refreshes silently when
-   expired, throws when not authenticated (§7.8.5 pre-emptive refresh)."
+   expired, throws when not authenticated — no stored credentials, or
+   only a client registration (a bound entry can outlive its tokens after
+   an authorization-server change) — §7.8.5 pre-emptive refresh."
   [name definition]
   (let [entry (server-entry name)]
     (cond
-      (nil? entry) (throw (auth-required-error name))
+      (nil? (get-in entry [:tokens :access])) (throw (auth-required-error name))
       (token-expired? entry)
       (if-let [refreshed (refresh-tokens! name definition)]
         (oauth-bearer-header refreshed)
@@ -751,8 +1236,9 @@
 
 (defn- refresh-tokens!
   "Refresh the stored tokens; returns the fresh tokens map or nil when no
-   refresh token is stored / the refresh failed (error recorded in the
-   store state only on success)."
+   refresh token is stored / the refresh failed. A stored refresh token is
+   never sent to an authorization server other than the one it was issued
+   by (SEP-2352); an unstamped pre-upgrade entry is bound on success."
   [name definition]
   (let [entry (server-entry name)
         refresh (get-in entry [:tokens :refresh])]
@@ -760,19 +1246,21 @@
                (seq (:url definition)))
       (try
         (let [metadata (discover-meta name definition)
-              token-endpoint (required-endpoint metadata :token_endpoint name)
-              client-id (or (get-in definition [:oauth :client-id])
-                            (get-in (server-entry name) [:client-info :client-id]))
-              tokens (when client-id
-                       (oauth/refresh-access-token
-                        token-endpoint
-                        {:client-id client-id
-                         :refresh-token refresh
-                         :scope (get-in entry [:tokens :scope])
-                         :resource (effective-resource definition)}))]
-          (when tokens
-            (store-tokens! name tokens)
-            (tokens->store tokens)))
+              issuer (issuer-of metadata)]
+          (when (or (nil? (:issuer entry)) (= (:issuer entry) issuer))
+            (let [token-endpoint (required-endpoint metadata :token_endpoint name)
+                  client-id (or (get-in definition [:oauth :client-id])
+                                (get-in entry [:client-info :client-id]))
+                  tokens (when client-id
+                           (oauth/refresh-access-token
+                            token-endpoint
+                            {:client-id client-id
+                             :refresh-token refresh
+                             :scope (get-in entry [:tokens :scope])
+                             :resource (effective-resource definition)}))]
+              (when tokens
+                (store-tokens! name issuer tokens)
+                (tokens->store tokens)))))
         (catch Exception _ nil)))))
 
 (defn- oauth-header-after-401

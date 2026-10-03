@@ -8,6 +8,7 @@
 ;;                        metadata (authorization_servers, scopes_supported)
 ;;   GET  /no-pkce-metadata — AS metadata WITHOUT code_challenge_methods_supported
 ;;   GET  /last-token-request — the last /token request form (RFC 8707 checks)
+;;   GET  /last-registration-request — the last /register body (SEP-837 checks)
 ;;   POST /register     — RFC 7591 DCR (returns a fixed client id)
 ;;   GET  /authorize    — loopback authorize: redirects to the callback
 ;;                        with ?code=...&state=<echoed> when code_verifier
@@ -43,6 +44,7 @@
 (def state (atom {:device-polls 0
                   :issued-tokens 0}))
 (def last-token-request (atom {}))
+(def last-registration-request (atom {}))
 
 (defn- http-response
   ([status body] (http-response status body {"Content-Type" "application/json"}))
@@ -116,7 +118,11 @@
                                                "client_credentials"
                                                "urn:ietf:params:oauth:grant-type:jwt-bearer"]
                        :token_endpoint_auth_methods_supported ["none"]
-                       :code_challenge_methods_supported ["S256"]}))
+                       :code_challenge_methods_supported ["S256"]
+                       ;; RFC 9207: this AS emits `iss` in authorization
+                       ;; responses, so the client must reject a response
+                       ;; without one
+                       :authorization_response_iss_parameter_supported true}))
 
       (and (= method "GET")
            (str/includes? path "/.well-known/oauth-protected-resource"))
@@ -141,23 +147,31 @@
       (and (= method "GET") (= path "/last-token-request"))
       (http-response 200 (json/generate-string @last-token-request))
 
+      ;; what the last /register request carried (SEP-837 application_type)
+      (and (= method "GET") (= path "/last-registration-request"))
+      (http-response 200 (json/generate-string @last-registration-request))
+
       (and (= method "POST") (= path "/register"))
-      (http-response 201
-                     (json/generate-string
-                      {:client_id "dcr-client-1"
-                       :client_id_issued_at 1700000000
-                       :redirect_uris [(get-in (json/parse-string (:body req) true)
-                                               [:redirect_uris 0])]}))
+      (let [body (json/parse-string (:body req) true)]
+        (reset! last-registration-request body)
+        (http-response 201
+                       (json/generate-string
+                        {:client_id "dcr-client-1"
+                         :client_id_issued_at 1700000000
+                         :redirect_uris [(first (:redirect_uris body))]})))
 
       (and (= method "GET") (= path "/authorize"))
       ;; Validate the PKCE challenge is present, then redirect to the
-      ;; callback with code + the same state (the validation script hits
-      ;; the callback URL directly).
+      ;; callback with code + the same state + the issuer (RFC 9207).
       (let [params (form-decode (:query req))]
         (if (seq (:code_challenge params))
           (http-response 302 ""
                          {"Location" (str (:redirect_uri params)
-                                          "?code=fake-code&state=" (:state params))})
+                                          "?code=fake-code"
+                                          "&state=" (:state params)
+                                          "&iss=" (java.net.URLEncoder/encode
+                                                   (str "http://127.0.0.1:" (:port @state))
+                                                   "UTF-8"))})
           (http-response 400 "missing code_challenge")))
 
       (and (= method "POST") (= path "/token"))

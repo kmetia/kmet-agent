@@ -122,7 +122,9 @@ sandbox, see below),
 `:on` — merges host mcp.json files at the lowest precedence).
 
 OAuth config (`:oauth` map): `:client-id` (pre-registered client; omit →
-RFC 7591 dynamic client registration), `:client-secret`, `:scopes`
+RFC 7591 dynamic client registration), `:client-secret`,
+`:application-type` (`"native"` | `"web"` — SEP-837 OIDC DCR client type;
+default inferred from the redirect URI, loopback → `"native"`), `:scopes`
 (string or vector), `:flow` (`:auto` default | `:pkce` | `:device`),
 `:grant` (`:authorization-code` default | `:client-credentials` |
 `:jwt-bearer` — machine grants, no browser), `:token-endpoint` (explicit,
@@ -268,17 +270,27 @@ cached metadata so no server spawns at startup. Names are lowercased with
   carry the RFC 8707 `resource` indicator — the canonical server URI —
   in both authorization and token requests, and the scopes come from
   config, else the server's `WWW-Authenticate` challenge, else
-  `scopes_supported`. PKCE support is verified before the PKCE flow
+  `scopes_supported`. The authorization response's `iss` is validated
+  against the issuer recorded when the flow started (RFC 9207; a missing
+  one is rejected when the AS advertises
+  `authorization_response_iss_parameter_supported`), and credentials are
+  keyed by the authorization server's issuer (SEP-2352) — a client
+  registered with one AS is never reused at another, and an AS change
+  re-registers (pre-registered `:client-id` credentials surface an error
+  instead). PKCE support is verified before the PKCE flow
   authorizes (`:skip-pkce-verification` overrides; the device flow sends
   no challenge and is never refused for missing PKCE metadata). Tokens
   refresh silently on expiry; a 401 with a stored refresh token refreshes
-  once and retries.
+  once and retries (never against a different issuer).
   Tokens are stored in the **OS keyring when available** — macOS
   `security`, Linux `secret-tool`, Windows Credential Manager (PowerShell
   P/Invoke) — and fall back to **plaintext** `~/.kmet/agent/mcp-oauth.edn`
-  (0600 perms) on hosts without a keyring tool (e.g. Termux). Settings
-  `:token-storage :keyring | :file | :auto` (default `:auto`); env
-  `MCP_TOKEN_STORAGE` overrides; `logout` clears the entry.
+  (0600 perms) on hosts without a keyring tool (e.g. Termux). The file is
+  issuer-keyed (`:version 2`): one client registration per authorization
+  server, shared by the servers resolving to it, and tokens per server; a
+  pre-upgrade per-server file is migrated on first authenticated use.
+  Settings `:token-storage :keyring | :file | :auto` (default `:auto`);
+  env `MCP_TOKEN_STORAGE` overrides; `logout` clears the entry.
 - **Machine grants**: `:oauth {:grant :client-credentials ...}` (RFC 6749
   §4.4) or `:grant :jwt-bearer` (RFC 7523) skip the browser: a token is
   fetched from the token endpoint on demand and cached in memory,

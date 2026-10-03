@@ -475,11 +475,13 @@
      :grant-types                  — default [\"authorization_code\"
                                       \"refresh_token\"]
      :response-types               — default [\"code\"]
+     :application-type             — OIDC application_type (\"native\" |
+                                      \"web\"); omitted when nil (SEP-837)
      :scope                        — optional scope hint
      :timeout                      — default 15000"
   [registration-endpoint {:keys [redirect-uris client-name client-uri
                                  token-endpoint-auth-method grant-types
-                                 response-types scope timeout]
+                                 response-types application-type scope timeout]
                           :or {client-name "kmet"
                                token-endpoint-auth-method "none"
                                grant-types ["authorization_code" "refresh_token"]
@@ -497,6 +499,7 @@
                                      :grant_types grant-types
                                      :response_types response-types}
                               client-uri (assoc :client_uri client-uri)
+                              application-type (assoc :application_type application-type)
                               scope (assoc :scope scope))
                       :timeout (or timeout 15000)})))
 

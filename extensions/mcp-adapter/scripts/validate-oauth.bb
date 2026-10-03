@@ -10,7 +10,9 @@
 (require '[babashka.process :as proc]
          '[clojure.string :as str]
          '[clojure.java.io :as io]
+         '[clojure.edn :as edn]
          '[kmet.extensions.mcp-adapter.auth :as auth]
+         '[kmet.libs.mcp.auth :as mcp-auth]
          '[kmet.libs.oauth :as oauth-lib])
 
 (def failures (atom 0))
@@ -62,6 +64,13 @@
   (:body (oauth-lib/fetch-json (str "http://127.0.0.1:" oauth-port "/last-token-request")
                                {:method :get})))
 
+(defn- last-registration-request
+  "What the fake authorization server last received at /register — the
+   SEP-837 application_type check."
+  [oauth-port]
+  (:body (oauth-lib/fetch-json (str "http://127.0.0.1:" oauth-port "/last-registration-request")
+                               {:method :get})))
+
 (defn- capture-notify
   "Interaction helper: capture the :auth-url / :device-code events."
   [events]
@@ -78,9 +87,11 @@
 (defn- interaction
   "Test interaction: no UI, no real browser. When the flow emits the
    authorize URL, a future simulates the browser: the AS redirects to the
-   loopback callback with code + state, and the callback server settles
-   the code promise. The prompt blocks so only the callback can win."
-  [events]
+   loopback callback with code + state + the issuer's `iss` (RFC 9207),
+   and the callback server settles the code promise. Pass {:iss ...} to
+   simulate a mismatching or absent `iss`; the prompt blocks so only the
+   callback can win."
+  [events issuer & [{:keys [iss] :or {iss issuer}}]]
   {:signal (atom false)
    :has-ui false
    :open-url (fn [_])
@@ -91,7 +102,9 @@
                  (let [url (:url event)
                        p (params-of url)
                        redirect-uri (:redirect_uri p)
-                       callback (str redirect-uri "?code=fake-code&state=" (:state p))]
+                       callback (str redirect-uri "?code=fake-code&state=" (:state p)
+                                     (when iss
+                                       (str "&iss=" (java.net.URLEncoder/encode iss "UTF-8"))))]
                    (http-get! callback))))
              (when (= :device-code (:type event))
                (swap! events conj event)))
@@ -99,12 +112,13 @@
 
 (defn test-pkce-flow [oauth-port store-path]
   (println "\n── DCR + PKCE loopback ──")
-  (let [events (atom [])
+  (let [issuer (str "http://127.0.0.1:" oauth-port)
+        events (atom [])
         definition {:url (str "http://127.0.0.1:" oauth-port "/mcp")
                     :auth :oauth
                     :oauth {:flow :pkce :scopes ["read"]}}
         abort-called (atom false)
-        flow-interaction (assoc (interaction events)
+        flow-interaction (assoc (interaction events issuer)
                                 :abort-prompt! (fn [] (reset! abort-called true)))
         status (auth/run-flow! "pkce-server" definition flow-interaction)
         auth-event (first (filter #(= :auth-url (:type %)) @events))]
@@ -132,7 +146,9 @@
              (let [auth-event (first (filter #(= :auth-url (:type %)) @events))
                    decoded (java.net.URLDecoder/decode
                             (get (params-of (:url auth-event)) :redirect_uri) "UTF-8")]
-               (some #(= decoded %) (get-in entry [:client-info :redirect-uris])))))
+               (some #(= decoded %) (get-in entry [:client-info :redirect-uris]))))
+      (check "DCR carries application_type native (SEP-837)"
+             (= "native" (:application_type (last-registration-request oauth-port)))))
     ;; request headers carry the bearer token
     (let [auth-fns (auth/make-auth-fns "pkce-server" definition)
           headers ((:auth-headers auth-fns))
@@ -161,7 +177,7 @@
         ;; earlier definition's :scopes ["read"] would mask it)
         (let [bare-events (atom [])
               bare-definition (assoc definition :oauth {:flow :pkce})]
-          (auth/run-flow! "pkce-server" bare-definition (interaction bare-events))
+          (auth/run-flow! "pkce-server" bare-definition (interaction bare-events issuer))
           (check "challenge scope used for the next token request"
                  (= "files:read" (:scope (last-token-request oauth-port)))))))
     ;; RFC 8707: the resource indicator is mandatory in authorization
@@ -188,6 +204,18 @@
     (check "token request carries the resource indicator"
            (= (str "http://127.0.0.1:" oauth-port "/mcp")
               (:resource (last-token-request oauth-port))))
+    ;; RFC 9207: the authorization response's iss is validated before the
+    ;; code reaches any token endpoint
+    (check "iss mismatch is rejected (RFC 9207)"
+           (try (auth/run-flow! "pkce-server" definition
+                                (interaction (atom []) issuer {:iss "https://evil.example"}))
+                false
+                (catch Exception e (= :oauth-issuer-mismatch (:type (ex-data e))))))
+    (check "missing iss is rejected when the AS advertised support (RFC 9207)"
+           (try (auth/run-flow! "pkce-server" definition
+                                (interaction (atom []) issuer {:iss nil}))
+                false
+                (catch Exception e (= :oauth-iss-missing (:type (ex-data e))))))
     (check "status logged-in" (= :logged-in (auth/auth-status "pkce-server" definition)))))
 
 (defn test-configured-redirect-uri [oauth-port store-path]
@@ -200,7 +228,8 @@
         definition {:url (str "http://127.0.0.1:" oauth-port "/mcp")
                     :auth :oauth
                     :oauth {:flow :pkce :redirect-uri redirect-uri}}
-        status (auth/run-flow! "custom-redirect" definition (interaction events))
+        status (auth/run-flow! "custom-redirect" definition
+                               (interaction events (str "http://127.0.0.1:" oauth-port)))
         auth-event (first (filter #(= :auth-url (:type %)) @events))
         p (params-of (:url auth-event))]
     (check "flow returns :logged-in" (= :logged-in status))
@@ -216,7 +245,8 @@
         definition {:url (str "http://127.0.0.1:" oauth-port "/mcp")
                     :auth :oauth
                     :oauth {:flow :device :scopes ["read"]}}
-        status (auth/run-flow! "device-server" definition (interaction events))
+        status (auth/run-flow! "device-server" definition
+                               (interaction events (str "http://127.0.0.1:" oauth-port)))
         device-event (first (filter #(= :device-code (:type %)) @events))]
     (check "device flow returns :logged-in" (= :logged-in status))
     (check "device code notified"
@@ -232,6 +262,26 @@
     (auth/logout! "device-server")
     (check "logout clears store" (nil? (auth/server-entry "device-server")))
     (check "status none after logout" (= :none (auth/auth-status "device-server" definition)))))
+
+(defn test-tokenless-status [oauth-port store-path]
+  (println "\n── credential-less store entry ──")
+  (let [issuer (str "http://127.0.0.1:" oauth-port)
+        definition {:url (str issuer "/mcp")
+                    :auth :oauth
+                    :oauth {:flow :pkce}}]
+    ;; what an interrupted issuer change leaves behind: a shared client
+    ;; registration with no tokens for this server
+    (auth/store-server! "tokenless" {:issuer issuer
+                                     :client-info {:client-id "c1"}})
+    (check "a client registration alone is not logged in"
+           (= :none (auth/auth-status "tokenless" definition)))
+    (check "auth headers refuse a credential-less entry"
+           (try ((:auth-headers (auth/make-auth-fns "tokenless" definition)))
+                false
+                (catch Exception e (= :mcp-auth-required (:type (ex-data e))))))
+    (auth/logout! "tokenless")
+    (check "logout clears the credential-less entry"
+           (nil? (auth/server-entry "tokenless")))))
 
 (defn test-client-credentials-flow [oauth-port store-path]
   (println "\n── client-credentials grant ──")
@@ -308,7 +358,8 @@
         definition {:url (str "http://127.0.0.1:" oauth-port "/mcp")
                     :auth :oauth
                     :oauth {:flow :device}}
-        _ (auth/run-flow! "scoped-server" definition (interaction events))]
+        _ (auth/run-flow! "scoped-server" definition
+                          (interaction events (str "http://127.0.0.1:" oauth-port)))]
     (check "scopes come from the resource metadata"
            (= "read write" (:scope (last-token-request oauth-port))))
     (auth/logout! "scoped-server"))
@@ -321,7 +372,8 @@
                             :authorization-server-url
                             (str "http://127.0.0.1:" oauth-port "/no-pkce-metadata")}}]
     (check "refuses an AS without PKCE support"
-           (try (auth/run-flow! "no-pkce" definition (interaction events))
+           (try (auth/run-flow! "no-pkce" definition
+                                (interaction events (str "http://127.0.0.1:" oauth-port)))
                 false
                 (catch Exception e (= :oauth-no-pkce (:type (ex-data e)))))))
   ;; ...and the documented override lets a user proceed anyway
@@ -334,7 +386,7 @@
                             (str "http://127.0.0.1:" oauth-port "/no-pkce-metadata")}}]
     (check "skip-pkce-verification overrides the refusal"
            (= :logged-in (auth/run-flow! "no-pkce-override" definition
-                                         (interaction events))))
+                                         (interaction events (str "http://127.0.0.1:" oauth-port)))))
     (auth/logout! "no-pkce-override"))
   ;; the RFC 8628 device flow sends no code challenge, so missing PKCE
   ;; metadata must not refuse it — it stops at the missing device endpoint
@@ -346,9 +398,38 @@
                             :authorization-server-url
                             (str "http://127.0.0.1:" oauth-port "/no-pkce-metadata")}}]
     (check "device flow is not refused for missing PKCE metadata"
-           (try (auth/run-flow! "no-pkce-device" definition (interaction events))
+           (try (auth/run-flow! "no-pkce-device" definition
+                                (interaction events (str "http://127.0.0.1:" oauth-port)))
                 false
                 (catch Exception e (not= :oauth-no-pkce (:type (ex-data e))))))))
+
+(defn test-sep-2352-binding [oauth-port store-path]
+  (println "\n── SEP-2352 authorization-server binding ──")
+  (let [issuer (str "http://127.0.0.1:" oauth-port)
+        definition {:url (str issuer "/mcp")
+                    :auth :oauth
+                    :oauth {:flow :pkce :client-id "pre-registered"}}]
+    ;; pkce-server is bound to this issuer; the same server pointing at a
+    ;; different authorization server must not reuse the credentials
+    (check "pre-registered credentials are not reused after an AS change"
+           (try
+             (with-redefs [mcp-auth/discover-meta
+                           (fn [_name _definition]
+                             {:issuer "https://other.example"
+                              :authorization_endpoint "https://other.example/authorize"
+                              :token_endpoint "https://other.example/token"
+                              :code_challenge_methods_supported ["S256"]})]
+               (auth/run-flow! "pkce-server" definition (interaction (atom []) issuer)))
+             false
+             (catch Exception e (= :oauth-issuer-mismatch (:type (ex-data e))))))
+    ;; the store file is issuer-keyed (v2) with a server → issuer binding
+    (let [store (edn/read-string (slurp store-path))]
+      (check "store file is issuer-keyed (SEP-2352)"
+             (and (= 2 (:version store))
+                  (seq (:issuers store))
+                  (seq (:servers store))
+                  (every? :issuer (vals (:servers store))))))
+    (auth/logout! "pkce-server")))
 
 (defn test-jwt-bearer-flow [oauth-port store-path]
   (println "\n── jwt-bearer grant (RFC 7523) ──")
@@ -397,7 +478,9 @@
         ;; callback server binds once (port + path), later flows reuse it
         (test-configured-redirect-uri port store-path)
         (test-pkce-flow port store-path)
+        (test-sep-2352-binding port store-path)
         (test-device-flow port store-path)
+        (test-tokenless-status port store-path)
         (test-client-credentials-flow port store-path)
         (test-jwt-bearer-flow port store-path)
         (test-discovery-and-pkce-verification port store-path)

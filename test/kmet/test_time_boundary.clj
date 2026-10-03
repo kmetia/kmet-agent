@@ -6,10 +6,11 @@
    backward step stalls them. In the kmet.libs.* layer, elapsed time must
    come from kmet.libs.concurrent/monotonic-ms.
 
-   The two allowlisted files read the wall clock for values compared against
-   externally-produced wall-clock data (JWT claims, a lock file's own mtime),
-   not for elapsed durations. Anything else that needs the wall clock in this
-   layer must move to monotonic-ms or argue for an allowlist entry here.
+   The allowlisted files read the wall clock for values compared against
+   externally-produced wall-clock data (JWT claims, a lock file's own
+   mtime, persisted OAuth token expiries), not for elapsed durations.
+   Anything else that needs the wall clock in this layer must move to
+   monotonic-ms or argue for an allowlist entry here.
 
    Comment lines are exempt so prose can still name the call; other prose
    should write it without parentheses."
@@ -21,8 +22,9 @@
 (def ^:private wall-clock-allowed
   "libs files where the wall clock is compared against externally-produced
    wall-clock data rather than an elapsed duration."
-  #{"src/kmet/libs/crypto.clj"    ; JWT iat/exp claims
-    "src/kmet/libs/edn_store.clj"}) ; the lock file's own mtime
+  #{"src/kmet/libs/crypto.clj"     ; JWT iat/exp claims
+    "src/kmet/libs/edn_store.clj"  ; the lock file's own mtime
+    "src/kmet/libs/mcp/auth.clj"}) ; persisted OAuth token expiry (epoch ms)
 
 (defn- lib-files
   "Every lib source file (.clj/.cljc) under src/kmet/libs, at any depth.

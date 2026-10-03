@@ -4,20 +4,16 @@
    mcp-auth-flow.ts / mcp-callback-server.ts, adapted onto the generic
    machinery in kmet.libs.oauth).
 
-   Thin adapter: server config → lib calls, token-store wiring (the host
-   path for the plaintext fallback; the :file/:keyring backends live in
-   the lib), the browser/callback-server interaction for the interactive
-   flows, and status text. The extension cannot require kmet.ai.*, so the
-   generic machinery lives in kmet.libs.oauth (RFC 8414 discovery,
+   Thin adapter: the interactive flow's host side (the browser/callback
+   server race, the manual-paste prompt, status text) lives here; the
+   protocol steps live in kmet.libs.mcp.auth (mcp.md Phase 2) — issuer
+   binding and the credential store (SEP-2352), discovery, client
+   registration incl. the SEP-837 application_type, PKCE request/response
+   handling with the RFC 9207 `iss` check, the device flow, and the
+   request-auth header provider. The extension cannot require kmet.ai.*,
+   so the generic machinery lives in kmet.libs.oauth (RFC 8414 discovery,
    RFC 7591 DCR, PKCE loopback + RFC 8628 device flows, token
    exchange/refresh).
-
-   The MCP-specific policy lives in kmet.libs.mcp.auth (mcp.md Phase 2):
-   resource canonicalization, the WWW-Authenticate challenge record,
-   scope/resource selection, the credential store, discovery, the token
-   lifecycle (bearer/machine grants/refresh + make-auth-fns) and the
-   request-auth header provider are there; the interactive flows and the
-   2026 hardening remain here.
 
    Flow (per server, §7.8):
      1. token lookup — expired → refresh; missing/refresh-failed → flow
@@ -39,16 +35,20 @@
             [kmet.libs.oauth :as oauth-lib]))
 
 ;; ─── kmet.libs.mcp.auth re-exports ────────────────────────────────────────
-;; The policy, discovery, request-auth and store machinery lives in the lib
-;; (mcp.md Phase 2). These aliases keep the validation scripts' call surface
-;; (auth/<name>) stable; the extension calls the lib directly where a name
-;; is not part of that surface.
+;; The policy, discovery, flow steps, request-auth and store machinery
+;; lives in the lib (mcp.md Phase 2). These aliases keep the validation
+;; scripts' call surface (auth/<name>) stable; the extension calls the lib
+;; directly where a name is not part of that surface.
 
 (def canonical-resource-uri mcp-auth/canonical-resource-uri)
 (def parse-www-authenticate mcp-auth/parse-www-authenticate)
 (def discover-meta mcp-auth/discover-meta)
 (def make-auth-fns mcp-auth/make-auth-fns)
 (def machine-token-cached? mcp-auth/machine-token-cached?)
+(def server-entry mcp-auth/server-entry)
+(def server-issuer mcp-auth/server-issuer)
+(def store-server! mcp-auth/store-server!)
+(def logout! mcp-auth/logout!)
 
 ;; ─── Token store (kmet.libs.mcp.auth) ─────────────────────────────────────
 ;; The :file / :keyring / :auto backends, their path/permission handling
@@ -74,36 +74,6 @@
                (contains? (or settings {}) :token-storage) (:token-storage settings)
                :else :auto)]
     (mcp-auth/configure-storage! {:mode mode :path (store-path)})))
-
-(def server-entry mcp-auth/server-entry)
-(def store-server! mcp-auth/store-server!)
-
-(def logout! mcp-auth/logout!)
-
-;; ─── Discovery (kmet.libs.mcp.auth) ──────────────────────────────────────
-;; RFC 9728 protected-resource probing, RFC 8414 / OIDC authorization-server
-;; discovery and the required-endpoint check live in the lib; only the
-;; flow-level PKCE gate stays here (run-flow! consults it).
-
-(defn- verify-pkce-support!
-  "OAuth 2.1 requires PKCE for the authorization-code flow and says a
-   client MUST verify the authorization server supports it before
-   authorizing: an absent `code_challenge_methods_supported` means no
-   PKCE support, and we must refuse rather than send a challenge the
-   server will ignore. Only the PKCE flow is checked — the RFC 8628
-   device flow sends no challenge. Config :skip-pkce-verification
-   overrides for broken servers."
-  [name definition metadata]
-  (let [cfg (:oauth definition)]
-    (when (and (= :authorization-code (or (:grant cfg) :authorization-code))
-               (not (true? (:skip-pkce-verification cfg)))
-               (:authorization_endpoint metadata)
-               (nil? (:code_challenge_methods_supported metadata)))
-      (throw (ex-info (str "MCP auth failed: " name " does not advertise PKCE support "
-                           "(no code_challenge_methods_supported in its authorization "
-                           "server metadata) — refusing to authorize. Set "
-                           ":oauth {:skip-pkce-verification true} to override.")
-                      {:type :oauth-no-pkce})))))
 
 ;; ─── Callback server (process-wide, OS-assigned port) ─────────────────────
 
@@ -162,17 +132,26 @@
                                 {:status 400
                                  :body (oauth-lib/oauth-error-html "State mismatch.")}
 
-                                (nil? (:code query-params))
+                                (and (nil? (:code query-params))
+                                     (nil? (:error query-params)))
                                 {:status 400
                                  :body (oauth-lib/oauth-error-html
                                         "Missing authorization code.")}
 
                                 :else
-                                (do (deliver (:code-p flow)
-                                             {:code (:code query-params)})
-                                    {:status 200
-                                     :body (oauth-lib/oauth-success-html
-                                            "MCP authentication completed. You can close this window.")})))))]
+                                ;; the whole response goes to the flow: the
+                                ;; lib validates `iss` (RFC 9207) and any
+                                ;; `error` before the code is exchanged. The
+                                ;; page stays generic — an unvalidated error
+                                ;; description must never be displayed
+                                (do (deliver (:code-p flow) query-params)
+                                    (if (:error query-params)
+                                      {:status 400
+                                       :body (oauth-lib/oauth-error-html
+                                              "Authorization failed. Return to kmet for details.")}
+                                      {:status 200
+                                       :body (oauth-lib/oauth-success-html
+                                              "MCP authentication completed. You can close this window.")}))))))]
               (reset! callback-state {:server server
                                       :port (:port server)
                                       :path callback-path})
@@ -205,129 +184,42 @@
     (reset! callback-state nil)
     (reset! current-flow nil)))
 
-;; ─── Client info (config pre-registered or RFC 7591 DCR) ──────────────────
-
-(defn- stored-client-id
-  [name]
-  (get-in (server-entry name) [:client-info :client-id]))
-
-(defn- resolve-client-id!
-  "The client id for a server: config :oauth {:client-id ...} wins; else
-   the stored (DCR'd) client; else RFC 7591 dynamic registration against
-   the metadata's registration_endpoint (registered once, persisted with
-   the entry)."
-  [name definition metadata]
-  (let [cfg (:oauth definition)]
-    (or (:client-id cfg)
-        (stored-client-id name)
-        (let [registration-endpoint (get metadata :registration_endpoint)]
-          (when-not registration-endpoint
-            (throw (ex-info (str "MCP auth failed: " name " has no OAuth client id and the "
-                                 "authorization server does not support dynamic client "
-                                 "registration. Set :oauth {:client-id ...} in mcp.edn.")
-                            {:type :oauth-no-registration})))
-          (let [redirect-uri (ensure-callback-redirect! cfg)
-                client (oauth-lib/register-client
-                        registration-endpoint
-                        {:redirect-uris [redirect-uri]
-                         :client-name "kmet"
-                         :scope (mcp-auth/scopes-string cfg)})]
-            (store-server! name (assoc (or (server-entry name) {})
-                                       :client-info {:client-id (:client_id client)
-                                                     :redirect-uris [redirect-uri]}))
-            (:client_id client))))))
-
 ;; ─── Full flow (/mcp auth, §7.8.4) ────────────────────────────────────────
 
-(defn- resolve-flow
-  "Flow selection: config :flow (:pkce | :device | :auto default). :auto →
-   PKCE loopback; the device flow is auto-selected when the metadata
-   exposes a device endpoint and the host is headless (no UI to paste a
-   redirect URL)."
-  [cfg metadata interaction]
-  (let [forced (:flow cfg)
-        device-endpoint? (contains? metadata :device_authorization_endpoint)]
-    (case forced
-      :pkce :pkce
-      :device :device
-      :auto (if (and device-endpoint? (not (:has-ui interaction))) :device :pkce)
-      nil (if (and device-endpoint? (not (:has-ui interaction))) :device :pkce)
-      (throw (ex-info (str "MCP auth failed: unknown OAuth flow " forced
-                           " (expected :auto, :pkce or :device)")
-                      {:type :oauth-invalid-config})))))
-
-(defn- authorize-url
-  "The authorization endpoint URL with the PKCE challenge, state, scope,
-   redirect URI and the RFC 8707 resource indicator (mandatory in
-   authorization requests as well as token requests)."
-  [authorize-endpoint client-id redirect-uri challenge state scope resource]
-  (str authorize-endpoint
-       "?response_type=code"
-       "&client_id=" (oauth-lib/url-encode client-id)
-       "&redirect_uri=" (oauth-lib/url-encode redirect-uri)
-       "&code_challenge=" (oauth-lib/url-encode challenge)
-       "&code_challenge_method=S256"
-       "&state=" (oauth-lib/url-encode state)
-       (when (seq scope)
-         (str "&scope=" (oauth-lib/url-encode scope)))
-       (when (seq resource)
-         (str "&resource=" (oauth-lib/url-encode resource)))))
-
 (defn- run-pkce-flow
+  "Host half of the PKCE loopback flow: bind the callback server, hand the
+   authorize URL to the user, race the callback against the manual-paste
+   prompt, then let the lib complete (RFC 9207 validation + code exchange +
+   issuer-bound store)."
   [name definition metadata interaction]
   (let [cfg (:oauth definition)
-        {:keys [verifier challenge]} (oauth-lib/generate-pkce)
-        state (oauth-lib/random-hex 16)
         redirect-uri (ensure-callback-redirect! cfg)
-        client-id (resolve-client-id! name definition metadata)
-        scope (mcp-auth/effective-scopes name definition (::mcp-auth/prm metadata))
-        resource (mcp-auth/effective-resource definition)
-        code-p (promise)
-        authorize-endpoint (mcp-auth/required-endpoint metadata :authorization_endpoint name)]
-    (reset! current-flow {:state state :code-p code-p})
+        {:keys [url pending]} (mcp-auth/prepare-pkce-flow
+                               name definition metadata redirect-uri)
+        code-p (promise)]
+    (reset! current-flow {:state (:state pending) :code-p code-p})
     (try
-      (let [url (authorize-url authorize-endpoint client-id redirect-uri
-                               challenge state scope resource)]
-        ((:notify interaction)
-         {:type :auth-url :url url
-          :instructions "Open the URL in your browser to authorize MCP access."})
-        (try ((:open-url interaction) url) (catch Exception _ nil))
-        (let [result (oauth-lib/wait-for-callback-or-manual
-                      interaction code-p
-                      {:type :manual-code
-                       :message (str "Complete login in your browser, or paste the "
-                                     "authorization code / redirect URL here:")}
-                      600000)
-              code (case (:source result)
-                     :callback (:code (:value result))
-                     :manual (let [parsed (oauth-lib/parse-authorization-input
-                                           (:value result))]
-                               (when (and (:state parsed)
-                                          (not= (:state parsed) state))
-                                 (throw (ex-info "OAuth state mismatch"
-                                                 {:type :oauth-state-mismatch})))
-                               (:code parsed))
-                     :cancelled (throw (ex-info "Login cancelled"
-                                                {:type :login-cancelled}))
-                     :timeout (throw (ex-info "OAuth login timed out"
-                                              {:type :oauth-timeout}))
-                     :error (throw (:error result)))]
-          (when-not code
-            (throw (ex-info "Missing authorization code"
-                            {:type :oauth-missing-code})))
-          (let [tokens (oauth-lib/exchange-authorization-code
-                        (mcp-auth/required-endpoint metadata :token_endpoint name)
-                        {:client-id client-id
-                         :code code
-                         :code-verifier verifier
-                         :redirect-uri redirect-uri
-                         :scope scope
-                         :resource resource})]
-            (mcp-auth/store-tokens! name tokens)
-            (store-server! name (assoc (server-entry name)
-                                       :client-info {:client-id client-id
-                                                     :redirect-uris [redirect-uri]}))
-            :logged-in)))
+      ((:notify interaction)
+       {:type :auth-url :url url
+        :instructions "Open the URL in your browser to authorize MCP access."})
+      (try ((:open-url interaction) url) (catch Exception _ nil))
+      (let [result (oauth-lib/wait-for-callback-or-manual
+                    interaction code-p
+                    {:type :manual-code
+                     :message (str "Complete login in your browser, or paste the "
+                                   "authorization code / redirect URL here:")}
+                    600000)
+            response (case (:source result)
+                       :callback (:value result)
+                       :manual (or (oauth-lib/parse-authorization-input
+                                    (:value result))
+                                   {})
+                       :cancelled (throw (ex-info "Login cancelled"
+                                                  {:type :login-cancelled}))
+                       :timeout (throw (ex-info "OAuth login timed out"
+                                                {:type :oauth-timeout}))
+                       :error (throw (:error result)))]
+        (mcp-auth/complete-pkce-flow! name pending response))
       (finally
         ;; pi: manualAbort.abort — dismiss the pending manual-paste dialog
         ;; and unblock its prompt when the callback won (no-op when the
@@ -337,71 +229,23 @@
         (reset! current-flow nil)))))
 
 (defn- run-device-flow
+  "Host half of the RFC 8628 device flow: hand the user code to the user,
+   then let the lib poll and store the tokens."
   [name definition metadata interaction]
-  (let [client-id (resolve-client-id! name definition metadata)
-        scope (mcp-auth/effective-scopes name definition (::mcp-auth/prm metadata))
-        resource (mcp-auth/effective-resource definition)
-        device (oauth-lib/start-device-authorization
-                (mcp-auth/required-endpoint metadata :device_authorization_endpoint name)
-                {:client-id client-id :scope scope :resource resource})
-        token-endpoint (mcp-auth/required-endpoint metadata :token_endpoint name)]
+  (let [cfg (:oauth definition)
+        ;; a pre-registered client needs no DCR, so no redirect URI (and
+        ;; no callback server) for this flow either
+        redirect-uri (when-not (:client-id cfg)
+                       (ensure-callback-redirect! cfg))
+        started (mcp-auth/begin-device-flow! name definition metadata redirect-uri)]
     ((:notify interaction)
      {:type :device-code
-      :user-code (:user-code device)
-      :verification-uri (:verification-uri device)
-      :expires-in-seconds (:expires-in device)})
-    (try ((:open-url interaction) (:verification-uri device))
+      :user-code (:user-code started)
+      :verification-uri (:verification-uri started)
+      :expires-in-seconds (:expires-in started)})
+    (try ((:open-url interaction) (:verification-uri started))
          (catch Exception _ nil))
-    (let [tokens (oauth-lib/poll-oauth-device-code-flow
-                  {:interval-seconds (:interval device)
-                   :expires-in-seconds (:expires-in device)
-                   :wait-before-first-poll true
-                   :signal (:signal interaction)
-                   :poll
-                   (fn []
-                     (let [raw (:body (oauth-lib/fetch-json
-                                       token-endpoint
-                                       {:method :post
-                                        :headers {"Content-Type"
-                                                  "application/x-www-form-urlencoded"
-                                                  "Accept" "application/json"}
-                                        :body (str "grant_type=urn:ietf:params:oauth:"
-                                                   "grant-type:device_code"
-                                                   "&device_code="
-                                                   (oauth-lib/url-encode (:device-code device))
-                                                   "&client_id="
-                                                   (oauth-lib/url-encode client-id)
-                                                   (when (seq scope)
-                                                     (str "&scope="
-                                                          (oauth-lib/url-encode scope)))
-                                                   (when (seq resource)
-                                                     (str "&resource="
-                                                          (oauth-lib/url-encode resource))))
-                                        :timeout 15000}))]
-                       (cond
-                         (string? (:access_token raw))
-                         {:status :complete :value raw}
-
-                         (string? (:error raw))
-                         (case (:error raw)
-                           "authorization_pending" {:status :pending}
-                           "slow_down" {:status :slow_down
-                                        :interval-seconds (:interval raw)}
-                           {:status :failed
-                            :message (str "Device flow failed: " (:error raw)
-                                          (when (:error_description raw)
-                                            (str ": " (:error_description raw))))})
-
-                         :else
-                         {:status :failed
-                          :message "Invalid device token response"})))})]
-      (mcp-auth/store-tokens! name {:access (:access_token tokens)
-                                    :expires-in (:expires_in tokens)
-                                    :refresh (:refresh_token tokens)
-                                    :scope (:scope tokens)})
-      (store-server! name (assoc (server-entry name)
-                                 :client-info {:client-id client-id}))
-      :logged-in)))
+    (mcp-auth/complete-device-flow! name started (:signal interaction))))
 
 (defn run-flow!
   "Run the auth flow for a server (§7.8) — fresh login, replaces stored
@@ -414,11 +258,11 @@
   (if (mcp-auth/machine-grant? definition)
     (do (mcp-auth/fetch-machine-token! name definition) :logged-in)
     (let [metadata (mcp-auth/discover-meta name definition)
-          flow (resolve-flow (:oauth definition) metadata interaction)]
+          flow (mcp-auth/resolve-flow (:oauth definition) metadata interaction)]
       ;; only the PKCE flow sends a code challenge — a device-only server
       ;; must not be refused for missing PKCE metadata
       (when (= :pkce flow)
-        (verify-pkce-support! name definition metadata))
+        (mcp-auth/verify-pkce-support! name definition metadata))
       (case flow
         :pkce (run-pkce-flow name definition metadata interaction)
         :device (run-device-flow name definition metadata interaction)))))
@@ -429,14 +273,16 @@
   "Auth state for a server: nil (not configured) | :bearer | :logged-in |
    :expired | :none (oauth configured, no tokens) | :client-credentials |
    :jwt-bearer (machine grants — always available, tokens fetched on
-   demand)."
+   demand). A stored client registration without tokens counts as :none."
   [name definition]
   (when (and (:url definition) (:auth definition))
     (case (:auth definition)
       :bearer (if (seq (mcp-auth/bearer-token definition)) :bearer :none)
       :oauth (cond
                (mcp-auth/machine-grant? definition) (mcp-auth/grant-of definition)
-               (nil? (server-entry name)) :none
-               (mcp-auth/token-expired? (server-entry name)) :expired
-               :else :logged-in)
+               :else (let [entry (server-entry name)]
+                       (cond
+                         (nil? (get-in entry [:tokens :access])) :none
+                         (mcp-auth/token-expired? entry) :expired
+                         :else :logged-in)))
       nil)))

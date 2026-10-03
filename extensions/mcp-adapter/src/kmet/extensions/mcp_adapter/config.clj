@@ -88,6 +88,7 @@
    :privateKeyFile :private-key-file
    :privateKeyJwk :private-key-jwk
    :tokenEndpoint :token-endpoint
+   :applicationType :application-type
    :tokenEndpointAuthMethod :token-endpoint-auth-method
    :includeTools :include-tools
    :excludeTools :exclude-tools
