@@ -190,8 +190,9 @@
   (invalidate [this] (reset! (:cache-atom this) nil)))
 
 (defn make-compaction-status-indicator
-  "Compaction progress indicator (pi: CompactionStatusIndicator). kmet's
-   compaction is not cancellable, so no cancel hint is shown."
+  "Compaction progress indicator (pi: CompactionStatusIndicator). The
+   cancellability hint rides in MESSAGE (compaction-status-message appends
+   it — escape aborts the compaction via the editor's interrupt action)."
   [& {:keys [message] :or {message "Compacting context..."}}]
   (map->CompactionStatusIndicator {:start-atom (atom (System/currentTimeMillis))
                                    :message-atom (atom message)

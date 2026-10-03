@@ -101,3 +101,5 @@ retry. The pre-cut conversation is summarized via the LLM (structured
 Goal/Progress/Next-Steps checkpoint, updated on subsequent compactions) and
 replaced with a summary entry; `:keep-recent-tokens` (default 20000) sets how
 many recent tokens to keep. `/compact [instructions]` triggers it manually.
+Escape aborts an in-progress compaction without cancelling the running turn
+(the turn continues on the pre-compaction context, pi: `abortCompaction`).

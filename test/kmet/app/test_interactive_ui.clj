@@ -1970,13 +1970,15 @@
     (let [cs (compaction-cs)]
       (reset! (:compacting? @(:agent-state cs)) true)
       (reset! (:signal @(:agent-state cs)) false)
+      (reset! (:compaction-signal @(:agent-state cs)) false)
       (reset! (:running-turn? cs) true)
       (with-redefs [status/stop-anim-timer! (fn [_] nil)
                     status/clear-status-indicator! (fn [_] nil)
                     state/update-footer! (fn [_] nil)
                     agent/cancel-turn (fn [_] (throw (ex-info "must not cancel the turn" {})))]
         ((var turn/handle-cancel) cs))
-      (t/is (true? @(:signal @(:agent-state cs))) "compaction aborted via signal")
+      (t/is (true? @(:compaction-signal @(:agent-state cs))) "compaction aborted via its own signal")
+      (t/is (false? @(:signal @(:agent-state cs))) "the run's cancel signal is untouched")
       (t/is (true? @(:running-turn? cs)) "the turn is NOT cancelled"))))
 
 (deftest test-cancel-idle-compaction-keeps-turn
@@ -1984,10 +1986,12 @@
     (let [cs (compaction-cs)]
       (reset! (:compacting? @(:agent-state cs)) true)
       (reset! (:signal @(:agent-state cs)) false)
+      (reset! (:compaction-signal @(:agent-state cs)) false)
       (reset! (:running-turn? cs) false)
       (with-redefs [state/update-footer! (fn [_] nil)]
         ((var turn/handle-cancel) cs))
-      (t/is (true? @(:signal @(:agent-state cs))) "compaction aborted"))))
+      (t/is (true? @(:compaction-signal @(:agent-state cs))) "compaction aborted")
+      (t/is (false? @(:signal @(:agent-state cs))) "the run's cancel signal is untouched"))))
 
 (deftest test-follow-up-extension-command-executes-during-compaction
   (testing "Alt+Enter with an extension command during compaction executes
@@ -2108,7 +2112,8 @@
                     agent/cancel-turn (fn [_] (swap! cancelled inc))]
         ;; first escape: compaction aborted only
         ((var turn/handle-cancel) cs)
-        (t/is (true? @(:signal @(:agent-state cs))) "compaction aborted")
+        (t/is (true? @(:compaction-signal @(:agent-state cs))) "compaction aborted")
+        (t/is (false? @(:signal @(:agent-state cs))) "the run is not cancelled")
         (t/is (true? @(:running-turn? cs)) "turn still running")
         (t/is (zero? @cancelled) "turn not cancelled")
         ;; compaction-end resets the flag; second escape cancels the turn

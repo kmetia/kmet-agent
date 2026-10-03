@@ -130,6 +130,8 @@
                        compact-token-threshold ;; int or nil: compact when estimated tokens exceed this
                        keep-recent-tokens     ;; int: cut-point budget in tokens (pi: keepRecentTokens, default 20000)
                        compacting?           ;; atom of bool: a compaction is in progress (escape cancels it)
+                       compaction-signal     ;; atom of bool: abort the in-flight compaction (pi: AbortController —
+                                             ;; escape aborts only the compaction; the run continues)
                        pending-bash          ;; atom of vector of bash entries queued while streaming
                        system-prompt-opts    ;; atom of the build-system-prompt options map (pi: _baseSystemPromptOptions)
                        loop-guard            ;; atom of per-run repeat-loop guard state:
@@ -217,6 +219,7 @@ Be precise and concise in your responses."}}]
                     :compact-reserve-tokens compact-reserve-tokens
                     :keep-recent-tokens keep-recent-tokens
                     :compacting? (atom false)
+                    :compaction-signal (atom false)
                     :pending-bash (atom [])
                     :system-prompt-opts (atom system-prompt-opts)
                     :loop-guard (atom {:window [] :suppressed 0})}))
@@ -1070,14 +1073,31 @@ Be precise and concise in your responses."}}]
 
 (declare resolve-api-key)
 
+(defn abort-compaction!
+  "Abort the in-flight compaction without cancelling the agent run (pi:
+   session.abortCompaction — escape during compaction touches only the
+   compaction controllers). The run continues on the pre-compaction context;
+   :compaction-end reports :aborted. A run cancel (cancel-turn) aborts the
+   compaction too."
+  [agent]
+  (reset! (:compaction-signal agent) true)
+  nil)
+
+(defn- compaction-aborted?
+  "True when the in-flight compaction must stop: its own signal fired (escape
+   during compaction) or the whole run was cancelled (pi: abort() calls
+   abortCompaction(), so a run cancel still aborts a live compaction)."
+  [agent]
+  (or @(:signal agent) @(:compaction-signal agent)))
+
 (defn- summarize!
   "LLM summarization of the pre-cut entries (pi: generateSummaryWithUsage).
    Returns {:summary str :usage usage-map} — usage is the summarization
    call's cost-attached provider usage, recorded on the compaction entry so
    the footer totals include it (pi: CompactionEntry.usage) — or nil when no
-   API key is available, the call fails/times out/returns empty, or the run's
-   cancel signal fired mid-call (the signal watcher delivers nil so
-   cancellation doesn't wait for the stream to die)."
+   API key is available, the call fails/times out/returns empty, or a
+   compaction/run cancel signal fired mid-call (the signal watchers deliver
+   nil so cancellation doesn't wait for the stream to die)."
   [agent prep & [custom-instructions]]
   (let [provider @(:provider agent)
         ep (resolve-endpoint agent)
@@ -1095,7 +1115,12 @@ Be precise and concise in your responses."}}]
       (let [done (promise)
             text-buf (atom "")
             usage-buf (atom nil)
-            signal (:signal agent)
+            run-signal (:signal agent)
+            compact-signal (:compaction-signal agent)
+            ;; The transport polls this OR-view; the watches below cover the
+            ;; deref abort (the stream may not deliver an event on cancel —
+            ;; killed curl — so the watchers make escape abort promptly).
+            signal (concurrent/or-signal run-signal compact-signal)
             msgs (compaction/summarization-messages
                   (:messages prep) (:previous-summary prep) custom-instructions)]
         (llm/send-message
@@ -1114,14 +1139,18 @@ Be precise and concise in your responses."}}]
           :on-usage (fn [u] (reset! usage-buf u))
           :on-done (fn [_] (deliver done @text-buf))
           :on-error (fn [_] (when-not (realized? done) (deliver done nil)))})
-        ;; Cancel watch: abort the deref the moment the signal fires. The
+        ;; Cancel watch: abort the deref the moment either signal fires. The
         ;; stream may not deliver an event on cancel (killed curl), so this
         ;; is what makes escape abort compaction promptly.
-        (add-watch signal :kmet/summarize-cancel
+        (add-watch run-signal :kmet/summarize-cancel
+                   (fn [_ _ _ v] (when v (deliver done nil))))
+        (add-watch compact-signal :kmet/summarize-cancel
                    (fn [_ _ _ v] (when v (deliver done nil))))
         (when @signal (deliver done nil))
         (let [result (try (deref done 120000 :timeout)
-                          (finally (remove-watch signal :kmet/summarize-cancel)))]
+                          (finally
+                            (remove-watch run-signal :kmet/summarize-cancel)
+                            (remove-watch compact-signal :kmet/summarize-cancel)))]
           (when (and (string? result) (seq result))
             {:summary result :usage @usage-buf}))))))
 
@@ -1208,10 +1237,11 @@ Be precise and concise in your responses."}}]
 
    Emits :compaction-start/:compaction-end around the work (pi:
    compaction_start/compaction_end); the end event carries :aborted true
-   when the run's cancel signal fired mid-compaction (escape) or an
-   extension's :session-before-compact handler returned {:cancel true}
-   (pi: aborted compaction_end), in which cases the session is left
-   untouched.
+   when the compaction's own signal fired mid-compaction (escape — pi:
+   session.abortCompaction), the run's cancel signal fired (a run cancel
+   aborts compaction too), or an extension's :session-before-compact
+   handler returned {:cancel true} (pi: aborted compaction_end), in which
+   cases the session is left untouched.
 
    Returns true when a compaction happened, false when there was nothing to
    compact (or compaction is already in progress, or an extension
@@ -1227,12 +1257,21 @@ Be precise and concise in your responses."}}]
       ;; auto paths keep it: an Escape at run start must still abort them.
       (when (= :manual reason)
         (reset! (:signal agent) false))
-      (emit agent {:type :compaction-start :reason reason})
+      ;; Every compaction starts with a fresh abort state (pi: a new
+      ;; AbortController per run) — the previous compaction's signal must not
+      ;; leak into this one.
+      (reset! (:compaction-signal agent) false)
+      ;; Flag first: the :compaction-start emit is synchronous and shows the
+      ;; UI indicator, so an escape arriving with that indicator must already
+      ;; see the compaction as in progress (pi: the controller is installed
+      ;; before compaction_start fires); the try keeps the flag from leaking
+      ;; when the emit throws.
       (reset! (:compacting? agent) true)
       (try
+        (emit agent {:type :compaction-start :reason reason})
         (let [result
               (if-let [sess (:session agent)]
-                (if @(:signal agent)
+                (if (compaction-aborted? agent)
                   :aborted
                   (let [entries (session/get-branch sess)
                         prep (compaction/prepare entries (or (:keep-recent-tokens agent) 20000))]
@@ -1247,10 +1286,10 @@ Be precise and concise in your responses."}}]
                                                 :branch-entries entries
                                                 :reason reason
                                                 :will-retry false
-                                                :signal (:signal agent)}))
+                                                :signal (:compaction-signal agent)}))
                         ::cancelled
                         (if-let [summary-result (summarize! agent prep custom-instructions)]
-                          (if @(:signal agent)
+                          (if (compaction-aborted? agent)
                           ;; cancelled during summarization — session unchanged
                             :aborted
                             (do (session/compact-with-summary! sess (:summary summary-result)
@@ -1270,7 +1309,7 @@ Be precise and concise in your responses."}}]
                                 (emit agent {:type :context-replaced :messages @(:messages agent)})
                                 (debug/log "compacted session with LLM summary")
                                 true))
-                          (if @(:signal agent)
+                          (if (compaction-aborted? agent)
                             :aborted
                             (do (debug/log "Warning: summarization failed; compaction skipped")
                                 :failed)))))))
@@ -1290,8 +1329,8 @@ Be precise and concise in your responses."}}]
                        ;; carries whether the run continues).
                        :will-retry (= reason :overflow)})
           ;; pi: session_compact_failed — fired when compaction fails or is
-          ;; aborted (the summarization errored, or the run's cancel signal
-          ;; fired mid-compaction).
+          ;; aborted (the summarization errored, or a compaction/run cancel
+          ;; signal fired mid-compaction).
           (when (or (= result :failed)
                     (= result :aborted)
                     (= result ::cancelled))
@@ -1919,9 +1958,11 @@ Be precise and concise in your responses."}}]
   "Cancel the current agent run: signal the LLM stream, drop queued messages,
    deliver the in-flight LLM call ({:cancelled true} plus the partials
    snapshot so the abandoned attempt keeps what arrived), return status to
-   :idle."
+   :idle. A live compaction is aborted too (pi: abort() calls
+   abortCompaction())."
   [agent]
   (reset! (:signal agent) true)
+  (reset! (:compaction-signal agent) true)
   (clear-queues! agent)
   (when-let [{:keys [promise partials]} @(:active-call agent)]
     (when-not (realized? promise)

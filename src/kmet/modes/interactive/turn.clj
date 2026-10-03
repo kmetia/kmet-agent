@@ -734,7 +734,10 @@
     (tui/tui-request-render (:tui cs))))
 
 (defn handle-cancel
-  "Cancel the current agent turn, bash command, or in-progress compaction."
+  "Cancel the current agent turn, bash command, or in-progress compaction.
+   During compaction only the compaction's own signal fires (pi: onEscape →
+   abortCompaction) — a running turn is NOT cancelled and continues on the
+   pre-compaction context."
   [cs]
   (if @(:compacting? @(:agent-state cs))
     ;; Escape during compaction aborts ONLY the summarization (pi: onEscape
@@ -747,7 +750,7 @@
       (debug/log "compaction cancelled by user")
       ;; no visual change here — compaction-end's clear-status-indicator!
       ;; schedules the frame when the abort lands
-      (reset! (:signal @(:agent-state cs)) true))
+      (agent/abort-compaction! @(:agent-state cs)))
     (do
       (when @(:bash-running? cs)
         (debug/log "bash command cancelled by user")

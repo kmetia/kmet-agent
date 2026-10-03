@@ -3544,6 +3544,82 @@
       (t/is (= 6 (count @(:messages agent))) "in-memory context untouched")
       (finally (fs/delete-tree dir)))))
 
+(t/deftest test-loop-abort-compaction-keeps-run
+  ;; Escape during an auto-compaction aborts only the summarization: the run
+  ;; continues on the pre-compaction context (pi: abortCompaction touches
+  ;; only the compaction controllers; only session.abort() aborts the run).
+  ;; Regression: the shared run signal killed the turn and latched the UI on
+  ;; running-turn?, so escape looked like it could not cancel the compaction.
+  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+        sess (session/create-session (str dir))
+        events (atom [])
+        started (promise)
+        calls (atom 0)
+        agent (loop/make-agent-state
+               :session sess
+               :compact-token-threshold 10
+               :keep-recent-tokens 40
+               :on-event (fn [e]
+                           (swap! events conj e)
+                           (when (= :compaction-start (:type e))
+                             (deliver started true))))]
+    (try
+      (doseq [i (range 6)]
+        (let [m {:role :user :content [{:type :text :text
+                                        (str "This is message body number " i
+                                             " with plenty of words so the estimated token count "
+                                             "easily exceeds the small test threshold.")}]}]
+          (swap! (:messages agent) conj m)
+          (session/append-entry sess m)))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    ;; The summarization stream never finishes on its own —
+                    ;; only the compaction signal (via summarize!'s watch)
+                    ;; ends it; the main call answers normally.
+                    llm/send-message
+                    (fn [opts]
+                      (if (= 1 (swap! calls inc))
+                        (promise)
+                        (future
+                          (when-let [on-text (:on-text opts)]
+                            (on-text "continued after abort"))
+                          (when-let [on-done (:on-done opts)]
+                            (on-done :stop))
+                          :done)))]
+        (let [run (loop/run-agent-turn
+                   agent
+                   {:message "go"
+                    :on-error (fn [e] (swap! events conj {:type :on-error
+                                                          :message (str e)}))})]
+          (t/is (true? (deref started 2000 false)) "threshold compaction started")
+          (loop/abort-compaction! agent)
+          (t/is (not= ::timeout (deref run 5000 ::timeout))
+                "the run continues after the compaction abort")))
+      (t/is (= 2 @calls) "the aborted summarization still let the main LLM call run")
+      (t/is (false? @(:signal agent)) "the run's cancel signal never fired")
+      (t/is (false? @(:compacting? agent)) "the compaction flag is cleared")
+      (let [end (first (filter #(= :compaction-end (:type %)) @events))]
+        (t/is (:aborted end) "compaction-end reports the abort"))
+      (t/is (not-any? #(contains? #{:error :on-error} (:type %)) @events)
+            "no error event — the abort is not a failure")
+      (t/is (some #(and (= :assistant (:role %))
+                        (= "continued after abort"
+                           (get-in % [:content 0 :text])))
+                  @(:messages agent))
+            "the main LLM response lands after the aborted compaction")
+      (t/is (not-any? #(= :compaction (:role %)) @(:entries sess))
+            "the aborted compaction appended no compaction entry")
+      (t/is (true? @(:compaction-signal agent))
+            "the abort signal stays set after the compaction ends")
+      ;; The next compaction is a fresh operation (pi: a new AbortController)
+      ;; — the stale abort must not cancel it.
+      (with-summarization-stub
+        (fn []
+          (t/is (true? (binding [*err* (java.io.StringWriter.)]
+                         (loop/compact-context! agent nil :threshold)))
+                "the next compaction starts with a fresh abort state")))
+      (t/is (false? @(:compaction-signal agent)) "the stale abort signal is cleared")
+      (finally (fs/delete-tree dir)))))
+
 (t/deftest test-loop-manual-compaction-clears-stale-cancel-signal
   ;; Regression (/compact after Escape): Escape leaves the run's cancel
   ;; signal set until the next run starts, which made every manual compaction
