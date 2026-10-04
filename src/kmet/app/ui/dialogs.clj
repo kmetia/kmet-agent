@@ -44,7 +44,10 @@
    `[:input]` element whose `:ref` the caller holds) and a dim keybinding
    hint. Returns the frame's root component (a Container) — its dispose
    cascades to the DSL-owned chrome AND the content, so the dialog
-   disposes the frame once."
+   disposes the frame once. TH styles the frame ONCE, at construction: a
+   dialog is themed by its caller (the app passes the current theme;
+   extensions may pass any), so a live theme switch does not restyle a
+   mounted dialog — the app's own panels subscribe instead (tui.md §9)."
   [th title content-el & {:keys [hint-keys]}]
   (h/compile-tree
    [:container {}

@@ -41,6 +41,7 @@
             [babashka.fs :as fs]
             [kmet.app.keybindings :as app-kb]
             [kmet.app.packages :as pkgs]
+            [kmet.app.ui.subs :as s]
             [kmet.config :as cfg]
             [kmet.libs.reakt :as r]
             [kmet.tui.components.input :as input]
@@ -544,7 +545,9 @@
    keeps a window built for the old terminal."
   [screen]
   (let [w hiccup/*width*
-        t (th/get-current-theme)
+        ;; tracked: a theme switch re-derives the frame's styled chrome
+        ;; (a plain get-current-theme read would keep the old palette)
+        t (r/tracked-deref s/theme-sub)
         st (r/tracked-deref (:state-atom screen))
         rows-count (r/tracked-deref (:rows-count screen))
         write-scope (:write-scope st)

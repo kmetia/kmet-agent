@@ -13,6 +13,7 @@
             [kmet.tui.keybindings :as tui-kb]
             [kmet.tui.macros :as macros]
             [kmet.tui.protocols :as protocols]
+            [kmet.tui.theme :as th]
             [kmet.tui.utils :as u]))
 
 (defn- model [provider id]
@@ -214,3 +215,30 @@
     (press sel "down")
     (protocols/render sel 120)
     (t/is (= 1 (:bodies-run (hiccup/counters))) "state change re-derives once")))
+
+(t/deftest test-theme-switch-re-derives-the-body
+  ;; the body tracks the theme sub: a palette switch re-derives the panel
+  ;; once (rows and chrome pick up the new colors) instead of waiting for
+  ;; the next state change
+  (let [orig-name (th/get-current-theme-name)
+        orig-theme (th/get-current-theme)]
+    (try
+      (th/init-theme! "dark")
+      (let [sel (selector)
+            dark (str/join "\n" (core/render sel 120))]
+        (hiccup/reset-counters!)
+        (th/init-theme! "light")
+        (let [light (str/join "\n" (core/render sel 120))]
+          (t/is (= 1 (:bodies-run (hiccup/counters)))
+                "the theme switch re-derived the body once")
+          (t/is (not= dark light) "the panel restyled")
+          (t/is (str/includes? light (th/get-fg-ansi (th/get-theme "light") :accent)))
+          (t/is (not (str/includes? light
+                                    (th/get-fg-ansi (th/get-theme "dark") :accent)))
+                "no construction-time accent survives"))
+        (hiccup/reset-counters!)
+        (core/render sel 120)
+        (t/is (zero? (:bodies-run (hiccup/counters))) "and it is memoized again"))
+      (finally
+        (th/set-theme-instance! orig-theme)
+        (th/init-theme! orig-name)))))

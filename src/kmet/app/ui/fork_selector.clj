@@ -11,6 +11,8 @@
             [kmet.app.session :as session]
             [kmet.app.ui.chat-history :as chat-history]
             [kmet.app.ui.dock :as dock]
+            [kmet.app.ui.subs :as s]
+            [kmet.libs.reakt :as r]
             [kmet.tui.hiccup :as h]
             [kmet.tui.keybindings :as kb]
             [kmet.tui.macros :refer [defcomponent track!]]
@@ -120,8 +122,7 @@
           (chat-history/chat-history-add-message! (:chat-history cs)
                                                   {:role :assistant
                                                    :content "No messages to fork from."})
-          (let [th (theme/get-current-theme)
-                ;; pi: start at the most recent message unless an initial id
+          (let [;; pi: start at the most recent message unless an initial id
                 ;; is given
                 messages-atom (atom messages)
                 selected-idx-atom (atom (dec (count messages)))
@@ -133,22 +134,29 @@
                        :on-select-atom on-select-atom
                        :on-cancel-atom on-cancel-atom
                        :cache-atom (atom nil)})
-                ;; The panel is a compiled hiccup tree (dsl.md): the
-                ;; spacer/title/border chrome is DSL-owned; the message list
-                ;; splices foreign (the focus target).
-                panel (h/compile-tree
-                       [:container {}
-                        [:spacer {:lines 1}]
-                        [:text {:padding-x 1 :padding-y 0} (theme/bold "Fork from Message")]
-                        [:text {:padding-x 1 :padding-y 0} (theme/fg th :muted description)]
-                        [:spacer {:lines 1}]
-                        [:dynamic-border {:color-fn #(theme/fg th :accent %)}]
-                        [:spacer {:lines 1}]
-                        list
-                        [:spacer {:lines 1}]
-                        [:dynamic-border {:color-fn #(theme/fg th :accent %)}]])
+                ;; one color-fn for the panel's lifetime: a changed prop
+                ;; rebuilds the border, so a fresh closure per body run would
+                ;; churn it on every state change
+                border-fn (fn [s] (theme/fg (theme/get-current-theme) :accent s))
+                ;; The panel is a reactive body (dsl.md): the spacer/title/
+                ;; border chrome re-derives on a theme switch (the tracked
+                ;; theme-sub read); the message list splices foreign (the
+                ;; focus target).
+                panel (h/root
+                       (fn [_props]
+                         (let [th (r/tracked-deref s/theme-sub)]
+                           [:container {}
+                            [:spacer {:lines 1}]
+                            [:text {:padding-x 1 :padding-y 0} (theme/bold "Fork from Message")]
+                            [:text {:padding-x 1 :padding-y 0} (theme/fg th :muted description)]
+                            [:spacer {:lines 1}]
+                            [:dynamic-border {:color-fn border-fn}]
+                            [:spacer {:lines 1}]
+                            list
+                            [:spacer {:lines 1}]
+                            [:dynamic-border {:color-fn border-fn}]])))
                 ;; pi: close — restore the editor and unwind the panel: the
-                ;; compiled frame's DSL chrome via dock/dispose! (leave then
+                ;; frame's DSL chrome via dock/dispose! (leave then
                 ;; dispose), the spliced list explicitly (the tree does not
                 ;; own it)
                 close! (fn []

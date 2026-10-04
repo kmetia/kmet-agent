@@ -13,6 +13,7 @@
             [kmet.tui.hiccup :as hiccup]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.tui.protocols :as protocols]
+            [kmet.tui.theme :as th]
             [kmet.tui.utils :as u]
             [kmet.test-utils :refer [slash]]))
 
@@ -794,3 +795,31 @@
               (when-some [unwatch (:rows-unwatch screen)]
                 (unwatch))))))
       {:user {:packages [dir]}})))
+
+(t/deftest test-theme-switch-restyles-the-frame
+  ;; the frame body tracks the theme subscription: a live switch re-derives
+  ;; the styled chrome (borders, title, hints), not just the rows
+  (let [dir (many-extension-package 3)
+        orig-name (th/get-current-theme-name)
+        orig-theme (th/get-current-theme)]
+    (try
+      (with-settings
+        (fn [_]
+          (th/init-theme! "dark")
+          (let [screen (rc/make-resource-config-screen :rows 30)
+                dark (str/join "\n" (render-lines screen 80))]
+            (t/is (str/includes? dark
+                                 (th/get-fg-ansi (th/get-theme "dark") :accent))
+                  "the dark theme's accent paints the borders")
+            (th/init-theme! "light")
+            (let [light (str/join "\n" (render-lines screen 80))]
+              (t/is (not= dark light) "the frame followed the switch")
+              (t/is (str/includes? light
+                                   (th/get-fg-ansi (th/get-theme "light") :accent)))
+              (t/is (not (str/includes? light
+                                        (th/get-fg-ansi (th/get-theme "dark") :accent)))
+                    "no construction-time accent survives"))))
+        {:user {:packages [dir]}})
+      (finally
+        (th/set-theme-instance! orig-theme)
+        (th/init-theme! orig-name)))))

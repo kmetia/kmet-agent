@@ -13,6 +13,7 @@
             [kmet.app.ui.chat-history :as chat-history]
             [kmet.app.ui.dock :as dock]
             [kmet.app.ui.model-catalog :as model-catalog]
+            [kmet.app.ui.subs :as s]
             [kmet.config :as cfg]
             [kmet.libs.reakt :as r]
             [kmet.tui.hiccup :as h]
@@ -332,7 +333,7 @@
    identity across passes."
   [state-atom search-ref focused? border-fn]
   (fn [_props]
-    (let [th (theme/get-current-theme)
+    (let [th (r/tracked-deref s/theme-sub)
           st (r/tracked-deref state-atom)
           filtered (filtered-items st)
           n (count filtered)

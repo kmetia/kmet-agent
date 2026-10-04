@@ -1087,8 +1087,7 @@
                                                {:role :assistant :content "Session is empty."})
 
        :else
-       (let [panel-theme (th/get-current-theme)
-             leaf-id @(:leaf-id sess)
+       (let [leaf-id @(:leaf-id sess)
              term-height (or (when-let [term (:terminal (:tui cs))]
                                (terminal/rows @term))
                              40)
@@ -1181,16 +1180,19 @@
              panel (h/compile-tree
                     [:container {}
                      [:spacer {:lines 1}]
-                     [:dynamic-border {:color-fn #(th/fg panel-theme :accent %)}]
+                     ;; the border colors are read at render time: the
+                     ;; panel is compiled once, and a theme switch while it
+                     ;; is open must restyle the chrome (tui.md §9)
+                     [:dynamic-border {:color-fn #(th/fg (th/get-current-theme) :accent %)}]
                      [:text {:padding-x 0 :padding-y 0} (th/bold "  Session Tree")]
                      (map->TreeHelpLine {:cache-atom (atom nil)})
                      (map->TreeSearchLine {:state-atom (:state-atom tl)
                                            :cache-atom (atom nil)})
-                     [:dynamic-border {:color-fn #(th/fg panel-theme :accent %)}]
+                     [:dynamic-border {:color-fn #(th/fg (th/get-current-theme) :accent %)}]
                      [:spacer {:lines 1}]
                      area
                      [:spacer {:lines 1}]
-                     [:dynamic-border {:color-fn #(th/fg panel-theme :accent %)}]])]
+                     [:dynamic-border {:color-fn #(th/fg (th/get-current-theme) :accent %)}]])]
          (reset! close-ref
                  (fn []
                    ;; restore the editor and unwind the panel: the compiled

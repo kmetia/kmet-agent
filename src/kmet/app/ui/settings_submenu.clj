@@ -4,11 +4,13 @@
    pane with one interactive child; the SettingsList's :submenu item
    contract opens it, renders it in place of the list, and forwards input
    to it through the child's ref."
-  (:require [kmet.tui.hiccup :as h]
+  (:require [kmet.app.ui.subs :as s]
+            [kmet.libs.reakt :as r]
+            [kmet.tui.components.select-list :as select-list]
+            [kmet.tui.hiccup :as h]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
-            [kmet.tui.theme :as theme]
-            [kmet.tui.components.select-list :as select-list]))
+            [kmet.tui.theme :as theme]))
 
 ;; ─── SubmenuPanel ──────────────────────────────────────────────────────────
 
@@ -27,13 +29,13 @@
       (protocols/invalidate child)))
 
   (dispose [this]
-    ;; the compiled tree is DSL-owned and dispose unwinds its reactions and
+    ;; the root tree is DSL-owned and dispose unwinds its reactions and
     ;; track! watches
     (h/dispose-tree! (:root this))))
 
 (defn panel
-  "Wrap ROOT — a compiled hiccup tree — as a submenu whose input goes to the
-   component REF points at. Render and dispose delegate to the tree."
+  "Wrap ROOT — a hiccup component tree — as a submenu whose input goes to
+   the component REF points at. Render and dispose delegate to the tree."
   [root input-ref]
   (map->SubmenuPanel {:root root
                       :input-ref input-ref
@@ -47,35 +49,43 @@
    ITEMS ({:label :value :description}) are shown with CURRENT-VALUE
    preselected. ON-SELECT receives the selected item's :value, ON-CANCEL the
    escape key, ON-SELECTION-CHANGE the newly highlighted item's :value (the
-   live-preview hook)."
+   live-preview hook). The chrome is a reactive body (tui.md §9): the
+   tracked theme-sub read re-derives the title/description on a theme
+   switch, where a compiled tree would keep the construction-time palette."
   [title description items current-value
    & {:keys [on-select on-cancel on-selection-change]}]
-  (let [th (theme/get-current-theme)
-        list-ref (h/ref)
-        root (h/compile-tree
-              [:container {}
-               [:text {:padding-x 0 :padding-y 0}
-                (theme/fg th :accent (theme/bold title))]
-               (when (seq description)
-                 [:spacer {:lines 1}])
-               (when (seq description)
-                 [:text {:padding-x 0 :padding-y 0}
-                  (theme/fg th :muted description)])
-               [:spacer {:lines 1}]
-               [:select-list {:ref list-ref
-                              :items (vec items)
-                              :height (min (count items) 10)
-                              :on-select (fn [item]
-                                           (when-let [cb on-select]
-                                             (cb (:value item))))
-                              :on-escape on-cancel
-                              :on-selection-change (fn [item]
-                                                     (when-let [cb on-selection-change]
-                                                       (cb (:value item))))}]
-               [:spacer {:lines 1}]
-               [:text {:padding-x 0 :padding-y 0}
-                (theme/dim "  Enter to select · Esc to go back")]])
-        sl (deref list-ref)]
+  (let [list-ref (h/ref)
+        items (vec items)
+        on-select-fn (fn [item]
+                       (when-let [cb on-select]
+                         (cb (:value item))))
+        on-selection-change-fn (fn [item]
+                                 (when-let [cb on-selection-change]
+                                   (cb (:value item))))
+        root (h/root
+              (fn [_props]
+                (let [th (r/tracked-deref s/theme-sub)]
+                  [:container {}
+                   [:text {:padding-x 0 :padding-y 0}
+                    (theme/fg th :accent (theme/bold title))]
+                   (when (seq description)
+                     [:spacer {:lines 1}])
+                   (when (seq description)
+                     [:text {:padding-x 0 :padding-y 0}
+                      (theme/fg th :muted description)])
+                   [:spacer {:lines 1}]
+                   [:select-list {:ref list-ref
+                                  :items items
+                                  :height (min (count items) 10)
+                                  :on-select on-select-fn
+                                  :on-escape on-cancel
+                                  :on-selection-change on-selection-change-fn}]
+                   [:spacer {:lines 1}]
+                   [:text {:padding-x 0 :padding-y 0}
+                    (theme/dim "  Enter to select · Esc to go back")]])))
+        ;; the ref fills on the body's first pass; the host mounts the panel
+        ;; later, so materialize now to land the initial selection
+        sl (h/materialize-ref! root list-ref)]
     (when-let [idx (and sl
                         (first (keep-indexed (fn [i item]
                                                (when (= (:value item) current-value)

@@ -6,6 +6,8 @@
    automatic setting."
   (:require [clojure.string :as str]
             [kmet.app.ui.settings-submenu :as submenu]
+            [kmet.app.ui.subs :as s]
+            [kmet.libs.reakt :as r]
             [kmet.tui.hiccup :as h]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
@@ -177,42 +179,46 @@
                 :description "Switch to one theme for light and dark"
                 :value "switch to single theme"
                 :values ["switch to single theme"]}]
-        th (theme/get-current-theme)
         sl-ref (h/ref)
-        root (h/compile-tree
-              [:container {}
-               [:text {:padding-x 0 :padding-y 0}
-                (theme/fg th :accent (theme/bold "Automatic Theme"))]
-               [:spacer {:lines 1}]
-               [:text {:padding-x 0 :padding-y 0}
-                (theme/fg th :muted "Choose themes for terminal light and dark appearance.")]
-               [:text {:padding-x 0 :padding-y 0}
-                (theme/fg th :muted "Light/dark detection requires terminal support.")]
-               [:spacer {:lines 1}]
-               [:settings-list
-                {:ref sl-ref
-                 :items items
-                 :max-visible (min (count items) 10)
-                 :on-change
-                 (fn [id _value]
-                   (case id
-                     :theme-apply
-                     (commit! ctx (automatic-setting (:light-theme @st)
-                                                     (:dark-theme @st)))
-                     :theme-single-mode
-                     (do (swap! st assoc
-                                :mode :single
-                                :single-theme (active-automatic-theme
-                                               (:light-theme @st)
-                                               (:dark-theme @st)
-                                               terminal-theme))
-                         (preview! ctx (:single-theme @st))
-                         ((:switch! ctx) (single-menu ctx)))
-                     nil))
-                 :on-escape
-                 (fn []
-                   (preview! ctx (:original @st))
-                   (close! ctx))}]])]
+        on-change (fn [id _value]
+                    (case id
+                      :theme-apply
+                      (commit! ctx (automatic-setting (:light-theme @st)
+                                                      (:dark-theme @st)))
+                      :theme-single-mode
+                      (do (swap! st assoc
+                                 :mode :single
+                                 :single-theme (active-automatic-theme
+                                                (:light-theme @st)
+                                                (:dark-theme @st)
+                                                terminal-theme))
+                          (preview! ctx (:single-theme @st))
+                          ((:switch! ctx) (single-menu ctx)))
+                      nil))
+        on-escape (fn []
+                    (preview! ctx (:original @st))
+                    (close! ctx))
+        ;; reactive body: the tracked theme-sub read re-derives the
+        ;; title/description on a theme switch (tui.md §9) — a compiled tree
+        ;; would keep the construction-time palette
+        root (h/root
+              (fn [_props]
+                (let [th (r/tracked-deref s/theme-sub)]
+                  [:container {}
+                   [:text {:padding-x 0 :padding-y 0}
+                    (theme/fg th :accent (theme/bold "Automatic Theme"))]
+                   [:spacer {:lines 1}]
+                   [:text {:padding-x 0 :padding-y 0}
+                    (theme/fg th :muted "Choose themes for terminal light and dark appearance.")]
+                   [:text {:padding-x 0 :padding-y 0}
+                    (theme/fg th :muted "Light/dark detection requires terminal support.")]
+                   [:spacer {:lines 1}]
+                   [:settings-list
+                    {:ref sl-ref
+                     :items items
+                     :max-visible (min (count items) 10)
+                     :on-change on-change
+                     :on-escape on-escape}]])))]
     (submenu/panel root sl-ref)))
 
 ;; ─── ThemeSubmenu component ────────────────────────────────────────────────

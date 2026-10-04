@@ -11,6 +11,7 @@
             [kmet.ai.models :as models]
             [kmet.app.keybindings :as app-kb]
             [kmet.app.ui.dock :as dock]
+            [kmet.app.ui.subs :as s]
             [kmet.config :as cfg]
             [kmet.libs.reakt :as r]
             [kmet.tui.components.input :as input]
@@ -199,7 +200,7 @@
    rebuilding the border on every body run)."
   [state-atom search-ref focused? border-fn]
   (fn [_props]
-    (let [th (theme/get-current-theme)
+    (let [th (r/tracked-deref s/theme-sub)
           st (r/tracked-deref state-atom)
           filtered (filtered-levels st)
           n (count filtered)

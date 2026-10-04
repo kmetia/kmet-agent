@@ -3,6 +3,7 @@
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.app.ui.theme-submenu :as theme-submenu]
             [kmet.tui.core :as core]
+            [kmet.tui.theme :as th]
             [kmet.test-utils :as tu]))
 
 (def ^:const K-DOWN "\u001b[B")
@@ -135,3 +136,38 @@
         "Change mode switches back to the single menu")
     (is (= "dark" (last @previews)) "the active automatic theme is previewed")
     (is (empty? @commits))))
+
+(deftest theme-switch-restyles-the-chrome
+  ;; the submenu chrome is a reactive body over the theme sub (tui.md §9):
+  ;; a live switch re-derives the title/description instead of keeping the
+  ;; construction-time palette, and the re-derive patches the select list
+  ;; in place (the user's selection survives)
+  (let [orig-name (th/get-current-theme-name)
+        orig-theme (th/get-current-theme)]
+    (try
+      (th/init-theme! "dark")
+      (let [{:keys [sub commits]} (make "dark" :dark)
+            dark-accent (th/get-fg-ansi (th/get-theme "dark") :accent)
+            dark-muted (th/get-fg-ansi (th/get-theme "dark") :muted)
+            dark-raw (str/join "\n" (core/render sub 100))]
+        (is (str/includes? dark-raw dark-accent)
+            "the title carries the dark theme's accent")
+        (is (str/includes? dark-raw dark-muted)
+            "the description carries the dark theme's muted color")
+        ;; move off the first row so a rebuilt list would reset the selection
+        (core/handle-input sub K-DOWN)
+        (th/init-theme! "light")
+        (let [light-raw (str/join "\n" (core/render sub 100))]
+          (is (not= dark-raw light-raw) "the chrome followed the switch")
+          (is (str/includes? light-raw
+                             (th/get-fg-ansi (th/get-theme "light") :accent))
+              "the title carries the light theme's accent")
+          (is (not (str/includes? light-raw dark-accent))
+              "no construction-time dark codes survive"))
+        (testing "the selection survives the re-derive (no rebuilt list)"
+          (core/handle-input sub K-ENTER)
+          (is (= ["light"] @commits)
+              "enter commits the row that was selected before the switch")))
+      (finally
+        (th/set-theme-instance! orig-theme)
+        (th/init-theme! orig-name)))))

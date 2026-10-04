@@ -7,6 +7,7 @@
    [subscription]/[API key] type labels when both types are listed."
   (:require [clojure.string :as str]
             [kmet.app.keybindings :as app-kb]
+            [kmet.app.ui.subs :as s]
             [kmet.libs.reakt :as r]
             [kmet.tui.hiccup :as h]
             [kmet.tui.components.input :as input]
@@ -164,7 +165,7 @@
    so the border's :color-fn keeps identity across passes."
   [state-atom search-ref focused? title mode border-fn]
   (fn [_props]
-    (let [th (theme/get-current-theme)
+    (let [th (r/tracked-deref s/theme-sub)
           st (r/tracked-deref state-atom)
           entries (:entries st)
           filtered (filtered-entries entries (:search st))
@@ -296,7 +297,7 @@
    across passes."
   [title options selected-idx-atom border-fn]
   (fn [_props]
-    (let [th (theme/get-current-theme)
+    (let [th (r/tracked-deref s/theme-sub)
           idx (r/tracked-deref selected-idx-atom)]
       [:container {}
        [:dynamic-border {:color-fn border-fn}]

@@ -209,3 +209,31 @@
           (is (= [[[:theme] "light"]] @saved) "the theme persists through the row")
           (is (some #(str/includes? % "Theme") (plain frame 100))
               "the main list is back"))))))
+
+(deftest settings-frame-borders-follow-a-theme-switch
+  (testing "the frame is compiled once but its border color-fn reads the live
+            theme (tui.md §9): a switch while the panel is open restyles it"
+    (let [orig-name (th/get-current-theme-name)
+          orig-theme (th/get-current-theme)]
+      (try
+        (th/init-theme! "dark")
+        (let [cs (settings-cs)]
+          (with-redefs [core/tui-set-focus (fn [_ _] nil)
+                        core/tui-request-render (fn [_] nil)]
+            (ss/show-settings cs)
+            (let [frame (dock/top-component @(:dock-stack cs))
+                  dark-border (first (core/render frame 40))]
+              (is (str/includes? dark-border
+                                 (th/get-fg-ansi (th/get-theme "dark") :accent))
+                  "the dark theme's accent paints the top border")
+              (th/init-theme! "light")
+              (let [light-border (first (core/render frame 40))]
+                (is (not= dark-border light-border) "the border followed the switch")
+                (is (str/includes? light-border
+                                   (th/get-fg-ansi (th/get-theme "light") :accent)))
+                (is (not (str/includes? light-border
+                                        (th/get-fg-ansi (th/get-theme "dark") :accent)))
+                    "no construction-time accent survives")))))
+        (finally
+          (th/set-theme-instance! orig-theme)
+          (th/init-theme! orig-name))))))

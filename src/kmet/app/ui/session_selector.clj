@@ -24,6 +24,7 @@
             [kmet.app.session :as session]
             [kmet.app.ui.dock :as dock]
             [kmet.app.ui.footer-data-provider :as fdp]
+            [kmet.app.ui.subs :as s]
             [kmet.debug :as debug]
             [kmet.libs.reakt :as r]
             [kmet.tui.components.input :as input]
@@ -923,7 +924,8 @@
         root (hiccup/root
               (fn [_props]
                 (let [w hiccup/*width*
-                      th (theme/get-current-theme)
+                      ;; tracked: a theme switch re-derives the panel
+                      th (r/tracked-deref s/theme-sub)
                       st (r/tracked-deref (:state-atom sel))
                       focused? (r/tracked-deref (:focused? sel))
                       border-fn #(theme/fg th :accent %)

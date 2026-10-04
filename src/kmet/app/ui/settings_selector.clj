@@ -415,17 +415,19 @@
         ;; The frame is a compiled hiccup tree (dsl.md): the border chrome
         ;; and the settings list are both DSL-owned, and the instance is read
         ;; back through the ref right after compile (tui.md §2.4).
-        th (th/get-current-theme)
         sl-ref (h/ref)
         frame (h/compile-tree
                [:container {}
-                [:dynamic-border {:color-fn #(th/fg th :accent %)}]
+                ;; the border color is read at render time: the frame is
+                ;; compiled once, and a theme switch while the panel is open
+                ;; must restyle the chrome (tui.md §9)
+                [:dynamic-border {:color-fn #(th/fg (th/get-current-theme) :accent %)}]
                 [:settings-list {:ref sl-ref
                                  :items items
                                  :enable-search true
                                  :on-change on-change
                                  :on-escape on-escape}]
-                [:dynamic-border {:color-fn #(th/fg th :accent %)}]])
+                [:dynamic-border {:color-fn #(th/fg (th/get-current-theme) :accent %)}]])
         sl @sl-ref]
     (reset! frame-atom frame)
     ;; pi: showSelector — mount the framed panel, focus the list

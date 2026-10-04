@@ -1251,8 +1251,20 @@ switch invalidates exactly the subscribed subtrees. The sub is a plain
 alias because there is no derivation to do: `track!` watches the atom and
 gates on `identical?`/`=`, exactly like a reaction's notification gate,
 while a reaction's per-read cache verification costs about twice an atom
-deref and every subscriber pays it on every frame's check. Construction-time
-snapshot reads (`get-current-theme`) remain valid.
+deref and every subscriber pays it on every frame's check.
+
+Subscribe wherever styling must follow a switch: a read baked in at
+construction never does. A `compile-tree` frame keeps its pre-styled
+strings, and a `track!` body's cache is only reached by an invalidation, so
+neither sees the new palette. The two safe shapes are a `root` body that
+`tracked-deref`s `theme-sub` — it re-derives on a switch and patches its
+element props in place, so a nested interactive component keeps its state
+(`kmet.app.ui.settings-submenu`, `kmet.app.ui.theme-submenu`, the fork
+panel) — and an uncached leaf's `:color-fn` that reads
+`get-current-theme` when it is called (`DynamicBorder` calls it per frame;
+see the settings, tree and config frames). A caller-supplied theme prop
+(`kmet.app.ui.dialogs`' `TH`) is a deliberate exception: that dialog stays
+on the theme its caller chose.
 
 Theme definitions are EDN files; `docs/examples/themes/` contains complete
 current dark/light examples. Color values match pi's `parseColor`: hex
