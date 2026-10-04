@@ -428,7 +428,7 @@
   (swap! (:state-atom this)
          (fn [st]
            (let [rows (:rows st)
-                 max-visible (max 5 (- (:rows-count this) chrome-lines))
+                 max-visible (max 5 (- @(:rows-count this) chrome-lines))
                  sel (:selected st)
                  n (count rows)
                  up? (= -1 direction)
@@ -539,17 +539,20 @@
    row lines and the clipped counter — with the search field as a
    tag-owned [:input] (state carries its text, the panel's focus flag its
    emphasis). A seq child splices (the rows), a bare element child is an
-   element (the counter)."
+   element (the counter). The height is tracked: a terminal resize must
+   re-lay out the frame (max-visible follows the live rows), or the list
+   keeps a window built for the old terminal."
   [screen]
   (let [w hiccup/*width*
         t (th/get-current-theme)
         st (r/tracked-deref (:state-atom screen))
+        rows-count (r/tracked-deref (:rows-count screen))
         write-scope (:write-scope st)
         rows (:rows st)
         item-rows (:item-rows st)
         n (count rows)
         item-total (count item-rows)
-        max-visible (max 5 (- (:rows-count screen) chrome-lines))
+        max-visible (max 5 (- rows-count chrome-lines))
         sel (min (or (:selected st) 0) (max 0 (dec n)))
         start-idx (max 0 (min (- sel (quot max-visible 2)) (- n max-visible)))
         visible (subvec rows start-idx (min (+ start-idx max-visible) n))
@@ -613,7 +616,7 @@
 
 (defcomponent ResourceConfigScreen nil
               [state-atom search-ref on-close-atom rows-count project-mode?
-               focused? root]
+               focused? rows-poller root]
 
   (render [this width] (protocols/render (:root this) width))
 
@@ -658,8 +661,11 @@
             nil))))
 
   ;; the root's reaction and the tag-owned search field are the screen's
-  ;; lifecycle — unwinding the tree disposes the field with it
+  ;; lifecycle — unwinding the tree disposes the field with it; the height
+  ;; poller (when one is running) must not outlive the screen
   (dispose [this]
+    (when-some [poller (:rows-poller this)]
+      (future-cancel poller))
     (protocols/dispose (:root this))))
 
 ;; ─── IFocusable — the panel's flag; the tree derives the field emphasis ────
@@ -671,6 +677,31 @@
 
 ;; ─── Construction & test helpers ──────────────────────────────────────────
 
+(def ^:private default-rows-poll-ms
+  "How often a mounted standalone screen re-checks the terminal height.
+   The TUI loop polls the size itself, but a height change only reaches a
+   component as a diff of a frame built for the OLD height — the frame
+   never grows or shrinks to match the terminal, and on Termux a height
+   change never takes the full-redraw path. The poller re-lays the frame
+   out and asks for a forced repaint; 100ms is invisible next to a
+   keystroke."
+  100)
+
+(defn- start-rows-poller!
+  "Watch ROWS-FN (the live terminal height) and push changes into SCREEN's
+   layout state, requesting a forced repaint through REQUEST-RENDER! so the
+   terminal always shows one coherent frame (a diff against the old-height
+   frame leaves stale rows and cursors on screen). Returns the poller
+   future — the screen's dispose cancels it."
+  [screen rows-fn request-render! poll-ms]
+  (future
+    (while true
+      (Thread/sleep poll-ms)
+      (when-let [rows (try (rows-fn) (catch Exception _ nil))]
+        (when (not= rows @(:rows-count screen))
+          (reset! (:rows-count screen) rows)
+          (request-render!))))))
+
 (defn make-resource-config-screen
   "Build the config screen. OPTS:
    :write-scope     — :global (default) or :project (pi: config -l starts
@@ -679,9 +710,17 @@
                       projectModeAvailable — kmet: the .kmet project dir
                       exists or -l was passed)
    :rows            — terminal height in rows
+   :rows-fn         — 0-arg fn returning the LIVE terminal height; with
+                      :request-render! the screen polls it and re-lays out
+                      on every change (the standalone TUI passes the live
+                      terminal query — a frame frozen at its construction
+                      height garbles once Termux resizes for the keyboard)
+   :rows-poll-ms    — poll interval for :rows-fn (default 100)
+   :request-render! — 0-arg forced-repaint request (see :rows-fn)
    :on-close        — called when the user closes the screen (escape or
                       ctrl+c)"
-  [& {:keys [write-scope project-mode? rows on-close]}]
+  [& {:keys [write-scope project-mode? rows rows-fn rows-poll-ms
+             request-render! on-close]}]
   (let [state-atom (atom {:write-scope (or write-scope :global)
                           :query ""
                           :selected 0
@@ -690,12 +729,15 @@
                 {:state-atom state-atom
                  :search-ref (hiccup/ref)
                  :on-close-atom (atom on-close)
-                 :rows-count (or rows 24)
+                 :rows-count (atom (or rows 24))
                  :project-mode? (boolean project-mode?)
                  :focused? (atom false)})
         root (hiccup/root (fn [_props] (frame-tree screen)))]
     (rebuild-layout! screen)
-    (assoc screen :root root)))
+    (cond-> (assoc screen :root root)
+      (and rows-fn request-render!)
+      (assoc :rows-poller (start-rows-poller! screen rows-fn request-render!
+                                              (or rows-poll-ms default-rows-poll-ms))))))
 
 (defn screen-write-scope
   "The screen's current write scope (tests)."
@@ -724,3 +766,10 @@
   [screen query]
   (swap! (:state-atom screen) assoc :query (str query))
   (rebuild-layout! screen))
+
+(defn screen-set-rows!
+  "Set the live terminal height (tests; the mounted screen's poller drives
+   the same update when Termux resizes for the keyboard). The next render
+   re-lays the frame out to the new height."
+  [screen rows]
+  (reset! (:rows-count screen) rows))

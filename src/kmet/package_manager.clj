@@ -236,6 +236,12 @@
                 :write-scope (if local :project :global)
                 :project-mode? project-mode?
                 :rows (try (max 10 (term/rows terminal)) (catch Exception _ 24))
+                ;; The terminal height is live: Termux resizes for the soft
+                ;; keyboard, and a frame laid out for the old height leaves
+                ;; stale rows once the viewport moves (the screen re-lays
+                ;; out and forces a clean repaint on every change).
+                :rows-fn (fn [] (term/rows terminal))
+                :request-render! (fn [] (tui/tui-request-render tui true))
                 :on-close (fn [] (tui/tui-stop tui)))]
     (tui/tui-add-child tui screen)
     (tui/tui-set-focus tui screen)

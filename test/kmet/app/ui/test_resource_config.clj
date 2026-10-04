@@ -723,3 +723,71 @@
         (let [screen (rc/make-resource-config-screen :rows 10)]
           (t/is (= 16 (count (render-lines screen 80))))))
       {:user {:packages [dir]}})))
+
+;; ─── Terminal resize (Termux keyboard) ────────────────────────────────────
+
+(defn- many-extension-package
+  "A package with N extension files — enough rows to keep the list clipped
+   at the tested terminal heights."
+  [n]
+  (let [root (str (fs/path (tmp-dir) "pkg"))]
+    (fs/create-dirs (str root "/extensions"))
+    (doseq [i (range n)]
+      (spit (str root "/extensions/e" (format "%02d" i) ".clj") "(ns x)\n"))
+    root))
+
+(t/deftest test-screen-resize-relayouts-to-the-new-height
+  ;; the frame must follow a terminal resize: a height frozen at
+  ;; construction keeps max-visible (and the frame's line count) from the
+  ;; old terminal, so after Termux shrinks for the keyboard the frame is
+  ;; taller than the screen and navigation paints over stale rows
+  (let [dir (many-extension-package 15)]
+    (with-settings
+      (fn [_]
+        (let [screen (rc/make-resource-config-screen :rows 24)]
+          (t/is (= 24 (count (render-lines screen 80))))
+          (t/is (some #(re-find #"\(1/\d+\)" %) (render-lines screen 80)))
+          (rc/screen-set-rows! screen 16)
+          (let [lines (render-lines screen 80)]
+            (t/is (= 16 (count lines)) "the frame re-lays out to the new height")
+            (t/is (some #(str/includes? % "Global Resources") lines)
+                  "the top chrome stays in the frame")
+            (t/is (some #(re-find #"\(1/\d+\)" %) lines)
+                  "the counter stays in the frame")))
+        (t/testing "the selection stays visible after the shrink"
+          (let [screen (rc/make-resource-config-screen :rows 24)]
+            (rc/screen-set-rows! screen 16)
+            (t/is (some #(str/starts-with? (u/strip-ansi-codes %) ">")
+                        (render-lines screen 80))
+                  "the cursor is inside the new 16-line frame"))))
+      {:user {:packages [dir]}})))
+
+(t/deftest test-rows-poller-reloads-and-forces-a-repaint
+  ;; the mounted screen polls the live terminal height (the standalone TUI
+  ;; passes the terminal query): a change re-lays the frame out and asks
+  ;; for a forced repaint — a diff against the frame built for the old
+  ;; height would leave stale rows and cursors on screen
+  (let [dir (many-extension-package 15)]
+    (with-settings
+      (fn [_]
+        (let [height (atom 24)
+              repainted (promise)
+              screen (rc/make-resource-config-screen
+                      :rows 24
+                      :rows-poll-ms 1
+                      :rows-fn (fn [] @height)
+                      :request-render! (fn [] (deliver repainted :repainted)))]
+          (try
+            (t/is (= 24 (count (render-lines screen 80))))
+            (reset! height 16)
+            (t/is (= :repainted (deref repainted 2000 ::timeout))
+                  "the height change requested a repaint")
+            (t/is (= 16 @(:rows-count screen)) "the layout picked up the new height")
+            (t/is (= 16 (count (render-lines screen 80))))
+            (t/testing "dispose cancels the poller"
+              (protocols/dispose screen)
+              (t/is (true? (future-cancelled? (:rows-poller screen)))))
+            (finally
+              (when-not (future-cancelled? (:rows-poller screen))
+                (protocols/dispose screen))))))
+      {:user {:packages [dir]}})))

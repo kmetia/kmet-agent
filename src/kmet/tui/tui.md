@@ -414,6 +414,14 @@ An idle UI runs zero bodies.
 - **Dynamic `hiccup/*width*`**: bound around bodies for truncation at the
   real width; a resize forces one re-derive of affected idle bodies, then
   they re-cache. `hiccup/*comp*` is the running ComponentFn itself.
+  **Height is not a dynamic**: only width participates in body
+  memoization, so a component whose layout depends on the terminal height
+  (a windowed list) must track the live height in its own tracked atom
+  and ask for a forced repaint when it changes — the loop's size poll
+  reaches a height change as a diff of the frame built for the OLD
+  height, and Termux never takes the height full-redraw path, so stale
+  rows and cursors survive on screen. `kmet.app.ui.resource-config` is
+  the reference (`:rows-fn` / `:request-render!`).
 - **Error contract**: a throwing component fn crashes the render loop
   (Throwable → render-crash.log → tui-stop) — loud beats silently wrong.
 
