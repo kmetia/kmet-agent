@@ -522,8 +522,15 @@ modern` / `KMET_FAKE_ERA=modern`, HTTP `?era=modern`), and
 the modern wire (discover result, `-32022` data, header rejection with
 `400` + `-32020`, `404` for unimplemented methods, `405` GET/DELETE, no
 session minting, ack-first listen with `subscriptionId` stamping and
-subscription-scoped list_changed, Base64 `Mcp-Name`) and proves the legacy
-shapes untouched. Baseline captured: eight scripts, zero failures.
+subscription-scoped list_changed, Base64 `Mcp-Name` — including a
+malformed sentinel, which passes through undecoded and fails the
+comparison) and proves the legacy shapes untouched. Baseline captured:
+eight scripts, zero failures. The legacy-equivalence claim was re-checked
+against the pre-change fakes with a fixed request sequence (stdio and
+HTTP): the response content is byte-identical, and the stdio fake's
+`send!` is now serialized, so the two threads that can write (the read
+loop and `who-asks`'s answers) can no longer interleave or drop a line —
+before the lock the same probe lost one in three runs.
 
 ### 3.2. Era core in `kmet.libs.mcp` (behavior-neutral)
 

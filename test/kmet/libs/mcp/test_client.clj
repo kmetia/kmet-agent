@@ -263,7 +263,31 @@
                     (throw (protocol/mcp-error "header mismatch" {:code -32020})))
                   mcp/notify! (fn [_ _ _] nil)]
       (let [e (try (mcp/establish! (stdio-conn)) nil (catch Exception e e))]
-        (is (= -32020 (:code (ex-data e))))))))
+        (is (= -32020 (:code (ex-data e)))))))
+  (testing "a different modern revision retries the probe with it"
+    ;; a server that dropped the revision we asked for: the probe restarts
+    ;; with the one it advertised. The client speaks one modern revision
+    ;; today, so the branch is pinned here for the next one.
+    (let [asked (atom [])]
+      (with-redefs [protocol/modern-supported-versions ["2026-11-01" "2026-07-28"]
+                    mcp/request!
+                    (fn [_ method params & _]
+                      (case method
+                        "server/discover"
+                        (let [v (get-in params [:_meta (protocol/meta-key "protocolVersion")])]
+                          (swap! asked conj v)
+                          (if (= "2026-07-28" v)
+                            (throw (protocol/mcp-error
+                                    "unsupported"
+                                    {:code -32022 :data {:supported ["2026-11-01"]}}))
+                            (discover-result ["2026-11-01"])))
+                        "tools/list" {:tools []}))
+                    mcp/notify! (fn [_ _ _] nil)]
+        (let [conn (stdio-conn)]
+          (is (= "2026-11-01" (:protocol-version (mcp/establish! conn))))
+          (is (= ["2026-07-28" "2026-11-01"] @asked)
+              "the probe retried with the revision the server advertised")
+          (is (= "2026-11-01" (protocol/era-version conn))))))))
 
 (deftest establish!-probe-timeout-falls-back
   (with-redefs [mcp/request!
@@ -426,6 +450,32 @@
                   mcp/notify! (fn [_ _ _] nil)]
       (let [e (try (mcp/establish! (http-conn)) nil (catch Exception e e))]
         (is (= -32020 (:code (ex-data e))))))))
+
+(deftest establish!-http-32022-retries-a-newer-revision
+  ;; the HTTP twin: the retry re-seeds MCP-Protocol-Version, so the second
+  ;; probe carries the revision it asks for
+  (let [seen (atom [])]
+    (with-redefs [protocol/modern-supported-versions ["2026-11-01" "2026-07-28"]
+                  mcp/request!
+                  (fn [conn method params & _]
+                    (case method
+                      "server/discover"
+                      (let [v (get-in params [:_meta (protocol/meta-key "protocolVersion")])]
+                        (swap! seen conj [v @(:protocol-version conn)])
+                        (if (= "2026-07-28" v)
+                          (throw (protocol/mcp-error
+                                  "unsupported"
+                                  {:code -32022 :status 400
+                                   :data {:supported ["2026-11-01"]}}))
+                          (discover-result ["2026-11-01"])))
+                      "tools/list" {:tools []}))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (let [conn (http-conn)]
+        (is (= "2026-11-01" (:protocol-version (mcp/establish! conn))))
+        (is (= [["2026-07-28" "2026-07-28"] ["2026-11-01" "2026-11-01"]]
+               (take 2 @seen))
+            "the retry's POST carries the revision it requests")
+        (is (= "2026-11-01" (protocol/era-version conn)))))))
 
 (deftest establish!-http-non-modern-error-falls-back
   ;; a 404 + JSON-RPC body is not an era signal: run the handshake

@@ -134,12 +134,17 @@
         ;; the modern fake notifies open subscriptions only (a modern
         ;; server never broadcasts), so the catalog changing with no manual
         ;; refresh proves the adapter's subscription carried it — a missing
-        ;; subscriptions/listen would leave the catalog stale
+        ;; subscriptions/listen would leave the catalog stale. The connect
+        ;; opens the subscription on a background thread, so the trigger can
+        ;; race its acknowledgment: retry it while waiting (add-tool is
+        ;; idempotent, and a trigger after the ack is delivered for sure)
         (check "subscription-driven resync registered the change"
-               (loop [waits 0]
+               (loop [tries 0]
                  (cond
                    (str/includes? (:content (s {:server "modern"})) "echo2") true
-                   (< waits 40) (do (Thread/sleep 100) (recur (inc waits)))
+                   (< tries 5) (do (s {:tool "modern_add_tool" :args {}})
+                                   (Thread/sleep 800)
+                                   (recur (inc tries)))
                    :else false)))
         (let [r (s {:disconnect "modern"})]
           (check "modern server disconnects" (str/includes? (:content r) "Disconnected")))

@@ -383,6 +383,17 @@
                (str/includes? (get-in (decode-body resp) [:result :content 0 :text])
                               "b64")))
 
+      ;; a sentinel that does not decode is not treated as encoded: it
+      ;; passes through and fails the comparison against the body value
+      (let [msg {:jsonrpc "2.0" :id 88 :method "tools/call"
+                 :params {:_meta (client-meta) :name "http-echo"
+                          :arguments {:message "b64"}}}
+            resp (post-mcp url msg (assoc (request-headers msg)
+                                          "Mcp-Name" "=?base64?not-base64?="))]
+        (check "malformed base64 Mcp-Name rejected"
+               (and (= 400 (:status resp))
+                    (= -32020 (get-in (decode-body resp) [:error :code])))))
+
       ;; tools/list carries the modern trigger tool and resultType
       (let [msg {:jsonrpc "2.0" :id 9 :method "tools/list"
                  :params {:_meta (client-meta)}}

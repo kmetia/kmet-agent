@@ -115,9 +115,18 @@
    {:name "issues" :uriTemplate "github://repo/{owner}/{repo}/issues/{number}"
     :description "A tracked issue"}])
 
+(def ^:private out-lock
+  "Serializes stdout writes. The who-asks tool answers from a spawned
+   thread while the read loop keeps answering other requests: an
+   unsynchronized println lets the two interleave or drop a line, and the
+   client then never sees a ping, a roots/list request or a
+   list_changed."
+  (Object.))
+
 (defn- send! [msg]
-  (println (json/generate-string msg))
-  (flush))
+  (locking out-lock
+    (println (json/generate-string msg))
+    (flush)))
 
 (defn- send-result! [id result]
   (send! {:jsonrpc "2.0" :id id
