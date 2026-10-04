@@ -26,25 +26,23 @@
                                            th 60 {:expanded false}) 60)]
       (is (= 1 (count lines)))
       (is (str/includes? (first lines) "$ ls -la (timeout 60s)"))))
-  (testing "collapsed renders a multiline command in full (pi parity)"
+  (testing "collapsed caps a multiline command and hints at ctrl+o"
     (let [cmd (str "python3 - <<'EOF'\n"
                    (str/join "\n" (mapv #(str "body " %) (range 10)))
                    "\nEOF")
           lines (plain (r/render-bash-call "bash" {:command cmd} th 60 {:expanded false}) 60)]
-      (is (= 12 (count lines)) "every command line renders")
+      (is (= 9 (count lines)) "8 visual head lines + the hint")
       (is (str/starts-with? (first lines) "$ python3 - <<'EOF'"))
-      (is (str/includes? (peek lines) "EOF"))
-      (is (every? (fn [i] (some #(str/includes? % (str "body " i)) lines))
-                  (range 10))
-          "the payload renders in full")
-      (is (not-any? #(str/includes? % "more lines,") lines) "no collapse hint")))
-  (testing "collapsed wraps a long single-line command in full"
-    (let [cmd (str "echo " (str/join " " (repeat 60 "word")))
+      (is (some #(str/includes? % "body 6") lines) "the head renders")
+      (is (not-any? #(str/includes? % "body 7") lines) "the tail is hidden")
+      (is (some #(str/includes? % "(+4 lines,") lines) "the hidden count")))
+  (testing "collapsed wraps and caps a long single-line command"
+    (let [cmd (str "echo " (str/join " " (repeat 200 "word")))
           lines (plain (r/render-bash-call "bash" {:command cmd} th 60 {:expanded false}) 60)]
-      (is (< 3 (count lines)) "wraps at the width")
-      (is (= 60 (count (re-seq #"word" (str/join "\n" lines))))
-          "every word of the command is present")
-      (is (not-any? #(str/includes? % "more lines,") lines) "no collapse hint")))
+      (is (= 9 (count lines)) "8 wrapped visual lines + the hint")
+      (is (pos? (count (re-seq #"word" (str/join "\n" lines)))) "the head renders")
+      (is (some #(str/includes? % "(+1 lines,") lines)
+          "the logical line is cut mid-wrap (pi-style count)")))
   (testing "expanded renders the command verbatim (pi parity)"
     (let [cmd (str/join "\n" (mapv #(str "line " %) (range 12)))
           lines (plain (r/render-bash-call "bash" {:command cmd} th 60 {:expanded true}) 60)]
@@ -75,18 +73,18 @@
           lines (plain (r/render-read-result content false th 60 true nil nil nil {}) 60)]
       (is (= 31 (count lines)) "spacer + 30 lines")
       (is (str/starts-with? (second lines) "line-0"))
-      (is (not-any? #(str/includes? % "more lines") lines))))
+      (is (not-any? #(str/includes? % "(+") lines))))
   (testing "error + collapsed caps at 10 lines with hint"
     (let [content (str/join "\n" (mapv #(str "line-" %) (range 30)))
           lines (plain (r/render-read-result content true th 60 false nil nil nil {}) 60)]
       (is (= 12 (count lines)) "spacer + 10 lines + more-hint")
       (is (str/starts-with? (second lines) "line-0"))
-      (is (str/includes? (peek lines) "... (20 more lines,"))))
+      (is (str/includes? (peek lines) "... (+20 lines,"))))
   (testing "collapsed error caps a long unbreakable line by visual lines"
     (let [content (apply str (repeat 700 "x"))
           lines (plain (r/render-read-result content true th 60 false nil nil nil {}) 60)]
       (is (= 12 (count lines)) "spacer + 10 visual lines + hint")
-      (is (str/includes? (peek lines) "... (1 more lines,")
+      (is (str/includes? (peek lines) "... (+1 lines,")
           "the line not shown in full is the one hidden line reported")))
   (testing "truncation warn renders on the visible path"
     (let [content (str/join "\n" (mapv #(str "l" %) (range 5)))
@@ -138,18 +136,18 @@
     (let [content (str/join "\n" (mapv #(str "w-" %) (range 25)))
           lines (plain (r/render-write-call "write" {:file_path "f" :content content} th 60 {}) 60)]
       (is (= 14 (count lines)) "title + 2 spacers + 10 lines + hint")
-      (is (str/includes? (peek lines) "... (15 more lines,"))))
+      (is (str/includes? (peek lines) "... (+15 lines,"))))
   (testing "a long line is capped by visual lines, not logical lines"
     (let [content (str "head " (str/join " " (repeat 200 "word")))
           lines (plain (r/render-write-call "write" {:file_path "f" :content content} th 60 {}) 60)]
       (is (= 14 (count lines)) "title + 2 spacers + 10 wrapped visual lines + hint")
-      (is (str/includes? (peek lines) "... (1 more lines, 1 total,")
+      (is (str/includes? (peek lines) "... (+1 lines,")
           "the line cut mid-wrap is reported as not fully shown")))
   (testing "a long first line hides the following lines behind the same budget"
     (let [content (str "head " (str/join " " (repeat 200 "word")) "\nshort-a\nshort-b")
           lines (plain (r/render-write-call "write" {:file_path "f" :content content} th 60 {}) 60)]
       (is (= 14 (count lines)))
-      (is (str/includes? (peek lines) "... (3 more lines, 3 total,"))
+      (is (str/includes? (peek lines) "... (+3 lines,"))
       (is (not-any? #(str/includes? % "short-") lines)
           "the short tail lines stay hidden")))
   (testing "error result renders content"
@@ -173,18 +171,19 @@
       (is (some #(str/includes? % kw-esc) clj-lines) ".clj content is syntax-highlighted"))))
 
 (deftest test-bash-result
-  (testing "collapsed keeps the tail of the output, capped, with the expand hint"
+  (testing "collapsed keeps the tail of the output, capped, hint at the bottom"
     (let [content (str/join "\n" (mapv #(str "r-" %) (range 12)))
           lines (plain (r/render-bash-result content false th 60 false 1000 2000 nil {}) 60)]
-      (is (= 9 (count lines)) "spacer + hint + 5 lines + spacer + took")
-      (is (str/starts-with? (second lines) "... (7 earlier lines,"))
-      (is (str/starts-with? (nth lines 2) "r-7") "the tail is what is kept")
-      (is (str/includes? (peek lines) "Took 1.0s"))))
+      (is (= 7 (count lines)) "spacer + 5 tail lines + hint")
+      (is (str/starts-with? (nth lines 1) "r-7") "the tail is what is kept")
+      (is (str/includes? (peek lines) "... (+7 lines,") "the hint is at the bottom")
+      (is (not-any? #(str/includes? % "Took") lines)
+          "the state line belongs to the component (tail line)")))
   (testing "expanded renders every line, no hint"
     (let [content (str/join "\n" (mapv #(str "r-" %) (range 7)))
           lines (plain (r/render-bash-result content false th 60 true 1000 2000 nil {}) 60)]
-      (is (= 10 (count lines)) "spacer + 7 lines + spacer + took")
-      (is (not-any? #(str/includes? % "earlier lines") lines))))
+      (is (= 8 (count lines)) "spacer + 7 lines")
+      (is (not-any? #(str/includes? % "(+") lines))))
   (testing "no output and no timing renders an empty body"
     (is (= [] (plain (r/render-bash-result "" false th 60 false nil nil nil {}) 60)))
     (is (= [] (plain (r/render-bash-result nil false th 60 false nil nil nil {}) 60))))
@@ -198,11 +197,11 @@
           "the footer copy inside the body is gone — the warn line is rebuilt")
       (is (some #(= warn (str/trimr %)) lines) "it is rebuilt from the truncation data")
       (is (= 1 (count (filter #(str/includes? % warn) lines))) "…and renders once")))
-  (testing "the elapsed label flips to Took once the execution ended"
+  (testing "the elapsed/took state line is the component's tail line, not the renderer's"
     (let [partial (plain (r/render-bash-result "x" false th 60 true 1000 nil nil {}) 60)
           done (plain (r/render-bash-result "x" false th 60 true 1000 3000 nil {}) 60)]
-      (is (some #(str/includes? % "Elapsed ") partial))
-      (is (some #(str/includes? % "Took 2.0s") done)))))
+      (is (not-any? #(str/includes? % "Elapsed ") partial))
+      (is (not-any? #(str/includes? % "Took") done)))))
 
 (deftest test-edit-result-error-leg
   (testing "error content renders indented, one column in (pi: new Text(content, 1, 0))"
@@ -241,7 +240,7 @@
     (let [content (str/join "\n" (mapv #(str "d-" %) (range 9)))
           lines (plain (r/render-default-result content false th 60 false) 60)]
       (is (= 7 (count lines)) "spacer + 5 lines + hint")
-      (is (str/includes? (peek lines) "... (4 more lines,")))
+      (is (str/includes? (peek lines) "... (+4 lines,")))
     (testing "expanded shows everything"
       (let [content (str/join "\n" (mapv #(str "d-" %) (range 9)))
             lines (plain (r/render-default-result content false th 60 true) 60)]
@@ -250,7 +249,7 @@
       (let [content (apply str (repeat 370 "x"))
             lines (plain (r/render-default-result content false th 60 false) 60)]
         (is (= 7 (count lines)) "spacer + 5 visual lines + hint")
-        (is (str/includes? (peek lines) "... (1 more lines,")
+        (is (str/includes? (peek lines) "... (+1 lines,")
             "the line not shown in full is the one hidden line reported")))
     (testing "fully shown head lines are consumed; only the cut line remains"
       (let [content (str "a\nb\n" (apply str (repeat 700 "x")))
@@ -258,14 +257,14 @@
         (is (= 7 (count lines)) "spacer + 5 visual lines + hint")
         (is (= ["a" "b"] (mapv str/trim [(second lines) (nth lines 2)]))
             "the two short lines render in full")
-        (is (str/includes? (peek lines) "... (1 more lines,")
+        (is (str/includes? (peek lines) "... (+1 lines,")
             "only the partially shown long line is counted as hidden")))
     (testing "an ANSI-dense line under-fills the first prefix; doubling still caps it"
       (let [content (apply str (for [i (range 3000)]
                                  (str (if (even? i) "\u001b[31m" "\u001b[32m") "ab")))
             lines (plain (r/render-default-result content false th 60 false) 60)]
         (is (= 7 (count lines)) "spacer + 5 visual lines + hint")
-        (is (str/includes? (peek lines) "... (1 more lines,"))))))
+        (is (str/includes? (peek lines) "... (+1 lines,"))))))
 
 (deftest test-edit-preview-follows-the-runtime-cwd
   (testing "a relative edit path previews the file in the render context's
@@ -379,13 +378,13 @@
   (testing "an explicit timeout renders as a suffix"
     (let [lines (plain (r/render-run-code-call "run_code" {:code "1" :timeout 5} th 60 {}) 60)]
       (is (str/includes? (first lines) "(5s)"))))
-  (testing "collapsed renders a multiline script in full (no head window)"
+  (testing "collapsed renders a multiline script capped with the ctrl+o hint"
     (let [code (str/join "\n" (mapv #(str "(println " % ")") (range 20)))
           lines (plain (r/render-run-code-call "run_code" {:code code} th 60 {:expanded false}) 60)]
-      (is (= 20 (count lines)) "every script line renders")
+      (is (= 9 (count lines)) "8 visual head lines + the hint")
       (is (str/starts-with? (first lines) "run_code (println 0)"))
-      (is (str/includes? (peek lines) "(println 19)"))
-      (is (not-any? #(str/includes? % "more lines,") lines) "no collapse hint")))
+      (is (not-any? #(str/includes? % "(println 19)") lines) "the tail is hidden")
+      (is (some #(str/includes? % "(+12 lines,") lines) "20 - 8 hidden")))
   (testing "expanded renders the script verbatim"
     (let [code (str/join "\n" (mapv #(str "line " %) (range 12)))
           lines (plain (r/render-run-code-call "run_code" {:code code} th 60 {:expanded true}) 60)]
@@ -403,13 +402,14 @@
       (is (= 1 (count lines)))
       (is (str/includes? (first lines) "clojure> (+ 1 2)"))
       (is (str/includes? (first lines) ":7888"))))
-  (testing "multi-line code renders in full when collapsed (no head window)"
+  (testing "multi-line code is capped when collapsed"
     (let [code (str/join "\n" (mapv #(str "(println " % ")") (range 20)))
           lines (plain (r/render-code-call "clojure>" code "" th 60 {:expanded false}) 60)]
-      (is (= 20 (count lines)) "every code line renders")
+      (is (= 9 (count lines)) "8 visual head lines + the hint")
       (is (str/starts-with? (first lines) "clojure> (println 0)"))
-      (is (str/includes? (peek lines) "(println 19)"))
-      (is (not-any? #(str/includes? % "more lines,") lines) "no collapse hint")))
+      (is (some #(str/includes? % "(println 7)") lines))
+      (is (not-any? #(str/includes? % "(println 19)") lines) "the tail is hidden")
+      (is (some #(str/includes? % "(+12 lines,") lines) "20 - 8 hidden")))
   (testing "expanded code renders verbatim"
     (let [code (str/join "\n" (mapv #(str "line " %) (range 12)))
           lines (plain (r/render-code-call "run" code "" th 60 {:expanded true}) 60)]
@@ -417,7 +417,7 @@
       (is (str/includes? (peek lines) "line 11")))))
 
 (deftest test-run-code-result
-  (testing "output preview, inner-call summary and Took all render"
+  (testing "output preview and inner-call summary render"
     (let [context {:details {:calls [{:tool "read" :ok true}
                                      {:tool "bash" :ok true}
                                      {:tool "bash" :ok false}]}}
@@ -425,11 +425,12 @@
       (is (some #(= "a" (str/trim %)) lines))
       (is (= "3 tool calls: bash ×2, read, 1 failed"
              (some #(when (str/includes? % "tool call") (str/trim %)) lines)))
-      (is (str/includes? (peek lines) "Took 1.0s"))))
+      (is (not-any? #(str/includes? % "Took") lines)
+          "the state line belongs to the component (tail line)")))
   (testing "no inner calls → no summary line"
     (let [lines (plain (r/render-run-code-result "x" false th 60 true 1000 2000 nil {}) 60)]
       (is (not-any? #(str/includes? % "tool call") lines))
-      (is (str/includes? (peek lines) "Took 1.0s"))))
+      (is (not-any? #(str/includes? % "Took") lines))))
   (testing "truncation warns like bash"
     (let [trunc {:truncated-by :lines :shown-lines 2 :total-lines 99}
           lines (plain (r/render-run-code-result "a\nb" false th 80 true 1000 2000 trunc {}) 80)]
@@ -442,12 +443,33 @@
       (is (not-any? #(str/includes? % "Print less") lines)
           "the model-facing notice does not render twice")
       (is (some #(str/includes? % "Truncated: showing 2 of 99 lines") lines))))
-  (testing "the measured :elapsed-ms wins over the component timestamp span"
+  (testing "timestamps/details no longer render a state line here"
     (let [context {:details {:elapsed-ms 3400}}
           lines (plain (r/render-run-code-result "a" false th 60 true 1000 2000 nil context) 60)]
-      (is (str/includes? (peek lines) "Took 3.4s")
-          "the tool's own measurement, not the 1.0s start/end span")))
-  (testing "a replayed result (no timestamps) still reports the measured time"
-    (let [context {:details {:elapsed-ms 3400}}
-          lines (plain (r/render-run-code-result "a" false th 60 true nil nil nil context) 60)]
-      (is (str/includes? (peek lines) "Took 3.4s")))))
+      (is (not-any? #(str/includes? % "Took") lines)
+          "state-result-nodes owns the Took line (component tail line)"))))
+
+(deftest test-state-result-nodes
+  (testing "running shows Elapsed in the muted foreground, with no background"
+    (let [raw (core/render (r/state-result-nodes th (System/currentTimeMillis) nil false) 60)]
+      (is (= 2 (count raw)) "spacer + state line")
+      (is (str/includes? (peek raw) (theme/get-fg-ansi th :muted)))
+      (is (not-any? #(str/includes? % (theme/get-bg-ansi th :tool-pending-bg)) raw)
+          "the tail line paints no status background")
+      (is (str/includes? (utils/strip-ansi-codes (peek raw)) "Elapsed "))))
+  (testing "done shows Took in the default color, with no background"
+    (let [raw (core/render (r/state-result-nodes th 1000 3000 false) 60)]
+      (is (not-any? #(str/includes? % (theme/get-bg-ansi th :tool-success-bg)) raw))
+      (is (not (str/includes? (peek raw) (theme/get-fg-ansi th :success)))
+          "success stays at the default foreground")
+      (is (str/includes? (utils/strip-ansi-codes (peek raw)) "Took 2.0s"))))
+  (testing "error shows the (!) marker in the error foreground, with no background"
+    (let [raw (core/render (r/state-result-nodes th nil nil true) 60)]
+      (is (str/includes? (peek raw) (theme/get-fg-ansi th :error)))
+      (is (not-any? #(str/includes? % (theme/get-bg-ansi th :tool-error-bg)) raw))
+      (is (= "(!)" (str/trim (utils/strip-ansi-codes (peek raw)))))))
+  (testing "replayed success (no started-at, no error) renders nothing"
+    (is (nil? (r/state-result-nodes th nil nil false))))
+  (testing "the measured :elapsed-ms wins over the component timestamp span"
+    (let [raw (core/render (r/state-result-nodes th 1000 2000 false 3400) 60)]
+      (is (str/includes? (utils/strip-ansi-codes (peek raw)) "Took 3.4s")))))

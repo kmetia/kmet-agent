@@ -1,7 +1,7 @@
 (ns kmet.app.ui.tool-execution
   "ToolExecutionComponent component — Pi's ToolExecutionComponent.
-   Uses a Box (with status background) wrapping a Container that holds
-   the call-render and result-render children.
+   Uses a Box (constant tool-pending background) wrapping a Container that
+   holds the call-render, result-render and tail state children.
    Matching Pi architecture: Box handles padding/background/caching.
    Timing is managed internally (started-at on first content, ended-at on error/finalize).
    Quiet mode (:quiet display) short-circuits before any renderer runs:
@@ -44,6 +44,26 @@
    "run_code" {:call renderers/render-run-code-call
                :result renderers/render-run-code-result}})
 
+(def ^:private self-describing-success-tools
+  "Tool names whose successful result needs no tail state line: the result
+   body already carries the outcome (file content, diff), so a `Took` line
+   is noise. Covers the built-ins and the shipped clojure extension's
+   edit-family tools (clojure_edit, clojure_edit_replace_sexp,
+   clojure_paren_repair), which share render-edit-call/render-edit-result.
+   While running they still show the live Elapsed counter, and an error
+   still shows the (!) marker; pi parity: only the shell-style renderers
+   print Elapsed/Took."
+  #{"read" "write" "edit"
+    "clojure_edit" "clojure_edit_replace_sexp" "clojure_paren_repair"})
+
+(defn- self-describing-success?
+  "True when the ended, non-error result of NAME needs no tail state line:
+   its body already carries the outcome (see self-describing-success-tools)."
+  [name ended-at is-error]
+  (and (not is-error)
+       (some? ended-at)
+       (contains? self-describing-success-tools name)))
+
 ;; ─── Render context helper ─────────────────────────────────────────────────
 
 (defn- last-call-component
@@ -67,6 +87,13 @@
    image ids, new allocations) on every render."
   [comp]
   @(:image-children-atom comp))
+
+(defn- last-state-component
+  "Read the previous pass's tail state component WITHOUT tracking (see
+   last-call-component): the render body replaces this atom on every cache
+   miss, so a tracked read could never equal the stored value."
+  [comp]
+  @(:last-state-component-atom comp))
 
 (defn- as-component
   "Normalize a renderer's output: an IComponent (the normal case), nil (the
@@ -160,6 +187,7 @@
                image-children-atom   ;; the previous pass's image children (disposed on rebuild)
                last-call-component-atom   ;; component from previous render-call
                last-result-component-atom ;; component from previous render-result
+               last-state-component-atom  ;; component from previous render's tail state line
                renderer-state-atom        ;; persistent state for custom renderers
                cwd-atom                ;; current working directory
                box             ;; outer Box (padding + bg)
@@ -193,19 +221,21 @@
         (if quiet?
           (do (let [prev-call (last-call-component this)
                     prev-result (last-result-component this)
+                    prev-state (last-state-component this)
                     ;; identity-deduped (records compare field-wise): a
                     ;; renderer returning one instance for both slots must
                     ;; not be disposed twice
                     obsolete (if (and prev-call prev-result
                                       (identical? prev-call prev-result))
                                [prev-call]
-                               (remove nil? [prev-call prev-result]))]
+                               (remove nil? [prev-call prev-result prev-state]))]
                 (doseq [c obsolete]
                   (cda/dispose-component! c)))
               (doseq [c (last-image-children this)]
                 (cda/dispose-component! c))
               (reset! (:last-call-component-atom this) nil)
               (reset! (:last-result-component-atom this) nil)
+              (reset! (:last-state-component-atom this) nil)
               (reset! (:image-children-atom this) [])
               (container/container-clear @(:inner-container this))
               ;; the bash Elapsed ticker is cancelled without a tracked read,
@@ -225,6 +255,7 @@
           (let [container @inner-container
                 last-call-component-atom (:last-call-component-atom this)
                 last-result-component-atom (:last-result-component-atom this)
+                last-state-component-atom (:last-state-component-atom this)
                 image-children-atom (:image-children-atom this)
             ;; tracked non-quiet inputs: everything the collapsed/expanded
             ;; forms read (the quiet branch above reads none of these)
@@ -259,6 +290,30 @@
                 result-context (tool-execution-context this prev-result show-images?)
                 result-comp (as-component (render-result-fn content is-error theme content-width expanded? started-at ended-at truncation result-context))
                 _ (reset! last-result-component-atom result-comp)
+                prev-state (last-state-component this)
+            ;; Option 1 — state on the tail: the component owns the block's only
+            ;; mutable line (state-result-nodes) and its 1s ticker. The ticker
+            ;; parks in renderer state under :timer-id — the key
+            ;; tool-execution-set-error! and dispose cancel. Built-in
+            ;; renderers no longer manage the ticker; those that write state
+            ;; (the write/edit renderers) merge their own keys onto the map
+            ;; they read. An extension renderer must do the same (commonly
+            ;; (assoc state …)) or it drops the parked :timer-id.
+                _ (when (and started-at (nil? ended-at))
+                    (when (nil? (:timer-id @(:renderer-state-atom this)))
+                      (swap! (:renderer-state-atom this)
+                             assoc :timer-id
+                             (timers/every! 1000 #(protocols/invalidate this)))))
+                _ (when (or (some? ended-at) (nil? started-at))
+                    (let [[old _] (swap-vals! (:renderer-state-atom this) dissoc :timer-id)]
+                      (when-let [id (:timer-id old)]
+                        (timers/cancel! id))))
+                state-comp (as-component
+                            (when-not (self-describing-success? name ended-at is-error)
+                              (renderers/state-result-nodes
+                               theme started-at ended-at is-error
+                               (get-in @details-atom [:elapsed-ms]))))
+                _ (reset! last-state-component-atom state-comp)
                 image-data @image-data-atom
                 prev-image-children (last-image-children this)
             ;; identity-deduped: a renderer returning one instance for both
@@ -271,9 +326,9 @@
                                      acc
                                      (conj acc prev)))
                                  []
-                                 [prev-call prev-result])]
+                                 [prev-call prev-result prev-state])]
       ;; Pi: hide component when no call/render content and no images
-            (if (and (nil? call-comp) (nil? result-comp) (not (seq image-data)))
+            (if (and (nil? call-comp) (nil? result-comp) (nil? state-comp) (not (seq image-data)))
               (do
             ;; nothing renders — drop the dropped children (a stale child
             ;; would keep its track! watches alive; the renderers may return
@@ -314,19 +369,17 @@
                   (reset! image-children-atom children)
                   (doseq [c children]
                     (container/container-add-child container c)))
+                ;; the block's tail: the only line that may change after the
+                ;; block scrolled (state line; option 1)
+                (when state-comp
+                  (container/container-add-child container state-comp))
           ;; Pi: render-shell :self skips outer Box (tool renders its own framing)
                 (if (= :self render-shell)
                   (let [content-lines (protocols/render container width)]
                     (if (seq content-lines)
                       (into [""] content-lines)
                       []))
-                  (let [bg-key (cond
-                           ;; Pi: isPartial=true until result arrives; ended-at=nil = pending
-                                 (nil? ended-at) :tool-pending-bg
-                                 is-error :tool-error-bg
-                                 :else :tool-success-bg)
-                        _ (box/box-set-bg-fn @box #(theme/bg theme bg-key %))
-                        box-lines (protocols/render @box width)]
+                  (let [box-lines (protocols/render @box width)]
                     (if (seq box-lines)
                       (into [""] box-lines)
                       []))))))))))
@@ -347,7 +400,12 @@
     ;; touch again
     (doseq [c @(:image-children-atom _this)]
       (cda/dispose-component! c))
-    (reset! (:image-children-atom _this) [])))
+    (reset! (:image-children-atom _this) [])
+    ;; the tail state component is a container child (disposed with the box
+    ;; above) — disposal is idempotent; clearing the atom drops the last
+    ;; strong reference
+    (cda/dispose-component! @(:last-state-component-atom _this))
+    (reset! (:last-state-component-atom _this) nil)))
 
 ;; ─── Construction ──────────────────────────────────────────────────────────
 ;; Pi: component manages timing internally — no started-at/ended-at passed in.
@@ -360,7 +418,11 @@
            output-pad 1 expanded? false truncation nil details nil
            cwd (or (System/getProperty "user.dir") ".")}}]
   (let [inner-container (container/make-container)
-        bg-key (if is-error :tool-error-bg :tool-success-bg)
+        ;; Option 1 (state on the tail): the box body background is constant
+        ;; for the block's whole life — the state rides the tail line
+        ;; (state-result-nodes), so a settle never rewrites a line that has
+        ;; already scrolled above the window.
+        bg-key :tool-pending-bg
         pad-atom (or output-pad-atom (atom output-pad))
         b (box/make-box @pad-atom 1 #(theme/bg (theme/get-current-theme) bg-key %))]
     (box/box-add-child b inner-container)
@@ -386,6 +448,7 @@
                                   :image-children-atom (atom [])
                                   :last-call-component-atom (atom nil)
                                   :last-result-component-atom (atom nil)
+                                  :last-state-component-atom (atom nil)
                                   :renderer-state-atom (atom {})
                                   :cwd-atom (atom cwd)
                                   :box (atom b)

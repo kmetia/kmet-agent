@@ -6,7 +6,6 @@
             [babashka.fs :as fs]
             [kmet.libs.json :as json]
             [kmet.tui.theme :as theme]
-            [kmet.tui.timers :as timers]
             [kmet.tui.utils :as utils]
             [kmet.libs.terminal-image :as timg]
             [kmet.libs.edit-diff :as edit-diff]
@@ -174,6 +173,39 @@
           (recur (rest remaining) (inc consumed) (into acc wrapped)
                  (+ visual (count wrapped)))
           {:visual-lines (into acc wrapped) :consumed consumed})))))
+
+(def ^:private call-preview-lines
+  "Collapsed cap on a verbatim call body (a shell command, a code argument),
+   in visual lines. A call box taller than the viewport pushes the block's
+   own lines off screen; the cap keeps the typical block inside a window,
+   and ctrl+o renders everything."
+  8)
+
+(defn expand-hint
+  "The compact ctrl+o nag shared by every collapsed body: `... (+N lines,
+   ctrl+o toggle)`. Public: the built-in renderers and extensions use it so
+   every transcript hint reads the same. N is the hidden count: visual lines
+   for the shell output window, logical lines for the head-truncated call and
+   file previews."
+  [theme hidden-lines]
+  (str (theme/fg theme :muted (str "... (+" hidden-lines " lines, "))
+       (app-kb/key-hint "app.tools.expand" "toggle")
+       (theme/fg theme :muted ")")))
+
+(defn- bounded-call-lines
+  "Split BODY into at most CALL-PREVIEW-LINES visual lines at WIDTH.
+   Returns {:lines [...] :hidden n} where HIDDEN counts logical lines not
+   shown in full (the pi-style hint count); expanded bodies return their
+   verbatim logical lines. The cap counts VISUAL lines — a single enormous
+   logical line must not bypass it by counting as one."
+  [body expanded? width]
+  (let [lines (str/split-lines (str body))
+        total (count lines)]
+    (if expanded?
+      {:lines lines :hidden 0}
+      (let [{:keys [visual-lines consumed]}
+            (bounded-head-visual-lines lines call-preview-lines width)]
+        {:lines visual-lines :hidden (- total consumed)}))))
 
 ;; ─── Compact read classification (pi: read.ts getCompactReadClassification) ─
 
@@ -496,16 +528,12 @@
        (every? (fn [e] (and (string? (:old-text e)) (string? (:new-text e)))) edits)))
 
 (defn- build-edit-box
-  "Pi: buildEditCallComponent — Box whose bg reflects preview or final state."
-  [name preview raw-path theme cwd context]
-  (let [bg-fn (cond
-                (:is-error context)
-                #(theme/bg theme :tool-error-bg %)
-                (not (:is-partial context))
-                #(theme/bg theme :tool-success-bg %)
-                (nil? preview) #(theme/bg theme :tool-pending-bg %)
-                (:success? preview) #(theme/bg theme :tool-success-bg %)
-                :else #(theme/bg theme :tool-error-bg %))
+  "Pi: buildEditCallComponent — Box whose body background is constant.
+   Option 1: the edit box's success/error state rides the tool component's
+   tail state line (state-result-nodes), never the body — a settle must not
+   repaint lines above the window."
+  [name preview raw-path theme cwd _context]
+  (let [bg-fn #(theme/bg theme :tool-pending-bg %)
         kids (cond-> [(tool-text (str (theme/fg theme :tool-title
                                                 (theme/bold (str name " ")))
                                       (render-tool-path raw-path theme cwd)))]
@@ -598,10 +626,7 @@
                                       visual-lines
                                       (mapv #(theme/fg theme :tool-output %) visual-lines)))
                    (when (pos? remaining)
-                     [(tool-text
-                       (str (theme/fg theme :muted (str "... (" remaining " more lines,"))
-                            " " (app-kb/key-hint "app.tools.expand" "to toggle")
-                            (theme/fg theme :muted ")")))])
+                     [(tool-text (expand-hint theme remaining))])
                    (when truncation-warn
                      [[:spacer {:lines 1}]
                       (tool-text (theme/fg theme :warning truncation-warn))]))))]
@@ -655,11 +680,7 @@
                          (concat
                           (tool-text-lines visual-lines)
                           (when (pos? remaining)
-                            [(tool-text
-                              (str (theme/fg theme :muted
-                                             (str "... (" remaining " more lines, " total " total,"))
-                                   " " (app-kb/key-hint "app.tools.expand" "to toggle")
-                                   (theme/fg theme :muted ")")))]))))))]
+                            [(tool-text (expand-hint theme remaining))]))))))]
     (h/compile-tree (into [:container {}] kids))))
 
 (defn render-write-result
@@ -864,11 +885,22 @@
    counts once, and the expand hint reports the rest."
   5)
 
+(defn- capped-call-tree
+  "Compile a call body: the pre-styled call text plus, when HIDDEN logical
+   lines were dropped, the ctrl+o expand hint."
+  [text theme hidden]
+  (h/compile-tree
+   (into [:container {}]
+         (cond-> [(tool-text text)]
+           (pos? hidden) (conj (tool-text (expand-hint theme hidden)))))))
+
 (defn render-bash-call
-  "Call line for the shell tool: `$ <command>` (+ timeout suffix). The
-   command renders verbatim whether the transcript is collapsed or expanded
-   (pi: the call line never truncates; Text wraps it at the width)."
-  [_name args theme _width _context]
+  "Call line for the shell tool: `$ <command>` (+ timeout suffix). Collapsed,
+   a multi-line command renders at most CALL-PREVIEW-LINES visual lines with
+   the ctrl+o hint — a call box taller than the window would push the
+   block's tail state line off screen. Expanded renders the command verbatim
+   (pi: the call line never truncates; kmet caps the collapsed box only)."
+  [_name args theme width context]
   (let [cmd (:command args)
         timeout (:timeout args)
         cmd-str (if (string? cmd) cmd (if (nil? cmd) "" nil))
@@ -876,29 +908,13 @@
                       (nil? cmd-str) (theme/fg theme :error "[invalid arg]")
                       (empty? cmd-str) (theme/fg theme :tool-output "...")
                       :else cmd-str)
-        cmd-line (theme/fg theme :tool-title (theme/bold (str "$ " cmd-display)))
+        {:keys [lines hidden]} (bounded-call-lines (str "$ " cmd-display)
+                                                   (:expanded context) width)
+        cmd-line (theme/fg theme :tool-title (theme/bold (str/join "\n" lines)))
         timeout-suffix (if (and (number? timeout) (pos? timeout))
                          (theme/fg theme :muted (str " (timeout " timeout "s)"))
                          "")]
-    (h/compile-tree (tool-text (str cmd-line timeout-suffix)))))
-
-(defn- manage-result-timer!
-  "Park/cancel the 1s invalidate timer that keeps a running tool's elapsed
-   counter moving (pi: setInterval → context.invalidate); completion and
-   dispose cancel it. The timer id parks in renderer state — shared by the
-   shell-style result renderers."
-  [context started-at ended-at is-error]
-  (let [state (:state context)
-        set-state! (:set-state! context)
-        invalidate (:invalidate context)]
-    (when (and started-at (nil? ended-at) (nil? (:timer-id state)))
-      (when (and invalidate set-state!)
-        (set-state! (assoc state :timer-id (timers/every! 1000 invalidate)))))
-    (when (or ended-at is-error)
-      (when-let [id (:timer-id state)]
-        (timers/cancel! id))
-      (when (and set-state! (contains? state :timer-id))
-        (set-state! (dissoc state :timer-id))))))
+    (capped-call-tree (str cmd-line timeout-suffix) theme hidden)))
 
 (defn- output-result-nodes
   "The output body (collapsed to a visual-line window with an expand hint,
@@ -937,17 +953,13 @@
                                                  width)]
              (concat
               [[:spacer {:lines 1}]]
+              (tool-text-lines visual-lines)
               (when (pos? skipped-count)
                 [(tool-text
                   (utils/truncate-to-width
-                   (str (theme/fg theme :muted
-                                  (str "... (" skipped-count " earlier lines,"))
-                        " "
-                        (app-kb/key-hint "app.tools.expand" "to toggle")
-                        (theme/fg theme :muted ")"))
+                   (expand-hint theme skipped-count)
                    width
-                   "..."))])
-              (tool-text-lines visual-lines))))))
+                   "..."))]))))))
      (when truncation
        (let [{:keys [total-lines shown-lines truncated-by max-bytes]} truncation
              size-str (when (= truncated-by :bytes)
@@ -969,52 +981,67 @@
          [[:spacer {:lines 1}]
           (tool-text (theme/fg theme :warning warn))])))))
 
-(defn- elapsed-result-nodes
-  "The muted Elapsed/Took line, or nil when the execution never started.
+(defn state-result-nodes
+  "The tool block's tail state line — the ONLY line of a block that may
+   change after it was painted. The box body keeps the constant
+   :tool-pending-bg (option 1), so a settle can never rewrite a line above
+   the window; the state rides this line's foreground color instead: muted
+   while running, the default color once the result arrived, error (+ a
+   (!) marker) on failure, with the elapsed/took duration as the text.
+
    MEASURED-MS — the tool's own recorded duration (run_code's :details
-   :elapsed-ms) — wins over the component timestamp span when given."
-  [theme started-at ended-at & [measured-ms]]
+   :elapsed-ms) — wins over the component timestamp span when given. Nil
+   when there is nothing to say: a replayed success has no started-at (pi
+   renders replayed tools without a duration) and no error; a replayed
+   error still gets its (!) marker. The component omits the success form
+   for self-describing content tools (read/write/edit) — see
+   tool-execution."
+  [theme started-at ended-at is-error & [measured-ms]]
   (let [elapsed-ms (or measured-ms
                        (when started-at
-                         (- (or ended-at (System/currentTimeMillis)) started-at)))]
-    (when (some? elapsed-ms)
-      [[:spacer {:lines 1}]
-       (tool-text
-        (theme/fg theme :muted
-                  (str (if (or ended-at measured-ms) "Took" "Elapsed")
-                       " "
-                       (format "%.1f" (float (/ (max 0 elapsed-ms) 1000)))
-                       "s")))])))
+                         (- (or ended-at (System/currentTimeMillis)) started-at)))
+        done? (or (some? ended-at) (some? measured-ms))
+        text (str (when is-error "(!) ")
+                  (when elapsed-ms
+                    (str (if done? "Took" "Elapsed") " "
+                         (format "%.1f" (float (/ (max 0 elapsed-ms) 1000))) "s")))
+        fg-key (cond is-error :error
+                     done? nil
+                     :else :muted)]
+    (when (seq text)
+      (h/compile-tree
+       [:container {}
+        [:spacer {:lines 1}]
+        [:text {:padding-x 0 :padding-y 0}
+         (if fg-key (theme/fg theme fg-key text) text)]]))))
 
 (defn render-bash-result
   "Result body for the shell tool: the output (collapsed to a visual-line
-   window with an expand hint, verbatim when expanded), the truncation
-   warning and the elapsed/took line.
-
-   While the tool runs, the renderer parks a 1s invalidate timer in its
-   state so the elapsed counter keeps moving with no output (pi:
-   setInterval → context.invalidate); completion and dispose cancel it."
-  [content is-error theme width expanded? started-at ended-at truncation context]
-  (manage-result-timer! context started-at ended-at is-error)
+   window with an expand hint, verbatim when expanded) and the truncation
+   warning. The elapsed/took state line is the tool component's tail line
+   (state-result-nodes), not the renderer's — see tool-execution."
+  [content _is-error theme width expanded? _started-at ended-at truncation _context]
   (h/compile-tree
    (into [:container {}]
-         (concat (output-result-nodes content theme width expanded? ended-at truncation)
-                 (elapsed-result-nodes theme started-at ended-at)))))
+         (output-result-nodes content theme width expanded? ended-at truncation))))
 
 (defn render-code-call
   "The shared call line for tools whose primary argument is code (run_code,
-   clojure_eval): `<label> <code>` rendered verbatim, whatever the display
-   mode (no head window, no expand hint). LABEL is plain text (styled bold
-   tool-title); SUFFIX is appended as given (pre-styled)."
-  [label code suffix theme _width _context]
+   clojure_eval): `<label> <code>`. Collapsed, a multi-line argument renders
+   at most CALL-PREVIEW-LINES visual lines with the ctrl+o hint; expanded
+   renders the code verbatim. LABEL is plain text (styled bold tool-title);
+   SUFFIX is appended as given (pre-styled)."
+  [label code suffix theme width context]
   (let [code-str (if (string? code) code (if (nil? code) "" nil))
         code-display (cond
                        (nil? code-str) (theme/fg theme :error "[invalid arg]")
                        (empty? code-str) (theme/fg theme :tool-output "...")
                        :else code-str)
+        {:keys [lines hidden]} (bounded-call-lines (str label " " code-display)
+                                                   (:expanded context) width)
         code-line (theme/fg theme :tool-title
-                            (theme/bold (str label " " code-display)))]
-    (h/compile-tree (tool-text (str code-line suffix)))))
+                            (theme/bold (str/join "\n" lines)))]
+    (capped-call-tree (str code-line suffix) theme hidden)))
 
 (defn render-run-code-call
   "Call line for the run_code tool: `run_code <code>` (+ an explicit timeout
@@ -1051,16 +1078,14 @@
 
 (defn render-run-code-result
   "Result body for the run_code tool: the shell-style body (output preview,
-   truncation warning, elapsed/took — the tool's own measured time when the
-   result carries it) plus the inner-call summary line."
-  [content is-error theme width expanded? started-at ended-at truncation context]
-  (manage-result-timer! context started-at ended-at is-error)
+   truncation warning) plus the inner-call summary line. The elapsed/took
+   state line — the tool's own measured time when the result carries it —
+   is the tool component's tail line (state-result-nodes)."
+  [content _is-error theme width expanded? _started-at ended-at truncation context]
   (h/compile-tree
    (into [:container {}]
          (concat (output-result-nodes content theme width expanded? ended-at truncation)
-                 (run-code-calls-nodes context theme)
-                 (elapsed-result-nodes theme started-at ended-at
-                                       (get-in context [:details :elapsed-ms]))))))
+                 (run-code-calls-nodes context theme)))))
 
 ;; ─── Default renderers (fallback when no custom or built-in) ──────────────
 
@@ -1103,8 +1128,5 @@
         kids (concat
               (tool-text-lines (mapv #(theme/fg theme :tool-output %) visual-lines))
               (when (pos? remaining)
-                [(tool-text
-                  (str (theme/fg theme :muted (str "... (" remaining " more lines,"))
-                       " " (app-kb/key-hint "app.tools.expand" "to toggle")
-                       (theme/fg theme :muted ")")))]))]
+                [(tool-text (expand-hint theme remaining))]))]
     (h/compile-tree (into [:container {} [:spacer {:lines 1}]] kids))))

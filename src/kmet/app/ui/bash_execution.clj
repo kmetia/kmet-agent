@@ -71,11 +71,11 @@
     (let [hint (when (pos? hidden-line-count)
                  (if expanded?
                    (str (theme/fg t :muted "(")
-                        (app-kb/key-hint "app.tools.expand" "to toggle")
+                        (app-kb/key-hint "app.tools.expand" "toggle")
                         (theme/fg t :muted ")"))
                    (str (theme/fg t :muted
-                                  (str "... " hidden-line-count " more lines ("))
-                        (app-kb/key-hint "app.tools.expand" "to toggle")
+                                  (str "... (+" hidden-line-count " lines, "))
+                        (app-kb/key-hint "app.tools.expand" "toggle")
                         (theme/fg t :muted ")"))))
           exit-part (case status
                       :cancelled (theme/fg t :warning "(cancelled)")

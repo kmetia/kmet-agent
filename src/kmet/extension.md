@@ -570,17 +570,35 @@ is-error, show-images — whether images render: the
 `:title (fn [args])` — pure plain-text data for that quiet line (nil-safe over
 partial streaming args; nil/blank falls back to the tool name).
 `:render-shell :self` lets the renderer own its outer
-box, padding, and status background. A renderer's returned component is
+box, padding, and framing. The default shell renders a constant box body
+and the component appends the tail state line (`state-result-nodes`) — the
+one line that carries pending/success/error and the elapsed time. That line
+changes only its foreground text (running is muted, success keeps the
+default color, error uses the error color with a `(!)` marker) — it never
+paints a background, so a settle only rewrites the one line at the document
+end. Self-describing content tools (`read`, `write`, `edit`, and the
+clojure extension's edit-family tools `clojure_edit`,
+`clojure_edit_replace_sexp`, and `clojure_paren_repair`) omit the success
+form — the body already carries the outcome — but still show the live
+Elapsed counter while running and the `(!)` marker on error; shell-style
+tools (`bash`, `run_code`, extension shells) keep Took/Elapsed.
+Whichever shell a renderer uses, its output must be stable above that
+tail: once a line can scroll above the window it must never change again
+(the TUI cannot repaint scrollback; a change there forces a clearing
+rebuild). Do not encode run state in a body background either — it repaints
+every line when the result settles. A renderer's returned component is
 disposed when a later pass replaces it — to keep an instance across passes,
 return the same one back (read it from `:last-component` and return it
 unchanged); a renderer that returns a fresh component each pass gets the
 previous one cleaned up automatically. The supported reusable built-in
 renderer vars are in `kmet.app.ui.tool-renderers`, including
-`render-edit-call`, `render-edit-result`, `render-bash-result` (a
+`render-edit-call`, `render-edit-result`, `state-result-nodes` (the tail
+state line), `render-bash-result` (a
 plain-text output body: styled lines, a collapsed line window with an expand
-hint, truncation and elapsed lines — the opt-in grep/find/ls tools use it)
-and `render-code-call` (the `run_code`/`clojure_eval` call line: a code
-argument rendered verbatim, whatever the display mode); the namespace is
+hint and truncation warnings — the opt-in grep/find/ls tools use it)
+and `render-code-call` (the `run_code`/`clojure_eval` call line: the code
+argument capped to a head window when collapsed, verbatim when expanded);
+the namespace is
 explicitly shared with extensions. Path display helpers are public too:
 `render-tool-path` (shortened, accent, hyperlinked path) and `link-path`
 (wrap any styled text in a terminal hyperlink), for tools that render

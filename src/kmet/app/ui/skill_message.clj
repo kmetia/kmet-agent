@@ -8,7 +8,7 @@
    into the transcript, so the block is parsed back
    (kmet.app.skills/parse-skill-block) and shown as a dedicated message:
 
-     collapsed   [skill] <name> (ctrl+o to toggle)
+     collapsed   [skill] <name> (ctrl+o)
      expanded    [skill]
                  **<name>**
 
@@ -54,12 +54,13 @@
   (str (bracket thm) " "))
 
 (defn expand-hint
-  "` (ctrl+o to toggle)` in dim — pi: keyText('app.tools.expand')."
+  "` (ctrl+o)` in dim — pi: keyText('app.tools.expand'). The compact nag:
+   no line count here (the collapsed skill/read line is already one line)."
   [thm]
-  (theme/fg thm :dim (str " (" (app-kb/key-text "app.tools.expand") " to toggle)")))
+  (theme/fg thm :dim (str " (" (app-kb/key-text "app.tools.expand") ")")))
 
 (defn collapsed-line
-  "The one-line collapsed form: `[skill] <name> (ctrl+o to toggle)`."
+  "The one-line collapsed form: `[skill] <name> (ctrl+o)`."
   [thm name]
   (str (label thm)
        (theme/fg thm :custom-message-text name)

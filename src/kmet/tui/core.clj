@@ -865,6 +865,29 @@
       (.write w text))
     (catch Exception _)))
 
+(defn- log-scrollback-heal!
+  "Append a `scrollbackHeal: DETAIL` line to the KMET_DEBUG_REDRAW log
+   (no-op unless debug redraw is on)."
+  [tui detail]
+  (when (some-> (:debug-redraw? tui) deref)
+    (append-log! (log-path "kmet-debug-render.log")
+                 (str "[" (java.time.LocalDateTime/now) "] scrollbackHeal: "
+                      detail "\n"))))
+
+(defn- debug-line-preview
+  "One-line description of LINE for the scrollback-dirty debug log
+   (KMET_DEBUG_REDRAW=1): the escape-stripped text, truncated, plus the
+   line's leading escape sequence so a style-only change — a box
+   background flipping from pending to success, say — reads as a change
+   instead of looking identical to its text."
+  [line]
+  (let [raw (str (or line ""))
+        esc-pos (str/index-of raw "\u001b")
+        esc (when esc-pos
+              (pr-str (subs raw esc-pos (min (count raw) (+ esc-pos 48)))))]
+    (str (pr-str (utils/truncate-to-width (utils/strip-ansi-codes raw) 90 "…"))
+         (when esc (str " esc=" esc)))))
+
 (defn- write-crash-log!
   "Write all rendered lines + overflow info to kmet-crash.log in the cwd
    (pi: pi-crash.log)."
@@ -2108,9 +2131,17 @@
       (swap! target-atom max target)
       ;; A fresh request re-arms the one-frame settle grace.
       (some-> (:scrollback-heal-graced? tui) (reset! false))
+      (log-scrollback-heal!
+       tui
+       (str "requested (frame=" (some-> (:frame-count tui) deref)
+            ", target=" @target-atom
+            ", dirty=" (tui-scrollback-dirty? tui) ")"))
       (tui-request-render tui (tui-scrollback-dirty? tui)))
-    (when (tui-scrollback-dirty? tui)
-      (tui-request-render tui true))))
+    (do
+      (log-scrollback-heal!
+       tui (str "requested (no latch, dirty=" (tui-scrollback-dirty? tui) ")"))
+      (when (tui-scrollback-dirty? tui)
+        (tui-request-render tui true)))))
 
 (defn tui-query-terminal-background-color
   "Query the terminal's default background color via OSC 11; returns a
@@ -2382,6 +2413,12 @@
                                        (str "[" (java.time.LocalDateTime/now) "] fullRender: "
                                             reason " (prev=" prev-count ", new=" new-count
                                             ", height=" h ")\n"))))
+                      log-heal! (fn [reason]
+                                  (log-scrollback-heal!
+                                   tui
+                                   (str reason " (frame=" @(:frame-count tui)
+                                        ", prev=" prev-count ", new=" new-count
+                                        ", height=" h ")")))
                       compute-line-diff (fn [target-row]
                                           (- (- target-row @viewport-top)
                                              (- @hardware-cursor-row @prev-viewport-top)))
@@ -2544,16 +2581,41 @@
                                                              (< first-changed @prev-viewport-top)
                                                              (>= new-count prev-count)
                                                              (>= new-count @prev-viewport-top))
-                                        first-changed (if viewport-clamp? @prev-viewport-top first-changed)
+                                        raw-first-changed first-changed
+                                        first-changed (if viewport-clamp? @prev-viewport-top raw-first-changed)
                                         ;; Both paths below leave the changed lines above
                                         ;; the window un-repainted (the terminal has no
                                         ;; addressable scrollback), so the history is stale
                                         ;; until a clearing full redraw. Record it; the app
                                         ;; heals at a streaming-free boundary
-                                        ;; (tui-heal-scrollback!).
+                                        ;; (tui-heal-scrollback!). The debug log below
+                                        ;; names the changed block's edges so a latched
+                                        ;; heal can be attributed to its renderer
+                                        ;; (KMET_DEBUG_REDRAW=1).
                                         _ (when (or scrollback-only-change?
                                                     shrink-above-window?
                                                     viewport-clamp?)
+                                            (when debug-redraw?
+                                              (append-log!
+                                               (log-path "kmet-debug-render.log")
+                                               (str "[" (java.time.LocalDateTime/now) "] scrollbackDirty: "
+                                                    (cond scrollback-only-change? "scrollback-only"
+                                                          shrink-above-window? "shrink-above-window"
+                                                          :else "viewport-clamp")
+                                                    " (frame=" (some-> (:frame-count tui) deref)
+                                                    ", prev=" prev-count ", new=" new-count
+                                                    ", height=" h
+                                                    ", firstChanged=" raw-first-changed
+                                                    ", lastChanged=" last-changed
+                                                    ", prevViewportTop=" @prev-viewport-top
+                                                    (when viewport-clamp?
+                                                      (str ", clampedTo=" first-changed))
+                                                    ", alreadyDirty=" (boolean (some-> (:scrollback-dirty? tui) deref))
+                                                    ")\n"
+                                                    "  old[first]: " (debug-line-preview (nth prev raw-first-changed nil)) "\n"
+                                                    "  new[first]: " (debug-line-preview (nth lines raw-first-changed nil)) "\n"
+                                                    "  old[last]:  " (debug-line-preview (nth prev last-changed nil)) "\n"
+                                                    "  new[last]:  " (debug-line-preview (nth lines last-changed nil)) "\n")))
                                             (reset! (:scrollback-dirty? tui) true))
                                         mid-full-redraw! (fn [reason]
                                                            (log-redraw! reason)
@@ -2767,16 +2829,19 @@
                       (when (compare-and-set! (:scrollback-heal-target tui) target 0)
                         (cond
                           (tui-scrollback-dirty? tui)
-                          (do (some-> (:scrollback-heal-graced? tui) (reset! false))
+                          (do (log-heal! (str "firing clearing full redraw (target=" target ")"))
+                              (some-> (:scrollback-heal-graced? tui) (reset! false))
                               (tui-request-render tui true))
 
                           (and @(:render-requested? tui)
                                (not (some-> (:scrollback-heal-graced? tui) deref)))
-                          (do (some-> (:scrollback-heal-graced? tui) (reset! true))
+                          (do (log-heal! (str "clean target frame, one grace frame (target=" target ")"))
+                              (some-> (:scrollback-heal-graced? tui) (reset! true))
                               (swap! (:scrollback-heal-target tui)
                                      max (inc @(:frame-count tui))))
 
-                          :else nil))))))))
+                          :else
+                          (log-heal! (str "clean target frame, latch dropped (target=" target ")"))))))))))
 
           ;; The frame's buffer leaves the lock with it: the write is the
           ;; only blocking tty I/O in the iteration (even the string

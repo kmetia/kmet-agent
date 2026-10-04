@@ -34,7 +34,8 @@
             [clojure.test :as t :refer [deftest testing]]
             [kmet.tui.core :as core]
             [kmet.tui.terminal :as term]
-            [kmet.tui.utils :as utils]))
+            [kmet.tui.utils :as utils]
+            [kmet.app.ui.tool-execution :as te]))
 
 (def ^:private clear-seq
   "The clear sequence a clearing full redraw must emit: erase screen, home,
@@ -869,5 +870,34 @@
         (t/is (not-any? #(str/includes? % marker)
                         (second (frame-writes (:writes vt))))
               "neither does the diff frame")
+        (finally
+          (stop-loop tui))))))
+
+(deftest ^:slow tall-tool-settle-keeps-scrollback-clean
+  (testing "option 1 (state on the tail): a tall live tool settles into a
+            tail state line — the box body is constant, so the settle can
+            never repaint a line above the window and the scrollback stays
+            clean (regression: the whole-box pending→success bg flip latched
+            a heal at every such tool end)"
+    (let [cmd (str/join "\n" (repeat 40 "echo x"))
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))
+          tool (te/make-tool-execution :name "bash" :args {:command cmd})]
+      (try
+        (core/tui-add-child tui (test-component
+                                 (atom (mapv #(str "history " %) (range 40)))))
+        (core/tui-add-child tui tool)
+        (te/tool-execution-mark-execution-started! tool)
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 5000)
+        ;; settle: content + ended-at change the state line only
+        (reset! (:content-atom tool) "ok")
+        (te/tool-execution-set-error! tool false)
+        (core/tui-request-render tui)
+        (wait-for-frames (:writes vt) 2 5000)
+        (t/is (false? (core/tui-scrollback-dirty? tui))
+              "the settle left the scrollback clean (tail line only)")
+        (t/is (some #(str/includes? % "Took") @(:writes vt))
+              "the tail line rendered the final state")
         (finally
           (stop-loop tui))))))

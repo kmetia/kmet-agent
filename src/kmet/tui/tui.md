@@ -86,7 +86,15 @@ tool result's preview correction calls `:invalidate` mid-render) records its
 dirt in the frame that starts after, so when such a follow-up frame is
 already requested the latch survives for exactly that one grace frame
 (`tui-scrollback-heal-graced?`). The grace is per request — a later
-streaming frame cannot keep the latch alive into a mid-stream clear. Both
+streaming frame cannot keep the latch alive into a mid-stream clear. Tool
+blocks keep this latch rare by construction: a box's *body* is constant for
+the block's whole life, and its pending/success/error state rides only the
+tail line (`state-result-nodes`) — the one line appended at the document
+end, where a change cannot land above the window. The box background no
+longer encodes the state, so a tall tool settling (the old whole-box
+`pending → success` repaint, the common latch) can never dirty the
+scrollback; only genuinely late content (a result that corrects a preview,
+a shrink) can. Both
 healing boundaries are moments where the user is expected
 to be at the document end, so the clear's viewport jump lands on a screen
 transition instead of mid-stream. An *explicit* reflow

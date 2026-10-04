@@ -25,7 +25,7 @@
   (str/join "\n" (plain-lines component width)))
 
 ;; The hint text comes from the keybindings manager; install one so the
-;; collapsed line reads "ctrl+o to toggle" rather than the empty fallback.
+;; collapsed line reads "ctrl+o" rather than the empty fallback.
 (defn- with-keybindings [f]
   (let [prev (kb/get-global-keybindings)]
     (try
@@ -98,7 +98,7 @@
         lines (plain-lines c 60)]
     (is (= 3 (count lines)) "box padding-y 1 above and below")
     (is (some #(str/includes? % "[skill] demo-skill") lines))
-    (is (some #(str/includes? % "(ctrl+o to toggle)") lines))
+    (is (some #(str/includes? % "(ctrl+o)") lines))
     (testing "the skill body is NOT dumped into the transcript"
       (is (not-any? #(str/includes? % "do a thing") lines)))
     (testing "the XML wrapper is not shown either"
@@ -114,7 +114,7 @@
     (is (str/includes? text "demo-skill") "the name heads the body")
     (is (str/includes? text "do a thing") "the body renders when expanded")
     (is (str/includes? text "do another"))
-    (is (not (str/includes? text "(ctrl+o to toggle)"))
+    (is (not (str/includes? text "(ctrl+o)"))
         "the hint belongs to the collapsed form")))
 
 (deftest test-the-shared-toggle-drives-it
@@ -170,7 +170,7 @@
     (ch/chat-history-add-message! ch {:role :user :content block})
     (let [text (str/join "\n" (plain-lines ch 60))]
       (is (str/includes? text "[skill] demo-skill"))
-      (is (str/includes? text "(ctrl+o to toggle)"))
+      (is (str/includes? text "(ctrl+o)"))
       (is (not (str/includes? text "do a thing")) "body hidden while collapsed")
       (testing "the shared ctrl+o toggle expands it"
         (is (true? (ch/chat-history-toggle-tool-expanded! ch)))
@@ -223,7 +223,7 @@
   ;; invocation and the agent's later SKILL.md read cannot drift
   (let [thm (deref subs/theme-sub)]
     (is (str/includes? (strip-ansi (sm/label thm)) "[skill]"))
-    (is (str/includes? (strip-ansi (sm/expand-hint thm)) "ctrl+o to toggle"))
+    (is (str/includes? (strip-ansi (sm/expand-hint thm)) "ctrl+o"))
     (testing "the collapsed line is exactly label + name + hint"
       (is (= (str (sm/label thm) (theme/fg thm :custom-message-text "demo")
                   (sm/expand-hint thm))

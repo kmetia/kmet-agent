@@ -64,7 +64,7 @@
     (let [lines (protocols/render c 40)]
       (t/is (seq lines))
       (t/is (some #(clojure.string/includes? % "line") lines) "preview lines shown")
-      (t/is (some #(clojure.string/includes? % "more lines") lines) "expand hint shown")
+      (t/is (some #(clojure.string/includes? % "(+10 lines,") lines) "expand hint shown")
       (t/is (some #(clojure.string/includes? % "Took") lines) "duration shown"))))
 
 (t/deftest test-bash-execution-render-expanded

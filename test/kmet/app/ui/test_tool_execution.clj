@@ -45,7 +45,7 @@
       (is (some #(re-find #"file2" %) plain)))))
 
 (deftest test-render-error
-  (testing "error tool uses tool-error-bg"
+  (testing "error tool renders its content"
     (let [c (te/make-tool-execution :name "my-tool" :content "failed" :is-error true)
           rendered (core/render c 40)]
         ;; Content visible for errors
@@ -253,7 +253,7 @@
                 (mapv strip-ansi (core/render c 60)))))))
 
 (deftest test-edit-render-final-status-without-preview
-  (testing "self-shell edit renderer uses final result status without a preview"
+  (testing "self-shell edit body stays pending; the tail carries the error state"
     (let [make (fn [is-error]
                  (te/make-tool-execution
                   :name "clojure_edit"
@@ -268,12 +268,59 @@
       (te/tool-execution-set-error! failure true)
       (let [success-lines (core/render success 60)
             failure-lines (core/render failure 60)
+            pending-bg (theme/get-bg-ansi theme/dark-theme :tool-pending-bg)
             success-bg (theme/get-bg-ansi theme/dark-theme :tool-success-bg)
             error-bg (theme/get-bg-ansi theme/dark-theme :tool-error-bg)]
-        (is (some #(str/includes? % success-bg) success-lines))
-        (is (some #(str/includes? % error-bg) failure-lines))
-        (is (not-any? #(str/includes? % error-bg) success-lines))
-        (is (not-any? #(str/includes? % success-bg) failure-lines))))))
+        (is (some #(str/includes? % pending-bg) success-lines)
+            "constant pending body (success)")
+        (is (some #(str/includes? % pending-bg) failure-lines)
+            "constant pending body (error)")
+        (is (some #(str/includes? (strip-ansi %) "(!)") failure-lines)
+            "the tail line carries the error marker")
+        (is (not-any? #(str/includes? % error-bg) failure-lines)
+            "the error state never repaints a background")
+        (is (not-any? #(str/includes? % success-bg) success-lines))
+        (is (not-any? #(str/includes? % error-bg) success-lines))))))
+
+(deftest test-tail-state-line
+  (testing "live settle: the body stays pending, the tail text flips to success"
+    (let [c (te/make-tool-execution :name "bash" :args {:command "echo hi"})]
+      (te/tool-execution-mark-execution-started! c)
+      (let [running (core/render c 60)
+            pending-bg (theme/get-bg-ansi theme/dark-theme :tool-pending-bg)]
+        (is (some #(str/includes? % pending-bg) running) "constant pending body")
+        (is (some #(str/includes? (strip-ansi %) "Elapsed") running)))
+      (reset! (:content-atom c) "hi")
+      (te/tool-execution-set-error! c false)
+      (let [done (core/render c 60)]
+        (is (some #(str/includes? (strip-ansi %) "Took") done))
+        (is (not-any? #(str/includes? % (theme/get-bg-ansi theme/dark-theme :tool-success-bg))
+                      done)
+            "success never repaints a background")
+        (is (not-any? #(str/includes? % (theme/get-bg-ansi theme/dark-theme :tool-error-bg))
+                      done))))))
+
+(deftest test-content-tools-skip-the-success-status-line
+  (testing "successful read/write/edit and the clojure edit-family tools
+            keep no tail Took line; running still shows Elapsed and errors
+            still show (!)"
+    (doseq [tool ["read" "write" "edit"
+                  "clojure_edit" "clojure_edit_replace_sexp" "clojure_paren_repair"]]
+      (let [c (te/make-tool-execution :name tool :args {} :content "out")]
+        (te/tool-execution-mark-execution-started! c)
+        (let [running (mapv strip-ansi (core/render c 60))]
+          (is (some #(str/includes? % "Elapsed") running)
+              (str tool ": running shows the live elapsed counter")))
+        (te/tool-execution-set-error! c false)
+        (let [done (mapv strip-ansi (core/render c 60))]
+          (is (not-any? #(str/includes? % "Took") done)
+              (str tool ": successful completion shows no status line")))))
+    (let [c (te/make-tool-execution :name "read" :args {} :content "denied")]
+      (te/tool-execution-mark-execution-started! c)
+      (te/tool-execution-set-error! c true)
+      (let [failed (mapv strip-ansi (core/render c 60))]
+        (is (some #(str/includes? % "(!)") failed)
+            "an error still gets its (!) marker")))))
 
 (deftest test-edit-render-edits-array
   (testing "edit preview handles camelCase edits array"
@@ -451,7 +498,7 @@
     (let [plain (render-tool :name "read"
                              :args {:path "/home/user/.pi/skills/demo-skill/SKILL.md"})]
       (is (some #(re-find #"\[skill\] demo-skill" %) plain))
-      (is (some #(re-find #"to toggle" %) plain)))))
+      (is (some #(re-find #"\[skill\] demo-skill \(" %) plain)))))
 
 (deftest test-read-compact-resource
   (testing "AGENTS.md reads render as 'read resource' label (pi)"
@@ -489,12 +536,12 @@
           collapsed (render-tool :name "write"
                                  :args {:path "src/a.clj" :content content})]
       (is (some #(re-find #"line1" %) collapsed))
-      (is (some #(re-find #"more lines, 12 total" %) collapsed))
+      (is (some #(re-find #"\(\+2 lines," %) collapsed))
       (is (not-any? #(re-find #"line12" %) collapsed))
       (let [expanded (render-tool :name "write" :expanded? true
                                   :args {:path "src/a.clj" :content content})]
         (is (some #(re-find #"line12" %) expanded))
-        (is (not-any? #(re-find #"more lines" %) expanded))))))
+        (is (not-any? #(re-find #"\(\+" %) expanded))))))
 
 (deftest test-read-expanded-leading-blank
   (testing "read result has a blank line between call and result (pi: result starts with a blank line)"
@@ -556,20 +603,20 @@
       (is (some #(re-find #"line1" %) plain))
       (is (some #(re-find #"line5" %) plain))
       (is (not-any? #(re-find #"line6" %) plain))
-      (is (some #(re-find #"5 more lines" %) plain)))))
+      (is (some #(re-find #"\(\+5 lines," %) plain)))))
 
 (deftest test-default-render-result-expanded
   (testing "default result shows all lines when expanded"
     (let [content (str/join "\n" (map #(str "line" %) (range 1 11)))
           plain (render-tool :name "custom" :content content :expanded? true)]
       (is (some #(re-find #"line10" %) plain))
-      (is (not-any? #(re-find #"more lines" %) plain)))))
+      (is (not-any? #(re-find #"\(\+" %) plain)))))
 
 (deftest test-default-render-result-empty
   (testing "default result with empty content shows just spacer"
     (let [plain (render-tool :name "custom" :content "")]
       (is (some #(re-find #"custom" %) plain))
-      (is (not-any? #(re-find #"more lines" %) plain)))))
+      (is (not-any? #(re-find #"\(\+" %) plain)))))
 
 ;; ─── Images (P2: show-images setting + terminal capability) ────────────────
 
@@ -766,6 +813,21 @@
         (is (= baseline (watchers))
             "steady state: no accumulation across rebuilds")))))
 
+(deftest test-state-component-disposed-on-rebuild
+  (testing "a cache-miss rebuild disposes the previous tail state component —
+            no zombie track! watches (the 1s ticker rebuilds it every second
+            while a tool runs)"
+    (let [c (te/make-tool-execution :name "bash" :args {:command "echo hi"})
+          watchers (fn [] (count @(deref #'kmet.tui.macros/watch-registry)))]
+      (te/tool-execution-mark-execution-started! c)
+      (reset! (:content-atom c) "out -1")  ;; result body present → steady state
+      (core/render c 60)
+      (let [baseline (watchers)]
+        (dotimes [i 5]
+          (reset! (:content-atom c) (str "out " i))
+          (core/render c 60))
+        (is (= baseline (watchers))
+            "steady state: the dropped state lines are disposed each pass")))))
 (deftest test-image-children-cache-hit-steady-state
   (testing "with images the render cache still HITS in steady state: the
             image-children atom is read untracked, so a body run does not

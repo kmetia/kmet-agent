@@ -122,10 +122,10 @@
         (tui/tui-request-render tui))
       :tool-execution-update
       ;; Pi: live partial content from streaming tools (bash). The
-      ;; elapsed counter itself ticks via the bash render-result's own
-      ;; 1s interval (pi: setInterval → context.invalidate), so a
-      ;; silent long-running tool still updates Elapsed steadily — this
-      ;; event only pushes the new output chunks.
+      ;; elapsed counter itself ticks via the tool component's own 1s
+      ;; ticker (pi: setInterval → context.invalidate), so a silent
+      ;; long-running tool still updates Elapsed steadily — this event
+      ;; only pushes the new output chunks.
       ;; No manual render request: set-content! swaps a track!-watched
       ;; atom, which schedules the frame itself (§3.4).
       (when-let [comp (get @pending-tool-comps (:tool-call-id evt))]

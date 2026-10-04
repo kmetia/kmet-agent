@@ -347,7 +347,8 @@
                 (when-let [id (:tool-call-id msg)]
                   (reset! (:tool-call-id-atom comp) id))
             ;; Pi: replayed/persisted tool results are final — mark ended so
-            ;; they render with success/error bg, footer strip, and Took.
+            ;; they render their final state (the tail state line, Took for
+            ;; shell-style tools, and the footer strip).
             ;; Live pending messages (content "" + is-error false) are skipped.
                 (when (or (seq (:content msg)) (:is-error msg))
                   (te/tool-execution-set-error! comp (:is-error msg false)))
