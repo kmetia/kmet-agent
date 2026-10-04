@@ -165,6 +165,7 @@
                        :previous-normalized-in (atom [])
                        :previous-normalized-out (atom [])
                        :previous-width (atom 0)
+                       :terminal-size (atom nil)
                        :render-requested? (atom false)
                        :force-redraw? (atom false)
                        :waker (wake/make-waker)
@@ -2025,6 +2026,20 @@
   (doseq [c @(:components tui)] (protocols/invalidate c))
   (doseq [o @(:overlays tui)] (protocols/invalidate (:component o))))
 
+(defn tui-terminal-size
+  "The live {:cols :rows} of the started terminal, nil before the first
+   frame. Published by the render loop before the frame's reaction flush,
+   so it always describes the frame being rendered."
+  [tui]
+  @(:terminal-size tui))
+
+(defn tui-terminal-size-ref
+  "The reactive ref behind tui-terminal-size — deref it under track! or
+   tracked-deref to re-lay a component out when the terminal resizes.
+   Read-only: the render loop is its only writer."
+  [tui]
+  (:terminal-size tui))
+
 (defn tui-get-clear-on-shrink [tui] @(:clear-on-shrink? tui))
 
 (defn tui-set-clear-on-shrink!
@@ -2237,6 +2252,16 @@
           (with-render-lock tui
             (let [w (terminal/columns started)
                   h (terminal/rows started)]
+              ;; Live terminal size (tui-terminal-size-ref): published here,
+              ;; BEFORE the reaction flush below, so a component tracking the
+              ;; ref re-lays out in this same frame instead of scheduling
+              ;; another one. The loop reads the size for its own resize
+              ;; detection anyway — one field compare per iteration, a write
+              ;; only on a real change.
+              (let [published @(:terminal-size tui)]
+                (when (or (not= (:cols published) w)
+                          (not= (:rows published) h))
+                  (reset! (:terminal-size tui) {:cols w :rows h})))
               ;; Loop-owned timers (tui.md §6.1): fire whatever is due
               ;; BEFORE the flush, so an atom a thunk just mutated is brought
               ;; current in this same iteration. Thunks run here, on the loop

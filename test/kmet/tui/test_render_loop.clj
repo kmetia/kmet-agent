@@ -700,6 +700,24 @@
         (finally
           (stop-loop tui))))))
 
+(deftest ^:slow terminal-size-ref-publishes-and-updates-on-resize
+  (testing "the live size ref carries every size change, published before
+            the frame that renders it"
+    (let [vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))
+          size-ref (core/tui-terminal-size-ref tui)]
+      (try
+        (t/is (nil? (core/tui-terminal-size tui)) "nothing published before the first frame")
+        (core/tui-add-child tui (test-component (atom ["alpha"])))
+        (start-loop tui)
+        (t/is (wait-until #(= {:cols 80 :rows 24} @size-ref) 5000)
+              "the first frame publishes the size")
+        (swap! (:size vt) assoc :rows 16)
+        (t/is (wait-until #(= {:cols 80 :rows 16} @size-ref) 5000)
+              "a resize updates the ref")
+        (finally
+          (stop-loop tui))))))
+
 ;; ─── Render vs input serialization (dispatch-lock) ─────────────────────────
 ;; The render loop and the input reader mutate/read component state on
 ;; separate threads; pi is single-threaded and has no interleaving. The

@@ -762,32 +762,35 @@
                   "the cursor is inside the new 16-line frame"))))
       {:user {:packages [dir]}})))
 
-(t/deftest test-rows-poller-reloads-and-forces-a-repaint
-  ;; the mounted screen polls the live terminal height (the standalone TUI
-  ;; passes the terminal query): a change re-lays the frame out and asks
-  ;; for a forced repaint — a diff against the frame built for the old
-  ;; height would leave stale rows and cursors on screen
+(t/deftest test-screen-tracks-the-terminal-size-ref
+  ;; the standalone TUI publishes its live size and the screen follows the
+  ;; ref: a height change re-lays the frame out and asks for a forced
+  ;; repaint — a diff against the frame built for the old height would
+  ;; leave stale rows and cursors on screen
   (let [dir (many-extension-package 15)]
     (with-settings
       (fn [_]
-        (let [height (atom 24)
+        (let [size (atom {:cols 80 :rows 24})
               repainted (promise)
               screen (rc/make-resource-config-screen
                       :rows 24
-                      :rows-poll-ms 1
-                      :rows-fn (fn [] @height)
+                      :size-ref size
                       :request-render! (fn [] (deliver repainted :repainted)))]
           (try
             (t/is (= 24 (count (render-lines screen 80))))
-            (reset! height 16)
+            (reset! size {:cols 80 :rows 16})
             (t/is (= :repainted (deref repainted 2000 ::timeout))
                   "the height change requested a repaint")
             (t/is (= 16 @(:rows-count screen)) "the layout picked up the new height")
             (t/is (= 16 (count (render-lines screen 80))))
-            (t/testing "dispose cancels the poller"
+            (t/testing "a width-only change keeps the height"
+              (reset! size {:cols 100 :rows 16})
+              (t/is (= 16 @(:rows-count screen))))
+            (t/testing "dispose removes the size watch"
               (protocols/dispose screen)
-              (t/is (true? (future-cancelled? (:rows-poller screen)))))
+              (reset! size {:cols 80 :rows 30})
+              (t/is (= 16 @(:rows-count screen))))
             (finally
-              (when-not (future-cancelled? (:rows-poller screen))
-                (protocols/dispose screen))))))
+              (when-some [unwatch (:rows-unwatch screen)]
+                (unwatch))))))
       {:user {:packages [dir]}})))

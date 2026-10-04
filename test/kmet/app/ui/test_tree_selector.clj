@@ -232,6 +232,26 @@
     (dotimes [_ 6] (press tl "pageUp"))
     (t/is (zero? (:selected-idx @(:state-atom tl))))))
 
+(t/deftest size-ref-rebudgets-the-visible-rows
+  ;; the tree list follows the TUI's live terminal size (pi:
+  ;; max(5, floor(terminalHeight/2))): a resize while the panel is open
+  ;; re-budgets the rows instead of keeping the open-time height
+  (let [many (mapv #(user-node (str "m" %) (str "msg " %)) (range 30))
+        size (atom {:cols 80 :rows 30})
+        tl (ts/make-tree-list many :leaf-id nil
+                              :size-ref size
+                              :max-visible-lines 5)]
+    (t/is (= 16 (count (plain tl))) "30 rows → floor(30/2)=15 visible rows + status")
+    (reset! size {:cols 80 :rows 12})
+    (t/is (= 7 (count (plain tl))) "12 rows → 6 visible rows + status")
+    ;; no leaf → the selection starts on the last row (pi parity); page up
+    ;; must jump by the live budget, not the open-time fallback
+    (press tl "pageUp")
+    (t/is (= 23 (:selected-idx @(:state-atom tl)))
+          "paging jumps by the live budget, not the open-time fallback")
+    (reset! size {:cols 80 :rows 6})
+    (t/is (= 6 (count (plain tl))) "the max(5, …) floor holds")))
+
 ;; ─── Rendering ──────────────────────────────────────────────────────────────
 
 (t/deftest render-rows-show-structure

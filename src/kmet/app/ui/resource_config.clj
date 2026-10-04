@@ -616,7 +616,7 @@
 
 (defcomponent ResourceConfigScreen nil
               [state-atom search-ref on-close-atom rows-count project-mode?
-               focused? rows-poller root]
+               focused? rows-unwatch root]
 
   (render [this width] (protocols/render (:root this) width))
 
@@ -661,11 +661,11 @@
             nil))))
 
   ;; the root's reaction and the tag-owned search field are the screen's
-  ;; lifecycle — unwinding the tree disposes the field with it; the height
-  ;; poller (when one is running) must not outlive the screen
+  ;; lifecycle — unwinding the tree disposes the field with it; the
+  ;; terminal-size watch (when one is attached) must not outlive the screen
   (dispose [this]
-    (when-some [poller (:rows-poller this)]
-      (future-cancel poller))
+    (when-some [unwatch (:rows-unwatch this)]
+      (unwatch))
     (protocols/dispose (:root this))))
 
 ;; ─── IFocusable — the panel's flag; the tree derives the field emphasis ────
@@ -677,30 +677,24 @@
 
 ;; ─── Construction & test helpers ──────────────────────────────────────────
 
-(def ^:private default-rows-poll-ms
-  "How often a mounted standalone screen re-checks the terminal height.
-   The TUI loop polls the size itself, but a height change only reaches a
-   component as a diff of a frame built for the OLD height — the frame
-   never grows or shrinks to match the terminal, and on Termux a height
-   change never takes the full-redraw path. The poller re-lays the frame
-   out and asks for a forced repaint; 100ms is invisible next to a
-   keystroke."
-  100)
-
-(defn- start-rows-poller!
-  "Watch ROWS-FN (the live terminal height) and push changes into SCREEN's
-   layout state, requesting a forced repaint through REQUEST-RENDER! so the
-   terminal always shows one coherent frame (a diff against the old-height
-   frame leaves stale rows and cursors on screen). Returns the poller
-   future — the screen's dispose cancels it."
-  [screen rows-fn request-render! poll-ms]
-  (future
-    (while true
-      (Thread/sleep poll-ms)
-      (when-let [rows (try (rows-fn) (catch Exception _ nil))]
-        (when (not= rows @(:rows-count screen))
-          (reset! (:rows-count screen) rows)
-          (request-render!))))))
+(defn- watch-terminal-rows!
+  "Keep SCREEN's layout height in step with the TUI's terminal-size ref
+   and force a repaint through REQUEST-RENDER! whenever the height changes.
+   The render loop publishes the size before its reaction flush, so the
+   re-layout and the repaint land in the same frame — a diff against the
+   old-height frame leaves stale rows and cursors on screen. Returns a
+   cancel fn for the screen's dispose."
+  [screen size-ref request-render!]
+  (let [k (keyword (str "resource-config-rows-" (System/identityHashCode screen)))
+        last-rows (atom @(:rows-count screen))]
+    (add-watch size-ref k
+               (fn [_ _ _ size]
+                 (let [rows (:rows size)]
+                   (when (not= rows @last-rows)
+                     (reset! last-rows rows)
+                     (reset! (:rows-count screen) rows)
+                     (request-render!)))))
+    (fn [] (remove-watch size-ref k))))
 
 (defn make-resource-config-screen
   "Build the config screen. OPTS:
@@ -709,18 +703,17 @@
    :project-mode?   — whether Tab may switch scopes (pi:
                       projectModeAvailable — kmet: the .kmet project dir
                       exists or -l was passed)
-   :rows            — terminal height in rows
-   :rows-fn         — 0-arg fn returning the LIVE terminal height; with
-                      :request-render! the screen polls it and re-lays out
-                      on every change (the standalone TUI passes the live
-                      terminal query — a frame frozen at its construction
-                      height garbles once Termux resizes for the keyboard)
-   :rows-poll-ms    — poll interval for :rows-fn (default 100)
-   :request-render! — 0-arg forced-repaint request (see :rows-fn)
+   :rows            — initial terminal height in rows
+   :size-ref        — the TUI's reactive terminal-size ref
+                      (kmet.tui.core/tui-terminal-size-ref); with
+                      :request-render! the screen follows its rows and
+                      forces a repaint on every height change — a frame
+                      frozen at its construction height garbles once
+                      Termux resizes for the keyboard
+   :request-render! — 0-arg forced-repaint request (see :size-ref)
    :on-close        — called when the user closes the screen (escape or
                       ctrl+c)"
-  [& {:keys [write-scope project-mode? rows rows-fn rows-poll-ms
-             request-render! on-close]}]
+  [& {:keys [write-scope project-mode? rows size-ref request-render! on-close]}]
   (let [state-atom (atom {:write-scope (or write-scope :global)
                           :query ""
                           :selected 0
@@ -732,12 +725,12 @@
                  :rows-count (atom (or rows 24))
                  :project-mode? (boolean project-mode?)
                  :focused? (atom false)})
-        root (hiccup/root (fn [_props] (frame-tree screen)))]
+        root (hiccup/root (fn [_props] (frame-tree screen)))
+        screen (assoc screen :root root)]
     (rebuild-layout! screen)
-    (cond-> (assoc screen :root root)
-      (and rows-fn request-render!)
-      (assoc :rows-poller (start-rows-poller! screen rows-fn request-render!
-                                              (or rows-poll-ms default-rows-poll-ms))))))
+    (cond-> screen
+      (and size-ref request-render!)
+      (assoc :rows-unwatch (watch-terminal-rows! screen size-ref request-render!)))))
 
 (defn screen-write-scope
   "The screen's current write scope (tests)."
@@ -768,8 +761,8 @@
   (rebuild-layout! screen))
 
 (defn screen-set-rows!
-  "Set the live terminal height (tests; the mounted screen's poller drives
-   the same update when Termux resizes for the keyboard). The next render
-   re-lays the frame out to the new height."
+  "Set the live terminal height (tests; the mounted screen's size watch
+   drives the same update when Termux resizes for the keyboard). The next
+   render re-lays the frame out to the new height."
   [screen rows]
   (reset! (:rows-count screen) rows))

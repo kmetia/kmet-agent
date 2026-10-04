@@ -754,20 +754,37 @@
 
 ;; ─── Component ──────────────────────────────────────────────────────────────
 
+(defn- rows-budget
+  "pi max(5, floor(terminalHeight/2)) computed from a terminal-size map;
+   FALLBACK when the size is not published yet."
+  [size fallback]
+  (if-let [rows (:rows size)]
+    (max 5 (quot rows 2))
+    fallback))
+
+(defn- live-visible-lines
+  "The tree list's live row budget for event handlers (the render body
+   tracks its own deref): the TUI size ref when present, else the fixed
+   fallback."
+  [tl]
+  (rows-budget (some-> (:size-ref tl) deref) (:max-visible-lines tl)))
+
 (defcomponent TreeList nil
               [state-atom on-select-atom on-cancel-atom on-copy-atom
-               on-label-edit-atom max-visible-lines focused? cache-atom]
+               on-label-edit-atom max-visible-lines size-ref focused? cache-atom]
 
   (render [this width]
     (track! this width
       (let [{:keys [filtered selected-idx] :as st} @state-atom
+            ;; tracked: a terminal resize re-budgets the rows
+            size (when-let [ref (:size-ref this)] @ref)
             theme-current (th/get-current-theme)]
         (if (empty? filtered)
           [(u/truncate-to-width (th/fg theme-current :muted "  No entries found") width)
            (u/truncate-to-width
             (th/fg theme-current :muted (str "  (0/0)" (status-labels st))) width)]
           (let [n (count filtered)
-                h (max 1 max-visible-lines)
+                h (max 1 (rows-budget size max-visible-lines))
                 start-idx (max 0 (min (- selected-idx (quot h 2)) (- n h)))
                 rows (mapv (fn [i] (build-row theme-current (:tool-calls st) st
                                               (nth filtered i) (= i selected-idx)))
@@ -817,7 +834,7 @@
 
         ;; paging (pi cursorLeft/right + select.pageUp/pageDown)
         (or (match "tui.editor.cursorLeft") (match "tui.select.pageUp"))
-        (do (swap! state-atom update :selected-idx #(max 0 (- % max-visible-lines)))
+        (do (swap! state-atom update :selected-idx #(max 0 (- % (live-visible-lines this))))
             nil)
 
         (or (match "tui.editor.cursorRight") (match "tui.select.pageDown"))
@@ -825,7 +842,7 @@
                    (fn [{:keys [filtered selected-idx] :as st}]
                      (assoc st :selected-idx
                             (min (max 0 (dec (count filtered)))
-                                 (+ selected-idx max-visible-lines)))))
+                                 (+ selected-idx (live-visible-lines this))))))
             nil)
 
         ;; enter selects (pi tui.select.confirm)
@@ -977,9 +994,11 @@
 (defn make-tree-list
   "Create the tree list over TREE (pi TreeList constructor): flattens with
    pi's visual rules and lands the selection on INITIAL-SELECTED-ID ?? the
-   current leaf. MAX-VISIBLE-LINES is the row budget (pi:
-   max(5, floor(terminalHeight/2)))."
-  [tree & {:keys [leaf-id max-visible-lines initial-filter-mode
+   current leaf. MAX-VISIBLE-LINES is the fallback row budget (pi:
+   max(5, floor(terminalHeight/2))); SIZE-REF, when given (the TUI's live
+   terminal-size ref), overrides it on every render so the panel follows a
+   terminal resize."
+  [tree & {:keys [leaf-id max-visible-lines size-ref initial-filter-mode
                   initial-selected-id on-select on-cancel on-copy on-label-edit]}]
   (let [tree (attach-parent-ids tree)
         parent-lookup (collect-parents tree)
@@ -1002,6 +1021,7 @@
               :show-label-timestamps false}
         tl (map->TreeList {:state-atom (atom base)
                            :max-visible-lines (long (max 5 (or max-visible-lines 10)))
+                           :size-ref size-ref
                            :on-select-atom (atom on-select)
                            :on-cancel-atom (atom on-cancel)
                            :on-copy-atom (atom on-copy)
@@ -1078,6 +1098,11 @@
              tl (make-tree-list (selector-tree sess)
                                 :leaf-id leaf-id
                                 :max-visible-lines (max 5 (quot term-height 2))
+                                ;; the list follows the TUI's live size ref:
+                                ;; a resize while the panel is open re-budgets
+                                ;; its rows instead of keeping the open-time
+                                ;; height
+                                :size-ref (tui/tui-terminal-size-ref (:tui cs))
                                 :initial-filter-mode (cfg/get-tree-filter-mode (:config cs))
                                 :initial-selected-id initial-selected-id
                                 :on-select (fn [entry]

@@ -416,12 +416,12 @@ An idle UI runs zero bodies.
   they re-cache. `hiccup/*comp*` is the running ComponentFn itself.
   **Height is not a dynamic**: only width participates in body
   memoization, so a component whose layout depends on the terminal height
-  (a windowed list) must track the live height in its own tracked atom
-  and ask for a forced repaint when it changes — the loop's size poll
-  reaches a height change as a diff of the frame built for the OLD
-  height, and Termux never takes the height full-redraw path, so stale
-  rows and cursors survive on screen. `kmet.app.ui.resource-config` is
-  the reference (`:rows-fn` / `:request-render!`).
+  (a windowed list) tracks `kmet.tui.core/tui-terminal-size-ref` instead —
+  the render loop publishes the live size before its reaction flush, so a
+  body that derefs the ref re-lays out in the same frame as a resize.
+  A panel just re-budgets its rows (`kmet.app.ui.tree-selector`); a
+  standalone frame that must repaint cleanly rather than diff watches the
+  ref and forces a render (`kmet.app.ui.resource-config`).
 - **Error contract**: a throwing component fn crashes the render loop
   (Throwable → render-crash.log → tui-stop) — loud beats silently wrong.
 
@@ -942,9 +942,12 @@ the terminal); with nothing requested it parks on `kmet.tui.wake` until the
 next request, the next timer due (§6.1), or a 100ms heartbeat — the
 heartbeat drives the terminal resize poll (JLine's WINCH callback never
 fires under babashka's native image) and is the safety net for any wakeup
-path that bypasses `tui-request-render`. `tui-request-render` sets the flag
-before it wakes the loop, and the loop re-checks the flag inside the park:
-a request is consumed, never lost to the park.
+path that bypasses `tui-request-render`. The poll publishes every size
+change as the live size ref (`tui-terminal-size-ref`, written before the
+reaction flush) so a component that tracks it reflows in the same frame.
+`tui-request-render` sets the flag before it wakes the loop, and the loop
+re-checks the flag inside the park: a request is consumed, never lost to
+the park.
 
 **Render and input never overlap.** The input reader, the flush timers and
 the render loop are separate threads, but component state is not
