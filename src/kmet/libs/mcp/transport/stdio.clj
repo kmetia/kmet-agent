@@ -9,9 +9,13 @@
        refused with -32601 (jsonrpc maps a nil handler return to it)
      - per-request progress routing to the in-flight call's callback
      - process-tree kill + host pid tracking on close
+     - `subscriptions/listen` on its own thread with no deadline (the
+       request's result arrives only at graceful close) and no request
+       lock, demuxed from ordinary notifications by subscription id
 
-   The conn is the jsonrpc conn map plus :transport :stdio, :req-lock and
-   :progress-callback; the common contract keys are documented in
+   The conn is the jsonrpc conn map plus :transport :stdio, :req-lock,
+   :progress-callback and :listen (the live subscription the notification
+   demux consults); the common contract keys are documented in
    kmet.libs.mcp.transport.
 
    Notification handlers run on the jsonrpc reader thread (the
@@ -39,13 +43,14 @@
 (defn- notification-handler
   "Route one incoming notification: notifications/progress goes to the
    in-flight request's callback (the client serializes stdio requests, so
-   at most one is live), and every notification reaches the conn-level
-   handler."
-  [conn-atom callback notify]
+   at most one is live), a frame of the conn's live subscription follows
+   the subscription demux (a stale subscription's frame is dropped), and
+   everything else reaches the conn-level handler."
+  [conn-atom callback listen-atom notify]
   (fn [msg]
     (when (and (= "notifications/progress" (:method msg)) @callback)
       (@callback msg))
-    (when notify
+    (when (and notify (transport/route-listen-frame! listen-atom msg))
       (try (notify @conn-atom msg) (catch Exception _ nil)))))
 
 (defn- dead-message
@@ -93,6 +98,10 @@
   (let [conn-atom (atom nil)
         callback (atom nil)
         notify (:on-notification opts)
+        ;; the conn's live subscription (transport/route-listen-frame!);
+        ;; created here so the notification handler, which captures this
+        ;; map, sees the same atom the client's listen! fills in
+        listen (atom nil)
         pid (atom nil)
         kill! (fn []
                 (when-let [p @pid]
@@ -108,16 +117,73 @@
                :framing :line-delimited
                :kill-fn kill!
                :on-request (ping-handler)
-               :on-notification (notification-handler conn-atom callback notify)})]
+               :on-notification (notification-handler conn-atom callback listen notify)})]
     (reset! conn-atom conn)
     (when-let [p (:pid conn)]
       (reset! pid p)
       (process/track-pid! p))
     (assoc conn
            :transport :stdio
+           :listen listen
            :req-lock (Object.)
            :progress-callback callback
            :conn-ref conn-atom)))
+
+(defn listen!
+  "Open the conn's 2026-07-28 subscription (spec, subscriptions/listen).
+   The request's result arrives only when the stream closes, so it runs on
+   its own daemon thread with no deadline (jrpc/no-deadline) and never
+   takes the per-conn request lock a tool call needs. FILTER is the
+   :notifications filter object; every frame of the subscription (the
+   acknowledgment first) is routed to ON-FRAME and to the conn-level
+   handler — see transport/route-listen-frame!.
+
+   Returns {:stop! f :ended promise}. stop! sends
+   notifications/cancelled — the stdio cancellation mechanism — and
+   :ended delivers :stopped (a caller stop), :ended (the server closed
+   the stream) or {:error e}."
+  [conn filter on-frame]
+  (let [id (swap! (:id-counter conn) inc)
+        listen-atom (:listen conn)
+        stopped (atom false)
+        ended (promise)
+        params (cond-> {:notifications filter}
+                 (protocol/modern-conn? conn)
+                 (update :_meta merge (protocol/conn-meta conn)))
+        stop! (fn []
+                (reset! stopped true)
+                (try
+                  (jrpc/notify! conn "notifications/cancelled"
+                                (cond-> {:requestId id
+                                         :reason "kmet: subscription closed"}
+                                  (protocol/modern-conn? conn)
+                                  (update :_meta merge (protocol/conn-meta conn))))
+                  (catch Exception _ nil))
+                (deliver ended :stopped))
+        t (Thread. (fn []
+                     (try
+                       (if @stopped
+                         ;; stopped before the request went out: there is
+                         ;; nothing to cancel, so don't subscribe at all
+                         (deliver ended :stopped)
+                         (do
+                           (jrpc/request! conn protocol/listen-method params
+                                          {:timeout-ms jrpc/no-deadline :id id})
+                           (deliver ended (if @stopped :stopped :ended))))
+                       (catch Exception e
+                         (deliver ended (if @stopped :stopped {:error e})))
+                       (finally
+                         ;; clear only our own entry: a re-listen may have
+                         ;; installed a fresh one already
+                         (swap! listen-atom
+                                (fn [l] (when-not (= id (:id l)) l)))))))]
+    (reset! listen-atom {:id id :subscription-id nil :on-frame on-frame
+                         :stop! stop!})
+    ;; the parked request thread is released by close! (its pending
+    ;; correlation fails with ::transport-dead)
+    (.setDaemon t true)
+    (.start t)
+    {:stop! stop! :ended ended}))
 
 (defn request!
   "Send one request and return its :result. The jsonrpc session owns the

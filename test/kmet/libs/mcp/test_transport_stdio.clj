@@ -25,7 +25,7 @@
   (let [progress (atom [])
         conn-level (atom [])
         callback (atom (fn [msg] (swap! progress conj msg)))
-        handler (notification-handler (atom :conn) callback
+        handler (notification-handler (atom :conn) callback (atom nil)
                                       (fn [c msg] (swap! conn-level conj [c msg])))]
     (handler {:method "notifications/progress" :params {:progress 1}})
     (is (= 1 (count @progress)) "progress reaches the in-flight callback")
@@ -38,6 +38,44 @@
     (reset! callback nil)
     (handler {:method "notifications/progress"})
     (is (= 1 (count @progress)) "no in-flight callback → progress is dropped")))
+
+(deftest listen-frame-routing
+  (let [conn-level (atom [])
+        observed (atom [])
+        listen (atom {:id 7
+                      :subscription-id nil
+                      :on-frame (fn [msg] (swap! observed conj (:method msg)))})
+        handler (notification-handler (atom :conn) (atom nil) listen
+                                      (fn [_ msg] (swap! conn-level conj (:method msg))))
+        stamped (fn [sid] {:jsonrpc "2.0"
+                           :method "notifications/tools/list_changed"
+                           :params {:_meta {(protocol/meta-key "subscriptionId") sid}}})]
+    (testing "the acknowledgment establishes the subscription id"
+      (handler {:jsonrpc "2.0"
+                :method protocol/ack-method
+                :params {:notifications {:toolsListChanged true}
+                         :_meta {(protocol/meta-key "subscriptionId") 7}}})
+      (is (= 7 (:subscription-id @listen)))
+      (is (= [protocol/ack-method] @observed)
+          "the ack reaches the subscription observer")
+      (is (= [protocol/ack-method] @conn-level)
+          "and the conn-level handler like any other notification"))
+    (testing "our own stamped frame is observed and delivered"
+      (handler (stamped 7))
+      (is (= [protocol/ack-method "notifications/tools/list_changed"] @observed))
+      (is (= [protocol/ack-method "notifications/tools/list_changed"] @conn-level)))
+    (testing "a stale subscription's frame is dropped"
+      (handler (stamped 999))
+      (is (= 2 (count @observed)))
+      (is (= 2 (count @conn-level))))
+    (testing "an unscoped notification skips the observer"
+      (handler {:jsonrpc "2.0" :method "notifications/tools/list_changed"})
+      (is (= 2 (count @observed)))
+      (is (= 3 (count @conn-level))))
+    (testing "no live subscription: everything is ordinary"
+      (reset! listen nil)
+      (handler (stamped 7))
+      (is (= 4 (count @conn-level))))))
 
 (deftest translate-exception-maps-jsonrpc-failures
   (let [conn {:stderr-tail (atom ["bad interpreter"])}]

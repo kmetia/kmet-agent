@@ -372,3 +372,35 @@
       (finally
         (when (and (:pid conn) (proc/alive? (:proc conn)))
           (process/kill-process-tree! (:pid conn)))))))
+
+(deftest request!-accepts-a-caller-allocated-id
+  (let [seen (atom nil)]
+    (run-with-conn
+     :line-delimited
+     (fn [msg send!]
+       (reset! seen msg)
+       (send! {:jsonrpc "2.0" :id (:id msg) :result :ok}))
+     (fn [conn]
+       (is (= "ok" (jsonrpc/request! conn "x" {} {:id 42}))
+           "a caller that must cancel the request later allocates its id")
+       (is (= 42 (:id @seen)))
+       (is (= "ok" (jsonrpc/request! conn "x" {})))
+       (is (= 1 (:id @seen))
+           "later requests allocate from the conn's own counter")))))
+
+(deftest ^:slow no-deadline-request-waits-for-the-answer
+  ;; the sentinel must bypass the deadline entirely: a plain request with
+  ;; the same timing times out, while no-deadline waits for the late answer
+  (run-with-conn
+   :line-delimited
+   (fn [{:keys [id]} send!]
+     ;; answer from the fake's own reader thread: a second writer thread
+     ;; would break the pipe the moment it dies
+     (Thread/sleep 150)
+     (send! {:jsonrpc "2.0" :id id :result {:late id}}))
+   (fn [conn]
+     (is (thrown-with-msg? Exception #"timed out"
+                           (jsonrpc/request! conn "slow" {} {:timeout-ms 50})))
+     (is (= {:late 2} (jsonrpc/request! conn "slow" {}
+                                        {:timeout-ms jsonrpc/no-deadline}))
+         "no-deadline waits instead of dropping the pending entry"))))

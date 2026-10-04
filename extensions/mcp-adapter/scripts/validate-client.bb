@@ -10,7 +10,9 @@
 ;; mid-request, request timeout, process-exit error, and disconnect kills
 ;; the process tree. The modern (2026-07-28) streamable-HTTP connect is
 ;; validated against the fake's header checks (MCP-Protocol-Version,
-;; Mcp-Method, Mcp-Name) and its no-session rule.
+;; Mcp-Method, Mcp-Name) and its no-session rule, and the modern
+;; subscriptions/listen flow (ack first, list_changed, catalog resync,
+;; close) is validated over both stdio and streamable HTTP.
 (require '[babashka.process :as proc]
          '[clojure.string :as str]
          '[kmet.libs.json :as json]
@@ -340,6 +342,61 @@
       (finally
         (stop-server! server)))))
 
+;; ─── 2026-07-28 subscriptions ────────────────────────────────────────────
+
+(defn- wait-for-list-changed
+  "Wait up to 5s for a list_changed notification (the resync trips it, so
+   it may arrive a moment after the trigger call returns)."
+  [seen]
+  (loop [waits 0]
+    (cond
+      (some #(str/includes? (str (:method %)) "list_changed") @seen) true
+      (< waits 50) (do (Thread/sleep 100) (recur (inc waits)))
+      :else false)))
+
+(defn- test-subscription
+  "One modern subscription against a fake: the ack is the first frame, the
+   agreed filter is visible, the server's list_changed reaches the client's
+   notification handler, and the catalog re-listed afterwards contains the
+   tool the trigger added."
+  [label definition trigger added-tool]
+  (println (str "\n── subscriptions/listen (" label ", 2026-07-28) ──"))
+  (let [seen (atom [])
+        {:keys [conn]}
+        (client/connect! definition {:on-notification (fn [_ msg] (swap! seen conj msg))})]
+    (try
+      (let [listener (client/listen! conn {:toolsListChanged true})]
+        (Thread/sleep 800)
+        (check (str label " subscription is live") (true? (client/listening? conn)))
+        (check (str label " ack is the first frame")
+               (true? (:first-ack? @listener)))
+        (check (str label " agreed filter")
+               (= {:toolsListChanged true} (:agreed @listener)))
+        (client/request! conn "tools/call" {:name trigger :arguments {}})
+        (check (str label " list_changed reached the handler")
+               (wait-for-list-changed seen))
+        (check (str label " catalog re-listed after the change")
+               (contains? (set (map :name (client/list-all-tools conn))) added-tool)))
+      (finally
+        (client/close! conn)))
+    (check (str label " close stops the subscription")
+           (false? (client/listening? conn)))))
+
+(defn test-subscriptions [fake-stdio fake-http]
+  (test-subscription
+   "stdio"
+   {:command "bb" :args [fake-stdio "--era" "modern"] :lifecycle :lazy}
+   "add-tool" "echo2")
+  (let [server (spawn-server! fake-http)]
+    (try
+      (test-subscription
+       "streamable-http"
+       {:url (str "http://127.0.0.1:" (:port server) "/mcp?era=modern")
+        :http-transport :streamable-http}
+       "http-add-tool" "http-echo2")
+      (finally
+        (stop-server! server)))))
+
 ;; ─── SSE responses on streamable-http (Accept: text/event-stream) ────────
 
 (defn test-http-sse-response [fake-http]
@@ -426,6 +483,7 @@
   (test-stdio fake-stdio)
   (test-http fake-http)
   (test-http-modern fake-http)
+  (test-subscriptions fake-stdio fake-http)
   (test-http-sse-response fake-http)
   (test-sse fake-http)
   (test-version-negotiation fake-http)

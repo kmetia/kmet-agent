@@ -6,8 +6,8 @@
    session header and mirrors the method (and the tool/prompt/resource
    name) in Mcp-Method/Mcp-Name routing headers.
 
-   Conn keys: :url :session-id :protocol-version :closed, plus the common
-   contract keys documented in kmet.libs.mcp.transport.
+   Conn keys: :url :session-id :protocol-version :closed :listen, plus
+   the common contract keys documented in kmet.libs.mcp.transport.
 
    This namespace also owns the HTTP POST/parse helpers and send-async!
    that the legacy SSE transport (kmet.libs.mcp.transport.sse) reuses."
@@ -31,7 +31,8 @@
    or nil, called per request), :on-401 (fn [] → fresh headers; called once
    per request when the first attempt answers 401), :on-notification.
    :protocol-version is filled in by the initialize handshake (nil until
-   then) — see http-request-headers."
+   then) — see http-request-headers. :listen is the live subscription
+   slot http/listen! fills in."
   [url opts]
   {:transport :streamable-http
    :url url
@@ -40,6 +41,7 @@
    :id-counter (atom 0)
    :closed (atom false)
    :last-used (atom (concurrent/monotonic-ms))
+   :listen (atom nil)
    :auth-headers (:auth-headers opts)
    :on-401 (:on-401 opts)
    :on-notification (:on-notification opts)
@@ -302,6 +304,105 @@
         (http/close! response))
       (catch Exception _ nil)))
   nil)
+
+;; ─── Subscriptions (2026-07-28) ──────────────────────────────────────────
+
+(defn- read-listen-stream!
+  "Read a subscription's SSE response body until the stream ends. Every
+   line read — keepalive comment lines included, which carry no frame —
+   touches the conn so the idle reaper leaves a live subscription alone.
+   Each parsed message goes through the subscription demux (a stale
+   subscription's frame is dropped) and then through the ordinary
+   server-message dispatch, so a server->client request arriving on the
+   subscription stream is answered like one on a request body."
+  [conn listen-atom body]
+  (with-open [rdr (io/reader body)]
+    (loop [event-name nil buf ""]
+      (let [line (.readLine rdr)]
+        (cond
+          (nil? line) nil
+          :else
+          (do
+            (transport/touch! conn)
+            (let [[ev data] (sse/parse-sse-line line)]
+              (cond
+                ev (recur ev buf)
+                data (recur event-name (str buf data))
+                (and (str/blank? line) (seq buf))
+                (let [parsed (try (json/parse-string buf true)
+                                  (catch Exception _ nil))]
+                  (when (and (map? parsed)
+                             (transport/route-listen-frame! listen-atom parsed))
+                    (transport/dispatch-server-message! conn parsed nil send-async!))
+                  (recur nil ""))
+                :else (recur event-name buf)))))))))
+
+(defn listen!
+  "Open CONN's 2026-07-28 subscription: one POST whose SSE response body
+   stays open on a background reader. The POST carries no deadline
+   (:timeout nil omits curl's --max-time) and is only retried for auth
+   once at open; a drop is not resumable, so re-establishing the
+   subscription is the client's job. A non-2xx or non-SSE answer throws
+   the MCP error contract with nothing left open. FILTER is the
+   :notifications filter object; every frame (the acknowledgment first)
+   is routed to ON-FRAME and to the conn-level handler — see
+   transport/route-listen-frame!.
+
+   Returns {:stop! f :ended promise}. stop! aborts the stream — closing
+   it IS the modern cancellation (no notifications/cancelled over HTTP) —
+   and :ended delivers :stopped, :ended (the server closed the stream) or
+   {:error e}."
+  [conn filter on-frame]
+  (let [id (swap! (:id-counter conn) inc)
+        params (cond-> {:notifications filter}
+                 (protocol/modern-conn? conn)
+                 (update :_meta merge (protocol/conn-meta conn)))
+        body (json/generate-string {:jsonrpc "2.0" :id id
+                                    :method protocol/listen-method
+                                    :params params})
+        response (http-post! conn (:url conn)
+                             (http-request-headers conn protocol/listen-method params)
+                             body nil)
+        status (:status response)
+        content-type (or (transport/header-value (:headers response) "Content-Type")
+                         "")]
+    (if-not (and (<= 200 status 299)
+                 (str/includes? content-type "text/event-stream"))
+      (do
+        (http/close! response)
+        (throw (protocol/mcp-error
+                (str "MCP connect failed: " protocol/listen-method " answered "
+                     status " " content-type)
+                {:status status})))
+      (let [listen-atom (:listen conn)
+            stopped (atom false)
+            ended (promise)
+            reader (atom nil)
+            stop! (fn []
+                    (reset! stopped true)
+                    (when-let [t @reader] (.interrupt t))
+                    (http/close! response)
+                    (deliver ended :stopped))]
+        ;; the subscription state is installed before the reader starts, so
+        ;; no frame can arrive without it (the ack observer and the
+        ;; subscription-id demux read it): spawning first would race the
+        ;; reset on a body that is already buffered
+        (reset! listen-atom {:id id :subscription-id nil :on-frame on-frame
+                             :stop! stop!})
+        (reset! reader
+                (spawn (fn []
+                         (try
+                           (read-listen-stream! conn listen-atom (:body response))
+                           (deliver ended (if @stopped :stopped :ended))
+                           (catch Exception e
+                             (deliver ended (if @stopped :stopped {:error e})))
+                           (finally
+                             (http/close! response)
+                             ;; clear only our own entry: a re-listen may
+                             ;; have installed a fresh one already
+                             (swap! listen-atom
+                                    (fn [l] (when-not (= id (:id l)) l))))))))
+        {:stop! stop! :ended ended}))))
 
 ;; ─── Teardown ─────────────────────────────────────────────────────────────
 

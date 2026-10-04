@@ -6,6 +6,7 @@
 (require '[clojure.string :as str]
          '[clojure.java.io :as io]
          '[kmet.extension :as ext]
+         '[kmet.extensions.mcp-adapter.client :as client]
          '[kmet.extensions.mcp-adapter.core :as mcp]
          '[kmet.extensions.mcp-adapter.config :as config]
          '[kmet.extensions.mcp-adapter.metadata :as metadata])
@@ -24,6 +25,12 @@
                                 ;; the fake server requires kmet.libs.json (data.json)
                                 :env {"BABASHKA_CLASSPATH" (System/getProperty "java.class.path")}
                                 :direct-tools true}
+                         ;; a 2026-07-28 server: the connect opens
+                         ;; subscriptions/listen instead of relying on the
+                         ;; broadcast list_changed the legacy fake sends
+                         "modern" {:command "bb" :args [fake-stdio "--era" "modern"]
+                                   :lifecycle :lazy
+                                   :env {"BABASHKA_CLASSPATH" (System/getProperty "java.class.path")}}
                          "bad" {:command "sh" :args ["-c" "exit 3"] :lifecycle :lazy}}}))
   (with-redefs [config/global-config-path (fn [] global)
                 config/project-config-path (fn [& _] (str global ".project"))
@@ -114,6 +121,28 @@
         (let [r (s {:search "echo2"})]
           (check "resync refreshed the proxy search"
                  (str/includes? (:content r) "echo2")))
+        ;; 2026-07-28 subscription (subscriptions/listen): the connect opens
+        ;; one from the advertised listChanged capabilities, the fake emits
+        ;; its list_changed on that stream (never a broadcast), and the
+        ;; adapter resyncs through the same path as above
+        (let [r (s {:connect "modern"})]
+          (check "modern server connects"
+                 (and (not (:is-error r)) (str/includes? (:content r) "modern_echo"))))
+        (let [r (s {:tool "modern_add_tool" :args {}})]
+          (check "modern list_changed trigger called"
+                 (str/includes? (:content r) "added echo2")))
+        ;; the modern fake notifies open subscriptions only (a modern
+        ;; server never broadcasts), so the catalog changing with no manual
+        ;; refresh proves the adapter's subscription carried it — a missing
+        ;; subscriptions/listen would leave the catalog stale
+        (check "subscription-driven resync registered the change"
+               (loop [waits 0]
+                 (cond
+                   (str/includes? (:content (s {:server "modern"})) "echo2") true
+                   (< waits 40) (do (Thread/sleep 100) (recur (inc waits)))
+                   :else false)))
+        (let [r (s {:disconnect "modern"})]
+          (check "modern server disconnects" (str/includes? (:content r) "Disconnected")))
         ;; a resource template (file:///{path}) registers a read tool
         ;; whose {path} variable expands into the resources/read URI
         (check "resource template registered a read tool"

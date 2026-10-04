@@ -206,3 +206,113 @@
                (catch Exception e e))]
     (is (some? e))
     (is (re-find #"empty response to tools/list" (ex-message e)))))
+
+;; ─── Subscriptions (2026-07-28) ───────────────────────────────────────────
+
+(defn- sse-frame
+  "One SSE message frame carrying MSG."
+  [msg]
+  (str "event: message\ndata: " (json/generate-string msg) "\n\n"))
+
+(defn- wait-for
+  "Poll PRED for up to a second: the listen reader's cleanup runs on its
+   own thread after the promise is delivered."
+  [pred]
+  (loop [n 0]
+    (cond
+      (pred) true
+      (< n 100) (do (Thread/sleep 10) (recur (inc n)))
+      :else false)))
+
+(defn- subscription-meta
+  [id]
+  {:_meta {(protocol/meta-key "subscriptionId") id}})
+
+(defn- ack-frame
+  [id agreed]
+  {:jsonrpc "2.0"
+   :method protocol/ack-method
+   :params (merge {:notifications agreed} (subscription-meta id))})
+
+(defn- list-changed-frame
+  [id]
+  {:jsonrpc "2.0"
+   :method "notifications/tools/list_changed"
+   :params (subscription-meta id)})
+
+(deftest listen!-reads-the-subscription-stream
+  (let [conn-level (atom [])
+        observed (atom [])
+        requests (atom [])
+        capture (fn [_url opts]
+                  (let [sent (json/parse-string (:body opts) true)]
+                    (swap! requests conj sent)
+                    (if (= protocol/listen-method (:method sent))
+                      (do
+                        (is (nil? (:timeout opts))
+                            "no deadline: curl gets no --max-time")
+                        (is (= protocol/listen-method
+                               (get (:headers opts) "Mcp-Method")))
+                        (response 200 "text/event-stream"
+                                  (str ":\r\n"   ;; keepalive comment
+                                       (sse-frame (ack-frame 1 {:toolsListChanged true}))
+                                       (sse-frame (list-changed-frame 1))
+                                       (sse-frame (list-changed-frame 999))
+                                       ;; a server->client request on the
+                                       ;; subscription stream is answered
+                                       (sse-frame {:jsonrpc "2.0" :id 9001
+                                                   :method "ping" :params {}}))))
+                      (response 202 "application/json" ""))))
+        conn (assoc (modern-conn)
+                    :on-notification (fn [_ msg] (swap! conn-level conj msg))
+                    :request-fn capture)]
+    (reset! (:last-used conn) 0)
+    (let [{:keys [ended]} (http/listen! conn {:toolsListChanged true}
+                                        (fn [msg] (swap! observed conj msg)))]
+      (is (= :ended (deref ended 2000 ::timeout))
+          "the stream's EOF ends the subscription")
+      (is (= [protocol/ack-method "notifications/tools/list_changed"]
+             (mapv :method @observed))
+          "the ack and our own stamped frame reach the observer; the stale id is dropped")
+      (is (= [protocol/ack-method "notifications/tools/list_changed"]
+             (mapv :method @conn-level))
+          "both frames are delivered to the conn-level handler too")
+      (is (= {:jsonrpc "2.0" :id 9001 :result {}} (second @requests))
+          "a server->client request on the subscription stream is answered")
+      (is (pos? (transport/last-used conn))
+          "a keepalive comment touched the conn (idle-reaper exemption)")
+      (is (wait-for #(nil? @(:listen conn)))
+          "the listen slot is cleared when the stream ends"))))
+
+(deftest listen!-stop-aborts-an-endless-stream
+  ;; a connected but silent pipe: reads block until the subscription is
+  ;; stopped (OUT must stay referenced — a collected writer breaks it)
+  (let [in (java.io.PipedInputStream.)
+        out (java.io.PipedOutputStream. in)
+        conn (assoc (modern-conn)
+                    :request-fn (fn [_ _]
+                                  {:status 200
+                                   :headers {"content-type" "text/event-stream"}
+                                   :body in}))
+        {:keys [stop! ended]} (http/listen! conn {:toolsListChanged true} nil)]
+    (try
+      (Thread/sleep 50)
+      (is (= ::pending (deref ended 0 ::pending)) "the stream is still open")
+      (stop!)
+      (is (= :stopped (deref ended 2000 ::timeout)) "stop! ends the subscription")
+      (is (wait-for #(nil? @(:listen conn))))
+      (finally (.close out)))))
+
+(deftest listen!-rejects-a-non-stream-answer
+  (let [conn (assoc (modern-conn)
+                    :request-fn (fn [_ _] (response 405 "application/json" "{}")))
+        e (try (http/listen! conn {:toolsListChanged true} nil)
+               nil (catch Exception e e))]
+    (is (some? e))
+    (is (re-find #"answered 405" (ex-message e)))
+    (is (= :mcp-error (:type (ex-data e))))
+    (is (nil? @(:listen conn)) "nothing is left open"))
+  (let [conn (assoc (modern-conn)
+                    :request-fn (fn [_ _] (response 200 "application/json" "{}")))]
+    (is (thrown-with-msg? Exception #"answered 200 application/json"
+                          (http/listen! conn {:toolsListChanged true} nil)))))

@@ -214,16 +214,80 @@
            (try (refresh-server-catalog! state name conn gen)
                 (catch Exception _ nil))))))))
 
+(defn- log-debug!
+  "Best-effort opt-in debug logging. kmet.debug is not part of the shared
+   extension context (only kmet.extension, kmet.tui.* and kmet.libs.* are
+   injected there), so resolve it at runtime the way the review extension
+   does, and stay silent where it is unreachable."
+  [& parts]
+  (try
+    (when-let [log-fn (resolve 'kmet.debug/log)]
+      (apply log-fn parts))
+    (catch Throwable _ nil)))
+
+(defn- subscription-filter
+  "The spec subscription filter built from a server's advertised
+   listChanged capabilities; nil when it advertises none (nothing to
+   subscribe to, and asking would only draw an empty agreement)."
+  [capabilities]
+  (let [filter (cond-> {}
+                 (get-in capabilities [:tools :listChanged])
+                 (assoc :toolsListChanged true)
+                 (get-in capabilities [:prompts :listChanged])
+                 (assoc :promptsListChanged true)
+                 (get-in capabilities [:resources :listChanged])
+                 (assoc :resourcesListChanged true))]
+    (when (seq filter) filter)))
+
+(defn- log-subscription-ack!
+  "Debug-log the subscription the server agreed to: a requested
+   list_changed type it dropped from the acknowledgment leaves that
+   catalog stale, and nothing else surfaces that."
+  [name requested msg]
+  (let [agreed (set (keys (:notifications (:params msg))))
+        dropped (seq (remove agreed (keys requested)))]
+    (when dropped
+      (log-debug! "mcp: " name " refused subscription notifications: "
+                  (str/join ", " (map name dropped))))))
+
+(defn- start-subscription!
+  "After a modern connect, open the server's one 2026-07-28 subscription
+   from its advertised listChanged capabilities. A gap is re-listened to
+   under the hood, and :on-restored runs the same generation-gated resync
+   the list_changed handler uses, so a change missed while the stream was
+   down is picked up. A legacy conn keeps receiving the server's
+   broadcast list_changed notifications — nothing to do there."
+  [state name result]
+  (let [conn (:conn result)]
+    (when-let [filter (and (client/modern? conn)
+                           (subscription-filter (:capabilities result)))]
+      (try
+        (client/listen! conn filter
+                        {:on-frame (fn [msg]
+                                     (when (= client/ack-method (:method msg))
+                                       (log-subscription-ack! name filter msg)))
+                         :on-restored
+                         (fn []
+                           (let [gen (swap! (get-in @state [:servers name :resync-changes])
+                                            inc)]
+                             (spawn (fn []
+                                      (refresh-server-catalog! state name conn gen)))))})
+        (catch Exception e
+          (log-debug! "mcp: " name " subscription failed: " (ex-message e)))))))
+
 (defn- connect-with-auth
-  "Connect a server, wiring the HTTP auth fns (§7.8.5) when configured
-   and the conn-level notification handler (list_changed → resync)."
+  "Connect a server, wiring the HTTP auth fns (§7.8.5), the conn-level
+   notification handler (list_changed → resync) and, for a modern conn,
+   the 2026-07-28 subscription."
   [state name]
-  (let [definition (get-in @state [:config :mcp-servers name])]
-    (client/connect! definition
-                     (assoc (auth/make-auth-fns name definition)
-                            :on-notification
-                            (fn [conn msg]
-                              (handle-list-changed! state name conn msg))))))
+  (let [definition (get-in @state [:config :mcp-servers name])
+        result (client/connect! definition
+                                (assoc (auth/make-auth-fns name definition)
+                                       :on-notification
+                                       (fn [conn msg]
+                                         (handle-list-changed! state name conn msg))))]
+    (start-subscription! state name result)
+    result))
 
 (defn- ensure-connected!
   "Locked, idempotent connect (§10.3): connected + alive? → return; dead →
@@ -1159,13 +1223,16 @@
       (if (= :keep-alive (:lifecycle definition)) 0 global))))
 
 (defn- reap-idle-servers!
-  "Disconnect every connected server idle past its timeout."
+  "Disconnect every connected server idle past its timeout. A conn with a
+   live subscription is exempt: a quiet stdio subscription sees no traffic
+   at all, and disconnecting would end it."
   [state]
   (doseq [[name {:keys [conn]}] (:servers @state)]
     (when-let [c @conn]
       (let [timeout-min (idle-timeout-minutes state name)
             idle-ms (- (concurrent/monotonic-ms) (client/last-used c))]
         (when (and (pos? timeout-min)
+                   (not (client/listening? c))
                    (> idle-ms (* timeout-min 60000)))
           (disconnect-server! state name))))))
 

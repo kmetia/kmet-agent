@@ -29,4 +29,7 @@
 (def expand-uri-template mcp/expand-uri-template)
 (def connect! mcp/connect!)
 (def modern? mcp/modern?)
+(def listen! mcp/listen!)
+(def listening? mcp/listening?)
+(def ack-method protocol/ack-method)
 (def format-result protocol/format-result)

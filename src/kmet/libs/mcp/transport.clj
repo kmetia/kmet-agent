@@ -6,6 +6,10 @@
      (request! conn method params timeout-ms on-notification)
                                    send a request (the transport allocates
                                    the JSON-RPC id), wait for its result
+     (listen! conn filter on-frame)  2026-07-28 subscriptions/listen: open
+                                   the conn's long-lived subscription and
+                                   return {:stop! f :ended promise} (the
+                                   stream ends via STOP! or the server)
      (send-async! conn msg)        deliver a message expecting no answer
                                    (notification, or a reply to a
                                    server->client request)
@@ -27,6 +31,10 @@
                        (streamable-HTTP answers each request on its own
                        response body and stays concurrent)
      :on-notification  (fn [conn msg]) for server notifications
+     :listen           the live subscription's state (an atom holding
+                       {:id :subscription-id :on-frame :stop!}, nil when
+                       none is open) — subscriptions keep the conn busy,
+                       so the idle reaper must skip a listening conn
      :conn-ref         atom holding the conn as the client sees it after
                        derived keys (:capabilities) are attached — the
                        transports' internal callbacks (stdio's
@@ -76,6 +84,44 @@
   [conn]
   (when-let [lu (:last-used conn)] (reset! lu (concurrent/monotonic-ms)))
   nil)
+
+;; ─── Subscriptions (2026-07-28) ───────────────────────────────────────────
+
+(defn route-listen-frame!
+  "Feed one incoming notification to the conn's live subscription.
+   LISTEN-ATOM is the transport's :listen slot — it holds
+   {:id :subscription-id :on-frame :stop!} while a subscription is open
+   and nil otherwise. A frame stamped with a subscription id (the
+   acknowledgment that establishes it, or a notification carrying it)
+   reaches the subscription's :on-frame observer; a frame stamped with a
+   subscription id other than the live one's is a stale subscription's
+   and is dropped. Returns true when MSG should still be delivered to the
+   conn-level handler, false when the caller must drop it.
+
+   One subscription per conn (the client opens at most one), so a stamped
+   frame either belongs to it or is stale; an unstamped notification
+   always belongs to the ordinary path."
+  [listen-atom msg]
+  (let [listen (some-> listen-atom deref)]
+    (if (nil? listen)
+      true
+      (let [sid (protocol/subscription-id msg)]
+        (cond
+          (nil? sid) true
+
+          ;; ours: the acknowledgment (which names the id), a notification
+          ;; stamped with it, or anything stamped before the ack arrived
+          ;; (a server streaming ahead of its own acknowledgment)
+          (or (nil? (:subscription-id listen))
+              (= sid (:subscription-id listen)))
+          (do
+            (when (nil? (:subscription-id listen))
+              (swap! listen-atom assoc :subscription-id sid))
+            (when-let [f (:on-frame listen)]
+              (try (f msg) (catch Exception _ nil)))
+            true)
+
+          :else false)))))
 
 ;; ─── Server->client dispatch (channel transports) ─────────────────────────
 

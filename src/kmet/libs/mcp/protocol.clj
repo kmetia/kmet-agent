@@ -61,6 +61,23 @@
   [k]
   (keyword meta-ns (name k)))
 
+(def listen-method
+  "The 2026-07-28 replacement for the broadcast list_changed
+   notifications: one long-lived subscriptions/listen request per conn."
+  "subscriptions/listen")
+
+(def ack-method
+  "The first frame of a subscription stream: the server's acknowledgment
+   names the subscription id and the filter subset it honors."
+  "notifications/subscriptions/acknowledged")
+
+(defn subscription-id
+  "The subscription id a server stamps on a subscription's notifications
+   (_meta.io.modelcontextprotocol/subscriptionId), or nil for an unscoped
+   message."
+  [msg]
+  (get-in msg [:params :_meta (meta-key "subscriptionId")]))
+
 (defn modern-request-meta
   "The _meta map a 2026-07-28 request or notification carries inside its
    params: VERSION (the negotiated revision), the client identity, and

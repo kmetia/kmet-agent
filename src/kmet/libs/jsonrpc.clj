@@ -36,6 +36,15 @@
             [babashka.process :as proc]))
 
 (def default-timeout-ms 30000)
+
+(def no-deadline
+  "TIMEOUT-MS sentinel for request!: wait for the response with no
+   deadline at all. The caller owns the exit — the server answers when it
+   is done, and close! releases the waiter (its pending correlation fails
+   with ::transport-dead). For a request whose result arrives only at
+   graceful close, like MCP's subscriptions/listen over stdio."
+  ::no-deadline)
+
 (def ^:private graceful-close-timeout-ms 2000)
 ;; sanity bound on announced Content-Length — a corrupt/garbage length must
 ;; not turn into a giant upfront allocation
@@ -321,18 +330,23 @@
 
 (defn request!
   "Sends METHOD/PARAMS and blocks for the matching response (up to
-   TIMEOUT-MS, default 30000). Returns the response's :result; throws
-   ex-info on a JSON-RPC error (::request-error), timeout (::timeout) or
-   transport death (::transport-dead); every failure carries the request
-   :id and :method in ex-data (MCP correlates a notifications/cancelled
-   on the abandoned id). Late responses after a timeout are dropped as
-   stale."
+   TIMEOUT-MS, default 30000; no-deadline waits without one). Returns the
+   response's :result; throws ex-info on a JSON-RPC error
+   (::request-error), timeout (::timeout) or transport death
+   (::transport-dead); every failure carries the request :id and :method
+   in ex-data (MCP correlates a notifications/cancelled on the abandoned
+   id). Late responses after a timeout are dropped as stale.
+
+   OPTS: :timeout-ms as above, :id to use a caller-allocated id instead
+   of allocating one. A caller that must reference the request later (a
+   cancelled subscriptions/listen) allocates it with (swap! (:id-counter
+   conn) inc) so it stays unique."
   ([conn method params] (request! conn method params {}))
-  ([conn method params {:keys [timeout-ms]}]
+  ([conn method params {:keys [timeout-ms id]}]
    (bump-last-used! conn)
    (when @(:closed conn)
      (throw (ex-info* ::transport-dead "jsonrpc connection is closed")))
-   (let [id (swap! (:id-counter conn) inc)
+   (let [id (or id (swap! (:id-counter conn) inc))
          p (promise)
          wl (:write-lock conn)]
      (locking wl (swap! (:pending conn) assoc id p))
@@ -345,7 +359,9 @@
                           (str "jsonrpc write failed: "
                                (or (ex-message e) (str e)))
                           {:id id :method method}))))
-     (let [res (deref p (or timeout-ms default-timeout-ms) ::timeout)]
+     (let [res (if (= no-deadline timeout-ms)
+                 (deref p)
+                 (deref p (or timeout-ms default-timeout-ms) ::timeout))]
        (cond
          (= res ::timeout)
          (do (locking wl (swap! (:pending conn) dissoc id))

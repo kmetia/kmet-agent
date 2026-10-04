@@ -3,7 +3,7 @@
 Status: draft. Order is deliberate: **Phase 0 (names consolidation + name
 assignment fix) → Phase 1 (extract `kmet.libs.mcp`) → Phase 2 (auth) →
 Phase 3 (2026-07-28 protocol work) → Phase 4 (optional hygiene)** — Phases 0,
-1 and 2 are landed, and Phase 3 is in progress (3.1–3.4 landed; 3.5–3.8 are
+1 and 2 are landed, and Phase 3 is in progress (3.1–3.5 landed; 3.6–3.8 are
 planned in full below — this section is their plan, there is no separate
 plan file); phase 4 lands after it. The protocol revision lands before the
 hygiene pass so the client is extracted and auth settled first.
@@ -441,7 +441,7 @@ baseline):
 
 ## Phase 3 — 2026-07-28 protocol work (the end goal)
 
-Status: **in progress** — 3.1–3.4 landed; 3.5–3.8 below, in order; each leaves
+Status: **in progress** — 3.1–3.5 landed; 3.6–3.8 below, in order; each leaves
 `scripts/validate-all.bb` and the repo gates green. Depends on Phase 1's
 era-neutral seam and Phase 2's auth plumbing (both landed).
 
@@ -793,6 +793,56 @@ script section; `validate-all.bb` stays green on the legacy fallback.
   jsonrpc no-deadline change gets its own test;
   `extensions/lsp-adapter/scripts/validate.bb` is re-run.
 
+Status: **landed** — with one placement correction and one split. The
+end-to-end "the modern fake emits `tools/list_changed` on the listen
+stream and the catalog resyncs" case needs the *client* (a catalog only
+resyncs through it), so it lives in `validate-client.bb`'s new
+subscription section (stdio and streamable HTTP): the ack is the first
+frame, the agreed filter is visible, the trigger's list_changed arrives,
+a re-list contains the added tool, and `close!` stops the listener. The
+*adapter* wiring is covered in `e2e.bb` — a modern server entry whose
+catalog change arrives with no manual refresh (the modern fake notifies
+subscriptions only) plus the resync hook — and `reap-idle-servers!`
+skips a listening conn. Behavior split across the pieces named here:
+
+- `jsonrpc`: `no-deadline` (a `request!` TIMEOUT-MS sentinel that waits
+  without a deadline; `close!` releases the waiter) and an `:id` opt so a
+  caller that must cancel later allocates the id itself.
+- `transport`: `route-listen-frame!` — the subscription demux shared by
+  the frame paths (the ack establishes the subscription id; a frame
+  stamped with another id is stale and dropped; unstamped notifications
+  stay ordinary), and the `:listen` conn key.
+- `stdio/listen!`: the listen request on its own daemon thread with no
+  deadline and no request lock; `notifications/cancelled` is the stop, and
+  a stop that lands before the request went out opens no subscription at
+  all (there is nothing to cancel).
+- `http/listen!`: the POST with `:timeout nil` and its SSE body kept open
+  by a background reader; the subscription state is installed *before*
+  the reader starts, so no frame can outrun its demux; every frame goes
+  through the demux and then the shared server-message dispatch (a
+  server->client request arriving on the stream is answered, not
+  ignored), and `touch!` on every line (keepalive comments included)
+  keeps the idle reaper away. `stop!` aborts the stream — the modern
+  cancellation. A non-2xx/non-SSE answer throws instead of leaving a
+  stream open; auth is retried once at open.
+- `client/listen!` / `listening?` / `close!`: one listener per conn, the
+  bounded re-listen (immediate, 1s/5s/15s; then the conn is closed so the
+  next use rebuilds it), `:on-restored` once per listener at the first
+  re-listen after a gap, `:on-frame` observation, the recorded
+  `:first-ack?`/`:agreed`, and a stop that also wins a race with an
+  attempt still opening.
+- adapter: `start-subscription!` from the advertised `listChanged`
+  capabilities after a modern connect (empty filter → no subscription),
+  the ack's dropped types logged best-effort via a runtime-resolved
+  `kmet.debug/log` (kmet.debug is not in the extension context), and the
+  reaper exemption.
+
+Tests: the transport table (ack/notification/stale id/graceful close/
+keepalive touch/abort/open failure), the stdio demux table, the client
+listener table (era and transport guards, frames and agreed filter,
+re-establish + one restore + budget exhaustion closing the conn, close,
+close-during-open, stdio dispatch), and the two script sections.
+
 ### 3.6. `x-mcp-header` mirroring + invalid-definition filtering
 
 `x-mcp-header` is a MUST for streamable-HTTP clients (SEP-2243), so it lands
@@ -961,7 +1011,7 @@ after Phase 3 — hygiene must not block or precede the protocol work.
 - [x] 3.2 era core: meta helpers, conn `:era`, `_meta` decoration, MRTR (`requestState`-only retry, `inputRequests` refusal) (behavior-neutral)
 - [x] 3.3 stdio: `server/discover` probe + modern establish + legacy fallback
 - [x] 3.4 streamable HTTP: routing headers, 400-body detection, `-32022` negotiation, no session
-- [ ] 3.5 `subscriptions/listen`: lib listen + HTTP long-lived stream + adapter wiring
+- [x] 3.5 `subscriptions/listen`: lib listen + HTTP long-lived stream + adapter wiring
 - [ ] 3.6 `x-mcp-header` mirroring + invalid-definition filtering
 - [ ] 3.7 `:protocol-era` in the metadata cache + re-probe on failure
 - [ ] 3.8 facade deletion + README + full gates

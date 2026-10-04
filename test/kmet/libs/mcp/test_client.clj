@@ -614,3 +614,145 @@
         (is (identical? conn @conn-ref)
             "the transport's callback sees the returned conn")
         (is (= {:tools {}} (:capabilities @conn-ref)))))))
+
+;; ─── Listeners (2026-07-28 subscriptions) ─────────────────────────────────
+
+(defn- listener-conn
+  "A conn shaped like client/connect!'s for a modern streamable-HTTP
+   server: the transport keys the listener touches plus its slots."
+  []
+  (assoc (http/connect! "http://server" {})
+         :era (atom {:era :modern :version protocol/modern-protocol-version})
+         :listener (atom nil)))
+
+(defn- wait-for
+  "Poll PRED for up to 2s — the listener runs on its own thread."
+  [pred]
+  (loop [n 0]
+    (cond
+      (pred) true
+      (< n 200) (do (Thread/sleep 10) (recur (inc n)))
+      :else false)))
+
+(defn- listen-state
+  [conn]
+  @(deref (:listener conn)))
+
+(defn- subscription-meta
+  [id]
+  {:_meta {(protocol/meta-key "subscriptionId") id}})
+
+(defn- ack-notification
+  [id agreed]
+  {:jsonrpc "2.0"
+   :method protocol/ack-method
+   :params (merge {:notifications agreed} (subscription-meta id))})
+
+(deftest listen!-requires-a-modern-streamable-conn
+  (is (thrown-with-msg? Exception #"requires the 2026-07-28 era"
+                        (mcp/listen! (assoc (http/connect! "http://server" {})
+                                            :listener (atom nil))
+                                     {:toolsListChanged true})))
+  (is (thrown-with-msg? Exception #"not available over sse"
+                        (mcp/listen! (assoc (listener-conn) :transport :sse)
+                                     {:toolsListChanged true}))))
+
+(deftest listen!-observes-the-frames-and-the-agreed-filter
+  (let [conn (listener-conn)
+        observed (atom [])
+        filters (atom [])
+        ended (promise)]
+    (with-redefs [http/listen! (fn [_conn filter on-frame]
+                                 (swap! filters conj filter)
+                                 (on-frame (ack-notification 7 {:toolsListChanged true}))
+                                 (on-frame {:jsonrpc "2.0"
+                                            :method "notifications/tools/list_changed"
+                                            :params (subscription-meta 7)})
+                                 {:stop! (fn [] (deliver ended :stopped))
+                                  :ended ended})]
+      (mcp/listen! conn {:toolsListChanged true :promptsListChanged true}
+                   {:on-frame (fn [msg] (swap! observed conj (:method msg)))})
+      (is (true? (mcp/listening? conn)))
+      (is (wait-for #(= 2 (:frames (listen-state conn)))))
+      (is (= [{:toolsListChanged true :promptsListChanged true}] @filters))
+      (is (true? (:first-ack? (listen-state conn))))
+      (is (= {:toolsListChanged true} (:agreed (listen-state conn)))
+          "the filter the server dropped stays visible")
+      (is (= [protocol/ack-method "notifications/tools/list_changed"] @observed)
+          "the observer sees every frame of the subscription")
+      (mcp/close! conn)
+      (is (false? (mcp/listening? conn)))
+      (is (true? @(:closed conn))))))
+
+(deftest listen!-re-establishes-with-a-bounded-budget
+  (let [conn (listener-conn)
+        calls (atom 0)
+        restored (atom 0)]
+    (with-redefs-fn {#'mcp/listen-backoff-ms [0 0 0]}
+      (fn []
+        (with-redefs [http/listen! (fn [_ _ _]
+                                     (swap! calls inc)
+                                     {:stop! (fn [])
+                                      :ended (doto (promise) (deliver :ended))})]
+          (mcp/listen! conn {:toolsListChanged true}
+                       {:on-restored (fn [] (swap! restored inc))})
+          (is (wait-for #(true? (:failed? (listen-state conn)))))
+          (is (= 3 @calls) "the immediate open plus two backed-off re-listens")
+          (is (= 1 @restored) "one resync per listener, after the first gap")
+          (is (false? (mcp/listening? conn)))
+          (is (true? @(:closed conn))
+              "the budget is spent: the next use reconnects from scratch"))))))
+
+(deftest listen!-close-stops-a-live-listener
+  (let [conn (listener-conn)
+        stops (atom 0)
+        ended (promise)]
+    (with-redefs [http/listen! (fn [_ _ _]
+                                 {:stop! (fn [] (swap! stops inc)
+                                           (deliver ended :stopped))
+                                  :ended ended})]
+      (mcp/listen! conn {:toolsListChanged true})
+      (is (wait-for #(some? (:stop! (listen-state conn)))))
+      (mcp/close! conn)
+      (is (= 1 @stops) "close! aborts the subscription")
+      (is (false? (mcp/listening? conn)))
+      (is (wait-for #(nil? (:stop! (listen-state conn))))
+          "no re-listen after a stop"))))
+
+(deftest listen!-close-during-the-open-still-stops
+  ;; close! may land while the attempt is still opening: the attempt must
+  ;; notice the stop flag itself instead of parking on a stream nobody
+  ;; will ever stop (the caller's stop finds no :stop! to call yet)
+  (let [conn (listener-conn)
+        stops (atom 0)
+        ended (promise)
+        opening (promise)
+        proceed (promise)]
+    (with-redefs [http/listen! (fn [_ _ _]
+                                 (deliver opening true)
+                                 (deref proceed 2000 nil)
+                                 {:stop! (fn [] (swap! stops inc)
+                                           (deliver ended :stopped))
+                                  :ended ended})]
+      (mcp/listen! conn {:toolsListChanged true})
+      (is (true? (deref opening 1000 false)) "the attempt opened")
+      (mcp/close! conn)
+      (deliver proceed true)
+      (is (= :stopped (deref ended 2000 ::timeout))
+          "the attempt ends itself when the caller's stop finds no stop!")
+      (is (wait-for #(= 1 @stops)))
+      (is (false? (mcp/listening? conn))))))
+
+(deftest listen!-dispatches-by-transport
+  (let [conn (assoc (listener-conn) :transport :stdio :listen (atom nil))
+        filter (atom nil)]
+    (with-redefs-fn {#'mcp/listen-backoff-ms [0 0]}
+      (fn []
+        (with-redefs [stdio/listen! (fn [_conn f _on-frame]
+                                      (reset! filter f)
+                                      {:stop! (fn [])
+                                       :ended (doto (promise) (deliver :ended))})
+                      stdio/close! (fn [_] nil)]
+          (mcp/listen! conn {:toolsListChanged true})
+          (is (wait-for #(= {:toolsListChanged true} @filter)))
+          (is (wait-for #(true? (:failed? (listen-state conn))))))))))

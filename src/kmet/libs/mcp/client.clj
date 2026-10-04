@@ -4,8 +4,8 @@
    expansion. Transports live in kmet.libs.mcp.transport.{stdio,http,sse};
    protocol constants in kmet.libs.mcp.protocol.
 
-   Public protocol: request! / notify! / close! / alive? / last-used /
-   modern?.
+   Public protocol: request! / notify! / listen! / close! / alive? /
+   last-used / modern?.
    request! throws ex-info with :type :mcp-error on a JSON-RPC error,
    timeout, or transport death (§7.7 message patterns). Notifications
    received mid-request are dispatched — notifications/progress goes to
@@ -15,6 +15,7 @@
    request!/notify! touches :last-used so the idle reaper can disconnect
    unused servers."
   (:require [clojure.string :as str]
+            [kmet.libs.concurrent :as concurrent]
             [kmet.libs.mcp.protocol :as protocol]
             [kmet.libs.mcp.transport :as transport]
             [kmet.libs.mcp.transport.http :as http]
@@ -132,16 +133,37 @@
   (send-async! conn {:jsonrpc "2.0" :method method
                      :params (with-request-meta conn params)}))
 
+(defn- listener-state
+  "The live listener generation's state atom: CONN's :listener slot holds
+   the current listener's atom (nil when none is open), and every
+   generation keeps its own — a stale loop can never write into a fresh
+   listener's state."
+  [conn]
+  (some-> (:listener conn) deref))
+
+(defn- stop-listener!
+  "Stop CONN's listener: the re-establish loop exits at its next check,
+   the transport subscription is aborted (or cancelled), and a later
+   listen! may open a fresh one. Idempotent — close! and listen! both
+   run it."
+  [conn]
+  (when-let [state (listener-state conn)]
+    (let [l @state]
+      (when-let [stop-flag (:stop-flag l)] (reset! stop-flag true))
+      (when-let [stop! (:stop! l)] (try (stop!) (catch Exception _ nil)))
+      (swap! state assoc :stopped? true :stop! nil))))
+
 (defn close!
-  "Close a connection: kill the stdio process tree, abort the active SSE
-   stream (releases the blocked reader + reaps the transport), or DELETE
-   a streamable-HTTP session (sent from a background thread, so the
-   caller never waits on the server). OPTS: :terminate-http-session?
-   false skips the DELETE entirely — teardown paths (session shutdown,
-   a retry after a request timeout) rely on the session expiring on its
-   own. Idempotent."
+  "Close a connection: stop its listener, then kill the stdio process
+   tree, abort the active SSE stream (releases the blocked reader + reaps
+   the transport), or DELETE a streamable-HTTP session (sent from a
+   background thread, so the caller never waits on the server). OPTS:
+   :terminate-http-session? false skips the DELETE entirely — teardown
+   paths (session shutdown, a retry after a request timeout) rely on the
+   session expiring on its own. Idempotent."
   ([conn] (close! conn {}))
   ([conn opts]
+   (stop-listener! conn)
    (case (:transport conn)
      :stdio (stdio/close! conn)
      :streamable-http (http/close! conn opts)
@@ -399,13 +421,13 @@
      - a DiscoverResult negotiates over :supportedVersions — a modern
        overlap continues modern (the result is carried along), a legacy
        overlap falls back to the handshake, no overlap errors;
-     - a recognized modern error (a 400 whose JSON-RPC body parsed into
-       the ex-data) negotiates over data.supported on -32022, surfaces
-       -32020/-32021;
+     - a JSON-RPC error body carrying one of the era's codes (servers
+       answer them with 400) negotiates over data.supported on -32022 and
+       surfaces -32020/-32021;
      - an auth failure (401/403 after the transport's own retry) aborts —
        authentication is not an era signal;
      - anything else (404/405, an empty or non-modern body, a non-modern
-       JSON-RPC error, another status) means legacy — the handshake
+       JSON-RPC error, a plain HTTP failure) means legacy — the handshake
        decides, and a legacy server answers unknown methods immediately.
    Returns {:era :modern :version rev :discover result} or
    {:era :legacy :probe-error e-or-nil}."
@@ -578,7 +600,10 @@
                     ;; the handshake/discovery records the negotiated
                     ;; revision here (the HTTP transport brings its own)
                     :protocol-version (or (:protocol-version transport-conn)
-                                          (atom nil)))]
+                                          (atom nil))
+                    ;; the live 2026-07-28 subscription (listen!) — nil
+                    ;; until one is opened
+                    :listener (atom nil))]
     (try
       (when (and url (= :sse (:transport conn)))
         (sse/open-stream! conn))
@@ -591,3 +616,143 @@
       (catch Exception e
         (close! conn)
         (throw e)))))
+
+;; ─── Subscriptions (2026-07-28) ───────────────────────────────────────────
+
+(def ^:private listen-backoff-ms
+  "Re-listen delays after a subscription stream ends on its own: the
+   immediate re-open, then 1s/5s/15s. Four attempts, then the conn is
+   closed so the next use rebuilds it."
+  [0 1000 5000 15000])
+
+(defn listening?
+  "True while CONN has a live 2026-07-28 subscription. The idle reaper
+   must not disconnect a listening conn: a quiet stdio subscription sees
+   no traffic at all, and the subscription is gone with the conn."
+  [conn]
+  (let [l (some-> (listener-state conn) deref)]
+    (boolean (and l (not (:stopped? l)) (not (:failed? l))))))
+
+(defn- observe-listen-frame!
+  "Record one frame of the live subscription: whether the server's
+   acknowledgment actually came first (`:first-ack?`) and the filter
+   subset it agreed to (`:agreed`). The listing too is the client's own
+   bookkeeping — the frame itself is delivered to the conn-level handler
+   by the transport like any other server message."
+  [state msg]
+  (swap! state
+         (fn [l]
+           (cond-> (update l :frames inc)
+             (zero? (:frames l))
+             (assoc :first-ack? (= protocol/ack-method (:method msg)))
+             (and (= protocol/ack-method (:method msg))
+                  (map? (:notifications (:params msg))))
+             (assoc :agreed (:notifications (:params msg)))))))
+
+(defn- listen-attempt!
+  "One subscription attempt on the live conn; blocks until the stream
+   stops or ends. Returns :stopped, :ended or :error (the exception lands
+   in the listener's :last-error)."
+  [conn state]
+  (let [on-frame (:on-frame @state)
+        {:keys [stop! ended]} (case (:transport conn)
+                                :stdio (stdio/listen! conn (:filter @state) on-frame)
+                                :streamable-http (http/listen! conn (:filter @state)
+                                                               on-frame))]
+    (swap! state assoc :stop! stop!)
+    ;; close! may have set the stop flag before this attempt installed its
+    ;; stop fn — then nobody else can end it, so end it here
+    (when @(:stop-flag @state) (try (stop!) (catch Exception _ nil)))
+    (let [outcome (deref ended)]
+      (swap! state assoc :stop! nil)
+      (cond
+        (= :stopped outcome) :stopped
+        (= :ended outcome) :ended
+        :else (do (swap! state assoc :last-error (:error outcome))
+                  :error)))))
+
+(defn- sleep-listen!
+  "Sleep MS in 100ms slices so a stop during the backoff is seen
+   promptly (pi abortableSleep)."
+  [ms stop-flag]
+  (let [end (+ (concurrent/monotonic-ms) ms)]
+    (loop []
+      (when (and (not @stop-flag) (< (concurrent/monotonic-ms) end))
+        (Thread/sleep (min 100 (- end (concurrent/monotonic-ms))))
+        (recur)))))
+
+(defn- listen-loop!
+  "The listener's own thread: open an attempt, wait for it to end, then
+   back off and re-open until the caller stops it or the budget runs out.
+   OPTS :on-restored runs once, after the first gap — the resync a caller
+   needs when the stream was down and notifications may have been
+   missed."
+  [conn state]
+  (loop [attempt 0
+         gapped? false
+         restored? false]
+    (let [{:keys [stop-flag on-restored]} @state
+          restore? (boolean (and gapped? (not restored?) on-restored))]
+      (when-not @stop-flag
+        (when restore?
+          (swap! state assoc :restored? true)
+          (try (on-restored) (catch Exception _ nil)))
+        (let [outcome (try (listen-attempt! conn state)
+                           (catch Exception e {:error e}))]
+          (when-not (or @stop-flag (= :stopped outcome))
+            (if (< attempt (dec (count listen-backoff-ms)))
+              (do (sleep-listen! (nth listen-backoff-ms (inc attempt)) stop-flag)
+                  (recur (inc attempt) true (or restored? restore?)))
+              ;; the subscription cannot be kept alive any more: close the
+              ;; conn so the next use reconnects from scratch
+              (do (swap! state assoc :failed? true)
+                  (try (close! conn) (catch Exception _ nil))))))))))
+
+(defn listen!
+  "Open CONN's 2026-07-28 subscription (one per conn — a live listener is
+   stopped first). FILTER is the spec filter: the :toolsListChanged /
+   :promptsListChanged / :resourcesListChanged booleans and
+   :resourceSubscriptions [uri ...] (kmet watches no individual
+   resources). Every frame of the subscription is delivered to the conn's
+   notification handler like any other server message; the listener also
+   records the server's agreed filter (:agreed) and whether the
+   acknowledgment really came first (:first-ack?).
+
+   OPTS:
+   :on-frame    (fn [msg]) — observes every frame of the subscription
+                (the acknowledgment first) before delivery
+   :on-restored (fn []) — runs once per listener, at the first re-listen
+                attempt after a gap, so a caller can resync what the gap
+                may have missed (a resync does not wait for the new
+                stream's acknowledgment: the catalog is re-listed over
+                ordinary requests)
+
+   A stream that ends on its own is re-established with a bounded backoff
+   (immediate, 1s, 5s, 15s); when the budget is spent the conn is closed
+   so the next use reconnects. close! stops the listener. Returns the
+   listener state atom; throws for a conn that did not negotiate the era
+   or whose transport has no subscription stream."
+  [conn filter & [{:keys [on-frame on-restored]}]]
+  (when-not (protocol/modern-conn? conn)
+    (throw (protocol/mcp-error
+            (str "MCP " protocol/listen-method
+                 " requires the 2026-07-28 era: no subscription opened")
+            {:method protocol/listen-method})))
+  (when-not (#{:stdio :streamable-http} (:transport conn))
+    (throw (protocol/mcp-error
+            (str "MCP " protocol/listen-method " is not available over "
+                 (name (or (:transport conn) :unknown)) " (legacy transport)")
+            {:method protocol/listen-method :transport (:transport conn)})))
+  (stop-listener! conn)
+  (let [state (atom {:filter filter
+                     :on-restored on-restored
+                     :stop-flag (atom false)
+                     :frames 0})]
+    (swap! state assoc :on-frame
+           (fn [msg]
+             (observe-listen-frame! state msg)
+             (when on-frame
+               (try (on-frame msg) (catch Exception _ nil)))))
+    (reset! (:listener conn) state)
+    (concurrent/spawn (fn [] (listen-loop! conn state)))
+    state))
