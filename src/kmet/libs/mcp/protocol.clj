@@ -79,13 +79,18 @@
   (boolean (when-let [era (:era conn)]
              (= :modern (:era @era)))))
 
+(defn era-version
+  "The revision recorded on CONN's :era atom, or nil while the era is
+   still unknown."
+  [conn]
+  (:version (some-> (:era conn) deref)))
+
 (defn conn-meta
   "The _meta map to merge into a modern CONN's request/notification
    params: the revision recorded on its :era atom, else the base modern
    revision (before negotiation has recorded one)."
   [conn]
-  (modern-request-meta
-   (or (:version (some-> (:era conn) deref)) modern-protocol-version)))
+  (modern-request-meta (or (era-version conn) modern-protocol-version)))
 
 (def modern-error-codes
   "JSON-RPC codes the 2026-07-28 revision defines for era negotiation:

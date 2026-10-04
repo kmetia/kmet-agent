@@ -3,7 +3,7 @@
 Status: draft. Order is deliberate: **Phase 0 (names consolidation + name
 assignment fix) → Phase 1 (extract `kmet.libs.mcp`) → Phase 2 (auth) →
 Phase 3 (2026-07-28 protocol work) → Phase 4 (optional hygiene)** — Phases 0,
-1 and 2 are landed, and Phase 3 is in progress (3.1–3.2 landed; 3.3–3.8 are
+1 and 2 are landed, and Phase 3 is in progress (3.1–3.3 landed; 3.4–3.8 are
 planned in full below — this section is their plan, there is no separate
 plan file); phase 4 lands after it. The protocol revision lands before the
 hygiene pass so the client is extracted and auth settled first.
@@ -441,7 +441,7 @@ baseline):
 
 ## Phase 3 — 2026-07-28 protocol work (the end goal)
 
-Status: **in progress** — 3.1–3.2 landed; 3.3–3.8 below, in order; each leaves
+Status: **in progress** — 3.1–3.3 landed; 3.4–3.8 below, in order; each leaves
 `scripts/validate-all.bb` and the repo gates green. Depends on Phase 1's
 era-neutral seam and Phase 2's auth plumbing (both landed).
 
@@ -640,6 +640,20 @@ era yet — and the eight-script extension suite plus `bb test` are green.
   fake-server run covers probe → discover → list → call. Scripts:
   `validate-protocol.bb` stdio modern + legacy; `validate-client.bb`,
   `validate-script.bb`, `e2e.bb` prove the legacy fallback end to end.
+
+Status: **landed** — `establish-era!` resolves the era before the catalog
+work and `record-era!` runs before the fetches so their requests carry the
+era `_meta`. A `:protocol-era` hint skips detection; a stdio conn is
+probed by `detect-stdio-era!` (DiscoverResult negotiation, `-32022`
+data.supported retry/fallback, `-32601`/death/timeout ⇒ legacy,
+`-32020`/`-32021` surface) and every non-stdio transport runs the
+handshake; the probe's round trip is reused by the modern establish, a
+timed-out probe plus a handshake error earns the one-shot modern recovery
+re-probe, and `connect!` now carries a `:protocol-version` atom on stdio
+conns too. Tests: the detection table and the `^:slow` modern subprocess
+run. The eight-script extension suite stays green on the legacy fallback,
+and a manual smoke connects the lib client to `fake-mcp-server.bb --era
+modern` (9 tools, `_meta`-guarded tools/call).
 
 ### 3.4. Streamable HTTP modern path
 
@@ -924,7 +938,7 @@ after Phase 3 — hygiene must not block or precede the protocol work.
 - [x] 2.6 gates: `validate-oauth.bb` + `validate-client.bb` (401 retry), `bb test`, jolt, lint/format, `check-bundled-extensions` (test-ext clean apart from the pre-existing lsp-adapter-dependent overlay smoke)
 - [x] 3.1 fakes modern mode + `validate-protocol.bb` harness (baseline)
 - [x] 3.2 era core: meta helpers, conn `:era`, `_meta` decoration, MRTR (`requestState`-only retry, `inputRequests` refusal) (behavior-neutral)
-- [ ] 3.3 stdio: `server/discover` probe + modern establish + legacy fallback
+- [x] 3.3 stdio: `server/discover` probe + modern establish + legacy fallback
 - [ ] 3.4 streamable HTTP: routing headers, 400-body detection, `-32022` negotiation, no session
 - [ ] 3.5 `subscriptions/listen`: lib listen + HTTP long-lived stream + adapter wiring
 - [ ] 3.6 `x-mcp-header` mirroring + invalid-definition filtering

@@ -293,51 +293,229 @@
 
 ;; ─── Connect ──────────────────────────────────────────────────────────────
 
-(defn establish!
-  "Handshake + capability-gated catalog discovery on an existing CONN.
-   prompts/resources are only queried when the server advertises the
-   capability (an unadvertised method errors with -32601). Returns
-   {:protocol-version :server-info :capabilities :tools :prompts
-   :resources :resource-templates} — no :conn."
+;; ─── Era establishment (2026-07-28) ──────────────────────────────────────
+
+(defn- record-era!
+  "Record the resolved era on the conn: {:era :modern|:legacy :version
+   rev} on its :era atom and the revision on its :protocol-version atom
+   (the transports' MCP-Protocol-Version header reads that one)."
+  [conn era version]
+  (when-let [a (:era conn)] (reset! a {:era era :version version}))
+  (when-let [pv (:protocol-version conn)] (reset! pv version))
+  nil)
+
+(defn- discover-request!
+  "One server/discover round trip with TIMEOUT-MS; its era _meta is forced
+   (the conn is not marked modern yet, and the probe runs before the era
+   is known)."
+  [conn version timeout-ms]
+  (request! conn "server/discover"
+            {:_meta (protocol/modern-request-meta version)}
+            {:timeout-ms timeout-ms}))
+
+(defn- discover-handshake
+  "A raw DiscoverResult → the handshake shape establish! works with."
+  [version result]
+  {:protocol-version version
+   :server-info (get-in result [:_meta (protocol/meta-key "serverInfo")])
+   :capabilities (or (:capabilities result) {})})
+
+(defn discover!
+  "server/discover — the 2026-07-28 replacement for the initialize
+   handshake. Returns {:protocol-version :server-info :capabilities
+   :supported-versions}. VERSION defaults to the conn's recorded
+   revision."
+  ([conn] (discover! conn (or (protocol/era-version conn)
+                              protocol/modern-protocol-version)))
+  ([conn version]
+   (let [result (discover-request! conn version protocol/initialize-timeout-ms)]
+     (assoc (discover-handshake version result)
+            :supported-versions (vec (:supportedVersions result))))))
+
+(defn- no-overlap-error
+  "The error for a server whose advertised revisions share none with the
+   client's."
+  [advertised]
+  (protocol/mcp-error
+   (str "MCP server advertises no protocol revision this client speaks: "
+        (str/join ", " (or (seq advertised) ["none"])))
+   {:supported (vec advertised)
+    :client-supported (into protocol/modern-supported-versions
+                            protocol/supported-protocol-versions)}))
+
+(defn- detect-stdio-era!
+  "Classify a stdio conn's era with a server/discover probe:
+     - a DiscoverResult negotiates over :supportedVersions — a modern
+       overlap continues modern (the result is carried along), a legacy
+       overlap falls back to the handshake, no overlap errors;
+     - -32022 negotiates over data.supported — a different modern revision
+       retries the probe, a legacy overlap falls back, no overlap errors;
+     - -32020/-32021 surface (the server rejected our _meta);
+     - any other error, process death or timeout means legacy — the
+       handshake decides (a legacy server answers unknown methods with
+       -32601 immediately).
+   Returns {:era :modern :version rev :discover result} or
+   {:era :legacy :probe-error e-or-nil}."
   [conn]
-  (let [{:keys [protocol-version server-info capabilities]} (initialize! conn)
-        capabilities (or capabilities {})]
-    {:protocol-version protocol-version
-     :server-info server-info
-     :capabilities capabilities
-     :tools (if (:tools capabilities) (list-all-tools conn) [])
-     :prompts (if (:prompts capabilities) (list-all-prompts conn) [])
-     :resources (if (:resources capabilities) (list-all-resources conn) [])
-     :resource-templates (if (:resources capabilities)
-                           (list-all-resource-templates conn)
-                           [])}))
+  (loop [version protocol/modern-protocol-version]
+    (let [outcome (try {:result (discover-request! conn version
+                                                   protocol/probe-timeout-ms)}
+                       (catch Exception e {:error e}))]
+      (if-let [result (:result outcome)]
+        (if-let [negotiated (protocol/negotiate-version (:supportedVersions result))]
+          (case (:era negotiated)
+            :modern {:era :modern
+                     :version (:version negotiated)
+                     :discover result}
+            :legacy {:era :legacy})
+          (throw (no-overlap-error (:supportedVersions result))))
+        (let [e (:error outcome)
+              code (:code (ex-data e))]
+          (cond
+            (= -32022 code)
+            (if-let [negotiated (protocol/negotiate-version
+                                 (:supported (:data (ex-data e))))]
+              (case (:era negotiated)
+                :modern (if (= (:version negotiated) version)
+                          {:era :modern :version version}
+                          (recur (:version negotiated)))
+                :legacy {:era :legacy})
+              (throw (no-overlap-error (:supported (:data (ex-data e))))))
+            (protocol/modern-error? (ex-data e)) (throw e)
+            :else {:era :legacy :probe-error e}))))))
+
+(defn- probe-timed-out?
+  "True when the era probe gave up on a timeout rather than a server
+   answer — the era-ambiguous case that earns a recovery re-probe."
+  [e]
+  (some? (:timeout-ms (ex-data e))))
+
+(defn- establish-modern!
+  "The modern era-establish result, reusing the detection round trip when
+   it produced a DiscoverResult and running server/discover with the full
+   establish timeout otherwise."
+  [conn version discover]
+  {:era :modern
+   :version version
+   :handshake (if discover
+                (discover-handshake version discover)
+                (discover! conn version))})
+
+(defn- recover-modern!
+  "The era-ambiguous failure path: the probe timed out and the handshake
+   then failed with a JSON-RPC error (a modern server that was still
+   booting answers the unknown initialize with an error). Probe
+   server/discover once more with the full establish timeout — a modern
+   answer is adopted, anything else leaves the handshake failure to
+   surface. Returns the modern establish map or nil."
+  [conn]
+  (try
+    (let [version protocol/modern-protocol-version
+          result (discover-request! conn version protocol/initialize-timeout-ms)]
+      (when-let [negotiated (protocol/negotiate-version (:supportedVersions result))]
+        (when (= :modern (:era negotiated))
+          (establish-modern! conn (:version negotiated) result))))
+    (catch Exception _ nil)))
+
+(defn- establish-legacy!
+  "Run the handshake — the era fallback whenever the probe established no
+   modern server. A timed-out probe plus a handshake JSON-RPC error is
+   ambiguous, so the modern discovery gets one more full-timeout try
+   before the handshake error surfaces."
+  [conn probe-error]
+  (try
+    (let [initialized (initialize! conn)]
+      {:era :legacy
+       :version (:protocol-version initialized)
+       :handshake initialized})
+    (catch Exception e
+      (if (and (probe-timed-out? probe-error) (:code (ex-data e)))
+        (or (recover-modern! conn)
+            (throw e))
+        (throw e)))))
+
+(defn- establish-era!
+  "Resolve the conn's era before the catalog work. A :protocol-era hint
+   (the metadata cache, 3.7) skips detection; a stdio conn without one is
+   probed with server/discover and falls back to the handshake; every
+   other transport runs the handshake (the HTTP era path is 3.4).
+   Returns {:era :modern|:legacy :version rev :handshake {:protocol-version
+   :server-info :capabilities}}."
+  [conn {:keys [protocol-era]}]
+  (cond
+    (= :modern protocol-era)
+    (establish-modern! conn (or (protocol/era-version conn)
+                                protocol/modern-protocol-version)
+                       nil)
+
+    (= :legacy protocol-era)
+    (establish-legacy! conn nil)
+
+    (= :stdio (:transport conn))
+    (let [detected (detect-stdio-era! conn)]
+      (if (= :modern (:era detected))
+        (establish-modern! conn (:version detected) (:discover detected))
+        (establish-legacy! conn (:probe-error detected))))
+
+    :else (establish-legacy! conn nil)))
+
+(defn establish!
+  "Handshake (legacy) or server/discover (modern) + capability-gated
+   catalog discovery on an existing CONN. OPTS: :protocol-era — a
+   :modern/:legacy hint (the metadata cache) skips era detection.
+   Returns {:protocol-version :server-info :capabilities :tools :prompts
+   :resources :resource-templates} — no :conn."
+  ([conn] (establish! conn {}))
+  ([conn opts]
+   (let [{:keys [era version handshake]} (establish-era! conn opts)
+         {:keys [protocol-version server-info capabilities]} handshake
+         capabilities (or capabilities {})]
+     ;; the era is recorded before the catalog fetches so their requests
+     ;; carry the era _meta
+     (record-era! conn era version)
+     {:protocol-version protocol-version
+      :server-info server-info
+      :capabilities capabilities
+      :tools (if (:tools capabilities) (list-all-tools conn) [])
+      :prompts (if (:prompts capabilities) (list-all-prompts conn) [])
+      :resources (if (:resources capabilities) (list-all-resources conn) [])
+      :resource-templates (if (:resources capabilities)
+                            (list-all-resource-templates conn)
+                            [])})))
 
 (defn connect!
-  "Full connect for a DEFINITION: build the transport, handshake,
-   catalog discovery. OPTS: :auth-headers / :on-401 (HTTP transports,
-   §7.8 — :on-401 is called as (fn [response]) with the 401 response so
-   it can read the WWW-Authenticate challenge, and returns fresh
-   headers) / :on-notification (fn [conn msg] — server->client
-   notifications other than progress, e.g. list_changed).
+  "Full connect for a DEFINITION: build the transport, establish the
+   era (handshake or 2026-07-28 discovery), catalog discovery. OPTS:
+   :auth-headers / :on-401 (HTTP transports, §7.8 — :on-401 is called as
+   (fn [response]) with the 401 response so it can read the
+   WWW-Authenticate challenge, and returns fresh headers) /
+   :on-notification (fn [conn msg] — server->client notifications other
+   than progress, e.g. list_changed) / :protocol-era — a :modern or
+   :legacy cache hint that skips stdio era detection.
    Returns {:conn conn :tools [..] :prompts [..] :resources [..]
    :resource-templates [..] :protocol-version str :server-info map}.
    On any failure the transport is closed and the ex-info rethrown."
   [definition opts]
   (let [url (:url definition)
-        conn (assoc (if url
-                      (case (:http-transport definition)
-                        :sse (sse/connect! url (assoc opts :reconnect-fn initialize!))
-                        (http/connect! url opts))
-                      (stdio/connect! definition opts))
+        transport-conn (if url
+                         (case (:http-transport definition)
+                           :sse (sse/connect! url (assoc opts :reconnect-fn initialize!))
+                           (http/connect! url opts))
+                         (stdio/connect! definition opts))
+        conn (assoc transport-conn
                     ;; nil until negotiation records {:era :modern|:legacy
                     ;; :version rev}; every conn carries the slot so the
                     ;; transports' captured maps stay consistent after the
                     ;; :conn-ref repoint below
-                    :era (atom nil))]
+                    :era (atom nil)
+                    ;; the handshake/discovery records the negotiated
+                    ;; revision here (the HTTP transport brings its own)
+                    :protocol-version (or (:protocol-version transport-conn)
+                                          (atom nil)))]
     (try
       (when (and url (= :sse (:transport conn)))
         (sse/open-stream! conn))
-      (let [established (establish! conn)
+      (let [established (establish! conn opts)
             conn (assoc conn :capabilities (:capabilities established))]
         ;; the transport's internal callbacks captured the pre-assoc map;
         ;; repoint them at the conn the caller will store

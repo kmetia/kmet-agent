@@ -162,6 +162,173 @@
       (is (= {:resultType "input_required" :requestState "s"}
              (mcp/request! (era-conn :legacy) "tools/call" {}))))))
 
+;; ─── Era detection (stdio) ────────────────────────────────────────────────
+
+(defn- stdio-conn
+  "A stdio conn for establish! tests: the era and revision atoms the
+   transports carry in production."
+  []
+  {:transport :stdio
+   :era (atom nil)
+   :protocol-version (atom nil)})
+
+(defn- discover-result
+  "A minimal DiscoverResult."
+  [& [versions]]
+  {:supportedVersions (or versions ["2026-07-28"])
+   :capabilities {:tools {}}
+   :_meta {:io.modelcontextprotocol/serverInfo {:name "modern" :version "1"}}})
+
+(deftest establish!-detects-modern-with-one-discover
+  (let [methods (atom [])
+        conn (stdio-conn)]
+    (with-redefs [mcp/request!
+                  (fn [_ method _params & _]
+                    (swap! methods conj method)
+                    (case method
+                      "server/discover" (discover-result)
+                      "tools/list" {:tools [{:name "t"}]}
+                      (throw (ex-info "unexpected request" {:method method}))))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (let [est (mcp/establish! conn)]
+        (is (= "2026-07-28" (:protocol-version est)))
+        (is (= {:name "modern" :version "1"} (:server-info est)))
+        (is (= [{:name "t"}] (:tools est)))
+        (is (mcp/modern? conn))
+        (is (= "2026-07-28" (protocol/era-version conn)))
+        (is (= "2026-07-28" @(:protocol-version conn)))
+        (is (= ["server/discover" "tools/list"] @methods)
+            "detection's round trip is reused by establish!; no initialize")))))
+
+(deftest establish!-falls-back-to-initialize
+  (let [methods (atom [])
+        conn (stdio-conn)]
+    (with-redefs [mcp/request!
+                  (fn [_ method _params & _]
+                    (swap! methods conj method)
+                    (case method
+                      "server/discover"
+                      (throw (protocol/mcp-error "MCP error -32601: Method not found"
+                                                 {:code -32601}))
+                      "initialize" {:protocolVersion "2025-11-25" :capabilities {}}
+                      (throw (ex-info "unexpected request" {:method method}))))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (let [est (mcp/establish! conn)]
+        (is (= "2025-11-25" (:protocol-version est)))
+        (is (not (mcp/modern? conn)))
+        (is (= "2025-11-25" (protocol/era-version conn)))
+        (is (= "2025-11-25" @(:protocol-version conn)))
+        (is (= ["server/discover" "initialize"] @methods))))))
+
+(deftest establish!-dual-era-discover-falls-back
+  ;; a server that answers server/discover but advertises only legacy
+  ;; revisions is dual-era: run the handshake instead of erroring
+  (let [methods (atom [])]
+    (with-redefs [mcp/request!
+                  (fn [_ method _params & _]
+                    (swap! methods conj method)
+                    (case method
+                      "server/discover" (discover-result ["2025-11-25"])
+                      "initialize" {:protocolVersion "2025-11-25" :capabilities {}}))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (let [conn (stdio-conn)]
+        (is (= "2025-11-25" (:protocol-version (mcp/establish! conn))))
+        (is (not (mcp/modern? conn)))
+        (is (= ["server/discover" "initialize"] @methods))))))
+
+(deftest establish!-negotiates-32022
+  (testing "a legacy overlap in data.supported falls back to the handshake"
+    (with-redefs [mcp/request!
+                  (fn [_ method _params & _]
+                    (case method
+                      "server/discover"
+                      (throw (protocol/mcp-error "unsupported"
+                                                 {:code -32022
+                                                  :data {:supported ["2025-11-25"]}}))
+                      "initialize" {:protocolVersion "2025-11-25" :capabilities {}}))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (is (= "2025-11-25" (:protocol-version (mcp/establish! (stdio-conn)))))))
+  (testing "no overlap in data.supported errors"
+    (with-redefs [mcp/request!
+                  (fn [_ _method _params & _]
+                    (throw (protocol/mcp-error "unsupported"
+                                               {:code -32022
+                                                :data {:supported ["1999-01-01"]}})))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (is (thrown-with-msg? Exception #"no protocol revision"
+                            (mcp/establish! (stdio-conn))))))
+  (testing "a header/era rejection surfaces"
+    (with-redefs [mcp/request!
+                  (fn [_ _method _params & _]
+                    (throw (protocol/mcp-error "header mismatch" {:code -32020})))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (let [e (try (mcp/establish! (stdio-conn)) nil (catch Exception e e))]
+        (is (= -32020 (:code (ex-data e))))))))
+
+(deftest establish!-probe-timeout-falls-back
+  (with-redefs [mcp/request!
+                (fn [_ method _params & _]
+                  (case method
+                    "server/discover"
+                    (throw (protocol/mcp-error "timed out" {:timeout-ms 10
+                                                            :method method}))
+                    "initialize" {:protocolVersion "2025-11-25" :capabilities {}}))
+                mcp/notify! (fn [_ _ _] nil)]
+    (let [conn (stdio-conn)]
+      (is (= "2025-11-25" (:protocol-version (mcp/establish! conn))))
+      (is (not (mcp/modern? conn))))))
+
+(deftest establish!-recovers-a-slow-modern-server
+  ;; probe timeout, then initialize fails with an error: era-ambiguous, so
+  ;; discover gets one more try with the full timeout
+  (let [discovers (atom 0)
+        methods (atom [])]
+    (with-redefs [mcp/request!
+                  (fn [_ method _params & _]
+                    (swap! methods conj method)
+                    (case method
+                      "server/discover"
+                      (if (= 1 (swap! discovers inc))
+                        (throw (protocol/mcp-error "timed out" {:timeout-ms 10
+                                                                :method method}))
+                        (discover-result))
+                      "initialize"
+                      (throw (protocol/mcp-error "MCP error -32601: Method not found"
+                                                 {:code -32601}))
+                      "tools/list" {:tools []}))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (let [conn (stdio-conn)
+            est (mcp/establish! conn)]
+        (is (mcp/modern? conn))
+        (is (= "2026-07-28" (:protocol-version est)))
+        (is (= ["server/discover" "initialize" "server/discover" "tools/list"]
+               @methods)
+            "the recovery probe is the second discover")))))
+
+(deftest establish!-honors-the-era-hint
+  (testing ":legacy skips the probe"
+    (let [methods (atom [])]
+      (with-redefs [mcp/request!
+                    (fn [_ method _params & _]
+                      (swap! methods conj method)
+                      {:protocolVersion "2025-11-25" :capabilities {}})
+                    mcp/notify! (fn [_ _ _] nil)]
+        (is (= "2025-11-25"
+               (:protocol-version (mcp/establish! (stdio-conn) {:protocol-era :legacy}))))
+        (is (= ["initialize"] @methods)))))
+  (testing ":modern runs discover directly"
+    (let [methods (atom [])]
+      (with-redefs [mcp/request!
+                    (fn [_ method _params & _]
+                      (swap! methods conj method)
+                      (case method
+                        "server/discover" (discover-result)
+                        "tools/list" {:tools []}))
+                    mcp/notify! (fn [_ _ _] nil)]
+        (is (= "2026-07-28"
+               (:protocol-version (mcp/establish! (stdio-conn) {:protocol-era :modern}))))
+        (is (= ["server/discover" "tools/list"] @methods))))))
+
 ;; ─── establish! capability gating ─────────────────────────────────────────
 
 (defn- fake-conn [methods result-for]
@@ -264,7 +431,7 @@
   (let [conn-ref (atom nil)
         fake-conn {:transport :stdio :conn-ref conn-ref}]
     (with-redefs [stdio/connect! (fn [_ _] fake-conn)
-                  mcp/establish! (fn [_]
+                  mcp/establish! (fn [_ _]
                                    {:protocol-version "2025-11-25"
                                     :capabilities {:tools {}}})]
       (let [{:keys [conn]} (mcp/connect! {:command "x"} {})]

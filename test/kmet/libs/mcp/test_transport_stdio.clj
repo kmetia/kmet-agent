@@ -160,3 +160,66 @@
       (is (true? (:pingReplied (mcp/request! conn "tools/list" {}))))
       (finally
         (stdio/close! conn)))))
+
+;; ─── Era probe over a real subprocess ─────────────────────────────────────
+
+(def ^:private modern-server-code
+  ;; A minimal 2026-07-28 stdio server: every request must carry the era
+  ;; _meta (the probe forces it before the client knows the era), it answers
+  ;; server/discover, and reports how many discovers it has seen so the test
+  ;; can prove detection's round trip was reused. clojure.data.json is
+  ;; built into babashka.
+  (str "(require '[clojure.data.json :as json])"
+       "(defn send! [m] (println (json/write-str m)) (flush))"
+       "(def discovers (atom 0))"
+       "(defn meta-ok? [msg]"
+       "  (let [m (get-in msg [:params :_meta])]"
+       "    (and m"
+       "         (get m :io.modelcontextprotocol/protocolVersion)"
+       "         (contains? m :io.modelcontextprotocol/clientInfo)"
+       "         (contains? m :io.modelcontextprotocol/clientCapabilities))))"
+       "(loop []"
+       "  (when-let [line (read-line)]"
+       "    (let [msg (json/read-str line :key-fn keyword)"
+       "          id (:id msg)"
+       "          method (:method msg)]"
+       "      (cond"
+       "        (and id (not (meta-ok? msg)))"
+       "        (send! {:jsonrpc \"2.0\" :id id"
+       "                :error {:code -32602 :message \"missing era _meta\"}})"
+       "        (= \"server/discover\" method)"
+       "        (do (swap! discovers inc)"
+       "            (send! {:jsonrpc \"2.0\" :id id"
+       "                    :result {:resultType \"complete\""
+       "                             :supportedVersions [\"2026-07-28\"]"
+       "                             :capabilities {:tools {:listChanged true}}"
+       "                             :instructions \"modern fake\""
+       "                             :_meta {\"io.modelcontextprotocol/serverInfo\""
+       "                                     {:name \"modern-fake\" :version \"1\"}}}}))"
+       "        (= \"tools/list\" method)"
+       "        (send! {:jsonrpc \"2.0\" :id id"
+       "                :result {:resultType \"complete\""
+       "                         :tools [{:name (str \"discover-\" @discovers)}]}})"
+       "        (= \"tools/call\" method)"
+       "        (send! {:jsonrpc \"2.0\" :id id"
+       "                :result {:resultType \"complete\""
+       "                         :content [{:type \"text\" :text \"hi\"}]}})"
+       "        :else (send! {:jsonrpc \"2.0\" :id id"
+       "                      :error {:code -32601"
+       "                              :message (str \"Method not found: \" method)}})))"
+       "    (recur)))"))
+
+(deftest ^:slow connect!-establishes-a-modern-server
+  (let [{:keys [conn tools protocol-version server-info]}
+        (mcp/connect! {:command "bb" :args ["-e" modern-server-code]} {})]
+    (try
+      (is (mcp/modern? conn))
+      (is (= "2026-07-28" protocol-version))
+      (is (= "modern-fake" (:name server-info)))
+      (is (= [{:name "discover-1"}] tools)
+          "one discover: detection's round trip was reused by establish!")
+      (is (= "2026-07-28" @(:protocol-version conn)))
+      (is (= "hi" (:text (protocol/format-result
+                          (mcp/request! conn "tools/call" {:name "echo"})))))
+      (finally
+        (mcp/close! conn)))))
