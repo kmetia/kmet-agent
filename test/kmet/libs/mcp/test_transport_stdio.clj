@@ -5,6 +5,7 @@
   (:require [clojure.test :as t :refer [deftest is testing]]
             [kmet.libs.jsonrpc :as jrpc]
             [kmet.libs.mcp.client :as mcp]
+            [kmet.libs.mcp.protocol :as protocol]
             [kmet.libs.mcp.transport.stdio :as stdio]))
 
 (def ^:private ping-handler @#'stdio/ping-handler)
@@ -72,18 +73,37 @@
   ;; a dropped connection is not a cancellation: the timeout path must tell
   ;; the server to stop working on the request we stopped waiting for, on
   ;; the id jsonrpc allocated for it
-  (let [sent (atom [])
-        conn {:stderr-tail (atom [])}
-        e (with-redefs [jrpc/notify! (fn [_ method params] (swap! sent conj [method params]))]
-            (translate-exception conn
-                                 (ex-info "timed out" {:type :kmet.libs.jsonrpc/timeout
-                                                       :id 7 :method "tools/call"})
-                                 "tools/call" 300))]
-    (is (= [["notifications/cancelled" {:requestId 7
-                                        :reason "kmet: tools/call — timed out"}]]
-           @sent))
-    (is (= :mcp-error (:type (ex-data e))))
-    (is (= 300 (:timeout-ms (ex-data e))))))
+  (testing "a legacy conn sends the bare cancellation"
+    (let [sent (atom [])
+          conn {:stderr-tail (atom [])}
+          e (with-redefs [jrpc/notify! (fn [_ method params]
+                                         (swap! sent conj [method params]))]
+              (translate-exception conn
+                                   (ex-info "timed out" {:type :kmet.libs.jsonrpc/timeout
+                                                         :id 7 :method "tools/call"})
+                                   "tools/call" 300))]
+      (is (= [["notifications/cancelled" {:requestId 7
+                                          :reason "kmet: tools/call — timed out"}]]
+             @sent))
+      (is (= :mcp-error (:type (ex-data e))))
+      (is (= 300 (:timeout-ms (ex-data e))))))
+  (testing "a modern conn carries the era _meta (this path bypasses client/notify!)"
+    (let [sent (atom [])
+          conn {:stderr-tail (atom [])
+                :era (atom {:era :modern :version "2026-07-28"})}]
+      (with-redefs [jrpc/notify! (fn [_ method params]
+                                   (swap! sent conj [method params]))]
+        (translate-exception conn
+                             (ex-info "timed out" {:type :kmet.libs.jsonrpc/timeout
+                                                   :id 8 :method "tools/call"})
+                             "tools/call" 300))
+      (is (= [["notifications/cancelled"
+               {:requestId 8
+                :reason "kmet: tools/call — timed out"
+                :_meta {:io.modelcontextprotocol/protocolVersion "2026-07-28"
+                        :io.modelcontextprotocol/clientInfo protocol/client-info
+                        :io.modelcontextprotocol/clientCapabilities {}}}]]
+             @sent)))))
 
 (deftest dead-message-shape
   (is (= "MCP connect failed: process exited"

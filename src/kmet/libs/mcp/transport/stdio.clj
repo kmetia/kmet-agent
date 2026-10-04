@@ -63,10 +63,14 @@
   (case (:type (ex-data e))
     ::jrpc/timeout
     (do
-      ;; the request is abandoned — tell the server to stop working
+      ;; the request is abandoned — tell the server to stop working (this
+      ;; path bypasses client/notify!, so a modern conn merges the era
+      ;; _meta here itself)
       (try (jrpc/notify! conn "notifications/cancelled"
-                         {:requestId (:id (ex-data e))
-                          :reason (str "kmet: " method " — timed out")})
+                         (cond-> {:requestId (:id (ex-data e))
+                                  :reason (str "kmet: " method " — timed out")}
+                           (protocol/modern-conn? conn)
+                           (update :_meta merge (protocol/conn-meta conn))))
            (catch Exception _ nil))
       (protocol/mcp-error (str "MCP request timed out after " timeout-ms "ms: " method)
                           {:timeout-ms timeout-ms :method method}))

@@ -4,7 +4,8 @@
    expansion. Transports live in kmet.libs.mcp.transport.{stdio,http,sse};
    protocol constants in kmet.libs.mcp.protocol.
 
-   Public protocol: request! / notify! / close! / alive? / last-used.
+   Public protocol: request! / notify! / close! / alive? / last-used /
+   modern?.
    request! throws ex-info with :type :mcp-error on a JSON-RPC error,
    timeout, or transport death (§7.7 message patterns). Notifications
    received mid-request are dispatched — notifications/progress goes to
@@ -29,15 +30,63 @@
   [conn]
   (transport/last-used conn))
 
+(defn modern?
+  "True when the connection negotiated the 2026-07-28 era: no initialize
+   handshake, per-request _meta, resultType on every result."
+  [conn]
+  (protocol/modern-conn? conn))
+
+(defn- with-request-meta
+  "Merge the era's _meta into PARAMS for a modern CONN; a legacy conn's
+   params pass through untouched. Caller-supplied keys (a progress token)
+   win."
+  [conn params]
+  (if (protocol/modern-conn? conn)
+    (update (or params {}) :_meta #(merge (protocol/conn-meta conn) %))
+    params))
+
+(def ^:private mrtr-max-retries
+  "How many requestState-only MRTR retries request! sends before giving
+   up: a server that repeatedly demands input the client cannot provide
+   must fail loudly rather than loop."
+  2)
+
+(defn- input-required-error
+  "MRTR result the client cannot serve: the server asked for an
+   inputRequests entry (elicitation/sampling/roots, none of which kmet
+   declares in protocol/modern-request-meta)."
+  [result]
+  (protocol/mcp-error
+   (str "MCP server requested client input (MRTR): "
+        (str/join ", " (map (fn [[k v]] (str (name k) " → " (:method v)))
+                            (:inputRequests result))))
+   {:result-type :input-required
+    :input-requests (:inputRequests result)}))
+
+(defn- mrtr-exhausted-error
+  "MRTR result abandoned after mrtr-max-retries requestState-only rounds."
+  [method]
+  (protocol/mcp-error
+   (str "MCP server kept requesting input (MRTR) after "
+        mrtr-max-retries " retries: " method)
+   {:result-type :input-required
+    :retries mrtr-max-retries}))
+
 (defn request!
   "Send a JSON-RPC request and return its :result. OPTS:
    {:timeout-ms n (default 120000) :on-notification (fn [notification])
    — receives notifications/progress events arriving mid-request
    (streaming tool-call progress)}. Throws ex-info on JSON-RPC error,
-   timeout, or transport death (§7.7)."
+   timeout, or transport death (§7.7).
+
+   On a modern conn the era _meta is merged into params, and an
+   input_required result (MRTR) is retried with its requestState echoed
+   while the server asked for no client input; an inputRequests entry
+   throws — kmet declares no elicitation/sampling/roots capabilities."
   [conn method params & [{:keys [timeout-ms on-notification]}]]
   (let [timeout (or timeout-ms protocol/default-request-timeout-ms)
-        dispatch (fn []
+        modern? (protocol/modern-conn? conn)
+        dispatch (fn [params]
                    (case (:transport conn)
                      :stdio (stdio/request! conn method params timeout on-notification)
                      :streamable-http (http/request! conn method params timeout on-notification)
@@ -50,13 +99,24 @@
     ;; list_changed resync queues behind an in-flight tool call instead of
     ;; racing it (streamable-http answers each request on its own response
     ;; body and stays concurrent).
-    (if (= :streamable-http (:transport conn))
-      (dispatch)
-      ;; clj-kondo flags the map lookup as locally created; the lock object
-      ;; is created once per conn (stdio/http/sse) and shared by
-      ;; every caller of that conn
-      #_{:clj-kondo/ignore [:locking-suspicious-lock]}
-      (locking (:req-lock conn) (dispatch)))))
+    (loop [params (with-request-meta conn params)
+           retries 0]
+      (let [result (if (= :streamable-http (:transport conn))
+                     (dispatch params)
+                     ;; clj-kondo flags the map lookup as locally created;
+                     ;; the lock object is created once per conn
+                     ;; (stdio/http/sse) and shared by every caller of that
+                     ;; conn
+                     #_{:clj-kondo/ignore [:locking-suspicious-lock]}
+                     (locking (:req-lock conn) (dispatch params)))]
+        (if (and modern? (= "input_required" (protocol/result-type result)))
+          (cond
+            (seq (:inputRequests result)) (throw (input-required-error result))
+            (< retries mrtr-max-retries)
+            (recur (assoc params :requestState (:requestState result))
+                   (inc retries))
+            :else (throw (mrtr-exhausted-error method)))
+          result)))))
 
 (defn- send-async!
   "Deliver a message that expects no answer (a notification)."
@@ -66,9 +126,11 @@
     (:streamable-http :sse) (http/send-async! conn msg)))
 
 (defn notify!
-  "Send a JSON-RPC notification (no response expected)."
+  "Send a JSON-RPC notification (no response expected). A modern conn
+   carries the era _meta in its params."
   [conn method params]
-  (send-async! conn {:jsonrpc "2.0" :method method :params params}))
+  (send-async! conn {:jsonrpc "2.0" :method method
+                     :params (with-request-meta conn params)}))
 
 (defn close!
   "Close a connection: kill the stdio process tree, abort the active SSE
@@ -262,11 +324,16 @@
    On any failure the transport is closed and the ex-info rethrown."
   [definition opts]
   (let [url (:url definition)
-        conn (if url
-               (case (:http-transport definition)
-                 :sse (sse/connect! url (assoc opts :reconnect-fn initialize!))
-                 (http/connect! url opts))
-               (stdio/connect! definition opts))]
+        conn (assoc (if url
+                      (case (:http-transport definition)
+                        :sse (sse/connect! url (assoc opts :reconnect-fn initialize!))
+                        (http/connect! url opts))
+                      (stdio/connect! definition opts))
+                    ;; nil until negotiation records {:era :modern|:legacy
+                    ;; :version rev}; every conn carries the slot so the
+                    ;; transports' captured maps stay consistent after the
+                    ;; :conn-ref repoint below
+                    :era (atom nil))]
     (try
       (when (and url (= :sse (:transport conn)))
         (sse/open-stream! conn))

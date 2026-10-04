@@ -3,7 +3,7 @@
 Status: draft. Order is deliberate: **Phase 0 (names consolidation + name
 assignment fix) → Phase 1 (extract `kmet.libs.mcp`) → Phase 2 (auth) →
 Phase 3 (2026-07-28 protocol work) → Phase 4 (optional hygiene)** — Phases 0,
-1 and 2 are landed, and Phase 3 is in progress (3.1 landed; 3.2–3.8 are
+1 and 2 are landed, and Phase 3 is in progress (3.1–3.2 landed; 3.3–3.8 are
 planned in full below — this section is their plan, there is no separate
 plan file); phase 4 lands after it. The protocol revision lands before the
 hygiene pass so the client is extracted and auth settled first.
@@ -441,7 +441,7 @@ baseline):
 
 ## Phase 3 — 2026-07-28 protocol work (the end goal)
 
-Status: **in progress** — 3.1 landed; 3.2–3.8 below, in order; each leaves
+Status: **in progress** — 3.1–3.2 landed; 3.3–3.8 below, in order; each leaves
 `scripts/validate-all.bb` and the repo gates green. Depends on Phase 1's
 era-neutral seam and Phase 2's auth plumbing (both landed).
 
@@ -584,6 +584,17 @@ notifications, none on a legacy conn; MRTR — `requestState`-only retry
 bounded, `inputRequests` refusal; `complete`/absent passthrough) with the
 transports' `request!` redefined as in Phase 1. Gates: `bb test` (lib
 namespaces), lint/format.
+
+Status: **landed** — `protocol.clj` owns the modern revision list,
+`probe-timeout-ms`, the `_meta` key/map builders and the pure negotiation
+helpers (`modern-conn?`, `conn-meta`, `negotiate-version`, `result-type`,
+`modern-error-codes`); every conn carries an `:era` atom, added by
+`connect!` and still nil on every path; `request!`/`notify!` merge the era
+`_meta`, and MRTR retries a `requestState`-only `input_required` twice
+before erroring while refusing `inputRequests` with the keys and methods
+named; the stdio timeout cancellation merges the `_meta` itself (it
+bypasses `client/notify!`). Behavior stays neutral — nothing records an
+era yet — and the eight-script extension suite plus `bb test` are green.
 
 ### 3.3. stdio probe + modern establish
 
@@ -912,7 +923,7 @@ after Phase 3 — hygiene must not block or precede the protocol work.
 - [x] 2.5 2026 hardening: issuer-keyed store + migration (SEP-2352), RFC 9207 `iss`, SEP-837 `application_type`
 - [x] 2.6 gates: `validate-oauth.bb` + `validate-client.bb` (401 retry), `bb test`, jolt, lint/format, `check-bundled-extensions` (test-ext clean apart from the pre-existing lsp-adapter-dependent overlay smoke)
 - [x] 3.1 fakes modern mode + `validate-protocol.bb` harness (baseline)
-- [ ] 3.2 era core: meta helpers, conn `:era`, `_meta` decoration, MRTR (`requestState`-only retry, `inputRequests` refusal) (behavior-neutral)
+- [x] 3.2 era core: meta helpers, conn `:era`, `_meta` decoration, MRTR (`requestState`-only retry, `inputRequests` refusal) (behavior-neutral)
 - [ ] 3.3 stdio: `server/discover` probe + modern establish + legacy fallback
 - [ ] 3.4 streamable HTTP: routing headers, 400-body detection, `-32022` negotiation, no session
 - [ ] 3.5 `subscriptions/listen`: lib listen + HTTP long-lived stream + adapter wiring
