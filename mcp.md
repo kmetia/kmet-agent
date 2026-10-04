@@ -3,10 +3,10 @@
 Status: draft. Order is deliberate: **Phase 0 (names consolidation + name
 assignment fix) → Phase 1 (extract `kmet.libs.mcp`) → Phase 2 (auth) →
 Phase 3 (2026-07-28 protocol work) → Phase 4 (optional hygiene)** — Phases 0,
-1 and 2 are landed; phase 3 is planned in full below (this section is its
-plan — there is no separate plan file), and phase 4 lands after it. The
-protocol revision lands before the hygiene pass so the client is extracted
-and auth settled first.
+1 and 2 are landed, and Phase 3 is in progress (3.1 landed; 3.2–3.8 are
+planned in full below — this section is their plan, there is no separate
+plan file); phase 4 lands after it. The protocol revision lands before the
+hygiene pass so the client is extracted and auth settled first.
 
 Scope: `extensions/mcp-adapter/` and the shared `kmet.libs` layer. Phase 0 and
 Phase 1 change no protocol behavior; they move code so the stateless revision
@@ -74,8 +74,8 @@ Constraints this plan must respect:
 
 ## Phase 0 — names consolidation + assignment fix (extension-local)
 
-Status: **landed** (0.1, 0.2, 0.3) — `validate-all.bb` runs the seven-script
-suite (names, client, config, oauth, panel, script, e2e), all green.
+Status: **landed** (0.1, 0.2, 0.3) — `validate-all.bb` runs the eight-script
+suite (names, client, config, oauth, panel, script, e2e, protocol), all green.
 
 Goal: one source of truth for tool naming, and **display == registered name**
 for every collision case. Today `core.clj` (registration) and `tool_proxy.clj`
@@ -441,7 +441,7 @@ baseline):
 
 ## Phase 3 — 2026-07-28 protocol work (the end goal)
 
-Status: **planned** — landings 3.1–3.8 below, in order; each leaves
+Status: **in progress** — 3.1 landed; 3.2–3.8 below, in order; each leaves
 `scripts/validate-all.bb` and the repo gates green. Depends on Phase 1's
 era-neutral seam and Phase 2's auth plumbing (both landed).
 
@@ -515,6 +515,15 @@ only, so it is frozen out of every landing below.
   refusing it (a legacy handshake must never select a modern revision).
 - No lib/adapter changes. Gates: `bb lint-changed`,
   `bb format-check-changed` (or `bb format-changed`); `validate-all.bb`.
+
+Status: **landed** — both fakes speak modern additively (stdio `--era
+modern` / `KMET_FAKE_ERA=modern`, HTTP `?era=modern`), and
+`validate-protocol.bb` is the eighth script in `validate-all.bb`. It pins
+the modern wire (discover result, `-32022` data, header rejection with
+`400` + `-32020`, `404` for unimplemented methods, `405` GET/DELETE, no
+session minting, ack-first listen with `subscriptionId` stamping and
+subscription-scoped list_changed, Base64 `Mcp-Name`) and proves the legacy
+shapes untouched. Baseline captured: eight scripts, zero failures.
 
 ### 3.2. Era core in `kmet.libs.mcp` (behavior-neutral)
 
@@ -902,7 +911,7 @@ after Phase 3 — hygiene must not block or precede the protocol work.
 - [x] 2.4 flow split: lib step functions, host interaction stays in the extension
 - [x] 2.5 2026 hardening: issuer-keyed store + migration (SEP-2352), RFC 9207 `iss`, SEP-837 `application_type`
 - [x] 2.6 gates: `validate-oauth.bb` + `validate-client.bb` (401 retry), `bb test`, jolt, lint/format, `check-bundled-extensions` (test-ext clean apart from the pre-existing lsp-adapter-dependent overlay smoke)
-- [ ] 3.1 fakes modern mode + `validate-protocol.bb` harness (baseline)
+- [x] 3.1 fakes modern mode + `validate-protocol.bb` harness (baseline)
 - [ ] 3.2 era core: meta helpers, conn `:era`, `_meta` decoration, MRTR (`requestState`-only retry, `inputRequests` refusal) (behavior-neutral)
 - [ ] 3.3 stdio: `server/discover` probe + modern establish + legacy fallback
 - [ ] 3.4 streamable HTTP: routing headers, 400-body detection, `-32022` negotiation, no session

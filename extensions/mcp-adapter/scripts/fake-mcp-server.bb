@@ -9,7 +9,15 @@
 ;; that adds a tool, notifications/cancelled logging, and clean exit on
 ;; SIGTERM/EOF.
 ;;
-;; Usage: bb fake-mcp-server.bb  (speaks JSON-RPC over stdin/stdout)
+;; Additive modern mode (`--era modern` / `--era=modern` /
+;; KMET_FAKE_ERA=modern, revision 2026-07-28): server/discover, per-request
+;; _meta enforcement, resultType "complete" on every result,
+;; subscriptions/listen (ack-first, subscriptionId-stamped notifications),
+;; and list_changed delivered to subscriptions from the add-tool call.
+;; Legacy behavior is unchanged.
+;;
+;; Usage: bb fake-mcp-server.bb [--era modern]  (speaks JSON-RPC over
+;; stdin/stdout)
 ;; Locate the kmet source tree (the fakes run as bare bb children with no
 ;; -cp) so JSON can go through kmet.libs.json like everywhere else.
 (require '[babashka.fs :as fs]
@@ -19,6 +27,26 @@
     (bcp/add-classpath src)))
 (require '[kmet.libs.json :as json]
          '[clojure.string :as str])
+
+;; ─── era ─────────────────────────────────────────────────────────────────
+;; legacy (default) — the initialize handshake, unchanged; modern
+;; (`--era modern` / `--era=modern` / KMET_FAKE_ERA=modern) — revision
+;; 2026-07-28: no handshake, per-request _meta, resultType on every result,
+;; subscriptions/listen with an ack-first stream.
+
+(def modern-version "2026-07-28")
+(def modern-supported-versions [modern-version])
+
+(def era
+  (let [args (vec (or *command-line-args* []))
+        i (first (keep-indexed (fn [i a] (when (= a "--era") (inc i))) args))
+        inline (some #(when (str/starts-with? % "--era=") (subs % 6)) args)]
+    (or inline
+        (when (and i (< i (count args))) (nth args i))
+        (System/getenv "KMET_FAKE_ERA")
+        "legacy")))
+
+(def modern? (= era "modern"))
 
 (def tools
   [{:name "echo" :description "Echo the message back"
@@ -92,10 +120,53 @@
   (flush))
 
 (defn- send-result! [id result]
-  (send! {:jsonrpc "2.0" :id id :result result}))
+  (send! {:jsonrpc "2.0" :id id
+          :result (cond-> result modern? (assoc :resultType "complete"))}))
 
-(defn- send-error! [id code message]
-  (send! {:jsonrpc "2.0" :id id :error {:code code :message message}}))
+(defn- send-error!
+  ([id code message] (send-error! id code message nil))
+  ([id code message data]
+   (send! {:jsonrpc "2.0" :id id
+           :error (cond-> {:code code :message message} data (assoc :data data))})))
+
+(defn- modern-meta-error
+  "Validation error for a modern (2026-07-28) request, or nil: _meta with
+   the version, clientInfo and clientCapabilities is mandatory; a version
+   outside the supported list is -32022 with the spec's data shape."
+  [msg]
+  (let [meta (get-in msg [:params :_meta])
+        version (get meta :io.modelcontextprotocol/protocolVersion)]
+    (cond
+      (nil? meta) {:code -32602 :message "Missing required _meta"}
+      (nil? version)
+      {:code -32602
+       :message "Missing io.modelcontextprotocol/protocolVersion in _meta"}
+      (not (some #{version} modern-supported-versions))
+      {:code -32022 :message "Unsupported protocol version"
+       :data {:supported modern-supported-versions :requested version}}
+      (not (contains? meta :io.modelcontextprotocol/clientInfo))
+      {:code -32602 :message "Missing io.modelcontextprotocol/clientInfo in _meta"}
+      (not (contains? meta :io.modelcontextprotocol/clientCapabilities))
+      {:code -32602
+       :message "Missing io.modelcontextprotocol/clientCapabilities in _meta"})))
+
+;; active subscriptions: listen request id → agreed filter
+(def subscriptions (atom {}))
+
+(defn- notify-subscriptions!
+  "Send METHOD to every subscription that agreed to toolsListChanged,
+   stamped with the subscription id (a modern server never broadcasts a
+   list_changed notification)."
+  [method]
+  (doseq [[sid filter] @subscriptions
+          :when (:toolsListChanged filter)]
+    (send! {:jsonrpc "2.0" :method method
+            :params {:_meta {:io.modelcontextprotocol/subscriptionId sid}}})))
+
+(defn- with-cache-fields
+  "ttlMs/cacheScope on modern list results (spec, caching)."
+  [result]
+  (cond-> result modern? (assoc :ttlMs 60000 :cacheScope "private")))
 
 (defn- handle-call [id params]
   (let [name (:name params)
@@ -133,13 +204,17 @@
       ;; add a tool and tell the client its catalog changed
       "add-tool"
       (do (reset! extra-tool? true)
-          (send! {:jsonrpc "2.0" :method "notifications/tools/list_changed"})
+          (if modern?
+            (notify-subscriptions! "notifications/tools/list_changed")
+            (send! {:jsonrpc "2.0" :method "notifications/tools/list_changed"}))
           (send-result! id {:content [{:type "text" :text "added echo2"}]}))
       ;; three notifications in a row, then every tools/list re-notifies
       "storm"
       (do (reset! storm? true)
           (dotimes [_ 3]
-            (send! {:jsonrpc "2.0" :method "notifications/tools/list_changed"}))
+            (if modern?
+              (notify-subscriptions! "notifications/tools/list_changed")
+              (send! {:jsonrpc "2.0" :method "notifications/tools/list_changed"})))
           (send-result! id {:content [{:type "text" :text "storming"}]}))
       "list-count"
       (send-result! id {:content [{:type "text" :text (str @list-calls)}]})
@@ -159,85 +234,130 @@
                                   {:result (:result msg)}))
 
         (= method "notifications/cancelled")
-        (log! (json/generate-string (select-keys msg [:method :params])))
+        (do (log! (json/generate-string (select-keys msg [:method :params])))
+            (swap! subscriptions dissoc (get-in msg [:params :requestId])))
 
         :else
-        (case method
-          "initialize"
-          (do (send-result! id {:protocolVersion (:protocolVersion (:params msg))
-                                :capabilities {:tools {:listChanged true}
-                                               :prompts {:listChanged false}
-                                               :resources {:listChanged false}}
-                                :serverInfo {:name "fake-mcp-server" :version "1.0.0"}})
-              (send! {:jsonrpc "2.0" :method "notifications/initialized" :params {}}))
-          "notifications/initialized" nil
-          "tools/list"
-          (let [_ (swap! list-calls inc)
-                _ (when @storm?
-                    (send! {:jsonrpc "2.0" :method "notifications/tools/list_changed"}))
-                cursor (:cursor (:params msg))
-                all (cond-> tools @extra-tool? (conj {:name "echo2"
-                                                      :description "Second echo"
-                                                      :inputSchema {:type "object"
-                                                                    :properties {}
-                                                                    :required []}}))
-                page1 (subvec (vec all) 0 2)
-                page2 (subvec (vec all) 2)]
-            (if (nil? cursor)
-              (send-result! id {:tools page1 :nextCursor "p2"})
-              (send-result! id {:tools page2})))
+        (let [meta-error (when (and modern? id) (modern-meta-error msg))]
+          (cond
+            ;; a modern-only server rejects the legacy handshake, naming the
+            ;; versions it speaks (spec, Versioning: Backward Compatibility)
+            (and modern? (= method "initialize"))
+            (send-error! id -32601
+                         (str "Method not found: initialize (this server speaks only "
+                              (str/join ", " modern-supported-versions) ")")
+                         {:supported modern-supported-versions})
+
+            meta-error
+            (let [{:keys [code message data]} meta-error]
+              (send-error! id code message data))
+
+            :else
+            (case method
+              "initialize"
+              (do (send-result! id {:protocolVersion (:protocolVersion (:params msg))
+                                    :capabilities {:tools {:listChanged true}
+                                                   :prompts {:listChanged false}
+                                                   :resources {:listChanged false}}
+                                    :serverInfo {:name "fake-mcp-server" :version "1.0.0"}})
+                  (send! {:jsonrpc "2.0" :method "notifications/initialized" :params {}}))
+          ;; modern discovery (spec, server/discover)
+              "server/discover"
+              (if modern?
+                (send-result! id
+                              {:supportedVersions modern-supported-versions
+                               :capabilities {:tools {:listChanged true}
+                                              :prompts {:listChanged true}
+                                              :resources {}}
+                               :instructions "Fake modern MCP server (kmet validation)"
+                               :ttlMs 3600000
+                               :cacheScope "public"
+                               :_meta {:io.modelcontextprotocol/serverInfo
+                                       {:name "fake-mcp-server" :version "1.0.0"}}})
+                (send-error! id -32601 (str "Method not found: " method)))
+          ;; one long-lived subscription per request id; the ack is the first
+          ;; frame and reflects the subset this server honors
+              "subscriptions/listen"
+              (if modern?
+                (let [filter (or (:notifications (:params msg)) {})
+                      agreed (select-keys filter [:toolsListChanged])]
+                  (swap! subscriptions assoc id agreed)
+                  (send! {:jsonrpc "2.0"
+                          :method "notifications/subscriptions/acknowledged"
+                          :params {:_meta {:io.modelcontextprotocol/subscriptionId id}
+                                   :notifications agreed}}))
+                (send-error! id -32601 (str "Method not found: " method)))
+              "notifications/initialized" nil
+              "tools/list"
+              (let [_ (swap! list-calls inc)
+                    _ (when @storm?
+                        (if modern?
+                          (notify-subscriptions! "notifications/tools/list_changed")
+                          (send! {:jsonrpc "2.0" :method "notifications/tools/list_changed"})))
+                    cursor (:cursor (:params msg))
+                    all (cond-> tools @extra-tool? (conj {:name "echo2"
+                                                          :description "Second echo"
+                                                          :inputSchema {:type "object"
+                                                                        :properties {}
+                                                                        :required []}}))
+                    page1 (subvec (vec all) 0 2)
+                    page2 (subvec (vec all) 2)]
+                (if (nil? cursor)
+                  (send-result! id (with-cache-fields {:tools page1 :nextCursor "p2"}))
+                  (send-result! id (with-cache-fields {:tools page2}))))
         ;; who-asks blocks while it waits for the client's answers, so it
         ;; runs off the read loop (the loop keeps reading responses); the
         ;; thread is returned so the loop can join it before exiting
-          "tools/call"
-          (if (= "who-asks" (get-in msg [:params :name]))
+              "tools/call"
+              (if (= "who-asks" (get-in msg [:params :name]))
           ;; the answer map is cleared here, before the thread sends its
           ;; requests — clearing it inside the thread would race the read
           ;; loop, which may already have recorded the answers
-            (do (reset! answers {})
-                (doto (Thread. (fn []
-                                 (try (handle-call id (:params msg))
-                                      (catch Exception e
-                                        (send-error! id -32603 (ex-message e))))))
-                  (.start)))
-            (handle-call id (:params msg)))
-          "prompts/list" (send-result! id {:prompts prompts})
-          "prompts/get"
-          (let [name (:name (:params msg))
-                args (or (:arguments (:params msg)) {})]
-            (case name
-              "brief" (send-result! id {:description "Summarize a topic briefly"
-                                        :messages [{:role "user"
-                                                    :content {:type "text"
-                                                              :text (str "Briefly summarize: " (:topic args))}}]})
-              "review" (send-result! id {:description "Review code"
-                                         :messages [{:role "user"
-                                                     :content {:type "text"
-                                                               :text (str "Review " (:path args))}}
-                                                    {:role "assistant"
-                                                     :content {:type "text"
-                                                               :text (str "Focus: " (or (:focus args) "overall"))}}]})
-              (send-error! id -32602 (str "Unknown prompt: " name))))
-          "resources/list" (send-result! id {:resources resources})
-          "resources/templates/list" (send-result! id {:resourceTemplates resource-templates})
-          "resources/read"
-          (let [uri (:uri (:params msg))]
-            (case uri
-              "file:///README.md" (send-result! id {:contents [{:type "text"
-                                                                :uri uri
-                                                                :text "# Fake README\ncontent"}]})
-              "file:///schema.json" (send-result! id {:contents [{:type "text"
-                                                                  :uri uri
-                                                                  :text "{\"type\": \"object\"}"}]})
+                (do (reset! answers {})
+                    (doto (Thread. (fn []
+                                     (try (handle-call id (:params msg))
+                                          (catch Exception e
+                                            (send-error! id -32603 (ex-message e))))))
+                      (.start)))
+                (handle-call id (:params msg)))
+              "prompts/list" (send-result! id (with-cache-fields {:prompts prompts}))
+              "prompts/get"
+              (let [name (:name (:params msg))
+                    args (or (:arguments (:params msg)) {})]
+                (case name
+                  "brief" (send-result! id {:description "Summarize a topic briefly"
+                                            :messages [{:role "user"
+                                                        :content {:type "text"
+                                                                  :text (str "Briefly summarize: " (:topic args))}}]})
+                  "review" (send-result! id {:description "Review code"
+                                             :messages [{:role "user"
+                                                         :content {:type "text"
+                                                                   :text (str "Review " (:path args))}}
+                                                        {:role "assistant"
+                                                         :content {:type "text"
+                                                                   :text (str "Focus: " (or (:focus args) "overall"))}}]})
+                  (send-error! id -32602 (str "Unknown prompt: " name))))
+              "resources/list" (send-result! id (with-cache-fields {:resources resources}))
+              "resources/templates/list"
+              (send-result! id (with-cache-fields {:resourceTemplates resource-templates}))
+              "resources/read"
+              (let [uri (:uri (:params msg))]
+                (case uri
+                  "file:///README.md" (send-result! id {:contents [{:type "text"
+                                                                    :uri uri
+                                                                    :text "# Fake README\ncontent"}]})
+                  "file:///schema.json" (send-result! id {:contents [{:type "text"
+                                                                      :uri uri
+                                                                      :text "{\"type\": \"object\"}"}]})
             ;; a template read arrives already expanded by the client
-              "file:///src/main.clj" (send-result! id {:contents [{:type "text"
-                                                                   :uri uri
-                                                                   :text "(ns main)"}]})
-              "file:///a b.txt" (send-result! id {:contents [{:type "text"
-                                                              :uri uri
-                                                              :text "spaced path"}]})
-              (send-error! id -32602 (str "Unknown resource: " uri))))
-          (send-error! id -32601 (str "Method not found: " method)))))))
+                  "file:///src/main.clj" (send-result! id {:contents [{:type "text"
+                                                                       :uri uri
+                                                                       :text "(ns main)"}]})
+                  "file:///a b.txt" (send-result! id {:contents [{:type "text"
+                                                                  :uri uri
+                                                                  :text "spaced path"}]})
+                  (send-error! id -32602 (str "Unknown resource: " uri))))
+              (send-error! id -32601 (str "Method not found: " method)))))))))
 
 ;; clean exit on EOF (client killed the pipe) — call threads are joined
 ;; first so a handler still waiting on the client's answers gets its

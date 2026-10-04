@@ -1,5 +1,6 @@
 # validation-script artifacts (written into the cwd)
 .mcp-fake-*.out
+.mcp-protocol-*.out
 .mcp-oauth-test-*.edn
 .mcp-*.edn
 .e2e-*

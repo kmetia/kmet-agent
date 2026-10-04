@@ -307,15 +307,20 @@ configure. Only add servers you trust.
 
 ## Development
 
-The `scripts/` directory carries fake MCP/OAuth servers and six
-validation scripts (client transports, config/extension load, OAuth flow,
-McpPanel/TextDialog/prompt components, scripted-MCP end-to-end) plus an
-end-to-end smoke of the proxy-tool surface (`e2e.bb`, headless — see plan
-§15.22):
+The `scripts/` directory carries fake MCP/OAuth servers (legacy and
+2026-07-28 modern modes — see mcp.md §3.1) and seven validation scripts
+(names assignment, protocol wire shape, client transports,
+config/extension load, OAuth flow, McpPanel/TextDialog/prompt components,
+scripted-MCP end-to-end) plus an end-to-end smoke of the proxy-tool surface
+(`e2e.bb`, headless — see plan §15.22). `validate-all.bb` runs the whole
+set:
 
 ```bash
 # `bb -cp` replaces the classpath; org.clojure/data.json is bb-bundled
 # (1.13.224+), so the tree's src roots are all the classpath needs.
+bb scripts/validate-all.bb
+bb -cp ../../src:src scripts/validate-names.bb
+bb -cp ../../src:src scripts/validate-protocol.bb scripts/fake-mcp-server.bb scripts/fake-http-mcp-server.bb
 bb -cp ../../src:src scripts/validate-client.bb scripts/fake-mcp-server.bb scripts/fake-http-mcp-server.bb
 bb -cp ../../src:src scripts/validate-config.bb
 bb -cp ../../src:src scripts/validate-panel.bb

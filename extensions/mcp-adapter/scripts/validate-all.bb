@@ -15,7 +15,8 @@
    ["validate-oauth.bb" "scripts/fake-oauth-server.bb"]
    ["validate-panel.bb"]
    ["validate-script.bb" "scripts/fake-mcp-server.bb"]
-   ["e2e.bb" "scripts/fake-mcp-server.bb"]])
+   ["e2e.bb" "scripts/fake-mcp-server.bb"]
+   ["validate-protocol.bb" "scripts/fake-mcp-server.bb" "scripts/fake-http-mcp-server.bb"]])
 
 (def failures (atom 0))
 
