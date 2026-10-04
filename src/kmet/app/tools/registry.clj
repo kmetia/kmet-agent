@@ -10,17 +10,6 @@
 
 (declare built-in-tools)
 
-;; ─── Registry generation ────────────────────────────────────────────────────
-
-(defonce ^:private registry-generation (atom 0))
-
-(defn tool-registry-generation
-  "Monotonic counter bumped on every registry mutation (register-tool!,
-   unregister-tool!). The run_code sandbox's base-context cache keys on it, so
-   a changed registry can never be served a stale sandbox surface."
-  []
-  @registry-generation)
-
 ;; ─── Built-in tools ─────────────────────────────────────────────────────────
 
 (def ^:private base-tools
@@ -88,14 +77,12 @@
   "Register a custom tool after normalizing its provider-facing schema."
   [tool]
   (let [tool (tool/normalize-tool-definition tool)]
-    (swap! custom-tools assoc (:name tool) tool)
-    (swap! registry-generation inc)))
+    (swap! custom-tools assoc (:name tool) tool)))
 
 (defn unregister-tool!
   "Remove a custom tool."
   [name]
-  (swap! custom-tools dissoc name)
-  (swap! registry-generation inc))
+  (swap! custom-tools dissoc name))
 
 (defn get-all-tools
   "Get all available tools (built-in + custom). A custom tool that reuses a
@@ -124,18 +111,15 @@
    :execute, optional :streams?/:contextual?/:prepare-arguments).
    Contributed tools join the run_code sandbox's surface only; the registry
    shadows a colliding name. Re-registering under the same ID replaces the
-   source and bumps the generation, so cached run_code bases rebuild against
-   the new catalog."
+   source; the next run_code call resolves the new catalog."
   [id tools-fn]
   (swap! tool-sources assoc id tools-fn)
-  (swap! registry-generation inc)
   nil)
 
 (defn unregister-tool-source!
   "Remove a contributed tool source by ID."
   [id]
   (swap! tool-sources dissoc id)
-  (swap! registry-generation inc)
   nil)
 
 (defn get-contributed-tools
@@ -234,5 +218,4 @@
          (run-code/create-tool {:get-all-tools get-all-tools
                                 :get-contributed-tools get-contributed-tools
                                 :select-tools select-tools
-                                :execute-tool execute-tool
-                                :generation-fn tool-registry-generation})))
+                                :execute-tool execute-tool})))

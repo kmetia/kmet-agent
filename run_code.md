@@ -23,9 +23,9 @@ still used rarely, so the bash find/read workload has not moved yet.
 
 A follow-up efficiency pass is also landed: `sandbox/emit` provides a
 single compact result path, `tools/call-many`/`tools/await-all` shorten
-ordered fan-out, per-call output budgets default to 16 KiB, capture budgets
-default to 1 MiB and are configurable up to 16 MiB, and the provider-facing
-description/guidelines are substantially shorter.
+ordered fan-out, the result byte budget defaults to 16 KiB (tunable per
+call, capped at 50 KiB), the capture budget is fixed at 1 MiB, and the
+provider-facing description/guidelines are substantially shorter.
 
 **Native Jolt evaluator now unblocked.** `jolt.loader/eval-in` landed
 upstream after v0.8.14, closing the gap the loader investigation below
@@ -278,10 +278,11 @@ so T1–T3 don't re-litigate it:
 
 Loader facts: kmet.loader uses **SCI on babashka** and the **native
 `jolt.loader` on jolt** (`.jolt` file; backend selected in
-`kmet.app.extensions`). The run_code tool already builds its per-call context
-through `kmet.loader.sci-loader` (`:base` fork + `:interrupt-fn`) on both
-hosts and then evaluates with `sci/eval-string*` directly; kmet pins SCI in
-`jolt/deps.edn`, so the same evaluator is available on jolt. Whether the eval
+`kmet.app.extensions`). The run_code tool builds a fresh per-call `sci/init`
+context (the T1 original forked a cached base through
+`kmet.loader.sci-loader`) and evaluates with `sci/eval-string*` directly;
+kmet pins SCI in `jolt/deps.edn`, so the same evaluator is available on
+jolt. Whether the eval
 itself could move behind `kmet.loader` is investigated next.
 
 ### Scripts on kmet.loader (feasibility, verified)
@@ -437,8 +438,9 @@ comes first.
   - **Core: extension-contributed tool sources.**
     `kmet.app.tools.registry/register-tool-source!` /
     `unregister-tool-source!` (id → a 0-arg fn returning {name → tool map})
-    and `get-contributed-tools`; registration bumps the generation, so
-    cached sandbox bases rebuild. `run-code/create-tool` gained the
+    and `get-contributed-tools`; the sandbox resolves the surface per call,
+    so the next run_code call sees a newly registered source.
+    `run-code/create-tool` gained the
     `:get-contributed-tools` seam; `active-surface` merges contributions
     after the enabled filter (sandbox-only tools are not in the model's
     tool set, so `set-active-tools!` must not hide them; the registry
@@ -490,8 +492,8 @@ Decisions from the design pass, so implementation doesn't re-derive them.
   registry), minus an exclusion list (`run_code` itself, and later any nested
   sandbox). Active is exactly what the model sees in its tool schema — this
   respects `set-active-tools!`, picks up extension tools automatically, and
-  keeps discovery equal to callability. The set is fixed when the base is
-  built (see Lifecycle), so a script's surface is stable for its whole run.
+  keeps discovery equal to callability. The set is fixed when the call
+  starts (see Lifecycle), so a script's surface is stable for its whole run.
 - Resolution is the normal path (landed as T1 prep): `get-tool` now reads
   through `get-all-tools` (custom shadows built-in, pi's registry layering),
   so the name the script sees listed is the record `execute-tool` dispatches —
@@ -609,8 +611,8 @@ returns `nil`, so the final expression does not duplicate it.
 
 - The enabled set rides a run-level thunk (`run-code/*enabled-tools-fn*`, bound
   in `loop.clj` next to `bash-tool/*cancel-signal*`; nil outside loop runs =
-  all tools) and is resolved once per call: the surface, the fork's bridge and
-  the base's discovery fns all read that one computed map, fixed for the call.
+  all tools) and is resolved once per call: the surface, the bridge and
+  the discovery fns all read that one computed map, fixed for the call.
   The loop's other run values (`bash-tool/*cancel-signal*`,
   `*session-env-fn*`, `tools-util/*cwd*`) reach the bridge the same way. The
   worker threads that run inner calls restore them explicitly — a pool worker
@@ -619,25 +621,21 @@ returns `nil`, so the final expression does not duplicate it.
 
 ### Lifecycle
 
-- **Per invocation**: one fresh `sci/fork` of the cached base, per-call state
-  merged in (the bridge closure: deadline, signal, trace, the call's surface),
-  discarded when the call returns — a context is never reused between scripts.
-  The fork is the isolation boundary; verified: a `def` in one fork is
-  invisible to sibling forks and the base, and redefining (or
-  `alter-var-root`ing) a base-injected var stays fork-local.
-- **Base cache, keyed by the tool surface**: `[registry-generation
-  enabled-tool-set]`. The base is rebuilt when the registry generation changes
-  (`register-tool!`/`unregister-tool!` — extension load/unload/`/reload`;
-  T2's contributed MCP catalogs join the same counter) or when
-  `set-active-tools!` changes the enabled set. A small keyed cache (a few
-  entries) keeps sibling sessions from thrashing; the normal case is one base.
-- **Why the surface lives in the base**: the base injects `tools/list` and
-  `tools/describe` for its surface, and the fork's bridge closes over the
-  same map — gate, discovery and dispatch read one surface fixed for the call
-  (the same set the model saw for the turn), not a dynamic var threaded
+- **Per invocation**: one fresh `sci/init` context, per-call state merged in
+  (the bridge closure: deadline, signal, trace, the call's surface),
+  discarded when the call returns — a context is never reused between
+  scripts. The fresh context is the isolation boundary; a `def` in one call
+  is invisible to the next, and redefining (or `alter-var-root`ing) an
+  injected var stays call-local. A fresh init is sub-millisecond (measured:
+  20 inits over the `babashka.fs` share list in 0.84 ms), so there is no base
+  to cache or fork.
+- **Why the surface is fixed per call**: the context injects `tools/list`
+  and `tools/describe` for the call's surface, and the bridge closes over
+  the same map — gate, discovery and dispatch read one surface fixed for the
+  call (the same set the model saw for the turn), not a dynamic var threaded
   through the tool future. `tools/call` dispatch still resolves through
-  `execute-tool`, so the record executed is the registry's (the key
-  guarantees it was the listed one when the context was built).
+  `execute-tool`, so the record executed is the registry's (the surface was
+  built from it at call start).
 
 ### Capabilities
 
@@ -657,7 +655,7 @@ jolt pin): value-shared `babashka.*` namespaces work in a context with **no
 | cwd/env | `(sandbox/cwd)` (the runtime cwd), `(sandbox/env k)` | SCI has no `System/getenv`. slurp/spit/file-seq and sh/shell/process resolve relative paths against the runtime cwd like the tools; **babashka.fs stays process-relative** (no wrapper can safely guess which args are paths) — build paths from `(sandbox/cwd)` |
 | time | `(sandbox/now)` / `(sandbox/sleep ms)` | any polling or scan-timeout loop needs them |
 | reader features | the host's own feature (`:bb` or `:jolt`) | kmet's convention — `:clj` matches both hosts and is not exposed |
-| output | `*out*`/`*err*` captured + the script's return value | captured to bounded temp files: a reader per stream keeps a 128 KiB tail for the result, streams throttled `on-update`s, and aborts the run past its per-call capture budget (1 MiB default, configurable up to the 16 MiB hard cap) so a print loop can't OOM or fill the disk. The result defaults to a 16 KiB/2000-line tail; `:max-output-bytes` and `:max-output-lines` can tune it up to the 50 KiB/2000-line tool-wide cap; `:max-capture-bytes` tunes capture separately |
+| output | `*out*`/`*err*` captured + the script's return value | captured to bounded temp files: a monitor thread polls them, streams throttled `on-update` tails while output is arriving, and aborts the run past the fixed 1 MiB capture budget, so a print loop can't OOM or fill the disk. The final result scans each file once for the exact byte/line totals and the 128 KiB retained tail. The result defaults to a 16 KiB/2000-line tail; `:max-output-bytes` can raise the byte cap up to the 50 KiB tool-wide cap |
 
 Excluded deliberately: class access (empty `:classes`/`:imports` — host fns
 hide their own; SCI's default reflective instance-method calls on host values
@@ -665,19 +663,18 @@ still work, and are harmless without class resolution),
 `kmet.app.*`/`kmet.tui.*`/`kmet.extension` (the extension contract is not the
 script contract), `kmet.loader`, arbitrary `require` of Maven deps (dependency
 resolution is an extension-manifest feature — a missing require fails with the
-loader's actionable error), and network (`kmet.libs.http` stays out until
+boundary error), and network (`kmet.libs.http` stays out until
 measured; the single-boundary rule would still apply if it lands).
 
-Mechanics: cached stdlib base + per-call fork (the extensions'
-`shared-context` pattern; `kmet.loader.sci-loader`'s `:base` handles the
-merge-opts pitfalls). `babashka.fs`/`.process` must be host-`require`d before
+Mechanics: one fresh `sci/init` per call with the capability map, the
+per-call bridge and the surface's discovery fns merged in — no cached base,
+no fork. `babashka.fs`/`.process` must be host-`require`d before
 their public fns are value-shared (bb preloads them, jolt does not — both
 verified). The prelude of aliases is evaluated **on the eval thread**, right
 before the user code: SCI's `*ns*` is per-thread, so aliases registered on
 the calling thread can land in a different namespace than the script's. The
-bridge namespace closes over per-call state (deadline, signal, trace; the
-surface comes from the base — Lifecycle), which is why it is merged into the
-fork rather than cached.
+bridge namespace closes over per-call state (deadline, signal, trace, the
+surface — Lifecycle), so it is constructed per call.
 
 The description must teach the boundary and the batching: **one call can
 orchestrate many tool calls** (fan out, loop, chain) so N results cost one
@@ -726,20 +723,20 @@ The plan above is now the record of what landed:
 
 1. ✅ **Tool** — `src/kmet/app/tools/run_code.cljc` (`.cljc` for the
    jolt/bb `sci/binding` split), a `run_code` record (params `code` +
-   `timeout` in seconds — bash's unit — plus optional result and capture
-   budgets, `:streams? true`, `:contextual? true`), registered at the
+   `timeout` in seconds — bash's unit — plus an optional result byte
+   budget, `:streams? true`, `:contextual? true`), registered at the
    bottom of `registry.clj` — after the registry fns — carrying seams
-   (`:get-all-tools`, `:execute-tool`, `:generation-fn` =
-   `tool-registry-generation`) so it never requires the registry back.
+   (`:get-all-tools`, `:get-contributed-tools`, `:select-tools`,
+   `:execute-tool`) so it never requires the registry back.
    No deadline by default (bash parity: `:timeout` omitted or 0 = none); a
    positive value is seconds, fractional, capped at a day.
-2. ✅ **Engine** — base cache keyed by `[registry-generation enabled-set]`
-   (`registry-generation` is the counter `register-tool!`/`unregister-tool!`
-   bump; `*enabled-tools-fn*` is the loop-bound thunk); per-call fork through
-   `kmet.loader.sci-loader`'s `:base` with the per-call bridge merged in.
+2. ✅ **Engine** — one fresh `sci/init` per call: the capability namespaces,
+   the per-call bridge and the surface's discovery fns in one merged map
+   (`context-namespaces`); `*enabled-tools-fn*` is the loop-bound thunk the
+   surface resolves through. No base cache, no fork, no registry generation.
 3. ✅ **Capabilities** — the table above as value maps; `pmap` patched into
    `clojure.core` alongside slurp/spit/file-seq; json aliased as `json`; a
-   per-fork prelude (on the eval thread) aliases fs/str/set/edn/walk/json/p so
+   per-call prelude (on the eval thread) aliases fs/str/set/edn/walk/json/p so
    scripts are body-only; `sandbox` for cwd/env/now/sleep/emit/spawn; the
    process wrappers add the cwd default and pid tracking; `tools/call-many`
    validates a complete batch before dispatch, while `tools/await-all` polls
@@ -762,41 +759,36 @@ The plan above is now the record of what landed:
    (seconds, nil = no deadline) and the measured total `:elapsed-ms` in
    `:details` — wall clock for the whole call, so it includes that grace and
    the capture drain, not just script runtime.
-6. ✅ **Output** — `*out*`/`*err*` bound to temp files; daemon reader
-   threads drain them per burst (a stream that has seen EOF stays at EOF —
-   hence reopen-per-burst) and keep the last 128 KiB: `append-chunk` trims an
-   oversized burst's own tail instead of dropping it whole, and *seen*
-   bytes/lines (which never shrink) feed both the per-call capture abort
-   (`make-progress`; 1 MiB default, configurable up to the 16 MiB hard cap)
-   and the truncation totals — the retained tail no longer knows them. The
-   result body defaults to a 16 KiB / 2000-line tail and can be tuned per call
-   with `:max-output-bytes` / `:max-output-lines` (up to the shared 50 KiB /
-   2000-line tool cap); `:max-capture-bytes` tunes the capture budget
-   separately. `(sandbox/emit value)` provides a compact result path that
-   returns `nil` and avoids stdout/return-value duplication.
-   Line counting and the head trim are native (`String.split`, `tail-text`'s
-   ASCII fast path): the readers run on the babashka interpreter, where a
-   per-char scan makes them fall behind a fast writer, and a lagging reader
-   under-reports the totals and starves the abort. Printing is bounded
-   (`*print-length*` 100000, `*print-level*` 30 — host vars on babashka,
-   `sci/print-*` on Jolt), so an infinite seq cannot print host code past the
-   deadline. On Jolt the writers are bound with `sci/binding` (the
-   `with-sci-io` pattern); on babashka the host `*out*`/`*err*` bindings are
-   enough. UI: a builtin renderer
+6. ✅ **Output** — `*out*`/`*err*` bound to temp files; one monitor thread
+   polls them: it emits throttled `on-update` tails while output is
+   arriving and sets the abort to `:output-limit` once both files pass the
+   fixed 1 MiB capture budget. `finish-capture!` stops the monitor and scans
+   each file once for the exact byte/line totals and the retained 128 KiB
+   tail, which the result assembler then caps with
+   `bash-executor/truncate-tail`. The result body defaults to a 16 KiB /
+   2000-line tail; `:max-output-bytes` can raise the byte cap up to the
+   shared 50 KiB tool cap. `(sandbox/emit value)` provides a compact result path that
+   returns `nil` and avoids stdout/return-value duplication. Printing is
+   bounded (`*print-length*` 100000, `*print-level*` 30 — host vars on
+   babashka, `sci/print-*` on Jolt), so an infinite seq cannot print host
+   code past the deadline. On Jolt the writers are bound with `sci/binding`
+   (the `with-sci-io` pattern); on babashka the host `*out*`/`*err*` bindings
+   are enough. UI: a builtin renderer
    (`render-run-code-call`/`render-run-code-result`) shows the code header
    (collapsed head + expand hint), the output preview, a muted inner-call
    summary from `:details :calls` and the elapsed/took line, and strips the
    model-facing truncation notice in favor of its own warn line.
 7. ✅ **Tests** — `test/kmet/app/test_run_code.clj`, registered in
-   `kmet.tasks.runner/all-namespaces`: 39 fast tests and 13 `^:slow` tests
+   `kmet.tasks.runner/all-namespaces`: 37 fast tests and 16 `^:slow` tests
    covering return/output, compact `sandbox/emit` (including spawned output),
    ordered `call-many` / cancellation-aware `await-all`, batch validation,
-   per-call output and configurable capture budgets, errors, timeout, signal abort,
+   per-call output budgets and the fixed capture budget, errors, timeout, signal abort,
    a caught interrupt still reporting its abort, capabilities (incl. the
    preloaded aliases and an explicit `require`), cwd resolution, stderr,
    truncation, streaming, promise fan-out, the gate, discovery (with
-   `:execute` sanitized), the excluded surface, fork isolation, the capture
-   edges, the print bounds and the tool-name forms, plus the subprocess and
+   `:execute` sanitized), the excluded surface, context isolation, the capture
+   edges (incl. a multi-byte tail cut and idle streaming), the print bounds
+   and the tool-name forms, plus the subprocess and
    contributed-source cases.
 8. ✅ **Verify** — the post-adoption T0 re-measurement is recorded above:
    the 54.8%/41.6% split and the bash file-view/search shares are unchanged,
@@ -888,8 +880,8 @@ pipeline both callers use:
 
 ## References
 
-- `src/kmet/app/tools/run_code.cljc` — the T1 implementation: base cache,
-  capabilities, bridge, capture, deadline, combined cancel signal;
+- `src/kmet/app/tools/run_code.cljc` — the T1 implementation: capabilities,
+  bridge, capture, deadline, combined cancel signal;
   `test/kmet/app/test_run_code.clj` the tests. `run_code.cljc` (not `.clj`)
   because of the `#?(:jolt … :default …)` `sci/binding` — clj-kondo allows
   reader conditionals only in `.cljc`, and the split must be read out on
@@ -906,8 +898,7 @@ pipeline both callers use:
   next to the extension `spawn` helper.
 - `src/kmet/app/tools/core.clj`, `src/kmet/app/tools/registry.clj` —
   `execute-tool` (the bridge seam), `select-tools` (the shared surface
-  filter), `built-in-tools`, `get-all-tools`, `get-tool`,
-  `tool-registry-generation` (the base-cache generation counter).
+  filter), `built-in-tools`, `get-all-tools`, `get-tool`.
 - `src/kmet/app/loop.clj` — run-level bindings (incl.
   `run-code/*enabled-tools-fn*`, `run-code/*tool-hooks*` and the per-batch
   `run-code/*assistant-message*`) + `active-tools` / `set-active-tools!`;

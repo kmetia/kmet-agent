@@ -2,17 +2,15 @@
   "The `run_code` tool — model-written Clojure in a per-call SCI sandbox with
    kmet's tools bridged in (design: run_code.md).
 
-   Lifecycle: every call forks a fresh SCI context from a base cached per
-   [registry-generation enabled-tool-set] and discards it on return. The base
-   carries the capability namespaces and the surface's discovery fns
-   (tools/list, tools/describe); the fork carries the cwd-dependent
-   capabilities and the per-call tools bridge (async promises over
-   execute-tool, drained by a shared bounded worker pool). The script runs on
-   a daemon thread whose SCI :interrupt-fn aborts interpreted code on the run
-   signal or the deadline; *out*/*err* are captured to bounded temp files,
-   streamed through on-update, and assembled into the result (a 16 KiB /
-   2000-line default budget, configurable per call, with a bounded capture
-   tail)."
+   Lifecycle: every call builds a fresh SCI context and discards it on
+   return. The context carries the capability namespaces, the surface's
+   discovery fns (tools/list, tools/describe) and the per-call tools bridge
+   (async promises over execute-tool, drained by a shared bounded worker
+   pool). The script runs on a daemon thread whose SCI :interrupt-fn aborts
+   interpreted code on the run signal or the deadline; *out*/*err* are
+   captured to bounded temp files, streamed through on-update, and assembled
+   into the result (a 16 KiB / 2000-line default budget, configurable per
+   call, with a bounded capture tail)."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.app.bash-executor :as bash-exec]
@@ -24,8 +22,6 @@
             [kmet.libs.concurrent :as concurrent]
             [kmet.libs.host :as host]
             [kmet.libs.process :as kprocess]
-            [kmet.loader.core :as loader]
-            [kmet.loader.sci-loader :as sci-loader]
             [sci.core :as sci]))
 
 ;; ─── Constants ────────────────────────────────────────────────────────────
@@ -48,8 +44,6 @@
 (def ^:private tool-max-output-lines bash-exec/DEFAULT-MAX-LINES)
 
 (def ^:private default-run-code-output-bytes (* 16 1024))
-(def ^:private tool-max-capture-bytes (* 16 1024 1024))
-
 (def ^:private default-capture-bytes (* 1 1024 1024))
 (def ^:private max-tail-bytes (* 128 1024))
 ;; Bound on printed collections (the script's own printing and the return
@@ -60,11 +54,10 @@
 (def ^:private update-throttle-ms 100)
 
 (def ^:private await-poll-ms 25)
-(def ^:private drain-timeout-ms 2000)
+(def ^:private capture-poll-ms 25)
 (def ^:private interrupt-grace-ms 1500)
 (def ^:private error-preview-chars 300)
 (def ^:private error-preview-lines 3)
-(def ^:private base-cache-size 4)
 (def ^:private excluded-tool-names #{"run_code"})
 
 (def ^:private alias-prelude
@@ -84,10 +77,10 @@
 
 (def ^:dynamic *enabled-tools-fn*
   "0-arg fn returning the run's enabled tool-name set (nil = all), bound by
-   kmet.app.loop next to bash-tool/*cancel-signal*. It is the session half of
-   the base-cache key: a script's callable surface is the registry filtered
-   to this set. nil outside the loop's run paths (extension code calling
-   execute-tool directly) — then every registry tool is callable."
+   kmet.app.loop next to bash-tool/*cancel-signal*: a script's callable
+   surface is the registry filtered to this set. nil outside the loop's run
+   paths (extension code calling execute-tool directly) — then every
+   registry tool is callable."
   nil)
 
 (def ^:dynamic *tool-hooks*
@@ -159,24 +152,15 @@
       (or (nil? n) (not (pos? n))) fallback
       :else (min n upper))))
 
-(defn- output-limits [max-bytes max-lines]
+(defn- resolve-limits
+  "Resolve the per-call budgets once, before the script starts. Only the
+   result byte budget is callable; the line and capture budgets are fixed."
+  [max-bytes]
   {:bytes (normalize-limit max-bytes
                            default-run-code-output-bytes
                            tool-max-output-bytes)
-   :lines (normalize-limit max-lines
-                           tool-max-output-lines
-                           tool-max-output-lines)})
-
-(defn- capture-limit
-  "Normalize the per-call capture budget to the tool-wide safety cap."
-  [v]
-  (normalize-limit v default-capture-bytes tool-max-capture-bytes))
-
-(defn- run-code-limits
-  "Resolve result and capture budgets once, before the script starts."
-  [max-bytes max-lines max-capture-bytes]
-  (let [limits (output-limits max-bytes max-lines)]
-    (assoc limits :capture-bytes (capture-limit max-capture-bytes))))
+   :lines tool-max-output-lines
+   :capture-bytes default-capture-bytes})
 
 (defn- combined-signal
   "The cancel signal a script's inner calls observe: true when the run's
@@ -222,65 +206,13 @@
 ;;
 ;; *out*/*err* are bound to temp files (no portable bounded in-memory Writer
 ;; exists on both hosts — Jolt has no PipedWriter, and proxy is unavailable
-;; here). A reader thread per file drains it as the eval thread writes,
-;; keeping a bounded tail for the result and streaming throttled updates.
-;; Past the per-call capture budget (1 MiB default, 16 MiB hard cap) the run
-;; is aborted (:output-limit), so a runaway print loop stays bounded in memory
-;; and on disk.
+;; here). A monitor thread polls the files: it streams throttled on-updates
+;; and aborts the run past the fixed 1 MiB capture budget, so a runaway print
+;; loop stays bounded in memory and on disk. The final result scans the files
+;; once for the exact totals and the retained tail.
 
-(defn- tail-text
-  "The suffix of S holding at most BUDGET UTF-8 bytes (cut on char
-   boundaries)."
-  [s budget]
-  (cond
-    (<= (byte-length s) budget) s
-    ;; ASCII fast path: chars and bytes agree, so the cut is a native slice
-    (= (count s) (byte-length s)) (subs s (- (count s) budget))
-    :else
-    (loop [i (count s) used 0]
-      (if (zero? i)
-        s
-        (let [n (+ used (byte-length (subs s (dec i) i)))]
-          (if (> n budget) (subs s i) (recur (dec i) n)))))))
-
-(defn- append-chunk
-  "Append CHUNK to a capture state, keeping the retained tail at or under
-   max-tail-bytes. Leading chunks are dropped whole while the state is over
-   budget; when the newest chunk alone is over, its *tail* is kept — a burst
-   is one reader poll's worth of output (a script can flush megabytes in
-   25ms) and dropping it whole loses the very output the truncation notice
-   describes. SKIPPED-BYTES/LINES carry the head a reader trimmed off the
-   burst; SEEN-BYTES/SEEN-LINES count everything ever read (never decreased),
-   so the notice can report totals the retained tail no longer knows."
-  ([state chunk] (append-chunk state chunk 0 0))
-  ([state chunk skipped-bytes skipped-lines]
-   (let [state (-> state
-                   (update :chunks conj chunk)
-                   (update :bytes + (byte-length chunk))
-                   (update :lines + (text-lines chunk))
-                   (update :seen-bytes + (byte-length chunk) skipped-bytes)
-                   (update :seen-lines + (text-lines chunk) skipped-lines))]
-     (loop [s state]
-       (cond
-         (and (> (:bytes s) max-tail-bytes) (> (count (:chunks s)) 1))
-         (let [c (first (:chunks s))]
-           (recur (-> s
-                      (update :chunks subvec 1)
-                      (update :bytes - (byte-length c))
-                      (update :lines - (text-lines c)))))
-
-         (and (> (:bytes s) max-tail-bytes) (= 1 (count (:chunks s))))
-         (let [c (first (:chunks s))
-               t (tail-text c max-tail-bytes)
-               head (subs c 0 (- (count c) (count t)))]
-           (-> s
-               (assoc :chunks [t])
-               (update :bytes - (byte-length head))
-               (update :lines - (text-lines head))))
-
-         :else s)))))
-
-(defn- chunks-text [state] (apply str (:chunks state)))
+(defn- file-size [f]
+  (try (fs/size f) (catch Throwable _ 0)))
 
 (defn- skip-bytes!
   "Advance IN to byte OFFSET (FileInputStream.skip may skip fewer)."
@@ -292,123 +224,115 @@
           (recur (- remaining skipped))
           (do (.read in) (recur (dec remaining))))))))
 
-(defn- read-burst
-  "Read FILE from byte OFFSET to the current end, returning [text end
-   skipped-bytes skipped-lines]. TEXT is only the retained tail — a burst is
-   one reader poll's worth of output and can be arbitrarily larger than the
-   state's budget, so the head is trimmed while reading (bounded memory) and
-   reported back, keeping the byte/line totals exact. A fresh stream per
-   burst: a stream that has seen EOF keeps reporting EOF when the file grows
-   later (InputStreamReader does not re-check), and the eval thread is
-   usually still writing when the readers start."
-  [file offset]
+(defn- read-tail
+  "The tail of FILE as a string — at most MAX-BYTES of its end, cut on a
+   UTF-8 char boundary (replacement chars from a mid-char cut are dropped).
+   \"\" when the file is missing or unreadable."
+  [file max-bytes]
   (try
-    (let [size (fs/size file)]
-      (if (<= size offset)
-        ["" offset 0 0]
-        (with-open [in (java.io.FileInputStream. (str file))]
-          (skip-bytes! in offset)
-          (let [r (java.io.InputStreamReader. in "UTF-8")
-                buf (char-array 8192)]
-            (loop [sb (StringBuilder.) bytes 0 lines 0]
-              (let [n (.read r buf)]
-                (if (pos? n)
-                  (let [s (String. buf 0 n)
-                        sb (doto sb (.append s))
-                        bytes (+ bytes (byte-length s))
-                        lines (+ lines (text-lines s))]
-                    (if (> (count sb) (* 4 max-tail-bytes))
-                      (recur (StringBuilder.
-                              (tail-text (str sb) (* 2 max-tail-bytes)))
-                             bytes
-                             lines)
-                      (recur sb bytes lines)))
-                  (let [text (str sb)]
-                    ;; END is what was actually consumed — the file can grow
-                    ;; between the size probe and the read, and a stale END
-                    ;; would re-read (and re-count) that overlap
-                    [text (+ offset bytes)
-                     (- bytes (byte-length text))
-                     (- lines (text-lines text))]))))))))
-    (catch Throwable _ ["" offset 0 0])))
+    (let [size (file-size file)]
+      (if (zero? size)
+        ""
+        (let [start (max 0 (- size max-bytes))]
+          (with-open [in (java.io.FileInputStream. (str file))
+                      r (java.io.InputStreamReader. in "UTF-8")]
+            (skip-bytes! in start)
+            (let [buf (char-array 8192)
+                  sb (StringBuilder.)]
+              (loop []
+                (let [n (.read r buf)]
+                  (when (pos? n)
+                    (.append sb (String. buf 0 n))
+                    (recur))))
+              (let [s (str sb)]
+                (if (pos? start)
+                  ;; start can land inside a multi-byte char: drop every
+                  ;; replacement char the truncated prefix produced
+                  (loop [s s]
+                    (if (str/starts-with? s "\uFFFD")
+                      (recur (subs s 1))
+                      s))
+                  s)))))))
+    (catch Throwable _ "")))
 
-(defn- start-reader
-  "Daemon thread draining FILE in bursts until the eval thread closes the
-   writer and no bytes remain unread, appending to STATE and calling
-   PROGRESS per burst."
-  [file state progress closed?]
-  (let [drain (fn []
-                (loop [offset 0]
-                  (let [[text offset' skipped-bytes skipped-lines]
-                        (read-burst file offset)]
-                    (when (seq text)
-                      (swap! state append-chunk text skipped-bytes skipped-lines)
-                      (progress))
-                    (if (and (empty? text) @closed?)
-                      nil
-                      (do (Thread/sleep 25)
-                          (recur offset'))))))
-        t (Thread. drain)]
-    (.setDaemon t true)
-    (.start t)
-    t))
+(defn- scan-file
+  "Scan FILE once, returning its exact UTF-8 byte and newline totals."
+  [file]
+  (try
+    (with-open [in (java.io.FileInputStream. (str file))
+                r (java.io.InputStreamReader. in "UTF-8")]
+      (let [buf (char-array 8192)]
+        (loop [bytes 0 lines 0]
+          (let [n (.read r buf)]
+            (if (pos? n)
+              (let [s (String. buf 0 n)]
+                (recur (+ bytes (byte-length s)) (+ lines (text-lines s))))
+              {:bytes bytes :lines lines})))))
+    (catch Throwable _ {:bytes 0 :lines 0})))
 
-(defn- make-progress
-  "The throttled on-update emitter shared by both readers. Also enforces the
-   per-call capture bound — the retained tail is capped by max-tail-bytes, so
-   the running total must come from the seen counters. A still-running script
-   past CAPTURE-LIMIT is aborted; a finished one is only truncated."
-  [out-state err-state on-update abort closed? capture-limit]
-  (let [last-at (atom 0)]
-    (fn []
-      (let [total (+ (:seen-bytes @out-state) (:seen-bytes @err-state))]
-        (when (and abort (nil? @abort) (not @closed?) (> total capture-limit))
-          (reset! abort :output-limit))
-        (when on-update
-          (let [now (concurrent/monotonic-ms)]
-            (when (>= (- now @last-at) update-throttle-ms)
-              (reset! last-at now)
-              (let [out (chunks-text @out-state)
-                    err (chunks-text @err-state)]
-                (on-update {:content (str out
-                                          (when (seq err) (str "\n[stderr]\n" err)))
-                            :is-partial true})))))))))
-
-(defn- start-capture [on-update abort capture-limit]
+(defn- start-capture
+  "Open the capture files and start the monitor thread. The monitor streams
+   throttled on-update tails while output is arriving and sets ABORT to
+   :output-limit once the two files pass CAPTURE-LIMIT; CLOSED? stops it
+   (the eval thread's finally)."
+  [on-update abort capture-limit]
   (let [dir (str (temp-root) "/kmet-run-code-" (System/nanoTime))
         _ (fs/create-dirs dir)
         out-file (str dir "/out.log")
         err-file (str dir "/err.log")
+        out-w (java.io.OutputStreamWriter. (java.io.FileOutputStream. out-file) "UTF-8")
+        err-w (java.io.OutputStreamWriter. (java.io.FileOutputStream. err-file) "UTF-8")
         closed? (atom false)
-        out-state (atom {:chunks [] :bytes 0 :lines 0 :seen-bytes 0 :seen-lines 0})
-        err-state (atom {:chunks [] :bytes 0 :lines 0 :seen-bytes 0 :seen-lines 0})
-        progress (make-progress out-state err-state on-update abort closed? capture-limit)]
+        last-at (atom 0)
+        last-total (atom 0)
+        monitor (Thread.
+                 (fn []
+                   (loop []
+                     (when-not @closed?
+                       (let [total (+ (file-size out-file) (file-size err-file))]
+                         (when (and abort (nil? @abort) (> total capture-limit))
+                           (reset! abort :output-limit))
+                         (when (and on-update (> total @last-total))
+                           (let [now (concurrent/monotonic-ms)]
+                             (when (>= (- now @last-at) update-throttle-ms)
+                               (reset! last-at now)
+                               (reset! last-total total)
+                               (let [out (read-tail out-file max-tail-bytes)
+                                     err (read-tail err-file max-tail-bytes)]
+                                 (try
+                                   (on-update {:content (str out
+                                                             (when (seq err)
+                                                               (str "\n[stderr]\n" err)))
+                                               :is-partial true})
+                                   (catch Throwable t
+                                     ;; the monitor must survive a throwing
+                                     ;; callback: it enforces the capture abort
+                                     (debug/log "run_code capture update failed: " t)))))))
+                         (Thread/sleep capture-poll-ms)
+                         (recur))))))]
+    (.setDaemon monitor true)
+    (.start monitor)
     {:dir dir
      :closed? closed?
-     :out-w (java.io.OutputStreamWriter. (java.io.FileOutputStream. out-file) "UTF-8")
-     :err-w (java.io.OutputStreamWriter. (java.io.FileOutputStream. err-file) "UTF-8")
-     :out-state out-state
-     :err-state err-state
-     :readers [(start-reader out-file out-state progress closed?)
-               (start-reader err-file err-state progress closed?)]}))
+     :out-file out-file
+     :err-file err-file
+     :out-w out-w
+     :err-w err-w}))
 
 (defn- finish-capture!
-  "Snapshot the capture tails and stop the readers. When FINISHED? the eval
-   thread closed the writers, so wait briefly for the readers to drain them;
-   an abandoned thread's readers are stopped here too — their temp file is
-   gone, and late `on-update`s must not reach a finished tool call. The
-   byte/line counts are the *seen* totals: the retained tails no longer know
-   how much output they stand for."
-  [capture finished?]
-  (when finished?
-    (doseq [t (:readers capture)]
-      (try (.join t drain-timeout-ms) (catch Throwable _ nil))))
+  "Stop the monitor and snapshot the capture: the exact totals (one scan per
+   file) and the retained tails. The writers were closed by the eval thread's
+   finally before it delivered `done`, so a finished run's files are complete;
+   an abandoned thread's flushed bytes are read as-is."
+  [capture]
   (reset! (:closed? capture) true)
-  (let [out @(:out-state capture)
-        err @(:err-state capture)]
+  (let [{out-bytes :bytes out-lines :lines} (scan-file (:out-file capture))
+        {err-bytes :bytes err-lines :lines} (scan-file (:err-file capture))
+        out (read-tail (:out-file capture) max-tail-bytes)
+        err (read-tail (:err-file capture) max-tail-bytes)]
     (try (fs/delete-tree (:dir capture)) (catch Throwable _ nil))
-    {:out (chunks-text out) :out-bytes (:seen-bytes out) :out-lines (:seen-lines out)
-     :err (chunks-text err) :err-bytes (:seen-bytes err) :err-lines (:seen-lines err)}))
+    {:out out :out-bytes out-bytes :out-lines out-lines
+     :err err :err-bytes err-bytes :err-lines err-lines}))
 
 ;; ─── Capabilities ─────────────────────────────────────────────────────────
 
@@ -547,51 +471,58 @@
   (require 'babashka.process)
   nil)
 
-(defn- base-namespaces [surface]
+(defn- unreadable-namespace
+  "The boundary error for a namespace the sandbox cannot serve."
+  [namespace]
+  (throw (ex-info (str "run_code cannot load namespace " namespace
+                       "; the sandbox only has its injected namespaces and"
+                       " SCI's built-in namespaces")
+                  {:type :run-code/unreadable :namespace (str namespace)})))
+
+(defn- sandbox-load-fn
+  "SCI's :load-fn for the sandbox. SCI consults it even for a `:reload` of an
+   already-loaded namespace, so a known namespace gets the no-op empty source
+   (the loader the sandbox used before returned its existing handle the same
+   way — a reload changed nothing); anything else gets the boundary error."
+  [ctx-holder]
+  (fn [{:keys [namespace]}]
+    (if (and @ctx-holder (sci/find-ns @ctx-holder (symbol namespace)))
+      {:file (str namespace) :source ""}
+      (unreadable-namespace namespace))))
+
+(defn- sandbox-context
+  "Build the per-call SCI context: NAMESPACES plus the sandbox's features,
+   load-fn and interrupt-fn."
+  [namespaces interrupt-fn]
+  (let [holder (atom nil)
+        ctx (sci/init {:namespaces namespaces
+                       :features (if (host/jolt?) #{:jolt} #{:bb})
+                       :load-fn (sandbox-load-fn holder)
+                       :interrupt-fn interrupt-fn})]
+    (reset! holder ctx)
+    ctx))
+
+(defn- context-namespaces
+  "The per-call sandbox namespaces: the capability vocabulary (SCI's builtin
+   clojure.core plus slurp/spit/file-seq/pmap, babashka.fs/json, the process
+   wrappers), the surface's discovery fns and the per-call bridge, cwd fns
+   and writers. Built fresh for every call — a fresh sci/init is cheap, so
+   there is no cached base to fork and no registry generation to key on. No
+   :classes/:imports (no Java interop); the context's :load-fn is
+   sandbox-load-fn, so an unknown require fails with the boundary error and a
+   reload of a known namespace is a no-op."
+  [surface cwd bridge writers]
   (require-host-namespaces!)
-  {'clojure.core {'pmap (deref #'pmap)}
+  {'clojure.core (merge {'pmap (deref #'pmap)} (core-fns cwd))
    'babashka.fs (shared-fns 'babashka.fs)
    ;; kmet.libs.json under its real name and the short `json` alias scripts
    ;; would otherwise have to require
    'kmet.libs.json (shared-fns 'kmet.libs.json)
-   'tools (discovery-fns surface)})
-
-(defn- fork-namespaces [cwd bridge writers]
-  {'clojure.core (core-fns cwd)
    'babashka.process (process-fns cwd)
    'sandbox (sandbox-fns cwd writers)
-   'tools bridge})
+   'tools (merge (discovery-fns surface) bridge)})
 
-(defn- build-base
-  "The base context for a surface: capability namespaces plus the surface's
-   discovery fns, no per-call (or per-session) state. No :classes/:imports —
-   the sandbox has no Java interop."
-  [surface]
-  (sci/init {:namespaces (base-namespaces surface)
-             :features (if (host/jolt?) #{:jolt} #{:bb})}))
-
-;; ─── Base cache + surface ───────────────────────────────────────────────────────
-
-(defonce ^:private base-cache (atom {:order [] :bases {}}))
-
-(defn- cached-base
-  "The base context for KEY, built on first use. A small keyed cache keeps
-   sibling sessions with different surfaces from evicting each other's; a
-   rebuild is cheap and idempotent. A hit moves KEY to the back of the LRU
-   (and a key already present is re-seated rather than duplicated, so
-   repeated hits cannot shrink the cache below base-cache-size)."
-  [key build]
-  (or (get-in @base-cache [:bases key])
-      (let [base (build)]
-        (swap! base-cache
-               (fn [{:keys [order bases]}]
-                 (let [order (conj (vec (remove #{key} order)) key)
-                       order (if (> (count order) base-cache-size)
-                               (subvec order (- (count order) base-cache-size))
-                               order)]
-                   {:order order
-                    :bases (assoc (select-keys bases order) key base)})))
-        base)))
+;; ─── The callable surface ───────────────────────────────────────────────────────
 
 (defn- active-surface
   "Ordered map of name → Tool record for the run's callable set, via the
@@ -661,18 +592,12 @@
       (deliver p {:is-error true
                   :content (str "Tool not active in this run_code call: " name
                                 ". Active tools: " (str/join ", " (keys surface)))})
-      (let [started (System/currentTimeMillis)
-            idx (dec (count (swap! trace conj {:tool name :ok false
-                                               :error "incomplete"
-                                               :started-at started})))
+      (let [idx (dec (count (swap! trace conj {:tool name :ok false
+                                               :error "incomplete"})))
             settle-cancelled!
             (fn []
               (try
-                (swap! trace assoc-in [idx]
-                       {:tool name
-                        :ok false
-                        :error "cancelled"
-                        :duration-ms (- (System/currentTimeMillis) started)})
+                (swap! trace assoc-in [idx] {:tool name :ok false :error "cancelled"})
                 (catch Throwable _ nil))
               (deliver p {:is-error true
                           :content (str "run_code cancelled before " name " ran")}))]
@@ -707,8 +632,7 @@
                           (try
                             (swap! trace assoc-in [idx]
                                    (cond-> {:tool name
-                                            :ok (not (:is-error result))
-                                            :duration-ms (- (System/currentTimeMillis) started)}
+                                            :ok (not (:is-error result))}
                                      (:is-error result)
                                      (assoc :error (preview (:content result)))))
                             (catch Throwable _ nil))
@@ -809,17 +733,6 @@
                     :max-lines max-lines}}
       {:content body :truncation nil})))
 
-(defn- trace-snapshot
-  "The call trace with in-flight entries completed as `incomplete`, carrying
-   their elapsed-at-snapshot duration (mcpScript parity)."
-  [trace]
-  (let [now (System/currentTimeMillis)]
-    (mapv (fn [e]
-            (if (= "incomplete" (:error e))
-              (assoc e :duration-ms (max 0 (- now (or (:started-at e) now))))
-              e))
-          @trace)))
-
 (defn- run-code-error-message [t]
   (str (some-> t class .getSimpleName) ": " (or (ex-message t) (str t))))
 
@@ -902,7 +815,7 @@
         totals {:bytes (+ out-bytes err-bytes (byte-length ret) (byte-length error-text))
                 :lines (+ out-lines err-lines (text-lines ret) (text-lines error-text))}
         {:keys [content truncation]} (bound-content body totals output-bytes output-lines)
-        calls (trace-snapshot trace)]
+        calls @trace]
     (cond-> {:content content
              :is-error (not= :ok status)
              ;; :timeout in seconds (the unit it was asked for; nil = no
@@ -916,8 +829,7 @@
 
 (defn- run-code
   [{:keys [code timeout limits signal ctx on-update
-           get-all-tools get-contributed-tools select-tools execute-tool
-           generation-fn]}]
+           get-all-tools get-contributed-tools select-tools execute-tool]}]
   (let [timeout-ms (normalize-timeout timeout)
         ;; monotonic: this origin measures both the deadline and the
         ;; :elapsed-ms reported in the result
@@ -937,8 +849,6 @@
                                 (get-all-tools)
                                 (if get-contributed-tools (get-contributed-tools) {})
                                 enabled)
-        base-key [(generation-fn) (when enabled (into (sorted-set) enabled))]
-        base (cached-base base-key #(build-base surface))
         abort (atom nil)
         cancelled (combined-signal signal abort)
         writers (atom nil)
@@ -955,12 +865,8 @@
                             :assistant-message assistant-message
                             :on-update on-update
                             :trace trace})
-        fork (sci-loader/sci-loader
-              {:id "run_code"
-               :base base
-               :namespaces (fork-namespaces cwd bridge writers)
-               :sci-opts {:interrupt-fn (interrupt-fn abort signal deadline)}})
-        fork-ctx (loader/context fork)
+        fork-ctx (sandbox-context (context-namespaces surface cwd bridge writers)
+                                  (interrupt-fn abort signal deadline))
         capture (start-capture on-update abort (:capture-bytes limits))
         _ (reset! writers capture)
         {:keys [done result]} (start-eval-thread! fork-ctx code capture)]
@@ -979,8 +885,7 @@
             (compare-and-set! abort nil :aborted)
             (recur)))))
     (try
-      (let [finished? (realized? done)
-            snapshot (finish-capture! capture finished?)
+      (let [snapshot (finish-capture! capture)
             res (or @result {:status (or @abort :timeout)})]
         (assemble-result {:res res
                           :capture snapshot
@@ -998,7 +903,7 @@
 (def ^:private description
   (str "Run a Clojure program against the available tools. `code` is the program body; top-level forms run in order and the last value is returned. Call tools from inside the program — inner results stay there and never enter the conversation. Only what you print or return is program output — curate it.\n\n"
        "Tool calls are async: @(tools/call \"name\" args). Fire independent calls before derefing them; use (deref p ms ::timeout) when needed. For batches, use (tools/await-all (tools/call-many [{:name \"read\" :args {...}} ...])). Discover active tools with (tools/list) and (tools/describe \"name\"). (sandbox/emit value) prints one compact result and returns nil. Calls settle as {:content :is-error :details :truncation :images}; branch on :is-error and read :content.\n\n"
-       "Aliases: fs, str/set/edn/walk, json, p, tools, and sandbox; core adds slurp/spit/file-seq/pmap. No Java interop. `fs` is process-relative; `slurp`/`spit`/`sh` use the session cwd. Catch `Exception` (`Throwable` is unavailable); `:content` may be a block vector/image. Extension-contributed tools join the active surface. :timeout is seconds (0 or omitted means no deadline). Output is capped at 16 KiB/2000 lines by default; :max-output-bytes and :max-output-lines tune the result, while :max-capture-bytes tunes capture (default 1 MiB, hard cap 16 MiB)."))
+       "Aliases: fs, str/set/edn/walk, json, p, tools, and sandbox; core adds slurp/spit/file-seq/pmap. No Java interop. `fs` is process-relative; `slurp`/`spit`/`sh` use the session cwd. Catch `Exception` (`Throwable` is unavailable); `:content` may be a block vector/image. Extension-contributed tools join the active surface. :timeout is seconds (0 or omitted means no deadline). Output is capped at 16 KiB/2000 lines by default; :max-output-bytes can raise the byte cap up to 50 KiB."))
 
 (defn title
   "Quiet one-liner body for the run_code tool: the first code line, shortened."
@@ -1017,9 +922,8 @@
      :select-tools  — (fn [all {:keys [enabled contributed exclude]}]) — the
                       registry's surface filter, so a script's callable set
                       resolves exactly like the loop's schema
-     :execute-tool  — (fn [name args opts]) dispatch
-     :generation-fn — 0-arg registry generation counter"
-  [{:keys [get-all-tools get-contributed-tools select-tools execute-tool generation-fn]}]
+     :execute-tool  — (fn [name args opts]) dispatch"
+  [{:keys [get-all-tools get-contributed-tools select-tools execute-tool]}]
   (tool/make-tool
    :name "run_code"
    :label "Run code"
@@ -1036,30 +940,21 @@
                       :optional? true}
             :max-output-bytes {:type :number
                                :description "Maximum result bytes (default 16 KiB; capped at 50 KiB)"
-                               :optional? true}
-            :max-output-lines {:type :number
-                               :description "Maximum result lines (default 2000; capped at 2000)"
-                               :optional? true}
-            :max-capture-bytes {:type :number
-                                :description "Maximum captured bytes (default 1 MiB; capped at 16 MiB)"
-                                :optional? true}}
+                               :optional? true}}
    :execute (fn [args on-update signal ctx]
               (let [code (some-> (:code args) str)]
                 (if (str/blank? code)
                   {:content "No code provided." :is-error true}
                   (run-code {:code code
                              :timeout (:timeout args)
-                             :limits (run-code-limits (:max-output-bytes args)
-                                                      (:max-output-lines args)
-                                                      (:max-capture-bytes args))
+                             :limits (resolve-limits (:max-output-bytes args))
                              :signal signal
                              :ctx ctx
                              :on-update on-update
                              :get-all-tools get-all-tools
                              :get-contributed-tools get-contributed-tools
                              :select-tools select-tools
-                             :execute-tool execute-tool
-                             :generation-fn generation-fn}))))
+                             :execute-tool execute-tool}))))
    :streams? true
    :contextual? true
    :title title))

@@ -162,6 +162,13 @@
     (t/is (not (:is-error r)) (:content r))
     (t/is (= "Y" (:content r)))))
 
+(t/deftest test-run-code-reload-is-noop
+  ;; SCI consults the sandbox :load-fn even for a :reload; a known namespace
+  ;; stays available (the pre-simplification loader returned its handle)
+  (let [r (run "(require 'clojure.set :reload) (require '[babashka.fs :as fs] :reload) :ok")]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (= ":ok" (:content r)))))
+
 (t/deftest test-run-code-slurp-follows-runtime-cwd
   (let [dir (temp-dir)]
     (try
@@ -189,16 +196,11 @@
 
 (t/deftest test-run-code-output-budget
   (let [r (run "(dotimes [i 1000] (println (apply str (repeat 100 \"x\"))))"
-               {:max-output-bytes 1024 :max-output-lines 2000})]
+               {:max-output-bytes 1024})]
     (t/is (not (:is-error r)))
     (t/is (= 1024 (get-in r [:truncation :max-bytes])))
     (t/is (= :bytes (get-in r [:truncation :truncated-by])))
     (t/is (str/includes? (:content r) "[run_code output truncated")))
-  (let [r (run "(dotimes [i 100] (println \"line\"))"
-               {:max-output-bytes 16384 :max-output-lines 10})]
-    (t/is (not (:is-error r)))
-    (t/is (= 10 (get-in r [:truncation :max-lines])))
-    (t/is (= :lines (get-in r [:truncation :truncated-by]))))
   (let [r (run "(dotimes [i 1000] (println (apply str (repeat 100 \"x\"))))")]
     (t/is (= (* 16 1024) (get-in r [:truncation :max-bytes]))
           "the script default is smaller than bash's shared cap")))
@@ -209,7 +211,7 @@
     (t/is (= (* 50 1024) (get-in r [:truncation :max-bytes]))
           "limits clamp to the tool-wide byte cap"))
   (let [r (run "(dotimes [i 1000] (println (apply str (repeat 100 \"x\"))))"
-               {:max-output-bytes 0 :max-output-lines -1})]
+               {:max-output-bytes 0})]
     (t/is (= (* 16 1024) (get-in r [:truncation :max-bytes])))
     (t/is (= 2000 (get-in r [:truncation :max-lines]))
           "invalid limits fall back to the defaults")))
@@ -233,8 +235,7 @@
         (t/is (not (:is-error r)) (:content r))
         (t/is (str/includes? (:content r) ":x 1"))
         (t/is (= [{:tool "run-code-test-echo" :ok true}]
-                 (mapv #(dissoc % :duration-ms) (get-in r [:details :calls]))))
-        (t/is (integer? (get-in r [:details :calls 0 :duration-ms])))))))
+                 (get-in r [:details :calls])))))))
 
 (t/deftest test-run-code-sugar-and-fan-out
   (with-custom-tool {:name "run-code-test-echo"
@@ -443,7 +444,7 @@
       (let [r (run "@(tools/call \"run-code-test-contributed\" {:x 7})")]
         (t/is (str/includes? (:content r) "contributed:7"))
         (t/is (= [{:tool "run-code-test-contributed" :ok true}]
-                 (mapv #(dissoc % :duration-ms) (get-in r [:details :calls])))))
+                 (get-in r [:details :calls]))))
       ;; the exclusion list covers contributions too
       (let [r (run "@(tools/call \"script\" {:code \"1\"})")]
         (t/is (str/includes? (:content r) "not active"))
@@ -512,7 +513,9 @@
     (t/is (str/includes? (:content r) "System/currentTimeMillis")))
   (let [r (run "(require 'kmet.app.loop)")]
     (t/is (:is-error r))
-    (t/is (str/includes? (:content r) "kmet.app.loop")))
+    (t/is (str/includes? (:content r) "kmet.app.loop"))
+    (t/is (str/includes? (:content r) "cannot load namespace")
+          "the sandbox's own boundary error, not SCI's generic one"))
   (let [r (run "(future 1)")]
     (t/is (:is-error r))
     (t/is (str/includes? (:content r) "future"))))
@@ -555,19 +558,7 @@
           (t/is (str/includes? (:content r) (fs/file-name dir)))))
       (finally (fs/delete-tree dir)))))
 
-;; ─── Capture edge cases (a burst is one reader poll's worth of output) ─────
-
-(t/deftest test-append-chunk-keeps-oversized-burst-tail
-  (let [state (atom {:chunks [] :bytes 0 :lines 0 :seen-bytes 0 :seen-lines 0})
-        chunk (str "HEAD" (apply str (repeat 100000 "a\n")) "TAIL")]
-    (swap! state @#'run-code/append-chunk chunk)
-    (let [s @state
-          kept (apply str (:chunks s))]
-      (t/is (<= (:bytes s) (* 128 1024)) "the retained tail stays under budget")
-      (t/is (= 200008 (:seen-bytes s)) "everything read is counted")
-      (t/is (str/ends-with? kept "TAIL") "the newest chunk's tail is kept")
-      (t/is (str/starts-with? kept "a\n") "…and its head dropped")
-      (t/is (= 100000 (:seen-lines s))))))
+;; ─── Capture edge cases ───────────────────────────────────────────────────
 
 (t/deftest test-run-code-burst-tail-kept
   ;; a print larger than the 128 KiB capture tail must keep its tail: the
@@ -583,6 +574,24 @@
   (let [r (run "(println (apply str (repeat 140000 \"b\"))) (println \"MARKER\")")]
     (t/is (str/includes? (:content r) "MARKER"))
     (t/is (some? (:truncation r)) "truncation is reported, not silence")))
+
+(t/deftest test-run-code-multibyte-tail-cut
+  ;; the 128 KiB tail cut can land inside a multi-byte char — a repeated
+  ;; 3-byte char always does (total bytes − 128 KiB ≢ 0 mod 3) — and the
+  ;; decoder's replacement chars must not leak into the result
+  (let [r (run "(print (apply str (repeat 43700 \"€\")))")]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (not (str/includes? (:content r) "\uFFFD")))
+    (t/is (str/includes? (:content r) "€"))))
+
+(t/deftest ^:slow test-run-code-streaming-stops-when-idle
+  ;; a single print streams once; an idle script must not re-emit the
+  ;; retained tail on every monitor poll
+  (let [updates (atom 0)]
+    (run "(println \"x\") (sandbox/sleep 600)" {}
+         (fn [_] (swap! updates inc)))
+    (t/is (pos? @updates) "the print streamed")
+    (t/is (<= @updates 3) "no update per poll while idle")))
 
 (t/deftest test-run-code-capture-totals-count-everything
   ;; the notice's totals are what the capture saw, not what it kept
@@ -608,21 +617,14 @@
                                "  (boolean (:is-error x)))"))))))
 
 (t/deftest ^:slow test-run-code-output-limit
-  ;; the per-call 1 MiB capture bound is reachable: it counts what the readers saw
+  ;; the fixed 1 MiB capture bound is reachable: the monitor aborts once
+  ;; the files pass the budget
   (let [r (run (str "(dotimes [i 200] (println (apply str (repeat 100000 \"x\"))))"
                     " (sandbox/sleep 1500)"))]
     (t/is (:is-error r) (:content r))
     (t/is (= :output-limit (get-in r [:details :error])))
     (t/is (str/includes? (:content r) "1.0MB"))
     (t/is (str/includes? (:content r) "exceeded"))))
-
-(t/deftest ^:slow test-run-code-capture-budget-option
-  (let [r (run (str "(println (apply str (repeat 100000 \"x\")))"
-                    " (sandbox/sleep 500))")
-               {:max-capture-bytes 1024})]
-    (t/is (:is-error r) (:content r))
-    (t/is (= :output-limit (get-in r [:details :error])))
-    (t/is (str/includes? (:content r) "1.0KB"))))
 
 (t/deftest ^:slow test-run-code-abort-during-slow-before-hook-skips-call
   ;; the admission check runs again after the before hook: a hook that ran
