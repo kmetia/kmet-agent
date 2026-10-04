@@ -8,7 +8,9 @@
 ;; Covers: connect/handshake, protocol version negotiation + rejection,
 ;; tools/list pagination, tools/call (echo + error), a notification
 ;; mid-request, request timeout, process-exit error, and disconnect kills
-;; the process tree.
+;; the process tree. The modern (2026-07-28) streamable-HTTP connect is
+;; validated against the fake's header checks (MCP-Protocol-Version,
+;; Mcp-Method, Mcp-Name) and its no-session rule.
 (require '[babashka.process :as proc]
          '[clojure.string :as str]
          '[kmet.libs.json :as json]
@@ -292,6 +294,52 @@
       (finally
         (stop-server! server)))))
 
+;; ─── streamable-http: modern (2026-07-28) ─────────────────────────────────
+
+(defn test-http-modern [fake-http]
+  (println "\n── streamable-http: modern (2026-07-28) ──")
+  (let [{:keys [port] :as server} (spawn-server! fake-http)
+        definition {:url (str "http://127.0.0.1:" port "/mcp?era=modern")
+                    :http-transport :streamable-http}]
+    (try
+      (let [{:keys [conn tools protocol-version server-info]}
+            (client/connect! definition {})]
+        (check "modern http discovers the revision" (= "2026-07-28" protocol-version))
+        (check "modern http era recorded" (true? (client/modern? conn)))
+        (check "modern http serverInfo from _meta"
+               (= "fake-http-mcp-server" (:name server-info)))
+        (check "modern http tool catalog"
+               (= #{"http-echo" "http-add" "http-slow" "http-headers" "http-add-tool"}
+                  (set (map :name tools))))
+        (check "modern http mints no session" (nil? @(:session-id conn)))
+        ;; the fake answers 400 -32020 on a missing/wrong routing or
+        ;; version header, so these calls prove the headers
+        (let [result (client/request! conn "tools/call"
+                                      {:name "http-headers" :arguments {}})]
+          (check "modern http MCP-Protocol-Version header"
+                 (= "2026-07-28" (:text (client/format-result result)))))
+        (let [result (client/request! conn "tools/call"
+                                      {:name "http-echo" :arguments {:message "hey"}})]
+          (check "modern http tools/call (Mcp-Name)"
+                 (= "http-echo: hey" (:text (client/format-result result)))))
+        (let [result (client/request! conn "resources/read" {:uri "http://fake/doc"})]
+          (check "modern http resources/read (Mcp-Name)"
+                 (= "http resource content" (get-in result [:contents 0 :text]))))
+        (check "modern http prompts/get (Mcp-Name)"
+               (str/includes? (get-in (client/request! conn "prompts/get"
+                                                       {:name "http-brief"
+                                                        :arguments {:topic "x"}})
+                                      [:messages 0 :content :text])
+                              "http brief: x"))
+        (client/close! conn)
+        (Thread/sleep 300)
+        (check "modern http close deletes no session"
+               (not (str/includes? (try (slurp (:out-file server))
+                                        (catch Exception _ ""))
+                                   "SESSION DELETED"))))
+      (finally
+        (stop-server! server)))))
+
 ;; ─── SSE responses on streamable-http (Accept: text/event-stream) ────────
 
 (defn test-http-sse-response [fake-http]
@@ -377,6 +425,7 @@
     (System/exit 1))
   (test-stdio fake-stdio)
   (test-http fake-http)
+  (test-http-modern fake-http)
   (test-http-sse-response fake-http)
   (test-sse fake-http)
   (test-version-negotiation fake-http)

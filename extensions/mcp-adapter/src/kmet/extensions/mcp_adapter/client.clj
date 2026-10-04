@@ -28,4 +28,5 @@
 (def read-resource mcp/read-resource)
 (def expand-uri-template mcp/expand-uri-template)
 (def connect! mcp/connect!)
+(def modern? mcp/modern?)
 (def format-result protocol/format-result)

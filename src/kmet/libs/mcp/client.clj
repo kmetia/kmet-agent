@@ -307,8 +307,18 @@
 (defn- discover-request!
   "One server/discover round trip with TIMEOUT-MS; its era _meta is forced
    (the conn is not marked modern yet, and the probe runs before the era
-   is known)."
+   is known). A streamable-HTTP conn additionally takes the modern shape
+   for the duration of the probe: the era atom records VERSION so the
+   POST carries MCP-Protocol-Version and the Mcp-Method routing header
+   (a hybrid legacy server still answers the unknown method), any session
+   the legacy handshake captured is dropped, and any session header in
+   the answer is ignored. establish-legacy! undoes it before the
+   handshake."
   [conn version timeout-ms]
+  (when (= :streamable-http (:transport conn))
+    (when-let [era (:era conn)] (reset! era {:era :modern :version version}))
+    (reset! (:protocol-version conn) version)
+    (when-let [session (:session-id conn)] (reset! session nil)))
   (request! conn "server/discover"
             {:_meta (protocol/modern-request-meta version)}
             {:timeout-ms timeout-ms}))
@@ -384,6 +394,51 @@
             (protocol/modern-error? (ex-data e)) (throw e)
             :else {:era :legacy :probe-error e}))))))
 
+(defn- detect-http-era!
+  "Classify a streamable-HTTP conn's era with a server/discover POST:
+     - a DiscoverResult negotiates over :supportedVersions — a modern
+       overlap continues modern (the result is carried along), a legacy
+       overlap falls back to the handshake, no overlap errors;
+     - a recognized modern error (a 400 whose JSON-RPC body parsed into
+       the ex-data) negotiates over data.supported on -32022, surfaces
+       -32020/-32021;
+     - an auth failure (401/403 after the transport's own retry) aborts —
+       authentication is not an era signal;
+     - anything else (404/405, an empty or non-modern body, a non-modern
+       JSON-RPC error, another status) means legacy — the handshake
+       decides, and a legacy server answers unknown methods immediately.
+   Returns {:era :modern :version rev :discover result} or
+   {:era :legacy :probe-error e-or-nil}."
+  [conn]
+  (loop [version protocol/modern-protocol-version]
+    (let [outcome (try {:result (discover-request! conn version
+                                                   protocol/probe-timeout-ms)}
+                       (catch Exception e {:error e}))]
+      (if-let [result (:result outcome)]
+        (if-let [negotiated (protocol/negotiate-version (:supportedVersions result))]
+          (case (:era negotiated)
+            :modern {:era :modern
+                     :version (:version negotiated)
+                     :discover result}
+            :legacy {:era :legacy})
+          (throw (no-overlap-error (:supportedVersions result))))
+        (let [e (:error outcome)
+              data (ex-data e)
+              code (:code data)]
+          (cond
+            (and code (protocol/modern-error? data))
+            (if (= -32022 code)
+              (if-let [negotiated (protocol/negotiate-version (:supported (:data data)))]
+                (case (:era negotiated)
+                  :modern (if (= (:version negotiated) version)
+                            {:era :modern :version version}
+                            (recur (:version negotiated)))
+                  :legacy {:era :legacy})
+                (throw (no-overlap-error (:supported (:data data)))))
+              (throw e))
+            (or (= 401 (:status data)) (= 403 (:status data))) (throw e)
+            :else {:era :legacy :probe-error e}))))))
+
 (defn- probe-timed-out?
   "True when the era probe gave up on a timeout rather than a server
    answer — the era-ambiguous case that earns a recovery re-probe."
@@ -419,10 +474,16 @@
 
 (defn- establish-legacy!
   "Run the handshake — the era fallback whenever the probe established no
-   modern server. A timed-out probe plus a handshake JSON-RPC error is
+   modern server. A streamable-HTTP conn drops the probe's transient
+   modern shape first: a legacy initialize POST must carry no version
+   header and no _meta, take its own session, and mirror no routing
+   headers. A timed-out probe plus a handshake JSON-RPC error is
    ambiguous, so the modern discovery gets one more full-timeout try
    before the handshake error surfaces."
   [conn probe-error]
+  (when (= :streamable-http (:transport conn))
+    (when-let [era (:era conn)] (reset! era nil))
+    (reset! (:protocol-version conn) nil))
   (try
     (let [initialized (initialize! conn)]
       {:era :legacy
@@ -436,11 +497,11 @@
 
 (defn- establish-era!
   "Resolve the conn's era before the catalog work. A :protocol-era hint
-   (the metadata cache, 3.7) skips detection; a stdio conn without one is
-   probed with server/discover and falls back to the handshake; every
-   other transport runs the handshake (the HTTP era path is 3.4).
-   Returns {:era :modern|:legacy :version rev :handshake {:protocol-version
-   :server-info :capabilities}}."
+   (the metadata cache, 3.7) skips detection; a stdio conn is probed
+   with server/discover and a streamable-HTTP conn with a server/discover
+   POST, each falling back to the handshake; the legacy SSE transport
+   runs the handshake. Returns {:era :modern|:legacy :version rev
+   :handshake {:protocol-version :server-info :capabilities}}."
   [conn {:keys [protocol-era]}]
   (cond
     (= :modern protocol-era)
@@ -453,6 +514,12 @@
 
     (= :stdio (:transport conn))
     (let [detected (detect-stdio-era! conn)]
+      (if (= :modern (:era detected))
+        (establish-modern! conn (:version detected) (:discover detected))
+        (establish-legacy! conn (:probe-error detected))))
+
+    (= :streamable-http (:transport conn))
+    (let [detected (detect-http-era! conn)]
       (if (= :modern (:era detected))
         (establish-modern! conn (:version detected) (:discover detected))
         (establish-legacy! conn (:probe-error detected))))
@@ -491,7 +558,7 @@
    WWW-Authenticate challenge, and returns fresh headers) /
    :on-notification (fn [conn msg] — server->client notifications other
    than progress, e.g. list_changed) / :protocol-era — a :modern or
-   :legacy cache hint that skips stdio era detection.
+   :legacy cache hint that skips era detection (3.7).
    Returns {:conn conn :tools [..] :prompts [..] :resources [..]
    :resource-templates [..] :protocol-version str :server-info map}.
    On any failure the transport is closed and the ex-info rethrown."

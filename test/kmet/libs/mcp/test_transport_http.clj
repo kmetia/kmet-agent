@@ -4,10 +4,19 @@
    as plain unit tests (the socket-level cases stay in the extension's
    scripts/validate-client.bb)."
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.libs.json :as json]
+            [kmet.libs.mcp.protocol :as protocol]
             [kmet.libs.mcp.transport :as transport]
             [kmet.libs.mcp.transport.http :as http]))
+
+(defn- modern-conn
+  "A streamable-HTTP conn whose era atom records the modern revision."
+  ([] (modern-conn "http://server"))
+  ([url]
+   (assoc (http/connect! url {})
+          :era (atom {:era :modern :version protocol/modern-protocol-version}))))
 
 (defn- response
   ([status content-type body] (response status content-type body {}))
@@ -34,6 +43,62 @@
     (let [conn (http/connect! "http://server"
                               {:auth-headers (fn [] {"Authorization" "Bearer t"})})]
       (is (= "Bearer t" (get (http/http-request-headers conn) "Authorization"))))))
+
+(deftest encode-header-value-cases
+  (testing "header-safe values pass through"
+    (is (= "http-echo" (http/encode-header-value "http-echo")))
+    (is (= "a b" (http/encode-header-value "a b")))
+    (is (= "doc://x/y?z=1" (http/encode-header-value "doc://x/y?z=1")))
+    (is (= "" (http/encode-header-value ""))))
+  (testing "values that cannot ride a header unchanged are Base64-sent"
+    (doseq [unsafe ["=?base64?literal" " leading" "trailing " "café" "a\nb" "a\tb"]]
+      (let [encoded (http/encode-header-value unsafe)]
+        (is (str/starts-with? encoded "=?base64?") unsafe)
+        (is (str/ends-with? encoded "?=") unsafe)
+        (is (= unsafe
+               (String. (.decode (java.util.Base64/getDecoder)
+                                 (subs encoded 9 (- (count encoded) 2)))
+                        "UTF-8"))
+            (str (pr-str unsafe) " round-trips"))))))
+
+(deftest modern-routing-headers
+  (let [conn (modern-conn)]
+    (is (= "tools/call" (get (http/http-request-headers conn "tools/call" {:name "t"})
+                             "Mcp-Method")))
+    (is (= "t" (get (http/http-request-headers conn "tools/call" {:name "t"}) "Mcp-Name")))
+    (is (= "doc://x" (get (http/http-request-headers conn "resources/read" {:uri "doc://x"})
+                          "Mcp-Name")))
+    (is (= "brief" (get (http/http-request-headers conn "prompts/get" {:name "brief"})
+                        "Mcp-Name")))
+    (is (str/starts-with? (get (http/http-request-headers conn "tools/call" {:name " read"})
+                               "Mcp-Name")
+                          "=?base64?")
+        "an unsafe name is mirrored as a Base64 sentinel")
+    (is (nil? (get (http/http-request-headers conn "tools/list" {}) "Mcp-Name"))
+        "only the named methods mirror a name")
+    (is (nil? (get (http/http-request-headers conn) "Mcp-Method"))
+        "the 1-arity (SSE, session DELETE) carries no routing headers"))
+  (let [conn (http/connect! "http://server" {})]
+    (is (nil? (get (http/http-request-headers conn "tools/list" {}) "Mcp-Method"))
+        "a legacy conn mirrors nothing")))
+
+(deftest modern-conns-never-mirror-a-session
+  (let [requests (atom [])
+        conn (assoc (modern-conn)
+                    :request-fn (fn [url opts]
+                                  (swap! requests conj [url opts])
+                                  (response 200 "application/json"
+                                            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}"
+                                            {"Mcp-Session-Id" "stale"})))]
+    (is (= {} (http/request! conn "tools/list" {} 5000 nil)))
+    (let [[_ opts] (first @requests)]
+      (is (= "tools/list" (get (:headers opts) "Mcp-Method")))
+      (is (nil? (get (:headers opts) "Mcp-Session-Id"))
+          "a modern POST never echoes a session header"))
+    (is (nil? @(:session-id conn)) "a modern conn never captures a session id")
+    (reset! (:session-id conn) "stale")
+    (is (false? (http/terminate-http-session! conn))
+        "a modern conn never DELETEs a session")))
 
 (deftest parse-json-response
   (let [conn (http/connect! "http://server" {})]
@@ -81,7 +146,26 @@
                    nil (catch Exception e e))]
         (is (some? e))
         (is (re-find #"HTTP 500" (ex-message e)))
-        (is (re-find #"boom" (ex-message e)))))))
+        (is (re-find #"boom" (ex-message e)))))
+    (testing "a JSON-RPC error body lands in the ex-data"
+      (let [e (try (http/parse-http-response
+                    conn
+                    (response 400 "application/json"
+                              (str "{\"jsonrpc\":\"2.0\",\"id\":1,"
+                                   "\"error\":{\"code\":-32020,"
+                                   "\"message\":\"Header mismatch\","
+                                   "\"data\":{\"supported\":[\"2026-07-28\"]}}}"))
+                    1 nil)
+                   nil (catch Exception e e))]
+        (is (= 400 (:status (ex-data e))))
+        (is (= -32020 (:code (ex-data e))))
+        (is (= "Header mismatch" (:message (ex-data e))))
+        (is (= {:supported ["2026-07-28"]} (:data (ex-data e))))))
+    (testing "a non-JSON error body keeps the status only"
+      (let [e (try (http/parse-http-response conn (response 500 "text/plain" "boom") 1 nil)
+                   nil (catch Exception e e))]
+        (is (= 500 (:status (ex-data e))))
+        (is (nil? (:code (ex-data e))))))))
 
 (deftest request!-posts-and-parses
   (let [requests (atom [])

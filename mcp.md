@@ -3,7 +3,7 @@
 Status: draft. Order is deliberate: **Phase 0 (names consolidation + name
 assignment fix) → Phase 1 (extract `kmet.libs.mcp`) → Phase 2 (auth) →
 Phase 3 (2026-07-28 protocol work) → Phase 4 (optional hygiene)** — Phases 0,
-1 and 2 are landed, and Phase 3 is in progress (3.1–3.3 landed; 3.4–3.8 are
+1 and 2 are landed, and Phase 3 is in progress (3.1–3.4 landed; 3.5–3.8 are
 planned in full below — this section is their plan, there is no separate
 plan file); phase 4 lands after it. The protocol revision lands before the
 hygiene pass so the client is extracted and auth settled first.
@@ -441,7 +441,7 @@ baseline):
 
 ## Phase 3 — 2026-07-28 protocol work (the end goal)
 
-Status: **in progress** — 3.1–3.3 landed; 3.4–3.8 below, in order; each leaves
+Status: **in progress** — 3.1–3.4 landed; 3.5–3.8 below, in order; each leaves
 `scripts/validate-all.bb` and the repo gates green. Depends on Phase 1's
 era-neutral seam and Phase 2's auth plumbing (both landed).
 
@@ -708,8 +708,29 @@ method, base64 encoding, no session echo or capture, probe version header),
 `400`-body ex-data, socket-free via `:request-fn` injection;
 `test_client.clj` detection outcomes (including 401 abort). Scripts:
 `validate-protocol.bb` HTTP modern happy path (fake validates the
-headers), `-32022` negotiation, legacy fallback; the 3.1 modern-rejection
+headers), `-32022` negotiation, legacy fallback; `validate-client.bb`
+gains the modern HTTP connect section (headers proven against the fake's
+validation, no session minted or DELETEd); the 3.1 modern-rejection
 baseline unchanged.
+
+Status: **landed** — `detect-http-era!` probes `server/discover` with the
+seeded version header. `discover-request!` gives a streamable-HTTP conn
+the modern shape for the probe's duration (era and version atoms seeded
+so the POST carries `MCP-Protocol-Version` and `Mcp-Method`, and no
+session header), and `establish-legacy!` undoes it before `initialize!`.
+The transport mirrors `Mcp-Method` on every modern POST and `Mcp-Name`
+for `tools/call` / `resources/read` / `prompts/get` (Base64 sentinel
+whenever the value is not header-safe — non-ASCII, a control character or
+a leading/trailing space — or begins with the sentinel itself), never
+captures, echoes or DELETEs a session,
+and drops `notifications/cancelled` for modern conns; a non-2xx response
+parses a JSON-RPC error body into the ex-data (`:status :code :message
+:data`). `-32022` negotiates over `data.supported`, `-32020`/`-32021`
+surface, 401/403 abort, and everything else falls back to the handshake
+(a timed-out probe plus a handshake error earns the shared one-shot
+recovery re-probe, which re-seeds the header). Tests: the transport
+table, the client detection table, and the extension's modern HTTP
+script section; `validate-all.bb` stays green on the legacy fallback.
 
 ### 3.5. `subscriptions/listen` lifecycle
 
@@ -939,7 +960,7 @@ after Phase 3 — hygiene must not block or precede the protocol work.
 - [x] 3.1 fakes modern mode + `validate-protocol.bb` harness (baseline)
 - [x] 3.2 era core: meta helpers, conn `:era`, `_meta` decoration, MRTR (`requestState`-only retry, `inputRequests` refusal) (behavior-neutral)
 - [x] 3.3 stdio: `server/discover` probe + modern establish + legacy fallback
-- [ ] 3.4 streamable HTTP: routing headers, 400-body detection, `-32022` negotiation, no session
+- [x] 3.4 streamable HTTP: routing headers, 400-body detection, `-32022` negotiation, no session
 - [ ] 3.5 `subscriptions/listen`: lib listen + HTTP long-lived stream + adapter wiring
 - [ ] 3.6 `x-mcp-header` mirroring + invalid-definition filtering
 - [ ] 3.7 `:protocol-era` in the metadata cache + re-probe on failure

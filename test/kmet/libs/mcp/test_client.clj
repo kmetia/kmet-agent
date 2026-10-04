@@ -329,6 +329,182 @@
                (:protocol-version (mcp/establish! (stdio-conn) {:protocol-era :modern}))))
         (is (= ["server/discover" "tools/list"] @methods))))))
 
+;; ─── Era detection (streamable HTTP) ──────────────────────────────────────
+
+(defn- http-conn
+  "A streamable-HTTP conn for establish! tests: the era, revision and
+   session atoms the transport carries in production."
+  []
+  {:transport :streamable-http
+   :url "http://server"
+   :era (atom nil)
+   :protocol-version (atom nil)
+   :session-id (atom nil)})
+
+(deftest establish!-detects-modern-http-with-one-discover
+  (let [methods (atom [])
+        conn (http-conn)]
+    (with-redefs [mcp/request!
+                  (fn [_ method _params & _]
+                    (swap! methods conj method)
+                    (case method
+                      "server/discover" (discover-result)
+                      "tools/list" {:tools [{:name "t"}]}
+                      (throw (ex-info "unexpected request" {:method method}))))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (let [est (mcp/establish! conn)]
+        (is (mcp/modern? conn))
+        (is (= "2026-07-28" (:protocol-version est)))
+        (is (= [{:name "t"}] (:tools est)))
+        (is (= "2026-07-28" @(:protocol-version conn)))
+        (is (= ["server/discover" "tools/list"] @methods)
+            "detection's round trip is reused by establish!; no initialize")))))
+
+(deftest establish!-seeds-the-http-probe-version
+  ;; the probe POST must carry MCP-Protocol-Version; a legacy initialize
+  ;; POST must not
+  (let [seen (atom [])
+        conn (http-conn)]
+    (with-redefs [mcp/request!
+                  (fn [conn method _params & _]
+                    (swap! seen conj [method @(:protocol-version conn)])
+                    (case method
+                      "server/discover" (throw (protocol/mcp-error
+                                                "HTTP 404" {:code -32601
+                                                            :status 404}))
+                      "initialize" {:protocolVersion "2025-11-25" :capabilities {}}))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (is (= "2025-11-25" (:protocol-version (mcp/establish! conn))))
+      (is (= [["server/discover" "2026-07-28"] ["initialize" nil]] @seen)
+          "the legacy initialize POST dropped the probe's version header"))))
+
+(deftest establish!-http-32022-negotiates
+  (testing "a -32022 naming a modern revision continues modern"
+    (let [discovers (atom 0)]
+      (with-redefs [mcp/request!
+                    (fn [_ method _params & _]
+                      (case method
+                        "server/discover"
+                        (if (= 1 (swap! discovers inc))
+                          (throw (protocol/mcp-error
+                                  "unsupported"
+                                  {:code -32022
+                                   :data {:supported ["2026-07-28"]}}))
+                          (discover-result))
+                        "tools/list" {:tools []}))
+                    mcp/notify! (fn [_ _ _] nil)]
+        (let [conn (http-conn)]
+          (is (mcp/modern? (do (mcp/establish! conn) conn)))
+          (is (= 2 @discovers))))))
+  (testing "a legacy overlap in data.supported falls back to the handshake"
+    (with-redefs [mcp/request!
+                  (fn [_ method _params & _]
+                    (case method
+                      "server/discover"
+                      (throw (protocol/mcp-error "unsupported"
+                                                 {:code -32022
+                                                  :data {:supported ["2025-11-25"]}}))
+                      "initialize" {:protocolVersion "2025-11-25" :capabilities {}}))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (let [conn (http-conn)]
+        (is (= "2025-11-25" (:protocol-version (mcp/establish! conn))))
+        (is (not (mcp/modern? conn))))))
+  (testing "no overlap in data.supported errors"
+    (with-redefs [mcp/request!
+                  (fn [_ _method _params & _]
+                    (throw (protocol/mcp-error "unsupported"
+                                               {:code -32022
+                                                :data {:supported ["1999-01-01"]}})))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (is (thrown-with-msg? Exception #"no protocol revision"
+                            (mcp/establish! (http-conn))))))
+  (testing "a header/era rejection surfaces"
+    (with-redefs [mcp/request!
+                  (fn [_ _method _params & _]
+                    (throw (protocol/mcp-error "header mismatch"
+                                               {:code -32020 :status 400})))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (let [e (try (mcp/establish! (http-conn)) nil (catch Exception e e))]
+        (is (= -32020 (:code (ex-data e))))))))
+
+(deftest establish!-http-non-modern-error-falls-back
+  ;; a 404 + JSON-RPC body is not an era signal: run the handshake
+  (let [methods (atom [])]
+    (with-redefs [mcp/request!
+                  (fn [_ method _params & _]
+                    (swap! methods conj method)
+                    (case method
+                      "server/discover" (throw (protocol/mcp-error
+                                                "HTTP 404" {:code -32601
+                                                            :status 404}))
+                      "initialize" {:protocolVersion "2025-11-25" :capabilities {}}))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (is (= "2025-11-25" (:protocol-version (mcp/establish! (http-conn)))))
+      (is (= ["server/discover" "initialize"] @methods)))))
+
+(deftest establish!-http-auth-failure-aborts
+  (let [methods (atom [])]
+    (with-redefs [mcp/request!
+                  (fn [_ method _params & _]
+                    (swap! methods conj method)
+                    (throw (protocol/mcp-error "MCP connect failed: HTTP 401: unauthorized"
+                                               {:status 401})))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (let [e (try (mcp/establish! (http-conn)) nil (catch Exception e e))]
+        (is (= 401 (:status (ex-data e))))
+        (is (= ["server/discover"] @methods)
+            "authentication is not an era signal: no initialize attempt")))))
+
+(deftest establish!-http-recovers-a-slow-modern-server
+  (let [discovers (atom 0)
+        seen (atom [])]
+    (with-redefs [mcp/request!
+                  (fn [conn method _params & _]
+                    (swap! seen conj [method @(:protocol-version conn)])
+                    (case method
+                      "server/discover"
+                      (if (= 1 (swap! discovers inc))
+                        (throw (protocol/mcp-error "timed out" {:timeout-ms 10
+                                                                :method method}))
+                        (discover-result))
+                      "initialize" (throw (protocol/mcp-error
+                                           "HTTP 404" {:code -32601
+                                                       :status 404}))
+                      "tools/list" {:tools []}))
+                  mcp/notify! (fn [_ _ _] nil)]
+      (let [conn (http-conn)]
+        (is (mcp/modern? (do (mcp/establish! conn) conn)))
+        (is (= [["server/discover" "2026-07-28"]
+                ["initialize" nil]
+                ["server/discover" "2026-07-28"]
+                ["tools/list" "2026-07-28"]]
+               @seen)
+            "the recovery probe re-seeds the version header")))))
+
+(deftest establish!-http-honors-the-era-hint
+  (testing ":modern runs discover directly (no probe)"
+    (let [methods (atom [])]
+      (with-redefs [mcp/request!
+                    (fn [_ method _params & _]
+                      (swap! methods conj method)
+                      (case method
+                        "server/discover" (discover-result)
+                        "tools/list" {:tools []}))
+                    mcp/notify! (fn [_ _ _] nil)]
+        (is (= "2026-07-28"
+               (:protocol-version (mcp/establish! (http-conn) {:protocol-era :modern}))))
+        (is (= ["server/discover" "tools/list"] @methods)))))
+  (testing ":legacy runs the handshake"
+    (let [methods (atom [])]
+      (with-redefs [mcp/request!
+                    (fn [_ method _params & _]
+                      (swap! methods conj method)
+                      {:protocolVersion "2025-11-25" :capabilities {}})
+                    mcp/notify! (fn [_ _ _] nil)]
+        (is (= "2025-11-25"
+               (:protocol-version (mcp/establish! (http-conn) {:protocol-era :legacy}))))
+        (is (= ["initialize"] @methods))))))
+
 ;; ─── establish! capability gating ─────────────────────────────────────────
 
 (defn- fake-conn [methods result-for]

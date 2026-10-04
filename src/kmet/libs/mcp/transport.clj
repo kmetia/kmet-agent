@@ -103,15 +103,20 @@
    dropped connection is not a cancellation (transports), so a tool call
    that timed out would otherwise keep running on the server. Best-effort:
    the HTTP transports deliver it from a background thread so a server
-   busy with the abandoned call cannot delay the timeout error itself."
+   busy with the abandoned call cannot delay the timeout error itself.
+   Nothing is sent for a modern streamable-HTTP conn: closing the response
+   stream is the cancellation signal there, and the 2026-07-28 revision
+   defines no client→server notification over HTTP (stdio keeps it)."
   [conn id method reason send-async!]
-  (let [msg {:jsonrpc "2.0"
-             :method "notifications/cancelled"
-             :params {:requestId id
-                      :reason (str "kmet: " method " — " reason)}}]
-    (if (= :stdio (:transport conn))
-      (send-async! conn msg)
-      (concurrent/spawn (fn [] (send-async! conn msg)))))
+  (when-not (and (= :streamable-http (:transport conn))
+                 (protocol/modern-conn? conn))
+    (let [msg {:jsonrpc "2.0"
+               :method "notifications/cancelled"
+               :params {:requestId id
+                        :reason (str "kmet: " method " — " reason)}}]
+      (if (= :stdio (:transport conn))
+        (send-async! conn msg)
+        (concurrent/spawn (fn [] (send-async! conn msg))))))
   nil)
 
 (defn dispatch-server-message!
