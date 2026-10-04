@@ -171,3 +171,24 @@
       (finally
         (th/set-theme-instance! orig-theme)
         (th/init-theme! orig-name)))))
+
+(deftest theme-switch-keeps-the-automatic-menu-state
+  ;; the automatic menu's settings list re-derives in place on a theme
+  ;; switch: the plain text (rows, check marks, the selection marker) is
+  ;; unchanged, only the styling differs
+  (let [orig-name (th/get-current-theme-name)
+        orig-theme (th/get-current-theme)]
+    (try
+      (th/init-theme! "dark")
+      (let [{:keys [sub]} (make "light/dark" :dark)]
+        (core/handle-input sub K-DOWN)  ;; move off the first row
+        (let [before (plain sub 100)
+              raw-before (str/join "\n" (core/render sub 100))]
+          (th/init-theme! "light")
+          (is (= before (plain sub 100))
+              "the rows and the selection survive the re-derive")
+          (is (not= raw-before (str/join "\n" (core/render sub 100)))
+              "the chrome restyled")))
+      (finally
+        (th/set-theme-instance! orig-theme)
+        (th/init-theme! orig-name)))))
