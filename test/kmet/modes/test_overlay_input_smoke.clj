@@ -11,10 +11,10 @@
    ESC) plus a settle delay; a stage without a marker runs a fixed delay
    after the previous write.
 
-   Assumes the repo-default extension set is enabled - the /lsp panel
-   footer marker doubles as proof the lsp-adapter loaded; on a machine
-   without it the panel never opens and the test fails loudly rather than
-   passing vacuously."
+   The app runs with a private agent dir under target/ whose settings.edn
+   enables the lsp-adapter bundled extension, so the /lsp panel opens
+   regardless of the developer's own extension set; its clojure-lsp row
+   doubles as proof the extension loaded."
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
             [clojure.string :as str]
@@ -90,8 +90,10 @@ sys.exit(status)
 (defn- python3-available? []
   (boolean (fs/which "python3")))
 
-(defn- run-stages! [out-file stages]
-  (let [{:keys [exit]} (process/shell {:in driver}
+(defn- run-stages! [out-file agent-dir stages]
+  (let [{:keys [exit]} (process/shell {:in driver
+                                       :continue true
+                                       :extra-env {"KMET_CODING_AGENT_DIR" agent-dir}}
                                       "python3" "-"
                                       (str out-file)
                                       (str (fs/cwd))
@@ -112,9 +114,16 @@ sys.exit(status)
       (let [out-dir (str (fs/path (fs/cwd) "target"))
             _ (fs/create-dirs out-dir)
             out-file (str (fs/path out-dir "overlay-smoke-out.raw"))
+            ;; a private agent dir pins the extension set: the /lsp panel
+            ;; needs lsp-adapter whatever the developer's own settings say
+            agent-dir (str (fs/path out-dir "overlay-smoke-agent"))
+            _ (fs/create-dirs agent-dir)
+            _ (spit (str (fs/path agent-dir "settings.edn"))
+                    (pr-str {:bundled-extensions ["lsp-adapter"]
+                             :session-dir "sessions"}))
             logo (str "kmet (" (host/runtime-name) ")")
             ;; Payloads travel as HEX so no encoding layer can mangle ESC/CR.
-            exit (run-stages! out-file
+            exit (run-stages! out-file agent-dir
                               [[logo 0.5 "2f6c7370"]         ;; "/lsp"
                                ["-" 1.2 "0d"]                ;; enter — its own stage: a CR inside a multi-char burst is rewritten to a newline by the paste-burst guard
                                ["clojure-lsp" 0.8 "1b"]      ;; the /lsp panel row is up: now ESC it closed
