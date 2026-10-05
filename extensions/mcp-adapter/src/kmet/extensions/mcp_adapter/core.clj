@@ -16,6 +16,8 @@
             [kmet.extensions.mcp-adapter.names :as names]
             [kmet.extensions.mcp-adapter.panel :as panel]
             [kmet.extensions.mcp-adapter.prompts :as prompts]
+            [kmet.extensions.mcp-adapter.search :as search]
+            [kmet.extensions.mcp-adapter.status :as status]
             [kmet.extensions.mcp-adapter.tool-proxy :as proxy]
             [kmet.extensions.mcp-adapter.tool-source :as script-source]
             [kmet.extensions.mcp-adapter.setup :as setup]
@@ -765,7 +767,7 @@
     (try
       (let [conn ((:ensure-connected-fn @state) server-name)]
         (if conn
-          (notify-or-print state ctx (:content (proxy/list-text @state server-name))
+          (notify-or-print state ctx (:content (status/list-text @state server-name))
                            (str "MCP: " server-name))
           (notify-or-print state ctx (str "Failed to connect to \"" server-name "\""))))
       (catch Exception e
@@ -1053,18 +1055,18 @@
       ("status" "")
       (if (and (:has-ui ctx) (seq (:mcp-servers (:config @state))))
         (open-panel! state ctx)
-        (notify-or-print state ctx (proxy/status-text @state) "MCP servers"))
+        (notify-or-print state ctx (status/status-text @state) "MCP servers"))
 
       "search"
       (let [[q regex] (str/split rest-args #"\s+" 2)]
-        (notify-or-print state ctx (:content (proxy/search-text @state (or q "") (proxy/flag regex)
-                                                                nil true 12 0))
+        (notify-or-print state ctx (:content (search/search-text @state (or q "") (proxy/flag regex)
+                                                                 nil true 12 0))
                          "MCP search"))
 
       "list"
       (notify-or-print state ctx (:content (if (seq rest-args)
-                                             (proxy/list-text @state rest-args)
-                                             (proxy/list-all-text @state)))
+                                             (status/list-text @state rest-args)
+                                             (status/list-all-text @state)))
                        (if (seq rest-args) (str "MCP: " rest-args) "MCP servers"))
 
       "connect"

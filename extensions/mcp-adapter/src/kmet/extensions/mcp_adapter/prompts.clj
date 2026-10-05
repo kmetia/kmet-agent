@@ -12,6 +12,7 @@
    the prompt text enters the conversation like a user message (pi
    pi.sendUserMessage)."
   (:require [clojure.string :as str]
+            [kmet.extensions.mcp-adapter.catalog :as catalog]
             [kmet.extensions.mcp-adapter.metadata :as metadata]
             [kmet.extensions.mcp-adapter.names :as names]
             [kmet.extensions.mcp-adapter.tool-proxy :as proxy]
@@ -276,7 +277,7 @@
 (defn- build-command-description
   [spec]
   (let [base (or (:description spec) (str "MCP prompt from " (:server spec)))
-        truncated (proxy/truncate-at-word (str "MCP: " base) 120)]
+        truncated (catalog/truncate-at-word (str "MCP: " base) 120)]
     (if (seq truncated) truncated (str "MCP prompt from " (:server spec)))))
 
 (defn sync-prompt-commands!
@@ -318,7 +319,7 @@
                 (map (fn [spec]
                        (str "- /" (:command-name spec)
                             (when (seq (:description spec))
-                              (str " — " (proxy/truncate-at-word
+                              (str " — " (catalog/truncate-at-word
                                           (:description spec) 80)))))
                      specs))
       "No MCP prompts cached. Connect a server with /mcp connect to discover prompts.")))

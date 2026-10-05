@@ -52,7 +52,8 @@
 
 (defn effective-mode
   "The effective prefix mode for a server: per-server :tool-prefix over
-   settings, default :server (was tool_proxy/tool-prefix-mode)."
+   settings, default :server (was tool-proxy/tool-prefix-mode, now
+   catalog/tool-prefix-mode)."
   [definition settings]
   (or (:tool-prefix definition) (:tool-prefix settings) :server))
 

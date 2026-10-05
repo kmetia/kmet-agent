@@ -7,7 +7,7 @@
          '[kmet.extensions.mcp-adapter.core :as core]
          '[kmet.extensions.mcp-adapter.metadata :as metadata]
          '[kmet.extensions.mcp-adapter.names :as names]
-         '[kmet.extensions.mcp-adapter.tool-proxy :as proxy])
+         '[kmet.extensions.mcp-adapter.status :as status])
 
 (def failures (atom 0))
 
@@ -164,14 +164,14 @@
   (check "direct-tools specs register the assigned names"
          (= #{"alpha_echo" "beta_echo"} (set (map :prefixed specs))))
   (check "describe shows the assigned name for alpha"
-         (str/starts-with? (:content (proxy/describe-text state "alpha_echo")) "alpha_echo"))
+         (str/starts-with? (:content (status/describe-text state "alpha_echo")) "alpha_echo"))
   (check "describe shows the assigned name for beta"
-         (str/starts-with? (:content (proxy/describe-text state "beta_echo")) "beta_echo"))
+         (str/starts-with? (:content (status/describe-text state "beta_echo")) "beta_echo"))
   (check "the contested plain name is reported ambiguous"
-         (str/includes? (:content (proxy/describe-text state "echo"))
+         (str/includes? (:content (status/describe-text state "echo"))
                         "matches multiple servers"))
   (check "list shows the assigned name"
-         (str/includes? (:content (proxy/list-text state "beta")) "beta_echo")))
+         (str/includes? (:content (status/list-text state "beta")) "beta_echo")))
 
 (println "\n" (if (zero? @failures) "ALL PASS" (str @failures " FAILURES")))
 (System/exit (if (zero? @failures) 0 1))
