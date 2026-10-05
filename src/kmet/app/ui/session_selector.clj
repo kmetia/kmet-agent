@@ -495,11 +495,10 @@
   (let [st @(:state-atom this)]
     (if (= :current (:scope st))
       (do (swap! (:state-atom this) assoc :scope :all)
-          (if (some? (:all-sessions st))
-            (set-sessions! this (:all-sessions st))
-            (do (set-sessions! this [])
-                (when-not (:all-loading st)
-                  (load-scope! this :all :toggle)))))
+          (let [cached (:all-sessions st)]
+            (set-sessions! this (or cached []))
+            (when (and (nil? cached) (not (:all-loading st)))
+              (load-scope! this :all :toggle))))
       (do (swap! (:state-atom this) assoc :scope :current)
           (set-sessions! this (or (:current-sessions st) []))))))
 
