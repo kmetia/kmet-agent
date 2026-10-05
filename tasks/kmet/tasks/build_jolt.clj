@@ -349,15 +349,19 @@
    download."
   [args]
   (loop [args args
-         opts {:mode "release" :flags [] :native-link nil :boot nil :target nil
+         opts {:mode "optimized" :flags [] :native-link nil :boot nil :target nil
                :target-pack nil :out-dir nil :jolt nil :force? false
                :no-smoke? true :test? false :help? false}]
     (if-some [arg (first args)]
       (let [more (rest args)]
         (case arg
-          ;; mode selects the artifact name and jolt's own emission mode
+          ;; mode selects the artifact name and jolt's own emission mode;
+          ;; optimized is the dist default (smallest released executable —
+          ;; the app half without inspector/proc-source information), and
+          ;; --release opts back into Clojure backtraces.
           "--dev" (recur more (assoc opts :mode "dev"))
           "--opt" (recur more (assoc opts :mode "optimized"))
+          "--release" (recur more (assoc opts :mode "release"))
           ;; forwarded verbatim: knobs the packager has no opinion about
           ("--closed-world" "--tree-shake" "--direct-link" "--no-direct-link")
           (recur more (update opts :flags conj arg))
@@ -641,6 +645,11 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
    static build is self-contained; a dynamic one needs its native libraries
    on the host.
 
+   Builds are optimized by default: Jolt's smallest and fastest app-half
+   emission (no inspector or procedure-source information), with --boot fast
+   (Jolt's default) for the quickest start. --release trades the size back for
+   Clojure backtraces; --dev produces an unoptimized development build.
+
    --test builds the compiled test runner instead: the same pipeline with the
    generated kmet.tasks.test-main entry, every test namespace statically
    required into the image. The artifact is the bare `kmetj-test`, packaged
@@ -664,10 +673,11 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
    Options:
      --dev                     unoptimized build, quickest to produce; vars
                                stay redefinable (a development build)
-     --opt                     optimized build: smaller and faster, but the
-                               binary cannot render Clojure backtraces
-                               (the default is a release build: the same
-                               optimizations, with backtraces)
+     --opt                     optimized build (the default): smaller and
+                               faster, but the binary cannot render Clojure
+                               backtraces
+     --release                 release build: the same optimizations, with
+                               backtraces (the larger binary)
      --closed-world            drop definitions unreachable from the entry
                                point (alias: --tree-shake) — a smaller binary
      --static                  link :jolt/native archives into the binary.
@@ -706,7 +716,7 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
                                kmetj-test-<ver>-<platform>.zip; entry
                                kmet.tasks.test-main, the whole suite compiled
                                in). The binary takes --test | --test-ext
-                               [filters]; release mode (the default) is the
+                               [filters]; the default optimized mode is the
                                one to use — its compressed fasl image links
                                far faster than --dev's uncompressed one for
                                the full suite
@@ -732,11 +742,12 @@ exec \"$LD\" --library-path \"$PREFIX/glibc/lib\" \"$BIN\" \"$@\"
      -h, --help                this text
 
    Examples:
-     jolt dist                          release build for this machine
+     jolt dist                          optimized build for this machine
+     jolt dist --release                ... with Clojure backtraces
      jolt dist --smoke                  ... and verify the artifact runs
      jolt dist --dynamic                force runtime native loading
      jolt dist --static                 force archive linking
-     jolt dist --test                   compiled test runner (release)
+     jolt dist --test                   compiled test runner (optimized)
      jolt dist --test --smoke           ... and smoke-run its suite
      jolt dist --dev                    quick development build
      jolt dist --out ~/.local/bin       also install the executable there

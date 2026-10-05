@@ -128,8 +128,8 @@
            (build/artifact-zip :jolt "1.2.3" "linux-amd64"
                                {:test? true :dev? true})))))
 
-(deftest parse-args-defaults-to-a-release-host-build
-  (is (= {:mode "release" :flags [] :native-link nil :boot nil :target nil
+(deftest parse-args-defaults-to-an-optimized-host-build
+  (is (= {:mode "optimized" :flags [] :native-link nil :boot nil :target nil
           :target-pack nil :out-dir nil :jolt nil :force? false :no-smoke? true
           :test? false :help? false}
          (jbuild/parse-args []))))
@@ -137,6 +137,10 @@
 (deftest parse-args-reads-modes-and-passthrough-flags
   (is (= "dev" (:mode (jbuild/parse-args ["--dev"]))))
   (is (= "optimized" (:mode (jbuild/parse-args ["--opt"]))))
+  (testing "--release opts back into Clojure backtraces"
+    (is (= "release" (:mode (jbuild/parse-args ["--release"]))))
+    (is (= "release" (:mode (jbuild/parse-args ["--opt" "--release"]))))
+    (is (= "optimized" (:mode (jbuild/parse-args ["--release" "--opt"])))))
   (is (= ["--closed-world"] (:flags
                              (jbuild/parse-args ["--closed-world"]))))
   (testing "native linking is an explicit pair, not a passthrough flag"

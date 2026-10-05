@@ -25,11 +25,14 @@ bb dist --out ~/bin     # additionally copy the executable there
 
 On jolt the same task AOT-compiles the app through
 `jolt build -m kmet.core` — runtime, stdlib, dependencies and kmet in one
-native binary, with the model catalogs embedded:
+native binary, with the model catalogs embedded. Builds default to Jolt's
+optimized emission (`--opt`, no inspector/procedure-source information) with
+its fast boot image; `--release` keeps Clojure backtraces at a larger size:
 
 ```sh
-jolt dist               # dist/kmetj-<version>-<platform>.zip
-jolt dist --dev         # Unoptimized build (--opt for optimized; release is the default)
+jolt dist               # Optimized + fast-boot build → dist/kmetj-<version>-<platform>.zip
+jolt dist --release     # Release build: optimized plus Clojure backtraces
+jolt dist --dev         # Unoptimized build (quickest to produce, redefinable vars)
 jolt dist --out ~/bin   # additionally copy the executable there
 jolt dist --target tarm64le --target-pack "$TMPDIR/pack"   # Cross-compile (use any writable pack dir)
 ```
