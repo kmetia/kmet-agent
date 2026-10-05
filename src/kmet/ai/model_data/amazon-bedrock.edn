@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-03T13:19:51Z"
+ :generated-at "2026-10-05T07:54:48Z"
  :provider {:id :amazon-bedrock
             :name "Amazon Bedrock"
             :env-vars []
@@ -576,6 +576,18 @@
    "eu.anthropic.claude-sonnet-5"
    {:id "eu.anthropic.claude-sonnet-5"
     :name "Claude Sonnet 5 (EU)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.eu-central-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:max "max" :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 2.2 :output 11 :cache-read 0.22 :cache-write 2.75}
+    :context-window 1000000
+    :max-tokens 128000}
+   "eu.anthropic.claude-sonnet-5-5"
+   {:id "eu.anthropic.claude-sonnet-5-5"
+    :name "Claude Sonnet 5.5 (EU)"
     :provider :amazon-bedrock
     :api :bedrock-converse-stream
     :base-url "https://bedrock-runtime.eu-central-1.amazonaws.com"
@@ -1964,6 +1976,18 @@
    "us.anthropic.claude-sonnet-5"
    {:id "us.anthropic.claude-sonnet-5"
     :name "Claude Sonnet 5 (US)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:max "max" :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 2.2 :output 11 :cache-read 0.22 :cache-write 2.75}
+    :context-window 1000000
+    :max-tokens 128000}
+   "us.anthropic.claude-sonnet-5-5"
+   {:id "us.anthropic.claude-sonnet-5-5"
+    :name "Claude Sonnet 5.5 (US)"
     :provider :amazon-bedrock
     :api :bedrock-converse-stream
     :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"

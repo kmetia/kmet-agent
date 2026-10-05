@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-03T13:19:51Z"
+ :generated-at "2026-10-05T07:54:48Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -1063,18 +1063,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
-    :context-window 256000
-    :max-tokens 32000}
-   "inclusionai/ling-3.0-flash-sante-free"
-   {:id "inclusionai/ling-3.0-flash-sante-free"
-    :name "Ling 3.0 Flash Sante (Free)"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning true
-    :input [:text]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :cost {:input 0.075 :output 0.22 :cache-read 0.015 :cache-write 0}
     :context-window 256000
     :max-tokens 32000}
    "inclusionai/ling-3.0-flash-vl"
