@@ -5,8 +5,8 @@ with exactly what to remove or update. A ticket is done only when its fix
 reaches a tagged release: closed upstream but unreleased still counts as
 live, because the workaround protects the declared floor (the latest tagged
 release). Status checked against GitHub and the re-fetched `origin/main` on
-2026-10-05, with the `jolt v0.8.17` build installed (latest tag: v0.8.17;
-`origin/main` at `bb30dc89`).
+2026-10-05, with the `jolt v0.8.17-10-gfba507c1` build installed (latest
+tag: v0.8.17; `origin/main` at `fba507c1`).
 
 ## Live workarounds
 
@@ -23,14 +23,3 @@ are not blocked. The fix is proposed in
 [babashka/sci#1093](https://github.com/babashka/sci/pull/1093), still open at
 head `1295142f`. `jolt/deps.edn` pins that SCI revision for the `:sci`
 fallback; keep the pin until the change is released by Jolt.
-
-### [jolt#1245](https://github.com/jolt-lang/jolt/issues/1245) — ClojureScript externs baked into built binaries
-
-Open upstream (filed 2026-10-05). `bld-dep-resources` (`host/chez/build.ss`)
-skips `.class` and `.cljs` but bakes `*.ext.js` externs, so any app whose
-dependencies carry `cljsjs`-style artifacts ships compiler-only bytes; when
-kmet still resolved `cljs.java-time`, 12.97 MB of `flat.ss` was the js-joda
-externs. No kmet-side workaround is carried now — jolt-lang/time#19's
-upstream exclusion keeps that artifact off the classpath — and the fix
-arrives with the `:jolt/min-version` floor bump when a tagged Jolt release
-carries it.
