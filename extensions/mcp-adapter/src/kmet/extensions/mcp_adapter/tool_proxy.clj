@@ -619,7 +619,8 @@
   "Connect a server honoring the 60s failure backoff window (pi
    lazyConnect): inside the window returns nil (the caller reports 'not
    available') instead of retrying; explicit connects bypass the window.
-   Returns the live conn or nil."
+   Returns the live conn or nil — the server's :error atom holds the
+   connect failure, so the caller can report it."
   [state server]
   (when-not (failure-age-seconds state server)
     (try
@@ -679,7 +680,7 @@
         (return-error (str "Server \"" server "\" not available (last failed "
                            failed-ago "s ago)"))
         (try
-          (let [conn ((:ensure-connected-fn state) server)]
+          (let [conn (ensure-lazy-connected state server)]
             (if conn
               (let [timeout-ms (or (:request-timeout-ms definition) 120000)
                     arguments (normalize-args args)
@@ -713,7 +714,9 @@
                   (return-error (:text guarded))
                   (cond-> {:content (:text guarded) :is-error false}
                     (seq details) (assoc :details details))))
-              (return-error (str "Server \"" server "\" not connected"))))
+              (return-error (str "MCP call failed: "
+                                 (or (some-> (get-in state [:servers server :error]) deref)
+                                     "not connected")))))
           (catch Exception e
             (return-error (str "MCP call failed: " (ex-message e)))))))))
 
@@ -770,7 +773,7 @@
         (return-error (str "Server \"" server "\" not available (last failed "
                            failed-ago "s ago)"))
         (try
-          (let [conn ((:ensure-connected-fn state) server)]
+          (let [conn (ensure-lazy-connected state server)]
             (if conn
               (let [result (mcp/read-resource conn uri)
                     contents (or (:contents result) [])
@@ -795,7 +798,9 @@
                                                                            (:details-max-bytes guard-options)))]
                 (cond-> {:content (:text guarded) :is-error false}
                   (seq details) (assoc :details details)))
-              (return-error (str "Server \"" server "\" not connected"))))
+              (return-error (str "MCP resource read failed: "
+                                 (or (some-> (get-in state [:servers server :error]) deref)
+                                     "not connected")))))
           (catch Exception e
             (return-error (str "MCP resource read failed: " (ex-message e)))))))))
 

@@ -12,12 +12,24 @@
 
 (defn parse-sse-line
   "Parse one SSE line. Returns [event-name data] — exactly one is non-nil
-   (:event or :data), both nil for blank/comment lines."
+   (:event or :data), both nil for blank/comment lines. A field value drops
+   at most one space after the colon (spec); any other whitespace is part
+   of the value."
   [line]
-  (cond
-    (str/starts-with? line "event:") [(str/trim (subs line 6)) nil]
-    (str/starts-with? line "data:")  [nil (str/trim (subs line 5))]
-    :else [nil nil]))
+  (let [value (fn [v] (if (str/starts-with? v " ") (subs v 1) v))]
+    (cond
+      (str/starts-with? line "event:") [(value (subs line 6)) nil]
+      (str/starts-with? line "data:") [nil (value (subs line 5))]
+      :else [nil nil])))
+
+(defn append-data
+  "Append one data: field value to BUF. The spec joins an event's data
+   fields with a newline, so a payload split across several `data:` lines is
+   reassembled exactly; the first value seeds the buffer."
+  [buf data]
+  (if (empty? buf)
+    (or data "")
+    (str buf "\n" data)))
 
 (defn body->reader
   "Response :body to a java.io.Reader. io/reader wraps a user-implemented

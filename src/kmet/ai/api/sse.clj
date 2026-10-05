@@ -325,7 +325,7 @@
                                                   {:keys [event-name buf]} @state]
                                               (cond
                                                 ev (swap! state assoc :event-name ev)
-                                                data (swap! state assoc :buf (str buf data))
+                                                data (swap! state assoc :buf (sse-lib/append-data buf data))
                                                 (and (empty? line) (seq buf))
                                                 (do (doseq [event (parse-responses-event event-name buf state)]
                                                       (when (= :done (:type event))
@@ -457,7 +457,7 @@
                                                   {:keys [event-name buf]} @state]
                                               (cond
                                                 ev (reset! state {:event-name ev :buf buf})
-                                                data (reset! state {:event-name event-name :buf (str buf data)})
+                                                data (reset! state {:event-name event-name :buf (sse-lib/append-data buf data)})
                                                 (and (empty? line) (seq buf))
                                                 (do (when-let [evt (parse-anthropic-event event-name buf)]
                                               ;; capture the message_delta stop reason before

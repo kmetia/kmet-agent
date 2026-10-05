@@ -55,7 +55,7 @@
             (let [[ev data] (sse/parse-sse-line line)]
               (cond
                 ev (recur ev buf)
-                data (recur event-name (str buf data))
+                data (recur event-name (sse/append-data buf data))
                 (and (str/blank? line) (seq buf))
                 (do
                   (if (= "endpoint" event-name)

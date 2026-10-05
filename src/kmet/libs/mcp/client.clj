@@ -692,8 +692,8 @@
 ;; ─── Subscriptions (2026-07-28) ───────────────────────────────────────────
 
 (def ^:private listen-backoff-ms
-  "Re-listen delays after a subscription stream ends on its own: the
-   immediate re-open, then 1s/5s/15s. Four attempts, then the conn is
+  "Re-listen delays after a subscription stream ends on its own: an
+   immediate re-open, then 1s/5s/15s. Four re-listens, then the conn is
    closed so the next use rebuilds it."
   [0 1000 5000 15000])
 
@@ -772,8 +772,8 @@
         (let [outcome (try (listen-attempt! conn state)
                            (catch Exception e {:error e}))]
           (when-not (or @stop-flag (= :stopped outcome))
-            (if (< attempt (dec (count listen-backoff-ms)))
-              (do (sleep-listen! (nth listen-backoff-ms (inc attempt)) stop-flag)
+            (if (< attempt (count listen-backoff-ms))
+              (do (sleep-listen! (nth listen-backoff-ms attempt) stop-flag)
                   (recur (inc attempt) true (or restored? restore?)))
               ;; the subscription cannot be kept alive any more: close the
               ;; conn so the next use reconnects from scratch

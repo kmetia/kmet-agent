@@ -338,7 +338,7 @@
           (let [[ev data] (sse/parse-sse-line line)]
             (cond
               ev (recur ev buf)
-              data (recur event-name (str buf data))
+              data (recur event-name (sse/append-data buf data))
               (and (str/blank? line) (seq buf))
               (let [parsed (try (json/parse-string buf true)
                                 (catch Exception _ nil))]
@@ -399,14 +399,21 @@
 
 ;; ─── Request + async send ─────────────────────────────────────────────────
 
+(def ^:private timeout-exception-classes
+  "JVM exception class names that mean the transport timed out. Classified
+   by name like kmet.libs.http's network-exception-classes, so the check
+   stays portable across hosts."
+  #{"HttpTimeoutException" "SocketTimeoutException"})
+
 (defn- timeout-exception?
-  "True when E (or a cause) is a java.net.http.HttpTimeoutException or
-   carries a 'timed out' message."
+  "True when E (or a cause) is a transport timeout, or carries a 'timed
+   out' message (a host may wrap the failure without preserving a
+   recognizable class)."
   [e]
   (loop [e e]
     (cond
       (nil? e) false
-      (instance? java.net.http.HttpTimeoutException e) true
+      (contains? timeout-exception-classes (some-> (class e) .getSimpleName)) true
       (str/includes? (str (ex-message e)) "timed out") true
       :else (recur (ex-cause e)))))
 
@@ -514,7 +521,7 @@
             (let [[ev data] (sse/parse-sse-line line)]
               (cond
                 ev (recur ev buf)
-                data (recur event-name (str buf data))
+                data (recur event-name (sse/append-data buf data))
                 (and (str/blank? line) (seq buf))
                 (let [parsed (try (json/parse-string buf true)
                                   (catch Exception _ nil))]

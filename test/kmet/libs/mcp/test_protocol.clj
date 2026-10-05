@@ -118,10 +118,32 @@
             {:content [{:type "text" :text "nope"}] :isError true}))))
   (testing "image blocks are summarized, not rendered"
     (let [r (protocol/format-result
-             {:content [{:type "image" :mimeType "image/png" :data "abcd"}]})]
+             {:content [{:type "image" :mimeType "image/png" :data "YWJj"}]})]
       (is (str/includes? (:text r) "image/png"))
-      (is (str/includes? (:text r) "4 bytes"))
+      (is (str/includes? (:text r) "3 bytes") "the decoded size, not the base64 length")
       (is (false? (:is-error r)))))
+  (testing "audio blocks are summarized like images"
+    (is (= "[audio: audio/mpeg, 3 bytes — not rendered]"
+           (:text (protocol/format-result
+                   {:content [{:type "audio" :mimeType "audio/mpeg" :data "YWJj"}]})))))
+  (testing "an embedded resource renders its text"
+    (is (= "hi" (:text (protocol/format-result
+                        {:content [{:type "resource"
+                                    :resource {:uri "file:///x" :text "hi"}}]})))))
+  (testing "an embedded resource blob is summarized"
+    (is (= "[resource file:///x: application/octet-stream, 3 bytes — not rendered]"
+           (:text (protocol/format-result
+                   {:content [{:type "resource"
+                               :resource {:uri "file:///x" :blob "YWJj"
+                                          :mimeType "application/octet-stream"}}]})))))
+  (testing "a resource link renders its name or uri"
+    (is (= "[resource link: file:///x]"
+           (:text (protocol/format-result
+                   {:content [{:type "resource_link" :uri "file:///x"}]}))))
+    (is (= "[resource link: readme]"
+           (:text (protocol/format-result
+                   {:content [{:type "resource_link" :name "readme"
+                               :uri "file:///x"}]})))))
   (testing "structuredContent is pretty JSON when there is no text"
     (let [r (protocol/format-result
              {:content [] :structuredContent {:a [1 2]}})]

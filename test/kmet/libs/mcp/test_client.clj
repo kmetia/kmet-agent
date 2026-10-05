@@ -913,7 +913,7 @@
           (mcp/listen! conn {:toolsListChanged true}
                        {:on-restored (fn [] (swap! restored inc))})
           (is (wait-for #(true? (:failed? (listen-state conn)))))
-          (is (= 3 @calls) "the immediate open plus two backed-off re-listens")
+          (is (= 4 @calls) "the immediate open, then the three backed-off re-listens")
           (is (= 1 @restored) "one resync per listener, after the first gap")
           (is (false? (mcp/listening? conn)))
           (is (true? @(:closed conn))

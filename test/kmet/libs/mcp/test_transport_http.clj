@@ -116,6 +116,18 @@
            (http/parse-http-response
             conn (response 200 "text/event-stream; charset=utf-8" body) 7 nil)))))
 
+(deftest parse-sse-response-joins-multi-line-data
+  ;; the spec joins an event's data fields with a newline: a payload split
+  ;; across two data: lines is reassembled exactly (a bare concat would
+  ;; yield "helloworld")
+  (let [conn (http/connect! "http://server" {})
+        body (str "event: message\n"
+                  "data: {\"jsonrpc\":\"2.0\",\"id\":9,\"result\":{\"text\":\"hello\n"
+                  "data: world\"}}\n\n")]
+    (is (= {:jsonrpc "2.0" :id 9 :result {:text "hello\nworld"}}
+           (http/parse-http-response
+            conn (response 200 "text/event-stream" body) 9 nil)))))
+
 (deftest parse-sse-response-dispatches-foreign-messages
   (let [progress (atom [])
         conn-level (atom [])
@@ -229,6 +241,22 @@
                (catch Exception e e))]
     (is (some? e))
     (is (re-find #"empty response to tools/list" (ex-message e)))))
+
+(deftest request!-maps-a-wrapped-transport-timeout
+  ;; timeout detection is by exception class name (portable across hosts):
+  ;; a wrapped HttpTimeoutException with no "timed out" message still maps
+  ;; to the timeout contract
+  (let [conn (http/connect! "http://server"
+                            {:request-fn (fn [_ _]
+                                           (throw (ex-info
+                                                   "network error: HttpTimeoutException"
+                                                   {:type :transport-error}
+                                                   (java.net.http.HttpTimeoutException. "x"))))})
+        e (try (http/request! conn "tools/list" {} 5000 nil nil) nil
+               (catch Exception e e))]
+    (is (= 5000 (:timeout-ms (ex-data e))))
+    (is (= "tools/list" (:method (ex-data e))))
+    (is (re-find #"timed out after 5000ms" (ex-message e)))))
 
 ;; ─── Custom headers from tool parameters (SEP-2243) ──────────────────────
 

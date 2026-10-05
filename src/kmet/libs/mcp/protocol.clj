@@ -158,20 +158,56 @@
 
 ;; ─── Result formatting (§7.6) ─────────────────────────────────────────────
 
+(defn- base64-byte-size
+  "Decoded byte length of a padded base64 string, or nil when S is not a
+   well-padded base64 string (a malformed payload is summarized by its
+   character count instead)."
+  [s]
+  (when (string? s)
+    (let [n (count s)
+          pad (cond (str/ends-with? s "==") 2
+                    (str/ends-with? s "=") 1
+                    :else 0)]
+      (when (and (pos? n) (zero? (mod n 4)))
+        (- (/ (* 3 n) 4) pad)))))
+
+(defn- byte-label
+  "The '<n> bytes' label of a base64 payload — the decoded size when the
+   payload is well-formed, else its character count."
+  [data]
+  (str (or (base64-byte-size data) (count (str data))) " bytes"))
+
+(defn- resource-block
+  "The text of an embedded resource content block: the resource's text,
+   else a summary of its blob; nil when the block carries neither."
+  [b]
+  (let [r (:resource b)
+        uri (or (:uri r) "?")]
+    (cond
+      (string? (:text r)) (:text r)
+      (some? (:blob r)) (str "[resource " uri ": " (or (:mimeType r) "?") ", "
+                             (byte-label (:blob r)) " — not rendered]")
+      :else nil)))
+
 (defn format-result
   "Flatten a tools/call result into text (§7.6): text/error content blocks
-   joined with newlines; image → '[image: <mimeType>, <n> bytes — not
-   rendered]'; empty content with structuredContent → pretty JSON; fallback
+   joined with newlines; image/audio → '[<kind>: <mimeType>, <n> bytes —
+   not rendered]' (a base64 payload reports its decoded size); an embedded
+   resource → its text, else a blob summary; a resource link → its name or
+   uri; empty content with structuredContent → pretty JSON; fallback
    '(no text content)'. Returns {:text str :is-error bool}."
   [result]
   (let [blocks (or (:content result) [])
         texts (keep (fn [b]
                       (case (:type b)
-                        "text" (:text b)
-                        "error" (:text b)
+                        ("text" "error") (:text b)
                         "image" (str "[image: " (or (:mimeType b) "?") ", "
-                                     (count (or (:data b) ""))
-                                     " bytes — not rendered]")
+                                     (byte-label (:data b)) " — not rendered]")
+                        "audio" (str "[audio: " (or (:mimeType b) "?") ", "
+                                     (byte-label (:data b)) " — not rendered]")
+                        "resource" (resource-block b)
+                        "resource_link" (str "[resource link: "
+                                             (or (:name b) (:uri b) "?") "]")
                         nil))
                     blocks)
         text (cond
