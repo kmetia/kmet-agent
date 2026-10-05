@@ -325,7 +325,7 @@ configure. Only add servers you trust.
 ## Development
 
 The `scripts/` directory carries fake MCP/OAuth servers (legacy and
-2026-07-28 modern modes — see mcp.md §3.1) and eight validation scripts
+2026-07-28 modern modes) and eight validation scripts
 (names assignment, protocol wire shape, client transports,
 config/extension load, OAuth flow, McpPanel/TextDialog/prompt components,
 scripted-MCP end-to-end) plus an end-to-end smoke of the proxy-tool surface

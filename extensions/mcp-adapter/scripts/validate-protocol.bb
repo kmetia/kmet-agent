@@ -1,9 +1,8 @@
 #!/usr/bin/env bb
-;; Wire-shape validation for the modern (2026-07-28) fake MCP servers
-;; (mcp.md §3.1). Raw JSON-RPC over stdio and raw HTTP POSTs — the lib
-;; client speaks only the legacy handshake until §3.3, so this script pins
-;; what the fakes put on the wire and proves the legacy modes are untouched.
-;; Client-side assertions accumulate here as later landings land.
+;; Wire-shape validation for the modern (2026-07-28) fake MCP servers.
+;; Raw JSON-RPC over stdio and raw HTTP POSTs — this script pins what the
+;; fakes and the lib client put on the wire, and proves the legacy modes
+;; are untouched.
 ;;
 ;; Usage: bb validate-protocol.bb <fake-stdio.bb> <fake-http.bb>
 

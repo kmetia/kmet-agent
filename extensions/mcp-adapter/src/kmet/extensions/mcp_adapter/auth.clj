@@ -6,7 +6,7 @@
 
    Thin adapter: the interactive flow's host side (the browser/callback
    server race, the manual-paste prompt, status text) lives here; the
-   protocol steps live in kmet.libs.mcp.auth (mcp.md Phase 2) — issuer
+   protocol steps live in kmet.libs.mcp.auth — issuer
    binding and the credential store (SEP-2352), discovery, client
    registration incl. the SEP-837 application_type, PKCE request/response
    handling with the RFC 9207 `iss` check, the device flow, and the
@@ -36,7 +36,7 @@
 
 ;; ─── kmet.libs.mcp.auth re-exports ────────────────────────────────────────
 ;; The policy, discovery, flow steps, request-auth and store machinery
-;; lives in the lib (mcp.md Phase 2). These aliases keep the validation
+;; lives in the lib. These aliases keep the validation
 ;; scripts' call surface (auth/<name>) stable; the extension calls the lib
 ;; directly where a name is not part of that surface.
 
@@ -52,7 +52,7 @@
 
 ;; ─── Token store (kmet.libs.mcp.auth) ─────────────────────────────────────
 ;; The :file / :keyring / :auto backends, their path/permission handling
-;; and logout live in the lib (mcp.md Phase 2). The extension keeps what is
+;; and logout live in the lib. The extension keeps what is
 ;; host policy — where the plaintext store file sits — plus the names
 ;; core.clj and the validation scripts call.
 
