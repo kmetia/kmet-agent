@@ -22,6 +22,7 @@
    streamable-HTTP transport delivers them on the response thread, so
    handlers must not block — the extension's list_changed resync spawns)."
   (:require [clojure.string :as str]
+            [kmet.libs.concurrent :as concurrent]
             [kmet.libs.jsonrpc :as jrpc]
             [kmet.libs.mcp.protocol :as protocol]
             [kmet.libs.mcp.transport :as transport]
@@ -160,29 +161,28 @@
                                   (update :_meta merge (protocol/conn-meta conn))))
                   (catch Exception _ nil))
                 (deliver ended :stopped))
-        t (Thread. (fn []
-                     (try
-                       (if @stopped
-                         ;; stopped before the request went out: there is
-                         ;; nothing to cancel, so don't subscribe at all
-                         (deliver ended :stopped)
-                         (do
-                           (jrpc/request! conn protocol/listen-method params
-                                          {:timeout-ms jrpc/no-deadline :id id})
-                           (deliver ended (if @stopped :stopped :ended))))
-                       (catch Exception e
-                         (deliver ended (if @stopped :stopped {:error e})))
-                       (finally
-                         ;; clear only our own entry: a re-listen may have
-                         ;; installed a fresh one already
-                         (swap! listen-atom
-                                (fn [l] (when-not (= id (:id l)) l)))))))]
-    (reset! listen-atom {:id id :subscription-id nil :on-frame on-frame
-                         :stop! stop!})
-    ;; the parked request thread is released by close! (its pending
-    ;; correlation fails with ::transport-dead)
-    (.setDaemon t true)
-    (.start t)
+        run (fn []
+              (try
+                (if @stopped
+                ;; stopped before the request went out: there is
+                ;; nothing to cancel, so don't subscribe at all
+                  (deliver ended :stopped)
+                  (do
+                    (jrpc/request! conn protocol/listen-method params
+                                   {:timeout-ms jrpc/no-deadline :id id})
+                    (deliver ended (if @stopped :stopped :ended))))
+                (catch Exception e
+                  (deliver ended (if @stopped :stopped {:error e})))
+                (finally
+                ;; clear only our own entry: a re-listen may have
+                ;; installed a fresh one already
+                  (swap! listen-atom
+                         (fn [l] (when-not (= id (:id l)) l))))))
+        _ (reset! listen-atom {:id id :subscription-id nil :on-frame on-frame
+                               :stop! stop!})
+        ;; the parked request thread is released by close! (its pending
+        ;; correlation fails with ::transport-dead)
+        _ (concurrent/spawn run)]
     {:stop! stop! :ended ended}))
 
 (defn request!
