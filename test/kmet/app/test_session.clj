@@ -490,6 +490,105 @@
         (t/is (< @loaded-count 15) "the remaining files were never read"))
       (finally (fs/delete-tree dir)))))
 
+(t/deftest test-session-list-sessions-info-empty-dir
+  ;; a real directory with no session files reports nothing and never fires
+  ;; progress (the empty listing short-circuits before the scan)
+  (let [dir (str "target/test-sess-listinfo-empty-" (System/currentTimeMillis))
+        progress (atom [])]
+    (try
+      (fs/create-dirs dir)
+      (t/is (= []
+               (s/list-sessions-info dir
+                                     {:on-progress
+                                      (fn [& _] (swap! progress conj :called))})))
+      (t/is (empty? @progress))
+      (finally (fs/delete-tree dir)))))
+
+(t/deftest test-session-list-sessions-info-headerless-only
+  ;; when every file is headerless the listing is empty and its snapshots
+  ;; are empty too — progress still reports each file
+  (let [dir (str "target/test-sess-listinfo-headerless-" (System/currentTimeMillis))
+        progress (atom [])]
+    (try
+      (fs/create-dirs dir)
+      (dotimes [i 2]
+        (spit (str dir "/legacy" i ".ednl")
+              (prn-str {:id (str "l" i) :parent-id nil :role :user
+                        :content (str "old" i)
+                        :timestamp (str (java.time.Instant/now))})))
+      (let [infos (s/list-sessions-info
+                   dir
+                   {:on-progress
+                    (fn [loaded total partial]
+                      (swap! progress conj [loaded total partial]))})]
+        (t/is (= [] infos))
+        (t/is (= [1 2] (map first @progress)) "one update per completed file")
+        (t/is (every? (fn [[_ _ partial]] (empty? partial)) @progress)
+              "a headerless file never enters a snapshot"))
+      (finally (fs/delete-tree dir)))))
+
+(t/deftest test-session-list-sessions-info-publish-every
+  ;; :publish-every controls only the snapshot cadence: progress still
+  ;; fires per file, and the first and last updates always carry a snapshot
+  (let [dir (str "target/test-sess-listinfo-cadence-" (System/currentTimeMillis))
+        progress (atom [])]
+    (try
+      (dotimes [i 12]
+        (let [sess (s/create-session dir)]
+          (s/append-entry sess {:role :assistant :content (str "m" i)})))
+      (let [infos (s/list-sessions-info
+                   dir
+                   {:publish-every 100
+                    :on-progress
+                    (fn [loaded total partial]
+                      (swap! progress conj {:loaded loaded
+                                            :total total
+                                            :partial partial}))})]
+        (t/is (= 12 (count infos)))
+        (t/is (= (range 1 13) (map :loaded @progress)) "progress fires per file")
+        (t/is (= [1 12] (map :loaded (filter :partial @progress)))
+              "snapshots only on the first and last update"))
+      (finally (fs/delete-tree dir)))))
+
+(t/deftest test-session-list-sessions-info-stop-before-start
+  ;; an already-true stop predicate prevents every file read and every
+  ;; progress update
+  (let [dir (str "target/test-sess-listinfo-prestop-" (System/currentTimeMillis))
+        progress (atom [])]
+    (try
+      (let [sess (s/create-session dir)]
+        (s/append-entry sess {:role :assistant :content "m"}))
+      (t/is (= []
+               (s/list-sessions-info
+                dir
+                {:stop? (fn [] true)
+                 :on-progress (fn [& _] (swap! progress conj :called))})))
+      (t/is (empty? @progress))
+      (finally (fs/delete-tree dir)))))
+
+(t/deftest test-session-file-candidates-order
+  ;; discovery streams newest-first by mtime, file name descending as the
+  ;; tiebreak (pi: candidate stats sort)
+  (let [dir (str "target/test-sess-candidates-" (System/currentTimeMillis))
+        t0 1700000000000
+        mk (fn [name mtime]
+             (let [f (str dir "/" name)]
+               (spit f "")
+               (fs/set-last-modified-time f (java.time.Instant/ofEpochMilli mtime))
+               f))]
+    (try
+      (fs/create-dirs dir)
+      (mk "a_newest.ednl" (+ t0 180000))
+      (mk "b_oldest.ednl" (+ t0 60000))
+      (mk "c_middle.ednl" (+ t0 120000))
+      (mk "d_tie.ednl" (+ t0 120000))
+      (let [candidates (#'s/session-file-candidates dir)]
+        (t/is (= ["a_newest.ednl" "d_tie.ednl" "c_middle.ednl" "b_oldest.ednl"]
+                 (mapv (comp fs/file-name :path) candidates)))
+        (t/is (= [(+ t0 180000) (+ t0 120000) (+ t0 120000) (+ t0 60000)]
+                 (mapv :mtime candidates))))
+      (finally (fs/delete-tree dir)))))
+
 (t/deftest test-session-list-sessions-info-nonexistent
   (t/is (= [] (s/list-sessions-info "nonexistent-dir"))))
 

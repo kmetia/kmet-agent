@@ -649,6 +649,111 @@
     (t/is (str/includes? (selected-row-text sel 100) "second")
           "the cursor stayed on the row the user picked")))
 
+(t/deftest tab-to-an-uncached-scope-drops-stale-rows
+  ;; pi: toggleScope always sets the list from the new scope's cache
+  ;; (sessions ?? []); the previous scope's rows must not linger while the
+  ;; new scope's listing has produced no snapshot yet
+  (install-keybindings!)
+  (let [a (info "/tmp/s/a.ednl" :first-message "current row")
+        gate (promise)
+        sel (ss/make-session-selector
+             :loaders {:current (fn [_ _] [])
+                       :all (fn [on-progress _stop?]
+                              @gate
+                              (on-progress 1 1 [a])
+                              [a])})]
+    (ss/session-selector-set-listing! sel :current [a])
+    (press sel "tab")
+    (t/is (not-any? #(str/includes? % "current row") (render-text sel 100))
+          "the previous scope's rows don't linger under the new scope")
+    (deliver gate true)
+    (wait-for #(boolean (some (fn [l] (str/includes? l "current row"))
+                              (render-text sel 100))))))
+
+(t/deftest a-newer-load-supersedes-and-stops-the-old-one
+  ;; launching a newer load of the same scope flips the old loader's stop?;
+  ;; its late snapshot and final result never reach the cache
+  (install-keybindings!)
+  (let [a (info "/tmp/s/a.ednl" :first-message "first load")
+        b (info "/tmp/s/b.ednl" :first-message "second load")
+        stop1 (atom nil)
+        gate1 (promise)
+        finished1 (promise)
+        calls (atom 0)
+        sel (ss/make-session-selector
+             :loaders {:current (fn [on-progress stop?]
+                                  (if (= 1 (swap! calls inc))
+                                    (do (reset! stop1 stop?)
+                                        (on-progress 1 2 [a])
+                                        @gate1
+                                        (on-progress 2 2 [a b])
+                                        (deliver finished1 true)
+                                        [a b])
+                                    (do (on-progress 1 2 [b])
+                                        [b])))
+                       :all (fn [_ _] [])})]
+    (#'ss/load-scope! sel :current :initial)
+    (wait-for #(boolean (some (fn [l] (str/includes? l "first load"))
+                              (render-text sel 100))))
+    (#'ss/load-scope! sel :current :refresh)
+    (wait-for #(boolean (some (fn [l] (str/includes? l "second load"))
+                              (render-text sel 100))))
+    (t/is (true? (@stop1)) "the superseded loader's stop? flipped")
+    (deliver gate1 true)
+    (wait-for #(realized? finished1))
+    (t/is (= ["/tmp/s/b.ednl"] (mapv :path (:current-sessions @(:state-atom sel))))
+          "the stale load's final result is dropped")
+    (t/is (not-any? #(str/includes? % "first load") (render-text sel 100)))))
+
+(t/deftest dispose-stops-an-in-flight-listing
+  ;; the dock can dispose a selector without hide! (clear!); dispose must
+  ;; still flip stop? so the scan ends
+  (install-keybindings!)
+  (let [a (info "/tmp/s/a.ednl" :first-message "row")
+        stop1 (atom nil)
+        gate (promise)
+        finished (promise)
+        sel (ss/make-session-selector
+             :loaders {:current (fn [on-progress stop?]
+                                  (reset! stop1 stop?)
+                                  (on-progress 1 1 [a])
+                                  @gate
+                                  (deliver finished true)
+                                  [a])
+                       :all (fn [_ _] [])})]
+    (#'ss/load-scope! sel :current :initial)
+    (wait-for #(boolean (some (fn [l] (str/includes? l "row"))
+                              (render-text sel 100))))
+    (protocols/dispose sel)
+    (t/is (true? (@stop1)) "dispose flipped the loader's stop?")
+    (deliver gate true)
+    (wait-for #(realized? finished))))
+
+(t/deftest named-filter-applies-to-streamed-snapshots
+  ;; the ctrl+n name filter re-derives from every partial, like the query
+  (install-keybindings!)
+  (let [named (info "/tmp/s/n.ednl" :name "named work" :first-message "named work")
+        unnamed (info "/tmp/s/u.ednl" :first-message "anon work")
+        release (promise)
+        sel (ss/make-session-selector
+             :loaders {:current (fn [_ _] [])
+                       :all (fn [on-progress _stop?]
+                              (on-progress 1 2 [named unnamed])
+                              @release
+                              [named unnamed])})]
+    (ss/session-selector-set-listing! sel :current [])
+    (press sel "tab")
+    (wait-for #(boolean (some (fn [l] (str/includes? l "anon work"))
+                              (render-text sel 100))))
+    (press sel "ctrl+n")
+    (t/is (some #(str/includes? % "named work") (render-text sel 100)))
+    (t/is (not-any? #(str/includes? % "anon work") (render-text sel 100)))
+    (deliver release true)
+    (wait-for #(not-any? (fn [l] (str/includes? l "Loading"))
+                         (render-text sel 100)))
+    (t/is (some #(str/includes? % "named work") (render-text sel 100)))
+    (t/is (not-any? #(str/includes? % "anon work") (render-text sel 100)))))
+
 (t/deftest close-and-select-stop-the-streaming-loader
   ;; while a listing is still blocked, selecting or closing flips the
   ;; loader's stop?; its late snapshot and final result are dropped, so a

@@ -487,15 +487,19 @@
 
 (defn- toggle-scope!
   "Tab — switch between the current folder and all sessions; the all-scope
-   list is loaded once and cached (pi: toggleScope)."
+   list is loaded once and cached (pi: toggleScope). The list is always set
+   from the new scope's cache (pi: setSessions(sessions ?? [])): while the
+   new scope has no snapshot yet the rows are empty, never the previous
+   scope's."
   [this]
   (let [st @(:state-atom this)]
     (if (= :current (:scope st))
       (do (swap! (:state-atom this) assoc :scope :all)
           (if (some? (:all-sessions st))
             (set-sessions! this (:all-sessions st))
-            (when-not (:all-loading st)
-              (load-scope! this :all :toggle))))
+            (do (set-sessions! this [])
+                (when-not (:all-loading st)
+                  (load-scope! this :all :toggle)))))
       (do (swap! (:state-atom this) assoc :scope :current)
           (set-sessions! this (or (:current-sessions st) []))))))
 
