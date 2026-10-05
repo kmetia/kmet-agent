@@ -454,11 +454,14 @@
         (t/is (= #{(:file sa) (:file sb) (:file legacy)} (set (map :path infos))))
         (t/is (= [4 4] (last (map (juxt :loaded :total) @progress)))
               "progress counts all scanned files, incl. headerless")
+        (t/is (= [1 2 3 4] (map :loaded @progress))
+              "progress reports every completed file")
         (t/is (apply >= (map :modified infos)) "sorted newest modified first")
         (t/is (some (comp some? :partial) @progress)
               "partial snapshots publish before the listing finishes")
-        (doseq [p (keep :partial @progress) :when (seq p)]
-          (t/is (apply >= (map :modified p)) "partial snapshots are newest first"))
+        (doseq [p (keep :partial @progress)]
+          (t/is (or (empty? p) (apply >= (map :modified p)))
+                "partial snapshots are newest first"))
         (t/is (= (set (map :path infos))
                  (set (map :path (:partial (last @progress)))))
               "the final publish carries the finished snapshot"))

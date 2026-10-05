@@ -1312,23 +1312,21 @@
           []
           (let [total (count files)
                 done (atom (vec (repeat total nil)))
-                loaded (atom 0)
-                publish! (fn []
-                           (when on-progress
-                             (on-progress @loaded total
-                                          (->> @done
-                                               (remove nil?)
-                                               (sort-by :modified >)
-                                               vec))))]
+                loaded (atom 0)]
             (build-session-infos
              files
              (fn [info index]
                (swap! done assoc index info)
                (let [n (swap! loaded inc)]
-                 (when (or (= 1 n)
-                           (= total n)
-                           (zero? (mod n publish-every)))
-                   (publish!))))
+                 (when on-progress
+                   (on-progress n total
+                                (when (or (= 1 n)
+                                          (= total n)
+                                          (zero? (mod n publish-every)))
+                                  (->> @done
+                                       (remove nil?)
+                                       (sort-by :modified >)
+                                       vec))))))
              stop?)
             (->> @done (remove nil?) (sort-by :modified >) vec))))
       (catch Exception _ []))))
