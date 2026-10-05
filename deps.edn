@@ -84,22 +84,11 @@
         ;; jolt path loads (jolt-lang/time#19).
         io.github.jolt-lang/time {:git/url "https://github.com/jolt-lang/time.git"
                                   :git/sha "2c58d9c709a25d80608757c3026f4c656a994ef1"}
-        ;; OpenSSL-backed javax.crypto/java.security shims on Jolt
-        ;; (MessageDigest, Mac, Cipher, SecureRandom, EC + RSA
-        ;; Signature/KeyPairGenerator/KeyFactory — RFC 0014; inert on bb/JVM).
-        ;; RSA (keygen + SHA*withRSA + RSA KeyFactory) comes from the library,
-        ;; as do the libcrypto/libssl runtime candidates. The project-level
-        ;; specs above retain those candidates and add static archives.
-        ;; v0.0.10 (feb25f70, 2026-10-01): honors off/len in the byte-array
-        ;; update/digest/doFinal overloads and the key/IV spec constructors,
-        ;; fixes the quadratic MessageDigest.update, drops the Apple
-        ;; libcrypto stub fallback, and declares the link-libs its static
-        ;; archives need. Keyed jolt-lang/jolt-crypto to match the name
-        ;; upstream http-client depends on: the shared key lets this root
-        ;; pin supersede the transitive v0.0.9 instead of resolving a
-        ;; second crypto copy.
-        jolt-lang/crypto {:git/url "https://github.com/jolt-lang/crypto.git"
-                               :git/sha "feb25f70c76ff1030f621817a31723a183ece80b"}
+        ;; jolt-lang/jolt-crypto — the OpenSSL-backed java.security /
+        ;; javax.crypto shims (MessageDigest, Mac, Cipher, SecureRandom, EC +
+        ;; RSA, RFC 0014; inert on bb/JVM) — arrives through http-client
+        ;; below at v0.0.10; no direct pin. The project-level specs above
+        ;; keep its libcrypto/libssl candidates and add static archives.
         ;; babashka.http-client on Jolt: the jolt-lang/http-client library's
         ;; java.net.http shims (RFC 0014 :jolt/provides over BSD sockets +
         ;; OpenSSL + libz via jolt.ffi) run the real org.babashka/http-client
@@ -119,8 +108,9 @@
         ;; v0.1.0 (d99af98, PR #34's merge): PR #34 drops the stale
         ;; java.util.concurrent.CompletableFuture claim and floors the
         ;; library at Jolt 0.8.16 (now the floor here), and PR #33 exits its
-        ;; test runners via jolt's wait and bumps crypto to v0.0.10 (kmet
-        ;; pins that revision already). v0.0.17 and earlier printed the
+        ;; test runners via jolt's wait and bumps its crypto dep to v0.0.10 —
+        ;; the revision kmet's digest/HMAC classes ride on, no root pin.
+        ;; v0.0.17 and earlier printed the
         ;; dropped-claim warning on every Jolt run (jolt-lang/http-client#32).
         io.github.jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
                                          :git/tag "v0.1.0"
