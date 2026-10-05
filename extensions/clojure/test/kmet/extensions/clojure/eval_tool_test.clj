@@ -4,6 +4,7 @@
    repair/timeout notices."
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
+            [kmet.extension :as ext]
             [kmet.extensions.clojure.eval-tool :as eval-tool]
             [kmet.extensions.clojure.nrepl :as nrepl]
             [kmet.tui.core :as core]
@@ -174,3 +175,14 @@
       (is (str/ends-with? long-title "…"))
       (is (= (+ (count "clj $ ") 81) (count long-title))))
     (is (nil? (eval-tool/title {})))))
+
+;; ═══════════════════════════════════════════════════════════════════════════════
+;; Registration
+;; ═══════════════════════════════════════════════════════════════════════════════
+
+(deftest test-registration-opts-into-the-tail-status-line
+  (testing "clojure_eval is a runner tool: :status true"
+    (let [{:keys [api state]} (ext/create-nullable-api)
+          _ (eval-tool/register! api)
+          tool (get-in @state [:tools "clojure_eval"])]
+      (is (true? (:status tool))))))

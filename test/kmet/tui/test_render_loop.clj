@@ -882,7 +882,7 @@
     (let [cmd (str/join "\n" (repeat 40 "echo x"))
           vt (make-virtual-terminal)
           tui (core/create-tui (:terminal vt))
-          tool (te/make-tool-execution :name "bash" :args {:command cmd})]
+          tool (te/make-tool-execution :name "bash" :args {:command cmd} :status true)]
       (try
         (core/tui-add-child tui (test-component
                                  (atom (mapv #(str "history " %) (range 40)))))

@@ -4,7 +4,7 @@
 (defrecord Tool [name label description prompt-snippet prompt-guidelines
                  parameters execute render-call render-result
                  constrained-sampling render-shell prepare-arguments
-                 execution-mode streams? contextual? title])
+                 execution-mode streams? contextual? title status])
 
 (defn param
   "Define a tool parameter for JSON schema generation."
@@ -49,11 +49,13 @@
    :parameters may be a pre-built JSON schema map (passed through as-is);
    :params is a compact alternative — a map of param keyword →
    {:type :string|:number|:boolean :description str :optional? bool} —
-   converted to a JSON schema automatically."
+   converted to a JSON schema automatically. :status requests the transcript's
+   tail state line (pending/success/error + Elapsed/Took); nil (the default)
+   renders no status line at all."
   [& {:keys [name label description prompt-snippet prompt-guidelines
              params parameters execute render-call render-result
              constrained-sampling render-shell prepare-arguments
-             execution-mode streams? contextual? title]}]
+             execution-mode streams? contextual? title status]}]
   (map->Tool
    {:name name :label label :description description
     :prompt-snippet prompt-snippet :prompt-guidelines prompt-guidelines
@@ -66,5 +68,6 @@
     :execution-mode execution-mode
     :streams? streams?
     :contextual? contextual?
-    :title title}))
+    :title title
+    :status status}))
 

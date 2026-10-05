@@ -121,9 +121,9 @@
         ;; messages-atom, so no watch exists for it yet
         (tui/tui-request-render tui))
       :tool-execution-update
-      ;; Pi: live partial content from streaming tools (bash). The
-      ;; elapsed counter itself ticks via the tool component's own 1s
-      ;; ticker (pi: setInterval → context.invalidate), so a silent
+      ;; Pi: live partial content from streaming tools (bash). For a
+      ;; :status tool the elapsed counter ticks via the tool component's own
+      ;; 1s ticker (pi: setInterval → context.invalidate), so a silent
       ;; long-running tool still updates Elapsed steadily — this event
       ;; only pushes the new output chunks.
       ;; No manual render request: set-content! swaps a track!-watched

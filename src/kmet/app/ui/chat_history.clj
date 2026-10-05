@@ -340,6 +340,9 @@
                           :render-call-fn (:render-call tool)
                           :render-result-fn (:render-result tool)
                           :render-shell (:render-shell tool)
+                          ;; tool :status — truthy keeps the tail state line
+                          ;; (Elapsed/Took, error marker); absent = none
+                          :status (:status tool)
                           :title-fn (:title tool))]
             ;; a paired rebuild carries the call id so the render context's
             ;; :tool-call-id matches the live/replay paths (extension
@@ -348,7 +351,7 @@
                   (reset! (:tool-call-id-atom comp) id))
             ;; Pi: replayed/persisted tool results are final — mark ended so
             ;; they render their final state (the tail state line, Took for
-            ;; shell-style tools, and the footer strip).
+            ;; :status tools, and the footer strip).
             ;; Live pending messages (content "" + is-error false) are skipped.
                 (when (or (seq (:content msg)) (:is-error msg))
                   (te/tool-execution-set-error! comp (:is-error msg false)))

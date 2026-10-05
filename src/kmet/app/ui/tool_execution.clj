@@ -1,7 +1,9 @@
 (ns kmet.app.ui.tool-execution
   "ToolExecutionComponent component — Pi's ToolExecutionComponent.
    Uses a Box (constant tool-pending background) wrapping a Container that
-   holds the call-render, result-render and tail state children.
+   holds the call-render, result-render and a tail state child (shown for a
+   tool that opted in with :status, or when both renderers produce nothing
+   — the block's only presence then).
    Matching Pi architecture: Box handles padding/background/caching.
    Timing is managed internally (started-at on first content, ended-at on error/finalize).
    Quiet mode (:quiet display) short-circuits before any renderer runs:
@@ -43,26 +45,6 @@
             :result renderers/render-bash-result}
    "run_code" {:call renderers/render-run-code-call
                :result renderers/render-run-code-result}})
-
-(def ^:private self-describing-success-tools
-  "Tool names whose successful result needs no tail state line: the result
-   body already carries the outcome (file content, diff), so a `Took` line
-   is noise. Covers the built-ins and the shipped clojure extension's
-   edit-family tools (clojure_edit, clojure_edit_replace_sexp,
-   clojure_paren_repair), which share render-edit-call/render-edit-result.
-   While running they still show the live Elapsed counter, and an error
-   still shows the (!) marker; pi parity: only the shell-style renderers
-   print Elapsed/Took."
-  #{"read" "write" "edit"
-    "clojure_edit" "clojure_edit_replace_sexp" "clojure_paren_repair"})
-
-(defn- self-describing-success?
-  "True when the ended, non-error result of NAME needs no tail state line:
-   its body already carries the outcome (see self-describing-success-tools)."
-  [name ended-at is-error]
-  (and (not is-error)
-       (some? ended-at)
-       (contains? self-describing-success-tools name)))
 
 ;; ─── Render context helper ─────────────────────────────────────────────────
 
@@ -179,6 +161,7 @@
                tools-expanded-atom ;; chat-history-wide display-mode atom (:collapsed | :expanded | :quiet), or nil (unlinked)
                custom-render-call-atom custom-render-result-atom title-fn-atom
                started-at-atom ended-at-atom
+               status              ;; tool :status — truthy renders the tail state line
                truncation-atom tool-call-id-atom
                details-atom        ;; result :details map (pi: result.details), e.g. edit diff
                args-complete-atom
@@ -263,6 +246,11 @@
                 expanded? (boolean (or @expanded-atom (= :expanded mode)))
                 started-at @started-at-atom
                 ended-at @ended-at-atom
+                ;; the tool's :status opt-in decides whether a state line (and
+                ;; its 1s ticker) exists at all: nil = none, true = in every
+                ;; phase (pending/success/error). Plain field: constant for
+                ;; the component's life.
+                status? (boolean status)
             ;; tracked read of the shared image settings: a /settings change
             ;; (show-images / image-width-cells) re-renders every tool box
                 image-settings (deref s/image-settings-sub)
@@ -291,6 +279,10 @@
                 result-comp (as-component (render-result-fn content is-error theme content-width expanded? started-at ended-at truncation result-context))
                 _ (reset! last-result-component-atom result-comp)
                 prev-state (last-state-component this)
+            ;; A tool whose renderers both produce nothing has no other
+            ;; presence in the transcript: the tail state line is shown
+            ;; regardless of :status so a running/errored block cannot vanish.
+                show-status? (or status? (and (nil? call-comp) (nil? result-comp)))
             ;; Option 1 — state on the tail: the component owns the block's only
             ;; mutable line (state-result-nodes) and its 1s ticker. The ticker
             ;; parks in renderer state under :timer-id — the key
@@ -299,7 +291,9 @@
             ;; (the write/edit renderers) merge their own keys onto the map
             ;; they read. An extension renderer must do the same (commonly
             ;; (assoc state …)) or it drops the parked :timer-id.
-                _ (when (and started-at (nil? ended-at))
+            ;; Only a shown tail arms it: without the line there is nothing
+            ;; for a tick to repaint.
+                _ (when (and show-status? started-at (nil? ended-at))
                     (when (nil? (:timer-id @(:renderer-state-atom this)))
                       (swap! (:renderer-state-atom this)
                              assoc :timer-id
@@ -309,7 +303,7 @@
                       (when-let [id (:timer-id old)]
                         (timers/cancel! id))))
                 state-comp (as-component
-                            (when-not (self-describing-success? name ended-at is-error)
+                            (when show-status?
                               (renderers/state-result-nodes
                                theme started-at ended-at is-error
                                (get-in @details-atom [:elapsed-ms]))))
@@ -412,8 +406,12 @@
 
 (defn make-tool-execution
   "THEME is no longer taken: the box background subscribes to
-   ui.subs/theme-sub and follows palette changes live (Stage 5)."
-  [& {:keys [name args content is-error output-pad output-pad-atom expanded? tools-expanded-atom render-call-fn render-result-fn title-fn truncation details cwd render-shell]
+   ui.subs/theme-sub and follows palette changes live (Stage 5).
+   :status is the tool definition's status opt-in: truthy renders the tail
+   state line (pending/success/error + Elapsed/Took), nil renders none —
+   except when both the call and result renderers produce nothing, where
+   the tail line renders regardless so the block keeps a presence."
+  [& {:keys [name args content is-error output-pad output-pad-atom expanded? tools-expanded-atom render-call-fn render-result-fn title-fn truncation details cwd render-shell status]
       :or {name "" args {} content "" is-error false
            output-pad 1 expanded? false truncation nil details nil
            cwd (or (System/getProperty "user.dir") ".")}}]
@@ -436,6 +434,7 @@
                                   :tools-expanded-atom tools-expanded-atom
                                   :started-at-atom (atom nil)
                                   :ended-at-atom (atom nil)
+                                  :status status
                                   :truncation-atom (atom truncation)
                                   :tool-call-id-atom (atom nil)
                                   :details-atom (atom details)

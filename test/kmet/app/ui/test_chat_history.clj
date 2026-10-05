@@ -84,6 +84,23 @@
             comp (ch/chat-history-add-message! chh {:role :tool :name "read" :content "x"})]
         (is (= (System/getProperty "user.dir") (:cwd (ctx comp nil true))))))))
 
+(deftest test-tool-message-resolves-the-status-opt-in
+  (testing "the tool definition's :status reaches its component: the bash
+            tool opts into the tail status line, an unknown tool does not"
+    (let [ch (ch/make-chat-history)
+          bash (ch/chat-history-add-message!
+                ch {:role :tool :tool-name "bash" :content "" :is-error false})
+          plain (ch/chat-history-add-message!
+                 ch {:role :tool :tool-name "my-tool" :content "x" :is-error false})]
+      (is (true? (:status bash)))
+      (is (nil? (:status plain)))
+      (te/tool-execution-mark-execution-started! bash)
+      (let [lines (plain-lines ch 60)]
+        (is (some #(str/includes? % "Elapsed") lines)
+            "the status tool renders the live tail line")
+        (is (= 1 (count (filter #(str/includes? % "Elapsed") lines)))
+            "only the opted-in tool renders it")))))
+
 (deftest test-render-tool-error
   (testing "render a tool error message with Pi-style box"
     (let [ch (ch/make-chat-history)]

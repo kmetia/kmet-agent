@@ -957,5 +957,8 @@
                              :execute-tool execute-tool}))))
    :streams? true
    :contextual? true
+   ;; the script tool: the transcript keeps the Elapsed/Took tail line
+   ;; (tool-execution :status) for its whole life
+   :status true
    :title title))
 

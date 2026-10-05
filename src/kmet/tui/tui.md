@@ -89,8 +89,10 @@ already requested the latch survives for exactly that one grace frame
 streaming frame cannot keep the latch alive into a mid-stream clear. Tool
 blocks keep this latch rare by construction: a box's *body* is constant for
 the block's whole life, and its pending/success/error state rides only the
-tail line (`state-result-nodes`) — the one line appended at the document
-end, where a change cannot land above the window. The box background no
+tail line (`state-result-nodes`, present for a tool whose definition opts
+in via `:status true`, or when both its renderers produce nothing — the
+block's only presence then) — the one line appended at the document end,
+where a change cannot land above the window. The box background no
 longer encodes the state, so a tall tool settling (the old whole-box
 `pending → success` repaint, the common latch) can never dirty the
 scrollback; only genuinely late content (a result that corrects a preview,

@@ -571,17 +571,21 @@ is-error, show-images — whether images render: the
 partial streaming args; nil/blank falls back to the tool name).
 `:render-shell :self` lets the renderer own its outer
 box, padding, and framing. The default shell renders a constant box body
-and the component appends the tail state line (`state-result-nodes`) — the
-one line that carries pending/success/error and the elapsed time. That line
-changes only its foreground text (running is muted, success keeps the
-default color, error uses the error color with a `(!)` marker) — it never
-paints a background, so a settle only rewrites the one line at the document
-end. Self-describing content tools (`read`, `write`, `edit`, and the
-clojure extension's edit-family tools `clojure_edit`,
-`clojure_edit_replace_sexp`, and `clojure_paren_repair`) omit the success
-form — the body already carries the outcome — but still show the live
-Elapsed counter while running and the `(!)` marker on error; shell-style
-tools (`bash`, `run_code`, extension shells) keep Took/Elapsed.
+and the component appends the tail state line (`state-result-nodes`) when
+the tool opts in with `:status true` — the one line that carries
+pending/success/error and the elapsed time. That line changes only its
+foreground text (running is muted, success keeps the default color, error
+uses the error color with a `(!)` marker) — never a background, so a settle
+only rewrites the one line at the document end. `:status` defaults to nil:
+no tail line (and no 1s elapsed ticker) in any phase — the built-in
+content tools (`read`, `write`, `edit`) and the clojure extension's
+edit-family tools (`clojure_edit`, `clojure_edit_replace_sexp`,
+`clojure_paren_repair`) keep their outcome in the body alone. One fallback:
+a tool whose call and result renderers both produce nothing renders the
+tail line regardless of `:status` — it is the block's only presence, so a
+running/errored block cannot vanish. The runner
+tools opt in: `bash`, `run_code`, and the clojure extension's
+`clojure_eval`, so they show Elapsed/Took and the error marker.
 Whichever shell a renderer uses, its output must be stable above that
 tail: once a line can scroll above the window it must never change again
 (the TUI cannot repaint scrollback; a change there forces a clearing
@@ -617,6 +621,9 @@ Other pi tool fields:
    ;; pi executionMode — :sequential (default) or :parallel; the agent
    ;; loop runs parallel-capable tools concurrently with a sequential
    ;; fallback when a tool doesn't declare it.
+   :status true
+   ;; opt into the transcript's tail state line (pending/success/error +
+   ;; Elapsed/Took) and its 1s ticker; default nil = no status line.
    :constrained-sampling {:type :json-schema :strict :prefer}
    ;; pi constrainedSampling — :json-schema strict ({:strict :prefer}
    ;; degrades silently when the provider/model can't do strict;

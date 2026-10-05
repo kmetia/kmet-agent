@@ -238,6 +238,22 @@
     (t/is (= "Read file" (:label t)))
     (t/is (= 3 (count (keys (:parameters t)))))))
 
+(t/deftest test-tool-status-opt-in
+  (t/testing "only the long-running executor tools opt into the tail status line"
+    (t/is (true? (:status (tools/get-tool "bash"))))
+    (t/is (true? (:status (tools/get-tool "run_code"))))
+    (doseq [tool-name ["read" "write" "edit"]]
+      (t/is (nil? (:status (tools/get-tool tool-name)))
+            (str tool-name " has no status line"))))
+  (t/testing "a registered extension tool can opt in via its definition map"
+    (tools/register-tool! {:name "status-custom" :status true
+                           :execute (fn [_] {:content "x"})})
+    (try
+      (t/is (true? (:status (tools/get-tool "status-custom"))))
+      (finally
+        (tools/unregister-tool! "status-custom")))
+    (t/is (nil? (tools/get-tool "status-custom")))))
+
 (t/deftest test-tool-quiet-titles
   (t/testing "built-in tools carry a :title fn for the quiet one-liner"
     (doseq [[tool-name args expected] [["read" {:path "src/a.clj" :offset 5 :limit 3} "read src/a.clj:5-7"]

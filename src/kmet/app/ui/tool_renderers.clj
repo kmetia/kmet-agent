@@ -993,9 +993,10 @@
    :elapsed-ms) — wins over the component timestamp span when given. Nil
    when there is nothing to say: a replayed success has no started-at (pi
    renders replayed tools without a duration) and no error; a replayed
-   error still gets its (!) marker. The component omits the success form
-   for self-describing content tools (read/write/edit) — see
-   tool-execution."
+   error still gets its (!) marker. The component calls this for a tool
+   whose definition opted in with :status, or when both renderers produced
+   nothing — the tail is then the block's only presence (see
+   tool-execution)."
   [theme started-at ended-at is-error & [measured-ms]]
   (let [elapsed-ms (or measured-ms
                        (when started-at

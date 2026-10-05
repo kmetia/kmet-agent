@@ -252,8 +252,9 @@
       (is (some #(re-find #"clojure_edit target/test-tools-edit-render.txt" %)
                 (mapv strip-ansi (core/render c 60)))))))
 
-(deftest test-edit-render-final-status-without-preview
-  (testing "self-shell edit body stays pending; the tail carries the error state"
+(deftest test-edit-render-no-status-line
+  (testing "self-shell edit body stays pending; a tool without :status has no
+            tail state line — not even the error marker"
     (let [make (fn [is-error]
                  (te/make-tool-execution
                   :name "clojure_edit"
@@ -275,8 +276,9 @@
             "constant pending body (success)")
         (is (some #(str/includes? % pending-bg) failure-lines)
             "constant pending body (error)")
-        (is (some #(str/includes? (strip-ansi %) "(!)") failure-lines)
-            "the tail line carries the error marker")
+        (is (not-any? #(str/includes? (strip-ansi %) "(!)") failure-lines)
+            "no status line means no error marker")
+        (is (not-any? #(str/includes? (strip-ansi %) "Took") failure-lines))
         (is (not-any? #(str/includes? % error-bg) failure-lines)
             "the error state never repaints a background")
         (is (not-any? #(str/includes? % success-bg) success-lines))
@@ -284,7 +286,7 @@
 
 (deftest test-tail-state-line
   (testing "live settle: the body stays pending, the tail text flips to success"
-    (let [c (te/make-tool-execution :name "bash" :args {:command "echo hi"})]
+    (let [c (te/make-tool-execution :name "bash" :args {:command "echo hi"} :status true)]
       (te/tool-execution-mark-execution-started! c)
       (let [running (core/render c 60)
             pending-bg (theme/get-bg-ansi theme/dark-theme :tool-pending-bg)]
@@ -300,17 +302,26 @@
         (is (not-any? #(str/includes? % (theme/get-bg-ansi theme/dark-theme :tool-error-bg))
                       done))))))
 
-(deftest test-content-tools-skip-the-success-status-line
-  (testing "successful read/write/edit and the clojure edit-family tools
-            keep no tail Took line; running still shows Elapsed and errors
-            still show (!)"
+(deftest test-status-tool-shows-error-marker
+  (testing ":status true keeps the error marker in the tail state line"
+    (let [c (te/make-tool-execution :name "bash" :args {} :content "boom" :status true)]
+      (te/tool-execution-mark-execution-started! c)
+      (te/tool-execution-set-error! c true)
+      (is (some #(str/includes? (strip-ansi %) "(!)") (core/render c 60))))))
+
+(deftest test-no-status-tools-render-no-status-line
+  (testing "read/write/edit and the clojure edit-family tools carry no
+            :status: no Elapsed while running, no ticker, no Took on success,
+            and no (!) on error"
     (doseq [tool ["read" "write" "edit"
                   "clojure_edit" "clojure_edit_replace_sexp" "clojure_paren_repair"]]
       (let [c (te/make-tool-execution :name tool :args {} :content "out")]
         (te/tool-execution-mark-execution-started! c)
         (let [running (mapv strip-ansi (core/render c 60))]
-          (is (some #(str/includes? % "Elapsed") running)
-              (str tool ": running shows the live elapsed counter")))
+          (is (not-any? #(str/includes? % "Elapsed") running)
+              (str tool ": running shows no elapsed line"))
+          (is (nil? (:timer-id @(:renderer-state-atom c)))
+              (str tool ": no elapsed ticker is armed")))
         (te/tool-execution-set-error! c false)
         (let [done (mapv strip-ansi (core/render c 60))]
           (is (not-any? #(str/includes? % "Took") done)
@@ -319,8 +330,33 @@
       (te/tool-execution-mark-execution-started! c)
       (te/tool-execution-set-error! c true)
       (let [failed (mapv strip-ansi (core/render c 60))]
-        (is (some #(str/includes? % "(!)") failed)
-            "an error still gets its (!) marker")))))
+        (is (not-any? #(str/includes? % "(!)") failed)
+            "no (!) marker without the status opt-in")))))
+
+(deftest test-status-fallback-when-both-renderers-are-nil
+  (testing "a tool whose call and result renderers both produce nothing
+            renders the tail status line regardless of :status — the block
+            would have no other presence"
+    (let [c (te/make-tool-execution
+             :name "custom" :args {}
+             :render-call-fn (fn [& _] nil)
+             :render-result-fn (fn [& _] nil))]
+      (te/tool-execution-mark-execution-started! c)
+      (let [running (mapv strip-ansi (core/render c 60))]
+        (is (some #(str/includes? % "Elapsed") running))
+        (is (some? (:timer-id @(:renderer-state-atom c))) "the ticker is armed"))
+      (te/tool-execution-set-error! c true)
+      (is (some #(str/includes? % "(!)")
+                (mapv strip-ansi (core/render c 60))))))
+  (testing "one renderer with output keeps :status in charge"
+    (let [c (te/make-tool-execution
+             :name "custom" :args {}
+             :render-call-fn (fn [& _] (text/make-text "call" 0 0))
+             :render-result-fn (fn [& _] nil))]
+      (te/tool-execution-mark-execution-started! c)
+      (is (not-any? #(str/includes? % "Elapsed")
+                    (mapv strip-ansi (core/render c 60))))
+      (is (nil? (:timer-id @(:renderer-state-atom c)))))))
 
 (deftest test-edit-render-edits-array
   (testing "edit preview handles camelCase edits array"
@@ -347,7 +383,8 @@
 
 (deftest test-bash-render-result
   (testing "bash result shows output and duration"
-    (let [c (te/make-tool-execution :name "bash" :args {:command "ls"} :content "out1\nout2")]
+    (let [c (te/make-tool-execution :name "bash" :args {:command "ls"} :content "out1\nout2"
+                                    :status true)]
       (te/tool-execution-mark-execution-started! c)
       (te/tool-execution-set-error! c false)
       (let [plain (mapv strip-ansi (core/render c 60))]
@@ -365,6 +402,7 @@
     (let [c (te/make-tool-execution :name "run_code"
                                     :args {:code "1"}
                                     :content "out1\nout2"
+                                    :status true
                                     :details {:calls [{:tool "read" :ok true}]})]
       (te/tool-execution-mark-execution-started! c)
       (te/tool-execution-set-error! c false)
@@ -376,7 +414,7 @@
 (deftest test-bash-elapsed-ticker
   (testing "partial bash execution starts a 1s elapsed ticker (pi: setInterval →
             context.invalidate); completion clears it and it does not restart"
-    (let [c (te/make-tool-execution :name "bash" :args {:command "sleep 5"})]
+    (let [c (te/make-tool-execution :name "bash" :args {:command "sleep 5"} :status true)]
       (te/tool-execution-mark-execution-started! c)
       (core/render c 60)
       (let [id (:timer-id @(:renderer-state-atom c))]
@@ -557,7 +595,7 @@
 
 (deftest test-bash-tool-result-blank-separators
   (testing "bash tool result keeps blank lines before output and before Took"
-    (let [c (te/make-tool-execution :name "bash" :args {:command "echo hi"})]
+    (let [c (te/make-tool-execution :name "bash" :args {:command "echo hi"} :status true)]
       ;; timing is lifecycle-driven: mark-execution-started! then set-error!
       ;; (pi: markExecutionStarted; set-content! must not mark started —
       ;; replayed tools render without a duration)
@@ -817,7 +855,7 @@
   (testing "a cache-miss rebuild disposes the previous tail state component —
             no zombie track! watches (the 1s ticker rebuilds it every second
             while a tool runs)"
-    (let [c (te/make-tool-execution :name "bash" :args {:command "echo hi"})
+    (let [c (te/make-tool-execution :name "bash" :args {:command "echo hi"} :status true)
           watchers (fn [] (count @(deref #'kmet.tui.macros/watch-registry)))]
       (te/tool-execution-mark-execution-started! c)
       (reset! (:content-atom c) "out -1")  ;; result body present → steady state
@@ -1016,6 +1054,7 @@
   (testing "entering quiet cancels the running-tool repaint timer"
     (let [shared (atom :collapsed)
           c (te/make-tool-execution :name "bash" :args {:command "sleep 5"}
+                                    :status true
                                     :tools-expanded-atom shared)]
       (te/tool-execution-mark-execution-started! c)
       (core/render c 60)

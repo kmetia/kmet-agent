@@ -213,4 +213,7 @@
                             :expose-session-env? expose-session-env?
                             :operations operations}))
       :streams? true
+      ;; the runner tool: the transcript keeps the Elapsed/Took tail line
+      ;; (tool-execution :status) for its whole life
+      :status true
       :title title))))

@@ -152,6 +152,9 @@
                       {:name "clojure_eval"
                        :label "Clojure Eval"
                        :contextual? true
+                       ;; the eval runner: keep the Elapsed/Took tail line
+                       ;; (tool-execution :status)
+                       :status true
                        :description
                        (str "Evaluate Clojure code in a running nREPL server and return the resulting values plus stdout/stderr.\n\n"
                             "The nREPL server must already be running: start one with `bb nrepl`, `clj -M:nrepl`, `lein repl`, "
