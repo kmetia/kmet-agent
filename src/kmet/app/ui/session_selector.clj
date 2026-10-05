@@ -461,7 +461,10 @@
         (let [infos (loader
                      (fn [loaded total partial]
                        (when-not (stop?)
-                         (when partial
+                         ;; an empty snapshot (a headerless legacy file
+                         ;; finished first) must not wipe rows already on
+                         ;; screen or reset the cursor mid-refresh
+                         (when (seq partial)
                            (store-listing! this scope partial))
                          (when (= scope (:scope @(:state-atom this)))
                            (swap! (:state-atom this)

@@ -621,6 +621,34 @@
     (press sel "enter")
     (t/is (= "/tmp/s/c.ednl" @selected))))
 
+(t/deftest empty-streamed-snapshot-keeps-loaded-rows-and-cursor
+  ;; a partial publish can be empty when only headerless legacy files
+  ;; finished so far; it must not wipe the rows already on screen or
+  ;; reset the cursor while the scan continues
+  (install-keybindings!)
+  (let [a (info "/tmp/s/a.ednl" :first-message "keep me")
+        b (info "/tmp/s/b.ednl" :first-message "second")
+        release (promise)
+        sel (ss/make-session-selector
+             :loaders {:current (fn [_ _] [])
+                       :all (fn [on-progress _stop?]
+                              (on-progress 1 3 [a b])
+                              @release
+                              (on-progress 2 3 [])
+                              (on-progress 3 3 [a b])
+                              [a b])})]
+    (ss/session-selector-set-listing! sel :current [])
+    (press sel "tab")
+    (wait-for #(boolean (some (fn [l] (str/includes? l "second"))
+                              (render-text sel 100))))
+    (press sel "down")
+    (deliver release true)
+    (wait-for #(not-any? (fn [l] (str/includes? l "Loading"))
+                         (render-text sel 100)))
+    (t/is (some #(str/includes? % "keep me") (render-text sel 100)))
+    (t/is (str/includes? (selected-row-text sel 100) "second")
+          "the cursor stayed on the row the user picked")))
+
 (t/deftest close-and-select-stop-the-streaming-loader
   ;; while a listing is still blocked, selecting or closing flips the
   ;; loader's stop?; its late snapshot and final result are dropped, so a
