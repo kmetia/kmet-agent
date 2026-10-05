@@ -46,7 +46,7 @@ depend on — and they can disagree.
 |---|---|---|
 | Transports (stdio, streamable HTTP, legacy SSE) + JSON-RPC client core + protocol constants/`_meta`/content | `kmet.libs.mcp.*` | Self-contained already (only `kmet.libs.*`, `babashka.process`, `io`, `core.async`); pi keeps them in a standalone `packages/mcp`; lib tests run under `bb test`/`jolt test` instead of manual scripts; the transport/era seam becomes an API boundary |
 | SSE wire framing | `kmet.libs.sse` — **already exists, unchanged** | Generic `parse-sse-line` / `body->reader` / `make-idle-reader` / `stream-loop`; shared with `kmet.ai.api.sse`. The MCP transports use it, never re-implement it |
-| MCP legacy SSE transport binding | `kmet.libs.mcp.transport.sse` | GET stream → `endpoint` event → POST URL + JSON-RPC correlation is MCP semantics, not generic SSE framing. **Frozen**: legacy SSE connections negotiate legacy protocol versions only, so Phase 3 must not touch it. Marked deprecated; removed when the HTTP+SSE off-ramp closes |
+| MCP legacy SSE transport binding | `kmet.libs.mcp.transport.sse` | GET stream → `endpoint` event → POST URL + JSON-RPC correlation is MCP semantics, not generic SSE framing. **Legacy-only**: these connections negotiate handshake-era protocol versions, so the 2026-07-28 era work does not apply. Deprecated by the streamable-HTTP revision, but kept working (see Non-goals) |
 | Tool naming/selection + name *assignment* | `kmet.extensions.mcp-adapter.names` | Prefix modes, builtin collision, and include/exclude globs are adapter policy, not MCP protocol |
 | Auth | extension now; `kmet.libs.mcp.auth` in Phase 2 | `kmet.libs.oauth` already holds discovery/PKCE/device/DCR/exchange; the rest is MCP-auth policy plus an issuer-keyed store |
 | Config, metadata cache, catalog, direct tools, proxy, UI, prompts, output guard | extension | Host integration |
@@ -481,7 +481,7 @@ keyed to one error code: stdio probes `server/discover` and falls back on
 anything that is not a *recognized modern error* (`-32020`/`-32021`/`-32022`);
 HTTP attempts a modern request and inspects the body of a `400`.
 `transport.sse` never detects: legacy HTTP+SSE negotiates legacy versions
-only, so it is frozen out of every landing below.
+only, so the era landings below never touch it.
 
 ### 3.1. Baseline: modern fakes + `scripts/validate-protocol.bb`
 
@@ -893,7 +893,7 @@ down the chain: an annotation under `items`, composition/conditional
 keywords, `$defs`/`definitions`, or on the schema root is unreachable at
 every depth and makes the definition invalid. `client/request!` gained
 `:http-headers` and the transport `request!` contract gained the options
-map (stdio and the frozen SSE binding ignore it); `list-all-tools`
+map (stdio and the legacy SSE binding ignore it); `list-all-tools`
 excludes an invalid definition on any `:streamable-http` conn
 (era-independent), while other transports keep it. Fixing the 401 retry
 to merge fresh auth over the original headers rode along: rebuilding from
@@ -1046,9 +1046,9 @@ lsp-adapter-dependent fixture, unchanged by this work).
 ## Phase 4 — optional hygiene
 
 `core.clj` lifecycle → `server.clj` / `direct_tools.clj` / `commands.clj`;
-`tool_proxy.clj` → `search.clj` + `status.clj`; drop
-`kmet.libs.mcp.transport.sse` once the deprecation window closes. Lands
-after Phase 3 — hygiene must not block or precede the protocol work.
+`tool_proxy.clj` → `search.clj` + `status.clj`. The legacy SSE transport
+stays (see Non-goals). Lands after Phase 3 — hygiene must not block or
+precede the protocol work.
 
 ---
 
@@ -1059,7 +1059,9 @@ after Phase 3 — hygiene must not block or precede the protocol work.
 - Don't start Phase 4 hygiene before Phase 3 lands unless something there
   actually blocks it.
 - Don't fix the collision-display divergence anywhere but 0.2.
-- Don't invest in `transport.sse` beyond the migration (deprecated).
+- `transport.sse` stays the supported legacy HTTP+SSE binding (server-side
+  `endpoint` events, POST correlation): keep it working and bug-fixed, but
+  add no era behavior — it speaks handshake-era revisions only.
 
 ## Risks
 

@@ -549,7 +549,7 @@
         (establish-modern! conn (:version detected) (:discover detected))
         (establish-legacy! conn (:probe-error detected))))
 
-    ;; the legacy SSE transport never detects (frozen out of the era work)
+    ;; the legacy SSE transport never detects (handshake era only)
     (establish-legacy! conn nil)))
 
 (defn- era-hint

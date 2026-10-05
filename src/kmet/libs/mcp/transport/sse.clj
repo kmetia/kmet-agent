@@ -6,11 +6,13 @@
    and re-established via (:reconnect-fn conn) — the client's initialize —
    so this namespace never requires kmet.libs.mcp.client.
 
-   Conn keys: :url :endpoint-atom :ch :response :stream-open :session-id
-   :closed :reconnect-fn, plus the common contract keys documented in
-   kmet.libs.mcp.transport.
+   Conn keys: :url :endpoint-atom :endpoint-ready :ch :response
+   :stream-open :session-id :closed :reconnect-fn, plus the common
+   contract keys documented in kmet.libs.mcp.transport.
 
-   Migrated as-is from the extension; no new features go here."
+   Kept as the supported legacy HTTP+SSE binding (deprecated by the
+   2025-03-26 streamable-HTTP revision but still used in the wild): it
+   speaks the handshake era only, no 2026-07-28 behavior."
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -43,8 +45,9 @@
 
 (defn- drain-sse-stream
   "Background reader for the legacy SSE GET stream: `endpoint` event → the
-   POST URL; `message` event → JSON-RPC → channel; ::eof + close on EOF."
-  [body ch endpoint-atom get-url]
+   POST URL and the endpoint-ready signal; `message` event → JSON-RPC →
+   channel; ::eof + close on EOF."
+  [body ch endpoint-atom get-url endpoint-ready]
   (try
     (with-open [rdr (io/reader body)]
       (loop [event-name nil buf ""]
@@ -59,7 +62,8 @@
                 (and (str/blank? line) (seq buf))
                 (do
                   (if (= "endpoint" event-name)
-                    (reset! endpoint-atom (sse-endpoint-url get-url buf))
+                    (do (reset! endpoint-atom (sse-endpoint-url get-url buf))
+                        (deliver endpoint-ready true))
                     (try
                       (let [parsed (json/parse-string buf true)]
                         (when (map? parsed)
@@ -96,8 +100,13 @@
     ;; stale noise, not the reconnect's problem
     (when-let [prev @(:response conn)]
       (try (http/close! prev) (catch Exception _ nil)))
-    (let [ch (async/chan 128)]
-      (spawn #(drain-sse-stream (:body response) ch (:endpoint-atom conn) (:url conn)))
+    (let [ch (async/chan 128)
+          ready (promise)]
+      ;; every (re)open gets its own endpoint-ready signal, so a request
+      ;; waits for this stream's `endpoint` event rather than a stale one
+      (reset! (:endpoint-ready conn) ready)
+      (spawn #(drain-sse-stream (:body response) ch (:endpoint-atom conn)
+                                (:url conn) ready))
       (reset! (:ch conn) ch)
       (reset! (:response conn) response)
       (reset! (:stream-open conn) true))))
@@ -108,6 +117,7 @@
   {:transport :sse
    :url url
    :endpoint-atom (atom nil)
+   :endpoint-ready (atom nil)
    :ch (atom nil)
    :response (atom nil)
    :stream-open (atom false)
@@ -128,22 +138,30 @@
   [conn msg]
   (http-transport/send-async! conn msg))
 
+(def ^:private endpoint-wait-ms
+  "How long a request waits for the stream's `endpoint` event before
+   failing — the event normally arrives within a round trip."
+  5000)
+
 (defn- endpoint!
-  "The POST endpoint for an SSE conn — waits up to 5s for the stream's
-   `endpoint` event (the reader thread delivers it asynchronously)."
+  "The POST endpoint for an SSE conn — waits up to endpoint-wait-ms for
+   the stream's `endpoint` event (the reader thread delivers it
+   asynchronously); an endpoint already resolved by an earlier stream
+   returns immediately."
   [conn]
-  (or (some (fn [_]
-              (or @(:endpoint-atom conn)
-                  (do (Thread/sleep 100) nil)))
-            (range 50))
-      (throw (protocol/mcp-error "MCP connect failed: no SSE endpoint received"
-                                 {:transport :sse}))))
+  (or @(:endpoint-atom conn)
+      (do
+        (when-let [ready (some-> (:endpoint-ready conn) deref)]
+          (deref ready endpoint-wait-ms nil))
+        (or @(:endpoint-atom conn)
+            (throw (protocol/mcp-error "MCP connect failed: no SSE endpoint received"
+                                       {:transport :sse}))))))
 
 (defn request!
   "POST a request and wait for its id-matched message on the stream. A
    dropped stream reopens once and re-establishes the session. OPTS is
-   the transport-neutral request options map — the legacy SSE binding is
-   frozen and consumes none of it (:http-headers is streamable-HTTP
+   the transport-neutral request options map — the legacy SSE binding
+   consumes none of it (:http-headers is streamable-HTTP
    only)."
   [conn method params timeout-ms on-notification _opts]
   (transport/touch! conn)

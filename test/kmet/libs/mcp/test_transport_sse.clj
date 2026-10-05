@@ -10,6 +10,7 @@
 
 (def ^:private endpoint-url @#'sse/sse-endpoint-url)
 (def ^:private drain-stream! @#'sse/drain-sse-stream)
+(def ^:private endpoint! @#'sse/endpoint!)
 
 (deftest endpoint-resolution
   (testing "a bare path resolves against the GET url"
@@ -27,9 +28,12 @@
   (let [body (str "event: endpoint\ndata: /messages\n\n"
                   "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":7,\"result\":{}}\n\n")
         ch (async/chan 8)
-        endpoint (atom nil)]
-    (drain-stream! (io/input-stream (.getBytes body "UTF-8")) ch endpoint "http://h:1/sse")
+        endpoint (atom nil)
+        ready (promise)]
+    (drain-stream! (io/input-stream (.getBytes body "UTF-8")) ch endpoint
+                   "http://h:1/sse" ready)
     (is (= "http://h:1/messages" @endpoint))
+    (is (realized? ready) "the endpoint event releases the wait")
     (is (= {:jsonrpc "2.0" :id 7 :result {}} (async/<!! ch)))
     (testing "stream end delivers the eof marker"
       (is (= transport/eof-marker (async/<!! ch))))))
@@ -38,8 +42,30 @@
   (let [body (str "event: message\ndata: not-json\n\n"
                   "event: message\ndata: {\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n\n")
         ch (async/chan 8)]
-    (drain-stream! (io/input-stream (.getBytes body "UTF-8")) ch (atom nil) "http://h/sse")
+    (drain-stream! (io/input-stream (.getBytes body "UTF-8")) ch (atom nil)
+                   "http://h/sse" (promise))
     (is (= {:jsonrpc "2.0" :id 1 :result {}} (async/<!! ch)))))
+
+(deftest endpoint-wait
+  (let [conn (sse/connect! "http://h/sse" {})]
+    (testing "an already-resolved endpoint returns immediately"
+      (reset! (:endpoint-atom conn) "http://h/messages")
+      (is (= "http://h/messages" (endpoint! conn))))
+    (testing "a not-yet-arrived endpoint event is awaited, not polled"
+      (reset! (:endpoint-atom conn) nil)
+      (let [ready (promise)]
+        (reset! (:endpoint-ready conn) ready)
+        (future (Thread/sleep 20)
+                (reset! (:endpoint-atom conn) "http://h/messages")
+                (deliver ready true))
+        (is (= "http://h/messages" (endpoint! conn)))))
+    (testing "no endpoint event fails with the MCP error after the wait"
+      (reset! (:endpoint-atom conn) nil)
+      (reset! (:endpoint-ready conn) (promise))
+      (with-redefs-fn {#'sse/endpoint-wait-ms 10}
+        (fn []
+          (is (thrown-with-msg? Exception #"no SSE endpoint received"
+                                (endpoint! conn))))))))
 
 (deftest connection-lifecycle
   (let [conn (sse/connect! "http://h/sse" {})]

@@ -11,7 +11,7 @@
                                    custom headers (a tools/call's
                                    Mcp-Param-*, SEP-2243) and is consumed
                                    only by :streamable-http — stdio and
-                                   the frozen SSE binding ignore it
+                                   the legacy SSE binding ignore it
      (listen! conn filter on-frame)  2026-07-28 subscriptions/listen: open
                                    the conn's long-lived subscription and
                                    return {:stop! f :ended promise} (the
