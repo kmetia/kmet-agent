@@ -41,6 +41,12 @@ Each was rerun standalone on both hosts; all green afterwards.
   both hosts), so the workaround briefly joined the client→target pump before
   closing. Jolt now has the half-close members, `pump` half-closes the socket
   itself, and the join is gone; 0/40 jolt and 0/10 bb reruns.
+
+  **Watch**: `libs.test-http/test-curl-redirect-slow-second-hop` — the
+  under-load sibling in the same proxy family; curl 97 "Connection reset by
+  peer" through the test SOCKS proxy while the suite is loaded. Not
+  reproduced on `v0.8.15-46`: 4/4 standalone and 6/6 under a full fast-suite
+  load. The half-close removes the reset path; keep an eye on it.
 - **Windows static-native build gaps** (jolt#1205/#1206/#1207) — the
   build-only `cc` shim, the precreated `<out>.build` directory, and the
   staged lz4/zlib archives are all gone. `jolt dist --smoke` builds the
