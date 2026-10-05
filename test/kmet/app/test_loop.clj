@@ -3574,17 +3574,23 @@
       (with-redefs [cfg/get-api-key (fn [_] "test-key")
                     ;; The summarization stream never finishes on its own —
                     ;; only the compaction signal (via summarize!'s watch)
-                    ;; ends it; the main call answers normally.
+                    ;; ends it; the main call answers normally. :tools tells
+                    ;; the two apart: the main call sends tools, the
+                    ;; summarization call does not. Do NOT key on the call
+                    ;; count — an escape that lands before summarize! starts
+                    ;; skips the summarization call entirely, and the main
+                    ;; call would then get the never-finishing stub.
                     llm/send-message
                     (fn [opts]
-                      (if (= 1 (swap! calls inc))
-                        (promise)
-                        (future
-                          (when-let [on-text (:on-text opts)]
-                            (on-text "continued after abort"))
-                          (when-let [on-done (:on-done opts)]
-                            (on-done :stop))
-                          :done)))]
+                      (if (:tools opts)
+                        (do (swap! calls inc)
+                            (future
+                              (when-let [on-text (:on-text opts)]
+                                (on-text "continued after abort"))
+                              (when-let [on-done (:on-done opts)]
+                                (on-done :stop))
+                              :done))
+                        (promise)))]
         (let [run (loop/run-agent-turn
                    agent
                    {:message "go"
@@ -3594,7 +3600,7 @@
           (loop/abort-compaction! agent)
           (t/is (not= ::timeout (deref run 5000 ::timeout))
                 "the run continues after the compaction abort")))
-      (t/is (= 2 @calls) "the aborted summarization still let the main LLM call run")
+      (t/is (= 1 @calls) "the aborted compaction still let the main LLM call run")
       (t/is (false? @(:signal agent)) "the run's cancel signal never fired")
       (t/is (false? @(:compacting? agent)) "the compaction flag is cleared")
       (let [end (first (filter #(= :compaction-end (:type %)) @events))]
