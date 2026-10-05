@@ -3,8 +3,8 @@
 Status: draft. Order is deliberate: **Phase 0 (names consolidation + name
 assignment fix) → Phase 1 (extract `kmet.libs.mcp`) → Phase 2 (auth) →
 Phase 3 (2026-07-28 protocol work) → Phase 4 (optional hygiene)** — Phases 0,
-1 and 2 are landed, and Phase 3 is in progress (3.1–3.6 landed; 3.7–3.8 are
-planned in full below — this section is their plan, there is no separate
+1 and 2 are landed, and Phase 3 is in progress (3.1–3.7 landed; 3.8 is
+planned in full below — this section is its plan, there is no separate
 plan file); phase 4 lands after it. The protocol revision lands before the
 hygiene pass so the client is extracted and auth settled first.
 
@@ -441,7 +441,7 @@ baseline):
 
 ## Phase 3 — 2026-07-28 protocol work (the end goal)
 
-Status: **in progress** — 3.1–3.6 landed; 3.7–3.8 below, in order; each
+Status: **in progress** — 3.1–3.7 landed; 3.8 below; each
 leaves `scripts/validate-all.bb` and the repo gates green. Depends on
 Phase 1's era-neutral seam and Phase 2's auth plumbing (both landed).
 
@@ -951,6 +951,36 @@ unit-tested to ignore the annotation. All eight extension scripts,
   asserts the re-probe; `validate-config.bb` keeps covering the
   fingerprint.
 
+Status: **landed** — the metadata entry carries `:protocol-era`
+(`{:era :modern|:legacy :version rev}`); an entry without the key is an
+unknown era and simply probes — no version bump. `update-entry!` now
+takes keyword options (`:tools`/`:prompts`/`:resources`/
+`:resource-templates`/`:protocol-era`) and stores it; `server-entry`
+returns it as-is. `connect-with-auth` passes a fresh entry's era as the
+lib connect hint, and `refresh-after-connect!` reads the conn's `:era`
+atom back on both the connect and the resync path, so a catalog resync
+never loses the recorded era. The lib normalizes the hint (a bare keyword
+still works; a map without `:era` is ignored), seeds a hinted modern
+connect with the cached revision (`_meta` and `MCP-Protocol-Version`),
+and on an era-contradicting failure discards the hint and runs the shared
+full detection once (`detect-and-establish!`): a modern hint that draws a
+non-modern error or `-32022`, a legacy hint that draws any JSON-RPC error
+(including the `-32601` a modern server answers the handshake with).
+`-32020`/`-32021`, timeouts, transport death and auth failures surface —
+they are not era signals. `establish!`/`connect!` now return
+`:protocol-era`, the era actually used. The optional `ttlMs`/`cacheScope`
+freshness cap was dropped — the hint stayed small.
+Tests: the hint/re-probe table in `test_client` (cached-revision seeding,
+legacy error, `-32022` negotiation, `-32020` surfacing, `-32601`
+handshake refusal, malformed hint, timeout) and the era assertions on the
+established result; `validate-client.bb`'s over-the-wire stale-hint
+re-probe on stdio and streamable HTTP; `validate-config.bb`'s round-trip
+plus the unknown-era entry staying fresh; `e2e.bb` seeds a stale hint for
+the stdio and HTTP modern servers before init, asserts the entry is fresh
+for the connect, that the era actually used is stored, and that the
+legacy direct-tools bootstrap records its own era. All eight extension
+scripts, `bb test` and jolt are green.
+
 ### 3.8. Facade deletion, docs, gates
 
 - Delete `extensions/mcp-adapter/src/kmet/extensions/mcp_adapter/client.clj`
@@ -1059,6 +1089,6 @@ after Phase 3 — hygiene must not block or precede the protocol work.
 - [x] 3.4 streamable HTTP: routing headers, 400-body detection, `-32022` negotiation, no session
 - [x] 3.5 `subscriptions/listen`: lib listen + HTTP long-lived stream + adapter wiring
 - [x] 3.6 `x-mcp-header` mirroring + invalid-definition filtering
-- [ ] 3.7 `:protocol-era` in the metadata cache + re-probe on failure
+- [x] 3.7 `:protocol-era` in the metadata cache + re-probe on failure
 - [ ] 3.8 facade deletion + README + full gates
 - [ ] 4 optional hygiene (after 3)

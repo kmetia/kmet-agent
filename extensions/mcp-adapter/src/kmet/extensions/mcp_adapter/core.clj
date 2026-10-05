@@ -116,27 +116,33 @@
 ;; ─── Connection lifecycle (§10.3) ─────────────────────────────────────────
 
 (defn- refresh-after-connect!
-  "On successful connect: refresh the metadata cache + save, resync direct
-   tools, resync prompt commands, rebuild the proxy description (§10.3)."
-  [state name tools prompts resources & [resource-templates]]
+  "On successful connect or resync: refresh the metadata cache + save
+   (storing the era the conn negotiated as the next connect's hint),
+   resync direct tools, resync prompt commands, rebuild the proxy
+   description (§10.3)."
+  [state name conn tools prompts resources & [resource-templates]]
   (when-let [definition (get-in @state [:config :mcp-servers name])]
-    (swap! state (fn [st]
-                   (assoc st :cache
-                          (metadata/update-entry! (:cache st) name definition
-                                                  (:settings (:config st))
-                                                  tools prompts resources
-                                                  resource-templates))))
-    (sync-direct-tools! state)
-    (prompts/sync-prompt-commands! state)
-    (register-proxy-tool! state)
-    (update-status-bar! state)))
+    (let [protocol-era (some-> (:era conn) deref)]
+      (swap! state (fn [st]
+                     (assoc st :cache
+                            (metadata/update-entry! (:cache st) name definition
+                                                    (:settings (:config st))
+                                                    :tools tools
+                                                    :prompts prompts
+                                                    :resources resources
+                                                    :resource-templates resource-templates
+                                                    :protocol-era protocol-era))))
+      (sync-direct-tools! state)
+      (prompts/sync-prompt-commands! state)
+      (register-proxy-tool! state)
+      (update-status-bar! state))))
 
 (defn- resync-server-catalog!
   "One catalog re-list pass on the live conn: the capability-gated
    prompts/resources/templates lists included, then refresh-after-connect!."
   [state name conn]
   (let [capabilities (or (:capabilities conn) {})]
-    (refresh-after-connect! state name
+    (refresh-after-connect! state name conn
                             (if (:tools capabilities)
                               (client/list-all-tools conn)
                               [])
@@ -282,11 +288,17 @@
 (defn- connect-with-auth
   "Connect a server, wiring the HTTP auth fns (§7.8.5), the conn-level
    notification handler (list_changed → resync) and, for a modern conn,
-   the 2026-07-28 subscription."
+   the 2026-07-28 subscription. The metadata cache's :protocol-era — when
+   the entry is fresh — is passed as the connect hint, so a known server
+   skips era detection (3.7)."
   [state name]
   (let [definition (get-in @state [:config :mcp-servers name])
+        settings (:settings (:config @state))
+        cached-era (:protocol-era (metadata/server-entry (:cache @state) name
+                                                         definition settings))
         result (client/connect! definition
                                 (assoc (auth/make-auth-fns name definition)
+                                       :protocol-era cached-era
                                        :on-notification
                                        (fn [conn msg]
                                          (handle-list-changed! state name conn msg))))]
@@ -324,7 +336,7 @@
                     resource-templates (:resource-templates result)]
                 (reset! conn new-conn)
                 (clear-failure! state name)
-                (refresh-after-connect! state name tools prompts resources
+                (refresh-after-connect! state name new-conn tools prompts resources
                                         resource-templates)
                 new-conn)
               (catch Exception e

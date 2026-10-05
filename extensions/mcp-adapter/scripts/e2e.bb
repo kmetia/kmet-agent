@@ -71,6 +71,20 @@
                 metadata/cache-path (constantly cache-file)]
     (try
       (let [{:keys [api state]} (ext/create-nullable-api)
+            cfg (config/load-config)
+            settings (:settings cfg)
+            ;; 3.7: seed a stale era hint before init loads the cache — the
+            ;; modern connects must discard it, re-probe and store the era
+            ;; actually used (the cache file is the adapter's, not the
+            ;; fixture state's)
+            _ (doseq [server ["modern" "http"]
+                    :let [definition (get-in cfg [:mcp-servers server])]
+                    :when definition]
+                (metadata/update-entry! nil server definition settings
+                                        :tools [] :prompts [] :resources []
+                                        :resource-templates []
+                                        :protocol-era {:era :legacy
+                                                       :version "2025-11-25"}))
             _ (mcp/init api)
             proxy-tool (get-in @state [:tools "mcp"])
             execute (:execute proxy-tool)
@@ -78,6 +92,10 @@
             result (s {})]
         (check "status text lists server"
                (str/includes? (:content result) "e2e"))
+        (check "stale era hint is a fresh cache entry"
+               (some? (metadata/server-entry (metadata/load-cache) "modern"
+                                             (get-in cfg [:mcp-servers "modern"])
+                                             settings)))
         ;; /mcp slash command — the interactive mode dispatches extension
         ;; command handlers as (handler ctx args) (kmet contract; pi passes
         ;; (args ctx)). The mcp handler used to reverse them, so args was
@@ -140,6 +158,9 @@
         (Thread/sleep 2000)
         (check "bootstrap registered the direct tool"
                (contains? (:tools @state) "e2e_echo"))
+        (check "legacy connect stored its era"
+               (= {:era :legacy :version "2025-11-25"}
+                  (get-in (metadata/load-cache) [:servers "e2e" :protocol-era])))
         ;; tools/list_changed: the server adds a tool and notifies — the
         ;; extension must re-list and register it with no manual connect
         ;; or refresh (client.clj dispatch -> core.clj resync)
@@ -162,6 +183,9 @@
         (let [r (s {:connect "modern"})]
           (check "modern server connects"
                  (and (not (:is-error r)) (str/includes? (:content r) "modern_echo"))))
+        (check "stale era hint re-probed and stored modern"
+               (= {:era :modern :version "2026-07-28"}
+                  (get-in (metadata/load-cache) [:servers "modern" :protocol-era])))
         (let [r (s {:tool "modern_add_tool" :args {}})]
           (check "modern list_changed trigger called"
                  (str/includes? (:content r) "added echo2")))
@@ -200,7 +224,10 @@
           (let [r (s {:server "http"})]
             (check "adapter catalog omits the invalid x-mcp-header tool"
                    (and (str/includes? (:content r) "http_http_region")
-                        (not (str/includes? (:content r) "http_bad"))))))
+                        (not (str/includes? (:content r) "http_bad")))))
+          (check "http stale era hint re-probed and stored modern"
+                 (= {:era :modern :version "2026-07-28"}
+                    (get-in (metadata/load-cache) [:servers "http" :protocol-era]))))
         ;; a resource template (file:///{path}) registers a read tool
         ;; whose {path} variable expands into the resources/read URI
         (check "resource template registered a read tool"

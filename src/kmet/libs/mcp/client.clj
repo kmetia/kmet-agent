@@ -531,43 +531,97 @@
             (throw e))
         (throw e)))))
 
-(defn- establish-era!
-  "Resolve the conn's era before the catalog work. A :protocol-era hint
-   (the metadata cache, 3.7) skips detection; a stdio conn is probed
-   with server/discover and a streamable-HTTP conn with a server/discover
-   POST, each falling back to the handshake; the legacy SSE transport
-   runs the handshake. Returns {:era :modern|:legacy :version rev
-   :handshake {:protocol-version :server-info :capabilities}}."
-  [conn {:keys [protocol-era]}]
-  (cond
-    (= :modern protocol-era)
-    (establish-modern! conn (or (protocol/era-version conn)
-                                protocol/modern-protocol-version)
-                       nil)
-
-    (= :legacy protocol-era)
-    (establish-legacy! conn nil)
-
-    (= :stdio (:transport conn))
+(defn- detect-and-establish!
+  "Full era detection + establish — the normal path without a hint, and
+   the recovery when a cached :protocol-era hint proves wrong (the shared
+   probe-once fallback)."
+  [conn]
+  (case (:transport conn)
+    :stdio
     (let [detected (detect-stdio-era! conn)]
       (if (= :modern (:era detected))
         (establish-modern! conn (:version detected) (:discover detected))
         (establish-legacy! conn (:probe-error detected))))
 
-    (= :streamable-http (:transport conn))
+    :streamable-http
     (let [detected (detect-http-era! conn)]
       (if (= :modern (:era detected))
         (establish-modern! conn (:version detected) (:discover detected))
         (establish-legacy! conn (:probe-error detected))))
 
-    :else (establish-legacy! conn nil)))
+    ;; the legacy SSE transport never detects (frozen out of the era work)
+    (establish-legacy! conn nil)))
+
+(defn- era-hint
+  "Normalize a :protocol-era connect option: the cached map
+   {:era :modern|:legacy :version rev} (3.7), or a bare keyword; nil when
+   absent or malformed (no :era)."
+  [hint]
+  (cond
+    (map? hint) (when (contains? hint :era) (select-keys hint [:era :version]))
+    (keyword? hint) {:era hint}
+    :else nil))
+
+(defn- hint-contradicted?
+  "True when a hinted establish failed in a way that contradicts the
+   cached HINT and earns the full detection instead of trusting the
+   cache: a hinted modern connect that did not draw a recognized modern
+   error (a legacy server answering server/discover) or drew -32022 (a
+   revision the server dropped), and a hinted legacy connect that drew
+   any JSON-RPC error (a modern server refusing the handshake). Timeouts,
+   transport death, auth failures and -32020/-32021 are not era signals —
+   they surface unchanged."
+  [hint e]
+  (let [data (ex-data e)
+        code (:code data)]
+    (and (some? code)
+         (not (or (= 401 (:status data)) (= 403 (:status data))))
+         (if (= :modern hint)
+           (not (contains? #{-32020 -32021} code))
+           true))))
+
+(defn- establish-hinted!
+  "Run the hinted era establishment. A hinted modern connect probes
+   server/discover with the cached revision (or the one the conn already
+   records); on an era-contradicting failure the hint is discarded and
+   the full detection runs once — the shared re-probe — while any other
+   failure surfaces."
+  [conn {:keys [era version]}]
+  (try
+    (if (= :modern era)
+      (establish-modern! conn (or version
+                                  (protocol/era-version conn)
+                                  protocol/modern-protocol-version)
+                         nil)
+      (establish-legacy! conn nil))
+    (catch Exception e
+      (if (hint-contradicted? era e)
+        (detect-and-establish! conn)
+        (throw e)))))
+
+(defn- establish-era!
+  "Resolve the conn's era before the catalog work. A :protocol-era hint
+   (the metadata cache, 3.7) skips detection — with the cached revision
+   for a modern hint, and a full re-probe when the hinted establish
+   contradicts it; without one, a stdio conn is probed with
+   server/discover and a streamable-HTTP conn with a server/discover
+   POST, each falling back to the handshake; the legacy SSE transport
+   runs the handshake. Returns {:era :modern|:legacy :version rev
+   :handshake {:protocol-version :server-info :capabilities}}."
+  [conn {:keys [protocol-era]}]
+  (if-let [hint (era-hint protocol-era)]
+    (establish-hinted! conn hint)
+    (detect-and-establish! conn)))
 
 (defn establish!
   "Handshake (legacy) or server/discover (modern) + capability-gated
-   catalog discovery on an existing CONN. OPTS: :protocol-era — a
-   :modern/:legacy hint (the metadata cache) skips era detection.
-   Returns {:protocol-version :server-info :capabilities :tools :prompts
-   :resources :resource-templates} — no :conn."
+   catalog discovery on an existing CONN. OPTS: :protocol-era — the
+   cached {:era :modern|:legacy :version rev} hint (a bare keyword also
+   works) skips era detection; a hint the server contradicts falls back
+   to the full probe once. Returns {:protocol-version :server-info
+   :capabilities :protocol-era {:era :version} :tools :prompts
+   :resources :resource-templates} — :protocol-era is the era actually
+   used (the metadata cache stores it), no :conn."
   ([conn] (establish! conn {}))
   ([conn opts]
    (let [{:keys [era version handshake]} (establish-era! conn opts)
@@ -577,6 +631,7 @@
      ;; carry the era _meta
      (record-era! conn era version)
      {:protocol-version protocol-version
+      :protocol-era {:era era :version version}
       :server-info server-info
       :capabilities capabilities
       :tools (if (:tools capabilities) (list-all-tools conn) [])
@@ -593,11 +648,14 @@
    (fn [response]) with the 401 response so it can read the
    WWW-Authenticate challenge, and returns fresh headers) /
    :on-notification (fn [conn msg] — server->client notifications other
-   than progress, e.g. list_changed) / :protocol-era — a :modern or
-   :legacy cache hint that skips era detection (3.7).
+   than progress, e.g. list_changed) / :protocol-era — the cached
+   {:era :modern|:legacy :version rev} hint (a bare keyword also works)
+   that skips era detection; a hinted establish the server contradicts
+   falls back to the full probe once (3.7).
    Returns {:conn conn :tools [..] :prompts [..] :resources [..]
-   :resource-templates [..] :protocol-version str :server-info map}.
-   On any failure the transport is closed and the ex-info rethrown."
+   :resource-templates [..] :protocol-version str :protocol-era
+   {:era :version} :server-info map}. On any failure the transport is
+   closed and the ex-info rethrown."
   [definition opts]
   (let [url (:url definition)
         transport-conn (if url

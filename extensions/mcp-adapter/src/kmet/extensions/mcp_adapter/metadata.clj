@@ -7,11 +7,16 @@
    Shape: {:version 1
            :servers {name {:config-fingerprint str
                            :fetched-at ms
+                           :protocol-era {:era :modern|:legacy :version rev}
                            :tools [{:name :description :inputSchema}]
                            :prompts [{:name :description :arguments}]
                            :resources [{:name :uri :description :mimeType}]
                            :resource-templates
                            [{:name :uriTemplate :description :mimeType}]}}}
+
+   :protocol-era is the era the recorded connect actually used; absent
+   means an unknown era (probe): a fresh entry, or one written before
+   3.7 — no version bump.
 
    Freshness: 7 days. server-entry returns nil when stale or the config
    fingerprint mismatches — callers fall back to a live connect. A config
@@ -103,7 +108,9 @@
 (defn server-entry
   "The cached tools entry for a server, or nil when missing / stale (7-day
    freshness) / fingerprint mismatch — callers fall back to a live
-   connect."
+   connect. The entry also carries :protocol-era when a connect recorded
+   one (:era/:version), the hint a later connect passes to skip era
+   detection."
   [cache name definition settings]
   (when cache
     (let [entry (get-in cache [:servers name])]
@@ -116,27 +123,32 @@
         entry))))
 
 (defn update-entry!
-  "Persist a fresh entry for a server (also returned). TOOLS/PROMPTS/
-   RESOURCES/RESOURCE-TEMPLATES are the wire lists; prompts keep
-   :name/:description/:arguments, resources :name/:uri/:description/
-   :mimeType, resource templates :uriTemplate/:name/:description/
-   :mimeType."
-  [cache name definition settings tools & [prompts resources resource-templates]]
-  (let [entry {:config-fingerprint (config-fingerprint name definition settings)
-               :fetched-at (System/currentTimeMillis)
-               :tools (vec (mapv (fn [t]
-                                   (select-keys t [:name :description :inputSchema]))
-                                 tools))
-               :prompts (vec (mapv (fn [p]
-                                     (select-keys p [:name :description :arguments]))
-                                   (or prompts [])))
-               :resources (vec (mapv (fn [r]
-                                       (select-keys r [:name :uri :description :mimeType]))
-                                     (or resources [])))
-               :resource-templates
-               (vec (mapv (fn [t]
-                            (select-keys t [:uriTemplate :name :description :mimeType]))
-                          (or resource-templates [])))}]
+  "Persist a fresh entry for a server (also returned). OPTS:
+   :tools/:prompts/:resources/:resource-templates are the wire lists
+   (nil is treated as empty; prompts keep :name/:description/:arguments,
+   resources :name/:uri/:description/:mimeType, resource templates
+   :uriTemplate/:name/:description/:mimeType); :protocol-era — the
+   {:era :modern|:legacy :version rev} the connect actually used, stored
+   for the next connect's hint (absent = unknown; the next connect
+   probes)."
+  [cache name definition settings & {:keys [tools prompts resources resource-templates
+                                            protocol-era]}]
+  (let [entry (cond-> {:config-fingerprint (config-fingerprint name definition settings)
+                       :fetched-at (System/currentTimeMillis)
+                       :tools (vec (mapv (fn [t]
+                                           (select-keys t [:name :description :inputSchema]))
+                                         (or tools [])))
+                       :prompts (vec (mapv (fn [p]
+                                             (select-keys p [:name :description :arguments]))
+                                           (or prompts [])))
+                       :resources (vec (mapv (fn [r]
+                                               (select-keys r [:name :uri :description :mimeType]))
+                                             (or resources [])))
+                       :resource-templates
+                       (vec (mapv (fn [t]
+                                    (select-keys t [:uriTemplate :name :description :mimeType]))
+                                  (or resource-templates [])))}
+                protocol-era (assoc :protocol-era protocol-era))]
     (save-cache! {:servers {name entry}})
     (assoc-in (or cache {:version cache-version :servers {}})
               [:servers name] entry)))

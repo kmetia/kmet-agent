@@ -122,10 +122,11 @@
   (let [definition {:command "npx" :args ["-y" "x"]}
         settings {}
         _ (metadata/update-entry! nil "srv" definition settings
-                                  [{:name "tool-a" :description "d" :inputSchema {}}]
-                                  [{:name "brief" :description "b"
-                                    :arguments [{:name "topic" :required true}]}]
-                                  [{:name "README" :uri "file:///r"}])]
+                                  :tools [{:name "tool-a" :description "d" :inputSchema {}}]
+                                  :prompts [{:name "brief" :description "b"
+                                             :arguments [{:name "topic" :required true}]}]
+                                  :resources [{:name "README" :uri "file:///r"}]
+                                  :protocol-era {:era :modern :version "2026-07-28"})]
     (check "cache round-trip"
            (some? (metadata/server-entry (metadata/load-cache) "srv" definition settings)))
     (check "cache stale on config change"
@@ -139,6 +140,14 @@
            (= "brief" (get-in (metadata/load-cache) [:servers "srv" :prompts 0 :name])))
     (check "resources cached"
            (= "README" (get-in (metadata/load-cache) [:servers "srv" :resources 0 :name])))
+    (check "protocol era cached"
+           (= {:era :modern :version "2026-07-28"}
+              (get-in (metadata/load-cache) [:servers "srv" :protocol-era])))
+    ;; an entry without the key means "unknown era" — still a usable cache
+    ;; entry, the next connect just probes
+    (metadata/update-entry! nil "no-era" definition settings :tools [])
+    (check "entry without a protocol era is still fresh"
+           (some? (metadata/server-entry (metadata/load-cache) "no-era" definition settings)))
     (check "all-tools"
            (= [{:server "srv" :tool {:name "tool-a"}}]
               (mapv #(update % :tool select-keys [:name])

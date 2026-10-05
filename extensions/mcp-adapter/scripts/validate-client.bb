@@ -502,6 +502,41 @@
       (finally
         (stop-server! server)))))
 
+;; ─── era hints (3.7) ─────────────────────────────────────────────────────
+
+(defn test-era-hints [fake-stdio fake-http]
+  (println "\n── era hints (cached :protocol-era) ──")
+  ;; a stale legacy hint against a modern stdio server: initialize draws
+  ;; -32601, the hint is discarded and the full probe finds the modern era
+  (let [{:keys [conn protocol-version protocol-era]}
+        (client/connect! {:command "bb" :args [fake-stdio "--era" "modern"]}
+                         {:protocol-era {:era :legacy :version "2025-11-25"}})]
+    (check "stale legacy hint on stdio re-probes to modern"
+           (and (= "2026-07-28" protocol-version)
+                (= {:era :modern :version "2026-07-28"} protocol-era)
+                (true? (client/modern? conn))))
+    (client/close! conn))
+  ;; a consistent modern hint skips detection and is reported back
+  (let [{:keys [conn protocol-era]}
+        (client/connect! {:command "bb" :args [fake-stdio "--era" "modern"]}
+                         {:protocol-era {:era :modern :version "2026-07-28"}})]
+    (check "consistent modern hint is used"
+           (= {:era :modern :version "2026-07-28"} protocol-era))
+    (client/close! conn))
+  ;; the HTTP twin: the hinted legacy initialize POST draws 400 -32020
+  ;; (no version header / _meta), then the probe discovers the modern server
+  (let [{:keys [port] :as server} (spawn-server! fake-http)]
+    (try
+      (let [{:keys [conn protocol-era]}
+            (client/connect! {:url (str "http://127.0.0.1:" port "/mcp?era=modern")
+                              :http-transport :streamable-http}
+                             {:protocol-era {:era :legacy :version "2025-11-25"}})]
+        (check "stale legacy hint on HTTP re-probes to modern"
+               (= {:era :modern :version "2026-07-28"} protocol-era))
+        (client/close! conn))
+      (finally
+        (stop-server! server)))))
+
 ;; ─── main ─────────────────────────────────────────────────────────────────
 
 (let [[fake-stdio fake-http] *command-line-args*]
@@ -515,5 +550,6 @@
   (test-http-sse-response fake-http)
   (test-sse fake-http)
   (test-version-negotiation fake-http)
+  (test-era-hints fake-stdio fake-http)
   (println "\n" (if (zero? @failures) "ALL PASS" (str @failures " FAILURES")))
   (System/exit (if (zero? @failures) 0 1)))
