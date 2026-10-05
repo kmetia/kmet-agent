@@ -80,8 +80,13 @@
         ;; the merge carrying the zone-aware LocalDateTime factories that
         ;; close jolt#1197: ofInstant, and ofEpochSecond applying its offset
         ;; (jolt-lang/time#18).
+        ;; jolt-lang/time#19: tick's cljc.java-time hard-depends on the
+        ;; ClojureScript cljs.java-time (11.7 MB of js-joda externs, all but
+        ;; ~5 KB unused on Jolt). Remove this exclusion when the pin moves to
+        ;; a revision that excludes it upstream.
         io.github.jolt-lang/time {:git/url "https://github.com/jolt-lang/time.git"
-                                  :git/sha "faff43aa3260bf79bb3fba10f6d9336190f83281"}
+                                  :git/sha "faff43aa3260bf79bb3fba10f6d9336190f83281"
+                                  :exclusions [com.widdindustries/cljs.java-time]}
         ;; OpenSSL-backed javax.crypto/java.security shims on Jolt
         ;; (MessageDigest, Mac, Cipher, SecureRandom, EC + RSA
         ;; Signature/KeyPairGenerator/KeyFactory — RFC 0014; inert on bb/JVM).
