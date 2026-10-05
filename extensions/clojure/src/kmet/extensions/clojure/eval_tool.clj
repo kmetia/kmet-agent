@@ -126,8 +126,8 @@
 
 (defn render-eval-call
   "Call line: `clojure> <code>` (+ the target port when one was given), via
-   the shared code-call renderer — capped to a head window when collapsed,
-   verbatim when expanded."
+   the shared code-call renderer — rendered verbatim, whatever the display
+   mode."
   [_name args theme width context]
   (let [code (or (:code args) (get args "code"))
         port (or (:port args) (get args "port"))

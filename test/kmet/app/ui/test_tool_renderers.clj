@@ -26,23 +26,22 @@
                                            th 60 {:expanded false}) 60)]
       (is (= 1 (count lines)))
       (is (str/includes? (first lines) "$ ls -la (timeout 60s)"))))
-  (testing "collapsed caps a multiline command and hints at ctrl+o"
+  (testing "collapsed renders a multiline command verbatim, like expanded"
     (let [cmd (str "python3 - <<'EOF'\n"
                    (str/join "\n" (mapv #(str "body " %) (range 10)))
                    "\nEOF")
           lines (plain (r/render-bash-call "bash" {:command cmd} th 60 {:expanded false}) 60)]
-      (is (= 9 (count lines)) "8 visual head lines + the hint")
+      (is (= 12 (count lines)) "the whole command, no cap")
       (is (str/starts-with? (first lines) "$ python3 - <<'EOF'"))
-      (is (some #(str/includes? % "body 6") lines) "the head renders")
-      (is (not-any? #(str/includes? % "body 7") lines) "the tail is hidden")
-      (is (some #(str/includes? % "(+4 lines,") lines) "the hidden count")))
-  (testing "collapsed wraps and caps a long single-line command"
+      (is (some #(str/includes? % "body 9") lines) "the tail renders")
+      (is (str/includes? (peek lines) "EOF"))
+      (is (not-any? #(str/includes? % "toggle") lines) "no expand hint")))
+  (testing "collapsed wraps a long single-line command in full"
     (let [cmd (str "echo " (str/join " " (repeat 200 "word")))
           lines (plain (r/render-bash-call "bash" {:command cmd} th 60 {:expanded false}) 60)]
-      (is (= 9 (count lines)) "8 wrapped visual lines + the hint")
-      (is (pos? (count (re-seq #"word" (str/join "\n" lines)))) "the head renders")
-      (is (some #(str/includes? % "(+1 lines,") lines)
-          "the logical line is cut mid-wrap (pi-style count)")))
+      (is (> (count lines) 9) "more than the old 8-line head plus hint")
+      (is (str/ends-with? (str/trimr (peek lines)) "word"))
+      (is (not-any? #(str/includes? % "toggle") lines) "no expand hint")))
   (testing "expanded renders the command verbatim (pi parity)"
     (let [cmd (str/join "\n" (mapv #(str "line " %) (range 12)))
           lines (plain (r/render-bash-call "bash" {:command cmd} th 60 {:expanded true}) 60)]
@@ -378,13 +377,13 @@
   (testing "an explicit timeout renders as a suffix"
     (let [lines (plain (r/render-run-code-call "run_code" {:code "1" :timeout 5} th 60 {}) 60)]
       (is (str/includes? (first lines) "(5s)"))))
-  (testing "collapsed renders a multiline script capped with the ctrl+o hint"
+  (testing "collapsed renders the whole multiline script, like expanded"
     (let [code (str/join "\n" (mapv #(str "(println " % ")") (range 20)))
           lines (plain (r/render-run-code-call "run_code" {:code code} th 60 {:expanded false}) 60)]
-      (is (= 9 (count lines)) "8 visual head lines + the hint")
+      (is (= 20 (count lines)) "the whole script, no cap")
       (is (str/starts-with? (first lines) "run_code (println 0)"))
-      (is (not-any? #(str/includes? % "(println 19)") lines) "the tail is hidden")
-      (is (some #(str/includes? % "(+12 lines,") lines) "20 - 8 hidden")))
+      (is (some #(str/includes? % "(println 19)") lines) "the tail renders")
+      (is (not-any? #(str/includes? % "toggle") lines) "no expand hint")))
   (testing "expanded renders the script verbatim"
     (let [code (str/join "\n" (mapv #(str "line " %) (range 12)))
           lines (plain (r/render-run-code-call "run_code" {:code code} th 60 {:expanded true}) 60)]
@@ -402,14 +401,14 @@
       (is (= 1 (count lines)))
       (is (str/includes? (first lines) "clojure> (+ 1 2)"))
       (is (str/includes? (first lines) ":7888"))))
-  (testing "multi-line code is capped when collapsed"
+  (testing "multi-line code renders verbatim when collapsed"
     (let [code (str/join "\n" (mapv #(str "(println " % ")") (range 20)))
           lines (plain (r/render-code-call "clojure>" code "" th 60 {:expanded false}) 60)]
-      (is (= 9 (count lines)) "8 visual head lines + the hint")
+      (is (= 20 (count lines)) "the whole payload, no cap")
       (is (str/starts-with? (first lines) "clojure> (println 0)"))
       (is (some #(str/includes? % "(println 7)") lines))
-      (is (not-any? #(str/includes? % "(println 19)") lines) "the tail is hidden")
-      (is (some #(str/includes? % "(+12 lines,") lines) "20 - 8 hidden")))
+      (is (some #(str/includes? % "(println 19)") lines) "the tail renders")
+      (is (not-any? #(str/includes? % "toggle") lines) "no expand hint")))
   (testing "expanded code renders verbatim"
     (let [code (str/join "\n" (mapv #(str "line " %) (range 12)))
           lines (plain (r/render-code-call "run" code "" th 60 {:expanded true}) 60)]

@@ -775,9 +775,10 @@ The plan above is now the record of what landed:
    (the `with-sci-io` pattern); on babashka the host `*out*`/`*err*` bindings
    are enough. UI: a builtin renderer
    (`render-run-code-call`/`render-run-code-result`) shows the code header
-   (collapsed head + expand hint), the output preview, a muted inner-call
-   summary from `:details :calls` and the elapsed/took line, and strips the
-   model-facing truncation notice in favor of its own warn line.
+   (rendered verbatim, whatever the display mode), the output preview, a
+   muted inner-call summary from `:details :calls` and the elapsed/took
+   line, and strips the model-facing truncation notice in favor of its own
+   warn line.
 7. ✅ **Tests** — `test/kmet/app/test_run_code.clj`, registered in
    `kmet.tasks.runner/all-namespaces`: 37 fast tests and 16 `^:slow` tests
    covering return/output, compact `sandbox/emit` (including spawned output),

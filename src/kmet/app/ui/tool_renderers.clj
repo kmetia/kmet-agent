@@ -174,38 +174,15 @@
                  (+ visual (count wrapped)))
           {:visual-lines (into acc wrapped) :consumed consumed})))))
 
-(def ^:private call-preview-lines
-  "Collapsed cap on a verbatim call body (a shell command, a code argument),
-   in visual lines. A call box taller than the viewport pushes the block's
-   own lines off screen; the cap keeps the typical block inside a window,
-   and ctrl+o renders everything."
-  8)
-
 (defn expand-hint
   "The compact ctrl+o nag shared by every collapsed body: `... (+N lines,
    ctrl+o toggle)`. Public: the built-in renderers and extensions use it so
    every transcript hint reads the same. N is the hidden count: visual lines
-   for the shell output window, logical lines for the head-truncated call and
-   file previews."
+   for the shell output window, logical lines for file previews."
   [theme hidden-lines]
   (str (theme/fg theme :muted (str "... (+" hidden-lines " lines, "))
        (app-kb/key-hint "app.tools.expand" "toggle")
        (theme/fg theme :muted ")")))
-
-(defn- bounded-call-lines
-  "Split BODY into at most CALL-PREVIEW-LINES visual lines at WIDTH.
-   Returns {:lines [...] :hidden n} where HIDDEN counts logical lines not
-   shown in full (the pi-style hint count); expanded bodies return their
-   verbatim logical lines. The cap counts VISUAL lines — a single enormous
-   logical line must not bypass it by counting as one."
-  [body expanded? width]
-  (let [lines (str/split-lines (str body))
-        total (count lines)]
-    (if expanded?
-      {:lines lines :hidden 0}
-      (let [{:keys [visual-lines consumed]}
-            (bounded-head-visual-lines lines call-preview-lines width)]
-        {:lines visual-lines :hidden (- total consumed)}))))
 
 ;; ─── Compact read classification (pi: read.ts getCompactReadClassification) ─
 
@@ -885,22 +862,11 @@
    counts once, and the expand hint reports the rest."
   5)
 
-(defn- capped-call-tree
-  "Compile a call body: the pre-styled call text plus, when HIDDEN logical
-   lines were dropped, the ctrl+o expand hint."
-  [text theme hidden]
-  (h/compile-tree
-   (into [:container {}]
-         (cond-> [(tool-text text)]
-           (pos? hidden) (conj (tool-text (expand-hint theme hidden)))))))
-
 (defn render-bash-call
-  "Call line for the shell tool: `$ <command>` (+ timeout suffix). Collapsed,
-   a multi-line command renders at most CALL-PREVIEW-LINES visual lines with
-   the ctrl+o hint — a call box taller than the window would push the
-   block's tail state line off screen. Expanded renders the command verbatim
-   (pi: the call line never truncates; kmet caps the collapsed box only)."
-  [_name args theme width context]
+  "Call line for the shell tool: `$ <command>` (+ timeout suffix), rendered
+   verbatim whatever the display mode (pi: the call line never truncates;
+   Text wraps it at the width)."
+  [_name args theme _width _context]
   (let [cmd (:command args)
         timeout (:timeout args)
         cmd-str (if (string? cmd) cmd (if (nil? cmd) "" nil))
@@ -908,13 +874,11 @@
                       (nil? cmd-str) (theme/fg theme :error "[invalid arg]")
                       (empty? cmd-str) (theme/fg theme :tool-output "...")
                       :else cmd-str)
-        {:keys [lines hidden]} (bounded-call-lines (str "$ " cmd-display)
-                                                   (:expanded context) width)
-        cmd-line (theme/fg theme :tool-title (theme/bold (str/join "\n" lines)))
+        cmd-line (theme/fg theme :tool-title (theme/bold (str "$ " cmd-display)))
         timeout-suffix (if (and (number? timeout) (pos? timeout))
                          (theme/fg theme :muted (str " (timeout " timeout "s)"))
                          "")]
-    (capped-call-tree (str cmd-line timeout-suffix) theme hidden)))
+    (h/compile-tree (tool-text (str cmd-line timeout-suffix)))))
 
 (defn- output-result-nodes
   "The output body (collapsed to a visual-line window with an expand hint,
@@ -1028,21 +992,19 @@
 
 (defn render-code-call
   "The shared call line for tools whose primary argument is code (run_code,
-   clojure_eval): `<label> <code>`. Collapsed, a multi-line argument renders
-   at most CALL-PREVIEW-LINES visual lines with the ctrl+o hint; expanded
-   renders the code verbatim. LABEL is plain text (styled bold tool-title);
-   SUFFIX is appended as given (pre-styled)."
-  [label code suffix theme width context]
+   clojure_eval): `<label> <code>` rendered verbatim, whatever the display
+   mode (no head window, no expand hint — the bash call line's policy).
+   LABEL is plain text (styled bold tool-title); SUFFIX is appended as
+   given (pre-styled)."
+  [label code suffix theme _width _context]
   (let [code-str (if (string? code) code (if (nil? code) "" nil))
         code-display (cond
                        (nil? code-str) (theme/fg theme :error "[invalid arg]")
                        (empty? code-str) (theme/fg theme :tool-output "...")
                        :else code-str)
-        {:keys [lines hidden]} (bounded-call-lines (str label " " code-display)
-                                                   (:expanded context) width)
         code-line (theme/fg theme :tool-title
-                            (theme/bold (str/join "\n" lines)))]
-    (capped-call-tree (str code-line suffix) theme hidden)))
+                            (theme/bold (str label " " code-display)))]
+    (h/compile-tree (tool-text (str code-line suffix)))))
 
 (defn render-run-code-call
   "Call line for the run_code tool: `run_code <code>` (+ an explicit timeout

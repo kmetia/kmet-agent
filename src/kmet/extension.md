@@ -601,7 +601,7 @@ state line), `render-bash-result` (a
 plain-text output body: styled lines, a collapsed line window with an expand
 hint and truncation warnings — the opt-in grep/find/ls tools use it)
 and `render-code-call` (the `run_code`/`clojure_eval` call line: the code
-argument capped to a head window when collapsed, verbatim when expanded);
+argument rendered verbatim, whatever the display mode);
 the namespace is
 explicitly shared with extensions. Path display helpers are public too:
 `render-tool-path` (shortened, accent, hyperlinked path) and `link-path`
