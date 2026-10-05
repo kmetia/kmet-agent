@@ -427,8 +427,8 @@
 
 (t/deftest test-session-list-sessions-info
   ;; G15: list-sessions-info streams per-file infos (buildSessionInfo) with
-  ;; a progress callback, walks cwd subdirs, excludes legacy headerless
-  ;; files, newest modified first
+  ;; a progress callback carrying partial snapshots, walks cwd subdirs,
+  ;; excludes legacy headerless files, newest modified first
   (let [dir (str "target/test-sess-listinfo-" (System/currentTimeMillis))
         cwd-a (s/session-dir-for-cwd dir "/home/user/proj-a")
         cwd-b (s/session-dir-for-cwd dir "/home/user/proj-b")
@@ -445,12 +445,46 @@
       (spit headerless (prn-str {:id "9" :parent-id nil :role :user
                                  :content "old" :timestamp (str (java.time.Instant/now))}))
       (let [infos (s/list-sessions-info dir
-                                        (fn [loaded total]
-                                          (swap! progress conj [loaded total])))]
+                                        {:on-progress
+                                         (fn [loaded total partial]
+                                           (swap! progress conj
+                                                  {:loaded loaded :total total
+                                                   :partial partial}))})]
         (t/is (= 3 (count infos)) "3 header-bearing sessions, headerless excluded")
         (t/is (= #{(:file sa) (:file sb) (:file legacy)} (set (map :path infos))))
-        (t/is (= [4 4] (last @progress)) "progress counts all scanned files, incl. headerless")
-        (t/is (apply >= (map :modified infos)) "sorted newest modified first"))
+        (t/is (= [4 4] (last (map (juxt :loaded :total) @progress)))
+              "progress counts all scanned files, incl. headerless")
+        (t/is (apply >= (map :modified infos)) "sorted newest modified first")
+        (t/is (some (comp some? :partial) @progress)
+              "partial snapshots publish before the listing finishes")
+        (doseq [p (keep :partial @progress) :when (seq p)]
+          (t/is (apply >= (map :modified p)) "partial snapshots are newest first"))
+        (t/is (= (set (map :path infos))
+                 (set (map :path (:partial (last @progress)))))
+              "the final publish carries the finished snapshot"))
+      (finally (fs/delete-tree dir)))))
+
+(t/deftest test-session-list-sessions-info-stop
+  ;; :stop? ends a listing early: no new files are scheduled, the sessions
+  ;; loaded so far are returned, and the rest are never read (closing the
+  ;; resume overlay must stop an in-flight scan)
+  (let [dir (str "target/test-sess-listinfo-stop-" (System/currentTimeMillis))
+        stop? (atom false)
+        loaded-count (atom 0)]
+    (try
+      (doseq [i (range 15)]
+        (let [sess (s/create-session dir)]
+          (s/append-entry sess {:role :assistant :content (str "m" i)})))
+      (let [infos (s/list-sessions-info dir
+                                        {:stop? (fn [] @stop?)
+                                         :on-progress
+                                         (fn [loaded _ _]
+                                           (reset! loaded-count loaded)
+                                           (reset! stop? true))})]
+        (t/is (pos? (count infos)) "the sessions loaded so far come back")
+        (t/is (<= (count infos) 10)
+              "a stop leaves at most the first concurrency window loaded")
+        (t/is (< @loaded-count 15) "the remaining files were never read"))
       (finally (fs/delete-tree dir)))))
 
 (t/deftest test-session-list-sessions-info-nonexistent

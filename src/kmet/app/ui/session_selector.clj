@@ -13,8 +13,11 @@
    ctrl+backspace is a query-empty alias for delete. Search supports
    re:<regex> and \"phrase\" tokens over id/name/message-text/cwd;
    navigation clamps at the ends (no wrap) and PageUp/PageDown jump by the
-   visible page. Sessions load asynchronously with progress; stale loads
-   are dropped by sequence. ON-SELECT receives the chosen session path —
+   visible page. Sessions load asynchronously, newest first, streaming
+   partial listings into the rows (the query applies to every snapshot) so
+   an already-loaded session can be resumed before the scan finishes;
+   stale loads are dropped by scope sequence, and closing or selecting
+   stops the listing. ON-SELECT receives the chosen session path —
    the caller performs the restore (pi: the component emits the selection,
    interactive-mode switches the session)."
   (:require [babashka.fs :as fs]
@@ -314,10 +317,17 @@
 
 (defn- refilter!
   "Recompute the flattened display list from the active scope's cache,
-   query, sort mode, and name filter; clamp the selection (pi:
-   filterSessions — the selection index is kept, not reset)."
+   query, sort mode, and name filter. The selection follows the selected
+   session (path identity) when it survives the rebuild — a streamed
+   partial appends older sessions around the cursor, so index-kept
+   selection would silently land on a different row — and otherwise clamps
+   (pi: filterSessions; index only)."
   [this]
   (let [st @(:state-atom this)
+        prev-path (let [{:keys [flat selected-idx]} st
+                        n (count flat)]
+                    (when (pos? n)
+                      (:path (:info (nth flat (min selected-idx (dec n)))))))
         name-filtered (if (= :named (:name-filter st))
                         (filterv has-session-name? (active-sessions st))
                         (active-sessions st))
@@ -326,11 +336,15 @@
                (mapv (fn [info] {:info info :depth 0 :is-last true
                                  :ancestor-continues []})
                      (filter-and-sort-sessions name-filtered (:query st) (:sort st))))
-        n (count flat)]
+        n (count flat)
+        keep-idx (when prev-path
+                   (first (keep-indexed (fn [i {:keys [info]}]
+                                          (when (= prev-path (:path info)) i))
+                                        flat)))]
     (swap! (:state-atom this)
            (fn [s]
              (-> s (assoc :flat flat)
-                 (update :selected-idx #(min % (max 0 (dec n)))))))))
+                 (update :selected-idx #(or keep-idx (min % (max 0 (dec n))))))))))
 
 (defn- set-sessions!
   "Replace the active scope's cached list and re-render the rows (pi:
@@ -368,7 +382,8 @@
 
 (defn- hide!
   "Close the selector through the caller-installed close fn (pi: done() —
-   restores the editor dock) and stop pending loads."
+   restores the editor dock); :cancelled also flips the in-flight loaders'
+   stop? so a listing still scanning stops scheduling files."
   [this]
   (swap! (:state-atom this) assoc :cancelled true)
   (when-let [h @(:hide-fn-atom this)]
@@ -399,6 +414,16 @@
     :current {:loading :current-loading :cache :current-sessions}
     :all {:loading :all-loading :cache :all-sessions}))
 
+(defn- store-listing!
+  "Cache a (possibly partial) listing for SCOPE and refilter the rows when
+   that scope is active — the streaming half of the async load, leaving
+   the loading flag and progress untouched."
+  [this scope infos]
+  (let [{:keys [cache]} (scope-state-keys scope)]
+    (swap! (:state-atom this) assoc cache (vec infos))
+    (when (= (:scope @(:state-atom this)) scope)
+      (refilter! this))))
+
 (defn session-selector-set-listing!
   "Feed a finished listing for SCOPE (:current/:all) into the selector and
    refresh the rows when that scope is active (the synchronous half of the
@@ -406,48 +431,56 @@
    themselves). The cwd column follows the scope (pi: setSessions(sessions,
    showCwd))."
   [sel scope infos]
-  (let [{:keys [loading cache]} (scope-state-keys scope)]
+  (let [{:keys [loading]} (scope-state-keys scope)]
+    (store-listing! sel scope infos)
     (swap! (:state-atom sel)
            (fn [s]
-             (cond-> (assoc s cache (vec infos)
-                            loading false)
-               (= (:scope s) scope) (assoc :progress nil))))
-    (when (= (:scope @(:state-atom sel)) scope)
-      (refilter! sel))))
+             (cond-> (assoc s loading false)
+               (= (:scope s) scope) (assoc :progress nil))))))
 
 (defn- load-scope!
-  "Load a scope's sessions asynchronously with progress updates; stale
-   progress (scope switched or a newer load started) is dropped (pi:
-   loadScope + allLoadSeq). Returns the load future."
+  "Load a scope's sessions asynchronously and stream partial listings into
+   the cache as files complete (newest first; the active scope's header
+   also shows progress). Results are dropped when the selector was
+   cancelled or a newer load of the same scope started; the loader's
+   stop? makes a superseded listing stop scheduling files (pi: loadScope +
+   AbortController). Returns the load future."
   [this scope reason]
-  (let [seq# (swap! (:seq-atom this) inc)
+  (let [seqs (swap! (:seq-atom this) update scope (fnil inc 0))
+        gen (get seqs scope)
         loader (case scope :current (:current (:loaders this)) :all (:all (:loaders this)))
-        {:keys [loading]} (scope-state-keys scope)]
+        {:keys [loading]} (scope-state-keys scope)
+        stop? (fn []
+                (let [st @(:state-atom this)]
+                  (or (:cancelled st)
+                      (< gen (get @(:seq-atom this) scope 0)))))]
     (swap! (:state-atom this) assoc loading true :progress nil)
     ((:request-render this))
     (future
       (try
-        (session-selector-set-listing!
-         this scope
-         (loader (fn [loaded total]
-                   (let [st @(:state-atom this)]
-                     (when (and (not (:cancelled st))
-                                (= (:scope st) scope)
-                                (= seq# @(:seq-atom this)))
-                       (swap! (:state-atom this)
-                              assoc :progress {:loaded loaded :total total})
-                       ((:request-render this)))))))
+        (let [infos (loader
+                     (fn [loaded total partial]
+                       (when-not (stop?)
+                         (when partial
+                           (store-listing! this scope partial))
+                         (when (= scope (:scope @(:state-atom this)))
+                           (swap! (:state-atom this)
+                                  assoc :progress {:loaded loaded :total total})
+                           ((:request-render this)))))
+                     stop?)]
+          (when-not (stop?)
+            (session-selector-set-listing! this scope infos)))
         ((:request-render this))
         (catch Exception e
           (debug/log "session-selector load: " e)
-          (swap! (:state-atom this) assoc loading false)
-          (when (and (= (:scope @(:state-atom this)) scope)
-                     (= seq# @(:seq-atom this)))
-            (set-status! this :error
-                         (str "Failed to load sessions: " (ex-message e)) 4000)
-            (when (= reason :initial)
-              (set-sessions! this []))
-            ((:request-render this))))))))
+          (when-not (stop?)
+            (swap! (:state-atom this) assoc loading false)
+            (when (= scope (:scope @(:state-atom this)))
+              (set-status! this :error
+                           (str "Failed to load sessions: " (ex-message e)) 4000)
+              (when (= reason :initial)
+                (set-sessions! this []))
+              ((:request-render this)))))))))
 
 (defn- toggle-scope!
   "Tab — switch between the current folder and all sessions; the all-scope
@@ -835,6 +868,8 @@
           :else
           (do (forward-to-search! this data) nil)))))
   (dispose [this]
+    ;; a disposed selector must not keep streaming loads alive
+    (swap! state-atom assoc :cancelled true)
     ;; cancel the pending status auto-hide before the tree goes (§6.1)
     (when-let [id @(:timer-atom this)]
       (timers/cancel! id)
@@ -862,9 +897,12 @@
 (defn make-session-selector
   "Create the session resume selector (pi: SessionSelectorComponent).
    Options:
-     :loaders               — {:current (fn [on-progress]) :all (fn [..])}
-                              returning session-info maps (pi:
-                              SessionsLoader pair)
+     :loaders               — {:current (fn [on-progress stop?]) :all (fn
+                              [on-progress stop?])} returning session-info
+                              maps (pi: SessionsLoader pair); on-progress
+                              is (fn [loaded total partial-infos]) and
+                              stop? returns truthy when the listing should
+                              stop
      :current-session-file  — the active session's file, marked accent and
                               protected from deletion
      :rename-session        — (fn [path name]); defaults to appending a
@@ -880,6 +918,7 @@
              on-select on-cancel request-render]}]
   (let [sel (map->SessionSelector
              {:state-atom (atom {:scope :current
+                                 :cancelled false
                                  :sort :threaded
                                  :name-filter :all
                                  :show-path false
@@ -900,7 +939,7 @@
                                  :rename-caret 0})
               :search-ref (hiccup/ref)
               :rename-ref (hiccup/ref)
-              :loaders (or loaders {:current (fn [_] []) :all (fn [_] [])})
+              :loaders (or loaders {:current (fn [_ _] []) :all (fn [_ _] [])})
               :current-session-file (some-> current-session-file canon-path)
               :rename-session-fn (or rename-session default-rename-session!)
               :delete-session-fn (or delete-session delete-session-file)
@@ -908,7 +947,7 @@
               :on-select-atom (atom on-select)
               :on-cancel-atom (atom on-cancel)
               :timer-atom (atom nil)
-              :seq-atom (atom 0)
+              :seq-atom (atom {})
               :hide-fn-atom (atom nil)
               :focused? (atom false)
               :cache-atom (atom nil)})
@@ -998,8 +1037,15 @@
          ;; selector through this atom once it exists
          sel-atom (atom nil)
          sel (make-session-selector
-              :loaders {:current #(session/list-sessions-info cwd-dir %)
-                        :all #(session/list-sessions-info base-dir %)}
+              :loaders {:current (fn [on-progress stop?]
+                                   (session/list-sessions-info
+                                    cwd-dir {:on-progress on-progress
+                                             :stop? stop?}))
+                        :all (fn [on-progress stop?]
+                               (session/list-sessions-info
+                                base-dir {:on-progress on-progress
+                                          :stop? stop?
+                                          :publish-every 100}))}
               :current-session-file (or current-session-file
                                         (some-> cs :session-atom deref :file))
               :on-select (fn [path]

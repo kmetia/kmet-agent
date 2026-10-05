@@ -1108,11 +1108,13 @@
                (catch Exception _ nil)))
         0)))
 
-(defn list-sessions
-  "List all session files under a session directory, newest first. When DIR
-   is a base sessions dir, its cwd-encoded subdirectories are walked too
-   (pi: listAll — sessions/<--cwd-->/); when DIR is a single cwd-encoded
-   dir, it is listed flat. Returns canonical absolute paths."
+(defn- session-file-candidates
+  "Every .ednl file under DIR — its cwd-encoded subdirectories included,
+   DIR itself too — as {:path canonical-path :mtime ms} maps, newest
+   first: file mtime descending, file name descending as the tiebreak.
+   The resume selector streams candidates in this order, so the sessions a
+   user is most likely to want are loaded and selectable first (pi:
+   discovery candidates sort; listSessionsFromDir)."
   [dir]
   (let [d (io/file dir)]
     (when (fs/directory? d)
@@ -1122,9 +1124,24 @@
                        (->> (fs/list-dir sub)
                             (filter #(and (str/ends-with? (fs/file-name %) ".ednl")
                                           (fs/regular-file? %)))
-                            (map #(str (fs/canonicalize %))))))
-             (sort-by #(.toMillis (fs/last-modified-time %)) >)
+                            (map (fn [f]
+                                   {:path (str (fs/canonicalize f))
+                                    :mtime (try (.toMillis (fs/last-modified-time f))
+                                                (catch Exception _ 0))})))))
+             (sort (fn [a b]
+                     (let [c (compare (long (:mtime b)) (long (:mtime a)))]
+                       (if (zero? c)
+                         (compare (fs/file-name (:path b)) (fs/file-name (:path a)))
+                         c))))
              vec)))))
+
+(defn list-sessions
+  "List all session files under a session directory, newest first. When DIR
+   is a base sessions dir, its cwd-encoded subdirectories are walked too
+   (pi: listAll — sessions/<--cwd-->/); when DIR is a single cwd-encoded
+   dir, it is listed flat. Returns canonical absolute paths."
+  [dir]
+  (some->> (session-file-candidates dir) (mapv :path)))
 
 ;; ─── Listing (G15 — pi: buildSessionInfo / buildSessionInfosWithConcurrency) ──
 
@@ -1215,76 +1232,106 @@
   "Build session info for FILES with at most 10 concurrent loads (pi:
    buildSessionInfosWithConcurrency — a sliding window capped at
    MAX_CONCURRENT_SESSION_INFO_LOADS). ON-LOADED is called once per file
-   that actually finished (progress callback; may be nil). Returns a vector
-   aligned with FILES — nil for files that yielded no info
-   (headerless/corrupt). Each iteration waits up to 5 s for the first
-   in-flight future, then collects every completed future — completed
-   siblings still count toward progress while a slow slot is pending, and
-   no result is dropped or counted early. (A permanently stuck read stalls
-   the listing, same as pi's Promise.race.)"
-  [files on-loaded]
+   that actually finished, with the info map (nil for headerless/corrupt
+   files) and the file's index in FILES; it runs on the coordinating
+   thread, so callbacks never interleave (progress callback; may be nil).
+   STOP? is polled before scheduling each file — a truthy return stops
+   scheduling new loads and returns the results collected so far without
+   awaiting the rest (pi: AbortSignal). Returns a vector aligned with
+   FILES — nil for files that yielded no info (headerless/corrupt). Each
+   iteration waits up to 5 s for the first in-flight future, then collects
+   every completed future — completed siblings still count toward progress
+   while a slow slot is pending, and no result is dropped or counted
+   early. (A permanently stuck read stalls the listing, same as pi's
+   Promise.race.)"
+  [files on-loaded stop?]
   (let [n (count files)
         results (atom (vec (repeat n nil)))
-        in-flight (atom #{})
-        next-idx (atom 0)]
+        in-flight (atom [])
+        next-idx (atom 0)
+        stopped? (fn [] (boolean (and stop? (stop?))))]
     (letfn [(start-next! []
               (let [i @next-idx]
                 (when (< i n)
                   (swap! next-idx inc)
-                  (swap! in-flight conj (future
-                                          (try
-                                            (swap! results assoc i
-                                                   (build-session-info (nth files i)))
-                                            (catch Exception _ nil)))))))]
+                  (swap! in-flight conj
+                         [i (future
+                              (try
+                                (swap! results assoc i (build-session-info (nth files i)))
+                                (catch Exception _ nil)))]))))]
       (loop []
-        (while (and (< @next-idx n)
+        (while (and (not (stopped?))
+                    (< @next-idx n)
                     (< (count @in-flight) max-concurrent-session-info-loads))
           (start-next!))
-        (if (seq @in-flight)
-          (let [f (first @in-flight)
-                ;; wait for this slot (bounded — a stuck read can't hang the
-                ;; caller forever); only completed futures count below
-                _ (deref f 5000 nil)
-                done (vec (filter future-done? @in-flight))]
-            (swap! in-flight #(reduce disj % done))
-            (doseq [_ done] (when on-loaded (on-loaded)))
-            (recur))
-          @results)))))
+        (cond
+          (stopped?) @results
+          (seq @in-flight)
+          (let [[_ f] (first @in-flight)]
+            ;; wait for this slot (bounded — a stuck read can't hang the
+            ;; caller forever); only completed futures count below
+            (deref f 5000 nil)
+            (let [done (vec (filter (fn [[_ fut]] (future-done? fut)) @in-flight))]
+              (swap! in-flight (fn [inflight] (vec (remove (set done) inflight))))
+              (doseq [[i _] done]
+                (when on-loaded (on-loaded (nth @results i) i)))
+              (recur)))
+          :else @results)))))
+
+(def ^:private partial-listing-publish-interval
+  "Publish the partial snapshot on the first completed file, every 10th,
+   and the last (pi: CURRENT_SESSION_LIST_PUBLISH_INTERVAL)."
+  10)
 
 (defn list-sessions-info
   "Session info for all session files under a session directory, newest
    modified first (pi: SessionManager.listAll + buildSessionInfosWith-
    Concurrency). When DIR is a base sessions dir, its cwd-encoded
    subdirectories are walked (pi: listAll); when DIR is a single
-   cwd-encoded dir, it is listed flat. Files are streamed (build-session-
-   info) at most 10 concurrent; ON-PROGRESS (fn [loaded total]) is called
-   as files complete. Legacy headerless files are excluded. Returns [] on
-   any error (pi: listSessionsFromDir catches and returns empty — a broken
-   dir must not take down the resume overlay)."
-  [dir & [on-progress]]
-  (try
-    (let [d (io/file dir)]
-      (if-not (fs/directory? d)
-        []
-        (let [dirs (cons d (filter fs/directory? (fs/list-dir d)))
-              files (vec (mapcat (fn [sub]
-                                   (->> (fs/list-dir sub)
-                                        (filter #(and (str/ends-with? (fs/file-name %) ".ednl")
-                                                      (fs/regular-file? %)))
-                                        (map #(str (fs/canonicalize %)))))
-                                 dirs))
-              total (count files)
-              loaded (atom 0)
-              infos (build-session-infos
-                     files
-                     (fn []
-                       (swap! loaded inc)
-                       (when on-progress (on-progress @loaded total))))]
-          (->> infos
-               (remove nil?)
-               (sort-by :modified >)
-               vec))))
-    (catch Exception _ [])))
+   cwd-encoded dir, it is listed flat. Files are discovered newest-first
+   (mtime descending) and streamed at most 10 concurrent. OPTS:
+     :on-progress — (fn [loaded total partial]) called as files complete.
+       PARTIAL is the sorted newest-first snapshot of the sessions loaded
+       so far, or nil between publishes; the first, every 10th, and the
+       final update carry it (pi: SessionListProgress partialSessions).
+       Headerless legacy files count toward LOADED/TOTAL but never enter a
+       snapshot.
+     :stop? — (fn []) polled before each file is scheduled; a truthy return
+       stops the listing and returns the sessions loaded so far, so closing
+       the resume overlay ends a scan in flight.
+     :publish-every — publish cadence in completed files (default 10; the
+       all-projects scope passes 100 — pi: ALL_SESSION_LIST_PUBLISH_INTERVAL).
+   Returns [] on any error (pi: listSessionsFromDir catches and returns
+   empty — a broken dir must not take down the resume overlay)."
+  [dir & [opts]]
+  (let [{:keys [on-progress stop? publish-every]} opts
+        publish-every (or publish-every partial-listing-publish-interval)]
+    (try
+      (let [files (mapv :path (session-file-candidates dir))]
+        (if (empty? files)
+          []
+          (let [total (count files)
+                done (atom (vec (repeat total nil)))
+                loaded (atom 0)
+                publish! (fn []
+                           (when on-progress
+                             (on-progress @loaded total
+                                          (->> @done
+                                               (remove nil?)
+                                               (sort-by :modified >)
+                                               vec))))]
+            (build-session-infos
+             files
+             (fn [info index]
+               (swap! done assoc index info)
+               (let [n (swap! loaded inc)]
+                 (when (or (= 1 n)
+                           (= total n)
+                           (zero? (mod n publish-every)))
+                   (publish!))))
+             stop?)
+            (->> @done (remove nil?) (sort-by :modified >) vec))))
+      (catch Exception _ []))))
 
 (def ^:private header-read-buffer-size
   "Chunk size (chars) for the bounded header scan (pi:

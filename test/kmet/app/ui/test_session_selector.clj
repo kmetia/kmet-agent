@@ -56,7 +56,7 @@
   [& {:keys [current all current-session-file on-select on-cancel
              rename-session delete-session]}]
   (install-keybindings!)
-  (let [loader (fn [infos] (fn [_] infos))
+  (let [loader (fn [infos] (fn [_ _] infos))
         sel (ss/make-session-selector
              :loaders {:current (loader (or current []))
                        :all (loader (or all []))}
@@ -383,7 +383,7 @@
         b (info "/tmp/s/b.ednl" :first-message "delete me")
         _ (reset! backing [a b])
         sel (ss/make-session-selector
-             :loaders {:current (fn [_] @backing) :all (fn [_] [])}
+             :loaders {:current (fn [_ _] @backing) :all (fn [_ _] [])}
              :delete-session (fn [path]
                                (swap! deleted conj path)
                                ;; the world moves on: the file is gone
@@ -568,18 +568,103 @@
 (t/deftest async-load-completes-and-refreshes
   (let [done (promise)
         sel (ss/make-session-selector
-             :loaders {:current (fn [_] (deliver done true)
+             :loaders {:current (fn [_ _] (deliver done true)
                                   [(info "/tmp/s/async.ednl" :first-message "async row")])
-                       :all (fn [_] [])})]
+                       :all (fn [_ _] [])})]
     (ss/session-selector-set-listing! sel :current [])
     ;; drive the async half: load-scope! is private, so emulate what it does
     ;; after the loader returns — feed through the public entry point
     (future
-      (let [infos ((get-in sel [:loaders :current]) (fn [_ _]))]
+      (let [infos ((get-in sel [:loaders :current]) (fn [_ _ _]) (fn [] false))]
         (ss/session-selector-set-listing! sel :current infos)))
     (wait-for #(realized? done))
     (wait-for #(boolean (some (fn [l] (str/includes? l "async row"))
                               (render-text sel 100))))))
+
+(t/deftest streaming-partials-are-selectable-filtered-and-stable
+  ;; partial listings land in the rows as they stream: a session is
+  ;; selectable before the scan finishes, the query filters each snapshot,
+  ;; and the cursor follows the selected session as later snapshots arrive
+  (install-keybindings!)
+  (let [a (info "/tmp/s/a.ednl" :first-message "newest work")
+        b (info "/tmp/s/b.ednl" :first-message "middle work")
+        c (info "/tmp/s/c.ednl" :first-message "oldest work")
+        partial-gate (promise)
+        release (promise)
+        selected (atom nil)
+        sel (ss/make-session-selector
+             :loaders {:current (fn [_ _] [])
+                       :all (fn [on-progress _stop?]
+                              (on-progress 1 3 [a])
+                              @partial-gate
+                              (on-progress 2 3 [a c])
+                              @release
+                              [a b c])}
+             :on-select (fn [path] (reset! selected path)))]
+    (ss/session-selector-set-listing! sel :current [])
+    (press sel "tab")                          ;; starts the all-scope load
+    (wait-for #(boolean (some (fn [l] (str/includes? l "newest work"))
+                              (render-text sel 100))))
+    ;; the query applies to the partial cache: nothing matches yet
+    (doseq [k ["o" "l" "d"]] (press sel k))
+    (t/is (not-any? #(str/includes? % "oldest work") (render-text sel 100)))
+    (deliver partial-gate true)
+    (wait-for #(boolean (some (fn [l] (str/includes? l "oldest work"))
+                              (render-text sel 100))))
+    ;; clear the query: the cursor follows c ("oldest work") as b arrives
+    ;; in a later snapshot ahead of it, instead of staying at index 0
+    (dotimes [_ 3] (press sel "backspace"))
+    (deliver release true)
+    (wait-for #(not-any? (fn [l] (str/includes? l "Loading"))
+                         (render-text sel 100)))
+    (t/is (str/includes? (selected-row-text sel 100) "oldest work"))
+    (press sel "enter")
+    (t/is (= "/tmp/s/c.ednl" @selected))))
+
+(t/deftest close-and-select-stop-the-streaming-loader
+  ;; while a listing is still blocked, selecting or closing flips the
+  ;; loader's stop?; its late snapshot and final result are dropped, so a
+  ;; closed selector cannot repopulate its cache
+  (install-keybindings!)
+  (let [a (info "/tmp/s/a.ednl" :first-message "only row")
+        late (info "/tmp/s/late.ednl" :first-message "late row")
+        make-sel (fn [close-key]
+                   (let [stop-fn (atom nil)
+                         gate (promise)
+                         finished (promise)
+                         selected (atom nil)
+                         cancelled (atom false)
+                         sel (ss/make-session-selector
+                              :loaders {:current (fn [_ _] [])
+                                        :all (fn [on-progress stop?]
+                                               (reset! stop-fn stop?)
+                                               (on-progress 1 1 [a])
+                                               @gate
+                                               (on-progress 1 1 [a late])
+                                               (deliver finished true)
+                                               [a late])}
+                              :on-select (fn [path] (reset! selected path))
+                              :on-cancel (fn [] (reset! cancelled true)))]
+                     (ss/session-selector-set-listing! sel :current [])
+                     (press sel "tab")
+                     (wait-for #(boolean (some (fn [l] (str/includes? l "only row"))
+                                               (render-text sel 100))))
+                     (press sel close-key)
+                     {:sel sel :stop-fn stop-fn :gate gate :finished finished
+                      :selected selected :cancelled cancelled}))
+        select-run (make-sel "enter")
+        cancel-run (make-sel "escape")]
+    (doseq [run [select-run cancel-run]]
+      (t/is (true? (@(:stop-fn run))) "closing flips the loader's stop?")
+      (deliver (:gate run) true)
+      (wait-for #(realized? (:finished run)))
+      (t/is (not-any? (fn [l] (str/includes? l "late row"))
+                      (render-text (:sel run) 100))
+            "a late snapshot never reaches a stopped listing")
+      (t/is (= [(:path a)] (mapv :path (:all-sessions @(:state-atom (:sel run)))))
+            "the stopped loader's final result is dropped too"))
+    (t/is (= "/tmp/s/a.ednl" @(:selected select-run)))
+    (t/is (true? @(:cancelled cancel-run)))))
 
 ;; ─── Panel lifecycle: reactive body + dispose ──────────────────────────────
 
