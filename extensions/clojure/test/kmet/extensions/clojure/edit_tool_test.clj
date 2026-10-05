@@ -328,7 +328,9 @@
     (let [content (read-test-file path)]
       ;; first-fn should appear before second-fn
       (is (< (.indexOf content "first-fn")
-             (.indexOf content "second-fn"))))))
+             (.indexOf content "second-fn")))
+      (is (str/includes? content "(defn first-fn [] 42)\n\n(defn second-fn [] nil)")
+          "inserted form is newline-separated from the anchor"))))
 
 (deftest test-insert-before-with-comment
   (let [path (write-test-file! "insert-before-cmt"

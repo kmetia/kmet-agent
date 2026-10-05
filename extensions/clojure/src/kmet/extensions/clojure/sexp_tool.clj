@@ -157,9 +157,14 @@
                            (z/next edit-span-loc))})))
 
 (defn- insert-before-multi [zloc _match-sexprs replacement-node]
+  ;; Same shape as edit-util/insert-before-form: a "\n\n" separator then
+  ;; the content, both inserted raw (z/insert-left would auto-space and
+  ;; glue the forms onto the anchor's line).
   (let [edit-loc (-> zloc
                      util/walk-back-to-non-comment z/next*
-                     (z/insert-left replacement-node)
+                     (z/insert-left* (p/parse-string-all "\n\n"))
+                     z/left
+                     (z/insert-left* replacement-node)
                      z/left)]
     {:edit-span-loc edit-loc
      :after-loc     (-> edit-loc z/splice

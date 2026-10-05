@@ -296,6 +296,21 @@
     (is (not (:is-error result)))
     (is (str/includes? (read-test-file path) "(* x 2)"))))
 
+(deftest test-only-the-changed-form-is-reformatted
+  ;; The pipeline formats only the top-level forms the edit touched: the
+  ;; changed form is cljfmt-formatted, while a form the formatter would
+  ;; change elsewhere keeps its bytes.
+  (let [path (write-test-file! "format-scope"
+                               "(defn a [](inc 1))\n\n(defn b []\n  (let [x 1]\n(+ x 2)))\n")
+        result (sexp-tool/execute
+                (sexp-opts path "(+ x 2)" "(+ x 3)"))]
+    (is (not (:is-error result)))
+    (let [content (read-test-file path)]
+      (is (str/includes? content "(defn a [](inc 1))")
+          "untouched form keeps its bytes")
+      (is (str/includes? content "  (let [x 1]\n    (+ x 3))")
+          "changed form is reformatted with cljfmt"))))
+
 (deftest test-replace-function-call
   (let [path (write-test-file! "replace-call"
                                "(println \"hello\")\n")
@@ -473,7 +488,9 @@
     (is (not (:is-error result)))
     (let [content (read-test-file path)]
       (is (< (.indexOf content "first")
-             (.indexOf content "second"))))))
+             (.indexOf content "second")))
+      (is (str/includes? content "(defn first [] 1)\n\n(defn second [] 2)")
+          "inserted form is newline-separated from the anchor"))))
 
 (deftest test-insert-before-expression
   (let [path (write-test-file! "insert-before-expr"

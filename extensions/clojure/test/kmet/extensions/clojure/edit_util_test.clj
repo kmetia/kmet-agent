@@ -185,6 +185,36 @@
     (is (string? result))
     (is (str/includes? result "let"))))
 
+(deftest test-format-changed-forms
+  (let [opts     (util/project-fmt-opts ".")
+        children (fn [s] (node/children (p/parse-string-all s)))]
+    (testing "only the changed window is reformatted — whole-file equivalent"
+      (let [orig "(defn a [] 1)\n\n(defn b []\n  (let [x 1]\n(+ x 2)))\n"
+            new  "(defn a [] 1)\n\n(defn b []\n  (let [x 1]\n(+ x 3)))\n"]
+        (is (= (util/format-source-string new opts)
+               (util/format-changed-forms (children orig) (children new) opts)))))
+    (testing "an untouched misformatted form keeps its bytes"
+      (let [orig "(defn a [](inc 1))\n\n(defn b [] 2)\n"
+            new  "(defn a [](inc 1))\n\n(defn b [](inc 2))\n"
+            out  (util/format-changed-forms (children orig) (children new) opts)]
+        (is (str/includes? out "(defn a [](inc 1))"))
+        (is (str/includes? out "(defn b [] (inc 2))"))))
+    (testing "an inserted form is formatted, its separators kept"
+      (let [orig "(defn a [] 1)\n"
+            new  "(defn a [] 1)\n\n(defn b [ ] 2)\n"]
+        (is (= "(defn a [] 1)\n\n(defn b [] 2)\n"
+               (util/format-changed-forms (children orig) (children new) opts)))))
+    (testing "a deleted form leaves the remaining bytes"
+      (let [orig "(defn a [] 1)\n\n(defn b [] 2)\n"
+            new  "(defn a [] 1)\n"]
+        (is (= "(defn a [] 1)\n"
+               (util/format-changed-forms (children orig) (children new) opts)))))
+    (testing "multiple changed forms across a file"
+      (let [orig "(defn a [](inc 1))\n\n(defn m [] 9)\n\n(defn b [](inc 2))\n"
+            new  "(defn a [](inc 10))\n\n(defn m [] 9)\n\n(defn b [](inc 20))\n"]
+        (is (= "(defn a [] (inc 10))\n\n(defn m [] 9)\n\n(defn b [] (inc 20))\n"
+               (util/format-changed-forms (children orig) (children new) opts)))))))
+
 (deftest test-project-fmt-opts
   (testing "finds cljfmt.edn walking up from the file's directory"
     (let [dir (fs/create-dir (fs/path "target" "fmt-config-test"))

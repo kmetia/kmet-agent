@@ -31,7 +31,8 @@ The tools always apply their edits; preview-only and unified-diff modes are not 
 - defmethod dispatch-value matching (`"shape/area :square"`)
 - Unbalanced delimiter rejection (edamame detection — content must be balanced)
 - Deletion: an empty `content` with `operation: "replace"` removes the form
-- cljfmt formatting
+- cljfmt formatting — only the forms the edit changed are reformatted;
+  untouched forms keep their bytes
 - Similar-match suggestions when form not found
 
 ### `clojure_edit_replace_sexp`
@@ -60,6 +61,8 @@ The tools always apply their edits; preview-only and unified-diff modes are not 
 - Multi-expression matching (consecutive expressions)
 - `replace_all` for renaming symbols across a file
 - Deletion: an empty `new_form` with `operation: "replace"` removes the matched expression(s), including multi-expression matches and with `replace_all`
+- cljfmt formatting — only the forms the edit changed are reformatted;
+  untouched forms keep their bytes
 - Standard edit-style file call, full numbered diff, and colored result rendering
 
 Both tools reuse the host's `render-edit-call` and `render-edit-result` renderers.

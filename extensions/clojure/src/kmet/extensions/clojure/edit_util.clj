@@ -536,6 +536,53 @@
        (re-indent-to-column formatted target-col))
      (catch Exception _ form-str))))
 
+(defn- common-prefix-len
+  "Number of leading strings equal in A and B."
+  [a b]
+  (loop [i 0]
+    (if (and (< i (count a)) (< i (count b))
+             (= (nth a i) (nth b i)))
+      (recur (inc i))
+      i)))
+
+(defn- common-suffix-len
+  "Number of trailing strings equal in A and B, up to LIMIT."
+  [a b limit]
+  (loop [i 0]
+    (if (and (< i limit)
+             (= (nth a (- (count a) 1 i))
+                (nth b (- (count b) 1 i))))
+      (recur (inc i))
+      i)))
+
+(defn format-changed-forms
+  "Format the top-level forms of an edited source with cljfmt, touching only
+   the forms that differ between ORIG-CHILDREN and NEW-CHILDREN (the root
+   node children of the source before and after the edit).  Returns the new
+   source string.
+
+   The common prefix and suffix are emitted byte-for-byte; every inner node
+   in the differing window is reformatted with OPTS, while the whitespace
+   between top-level forms stays as the edit produced it.  For a file the
+   project formatter leaves clean this is the whole-file cljfmt result, at
+   the cost of formatting the changed forms instead of the whole file."
+  [orig-children new-children opts]
+  (let [new-children (vec new-children)
+        orig-strs    (mapv n/string orig-children)
+        new-strs     (mapv n/string new-children)
+        limit        (min (count orig-strs) (count new-strs))
+        prefix       (common-prefix-len orig-strs new-strs)
+        suffix       (common-suffix-len orig-strs new-strs (- limit prefix))
+        end          (- (count new-strs) suffix)]
+    (->> new-strs
+         (map-indexed
+          (fn [i s]
+            (if (and (>= i prefix) (< i end) (n/inner? (nth new-children i)))
+              (try (n/string (fmt/reformat-form (nth new-children i) opts))
+                   (catch Exception _ s))
+              s)))
+         (apply str))))
+
 ;; ═══════════════════════════════════════════════════════════════════════════════
 ;; Zipper: navigation
 ;; ═══════════════════════════════════════════════════════════════════════════════
@@ -626,15 +673,17 @@
 (defn edit-pipeline
   "Run the shared edit pipeline: load FILE-PATH, call FIND-EDIT-FN with the
    parsed zipper (which must return either {:error msg :similar-matches ...}
-   or {:zloc updated-zloc}), format the result with the project's cljfmt
-   config, write it back, and return the tool result map.
+   or {:zloc updated-zloc}), format the top-level forms the edit changed
+   with the project's cljfmt config, write the file back, and return the
+   tool result map.
    FIND-EDIT-FN may return nil instead of {:error ...} — that becomes the
    not-found error."
   [file-path find-edit-fn]
   (try
-    (let [original (slurp-utf8 file-path)
-          zloc     (z/of-string original {:track-position? true})
-          result   (find-edit-fn zloc)]
+    (let [original      (slurp-utf8 file-path)
+          zloc          (z/of-string original {:track-position? true})
+          orig-children (n/children (z/root zloc))
+          result        (find-edit-fn zloc)]
       (if (and result (:error result))
         (let [similar (:similar-matches result)
               similar-note (when (seq similar)
@@ -648,9 +697,11 @@
           {:content  (str "Could not find the target in " file-path
                           "\nThe match is content-based — whitespace/newlines are ignored, but the structure (parens, brackets, braces, keywords, symbols) must match.")
            :is-error true}
-          (let [new-source (z/root-string (:zloc result))
-                fmt-opts   (project-fmt-opts file-path)
-                formatted  (format-source-string new-source fmt-opts)]
+          (let [new-zloc  (:zloc result)
+                formatted (format-changed-forms
+                           orig-children
+                           (n/children (z/root new-zloc))
+                           (project-fmt-opts file-path))]
             (spit-utf8 file-path formatted)
             (let [diff-str (edit-diff/generate-display-diff original formatted)]
               {:content "Edit applied."
