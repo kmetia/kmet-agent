@@ -237,6 +237,20 @@
            (= redirect-uri (java.net.URLDecoder/decode (:redirect_uri p) "UTF-8")))
     (check "callback served on the configured port"
            (some? (get-in (auth/server-entry "custom-redirect") [:tokens :access])))
+    (check "a matching config keeps the redirect-uri verbatim"
+           (= redirect-uri
+              (auth/callback-redirect-uri {:port cb-port :path "/custom-cb"}
+                                          cb-port "/custom-cb" redirect-uri)))
+    (check "a later config cannot rebind the callback server"
+           (= (str "http://" (oauth-lib/callback-host) ":" cb-port "/custom-cb")
+              (auth/callback-redirect-uri {:port cb-port :path "/custom-cb"}
+                                          (inc cb-port) "/other"
+                                          (str "http://127.0.0.1:" (inc cb-port) "/other"))))
+    (check "a path-less config derives the served callback path"
+           (= (str "http://" (oauth-lib/callback-host) ":" cb-port "/callback")
+              (auth/callback-redirect-uri {:port cb-port :path "/callback"}
+                                          cb-port nil
+                                          (str "http://127.0.0.1:" cb-port))))
     (auth/logout! "custom-redirect")))
 
 (defn test-device-flow [oauth-port store-path]

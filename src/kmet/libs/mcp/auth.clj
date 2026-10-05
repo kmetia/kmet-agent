@@ -43,26 +43,44 @@
              (str/lower-case authority)
              (if (or (str/blank? p) (= p "/")) "" (str/replace p #"/+$" "")))))))
 
+(defn- split-auth-params
+  "Split a WWW-Authenticate parameter list on the commas that are outside
+   quoted strings. An auth-param value is a quoted-string (RFC 9110
+   §11.2), so it may contain a comma — a plain split would truncate it."
+  [s]
+  (loop [chars (seq s) quoted? false escaped? false buf "" out []]
+    (if-let [c (first chars)]
+      (let [r (rest chars)]
+        (cond
+          escaped? (recur r true false (str buf c) out)
+          (and quoted? (= c \\)) (recur r true true (str buf c) out)
+          (= c \") (recur r (not quoted?) false (str buf c) out)
+          (and (not quoted?) (= c \,)) (recur r false false "" (conj out buf))
+          :else (recur r quoted? false (str buf c) out)))
+      (conj out buf))))
+
 (defn parse-www-authenticate
   "The auth-param map of a `WWW-Authenticate: Bearer ...` challenge:
    {:resource-metadata \"...\" :scope \"a b\" :error \"insufficient_scope\"}.
    RFC 9728 §5.1 resource_metadata points at the protected-resource
    document; the scope parameter is the server's authoritative minimum
    for this request. nil when the header is absent or not a Bearer
-   challenge."
+   challenge. Values are quoted-strings — a comma inside one does not end
+   the parameter, and a quoted-pair is unescaped; an unquoted value is not
+   a valid auth-param here and is skipped."
   [header]
   (when (and (string? header) (str/starts-with? (str/trim header) "Bearer"))
-    (let [params (str/split (subs (str/trim header) 6) #",")]
-      (not-empty
-       (into {}
-             (keep (fn [param]
-                     (when-let [[_ k v] (re-matches #"\s*([A-Za-z_-]+)\s*=\s*\"([^\"]*)\"\s*"
-                                                    param)]
-                       ;; resource_metadata → :resource-metadata, so both
-                       ;; the RFC 9728 spelling and a hyphenated one land
-                       ;; on the same key
-                       [(keyword (str/replace (str/lower-case k) "_" "-")) v])))
-             params)))))
+    (not-empty
+     (into {}
+           (keep (fn [param]
+                   (when-let [[_ k v] (re-matches #"\s*([A-Za-z_-]+)\s*=\s*\"((?:\\.|[^\"\\])*)\"\s*"
+                                                  param)]
+                     ;; resource_metadata → :resource-metadata, so both
+                     ;; the RFC 9728 spelling and a hyphenated one land
+                     ;; on the same key
+                     [(keyword (str/replace (str/lower-case k) "_" "-"))
+                      (str/replace v #"\\(.)" "$1")])))
+           (split-auth-params (subs (str/trim header) 6))))))
 
 ;; the last WWW-Authenticate challenge seen per server (the transport
 ;; records it on every 401), so discovery and scope selection can use
@@ -958,7 +976,7 @@
   [name pending response]
   (let [{:keys [issuer state verifier client-id redirect-uri scope resource
                 token-endpoint iss-supported?]} pending]
-    (when (and (:state response) (not= (:state response) state))
+    (when-not (= (:state response) state)
       (throw (ex-info "OAuth state mismatch" {:type :oauth-state-mismatch})))
     (validate-authorization-response! response issuer iss-supported?)
     (when-not (seq (:code response))

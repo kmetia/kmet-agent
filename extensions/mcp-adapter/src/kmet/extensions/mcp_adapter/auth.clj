@@ -101,6 +101,29 @@
     [(str "http://" (oauth-lib/callback-host) ":" default-port default-path)
      default-port]))
 
+(defn- callback-path
+  "The callback route a bind PATH serves: /callback when the configured
+   URI carries none."
+  [path]
+  (or (not-empty path) "/callback"))
+
+(defn callback-redirect-uri
+  "The redirect URI a flow must advertise for the bound callback server
+   BOUND ({:port :path}). The configured URI is returned when it names the
+   bound server exactly — preserving the config's host spelling; otherwise
+   the bound server's own URI is returned, because the first flow's
+   :redirect-uri fixed the bind and a later config's port/path would send
+   the browser to an address nothing listens on. A path-less configured
+   URI also gets the bound URI: the config names no route to preserve."
+  ([bound] (callback-redirect-uri bound nil nil nil))
+  ([bound bind-port bind-path configured]
+   (if (and (some? configured)
+            (some? (not-empty bind-path))
+            (= bind-port (:port bound))
+            (= bind-path (:path bound)))
+     configured
+     (str "http://" (oauth-lib/callback-host) ":" (:port bound) (:path bound)))))
+
 (defn- ensure-callback-server!
   "Start the process-wide loopback callback server once. PORT is the bind
    port: a configured :redirect-uri supplies its explicit port (the
@@ -112,13 +135,13 @@
   (or @callback-state
       (locking callback-state
         (or @callback-state
-            (let [callback-path (or path "/callback")
+            (let [route (callback-path path)
                   server (oauth-lib/start-callback-server
                           (or port 0)
                           (fn [{:keys [path query-params]}]
                             (let [flow @current-flow]
                               (cond
-                                (not= path callback-path)
+                                (not= path route)
                                 {:status 404
                                  :body (oauth-lib/oauth-error-html
                                         "Callback route not found.")}
@@ -154,24 +177,25 @@
                                               "MCP authentication completed. You can close this window.")}))))))]
               (reset! callback-state {:server server
                                       :port (:port server)
-                                      :path callback-path})
+                                      :path route})
               @callback-state)))))
 
 (defn- ensure-callback-redirect!
   "Ensure the process-wide callback server and return the redirect URI to
    use for this flow. The server binds ONCE: the first flow's
    :redirect-uri config (explicit port + path) wins; later flows reuse the
-   bound server and derive the URI from it, so the authorize URL always
-   matches the server the browser hits (a DCR'd client's registered URI
-   stays valid)."
+   bound server, so the authorize URL always matches the server the
+   browser hits (a DCR'd client's registered URI stays valid) and a later
+   config that asks for a different port/path cannot point the browser at
+   a dead address."
   [cfg]
   (if-let [configured (:redirect-uri cfg)]
-    (let [[uri bind-port] (redirect-uri-for cfg 0 "/callback")
-          uri-obj (try (java.net.URI. configured) (catch Exception _ nil))]
-      (ensure-callback-server! bind-port (some-> uri-obj .getPath))
-      uri)
-    (let [{:keys [port path]} (ensure-callback-server!)]
-      (str "http://" (oauth-lib/callback-host) ":" port path))))
+    (let [[_ bind-port] (redirect-uri-for cfg 0 "/callback")
+          uri-obj (try (java.net.URI. configured) (catch Exception _ nil))
+          bind-path (some-> uri-obj .getPath)]
+      (callback-redirect-uri (ensure-callback-server! bind-port bind-path)
+                             bind-port bind-path configured))
+    (callback-redirect-uri (ensure-callback-server!))))
 
 (defn shutdown!
   "Close the callback server and drop machine-token caches (extension
@@ -211,9 +235,17 @@
                     600000)
             response (case (:source result)
                        :callback (:value result)
-                       :manual (or (oauth-lib/parse-authorization-input
-                                    (:value result))
-                                   {})
+                       :manual (let [parsed (or (oauth-lib/parse-authorization-input
+                                                 (:value result))
+                                                {})]
+                                 ;; a bare pasted code carries no state; the
+                                 ;; manual entry is an explicit user action
+                                 ;; in this terminal, so bind the flow's
+                                 ;; state (complete-pkce-flow! requires it)
+                                 (cond-> parsed
+                                   (and (seq (:code parsed))
+                                        (nil? (:state parsed)))
+                                   (assoc :state (get pending :state))))
                        :cancelled (throw (ex-info "Login cancelled"
                                                   {:type :login-cancelled}))
                        :timeout (throw (ex-info "OAuth login timed out"

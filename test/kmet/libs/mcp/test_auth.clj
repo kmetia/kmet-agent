@@ -367,7 +367,18 @@
     (is (= {:scope "a"} (auth/parse-www-authenticate "  Bearer   scope=\"a\""))))
   (testing "OWS around the auth-param separators is tolerated (RFC 9110)"
     (is (= {:scope "a" :error "b"}
-           (auth/parse-www-authenticate "Bearer scope=\"a\" , error=\"b\"")))))
+           (auth/parse-www-authenticate "Bearer scope=\"a\" , error=\"b\""))))
+  (testing "a comma inside a quoted value does not split the parameter"
+    (is (= {:error "invalid_token"
+            :error-description "the token expired, please retry"
+            :scope "read"}
+           (auth/parse-www-authenticate
+            (str "Bearer error=\"invalid_token\", "
+                 "error_description=\"the token expired, please retry\", scope=\"read\"")))))
+  (testing "a quoted-pair is unescaped"
+    (is (= {:error-description "say \"hi\""}
+           (auth/parse-www-authenticate
+            "Bearer error_description=\"say \\\"hi\\\"\"")))))
 
 (deftest challenge-record-and-selection
   (let [s "test-auth-server-1"
@@ -715,6 +726,12 @@
             (is (= :oauth-state-mismatch
                    (try (auth/complete-pkce-flow! "srv" pending
                                                   {:code "c" :state "nope" :iss "https://as.example"})
+                        nil
+                        (catch Exception e (:type (ex-data e)))))))
+          (testing "a missing state is rejected"
+            (is (= :oauth-state-mismatch
+                   (try (auth/complete-pkce-flow! "srv" pending
+                                                  {:code "c" :iss "https://as.example"})
                         nil
                         (catch Exception e (:type (ex-data e)))))))
           (testing "a missing iss is rejected when the server advertised support"
