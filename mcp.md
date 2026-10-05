@@ -3,9 +3,8 @@
 Status: draft. Order is deliberate: **Phase 0 (names consolidation + name
 assignment fix) → Phase 1 (extract `kmet.libs.mcp`) → Phase 2 (auth) →
 Phase 3 (2026-07-28 protocol work) → Phase 4 (optional hygiene)** — Phases 0,
-1 and 2 are landed, and Phase 3 is in progress (3.1–3.7 landed; 3.8 is
-planned in full below — this section is its plan, there is no separate
-plan file); phase 4 lands after it. The protocol revision lands before the
+1 and 2 are landed, and Phase 3 is complete (3.1–3.8); Phase 4 (optional
+hygiene) is all that is left. The protocol revision landed before the
 hygiene pass so the client is extracted and auth settled first.
 
 Scope: `extensions/mcp-adapter/` and the shared `kmet.libs` layer. Phase 0 and
@@ -441,7 +440,8 @@ baseline):
 
 ## Phase 3 — 2026-07-28 protocol work (the end goal)
 
-Status: **in progress** — 3.1–3.7 landed; 3.8 below; each
+Status: **in progress** — 3.1–3.8 landed; Phase 4 (optional hygiene) is the
+only work left; each landing
 leaves `scripts/validate-all.bb` and the repo gates green. Depends on
 Phase 1's era-neutral seam and Phase 2's auth plumbing (both landed).
 
@@ -999,6 +999,22 @@ scripts, `bb test` and jolt are green.
   `bb test-ext`, `validate-all.bb` (eight scripts), plus
   `extensions/lsp-adapter/scripts/validate.bb` if 3.5 touched jsonrpc.
 
+Status: **landed** — the facade is deleted. `core.clj`, `tool_proxy.clj`,
+`prompts.clj`, `validate-client.bb` and `e2e.bb` require
+`kmet.libs.mcp.client` directly (the extension's only `client` alias gone;
+`protocol/format-result`/`progress-token`/`ack-method` come from
+`kmet.libs.mcp.protocol` now) — note `auth.clj` never used the facade, so
+its requires were already lib-level. `e2e.bb`'s require was dead and is
+removed. The extension's README replaces the "stateless `2026-07-28` …
+not reachable from here" paragraph with the two-era model (modern spoken,
+legacy kept, detection, the cache hint and its re-probe) and its script
+list gains the HTTP fake and the eighth script. The 3.5 jsonrpc additions
+were not touched here, so `extensions/lsp-adapter/scripts/validate.bb` was
+not rerun for this landing. All eight extension scripts, `bb test`, jolt,
+lint/format, `bb check` and `bb check-bundled-extensions` are green;
+`bb test-ext` keeps its pre-existing overlay-input smoke failure (the
+lsp-adapter-dependent fixture, unchanged by this work).
+
 ### Phase 3 risks
 
 - **No pi reference** (above): the spec plus the 3.1 fakes are the only
@@ -1090,5 +1106,5 @@ after Phase 3 — hygiene must not block or precede the protocol work.
 - [x] 3.5 `subscriptions/listen`: lib listen + HTTP long-lived stream + adapter wiring
 - [x] 3.6 `x-mcp-header` mirroring + invalid-definition filtering
 - [x] 3.7 `:protocol-era` in the metadata cache + re-probe on failure
-- [ ] 3.8 facade deletion + README + full gates
+- [x] 3.8 facade deletion + README + full gates
 - [ ] 4 optional hygiene (after 3)

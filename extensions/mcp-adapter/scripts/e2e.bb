@@ -12,7 +12,6 @@
          '[clojure.string :as str]
          '[clojure.java.io :as io]
          '[kmet.extension :as ext]
-         '[kmet.extensions.mcp-adapter.client :as client]
          '[kmet.extensions.mcp-adapter.core :as mcp]
          '[kmet.extensions.mcp-adapter.config :as config]
          '[kmet.extensions.mcp-adapter.metadata :as metadata])
@@ -64,8 +63,8 @@
                           http-server
                           (assoc "http" {:url (str "http://127.0.0.1:" (:port http-server)
                                                    "/mcp?era=modern")
-                                          :http-transport :streamable-http
-                                          :lifecycle :lazy}))}))
+                                         :http-transport :streamable-http
+                                         :lifecycle :lazy}))}))
   (with-redefs [config/global-config-path (fn [] global)
                 config/project-config-path (fn [& _] (str global ".project"))
                 metadata/cache-path (constantly cache-file)]
@@ -78,8 +77,8 @@
             ;; actually used (the cache file is the adapter's, not the
             ;; fixture state's)
             _ (doseq [server ["modern" "http"]
-                    :let [definition (get-in cfg [:mcp-servers server])]
-                    :when definition]
+                      :let [definition (get-in cfg [:mcp-servers server])]
+                      :when definition]
                 (metadata/update-entry! nil server definition settings
                                         :tools [] :prompts [] :resources []
                                         :resource-templates []

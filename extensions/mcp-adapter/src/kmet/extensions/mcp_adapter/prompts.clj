@@ -12,11 +12,11 @@
    the prompt text enters the conversation like a user message (pi
    pi.sendUserMessage)."
   (:require [clojure.string :as str]
-            [kmet.extensions.mcp-adapter.client :as client]
             [kmet.extensions.mcp-adapter.metadata :as metadata]
             [kmet.extensions.mcp-adapter.names :as names]
             [kmet.extensions.mcp-adapter.tool-proxy :as proxy]
-            [kmet.extension :as ext]))
+            [kmet.extension :as ext]
+            [kmet.libs.mcp.client :as mcp]))
 
 ;; ─── Naming (pi sanitizePromptName / formatPromptCommandName) ─────────────
 
@@ -254,8 +254,8 @@
               (let [live (or (find-live-spec state (:server spec) (:original spec))
                              spec)]
                 (try
-                  (let [result (client/get-prompt conn (:original live)
-                                                  prompt-args)
+                  (let [result (mcp/get-prompt conn (:original live)
+                                               prompt-args)
                         text (format-result result)]
                     (if (seq (str/trim text))
                       (do (ext/send-user-message (:api @state) text)

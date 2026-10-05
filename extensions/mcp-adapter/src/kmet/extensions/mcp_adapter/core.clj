@@ -11,7 +11,6 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [kmet.extensions.mcp-adapter.auth :as auth]
-            [kmet.extensions.mcp-adapter.client :as client]
             [kmet.extensions.mcp-adapter.config :as config]
             [kmet.extensions.mcp-adapter.metadata :as metadata]
             [kmet.extensions.mcp-adapter.names :as names]
@@ -22,6 +21,8 @@
             [kmet.extensions.mcp-adapter.setup :as setup]
             [kmet.extension :as ext]
             [kmet.libs.concurrent :as concurrent]
+            [kmet.libs.mcp.client :as mcp]
+            [kmet.libs.mcp.protocol :as protocol]
             [kmet.tui.theme :as theme]))
 
 (def ^:private state-atom (atom nil))
@@ -144,16 +145,16 @@
   (let [capabilities (or (:capabilities conn) {})]
     (refresh-after-connect! state name conn
                             (if (:tools capabilities)
-                              (client/list-all-tools conn)
+                              (mcp/list-all-tools conn)
                               [])
                             (if (:prompts capabilities)
-                              (client/list-all-prompts conn)
+                              (mcp/list-all-prompts conn)
                               [])
                             (if (:resources capabilities)
-                              (client/list-all-resources conn)
+                              (mcp/list-all-resources conn)
                               [])
                             (if (:resources capabilities)
-                              (client/list-all-resource-templates conn)
+                              (mcp/list-all-resource-templates conn)
                               []))))
 
 (defn- refresh-server-catalog!
@@ -175,7 +176,7 @@
   (let [busy (get-in @state [:servers name :resyncing])
         changes (get-in @state [:servers name :resync-changes])
         covered (get-in @state [:servers name :resync-covered])]
-    (when (and busy (client/alive? conn))
+    (when (and busy (mcp/alive? conn))
       (if (compare-and-set! busy false true)
         (try
           (when (> gen @covered)
@@ -269,19 +270,19 @@
    broadcast list_changed notifications — nothing to do there."
   [state name result]
   (let [conn (:conn result)]
-    (when-let [filter (and (client/modern? conn)
+    (when-let [filter (and (mcp/modern? conn)
                            (subscription-filter (:capabilities result)))]
       (try
-        (client/listen! conn filter
-                        {:on-frame (fn [msg]
-                                     (when (= client/ack-method (:method msg))
-                                       (log-subscription-ack! name filter msg)))
-                         :on-restored
-                         (fn []
-                           (let [gen (swap! (get-in @state [:servers name :resync-changes])
-                                            inc)]
-                             (spawn (fn []
-                                      (refresh-server-catalog! state name conn gen)))))})
+        (mcp/listen! conn filter
+                     {:on-frame (fn [msg]
+                                  (when (= protocol/ack-method (:method msg))
+                                    (log-subscription-ack! name filter msg)))
+                      :on-restored
+                      (fn []
+                        (let [gen (swap! (get-in @state [:servers name :resync-changes])
+                                         inc)]
+                          (spawn (fn []
+                                   (refresh-server-catalog! state name conn gen)))))})
         (catch Exception e
           (log-debug! "mcp: " name " subscription failed: " (ex-message e)))))))
 
@@ -296,12 +297,12 @@
         settings (:settings (:config @state))
         cached-era (:protocol-era (metadata/server-entry (:cache @state) name
                                                          definition settings))
-        result (client/connect! definition
-                                (assoc (auth/make-auth-fns name definition)
-                                       :protocol-era cached-era
-                                       :on-notification
-                                       (fn [conn msg]
-                                         (handle-list-changed! state name conn msg))))]
+        result (mcp/connect! definition
+                             (assoc (auth/make-auth-fns name definition)
+                                    :protocol-era cached-era
+                                    :on-notification
+                                    (fn [conn msg]
+                                      (handle-list-changed! state name conn msg))))]
     (start-subscription! state name result)
     result))
 
@@ -319,11 +320,11 @@
     (locking lock
       (let [current @conn]
         (cond
-          (and current (client/alive? current)) current
+          (and current (mcp/alive? current)) current
 
           :else
           (do
-            (when current (try (client/close! current) (catch Exception _ nil)))
+            (when current (try (mcp/close! current) (catch Exception _ nil)))
             (reset! conn nil)
             (try
               ;; the connect result also carries :conn — bind it under a
@@ -345,13 +346,13 @@
 
 (defn- disconnect-server!
   "Close + kill a server connection (§10.3). OPTS are passed to
-   client/close! — teardown paths pass :terminate-http-session? false so
+   mcp/close! — teardown paths pass :terminate-http-session? false so
    a synchronous :session-shutdown handler never waits on an
    unresponsive streamable-HTTP server."
   [state name & [opts]]
   (when-let [{:keys [conn]} (get-in @state [:servers name])]
     (when-let [c @conn]
-      (try (client/close! c opts) (catch Exception _ nil)))
+      (try (mcp/close! c opts) (catch Exception _ nil)))
     (reset! conn nil))
   (update-status-bar! state)
   nil)
@@ -636,7 +637,7 @@
 
                            (:resource-template spec)
                            (proxy/read-mcp-resource @state (:server spec)
-                                                    (client/expand-uri-template
+                                                    (mcp/expand-uri-template
                                                      (:resource-template spec)
                                                      (or args {})))
 
@@ -923,7 +924,7 @@
         {:keys [conn failed-at]} (get-in @state [:servers name])]
     (cond
       (true? (:disabled definition)) :disabled
-      (and conn @conn (client/alive? @conn)) :connected
+      (and conn @conn (mcp/alive? @conn)) :connected
       (and (= :oauth (:auth definition))
            (= :none (auth/auth-status name definition))) :needs-auth
       (and failed-at @failed-at) :failed
@@ -1247,9 +1248,9 @@
   (doseq [[name {:keys [conn]}] (:servers @state)]
     (when-let [c @conn]
       (let [timeout-min (idle-timeout-minutes state name)
-            idle-ms (- (concurrent/monotonic-ms) (client/last-used c))]
+            idle-ms (- (concurrent/monotonic-ms) (mcp/last-used c))]
         (when (and (pos? timeout-min)
-                   (not (client/listening? c))
+                   (not (mcp/listening? c))
                    (> idle-ms (* timeout-min 60000)))
           (disconnect-server! state name))))))
 

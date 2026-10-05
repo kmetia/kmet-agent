@@ -20,10 +20,11 @@
    {:content str :is-error bool}."
   (:require [kmet.libs.concurrent :as concurrent]
             [kmet.libs.json :as json]
+            [kmet.libs.mcp.client :as mcp]
+            [kmet.libs.mcp.protocol :as protocol]
             [kmet.libs.mcp.transport.http :as mcp-http]
             [clojure.string :as str]
             [kmet.extensions.mcp-adapter.auth :as auth]
-            [kmet.extensions.mcp-adapter.client :as client]
             [kmet.extensions.mcp-adapter.metadata :as metadata]
             [kmet.extensions.mcp-adapter.names :as names]
             [kmet.extensions.mcp-adapter.output-guard :as guard]))
@@ -266,7 +267,7 @@
     :else
     (let [{:keys [conn]} (server-state state name)]
       (cond
-        (and @conn (client/alive? @conn)) :connected
+        (and @conn (mcp/alive? @conn)) :connected
         (failure-age-seconds state name) :failed
         :else :idle))))
 
@@ -692,17 +693,17 @@
                     ;; streaming path below never fires. The custom headers
                     ;; mirror x-mcp-header-annotated parameters into
                     ;; Mcp-Param-* (SEP-2243).
-                    result (client/request! conn "tools/call"
-                                            {:name tool-name
-                                             :arguments arguments
-                                             :_meta {:progressToken (client/progress-token)}}
-                                            {:timeout-ms timeout-ms
-                                             :on-notification (on-update-progress! (:on-update opts))
-                                             :http-headers (when (= :streamable-http
-                                                                    (:transport conn))
-                                                             (mcp-http/x-mcp-param-headers
-                                                              schema arguments))})
-                    formatted (client/format-result result)
+                    result (mcp/request! conn "tools/call"
+                                         {:name tool-name
+                                          :arguments arguments
+                                          :_meta {:progressToken (protocol/progress-token)}}
+                                         {:timeout-ms timeout-ms
+                                          :on-notification (on-update-progress! (:on-update opts))
+                                          :http-headers (when (= :streamable-http
+                                                                 (:transport conn))
+                                                          (mcp-http/x-mcp-param-headers
+                                                           schema arguments))})
+                    formatted (protocol/format-result result)
                     guard-options (guard/resolve-options (settings state))
                     guarded (guard/guard-text (:text formatted) guard-options)
                     details (guard/guarded-details (:guard guarded)
@@ -771,7 +772,7 @@
         (try
           (let [conn ((:ensure-connected-fn state) server)]
             (if conn
-              (let [result (client/read-resource conn uri)
+              (let [result (mcp/read-resource conn uri)
                     contents (or (:contents result) [])
                     texts (keep (fn [c]
                                   (case (:type c)
