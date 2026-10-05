@@ -3,7 +3,7 @@
    that paper over host differences.
 
    kmet runs on babashka and on Jolt: Jolt defines the
-   clojure.core/*jolt-version* var (jolt-port.md), babashka does not — the
+   clojure.core/*jolt-version* var, babashka does not — the
    only supported non-Jolt host, so anything that isn't Jolt is babashka.
    UI surfaces that name or badge the host (the welcome header logo, the
    footer's К mark) share this one detection instead of repeating it, and

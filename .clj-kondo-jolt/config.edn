@@ -35,7 +35,7 @@
   ;; load on jolt too — dead there, not broken: the SCI loader backend is the
   ;; babashka/JVM one (jolt's extension contexts run natively through
   ;; kmet.loader.jolt-loader), and kmet.tasks.build is the babashka packaging pipeline (jolt
-  ;; gets its own packager — jolt-port.md M5/M6). Their requires sit in the
+  ;; gets its own packager). Their requires sit in the
   ;; :bb branch (skipped here), the references outside it.
   ;; The sci backend's helpers are defined for the :default branch, which this
   ;; view does not select — unused here, used on bb/JVM (where the same helpers

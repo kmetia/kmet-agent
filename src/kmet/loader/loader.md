@@ -3,8 +3,7 @@
 Goal: one portable **Loader** abstraction that gives kmet's extension system
 real isolation on every host — bb, JVM Clojure and Jolt — and that can be
 promoted to a standalone library afterwards. It is the answer to the
-**extension-isolation** workstream in `jolt-port.md` §B3 (a hard blocker for
-the port).
+**extension-isolation** workstream that was a hard blocker for the port.
 
 Status: design locked; implementation staged (see §9). **Phases 0, 1 and 2
 are implemented**: `src/kmet/loader/core.clj` (protocol, generic body,
@@ -34,9 +33,8 @@ Not implemented yet: Phase 3 (JVM native backend + hybrid — deliberately
 last: the JVM host already gets isolation through SCI) and Phase 4
 (promotion).
 
-Related docs (repo-root relative): `jolt-port.md` §B3,
-`src/kmet/extension.md` (the extension contract), `src/kmet/tui/tui.md`
-(house style for a package reference doc).
+Related docs (repo-root relative): `src/kmet/extension.md` (the extension
+contract), `src/kmet/tui/tui.md` (house style for a package reference doc).
 
 ---
 

@@ -5,8 +5,8 @@ Implementation-specific references live beside their namespaces, not in the
 user-facing `docs/` directory: see [`tui/tui.md`](tui/tui.md),
 [`loader/loader.md`](loader/loader.md), [`extension.md`](extension.md),
 [`development/pi-alignment.md`](development/pi-alignment.md). Temporary
-analysis notes (`run_code.md`, `perf.md`, `jolt-bugs.md`, and `jolt-port.md`)
-remain at the repository root by convention.
+analysis notes (`run_code.md`, `perf.md`, and `jolt-bugs.md`) remain at the
+repository root by convention.
 
 ## Project structure
 
