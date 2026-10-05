@@ -63,20 +63,26 @@
     (t/is (= 0.3 (get-in r [:details :timeout])))))
 
 (t/deftest ^:slow test-run-code-await-all-honors-timeout
-  (let [release (promise)]
+  (let [release (promise)
+        finished (atom false)]
     (with-custom-tool {:name "run-code-test-block"
                        :label "Block"
                        :description "Blocks until released"
-                       :execute (fn [_] @release {:content "late"})}
+                       :execute (fn [_]
+                                  @release
+                                  (reset! finished true)
+                                  {:content "late"})}
       (fn []
         (try
-          (let [started-at (System/currentTimeMillis)
-                r (run (str "(tools/await-all (tools/call-many "
+          (let [r (run (str "(tools/await-all (tools/call-many "
                             "[{:name \"run-code-test-block\" :args {}}]))")
                        {:timeout 0.2})]
             (t/is (:is-error r))
             (t/is (= :timeout (get-in r [:details :error])))
-            (t/is (< (- (System/currentTimeMillis) started-at) 1000)
+            ;; The blocked call is still parked on RELEASE: the run observed
+            ;; its deadline instead of waiting for the tool to settle. (A
+            ;; wall-clock bound flakes under load; this is the mechanism.)
+            (t/is (false? @finished)
                   "await-all observes the deadline without waiting for the tool"))
           (finally
             (deliver release true)

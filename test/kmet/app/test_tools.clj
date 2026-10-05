@@ -455,17 +455,21 @@
 
 (t/deftest ^:slow test-tool-bash-background-pipe-closed
   (t/testing "detached child holding the pipe open doesn't stall the tool (pi waitForChildProcess)"
-    ;; The descendant outlives the tool's bounded drain: a broken
-    ;; implementation that waits for pipe EOF takes ~10s (the sleep's
-    ;; lifetime); the fixed one returns at the ~2s grace + spawn overhead.
-    ;; The 8s window separates the two with margin on both sides, and is
-    ;; generous enough for a loaded host.
-    (let [start (System/currentTimeMillis)
-          result (tools/execute-tool "bash" {:command "sleep 10 &"})
-          elapsed (- (System/currentTimeMillis) start)]
+    ;; The descendant outlives the tool's bounded drain; its late write is
+    ;; the oracle. The fixed tool returns at the ~2s grace + spawn overhead,
+    ;; before the descendant writes, so "late" never lands in the output; a
+    ;; tool that waits for pipe EOF returns only after the descendant exits
+    ;; and captures it. Scheduling load can stretch the wall clock but
+    ;; cannot reorder the child's exit past the tool's return, so this
+    ;; assertion — unlike an 8s window — stays honest on a loaded host.
+    (let [result (tools/execute-tool
+                  "bash" {:command "(sleep 10; echo late) & echo early"})
+          content (str (:content result))]
       (t/is (not (:is-error result)))
-      (t/is (< elapsed 8000)
-            (str "tool should return at bash exit + the bounded drain, took " elapsed "ms")))))
+      (t/is (str/includes? content "early") "the shell's own output is captured")
+      (t/is (not (str/includes? content "late"))
+            (str "tool returned before the detached child wrote; output: "
+                 (pr-str content))))))
 
 (t/deftest ^:slow test-tool-bash-cancel-signal
   (t/testing "setting the bound cancel signal kills the process (pi AbortSignal)"
