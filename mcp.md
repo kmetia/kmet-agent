@@ -3,9 +3,11 @@
 Status: draft. Order is deliberate: **Phase 0 (names consolidation + name
 assignment fix) → Phase 1 (extract `kmet.libs.mcp`) → Phase 2 (auth) →
 Phase 3 (2026-07-28 protocol work) → Phase 4 (optional hygiene)** — Phases 0,
-1 and 2 are landed, and Phase 3 is complete (3.1–3.8); Phase 4 (optional
-hygiene) is all that is left. The protocol revision landed before the
-hygiene pass so the client is extracted and auth settled first.
+1 and 2 are landed, Phase 3 is complete (3.1–3.8), and Phase 4 has started:
+**4a (the proxy split) is landed**; **4b (the `core.clj` split) is the only
+work left** and needs its state/status seam settled first. The protocol
+revision landed before the hygiene pass so the client is extracted and auth
+settled first.
 
 Scope: `extensions/mcp-adapter/` and the shared `kmet.libs` layer. Phase 0 and
 Phase 1 change no protocol behavior; they move code so the stateless revision
@@ -1045,10 +1047,74 @@ lsp-adapter-dependent fixture, unchanged by this work).
 
 ## Phase 4 — optional hygiene
 
-`core.clj` lifecycle → `server.clj` / `direct_tools.clj` / `commands.clj`;
-`tool_proxy.clj` → `search.clj` + `status.clj`. The legacy SSE transport
-stays (see Non-goals). Lands after Phase 3 — hygiene must not block or
-precede the protocol work.
+Status: **4a landed; 4b not started and needs the seam below.** The proxy half
+was the mechanical half (the ns was already cycle-free); the `core.clj` half is
+a real refactor of a 1351-line, four-concern file, and is worth doing only if
+the lifecycle code keeps growing.
+
+### 4a. Proxy split — landed
+
+`tool_proxy.clj` (876 → 336 lines) split by concern, with the invocation
+surface left in `tool_proxy.clj`:
+
+| File | Content |
+|---|---|
+| `catalog.clj` (114) | shared read view: `server-definition`/`settings`/`server-state`, `failure-age-seconds`, `cached-tools`, `display-name` (+`tool-prefix-mode`), `return-error`, `find-tool` |
+| `search.clj` (261) | the pi search-ranking.ts port plus `search-tools`/`search-text` (§9.3) |
+| `status.clj` (189) | status (§9.5), describe (§9.4), list / list-all (§9.2 `server` mode) |
+| `tool_proxy.clj` (336) | param coercion/validation, `call-mcp-tool`, `read-mcp-resource`, `script-tool-records`, `execute` |
+
+`catalog.clj` is the seam the original two-file split missed: search, status
+and the invocation surface all read the same state view, so without it either
+`search.clj` would have required `tool_proxy.clj` (a cycle) or the helpers
+would have been duplicated. The proxy ns is already cycle-free — it reaches
+the lifecycle only through callbacks carried in the state map
+(`:ensure-connected-fn`, `:read-state-fn`) and takes `state` as an argument —
+so the move changed no behavior. Callers repointed in the same landing:
+`core.clj` (status/search), `prompts.clj` (`catalog/truncate-at-word`),
+`validate-names.bb` (status); the moved public fns are `status-text`,
+`search-text`, `describe-text`, `list-text`, `list-all-text`,
+`truncate-at-word` (kept-in-place public API: `execute`, `call-mcp-tool`,
+`read-mcp-resource`, `script-tool-records`, `ensure-lazy-connected`, `flag`).
+Gates: the eight `validate-*.bb` scripts via `validate-all.bb`, `bb
+lint-changed`, `bb format-check-changed`, `bb check-bundled-extensions`.
+
+### 4b. `core.clj` split — not started (needs the seam decided first)
+
+`core.clj` (1351 lines) mixes four concerns that Phase 3 made denser:
+
+- **lifecycle** → `server.clj`: `build-servers`/`rebuild-servers`, the
+  connect/era wiring, `refresh-after-connect!`, `resync-server-catalog!`,
+  subscriptions, `disconnect-*`, the idle reaper;
+- **direct tools** → `direct_tools.clj`: `catalog-entries`,
+  `direct-tools-specs`, the `title-*` helpers, schema normalization,
+  `bootstrap-`/`sync-direct-tools!`, `register-proxy-tool!`,
+  `apply-direct-tools-changes!`;
+- **commands/UI** → `commands.clj`: `handle-*`, `build-interaction`,
+  `panel-callbacks`, `setup-callbacks`, `handle-import`, `reload-config!`,
+  `on-session-*`;
+- **entry/state** stays in `core.clj` (it is `extension.edn`'s `:entry`):
+  `state-atom`, `build-servers`/`init-state`, `init`/`shutdown`.
+
+Two seams must be settled first — today's cycle fuse is the `declare` block at
+the top of `core.clj`:
+
+1. **state**: `init-state` installs closures over lifecycle fns
+   (`:ensure-connected-fn`, `:disconnect-fn`), so a shared state ns requiring
+   `server.clj` would cycle. Keep the atom and `init-state` in `core.clj`,
+   which requires the other three one-way; the new nses keep taking `state` as
+   an argument (they already do) and never require `core`.
+2. **status/UI**: the lifecycle path calls `update-status-bar!` while
+   `commands.clj` also calls lifecycle — another cycle. Either move the status
+   helpers (`mcp-status-text`, `panel-connection-status`, `update-status-bar!`,
+   `notify-or-print`) to a leaf ns, or inject `:update-status-fn` through
+   `init-state` like the existing callbacks.
+
+One-way edges to preserve: lifecycle → direct tools (`sync-direct-tools!` and
+`register-proxy-tool!` are called from `refresh-after-connect!`); commands →
+both. No behavior change intended; gates: the eight-script suite,
+lint/format, `check-bundled-extensions`, and both host reader views (`bb` and
+`jolt`). The legacy SSE transport stays (see Non-goals).
 
 ---
 
@@ -1109,4 +1175,5 @@ precede the protocol work.
 - [x] 3.6 `x-mcp-header` mirroring + invalid-definition filtering
 - [x] 3.7 `:protocol-era` in the metadata cache + re-probe on failure
 - [x] 3.8 facade deletion + README + full gates
-- [ ] 4 optional hygiene (after 3)
+- [x] 4a proxy split: `catalog.clj` + `search.clj` + `status.clj`, callers repointed
+- [ ] 4b `core.clj` lifecycle split (needs the state/status seam; not started)
