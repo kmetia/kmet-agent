@@ -20,6 +20,7 @@
    {:content str :is-error bool}."
   (:require [kmet.libs.concurrent :as concurrent]
             [kmet.libs.json :as json]
+            [kmet.libs.mcp.transport.http :as mcp-http]
             [clojure.string :as str]
             [kmet.extensions.mcp-adapter.auth :as auth]
             [kmet.extensions.mcp-adapter.client :as client]
@@ -652,9 +653,14 @@
 (defn call-mcp-tool
   "Call one MCP tool on a server (direct-tool executor + proxy tool mode).
    Ensures the connection first (reconnect-on-use). OPTS:
-   {:on-update (fn [partial]) — progress streaming}. Returns the kmet
-   tool result shape; the output guard (§settings :output-guard) bounds
-   oversized text and rides details (:output-guard / :mcp-result)."
+   {:on-update (fn [partial]) — progress streaming; :input-schema — the
+   tool's inputSchema, used to derive the Mcp-Param-* headers a
+   streamable-HTTP tools/call must mirror (SEP-2243). Without it the
+   call falls back to the catalog record — read back after the connect,
+   so a lazy first call by raw name still finds its schema; when even
+   that is missing the call degrades to no custom headers)}. Returns the
+   kmet tool result shape; the output guard (§settings :output-guard)
+   bounds oversized text and rides details (:output-guard / :mcp-result)."
   [state server tool-name args & [opts]]
   (let [definition (server-definition state server)]
     (cond
@@ -675,15 +681,27 @@
           (let [conn ((:ensure-connected-fn state) server)]
             (if conn
               (let [timeout-ms (or (:request-timeout-ms definition) 120000)
+                    arguments (normalize-args args)
+                    catalog (if-let [fresh (:read-state-fn state)] (fresh) state)
+                    schema (or (:input-schema opts)
+                               (:inputSchema (first (filter #(= tool-name (:name %))
+                                                            (or (cached-tools catalog server)
+                                                                [])))))
                     ;; _meta.progressToken is what makes a server emit
                     ;; notifications/progress for this call — without it the
-                    ;; streaming path below never fires
+                    ;; streaming path below never fires. The custom headers
+                    ;; mirror x-mcp-header-annotated parameters into
+                    ;; Mcp-Param-* (SEP-2243).
                     result (client/request! conn "tools/call"
                                             {:name tool-name
-                                             :arguments (normalize-args args)
+                                             :arguments arguments
                                              :_meta {:progressToken (client/progress-token)}}
                                             {:timeout-ms timeout-ms
-                                             :on-notification (on-update-progress! (:on-update opts))})
+                                             :on-notification (on-update-progress! (:on-update opts))
+                                             :http-headers (when (= :streamable-http
+                                                                    (:transport conn))
+                                                             (mcp-http/x-mcp-param-headers
+                                                              schema arguments))})
                     formatted (client/format-result result)
                     guard-options (guard/resolve-options (settings state))
                     guarded (guard/guard-text (:text formatted) guard-options)
@@ -727,7 +745,8 @@
                         :streams? true
                         :execute (fn [args & [on-update]]
                                    (call-mcp-tool state server (:name tool) args
-                                                  {:on-update on-update}))}]))))
+                                                  {:on-update on-update
+                                                   :input-schema (:inputSchema tool)}))}]))))
           (group-by first candidates))))
 
 (defn read-mcp-resource
@@ -819,7 +838,11 @@
                                  (:name (:tool match))
                                  (:tool params))
                                (:args params)
-                               {:on-update on-update})))
+                               {:on-update on-update
+                                ;; the resolved record carries the schema the
+                                ;; SEP-2243 Mcp-Param-* headers derive from
+                                :input-schema (when (and match (not= :ambiguous match))
+                                                (:inputSchema (:tool match)))})))
 
             (some? (:connect params))
             (try

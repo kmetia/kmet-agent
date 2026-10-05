@@ -72,6 +72,32 @@
   {:name "http-echo2" :description "Second echo over HTTP"
    :inputSchema {:type "object" :properties {} :required []}})
 
+;; SEP-2243: a validly annotated tool (the client must mirror its
+;; parameters into Mcp-Param-* headers) and one whose annotation violates
+;; the spec (a client using streamable HTTP must drop it from tools/list)
+(def modern-region-tool
+  {:name "http-region"
+   :description "Echo the Mcp-Param-* headers mirrored from its annotated parameters"
+   :inputSchema {:type "object"
+                 :properties {"region" {:type "string" :x-mcp-header "Region"}
+                              "priority" {:type "integer" :x-mcp-header "Priority"}
+                              "dryRun" {:type "boolean" :x-mcp-header "DryRun"}}
+                 :required ["region"]}})
+(def modern-bad-header-tool
+  {:name "http-bad-header"
+   :description "A tool whose x-mcp-header annotation violates the spec"
+   :inputSchema {:type "object"
+                 :properties {"q" {:type "string" :x-mcp-header "Bad Header"}}
+                 :required ["q"]}})
+
+(defn- modern-tools
+  "The tool catalog of a modern server: the legacy tools plus the
+   modern-only ones (the trigger, the annotated tool, the invalid one and,
+   after the trigger call, the added tool)."
+  []
+  (cond-> (conj tools modern-trigger-tool modern-region-tool modern-bad-header-tool)
+    @modern-extra-tool? (conj modern-extra-tool)))
+
 (defn- http-response
   ([status body] (http-response status body {"Content-Type" "application/json"}))
   ([status body headers]
@@ -102,6 +128,52 @@
       (catch Exception _ v))
     v))
 
+(defn- received-param
+  "The decoded value of the last request's Mcp-Param-* header NAME (the
+   request headers are kept in :last-headers)."
+  [name]
+  (some-> (get-in @state [:last-headers (str "mcp-param-" (str/lower-case name))])
+          decode-header-value))
+
+(defn- schema-x-mcp-headers
+  "The statically reachable x-mcp-header annotations of a tool schema (the
+   fake's schemas use only `properties` chains):
+   [{:path [property ..] :header name :type declared-type}]"
+  [schema]
+  (letfn [(walk [node path]
+            (when (map? node)
+              (concat
+               (when-let [h (:x-mcp-header node)]
+                 [{:path path :header h :type (:type node)}])
+               (mapcat (fn [[k sub]] (walk sub (conj path k)))
+                       (:properties node)))))]
+    (walk schema [])))
+
+(defn- expected-param-value
+  "The header value the body value maps to (spec, Value Encoding)."
+  [type v]
+  (case type
+    "integer" (str (long v))
+    "boolean" (if v "true" "false")
+    (str v)))
+
+(defn- param-header-problems
+  "The Mcp-Param-* validation failures for a tools/call MSG of TOOL against
+   HEADERS: every annotated parameter's header must be present and decode
+   to the body value; a null/absent value must have no header (spec, Server
+   Validation)."
+  [headers msg tool]
+  (for [{:keys [path header type]} (schema-x-mcp-headers (:inputSchema tool))
+        :let [v (get-in msg (into [:params :arguments] (map keyword path)))
+              received (get headers (str "mcp-param-" (str/lower-case header)))
+              decoded (when received (decode-header-value received))
+              expected (when (some? v) (expected-param-value type v))]
+        :when (not= expected decoded)]
+    (str "Mcp-Param-" header
+         (if (some? v)
+           (str " does not match body value " (pr-str v))
+           " must be omitted for a null/absent value"))))
+
 (defn- validate-modern-request
   "Body/header validation for a modern POST (spec, Server Validation):
    required mirrored headers, Base64-aware Mcp-Name comparison, the
@@ -119,6 +191,10 @@
         version-header (get headers "mcp-protocol-version")
         method-header (get headers "mcp-method")
         name-header (get headers "mcp-name")
+        param-problems (when (= "tools/call" method)
+                         (when-let [tool (some #(when (= named (:name %)) %)
+                                               (modern-tools))]
+                           (seq (param-header-problems headers msg tool))))
         mismatch (fn [m] {:status 400
                           :error {:code -32020
                                   :message (str "Header mismatch: " m)}})]
@@ -136,6 +212,10 @@
       (and named (not= (decode-header-value name-header) named))
       (mismatch (str "Mcp-Name header value '" name-header
                      "' does not match body value '" named "'"))
+      param-problems
+      {:status 400 :error {:code -32020
+                           :message (str "Header mismatch: "
+                                         (str/join "; " param-problems))}}
       (not (some #{version-header} modern-supported-versions))
       {:status 400 :error {:code -32022 :message "Unsupported protocol version"
                            :data {:supported modern-supported-versions
@@ -243,12 +323,9 @@
              :error {:code -32601 :message (str "Method not found: " method)}})
           "tools/list"
           {:jsonrpc "2.0" :id id
-           :result (with-cache-fields
-                     modern?
-                     (cond-> {:tools tools}
-                       modern? (update :tools conj modern-trigger-tool)
-                       (and modern? @modern-extra-tool?)
-                       (update :tools conj modern-extra-tool)))}
+           :result (if modern?
+                     (with-cache-fields true {:tools (modern-tools)})
+                     {:tools tools})}
           "tools/call"
           (let [name (get-in msg [:params :name])
                 args (get-in msg [:params :arguments])]
@@ -273,6 +350,12 @@
                   (notify-listeners! "notifications/tools/list_changed")
                   {:jsonrpc "2.0" :id id
                    :result {:content [{:type "text" :text "added http-echo2"}]}})
+              "http-region"
+              {:jsonrpc "2.0" :id id
+               :result {:content [{:type "text"
+                                   :text (str "region=" (received-param "Region")
+                                              " priority=" (received-param "Priority")
+                                              " dryRun=" (received-param "DryRun"))}]}}
               {:jsonrpc "2.0" :id id
                :result {:content [{:type "text" :text "unknown"}]
                         :isError true}}))

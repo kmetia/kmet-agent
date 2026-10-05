@@ -48,7 +48,7 @@
 (deftest request!-merges-modern-meta
   (let [calls (atom [])]
     (with-redefs [http/request!
-                  (fn [_conn _method params _timeout _on-notification]
+                  (fn [_conn _method params _timeout _on-notification _opts]
                     (swap! calls conj params)
                     {:ok true})]
       (testing "a modern conn carries the era _meta"
@@ -98,7 +98,7 @@
                       {:resultType "input_required" :requestState "s2"}
                       {:ok true}])]
     (with-redefs [http/request!
-                  (fn [_conn _method params _timeout _on-notification]
+                  (fn [_conn _method params _timeout _on-notification _opts]
                     (swap! calls conj params)
                     (let [r (first @rounds)] (swap! rounds rest) r))]
       (is (= {:ok true}
@@ -115,7 +115,7 @@
 (deftest request!-bounds-mrtr-retries
   (let [calls (atom 0)]
     (with-redefs [http/request!
-                  (fn [_conn _method _params _timeout _on-notification]
+                  (fn [_conn _method _params _timeout _on-notification _opts]
                     (swap! calls inc)
                     {:resultType "input_required" :requestState "same"})]
       (let [e (try (mcp/request! (era-conn :modern) "tools/call" {:name "t"})
@@ -133,7 +133,7 @@
                 :inputRequests {"confirm" {:method "elicitation/create"}
                                 "sample" {:method "sampling/createMessage"}}}]
     (with-redefs [http/request!
-                  (fn [_conn _method _params _timeout _on-notification]
+                  (fn [_conn _method _params _timeout _on-notification _opts]
                     (swap! calls inc)
                     result)]
       (let [e (try (mcp/request! (era-conn :modern) "tools/call" {})
@@ -149,18 +149,47 @@
 
 (deftest request!-passes-through-result-types
   (testing "absent and complete results pass through"
-    (with-redefs [http/request! (fn [_ _ _ _ _] {:ok 1})]
+    (with-redefs [http/request! (fn [_ _ _ _ _ _] {:ok 1})]
       (is (= {:ok 1} (mcp/request! (era-conn :modern) "tools/call" {}))))
-    (with-redefs [http/request! (fn [_ _ _ _ _]
+    (with-redefs [http/request! (fn [_ _ _ _ _ _]
                                   {:resultType "complete" :ok 1})]
       (is (= {:resultType "complete" :ok 1}
              (mcp/request! (era-conn :modern) "tools/call" {})))))
   (testing "a legacy conn does not interpret resultType"
-    (with-redefs [http/request! (fn [_ _ _ _ _]
+    (with-redefs [http/request! (fn [_ _ _ _ _ _]
                                   {:resultType "input_required"
                                    :requestState "s"})]
       (is (= {:resultType "input_required" :requestState "s"}
              (mcp/request! (era-conn :legacy) "tools/call" {}))))))
+
+(deftest request!-forwards-http-headers
+  (let [seen (atom nil)]
+    (with-redefs [http/request! (fn [_ _ _ _ _ opts] (reset! seen opts) {:ok true})]
+      (mcp/request! (era-conn :modern) "tools/call" {:name "t"}
+                    {:http-headers {"Mcp-Param-Region" "r"}})
+      (is (= {:http-headers {"Mcp-Param-Region" "r"}} @seen)
+          "the transport receives the caller's custom headers"))))
+
+;; ─── x-mcp-header filtering (SEP-2243) ───────────────────────────────────
+
+(def ^:private valid-x-mcp-tool
+  {:name "region-tool"
+   :inputSchema {:type "object"
+                 :properties {"region" {:type "string" :x-mcp-header "Region"}}}})
+
+(def ^:private invalid-x-mcp-tool
+  {:name "bad-tool"
+   :inputSchema {:type "object"
+                 :properties {"q" {:type "number" :x-mcp-header "Q"}}}})
+
+(deftest list-all-tools-drops-invalid-x-mcp-header-definitions
+  (with-redefs [mcp/request! (fn [_ _ _ _] {:tools [valid-x-mcp-tool invalid-x-mcp-tool]})]
+    (is (= [valid-x-mcp-tool invalid-x-mcp-tool]
+           (mcp/list-all-tools {:transport :stdio}))
+        "the other transports ignore the annotation")
+    (is (= [valid-x-mcp-tool]
+           (mcp/list-all-tools {:transport :streamable-http}))
+        "a streamable-HTTP definition with an invalid annotation is excluded")))
 
 ;; ─── Era detection (stdio) ────────────────────────────────────────────────
 

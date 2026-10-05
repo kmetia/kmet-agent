@@ -3,9 +3,15 @@
 
    A conn is a plain map. Every transport provides the same operations:
 
-     (request! conn method params timeout-ms on-notification)
+     (request! conn method params timeout-ms on-notification opts)
                                    send a request (the transport allocates
-                                   the JSON-RPC id), wait for its result
+                                   the JSON-RPC id), wait for its result.
+                                   OPTS is a transport-neutral options map:
+                                   :http-headers carries per-request
+                                   custom headers (a tools/call's
+                                   Mcp-Param-*, SEP-2243) and is consumed
+                                   only by :streamable-http — stdio and
+                                   the frozen SSE binding ignore it
      (listen! conn filter on-frame)  2026-07-28 subscriptions/listen: open
                                    the conn's long-lived subscription and
                                    return {:stop! f :ended promise} (the

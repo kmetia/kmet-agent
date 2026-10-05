@@ -188,8 +188,10 @@
 (defn request!
   "Send one request and return its :result. The jsonrpc session owns the
    id and the response correlation; the timeout is translated into the MCP
-   error contract (and the abandoned request cancelled)."
-  [conn method params timeout-ms on-notification]
+   error contract (and the abandoned request cancelled). OPTS is the
+   transport-neutral request options map — stdio consumes none of it
+   (:http-headers is streamable-HTTP only)."
+  [conn method params timeout-ms on-notification _opts]
   (transport/touch! conn)
   (reset! (:progress-callback conn) on-notification)
   (try

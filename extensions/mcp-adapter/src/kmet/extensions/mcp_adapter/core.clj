@@ -86,6 +86,10 @@
                    :registered-prompts (atom {})
                    :reaper-stop (atom false)})
     (swap! state assoc
+           ;; a state snapshot is immutable, but a connect mutates the
+           ;; atom (cache, catalog): callers holding a snapshot read the
+           ;; fresh map back through this getter
+           :read-state-fn (fn [] @state)
            :ensure-connected-fn (fn [name] (ensure-connected! state name))
            :disconnect-fn (fn [name] (disconnect-server! state name)))
     state))
@@ -627,7 +631,8 @@
                            :else
                            (proxy/call-mcp-tool @state (:server spec)
                                                 (:original spec) args
-                                                {:on-update on-update}))))]
+                                                {:on-update on-update
+                                                 :input-schema (:input-schema spec)}))))]
     (doseq [spec specs]
       (let [fp (fingerprint spec)]
         (when (not= fp (get registered (:prefixed spec)))

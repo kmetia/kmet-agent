@@ -17,6 +17,7 @@
          '[clojure.string :as str]
          '[kmet.libs.json :as json]
          '[clojure.java.io :as io]
+         '[kmet.libs.mcp.transport.http :as mcp-http]
          '[kmet.extensions.mcp-adapter.client :as client]
          '[kmet.extensions.mcp-adapter.config :as config])
 
@@ -311,8 +312,11 @@
         (check "modern http serverInfo from _meta"
                (= "fake-http-mcp-server" (:name server-info)))
         (check "modern http tool catalog"
-               (= #{"http-echo" "http-add" "http-slow" "http-headers" "http-add-tool"}
+               (= #{"http-echo" "http-add" "http-slow" "http-headers" "http-add-tool"
+                    "http-region"}
                   (set (map :name tools))))
+        (check "modern http drops the invalid x-mcp-header definition"
+               (not-any? #(= "http-bad-header" (:name %)) tools))
         (check "modern http mints no session" (nil? @(:session-id conn)))
         ;; the fake answers 400 -32020 on a missing/wrong routing or
         ;; version header, so these calls prove the headers
@@ -320,6 +324,30 @@
                                       {:name "http-headers" :arguments {}})]
           (check "modern http MCP-Protocol-Version header"
                  (= "2026-07-28" (:text (client/format-result result)))))
+        ;; SEP-2243: x-mcp-header parameters are mirrored into Mcp-Param-*
+        ;; headers (the fake validates them against the body, so a missing
+        ;; or mismatched header would answer 400 -32020)
+        (let [schema (:inputSchema (first (filter #(= "http-region" (:name %)) tools)))
+              args {:region "us-west1" :priority 42 :dryRun true}
+              result (client/request! conn "tools/call"
+                                      {:name "http-region" :arguments args}
+                                      {:http-headers (mcp-http/x-mcp-param-headers schema args)})]
+          (check "modern http Mcp-Param-* headers mirrored"
+                 (= "region=us-west1 priority=42 dryRun=true"
+                    (:text (client/format-result result)))))
+        (check "modern http missing Mcp-Param-* rejected"
+               (try (client/request! conn "tools/call"
+                                     {:name "http-region" :arguments {:region "x"}})
+                    false
+                    (catch Exception e (str/includes? (ex-message e) "-32020"))))
+        (let [schema (:inputSchema (first (filter #(= "http-region" (:name %)) tools)))
+              args {:region "Héllo, 世界"}
+              result (client/request! conn "tools/call"
+                                      {:name "http-region" :arguments args}
+                                      {:http-headers (mcp-http/x-mcp-param-headers schema args)})]
+          (check "modern http Base64 Mcp-Param-* round trip"
+                 (= "region=Héllo, 世界 priority= dryRun="
+                    (:text (client/format-result result)))))
         (let [result (client/request! conn "tools/call"
                                       {:name "http-echo" :arguments {:message "hey"}})]
           (check "modern http tools/call (Mcp-Name)"

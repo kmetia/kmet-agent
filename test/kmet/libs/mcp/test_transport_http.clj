@@ -90,7 +90,7 @@
                                   (response 200 "application/json"
                                             "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}"
                                             {"Mcp-Session-Id" "stale"})))]
-    (is (= {} (http/request! conn "tools/list" {} 5000 nil)))
+    (is (= {} (http/request! conn "tools/list" {} 5000 nil nil)))
     (let [[_ opts] (first @requests)]
       (is (= "tools/list" (get (:headers opts) "Mcp-Method")))
       (is (nil? (get (:headers opts) "Mcp-Session-Id"))
@@ -175,7 +175,7 @@
                                            (response 200 "application/json"
                                                      "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"ok\":true}}"
                                                      {"Mcp-Session-Id" "s1"}))})]
-    (is (= {:ok true} (http/request! conn "tools/list" {:cursor "c"} 5000 nil)))
+    (is (= {:ok true} (http/request! conn "tools/list" {:cursor "c"} 5000 nil nil)))
     (is (= 1 (count @requests)))
     (is (= "http://server" (ffirst @requests)))
     (let [[_ opts] (first @requests)
@@ -196,16 +196,159 @@
                              :on-401 (fn [response]
                                        (is (= 401 (:status response)))
                                        {"Authorization" "Bearer refreshed"})})]
-    (is (= {} (http/request! conn "tools/list" {} 5000 nil)))
+    (is (= {} (http/request! conn "tools/list" {} 5000 nil nil)))
     (is (= 2 @attempts) "one retry with the refreshed headers")))
+
+(deftest retry-on-401-keeps-routing-and-custom-headers
+  ;; the retry swaps in fresh auth but must keep the request's own
+  ;; headers: a modern tools/call's Mcp-Method/Mcp-Name routing headers
+  ;; and its Mcp-Param-* custom headers (SEP-2243)
+  (let [requests (atom [])
+        attempts (atom 0)
+        conn (assoc (modern-conn)
+                    :request-fn (fn [_ opts]
+                                  (swap! requests conj opts)
+                                  (if (= 1 (swap! attempts inc))
+                                    (response 401 "application/json" "{}")
+                                    (response 200 "application/json"
+                                              "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}")))
+                    :on-401 (fn [_] {"Authorization" "Bearer fresh"}))]
+    (is (= {} (http/request! conn "tools/call" {:name "t"} 5000 nil
+                             {:http-headers {"Mcp-Param-Region" "us-west1"}})))
+    (is (= 2 (count @requests)))
+    (doseq [opts @requests]
+      (is (= "tools/call" (get (:headers opts) "Mcp-Method")))
+      (is (= "t" (get (:headers opts) "Mcp-Name")))
+      (is (= "us-west1" (get (:headers opts) "Mcp-Param-Region"))))
+    (is (= "Bearer fresh" (get (:headers (second @requests)) "Authorization")))))
 
 (deftest request!-empty-response-is-an-error
   (let [conn (http/connect! "http://server"
                             {:request-fn (fn [_ _] (response 202 "application/json" ""))})
-        e (try (http/request! conn "tools/list" {} 5000 nil) nil
+        e (try (http/request! conn "tools/list" {} 5000 nil nil) nil
                (catch Exception e e))]
     (is (some? e))
     (is (re-find #"empty response to tools/list" (ex-message e)))))
+
+;; ─── Custom headers from tool parameters (SEP-2243) ──────────────────────
+
+(def ^:private annotated-schema
+  {:type "object"
+   :properties {"region" {:type "string" :x-mcp-header "Region"}
+                "priority" {:type "integer" :x-mcp-header "Priority"}
+                "dryRun" {:type "boolean" :x-mcp-header "DryRun"}
+                "tenant" {:type "object"
+                          :properties {"id" {:type "integer" :x-mcp-header "TenantId"}}}
+                "query" {:type "string"}}})
+
+(deftest x-mcp-param-headers-derivation
+  (testing "string, integer and boolean mirror per the spec"
+    (is (= {"Mcp-Param-Region" "us-west1"
+            "Mcp-Param-Priority" "42"
+            "Mcp-Param-DryRun" "false"}
+           (http/x-mcp-param-headers annotated-schema
+                                     {:region "us-west1" :priority 42 :dryRun false}))))
+  (testing "nested properties mirror their instance path"
+    (is (= {"Mcp-Param-TenantId" "7"}
+           (http/x-mcp-param-headers annotated-schema {:tenant {:id 7}}))))
+  (testing "an absent, null or non-mirrored parameter is omitted"
+    (is (= {"Mcp-Param-Region" "r"}
+           (http/x-mcp-param-headers annotated-schema {:region "r"})))
+    (is (= {} (http/x-mcp-param-headers annotated-schema
+                                        {:region nil :priority nil :dryRun nil :query "q"})))
+    (is (= {} (http/x-mcp-param-headers nil {:region "r"})))
+    (is (= {} (http/x-mcp-param-headers {} {:region "r"}))))
+  (testing "string keys work too (a tool call whose arguments were JSON)"
+    (is (= {"Mcp-Param-Region" "r"}
+           (http/x-mcp-param-headers annotated-schema {"region" "r"}))))
+  (testing "unsafe values ride the Base64 sentinel and round-trip"
+    (doseq [v ["Héllo, 世界" " padded " "line1\nline2" "=?base64?literal?="]]
+      (let [encoded (get (http/x-mcp-param-headers annotated-schema {:region v})
+                         "Mcp-Param-Region")]
+        (is (str/starts-with? encoded "=?base64?") v)
+        (is (= v (String. (.decode (java.util.Base64/getDecoder)
+                                   (subs encoded 9 (- (count encoded) 2)))
+                          "UTF-8"))))))
+  (testing "conversion follows the value's JSON type, not the declared type"
+    (is (= {"Mcp-Param-Region" "42"}
+           (http/x-mcp-param-headers annotated-schema {:region 42})))
+    (is (= {"Mcp-Param-Priority" "42"}
+           (http/x-mcp-param-headers annotated-schema {:priority 42.0})))
+    (is (= {"Mcp-Param-DryRun" "1"}
+           (http/x-mcp-param-headers annotated-schema {:dryRun 1}))))
+  (testing "integer values outside the JS safe range (or not integral) are omitted"
+    (is (= {} (http/x-mcp-param-headers annotated-schema {:priority 9007199254740992})))
+    (is (= {} (http/x-mcp-param-headers annotated-schema {:priority 42.5})))))
+
+(deftest valid-x-mcp-header-cases
+  (testing "no annotation is valid"
+    (is (true? (http/valid-x-mcp-header? nil)))
+    (is (true? (http/valid-x-mcp-header? {})))
+    (is (true? (http/valid-x-mcp-header? {:type "object"
+                                          :properties {"q" {:type "string"}}}))))
+  (testing "a malformed schema value is not an annotation and does not throw"
+    (is (true? (http/valid-x-mcp-header? {:type "object" :properties [1 2]})))
+    (is (true? (http/valid-x-mcp-header? {:type "object" :$defs 5})))
+    (is (= {} (http/x-mcp-param-headers {:type "object" :properties [1 2]} {:a 1}))))
+  (testing "conforming annotations are valid"
+    (is (true? (http/valid-x-mcp-header? annotated-schema)))
+    (is (true? (http/valid-x-mcp-header? {:type "object"
+                                          :properties {"q" {:type ["string" "null"]
+                                                            :x-mcp-header "Q"}}}))))
+  (testing "an invalid annotation rejects the defining tool"
+    (doseq [bad [{:type "object" :properties {"q" {:type "string" :x-mcp-header ""}}}
+                 {:type "object" :properties {"q" {:type "string" :x-mcp-header "Bad Name"}}}
+                 {:type "object" :properties {"q" {:type "string" :x-mcp-header "a:b"}}}
+                 {:type "object" :properties {"q" {:type "number" :x-mcp-header "Q"}}}
+                 {:type "object" :properties {"q" {:x-mcp-header "Q"}}}
+                 ;; duplicates compare case-insensitively, across depths
+                 {:type "object"
+                  :properties {"q" {:type "string" :x-mcp-header "Q"}
+                               "r" {:type "object"
+                                    :properties {"n" {:type "string"
+                                                      :x-mcp-header "q"}}}}}
+                 ;; unreachable: items / oneOf / $defs / the schema root
+                 {:type "object" :properties {"q" {:type "string"}}
+                  :$defs {"Q" {:type "string" :x-mcp-header "Q"}}}
+                 {:type "object" :properties {"q" {:type "array"
+                                                   :items {:type "string"
+                                                           :x-mcp-header "Q"}}}}
+                 ;; an unreachable chain stays unreachable at every depth
+                 {:type "object" :properties {"q" {:type "array"
+                                                   :items {:type "object"
+                                                           :properties {"n" {:type "string"
+                                                                             :x-mcp-header "N"}}}}}}
+                 {:type "object" :properties {"q" {:type "string"}}
+                  :$defs {"X" {:type "object"
+                               :properties {"n" {:type "string"
+                                                 :x-mcp-header "N"}}}}}
+                 {:type "object" :properties {"q" {:oneOf [{:type "string"
+                                                            :x-mcp-header "Q"}]}}}
+                 {:type "object" :x-mcp-header "Q"}]]
+      (is (false? (http/valid-x-mcp-header? bad)) (pr-str bad))))
+  (testing "an invalid definition emits no headers"
+    (is (= {} (http/x-mcp-param-headers
+               {:type "object" :properties {"q" {:type "string" :x-mcp-header ""}}}
+               {:q "v"})))))
+
+(deftest request!-carries-custom-headers
+  (let [requests (atom [])
+        conn (assoc (modern-conn)
+                    :request-fn (fn [url opts]
+                                  (swap! requests conj [url opts])
+                                  (response 200 "application/json"
+                                            "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}")))]
+    (is (= {} (http/request! conn "tools/call" {:name "t"} 5000 nil
+                             {:http-headers {"Mcp-Param-Region" "us-west1"
+                                             "Mcp-Param-DryRun" "true"}})))
+    (let [[_ opts] (first @requests)]
+      (is (= "us-west1" (get (:headers opts) "Mcp-Param-Region")))
+      (is (= "true" (get (:headers opts) "Mcp-Param-DryRun")))
+      (is (= "tools/call" (get (:headers opts) "Mcp-Method"))))
+    (reset! requests [])
+    (http/request! conn "tools/list" {} 5000 nil nil)
+    (is (nil? (get (:headers (first @requests)) "Mcp-Param-Region"))
+        "a request without custom headers carries none")))
 
 ;; ─── Subscriptions (2026-07-28) ───────────────────────────────────────────
 

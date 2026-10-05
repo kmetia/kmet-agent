@@ -141,8 +141,11 @@
 
 (defn request!
   "POST a request and wait for its id-matched message on the stream. A
-   dropped stream reopens once and re-establishes the session."
-  [conn method params timeout-ms on-notification]
+   dropped stream reopens once and re-establishes the session. OPTS is
+   the transport-neutral request options map — the legacy SSE binding is
+   frozen and consumes none of it (:http-headers is streamable-HTTP
+   only)."
+  [conn method params timeout-ms on-notification _opts]
   (transport/touch! conn)
   (let [id (swap! (:id-counter conn) inc)]
     (loop [attempts 0]

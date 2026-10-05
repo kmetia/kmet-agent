@@ -400,7 +400,52 @@
             r (:result (decode-body (post-mcp url msg (request-headers msg))))]
         (check "http tools/list resultType" (= "complete" (:resultType r)))
         (check "http tools/list modern tool"
-               (some #(= "http-add-tool" (:name %)) (:tools r))))
+               (some #(= "http-add-tool" (:name %)) (:tools r)))
+        (check "http tools/list annotated tool"
+               (some #(= "http-region" (:name %)) (:tools r)))
+        (check "http tools/list keeps the invalid definition (the client drops it)"
+               (some #(= "http-bad-header" (:name %)) (:tools r))))
+
+      ;; SEP-2243: x-mcp-header parameters are mirrored into Mcp-Param-*
+      ;; headers and validated against the body
+      (let [msg {:jsonrpc "2.0" :id 11 :method "tools/call"
+                 :params {:_meta (client-meta) :name "http-region"
+                          :arguments {:region "us-west1" :priority 42 :dryRun true}}}
+            headers (merge (request-headers msg)
+                           {"Mcp-Param-Region" "us-west1"
+                            "Mcp-Param-Priority" "42"
+                            "Mcp-Param-DryRun" "true"})
+            r (:result (decode-body (post-mcp url msg headers)))]
+        (check "Mcp-Param-* headers accepted"
+               (= "region=us-west1 priority=42 dryRun=true"
+                  (get-in r [:content 0 :text]))))
+      (let [msg {:jsonrpc "2.0" :id 12 :method "tools/call"
+                 :params {:_meta (client-meta) :name "http-region"
+                          :arguments {:region "x"}}}]
+        (check-http-error "missing Mcp-Param-Region → 400 -32020"
+                          (post-mcp url msg (request-headers msg))
+                          -32020)
+        (check-http-error "Mcp-Param-* for an absent value → 400 -32020"
+                          (post-mcp url msg (assoc (request-headers msg)
+                                                   "Mcp-Param-DryRun" "true"))
+                          -32020)
+        (check-http-error "Mcp-Param value not matching the body → 400 -32020"
+                          (post-mcp url msg (assoc (request-headers msg)
+                                                   "Mcp-Param-Region" "y"))
+                          -32020))
+      (let [region "Héllo, 世界"
+            msg {:jsonrpc "2.0" :id 13 :method "tools/call"
+                 :params {:_meta (client-meta) :name "http-region"
+                          :arguments {:region region}}}
+            encoded (str "=?base64?"
+                         (.encodeToString (java.util.Base64/getEncoder)
+                                          (.getBytes region "UTF-8"))
+                         "?=")
+            r (:result (decode-body (post-mcp url msg (assoc (request-headers msg)
+                                                             "Mcp-Param-Region" encoded))))]
+        (check "Base64-decoded Mcp-Param value accepted"
+               (= (str "region=" region " priority= dryRun=")
+                  (get-in r [:content 0 :text]))))
 
       ;; a stale session header is ignored, never echoed
       (let [msg {:jsonrpc "2.0" :id 10 :method "tools/list"

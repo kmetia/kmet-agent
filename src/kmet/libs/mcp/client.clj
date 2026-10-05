@@ -77,21 +77,24 @@
   "Send a JSON-RPC request and return its :result. OPTS:
    {:timeout-ms n (default 120000) :on-notification (fn [notification])
    — receives notifications/progress events arriving mid-request
-   (streaming tool-call progress)}. Throws ex-info on JSON-RPC error,
+   (streaming tool-call progress)}. :http-headers — per-request custom
+   headers for HTTP transports (a tools/call's Mcp-Param-*, SEP-2243;
+   stdio and SSE ignore them). Throws ex-info on JSON-RPC error,
    timeout, or transport death (§7.7).
 
    On a modern conn the era _meta is merged into params, and an
    input_required result (MRTR) is retried with its requestState echoed
    while the server asked for no client input; an inputRequests entry
    throws — kmet declares no elicitation/sampling/roots capabilities."
-  [conn method params & [{:keys [timeout-ms on-notification]}]]
+  [conn method params & [{:keys [timeout-ms on-notification http-headers]}]]
   (let [timeout (or timeout-ms protocol/default-request-timeout-ms)
         modern? (protocol/modern-conn? conn)
+        request-opts {:http-headers http-headers}
         dispatch (fn [params]
                    (case (:transport conn)
-                     :stdio (stdio/request! conn method params timeout on-notification)
-                     :streamable-http (http/request! conn method params timeout on-notification)
-                     :sse (sse/request! conn method params timeout on-notification)))]
+                     :stdio (stdio/request! conn method params timeout on-notification request-opts)
+                     :streamable-http (http/request! conn method params timeout on-notification request-opts)
+                     :sse (sse/request! conn method params timeout on-notification request-opts)))]
     ;; one request at a time per stdio/sse conn: SSE matches responses on
     ;; one shared channel, so two waiters would consume (and drop) each
     ;; other's responses; stdio correlates per request in jsonrpc but
@@ -207,14 +210,25 @@
      :server-info (:serverInfo result)
      :capabilities (or (:capabilities result) {})}))
 
+(defn- list-tools-for-conn
+  "The tools of a tools/list result usable on CONN. A streamable-HTTP
+   client MUST exclude a definition with an invalid x-mcp-header
+   annotation (SEP-2243); the other transports ignore the annotation."
+  [conn tools]
+  (if (= :streamable-http (:transport conn))
+    (remove #(not (http/valid-x-mcp-header? (:inputSchema %))) tools)
+    tools))
+
 (defn list-all-tools
-  "tools/list with cursor pagination (nextCursor loop, 30s per page)."
+  "tools/list with cursor pagination (nextCursor loop, 30s per page). On
+   a streamable-HTTP conn a tool definition with an invalid x-mcp-header
+   annotation is excluded (SEP-2243)."
   [conn]
   (loop [cursor nil tools []]
     (let [result (request! conn "tools/list"
                            (if cursor {:cursor cursor} {})
                            {:timeout-ms protocol/list-page-timeout-ms})
-          tools (into tools (:tools result))]
+          tools (into tools (list-tools-for-conn conn (:tools result)))]
       (if-let [next-cursor (:nextCursor result)]
         (recur next-cursor tools)
         tools))))

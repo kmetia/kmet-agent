@@ -10,7 +10,9 @@
    the common contract keys documented in kmet.libs.mcp.transport.
 
    This namespace also owns the HTTP POST/parse helpers and send-async!
-   that the legacy SSE transport (kmet.libs.mcp.transport.sse) reuses."
+   that the legacy SSE transport (kmet.libs.mcp.transport.sse) reuses,
+   plus the SEP-2243 custom-header helpers (x-mcp-param-headers /
+   valid-x-mcp-header?) for tool parameters annotated x-mcp-header."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [kmet.libs.concurrent :as concurrent]
@@ -62,9 +64,9 @@
     (assoc "MCP-Protocol-Version" @(:protocol-version conn))))
 
 (defn encode-header-value
-  "Encode a mirrored header value (Mcp-Name) for the wire (spec, Header
-   Mirroring): a value that cannot ride in a header field value
-   unchanged — non-ASCII or control characters, a leading or trailing
+  "Encode a mirrored header value (Mcp-Name, Mcp-Param-*) for the wire
+   (spec, Header Mirroring): a value that cannot ride in a header field
+   value unchanged — non-ASCII or control characters, a leading or trailing
    space (parsers trim it) — or that itself begins with the Base64
    sentinel is sent as a Base64 sentinel, so it round-trips exactly."
   [v]
@@ -103,14 +105,194 @@
 (defn http-request-headers
   "The headers for one MCP POST. The 1-arity is the base set (base +
    auth) for callers without a JSON-RPC message (the SSE transport, a
-   session DELETE); the 2-arity adds the modern routing headers."
+   session DELETE); the 2-arity adds the modern routing headers; the
+   3-arity additionally merges EXTRA-HEADERS, the per-request custom
+   headers a tools/call derives from its x-mcp-header annotations
+   (Mcp-Param-*, SEP-2243)."
   ([conn]
    (let [headers (base-http-headers conn)]
      (if-let [auth (:auth-headers conn)]
        (merge headers (or (auth) {}))
        headers)))
   ([conn method params]
-   (merge (http-request-headers conn) (routing-headers conn method params))))
+   (http-request-headers conn method params nil))
+  ([conn method params extra-headers]
+   (merge (http-request-headers conn) (routing-headers conn method params) extra-headers)))
+
+;; ─── Custom headers from tool parameters (SEP-2243) ──────────────────────
+
+(def ^:private js-safe-integer-max
+  "2^53 - 1 — the largest integer an IEEE-754 double represents exactly;
+   the spec's safe range for a mirrored integer value."
+  9007199254740991)
+
+(def ^:private tchar-pattern
+  "RFC 9110 field-name token characters (tchar)."
+  #"[!#$%&'*+\-.^_`|~0-9A-Za-z]")
+
+(def ^:private non-reachable-schema-keywords
+  "JSON Schema keywords whose values are schemas but never part of a
+   statically reachable property path. They are walked only to find an
+   x-mcp-header annotation placed where the spec forbids it."
+  [:items :prefixItems :contains :additionalItems :additionalProperties
+   :propertyNames :not :if :then :else :unevaluatedItems
+   :unevaluatedProperties :contentSchema :allOf :anyOf :oneOf])
+
+(def ^:private non-reachable-schema-map-keywords
+  "The same, for keywords whose values are maps of schemas."
+  [:$defs :definitions :dependentSchemas :patternProperties :dependencies])
+
+(defn- walk-x-mcp-headers
+  "Every x-mcp-header annotation in SCHEMA, in traversal order, as
+   {:path [property-name ...] :reachable? bool :header v :schema sub}.
+   A node is REACHABLE when every edge on its path from the schema root is
+   a `properties` key; only such a node is a mirrorable parameter, so its
+   annotation counts and its own `properties` children stay reachable.
+   Every other schema-bearing keyword (items, composition/conditional
+   keywords, $ref targets under $defs/definitions) is walked as
+   unreachable — its own annotation and any below it invalidate the
+   definition, and its `properties` children are not instance paths. The
+   root itself is not a property: an annotation there is unreachable too.
+   Non-schema positions (default/enum/examples) are not walked."
+  [schema]
+  (letfn [(walk [node path property? chain?]
+            (if-not (map? node)
+              []
+              (let [here (when (contains? node :x-mcp-header)
+                           [{:path path :reachable? property?
+                             :header (:x-mcp-header node)
+                             :schema node}])
+                    props (if (map? (:properties node))
+                            (mapcat (fn [[k sub]] (walk sub (conj path k) chain? chain?))
+                                    (:properties node))
+                            [])
+                    others (mapcat (fn [k]
+                                     (let [v (get node k)]
+                                       (cond
+                                         (map? v) (walk v path false false)
+                                         (sequential? v) (mapcat #(walk % path false false) v)
+                                         :else [])))
+                                   non-reachable-schema-keywords)
+                    defs (mapcat (fn [k]
+                                   (let [v (get node k)]
+                                     (if (map? v)
+                                       (mapcat (fn [[_ sub]] (walk sub path false false)) v)
+                                       [])))
+                                 non-reachable-schema-map-keywords)]
+                (concat here props others defs))))]
+    ;; the root is on the chain but is not itself a property subschema
+    (walk schema [] false true)))
+
+(defn- primitive-declared-type?
+  "True when a schema's :type declares one or more of the spec's primitive
+   header types (a vector may add null — a nullable primitive)."
+  [type]
+  (let [types (if (sequential? type) type [type])]
+    (and (seq types)
+         (every? #{"string" "integer" "boolean" "null"} types)
+         (some #{"string" "integer" "boolean"} types))))
+
+(defn- tchar-value?
+  "True when V is a non-empty string of RFC 9110 tchar characters."
+  [v]
+  (and (string? v)
+       (pos? (count v))
+       (every? (fn [ch] (re-matches tchar-pattern (str ch))) (seq v))))
+
+(defn- ascii-fold-down
+  "ASCII-only case fold for the spec's case-insensitive header-name
+   comparison. The names are token-validated ASCII, and folding only A-Z
+   keeps the comparison locale-independent (str/lower-case follows the
+   JVM default locale, where e.g. Turkish maps I to a dotless i and would
+   miss a duplicate)."
+  [s]
+  (str/replace s #"[A-Z]" (fn [c] (str (char (+ 32 (int (first c))))))))
+
+(defn- x-mcp-annotation-reasons
+  "The constraint violations in ANNOTATIONS (SEP-2243) as messages; empty
+   when the whole definition conforms."
+  [annotations]
+  (let [names (keep #(when (string? (:header %)) (ascii-fold-down (:header %)))
+                    annotations)
+        duplicates (->> names frequencies
+                        (keep (fn [[n c]] (when (> c 1) n)))
+                        seq)]
+    (cond-> []
+      (some #(not (:reachable? %)) annotations)
+      (conj "an x-mcp-header is not statically reachable through properties")
+
+      (some #(not (tchar-value? (:header %))) annotations)
+      (conj "an x-mcp-header value is not an HTTP field-name token")
+
+      (some #(not (primitive-declared-type? (:type (:schema %)))) annotations)
+      (conj "an x-mcp-header is on a parameter that is not a declared primitive")
+
+      duplicates
+      (conj (str "x-mcp-header values are not case-insensitively unique: "
+                 (str/join ", " duplicates))))))
+
+(defn valid-x-mcp-header?
+  "True when every x-mcp-header annotation in INPUT-SCHEMA satisfies the
+   2026-07-28 constraints (SEP-2243): a non-empty HTTP token name, unique
+   case-insensitively, on a property with a declared primitive type, and
+   statically reachable through `properties` keys from the schema root.
+   A vector :type may add null (a nullable primitive); a property with no
+   declared type, or one typed number/object/array, is invalid. A
+   streamable-HTTP client MUST exclude a tool whose definition violates
+   them from the tools/list result; the other transports ignore the
+   annotation. INPUT-SCHEMA nil or annotation-free is valid."
+  [input-schema]
+  (empty? (x-mcp-annotation-reasons (walk-x-mcp-headers input-schema))))
+
+(defn- argument-value
+  "The value at PATH in the call ARGUMENTS, accepting string or keyword
+   keys at each step; nil when absent."
+  [arguments path]
+  (reduce (fn [m k]
+            (if (map? m)
+              (if (contains? m (keyword k))
+                (get m (keyword k))
+                (get m k))
+              (reduced nil)))
+          arguments
+          path))
+
+(defn- mirrored-value
+  "The spec's string form of a mirrored parameter value, keyed on the
+   value's own JSON type (the declared type is the server's constraint;
+   a non-conforming caller gets its value converted, not silently
+   dropped): string as-is, boolean lower-case, integer decimal. nil (the
+   header is omitted) for null/absent, containers and numbers outside the
+   integer safe range — an unrepresentable value cannot ride a header."
+  [v]
+  (cond
+    (nil? v) nil
+    (string? v) v
+    (true? v) "true"
+    (false? v) "false"
+    (number? v) (when (and (== v (long v))
+                           (<= (- js-safe-integer-max) v js-safe-integer-max))
+                  (str (long v)))
+    :else nil))
+
+(defn x-mcp-param-headers
+  "The Mcp-Param-* headers for one tools/call (SEP-2243): one header per
+   statically reachable x-mcp-header annotation whose argument value is
+   present and non-null, converted per the spec (string as-is, integer
+   decimal, boolean lower-case) and encoded like Mcp-Name (Base64
+   sentinel when unsafe). Returns {} when INPUT-SCHEMA is absent, has no
+   annotations, or violates the constraints — the tool should have been
+   excluded from tools/list, and emitting headers from an invalid
+   definition would be guessing at its property paths."
+  [input-schema arguments]
+  (let [annotations (walk-x-mcp-headers input-schema)]
+    (if (seq (x-mcp-annotation-reasons annotations))
+      {}
+      (into {}
+            (keep (fn [{:keys [path header]}]
+                    (when-let [value (mirrored-value (argument-value arguments path))]
+                      [(str "Mcp-Param-" header) (encode-header-value value)])))
+            annotations))))
 
 ;; ─── POST + response parsing ──────────────────────────────────────────────
 
@@ -133,8 +315,10 @@
       (do
         ;; the discarded 401 body is never read — reap its transport
         (http/close! response)
-        (attempt (merge (base-http-headers conn)
-                        (or ((:on-401 conn) response) {}))))
+        ;; fresh auth over the same base/routing/custom headers: the
+        ;; retry must not lose Mcp-Method/Mcp-Name or the Mcp-Param-*
+        ;; headers a modern tools/call carries (SEP-2243)
+        (attempt (merge headers (or ((:on-401 conn) response) {}))))
       response)))
 
 (defn- read-sse-response
@@ -228,10 +412,12 @@
 
 (defn request!
   "POST a request and wait for its response (a background thread reads the
-   body; the caller's deadline bounds the wait). On timeout the request is
-   cancelled and the conn is marked closed — the abandoned response has no
-   transport to read it."
-  [conn method params timeout-ms on-notification]
+   body; the caller's deadline bounds the wait). OPTS is the request
+   options map: :http-headers — per-request custom headers for HTTP
+   transports (a tools/call's Mcp-Param-*, SEP-2243; stdio and SSE ignore
+   them). On timeout the request is cancelled and the conn is marked
+   closed — the abandoned response has no transport to read it."
+  [conn method params timeout-ms on-notification {:keys [http-headers]}]
   (transport/touch! conn)
   (let [id (swap! (:id-counter conn) inc)
         result-p (promise)
@@ -241,7 +427,8 @@
                            (let [body (json/generate-string
                                        {:jsonrpc "2.0" :id id :method method :params params})
                                  response (http-post! conn (:url conn)
-                                                      (http-request-headers conn method params)
+                                                      (http-request-headers conn method params
+                                                                            http-headers)
                                                       body (+ timeout-ms 5000))]
                              ;; a modern conn has no session: a header a
                              ;; probe or discovery response carried is

@@ -3,7 +3,7 @@
 Status: draft. Order is deliberate: **Phase 0 (names consolidation + name
 assignment fix) → Phase 1 (extract `kmet.libs.mcp`) → Phase 2 (auth) →
 Phase 3 (2026-07-28 protocol work) → Phase 4 (optional hygiene)** — Phases 0,
-1 and 2 are landed, and Phase 3 is in progress (3.1–3.5 landed; 3.6–3.8 are
+1 and 2 are landed, and Phase 3 is in progress (3.1–3.6 landed; 3.7–3.8 are
 planned in full below — this section is their plan, there is no separate
 plan file); phase 4 lands after it. The protocol revision lands before the
 hygiene pass so the client is extracted and auth settled first.
@@ -441,9 +441,9 @@ baseline):
 
 ## Phase 3 — 2026-07-28 protocol work (the end goal)
 
-Status: **in progress** — 3.1–3.5 landed; 3.6–3.8 below, in order; each leaves
-`scripts/validate-all.bb` and the repo gates green. Depends on Phase 1's
-era-neutral seam and Phase 2's auth plumbing (both landed).
+Status: **in progress** — 3.1–3.6 landed; 3.7–3.8 below, in order; each
+leaves `scripts/validate-all.bb` and the repo gates green. Depends on
+Phase 1's era-neutral seam and Phase 2's auth plumbing (both landed).
 
 No pi reference: pi's current main still negotiates only `2025-11-25` and
 earlier (`packages/mcp/src/protocol/types.ts`, `SUPPORTED_PROTOCOL_VERSIONS`),
@@ -880,6 +880,45 @@ before the era cache:
   (a conforming server then answers `-32020` for that annotated tool) —
   keep schema lookup beside the call.
 
+Status: **landed** — `transport.http` owns the pure helpers:
+`x-mcp-param-headers` derives the `Mcp-Param-*` map (conversion keyed on
+the value's JSON type — string as-is, integer decimal within the JS safe
+range, boolean lower-case; null/absent, non-integral and out-of-range
+values are omitted) and reuses `encode-header-value` for the Base64
+sentinel; `valid-x-mcp-header?` checks the whole schema — a non-empty
+HTTP token name, case-insensitive uniqueness (ASCII-folded, so it does
+not depend on the JVM default locale), a declared primitive type, and
+static reachability through `properties` keys. Reachability is inherited
+down the chain: an annotation under `items`, composition/conditional
+keywords, `$defs`/`definitions`, or on the schema root is unreachable at
+every depth and makes the definition invalid. `client/request!` gained
+`:http-headers` and the transport `request!` contract gained the options
+map (stdio and the frozen SSE binding ignore it); `list-all-tools`
+excludes an invalid definition on any `:streamable-http` conn
+(era-independent), while other transports keep it. Fixing the 401 retry
+to merge fresh auth over the original headers rode along: rebuilding from
+the base set would have dropped `Mcp-Method`/`Mcp-Name` (already wrong for
+modern POSTs) and would now also drop `Mcp-Param-*`. The adapter's
+`call-mcp-tool` takes `:input-schema` (direct tools, script records, and
+the proxy's resolved tool all pass it; otherwise it reads the catalog
+back through the state's `:read-state-fn`, so a lazy first call by raw
+name — the connect fills the cache after the caller's snapshot was
+taken — still finds its schema; without any schema the call degrades to
+no custom headers).
+Tests: the pure derivation/validity table, the value-typed conversion
+cases and the 401 retention in `test_transport_http`; transport-scoped
+filtering and `:http-headers` forwarding in `test_client`.
+`validate-client.bb` proves the lib mirrors plain and Base64 values and
+drops the invalid definition; `validate-protocol.bb` proves the HTTP
+fake's validation (missing/extra/mismatched headers ⇒ `400` `-32020`,
+while the server keeps the invalid definition — filtering is the client's
+job). `e2e.bb` (now optionally given the HTTP fake) covers the adapter
+path end-to-end: a lazy first call by raw name connects and the mirroring
+succeeds (the fake rejects anything else), Base64 values round-trip, and
+the served catalog omits the invalid tool. stdio is untouched and
+unit-tested to ignore the annotation. All eight extension scripts,
+`bb test` and jolt are green.
+
 ### 3.7. Era caching in the metadata cache
 
 - `metadata.clj`: the entry gains `:protocol-era` (`{:era :modern|:legacy
@@ -1019,7 +1058,7 @@ after Phase 3 — hygiene must not block or precede the protocol work.
 - [x] 3.3 stdio: `server/discover` probe + modern establish + legacy fallback
 - [x] 3.4 streamable HTTP: routing headers, 400-body detection, `-32022` negotiation, no session
 - [x] 3.5 `subscriptions/listen`: lib listen + HTTP long-lived stream + adapter wiring
-- [ ] 3.6 `x-mcp-header` mirroring + invalid-definition filtering
+- [x] 3.6 `x-mcp-header` mirroring + invalid-definition filtering
 - [ ] 3.7 `:protocol-era` in the metadata cache + re-probe on failure
 - [ ] 3.8 facade deletion + README + full gates
 - [ ] 4 optional hygiene (after 3)

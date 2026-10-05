@@ -1,9 +1,15 @@
 #!/usr/bin/env bb
 ;; End-to-end smoke: load the extension against the nullable api with a
 ;; real config pointing at the fake stdio server, then drive the proxy
-;; tool: status → search → connect → call → disconnect → status.
-;; Usage: bb e2e.bb <fake-mcp-server.bb>
-(require '[clojure.string :as str]
+;; tool: status → search → connect → call → disconnect → status. With the
+;; optional second argument (the HTTP fake) it also proves the SEP-2243
+;; adapter path: a lazy first call by raw name connects and still mirrors
+;; the Mcp-Param-* headers its inputSchema derives (the fake validates
+;; them against the body), and the invalid definition is filtered out of
+;; the catalog the adapter serves.
+;; Usage: bb e2e.bb <fake-mcp-server.bb> [fake-http-mcp-server.bb]
+(require '[babashka.process :as proc]
+         '[clojure.string :as str]
          '[clojure.java.io :as io]
          '[kmet.extension :as ext]
          '[kmet.extensions.mcp-adapter.client :as client]
@@ -16,22 +22,50 @@
   (println (if ok "PASS" "FAIL") label)
   (when-not ok (swap! failures inc)))
 
-(let [[fake-stdio] *command-line-args*
+(defn- start-http-server!
+  "Start the HTTP fake; it prints 'PORT <n>' on stdout (captured to a file
+   so the caller can poll it while the process runs)."
+  [script]
+  (let [out-file (str (System/getProperty "user.dir") "/.e2e-http-" (System/nanoTime) ".out")
+        p (proc/process ["bb" script] {:in :discard :out out-file :err :discard})]
+    (loop [waits 0]
+      (let [out (try (slurp out-file) (catch Exception _ ""))]
+        (if-let [m (re-find #"PORT (\d+)" out)]
+          {:proc p :port (Long/parseLong (second m)) :out-file out-file}
+          (do (Thread/sleep 100)
+              (if (< waits 50)
+                (recur (inc waits))
+                (throw (ex-info (str "HTTP fake did not start: " out)
+                                {:type :server-start-failed})))))))))
+
+(defn- stop-http-server! [{:keys [proc out-file]}]
+  (try (proc/destroy-tree proc) (catch Exception _ nil))
+  (when out-file (io/delete-file out-file true)))
+
+(let [[fake-stdio fake-http] *command-line-args*
       fake-stdio (str (System/getProperty "user.dir") "/" fake-stdio)
+      http-server (when fake-http
+                    (start-http-server! (str (System/getProperty "user.dir") "/" fake-http)))
       global (str (System/getProperty "user.dir") "/.e2e-global-" (System/nanoTime) ".edn")
       cache-file (str (System/getProperty "user.dir") "/.e2e-cache-" (System/nanoTime) ".edn")]
   (spit global (pr-str {:mcp-servers
-                        {"e2e" {:command "bb" :args [fake-stdio] :lifecycle :lazy
-                                ;; the fake server requires kmet.libs.json (data.json)
-                                :env {"BABASHKA_CLASSPATH" (System/getProperty "java.class.path")}
-                                :direct-tools true}
-                         ;; a 2026-07-28 server: the connect opens
-                         ;; subscriptions/listen instead of relying on the
-                         ;; broadcast list_changed the legacy fake sends
-                         "modern" {:command "bb" :args [fake-stdio "--era" "modern"]
-                                   :lifecycle :lazy
-                                   :env {"BABASHKA_CLASSPATH" (System/getProperty "java.class.path")}}
-                         "bad" {:command "sh" :args ["-c" "exit 3"] :lifecycle :lazy}}}))
+                        (cond->
+                         {"e2e" {:command "bb" :args [fake-stdio] :lifecycle :lazy
+                                 ;; the fake server requires kmet.libs.json (data.json)
+                                 :env {"BABASHKA_CLASSPATH" (System/getProperty "java.class.path")}
+                                 :direct-tools true}
+                          ;; a 2026-07-28 server: the connect opens
+                          ;; subscriptions/listen instead of relying on the
+                          ;; broadcast list_changed the legacy fake sends
+                          "modern" {:command "bb" :args [fake-stdio "--era" "modern"]
+                                    :lifecycle :lazy
+                                    :env {"BABASHKA_CLASSPATH" (System/getProperty "java.class.path")}}
+                          "bad" {:command "sh" :args ["-c" "exit 3"] :lifecycle :lazy}}
+                          http-server
+                          (assoc "http" {:url (str "http://127.0.0.1:" (:port http-server)
+                                                   "/mcp?era=modern")
+                                          :http-transport :streamable-http
+                                          :lifecycle :lazy}))}))
   (with-redefs [config/global-config-path (fn [] global)
                 config/project-config-path (fn [& _] (str global ".project"))
                 metadata/cache-path (constantly cache-file)]
@@ -148,6 +182,25 @@
                    :else false)))
         (let [r (s {:disconnect "modern"})]
           (check "modern server disconnects" (str/includes? (:content r) "Disconnected")))
+        ;; SEP-2243 adapter path (when the HTTP fake was supplied): the
+        ;; first call is by raw name on a never-connected lazy server, so no
+        ;; catalog record exists when the call starts — the schema must come
+        ;; from the catalog read back after the connect. The fake validates
+        ;; every Mcp-Param-* header against the body and answers 400 -32020
+        ;; when one is missing, so a success proves the adapter derived and
+        ;; sent them.
+        (when http-server
+          (let [r (s {:tool "http-region" :server "http"
+                      :args {:region "us-west1" :priority 42 :dryRun true}})]
+            (check "adapter mirrors Mcp-Param-* on a lazy first call"
+                   (= "region=us-west1 priority=42 dryRun=true" (:content r))))
+          (let [r (s {:tool "http-region" :args {:region "Héllo, 世界"}})]
+            (check "adapter Base64-encodes unsafe Mcp-Param values"
+                   (= "region=Héllo, 世界 priority= dryRun=" (:content r))))
+          (let [r (s {:server "http"})]
+            (check "adapter catalog omits the invalid x-mcp-header tool"
+                   (and (str/includes? (:content r) "http_http_region")
+                        (not (str/includes? (:content r) "http_bad"))))))
         ;; a resource template (file:///{path}) registers a read tool
         ;; whose {path} variable expands into the resources/read URI
         (check "resource template registered a read tool"
@@ -194,6 +247,7 @@
         (check "shutdown" true))
       (finally
         (io/delete-file global true)
-        (io/delete-file cache-file true))))
+        (io/delete-file cache-file true)
+        (when http-server (stop-http-server! http-server)))))
   (println "\n" (if (zero? @failures) "ALL PASS" (str @failures " FAILURES")))
   (System/exit (if (zero? @failures) 0 1)))
