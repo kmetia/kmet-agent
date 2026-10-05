@@ -119,15 +119,14 @@
         ;; connection fails. Pin the merge so the default :platform transport
         ;; works on Windows too. OpenSSL comes from jolt-crypto;
         ;; java.util.zip is runtime surface from Jolt 0.8.9.
-        ;; Pinned to unreleased main (d99af98, PR #34's merge) until the
-        ;; first release carrying it: PR #34 drops the stale
+        ;; v0.1.0 (d99af98, PR #34's merge): PR #34 drops the stale
         ;; java.util.concurrent.CompletableFuture claim and floors the
         ;; library at Jolt 0.8.16 (now the floor here), and PR #33 exits its
         ;; test runners via jolt's wait and bumps crypto to v0.0.10 (kmet
-        ;; pins that revision already). On v0.0.17 every Jolt run printed
-        ;; the dropped-claim warning. Move to the v0.0.18+ tag when it ships
-        ;; (jolt-lang/http-client#32, jolt-bugs.md).
+        ;; pins that revision already). v0.0.17 and earlier printed the
+        ;; dropped-claim warning on every Jolt run (jolt-lang/http-client#32).
         io.github.jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
+                                         :git/tag "v0.1.0"
                                          :git/sha "d99af98cc97dcb2e4afc3eee142166585a26b859"}
         ;; cljfmt / spec.alpha / rewrite-clj serve the format tasks
         ;; (kmet.tasks.format — one code path on both hosts) AND the fixed

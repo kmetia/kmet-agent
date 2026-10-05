@@ -8,28 +8,27 @@ transport from http-client v0.0.15), packaging (`jolt dist`), and extensions
 **only what is still open**; finished work lives in the code, and upstream
 issues filed or tracked live in `jolt-bugs.md` and are not repeated here.
 
-Status checked against `jolt v0.8.16` (2026-10-03), the latest tagged
-release and kmet's declared floor (root `deps.edn`; `jolt-bugs.md` tracks
-the live upstream workarounds).
+Status checked against `jolt v0.8.17` (2026-10-05), the latest tagged
+release (kmet's declared floor is `:jolt/min-version` in the root
+`deps.edn`; `jolt-bugs.md` tracks the live upstream workarounds).
 
 ## Dependency pins
 
-The git pins track their upstream releases (checked 2026-10-02):
+The git pins track their upstream releases (checked 2026-10-05):
 
 - `jolt-lang/jolt-crypto` — `v0.0.10` (`feb25f70`): the `(bytes, off, len)`
   overload fixes and the quadratic `MessageDigest.update` fix (PR #13)
   plus the macOS stub/libcrypto `:link-libs` change (PR #14). Keyed
   `jolt-lang/jolt-crypto` to match the lib name upstream http-client
   depends on, so this root pin supersedes the transitive v0.0.9.
-- `io.github.jolt-lang/http-client` — unreleased main `d99af98` (PR #34's
+- `io.github.jolt-lang/http-client` — `v0.1.0` (`d99af98`, PR #34's
   merge, 2026-10-02): drops the stale `:jolt/provides` claim on
   `java.util.concurrent.CompletableFuture` and floors the library at jolt
   v0.8.16 (now kmet's floor), and exits its test runners via jolt's exit
   wait while bumping jolt-crypto to v0.0.10 (PR #33, already kmet's pinned
   revision). v0.0.17 (`77d7e310`) carried the interrupted-connect and
   TLS-release fixes (PRs #30, #31) but still claimed the class, so every
-  Jolt run warned; the pin moves to the v0.0.18+ tag when it ships
-  (jolt-bugs.md carries the move condition).
+  Jolt run warned; the v0.1.0 pin retires that.
 
 ## Tests
 
