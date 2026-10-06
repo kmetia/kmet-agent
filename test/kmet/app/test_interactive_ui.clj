@@ -1146,6 +1146,45 @@
           (t/is (= [] @(:scoped-models ag))
                 "all-enabled clears the session scoped list (pi updateSessionModels)"))))))
 
+(deftest test-scoped-models-save-drops-models-no-longer-available
+  (testing "Ctrl+S excludes models that became unavailable after opening the selector"
+    (install-app-keybindings!)
+    (commands/clear-commands!)
+    (let [kept (m/map->Model {:provider :test-provider :id "kept"})
+          disappeared (m/map->Model {:provider :test-provider :id "disappeared"})
+          disabled (m/map->Model {:provider :test-provider :id "disabled"})
+          initially-available [kept disappeared disabled]
+          available-at-save [kept disabled]
+          available-calls (atom 0)
+          ag (agent/make-agent-state)
+          _ (agent/set-scoped-models! ag ["test-provider/kept"
+                                          "test-provider/disappeared"])
+          cs {:agent-state (atom ag)
+              :chat-history nil
+              :footer-comp nil
+              :footer-provider nil
+              :config cfg/default-config
+              :tui nil}
+          sel-ref (atom nil)
+          saved (atom ::not-saved)]
+      ((var builtins/register-builtin-commands!) cfg/default-config)
+      (with-redefs [m/get-available (fn []
+                                      (if (= 1 (swap! available-calls inc))
+                                        initially-available
+                                        available-at-save))
+                    auth/configured? (fn [_] true)
+                    chat-history/chat-history-add-message! (fn [_ _] nil)
+                    cfg/get-enabled-models-live (fn [_] nil)
+                    cfg/set-enabled-models! (fn [ids] (reset! saved ids))
+                    model-catalog/update-available-provider-count! (fn [_] nil)
+                    dock/mount! (capture-mount! sel-ref)
+                    tui/tui-set-focus (fn [_ _])
+                    tui/tui-request-render (fn [_])]
+        ((:handler (commands/find-command "scoped-models")) cs "")
+        (protocols/handle-input @sel-ref "\u0013")
+        (t/is (= ["test-provider/kept"] @saved)
+              "only still-available enabled models are persisted")))))
+
 (deftest test-settings-thinking-row
   (testing "/settings opens a settings list whose thinking row changes the
             session level and persists to settings"

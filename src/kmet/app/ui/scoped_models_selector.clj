@@ -404,7 +404,8 @@
    else the settings :enabled-models patterns resolved through
    resolve-model-scope-models (unresolved patterns survive as [unavailable]
    rows), else nil (all enabled). Changes are session-only until Ctrl+S
-   writes :enabled-models; the footer provider count updates live."
+   rechecks availability, omits unavailable ids, and writes :enabled-models;
+   the footer provider count updates live."
   [cs]
   (let [sel-atom (atom nil)
         ;; leave, then dispose: dispose unwinds the selector's root
@@ -457,10 +458,13 @@
              available initial
              :on-change update-session-models
              :on-persist (fn [enabled-ids]
-                           (let [all-enabled? (or (nil? enabled-ids)
-                                                  (and (= (count enabled-ids) (count available))
-                                                       (every? available-ids enabled-ids)))]
-                             (cfg/set-enabled-models! (when-not all-enabled? enabled-ids))
+                           (let [available-at-save (models/get-available)
+                                 available-ids (set (map model-catalog/model-full-id available-at-save))
+                                 save-ids (when enabled-ids
+                                            (filterv available-ids enabled-ids))
+                                 all-enabled? (or (nil? enabled-ids)
+                                                  (= available-ids (set save-ids)))]
+                             (cfg/set-enabled-models! (when-not all-enabled? save-ids))
                              (chat-history/chat-history-add-message!
                               (:chat-history cs)
                               {:role :assistant
