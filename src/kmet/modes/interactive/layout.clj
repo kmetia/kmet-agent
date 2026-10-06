@@ -414,6 +414,9 @@
         ;; top-level entries, auto roots, then packages)
         _ (packages/load-skills!)
         _ (packages/load-prompts!)
+        ;; pi: defaultTools — the built-in tools active at startup; extension
+        ;; tools stay enabled and a later set-active-tools! wins over it
+        default-tools (tools/resolve-default-tools (cfg/get-default-tools config))
         system-prompt-opts {:custom-prompt (cfg/get-custom-prompt config)
                             :append-prompt (cfg/get-append-system-prompt config)
                             ;; the prompt's cwd line is the runtime cwd (the
@@ -422,7 +425,8 @@
                             :cwd cwd
                             :context-files (context/load-project-context-files
                                             (cfg/get-agent-dir) (str (fs/cwd)))
-                            :tools (vals (tools/get-all-tools))}
+                            :tools (agent/active-tools-for
+                                    {:default-tools default-tools})}
         system-prompt (apply skills/build-system-prompt
                              (mapcat identity system-prompt-opts))
 
@@ -469,6 +473,7 @@
             :system system-prompt
             :system-prompt-opts system-prompt-opts
             :session session
+            :default-tools default-tools
             :context-window ctx-window
             :compact-reserve-tokens (or (:compact-reserve-tokens config) 16384)
             :compact-token-threshold (:compact-token-threshold config)

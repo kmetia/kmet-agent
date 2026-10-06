@@ -178,7 +178,7 @@ list/config` dispatch from `core.clj` to `kmet.package-manager` (pi
 | flag | purpose |
 |---|---|
 | `--api-key` | API key for a model specified via `--model`/`--models` |
-| `--exclude-tools`, `--tools`, `--no-tools`, `--no-builtin-tools` | tool selection for one run (kmet has in-TUI `/tools` only) |
+| `--exclude-tools`, `--tools`, `--no-tools`, `--no-builtin-tools` | tool selection for one run (kmet has the `:default-tools` setting and the in-TUI `/tools` selector only) |
 | `--extension` | load an extension file/dir for one run |
 | `--export` | export a session file to HTML/EDNL from the CLI |
 | `--fork` | start from a fork of a previous user message |
@@ -223,6 +223,9 @@ image-width-cells / clear-on-shrink), terminal progress
 (`:show-terminal-progress`), provider image blocking (`:images` — block-images),
 shell customization (`:shell-path` / `:shell-command-prefix` — applied to
 every bash execution: tool, `!` commands, and factory-built tools),
+built-in tool selection (`:default-tools` — pi `defaultTools`; plain names
+replace the built-in set, `+name`/`-name` modify it, scopes layer and
+`/reload` re-resolves it),
 `.kmet/SYSTEM.md` + `APPEND_SYSTEM.md` discovery, `KMET_PROVIDER`/
 `KMET_MODEL` env vars.
 
@@ -278,7 +281,7 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
 | `sendUserMessage` (deliverAs steer/followUp) | **Done** — `extensions/send-user-message` → loop steer!/follow-up! |
 | `setModel`, `getThinkingLevel`, `setThinkingLevel` | **Done** — via the ui registry (auth-gated setModel, validated levels) |
 | `exec` | **Done** — `extensions/exec` (babashka.process, string capture) |
-| `getActiveTools`/`getAllTools`/`setActiveTools` | **Done** — `:enabled-tools` filter on the agent state, applied to the wire `:tools`; `get-all-tools` returns the array |
+| `getActiveTools`/`getAllTools`/`setActiveTools` | **Done** — `:enabled-tools` (runtime selection, pi: setActiveTools) and `:default-tools` (pi: defaultTools) filter the agent state, applied to the wire `:tools` and the run_code sandbox surface; `get-active-tools` returns the effective active names, `get-all-tools` the array |
 | `registerProvider` `streamSimple`/`refreshModels` | Partial — `registerProvider` config registration is done (`extensions/register-provider!` / `models/register-provider-config!`); `streamSimple`/`refreshModels` (wire-layer custom provider streaming + dynamic model refresh) still missing |
 | `context_with_system` event | **Missing** — pi runs it after every `context` handler over the full transcript (system messages included) and sends the result verbatim; dropping the leading system message is an extension error. kmet has one `:context` event over the outgoing message list (system prompt included — `call-llm` prepends it; tools travel separately, so a filtering handler cannot drop them), last non-nil `{:messages ...}` wins |
 | Events: `resources_discover`, `session_before_switch`, `session_before_fork`, `session_before_compact`, `context`, `before_provider_request`, `before_provider_headers`, `after_provider_response` | **Done** — see Appendix (all ✅) |

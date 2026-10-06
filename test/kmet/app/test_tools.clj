@@ -98,6 +98,35 @@
                (keys (tools/select-tools all {:contributed {"mcp_x" {:name "mcp_x"}}
                                               :exclude #{"mcp_x"}})))))))
 
+(t/deftest test-resolve-default-tools
+  (t/testing "nil = no setting: every tool stays active"
+    (t/is (nil? (tools/resolve-default-tools nil))))
+  (t/testing "plain names replace the default built-in set"
+    (t/is (= ["read" "bash"] (tools/resolve-default-tools ["read" "bash"]))))
+  (t/testing "an empty list selects no built-ins"
+    (t/is (= [] (tools/resolve-default-tools []))))
+  (t/testing "modifier-only lists modify the full built-in set (pi: defaultTools)"
+    (t/is (= ["read" "write" "edit" "run_code"] (tools/resolve-default-tools ["-bash"])))
+    (t/is (= (conj (vec tools/builtin-tool-names) "grep")
+             (tools/resolve-default-tools ["+grep"]))))
+  (t/testing "plain names and modifiers mix: the selection applies first, modifiers in order"
+    (t/is (= ["bash" "grep"] (tools/resolve-default-tools ["read" "+bash" "-read" "+grep"]))))
+  (t/testing "unknown names pass through (matched against the live registry later)"
+    (t/is (= ["nope"] (tools/resolve-default-tools ["nope"]))))
+  (t/testing "malformed entries degrade like pi: non-strings are dropped, a non-list resolves empty"
+    (t/is (= ["read"] (tools/resolve-default-tools ["read" 42])))
+    (t/is (= [] (tools/resolve-default-tools "read")))))
+
+(t/deftest test-default-tool-exclusions
+  (t/testing "nil selection = no exclusions"
+    (t/is (nil? (tools/default-tool-exclusions nil))))
+  (t/testing "the built-ins the selection leaves out"
+    (t/is (= #{"bash" "edit" "run_code" "write"} (tools/default-tool-exclusions ["read"]))))
+  (t/testing "unknown names select nothing extra"
+    (t/is (= #{"bash" "edit" "run_code" "write"} (tools/default-tool-exclusions ["read" "nope"]))))
+  (t/testing "selecting every built-in excludes nothing"
+    (t/is (= #{} (tools/default-tool-exclusions (vec tools/builtin-tool-names))))))
+
 ;; ─── Shared invocation pipeline (kmet.app.tools.invoke) ───────────────────
 
 (t/deftest test-invoke-prepare-tool-call

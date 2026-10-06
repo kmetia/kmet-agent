@@ -575,7 +575,12 @@
                             (state/update-footer! cs)
                             true))
          :get-active-tools (fn []
-                             @(:enabled-tools @(:agent-state cs)))
+                             ;; the effective active set, not the raw
+                             ;; :enabled-tools filter (nil would read as
+                             ;; "every tool" and hide a :default-tools
+                             ;; selection from extensions; pi: getActiveTools
+                             ;; returns the active names)
+                             (mapv :name (agent/active-tools @(:agent-state cs))))
          :set-active-tools (fn [names]
                              ;; agent state only — no display depends on
                              ;; this synchronously

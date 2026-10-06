@@ -26,6 +26,9 @@
 (def unregister-tool-source! registry/unregister-tool-source!)
 (def get-contributed-tools registry/get-contributed-tools)
 (def select-tools registry/select-tools)
+(def builtin-tool-names registry/builtin-tool-names)
+(def resolve-default-tools registry/resolve-default-tools)
+(def default-tool-exclusions registry/default-tool-exclusions)
 
 ;; ─── From invoke.clj (the shared invocation pipeline) ──────────────────────
 

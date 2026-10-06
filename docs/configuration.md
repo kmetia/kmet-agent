@@ -79,6 +79,41 @@ Config values win over files; a config value naming an existing file is read as
 content. CLI flags `--system-prompt <txt>` and `--append-system-prompt <txt>`
 (repeatable) override everything.
 
+## Tools
+
+The built-in tools (`read`, `write`, `edit`, `bash`, `run_code`) start enabled.
+`:default-tools` changes that selection. It selects among built-in tools;
+extension tools stay enabled either way.
+
+```clojure
+:default-tools ["read" "bash"]   ; plain names: only these built-ins
+:default-tools ["-bash"]         ; +name/-name modify the built-in set
+:default-tools ["read" "+bash"]  ; mixed: plain names form the selection first
+```
+
+Plain names replace the built-in selection; `+name` adds a tool and `-name`
+removes one, applied in list order. A mixed list uses its plain names as the
+selection and then applies the modifiers. An empty list disables every
+built-in tool (extension tools stay available), and an unset
+`:default-tools` enables all of them. The built-in `run_code` sandbox only
+exposes the tools that are active.
+
+Project settings layer over user settings: a `.kmet/settings.edn` list of only
+`+name`/`-name` entries modifies the user's selection, while a list containing
+a plain name replaces it.
+
+`kmet config` (the resource TUI) lists the built-in tools as their own group
+and toggles this setting: the global scope keeps a modifier-only list's shape
+(disabling writes `-name`) and rewrites a plain list as the effective
+selection, while the project scope writes the usual inherit/load/unload
+`+name`/`-name` delta over the user list.
+
+The selection applies at startup and is re-resolved by `/reload` — tools newly
+added to the setting become active, tools removed from it stay as they are,
+and a runtime selection made with the `/tools` selector (bundled `tools`
+extension) wins over the setting. kmet has no CLI equivalent of pi's
+`--tools`/`--exclude-tools`/`--no-tools`/`--no-builtin-tools` yet.
+
 ## HTTP and reload
 
 `:http-idle-timeout-ms` (default 300000, pi: `httpIdleTimeoutMs`) is the LLM

@@ -3818,6 +3818,51 @@
       (loop/set-active-tools! ag nil)
       (t/is (nil? @(:enabled-tools ag))))))
 
+(t/deftest test-active-tools-default-tools
+  (t/testing "a :default-tools selection filters built-ins; extension tools
+              stay enabled; a runtime selection wins; nil restores the default"
+    (let [builtins (set tools/builtin-tool-names)
+          builtin-names (fn [ag] (into #{} (filter builtins) (map :name (loop/active-tools ag))))
+          all-names (fn [ag] (set (map :name (loop/active-tools ag))))
+          ag (loop/make-agent-state :provider :opencode-go :model "deepseek-v4-flash"
+                                    :default-tools ["read"])]
+      (t/is (= #{"read"} (builtin-names ag)))
+      (t/testing "extension tools registered later stay active"
+        (try
+          (tools-registry/register-tool! {:name "default-tools-ext"
+                                          :description "d"
+                                          :execute (fn [_] {:content ""})})
+          (t/is (contains? (all-names ag) "default-tools-ext"))
+          (finally (tools-registry/unregister-tool! "default-tools-ext"))))
+      (t/testing "an explicit set-active-tools! selection replaces the default"
+        (loop/set-active-tools! ag ["bash"])
+        (t/is (= #{"bash"} (all-names ag))))
+      (t/testing "nil restores the configured default surface"
+        (loop/set-active-tools! ag nil)
+        (t/is (= #{"read"} (builtin-names ag))))
+      (t/testing "no setting → every tool active"
+        (let [fal (loop/make-agent-state :provider :opencode-go :model "deepseek-v4-flash")]
+          (t/is (= (set (keys (tools/get-all-tools))) (all-names fal))))))))
+
+(t/deftest test-apply-default-tools-reload
+  (t/testing "reload replaces the selection: tools newly in
+              :default-tools become active; tools removed from it
+              go inactive (pi: defaultTools controls the built-in
+              surface)"
+    (let [builtins (set tools/builtin-tool-names)
+          builtin-names (fn [ag] (into #{} (filter builtins) (map :name (loop/active-tools ag))))
+          ag (loop/make-agent-state :provider :opencode-go :model "deepseek-v4-flash"
+                                    :default-tools ["read"])]
+      (t/is (= #{"read"} (builtin-names ag)))
+      (loop/apply-default-tools! ag ["read" "bash"])
+      (t/is (= #{"read" "bash"} (builtin-names ag)))
+      (loop/apply-default-tools! ag ["read"])
+      (t/is (= #{"read"} (builtin-names ag))
+            "a tool removed from the setting goes inactive")
+      (loop/apply-default-tools! ag nil)
+      (t/is (= builtins (builtin-names ag))
+            "a removed setting (nil) re-enables every built-in"))))
+
 (t/deftest test-thinking-level-select-event
   (let [events (atom [])
         ag (loop/make-agent-state :provider :opencode-go :model "deepseek-v4-flash"

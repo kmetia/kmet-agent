@@ -62,11 +62,15 @@
         config (cfg/apply-cli-overrides (or config (cfg/load-config :no-env? true)) opts)
         _ (packages/load-skills!)
         _ (packages/load-prompts!)
+        ;; pi: defaultTools — the built-in tools active at startup; extension
+        ;; tools stay enabled
+        default-tools (tools/resolve-default-tools (cfg/get-default-tools config))
         system-prompt-opts {:custom-prompt (cfg/get-custom-prompt config)
                             :append-prompt (cfg/get-append-system-prompt config)
                             :context-files (context/load-project-context-files
                                             (cfg/get-agent-dir) (str (fs/cwd)))
-                            :tools (vals (tools/get-all-tools))}
+                            :tools (agent/active-tools-for
+                                    {:default-tools default-tools})}
         system-prompt (apply skills/build-system-prompt
                              (mapcat identity system-prompt-opts))
         resolved-provider (or provider (cfg/get-provider config))
@@ -83,6 +87,7 @@
             :system system-prompt
             :system-prompt-opts system-prompt-opts
             :session session
+            :default-tools default-tools
             :before-tool-call extension-before-tool-call
             :after-tool-call extension-after-tool-call
             ;; pi: retry settings (settings.edn :retry block — enabled gates

@@ -20,6 +20,10 @@
  :http-transport :platform
  :shell-path nil
  :shell-command-prefix nil
+ ;; built-in tools enabled at startup; nil = all (read write edit bash run_code).
+ ;; Plain names replace the set; "+name"/"-name" entries modify it. Extension
+ ;; tools are unaffected.
+ :default-tools nil
  :terminal {:show-images true
             :image-width-cells 60
             :clear-on-shrink false}

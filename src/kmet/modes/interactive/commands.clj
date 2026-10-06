@@ -773,12 +773,13 @@
               ;; pi: _rebuildSystemPrompt with new sources — the prompt is
               ;; built over the CURRENTLY active tool set (pi:
               ;; getActiveToolNames), so a pre-reload set-active-tools
-              ;; restriction survives the reload.
-              active-names @(:enabled-tools agent-state)
-              active-tools (if active-names
-                             (filterv #(contains? active-names (:name %))
-                                      (vals (tools/get-all-tools)))
-                             (vals (tools/get-all-tools)))
+              ;; restriction survives the reload. The :default-tools setting
+              ;; is re-resolved first (pi: AgentSession.reload — tools newly
+              ;; added to the setting become active; removed ones stay).
+              _ (agent/apply-default-tools! agent-state
+                                            (tools/resolve-default-tools
+                                             (cfg/get-default-tools config)))
+              active-tools (agent/active-tools agent-state)
               system-prompt-opts {:custom-prompt (cfg/get-custom-prompt config)
                                   :append-prompt (cfg/get-append-system-prompt config)
                                   ;; the cwd line follows the runtime cwd (a session

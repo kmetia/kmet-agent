@@ -1,6 +1,7 @@
 (ns kmet.app.tools.registry
   "Tool registry — built-in tool map, custom tool registration, schema conversion, execution."
-  (:require [kmet.libs.json :as json]
+  (:require [clojure.string :as str]
+            [kmet.libs.json :as json]
             [kmet.app.tools.tool :as tool]
             [kmet.app.tools.read :as read]
             [kmet.app.tools.write :as write]
@@ -220,3 +221,59 @@
                                 :get-contributed-tools get-contributed-tools
                                 :select-tools select-tools
                                 :execute-tool execute-tool})))
+
+;; ─── Default tool selection (pi: defaultTools) ─────────────────────────────
+
+(def builtin-tool-names
+  "Names of the built-in tools in registry order — the base a modifier-only
+   :default-tools list modifies, and the set the setting can exclude.
+   Pi: DEFAULT_TOOL_NAMES; kmet ships every built-in active by default, so the
+   base is the full built-in set (docs/configuration.md)."
+  (vec (keys built-in-tools)))
+
+(defn tool-selection-modifier?
+  "True when a :default-tools entry is a +name/-name modifier (pi:
+   isToolModifier)."
+  [entry]
+  (and (string? entry)
+       (or (str/starts-with? entry "+")
+           (str/starts-with? entry "-"))))
+
+(defn resolve-default-tools
+  "Resolve a merged :default-tools entry list to the initial built-in tool
+   selection (pi: SettingsManager.resolveDefaultTools). Plain names replace
+   the default built-in set; +name adds and -name removes in list order; a
+   list of only +name/-name entries modifies the default set; an empty list
+   selects no built-ins (extension tools are unaffected). Unknown names pass
+   through — they select nothing; callers match against the live registry.
+   A non-list value resolves empty and non-string entries are dropped (pi:
+   getDefaultTools). nil when ENTRIES is nil: no setting, every tool stays
+   active."
+  [entries]
+  (when entries
+    ;; pi: getDefaultTools filters to strings and treats a non-array value
+    ;; as [] before resolving; settings files are not validated
+    (let [entries (if (sequential? entries) (filterv string? entries) [])
+          plain (filterv (complement tool-selection-modifier?) entries)
+          base (cond
+                 (seq plain) plain
+                 (empty? entries) []
+                 :else builtin-tool-names)]
+      (reduce (fn [names entry]
+                (if (tool-selection-modifier? entry)
+                  (let [n (subs entry 1)]
+                    (if (str/starts-with? entry "+")
+                      (if (some #(= n %) names) names (conj names n))
+                      (filterv #(not= n %) names)))
+                  names))
+              (vec base)
+              entries))))
+
+(defn default-tool-exclusions
+  "Built-in tool names a resolved :default-tools SELECTION leaves out — the
+   :exclude list a caller passes to select-tools. nil when SELECTION is nil
+   (no setting; every built-in stays available)."
+  [selection]
+  (when selection
+    (let [selected (set selection)]
+      (into #{} (remove selected) builtin-tool-names))))

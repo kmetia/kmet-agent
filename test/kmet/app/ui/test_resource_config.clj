@@ -8,6 +8,7 @@
             [babashka.fs :as fs]
             [kmet.app.bundled-extensions :as bundled]
             [kmet.app.packages :as pkgs]
+            [kmet.app.tools.config :as tools-config]
             [kmet.app.ui.resource-config :as rc]
             [kmet.config :as cfg]
             [kmet.tui.hiccup :as hiccup]
@@ -36,10 +37,10 @@
    read-after-write round-trips behave like production. CWD is a single
    stable temp dir whose .kmet IS the project dir (production layout), so
    project auto dirs created by a test actually resolve. The bundled layer
-   is stubbed out unless OPTS :bundled? — the pre-existing tests assert
-   exact row models of their own fixtures; the bundled tests opt in and see
-   the real artifacts."
-  [f {:keys [user project bundled?]}]
+   and the built-in tools layer are stubbed out unless OPTS :bundled? /
+   :tools? — the pre-existing tests assert exact row models of their own
+   fixtures; the bundled/tools tests opt in and see the real layers."
+  [f {:keys [user project bundled? tools?]}]
   (let [global-dir (tmp-dir)
         cwd (tmp-dir)
         project-dir (str (fs/path cwd ".kmet"))
@@ -54,23 +55,24 @@
       (fs/create-dirs project-dir)
       (spit (str (fs/path project-dir "settings.edn")) (pr-str project)))
     (let [run (fn []
-                (with-redefs [cfg/read-global-settings-map (fn [] (read-file (str (fs/path global-dir "settings.edn")) {}))
-                              cfg/read-project-settings-map (fn [] (read-file (str (fs/path project-dir "settings.edn")) {}))
-                              cfg/save-setting! (fn [path value]
-                                                  (spit (str (fs/path global-dir "settings.edn"))
-                                                        (pr-str (assoc-in (read-file (str (fs/path global-dir "settings.edn")) {}) path value))))
-                              cfg/save-project-setting! (fn [path value]
-                                                          (fs/create-dirs project-dir)
-                                                          (spit (str (fs/path project-dir "settings.edn"))
-                                                                (pr-str (assoc-in (read-file (str (fs/path project-dir "settings.edn")) {}) path value))))
-                              cfg/get-agent-dir (fn [] global-dir)
-                              cfg/project-dir (fn [] project-dir)
-                              fs/cwd (fn [] cwd)]
-                  (f {:global-dir global-dir :project-dir project-dir :cwd cwd})))]
-      (if bundled?
-        (run)
-        (with-redefs [bundled/artifacts (constantly [])]
-          (run))))))
+                (with-redefs-fn
+                  (cond-> {#'cfg/read-global-settings-map (fn [] (read-file (str (fs/path global-dir "settings.edn")) {}))
+                           #'cfg/read-project-settings-map (fn [] (read-file (str (fs/path project-dir "settings.edn")) {}))
+                           #'cfg/save-setting! (fn [path value]
+                                                 (spit (str (fs/path global-dir "settings.edn"))
+                                                       (pr-str (assoc-in (read-file (str (fs/path global-dir "settings.edn")) {}) path value))))
+                           #'cfg/save-project-setting! (fn [path value]
+                                                         (fs/create-dirs project-dir)
+                                                         (spit (str (fs/path project-dir "settings.edn"))
+                                                               (pr-str (assoc-in (read-file (str (fs/path project-dir "settings.edn")) {}) path value))))
+                           #'cfg/get-agent-dir (fn [] global-dir)
+                           #'cfg/project-dir (fn [] project-dir)
+                           #'fs/cwd (fn [] cwd)}
+                    (not bundled?) (assoc #'bundled/artifacts (constantly []))
+                    (not tools?) (assoc #'tools-config/builtin-tool-items (fn [_ _] [])))
+                  (fn []
+                    (f {:global-dir global-dir :project-dir project-dir :cwd cwd}))))]
+      (run))))
 
 (defn- render-lines [screen width]
   (protocols/render screen width))
@@ -495,6 +497,130 @@
         (t/is (some #(str/includes? % "clojure") (render-lines screen 100)))))
     {:user {:bundled-extensions ["clojure"]}
      :bundled? true}))
+
+;; ─── Built-in tools (under the bundled group, before extensions) ──
+
+(t/deftest test-screen-builtin-tools-group-and-global-toggle
+  ;; the built-in tools group joins the "Bundled with kmet" group
+  ;; (before extensions); all on by default; space writes the global
+  ;; :default-tools list. An unset setting keeps its modifier shape:
+  ;; disabling writes -name so future built-ins inherit, enabling
+  ;; drops the entry again.
+  (with-settings
+    (fn [ctx]
+      (let [screen (rc/make-resource-config-screen :rows 40)
+            settings (fn [] (let [f (str (fs/path (:global-dir ctx) "settings.edn"))]
+                              (when (fs/exists? f)
+                                (edn/read-string (slurp f)))))
+            items (item-rows screen)
+            first-row (first-item-row screen)]
+        (t/is (= 5 (count items)))
+        (t/is (every? #(= :tools (:resource-type (:item %))) items))
+        (t/is (= "Bundled with kmet" (:label (:group first-row))))
+        (t/is (= "bash" (get-in (:item first-row) [:metadata :display-name]))
+              "rows sort by name within the group")
+        (t/is (every? :enabled items))
+        (t/is (some #(str/includes? % "Bundled with kmet") (render-lines screen 100)))
+        (t/testing "space disables the selected tool with a -name modifier"
+          (protocols/handle-input screen " ")
+          (t/is (= ["-bash"] (:default-tools (settings))))
+          (t/is (false? (:enabled (first-item-row screen)))))
+        (t/testing "space again removes the entry (unset = every built-in)"
+          (protocols/handle-input screen " ")
+          (t/is (nil? (:default-tools (settings))))
+          (t/is (true? (:enabled (first-item-row screen)))))))
+    {:tools? true}))
+
+(t/deftest test-screen-builtin-tools-plain-selection-rewrite
+  ;; a :default-tools list with plain names is rewritten as the effective
+  ;; selection (plain names replace the whole set, pi: resolveDefaultTools)
+  (with-settings
+    (fn [ctx]
+      (let [screen (rc/make-resource-config-screen :rows 40)
+            settings (fn [] (:default-tools (edn/read-string (slurp (str (fs/path (:global-dir ctx) "settings.edn"))))))
+            row-of (fn [name]
+                     (first (filter #(= name (get-in (:item %) [:metadata :display-name]))
+                                    (item-rows screen))))]
+        (t/is (true? (:enabled (row-of "read"))))
+        (t/is (false? (:enabled (row-of "bash"))))
+        (t/testing "disabling the only selected tool writes the empty selection"
+          (rc/screen-set-query! screen "read")
+          (protocols/handle-input screen " ")
+          (t/is (= [] (settings)))
+          (t/is (false? (:enabled (row-of "read")))))
+        (t/testing "enabling one tool from the empty selection writes [name]"
+          (rc/screen-set-query! screen "bash")
+          (protocols/handle-input screen " ")
+          (t/is (= ["bash"] (settings)))
+          (t/is (true? (:enabled (row-of "bash")))))))
+    {:user {:default-tools ["read"]}
+     :tools? true}))
+
+(t/deftest test-screen-builtin-tools-merged-state
+  ;; the global view resolves the user list only; the project view resolves
+  ;; the scope-merged entries (kmet.config/merge-default-tools)
+  (with-settings
+    (fn [_]
+      (let [rows-of (fn [screen]
+                      (item-rows screen))
+            row-of (fn [rows name]
+                     (first (filter #(= name (get-in (:item %) [:metadata :display-name])) rows)))
+            global (rc/make-resource-config-screen :rows 40)
+            project (rc/make-resource-config-screen :rows 40
+                                                    :write-scope :project
+                                                    :project-mode? true)]
+        (t/is (true? (:enabled (row-of (rows-of global) "read"))))
+        (t/is (false? (:enabled (row-of (rows-of global) "bash"))))
+        (t/is (true? (:enabled (row-of (rows-of project) "read"))))
+        (t/is (true? (:enabled (row-of (rows-of project) "bash"))))))
+    {:user {:default-tools ["read"]}
+     :project {:default-tools ["+bash"]}
+     :tools? true}))
+
+(t/deftest test-screen-builtin-tools-project-override-cycle
+  ;; project scope: the built-in tool row is an inherited global setting;
+  ;; the tri-state cycle writes +/- deltas into the project :default-tools
+  ;; list and clears the key again at :inherit
+  (with-settings
+    (fn [ctx]
+      (let [screen (rc/make-resource-config-screen :rows 40
+                                                   :write-scope :project
+                                                   :project-mode? true)
+            settings (fn [] (let [f (str (fs/path (:project-dir ctx) "settings.edn"))]
+                              (when (fs/exists? f)
+                                (:default-tools (edn/read-string (slurp f))))))
+            row (first-item-row screen)]
+        (t/is (= :inherit (:override-state row)))
+        (t/is (true? (:inherited? row)))
+        (t/testing "inherit → unload writes -name"
+          (protocols/handle-input screen " ")
+          (t/is (= ["-bash"] (settings)))
+          (t/is (= :unload (:override-state (first-item-row screen))))
+          (t/is (false? (:enabled (first-item-row screen)))))
+        (t/testing "unload → load writes +name"
+          (protocols/handle-input screen " ")
+          (t/is (= ["+bash"] (settings)))
+          (t/is (= :load (:override-state (first-item-row screen))))
+          (t/is (true? (:enabled (first-item-row screen)))))
+        (t/testing "load → inherit clears the project key"
+          (protocols/handle-input screen " ")
+          (t/is (nil? (settings)))
+          (t/is (= :inherit (:override-state (first-item-row screen)))))))
+    {:tools? true}))
+
+(t/deftest test-screen-builtin-tools-group-order
+  ;; built-in tools sit in the single "Bundled with kmet" group,
+  ;; Tools subgroup before Extensions
+  (with-settings
+    (fn [_]
+      (let [screen (rc/make-resource-config-screen :rows 40)
+            groups (filterv #(= :group (:kind %)) (rc/screen-rows screen))
+            tools-rows (filter #(= :tools (:resource-type (:item %))) (item-rows screen))]
+        (t/is (= 1 (count groups)))
+        (t/is (= "Bundled with kmet" (:label (:group (first groups)))))
+        (t/is (pos? (count tools-rows)))
+        (t/is (every? #(= :tools (:resource-type (:item %))) tools-rows))))
+    {:tools? true :bundled? true}))
 
 ;; ─── Project auto-dir items (regression: SCI duplicate-key crash) ─────────
 

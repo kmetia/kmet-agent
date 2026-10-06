@@ -996,8 +996,10 @@
 ;; array instead (pi toggleTopLevelResource / setProjectTopLevelOverride).
 
 (def resource-type-labels
-  "pi RESOURCE_TYPE_LABELS."
-  {:extensions "Extensions" :skills "Skills" :prompts "Prompts" :themes "Themes"})
+  "pi RESOURCE_TYPE_LABELS plus kmet's built-in tools type (the config
+   screen's tools group — not a package resource)."
+  {:tools "Tools"
+   :extensions "Extensions" :skills "Skills" :prompts "Prompts" :themes "Themes"})
 
 (defn item-key
   "pi getResourceItemKey — resourceType + canonical path."

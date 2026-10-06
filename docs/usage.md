@@ -79,6 +79,11 @@ resource dirs.
   Single-extension packages (a file source or an `extension.edn` directory)
   ignore those filters, so their rows are marked *always loaded* and cannot
   be toggled.
+- The TUI leads with a **Built-in tools** group (`read`, `write`, `edit`,
+  `bash`, `run_code`); toggles write the `:default-tools` setting
+  ([configuration](configuration.md#tools)) — the project scope cycles the
+  same inherit/load/unload delta (`+name`/`-name`) as the other rows. The
+  app-provided bundled extensions follow as the **Bundled with kmet** group.
 
 ### In-TUI commands
 

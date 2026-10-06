@@ -157,8 +157,11 @@
          positive number overrides the total request deadline; 0 disables it
          (falls back to idle); nil uses idle),
          :block-images (default false, pi: images.blockImages — strip image
-         blocks from provider calls; transcript and session untouched)"
-  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms before-tool-call after-tool-call system-prompt-override transform-context prepare-next-turn should-stop-after-turn get-api-key scoped-models system-prompt-opts compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images]
+         blocks from provider calls; transcript and session untouched),
+         :default-tools (resolved :default-tools selection — the built-in
+         tools active at startup, pi: defaultTools; nil = every built-in
+         active, see kmet.app.tools.registry/resolve-default-tools)"
+  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms before-tool-call after-tool-call system-prompt-override transform-context prepare-next-turn should-stop-after-turn get-api-key scoped-models system-prompt-opts compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools]
       :or {provider :opencode-go
            thinking :off
            steering-mode :all
@@ -187,6 +190,7 @@ Be precise and concise in your responses."}}]
                     :signal (atom false)
                     :thinking (atom thinking)
                     :enabled-tools (atom nil)
+                    :default-tools (atom default-tools)
                     :on-event on-event
                     :base-url base-url
                     :api-type api-type
@@ -226,16 +230,33 @@ Be precise and concise in your responses."}}]
 
 ;; ─── Active tools (pi: ctx.setActiveTools) ──────────────────────
 
-(defn- active-tools
-  "The tools sent to the LLM: the registry filtered to the :enabled-tools
-   set (nil = all), preserving registry order (registry/select-tools)."
-  [agent]
+(defn active-tools-for
+  "The tool set a selection resolves to, in registry order (see
+   registry/select-tools): ENABLED (the runtime allowlist, nil = all) wins;
+   otherwise DEFAULT-TOOLS (a resolved :default-tools selection, nil = every
+   built-in) excludes the built-ins it leaves out — extension tools stay
+   enabled (pi: defaultTools selects the built-in tools; extension/custom
+   tools remain enabled). The wire :tools and the run_code sandbox surface
+   both resolve through this."
+  [{:keys [enabled default-tools]}]
   (vals (tools/select-tools (tools/get-all-tools)
-                            {:enabled @(:enabled-tools agent)})))
+                            {:enabled enabled
+                             :exclude (when (nil? enabled)
+                                        (tools/default-tool-exclusions default-tools))})))
+
+(defn active-tools
+  "The tools sent to the LLM (pi: AgentSession.getActiveToolNames → the
+   declared set): the registry filtered by the state's :enabled-tools and
+   :default-tools (see active-tools-for)."
+  [agent]
+  (active-tools-for {:enabled @(:enabled-tools agent)
+                     :default-tools @(:default-tools agent)}))
 
 (defn set-active-tools!
   "Restrict the tools sent to the LLM to NAMES (a set or seq of tool
-   names); nil restores all tools (pi: setActiveTools). Also rebuilds the
+   names); nil restores the configured default surface — every tool, minus
+   the built-ins a :default-tools selection leaves out (pi: setActiveTools).
+   Also rebuilds the
    system prompt to reflect the new tool set (pi: setActiveToolsByName —
    only tools in the registry can be enabled; unknown names are ignored).
    Validation runs against the LIVE tool registry, and the base prompt
@@ -259,7 +280,9 @@ Be precise and concise in your responses."}}]
         valid (if enabled
                 (filterv #(contains? enabled (:name %))
                          (vals (tools/get-all-tools)))
-                (vals (tools/get-all-tools)))
+                ;; nil restores the configured default surface — a
+                ;; :default-tools selection stays in force
+                (active-tools-for {:default-tools @(:default-tools agent)}))
         ;; pi filters unknown names out of the enabled set itself (only
         ;; registry tools are stored); the prompt is built from VALID, so
         ;; the two can never diverge
@@ -270,6 +293,17 @@ Be precise and concise in your responses."}}]
       (reset! (:system agent)
               (apply skills/build-system-prompt (mapcat identity opts))))
     nil))
+
+(defn apply-default-tools!
+  "Re-apply the :default-tools selection after a settings reload
+   (pi: AgentSession.reload — the new selection replaces the
+   accumulated one; tools it names are active, tools it omits are
+   not; extension tools in :enabled-tools are unaffected). An
+   explicit set-active-tools! selection wins over it. Returns the
+   new selection."
+  [agent selection]
+  (reset! (:default-tools agent) (vec (or selection tools/builtin-tool-names))))
+
 ;; ─── Helpers ───────────────────────────────────────────────────────────────
 
 (defn- emit
@@ -1686,8 +1720,14 @@ Be precise and concise in your responses."}}]
                                      (tools-util/cwd))
                 ;; a thunk, not a snapshot: set-active-tools! takes effect on
                 ;; the next turn, and the run_code sandbox keys its context on
-                ;; the set it resolves at call time
-                run-code-tool/*enabled-tools-fn* (fn [] @(:enabled-tools agent))
+                ;; the set it resolves at call time. The effective active set
+                ;; is resolved (not just :enabled-tools) so a :default-tools
+                ;; selection hides the built-ins it disables from scripts too
+                ;; (pi: the codemode callable set is the active direct tools)
+                run-code-tool/*enabled-tools-fn*
+                (fn []
+                  (when (or @(:enabled-tools agent) @(:default-tools agent))
+                    (into #{} (map :name) (active-tools agent))))
                 ;; the run's agent-level tool hooks as thunks — a hook set
                 ;; mid-run is picked up, and scripted inner calls go through
                 ;; the same before/after semantics as the loop's own batches

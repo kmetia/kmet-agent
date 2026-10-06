@@ -52,6 +52,7 @@ global agent directory can be changed with `KMET_CODING_AGENT_DIR`.
 | `:http-transport` | `:platform` uses the built-in HTTP client where possible and curl for proxy cases; `:curl` sends all requests through curl. |
 | `:terminal`, `:images` | Inline-image display, image width, clear-on-shrink, and whether images are sent to providers. |
 | `:shell-path`, `:shell-command-prefix` | Custom bash executable and a line prepended to every bash command. |
+| `:default-tools` | Built-in tools enabled at startup: plain names replace the set, `+name`/`-name` entries modify it. |
 | `:system-prompt`, `:append-system-prompt` | Replace or extend the system prompt. A value naming an existing file is read as that file's contents. |
 
 See the [configuration guide](../configuration.md)

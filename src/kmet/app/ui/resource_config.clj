@@ -4,6 +4,11 @@
    first, then packages, then top-level groups, pi buildGroups over the
    unified resolution).
 
+   The kmet-only built-in tools group renders first
+   (kmet.app.tools.config): one row per built-in tool, toggled through the
+   :default-tools settings key of the write scope (global: -name modifier
+   or plain selection rewrite; project: +/- delta over the global list).
+
    The bundled group lists the app-provided bundled extensions
    (kmet.app.bundled-extensions): always present,
    disabled by default, toggled through the :bundled-extensions settings
@@ -41,6 +46,7 @@
             [babashka.fs :as fs]
             [kmet.app.keybindings :as app-kb]
             [kmet.app.packages :as pkgs]
+            [kmet.app.tools.config :as tools-config]
             [kmet.app.ui.subs :as s]
             [kmet.config :as cfg]
             [kmet.libs.reakt :as r]
@@ -54,8 +60,9 @@
             [kmet.tui.utils :as u]))
 
 (def ^:private type-order
-  "pi typeOrder — subgroup order inside a group."
-  {:extensions 0 :skills 1 :prompts 2 :themes 3})
+  "pi typeOrder — subgroup order inside a group (the kmet-only :tools
+   subgroup only ever appears in the built-in tools group)."
+  {:tools 0 :extensions 1 :skills 2 :prompts 3 :themes 4})
 
 (def ^:private chrome-lines
   "Fixed lines around the list rows (pi ConfigSelectorComponent chrome):
@@ -92,7 +99,7 @@
    settings-entry groups name their scope (User/Project settings); auto-dir
    groups name the scope + base dir (User/∼... or Project/.kmet/...); the
    bundled group is a fixed label — the shipped set is the same in every
-   project."
+   project. Built-in tools share this label (origin :bundled)."
   [origin scope source base-dir agent-dir]
   (cond
     (= origin :bundled) "Bundled with kmet"
@@ -300,11 +307,19 @@
    sees (user-only settings for :user, the merged settings for :project)."
   []
   (let [user-settings (cfg/read-global-settings-map)
-        project-settings (cfg/read-project-settings-map)]
-    {:user (pkgs/resolve-package-items user-settings nil nil false
-                                       (pkgs/bundled-items user-settings nil))
-     :project (pkgs/resolve-package-items user-settings project-settings nil true
-                                          (pkgs/bundled-items user-settings project-settings))}))
+        project-settings (cfg/read-project-settings-map)
+        ;; the built-in tools group joins each view: user-only settings for
+        ;; the global view, the scope-merged :default-tools entries for the
+        ;; project view (kmet.app.tools.config)
+        tools (fn [project?]
+                (tools-config/builtin-tool-items user-settings
+                                                 (when project? project-settings)))]
+    {:user (assoc (pkgs/resolve-package-items user-settings nil nil false
+                                              (pkgs/bundled-items user-settings nil))
+                  :tools (tools false))
+     :project (assoc (pkgs/resolve-package-items user-settings project-settings nil true
+                                                 (pkgs/bundled-items user-settings project-settings))
+                     :tools (tools true))}))
 
 (defn- override-state-of
   "pi getProjectOverrideState — ITEM's project override state from the live
@@ -313,6 +328,7 @@
    otherwise."
   [item]
   (cond
+    (tools-config/builtin-tool-item? item) (tools-config/builtin-tool-override-state-of item)
     (pkgs/bundled-item? item) (pkgs/bundled-override-state-of item)
     (pkgs/top-level-item? item) (pkgs/top-level-override-state-of item)
     :else (pkgs/override-state-of item (pkgs/project-packages))))
@@ -445,7 +461,8 @@
   "Space/enter on an item row (pi toggleResource): global scope flips the
    enabled state (package items write the package entry, top-level items
    the scope's settings resource array, bundled items the
-   :bundled-extensions entry); project scope cycles inherit/load/unload
+   :bundled-extensions entry, built-in tools the :default-tools entry);
+   project scope cycles inherit/load/unload
    (pi getNextOverrideState + setProjectResourceOverride — the package,
    top-level or bundled branch per origin). The row's state updates in
    place (pi updateItem) — the layout is not re-resolved. Single-extension
@@ -458,6 +475,26 @@
     (when (and row (= :item (:kind row)))
       (let [item (:item row)]
         (cond
+          ;; built-in tools are not :packages entries either: the global
+          ;; branch writes the :default-tools list, the project branch its
+          ;; +name/-name delta (kmet.app.tools.config/apply-builtin-tool-*)
+          (tools-config/builtin-tool-item? item)
+          (if (= :global (:write-scope st))
+            (let [enabled (not (:enabled row))]
+              (tools-config/apply-builtin-tool-toggle! item enabled)
+              (update-row-state! this {:enabled enabled
+                                       :override-state :inherit}))
+            (let [next-state (pkgs/next-override-state (:override-state row)
+                                                       (:inherited-enabled row))]
+              (when (not= next-state (:override-state row))
+                (tools-config/apply-builtin-tool-project-override! item next-state)
+                (update-row-state!
+                 this
+                 {:override-state next-state
+                  :enabled (if (= :inherit next-state)
+                             (:inherited-enabled row)
+                             (= :load next-state))}))))
+
           ;; bundled items are not :packages entries: the global branch
           ;; writes the :bundled-extensions key, the project branch its
           ;; +/- delta (kmet.app.packages/apply-bundled-*)

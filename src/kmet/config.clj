@@ -99,6 +99,31 @@
 
 (def deep-merge eds/deep-merge)
 
+;; ─── defaultTools scope merge (pi: SettingsManager.mergeDefaultTools) ──────
+
+(defn- tool-selection-modifier?
+  "True when a :default-tools entry is a +name/-name modifier. Kept local
+   to config so the settings merge stays free of the tools registry; the
+   resolver in kmet.app.tools.registry owns the tool-name side."
+  [entry]
+  (and (string? entry)
+       (or (str/starts-with? entry "+")
+           (str/starts-with? entry "-"))))
+
+(defn merge-default-tools
+  "Merge the user and project :default-tools entry lists (pi:
+   SettingsManager.mergeDefaultTools): a project list of only +name/-name
+   entries appends to the user list — it modifies the inherited selection —
+   while a list with any plain name (or a malformed value) replaces it.
+   Returns USER when PROJECT is nil. Exposed for the `kmet config` screen
+   (kmet.app.tools.config); load-config uses it for the runtime merge."
+  [user project]
+  (cond
+    (nil? project) user
+    (not (and (sequential? user)
+              (every? tool-selection-modifier? project))) project
+    :else (into (vec user) project)))
+
 ;; load-config (above) applies the merged :http-transport and the shell
 ;; settings to their runtime knobs; the accessors live with the others below.
 (declare get-http-transport get-shell-path get-shell-command-prefix)
@@ -224,7 +249,19 @@
         base (deep-merge (resolve-scope-paths default-config global-dir)
                          (resolve-scope-paths user-config global-dir)
                          (resolve-scope-paths project-config project-dir))
-        with-env (cond-> base
+        ;; :default-tools — pi merges the scopes' entry lists instead of
+        ;; letting a project list replace the user one: a project list of
+        ;; only +name/-name entries modifies the user selection, any plain
+        ;; name replaces it (SettingsManager.mergeDefaultTools). The
+        ;; tool-name resolution happens at startup
+        ;; (kmet.app.tools.registry/resolve-default-tools).
+        with-default-tools (if (or (contains? (or user-config {}) :default-tools)
+                                   (contains? (or project-config {}) :default-tools))
+                             (assoc base :default-tools
+                                    (merge-default-tools (:default-tools user-config)
+                                                         (:default-tools project-config)))
+                             base)
+        with-env (cond-> with-default-tools
                    env-provider (assoc :provider env-provider)
                    env-model (assoc :model env-model))]
     ;; Runtime knobs from the merged config (precedent: auth/load-auth!
@@ -373,6 +410,14 @@
    enabledModels — same format as the --models flag). nil = all enabled."
   [config]
   (:enabled-models config))
+
+(defn get-default-tools
+  "The merged :default-tools entry list (pi: SettingsManager.getDefaultTools)
+   — plain built-in tool names and +name/-name modifiers, or nil when no
+   settings scope sets the key. Resolve it with
+   kmet.app.tools.registry/resolve-default-tools before use."
+  [config]
+  (:default-tools config))
 
 (defn- read-global-settings
   "The parsed global settings map, or nil when the file is missing,
