@@ -41,9 +41,18 @@ Landed baseline — do not redo:
   `run-agent-turn` owns the state machine, `run-attempt!` is the low-level
   loop, one `:agent-start`/`:agent-end` pair per attempt, one `:agent-settled`
   per prompt.
+- **E** — a message an `:agent-end` handler queues starts a fresh attempt in
+  the same prompt. `run-agent-turn`'s `:settled` branch drains
+  steering-else-follow-up into the context (`drain-next-queue!`, mirroring
+  `Agent.continue`) and begins the next attempt; `on-done` moved to the
+  prompt's settle point so one prompt still tears down once. Also fixed the
+  after-turn-stop settled outcome's missing `:status`, which resumed the
+  follow-up drain with a nil turn index and crashed the next turn.
+- **J** — `peek-queued-messages`: a non-destructive, mode-aware preview of
+  the next batch (steering wins), ready for the F/G boundary previews.
 
-Open: **D–L**, phased below. D is the item the original note tracked; E–L are
-the 0.87.0 session-context / boundary wave.
+Open: **D, F–L**, phased below. D is the item the original note tracked;
+F–L are the 0.87.0 session-context / boundary wave.
 
 ## Target behavior (pi)
 
@@ -98,9 +107,20 @@ Decisions taken for this plan:
 
 ---
 
-## Phase 1 — post-run continuation
+## Phase 1 — post-run continuation (E, J landed)
 
 ### E. Messages queued by an `:agent-end` handler start a fresh attempt
+
+**Landed.** Two notes beyond the sketch. The next attempt *drains before it
+starts* (`drain-next-queue!` mirrors `Agent.continue`: steering first, then
+follow-up, per mode), so the queued message is that attempt's prompt instead
+of costing an extra empty request; a second batch still queued then is picked
+up by the attempt's own follow-up poll, as pi's `runLoop` does. And `on-done`
+moved from `run-attempt!` to the prompt's settle point — the UI's
+`running-turn?` teardown keys on it, so a per-attempt call would mark the
+prompt finished between attempts. The registry's "run vs queue" branches now
+key on `state/turn-running?` too (pi: `isStreaming` outlives the last
+attempt); the sites still on the status atom are the finding below.
 
 **Goal.** A follow-up/steer queued during the `:agent-end` extension dispatch
 runs in the same prompt instead of waiting for the next submit.
@@ -129,6 +149,11 @@ two `:agent-start`/`:agent-end` pairs in one prompt, one `:agent-settled`.
 
 ### J. `peekQueuedMessages`
 
+**Landed.** `peek-queued-messages` (`src/kmet/app/loop.clj`): non-destructive,
+mode-aware, steering wins over follow-up. The pending display keeps using the
+raw `queued-messages` — that is what pi's `updatePendingMessagesDisplay`
+does (`getAllQueuedMessages`, not `peekQueuedMessages`).
+
 **Goal.** Preview the next queued batch without draining it, for the F/G
 boundary previews and the UI pending display.
 
@@ -144,6 +169,20 @@ pending-custom queue added in H), used by F/G and the pending display.
 
 **Acceptance.** Peeking does not empty the queues and returns the same messages
 the next drain consumes.
+
+### Phase 1 finding: the settle window still reports "idle"
+
+The `:status` atom reads `:idle` from the attempt tail on, so between that
+point and the prompt's finally the agent looks idle while a prompt is in
+flight — pi's `isStreaming` (`_isAgentRunActive`) stays true for the whole
+prompt. E fixed the two sites the continuation depends on; these still key on
+the status atom and are wrong in the same window (D's post-run compaction
+widens it, so fix them with or before D):
+
+- `ui_registry.clj` `:is-idle` (ext ctx, pi `isIdle`), `:wait-for-idle`,
+  `:abort` (pi `abort()` works while a run is active)
+- `commands.clj` `/compact` and `/reload` "wait for the current response"
+  guards
 
 ---
 
@@ -370,8 +409,11 @@ next provider context; the raw branch, usage totals, and replay are unchanged.
 
 ## Docs to update as items land
 
-- `src/kmet/app/event_bus.clj` — A/B done; E/F/G/H/L add or reshape events
+- `src/kmet/app/event_bus.clj` — A/B/E done (E reshaped the `:agent-start`
+  and `:agent-end` descriptions); F/G/H/L add or reshape events
   (`:agent-before-settle`, actionable `:turn-end`, `:context-with-system`).
+- `src/kmet/extension.md` — done with E (the `:agent-end` queueing
+  paragraph and the `send-user-message` note).
 - `src/kmet/development/pi-alignment.md` — A/B/C done and §7 moved here; the
   Appendix rows for the agent/turn/context boundaries point at this file. The
   compaction row (`session_before_compact` / `session_compact`) follows D.

@@ -1091,6 +1091,45 @@
     (t/is (= :queue-update (:type (last @events)))
           "follow-up! emits :queue-update")))
 
+(t/deftest test-loop-peek-queued-messages
+  ;; pi: Agent.peekQueuedMessages — a non-destructive preview of the batch
+  ;; the loop consumes next: steering while it has messages (the inner loop
+  ;; polls it first), otherwise the follow-up queue; each per its queue mode.
+  (let [agent (loop/make-agent-state)
+        next-drain (fn []
+                     (if (seq @(:steering agent))
+                       (#'loop/drain-queue! (:steering agent)
+                                            (:steering-mode @(:cfg agent)))
+                       (#'loop/drain-queue! (:follow-up agent)
+                                            (:follow-up-mode @(:cfg agent)))))]
+    (t/is (= [] (loop/peek-queued-messages agent))
+          "empty queues preview nothing")
+    (loop/steer! agent "s1")
+    (loop/steer! agent "s2")
+    (t/is (= ["s1" "s2"] (loop/peek-queued-messages agent)))
+    (loop/follow-up! agent "f1")
+    (t/is (= ["s1" "s2"] (loop/peek-queued-messages agent))
+          "steering wins while it has messages")
+    (t/is (= ["s1" "s2"] @(:steering agent)) "peeking drains nothing")
+    (t/is (= ["f1"] @(:follow-up agent)) "peeking drains nothing")
+    (swap! (:cfg agent) assoc :steering-mode :one-at-a-time)
+    (t/is (= ["s1"] (loop/peek-queued-messages agent))
+          ":one-at-a-time previews the single message the drain takes")
+    (t/is (= ["s1"] (vec (next-drain)))
+          "the preview is exactly what the next drain consumes")
+    (t/is (= ["s2"] (loop/peek-queued-messages agent))
+          "the unconsumed message is still previewed")
+    (swap! (:cfg agent) assoc :steering-mode :all)
+    (loop/clear-queues! agent)
+    (loop/follow-up! agent "f1")
+    (loop/follow-up! agent "f2")
+    (t/is (= ["f1" "f2"] (loop/peek-queued-messages agent))
+          "follow-up previews once steering is empty")
+    (swap! (:cfg agent) assoc :follow-up-mode :one-at-a-time)
+    (t/is (= ["f1"] (loop/peek-queued-messages agent)))
+    (t/is (= ["f1"] (vec (next-drain)))
+          "the preview is exactly what the next drain consumes")))
+
 (t/deftest test-loop-cancel-clears-queues
   (let [agent (loop/make-agent-state)]
     (loop/steer! agent "x")
@@ -1194,6 +1233,72 @@
                (select-keys (last queue-updates) [:steering :follow-up]))
             "consumption reports the drained queue"))
     (t/is (= :idle @(:status agent)) "agent idle after run")))
+
+(t/deftest test-loop-agent-end-queued-messages-start-attempts
+  ;; pi: _handlePostAgentRun ends with hasQueuedMessages(), so messages an
+  ;; :agent-end handler queues run in fresh attempts of the same prompt —
+  ;; agent.continue drains the queue into that attempt's prompt (steering
+  ;; first, then follow-up). Messages queued by :agent-settled handlers stay
+  ;; queued: settle fires in the prompt's finally.
+  (let [calls (atom 0)
+        dones (atom 0)
+        seen (atom [])
+        events (atom [])
+        queue-once (atom true)
+        agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))
+        dereg-end (event-bus/on-event
+                   :agent-end
+                   (fn [_]
+                     (when (compare-and-set! queue-once true false)
+                       (loop/steer! agent "steered by agent-end")
+                       (loop/follow-up! agent "followed up by agent-end"))))
+        dereg-settled (event-bus/on-event
+                       :agent-settled
+                       (fn [_] (loop/follow-up! agent "queued by agent-settled")))]
+    (try
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [opts]
+                      (swap! seen conj (:messages opts))
+                      (future
+                        (when-let [on-text (:on-text opts)]
+                          (on-text (str "response-" (swap! calls inc))))
+                        (when-let [on-done (:on-done opts)]
+                          (on-done :stop))
+                        :done))]
+        @(loop/run-agent-turn agent
+                              {:message "hi"
+                               :on-done (fn [_] (swap! dones inc))
+                               :on-error (fn [_])}))
+      (finally
+        (dereg-end)
+        (dereg-settled)))
+    (t/is (= 3 (count @seen))
+          "three requests: the steering batch opens attempt 2, whose own
+           follow-up drain then runs the third (pi: runLoop's outer poll)")
+    (t/is (= 1 @dones)
+          "on-done is the prompt's teardown — once per prompt")
+    (t/is (= 2 (count (filter #(= :agent-start (:type %)) @events)))
+          "one :agent-start per attempt")
+    (t/is (= 2 (count (filter #(= :agent-end (:type %)) @events)))
+          "one :agent-end per attempt")
+    (t/is (= 1 (count (filter #(= :agent-settled (:type %)) @events)))
+          "exactly one :agent-settled per prompt, after the continuations")
+    (let [user-text (fn [msgs]
+                      (mapv #(get-in % [:content 0 :text])
+                            (filter #(= :user (:role %)) msgs)))]
+      (t/is (= ["hi" "steered by agent-end"] (user-text (second @seen)))
+            "the steering batch drains first, as the next attempt's prompt")
+      (t/is (= ["hi" "steered by agent-end" "followed up by agent-end"]
+               (user-text (nth @seen 2)))
+            "the follow-up batch is drained by attempt 2's own poll, before it
+             ends — it costs no extra attempt"))
+    (t/is (= ["hi" "steered by agent-end" "followed up by agent-end"]
+             (mapv #(get-in % [:content 0 :text])
+                   (filter #(= :user (:role %)) (loop/get-context agent)))))
+    (t/is (= ["queued by agent-settled"] @(:follow-up agent))
+          "a message queued after the last :agent-end stays queued")
+    (t/is (= :idle @(:status agent)))))
 
 (t/deftest test-loop-steer-one-at-a-time
   (let [calls (atom 0)
@@ -3026,6 +3131,65 @@
                       :done))]
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
     (t/is (= 1 @calls) "loop stops after the first turn")
+    (t/is (= :idle @(:status agent)))))
+
+(t/deftest test-loop-stop-after-turn-still-drains-a-queued-follow-up
+  ;; The tool-phase stop path settles with a :turn tag and resumes from it
+  ;; (pi: runLoop's follow-up poll after the turn keeps counting turns). The
+  ;; final-response variant below also checks the message reaches the context.
+  (let [calls (atom 0)
+        errors (atom [])
+        events (atom [])
+        agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))]
+    (reset! (:should-stop-after-turn agent) (fn [_] true))
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message (stub-llm-tool-then-text calls)
+                  tools/execute-tool
+                  (fn [_ _ _]
+                    (loop/follow-up! agent "queued follow-up")
+                    {:content "ok" :is-error false})]
+      @(loop/run-agent-turn agent
+                            {:message "run"
+                             :on-done (fn [_])
+                             :on-error (fn [e] (swap! errors conj e))}))
+    (t/is (empty? @errors) "the stop path resumed the run instead of crashing")
+    (t/is (= 2 @calls) "the queued follow-up ran")
+    (t/is (= [0 1]
+             (mapv :turn-index (filter #(= :turn-start (:type %)) @events)))
+          "turn numbering resumes from the stopped turn")))
+
+(t/deftest test-loop-stop-after-turn-final-drains-a-queued-follow-up
+  ;; The final-response stop path must settle with a :turn tag too: a
+  ;; follow-up queued while that response streamed (the user's Alt+Enter) is
+  ;; drained by the outer poll, and an untagged outcome resumes the loop with
+  ;; a nil turn index — the resumed turn then crashes computing the next one.
+  (let [calls (atom 0)
+        errors (atom [])
+        events (atom [])
+        agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))]
+    (reset! (:should-stop-after-turn agent) (fn [_] true))
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message
+                  (fn [opts]
+                    (future
+                      (when (= 1 (swap! calls inc))
+                        ;; the user queues a follow-up while this response streams
+                        (loop/follow-up! agent "queued follow-up"))
+                      (when-let [on-done (:on-done opts)]
+                        (on-done :stop))
+                      :done))]
+      @(loop/run-agent-turn agent
+                            {:message "run"
+                             :on-done (fn [_])
+                             :on-error (fn [e] (swap! errors conj e))}))
+    (t/is (empty? @errors) "the stop path resumed the run instead of crashing")
+    (t/is (= 2 @calls) "the queued follow-up ran a second turn")
+    (t/is (= [0 1]
+             (mapv :turn-index (filter #(= :turn-start (:type %)) @events)))
+          "turn numbering resumes from the stopped turn")
+    (t/is (= "queued follow-up"
+             (get-in (last (filter #(= :user (:role %)) (loop/get-context agent)))
+                     [:content 0 :text])))
     (t/is (= :idle @(:status agent)))))
 
 ;; ─── Phase 3: parallel tool execution ────────────────────────────────────

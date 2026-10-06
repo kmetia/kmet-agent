@@ -15,8 +15,9 @@
    app — see each entry's description for the emitting path."
   {:agent-start
    "Fired at the start of each attempt: once per user submission, and once
-    more for every auto-retry or overflow-recovery attempt (pi: agent_start,
-    emitted by agent.prompt and by every agent.continue)."
+    more for every auto-retry, overflow-recovery, or agent-end-queued
+    attempt (pi: agent_start, emitted by agent.prompt and by every
+    agent.continue)."
 
    :agent-end
    "Fired when an attempt finishes (success or error) — one per attempt
@@ -25,7 +26,11 @@
     mid-run context replacement does not shrink the list, and an aborted or
     errored attempt is included), :error (optional), :will-retry (true when
     this attempt's transient error will be retried; pi: willRetry, added for
-    public listeners only — extensions never see the key)."
+    public listeners only — extensions never see the key). A handler that
+    queues a message here (steer! / follow-up!) starts a fresh attempt in
+    the same prompt, with the queued messages as its starting context (pi:
+    _handlePostAgentRun's hasQueuedMessages → agent.continue); messages
+    queued by :agent-settled handlers stay queued for the next submission."
 
    :turn-start
    "Fired before each LLM call.

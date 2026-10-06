@@ -1533,6 +1533,62 @@
           ;; capability throws, so later contexts cannot see the fake cs.
           (finally (clear-installed-context!)))))))
 
+(deftest test-send-user-message-queues-while-the-prompt-settles
+  (testing "a send during the settle window queues into the running prompt
+            instead of starting a concurrent one (pi: prompt() while
+            isStreaming queues via streamingBehavior; isStreaming stays true
+            until the whole prompt loop finishes, so an :agent-end handler's
+            message extends the prompt)"
+    (let [model (m/map->Model {:provider :test-native :id "test-model"})
+          ag (agent/make-agent-state :provider :test-native :model "test-model")
+          ;; The settle window: a prompt is in flight (running-turn? true) but
+          ;; the last attempt already reported the agent idle.
+          cs {:agent-state (atom ag)
+              :config cfg/default-config
+              :session-atom (atom nil)
+              :footer-provider (fdp/make-footer-data-provider)
+              :compaction-queued (atom [])
+              :pending-messages-comp {:steering-atom (atom [])
+                                      :follow-up-atom (atom [])}
+              :running-turn? (atom true)}]
+      (with-redefs [m/providers-atom (atom {:test-native {:models [model]}})]
+        (try
+          (let [registry ((var ui-registry/build-extension-ui-registry)
+                          {:tui nil :cs cs}
+                          {:fdp (:footer-provider cs)}
+                          nil)
+                started (atom 0)]
+            (with-redefs [turn/start-agent-run! (fn [& _] (swap! started inc))]
+              (t/is (= :idle @(:status ag)) "the attempt already reported idle")
+              ((:send-user-message registry) "queued" {:deliver-as :follow-up})
+              (t/is (= ["queued"] @(:follow-up ag))
+                    "queued for the running prompt")
+              (t/is (= 0 @started) "no concurrent prompt")
+              ((:send-user-message registry) "steered" {:deliver-as :steer})
+              (t/is (= ["steered"] @(:steering ag)))
+              (let [before (count @(:follow-up ag))]
+                ((:send-message! registry) {:custom-type :note :content "custom"}
+                                           {:trigger-turn true :deliver-as :follow-up})
+                (t/is (= (inc before) (count @(:follow-up ag)))
+                      "a custom message queues as one message-map entry")
+                (t/is (map? (last @(:follow-up ag)))))
+              (t/is (= 0 @started) "still no concurrent prompt")
+              (testing "with no prompt in flight a send starts the run"
+                (let [queued-before (vec @(:follow-up ag))]
+                  (reset! (:running-turn? cs) false)
+                  ((:send-user-message registry) "fresh" {:deliver-as :follow-up})
+                  (t/is (= 1 @started) "idle send starts the run")
+                  (t/is (= queued-before @(:follow-up ag))
+                        "nothing was queued for the idle send")
+                  ;; idle + :steer starts a run too — :steer only means "into
+                  ;; the current run" while one is active
+                  (let [steered-before (vec @(:steering ag))]
+                    ((:send-user-message registry) "fresh steer" {:deliver-as :steer})
+                    (t/is (= 2 @started) "idle :steer starts the run")
+                    (t/is (= steered-before @(:steering ag))
+                          "nothing was steered with no run active"))))))
+          (finally (clear-installed-context!)))))))
+
 (deftest test-build-context-resolves-current-model
   (let [native (m/map->Model {:provider :test-native :id "test-model"
                               :base-url "https://native.test/v1"})

@@ -524,13 +524,23 @@
                                            (turn/expand-user-message-text cs text)
                                            text)]
                                 (when text
-                                  (if (= :idle @(:status ag))
+                                  ;; pi: prompt() queues while streaming —
+                                  ;; streamingBehavior steer/followUp; the run
+                                  ;; counts as active until the prompt settles,
+                                  ;; so an :agent-end handler that sends here
+                                  ;; extends the prompt instead of starting a
+                                  ;; concurrent one
+                                  (cond
+                                    (not (state/turn-running? cs))
                                     ;; pi: sendUserMessage always triggers a
                                     ;; turn when idle
                                     (turn/start-agent-run! cs text)
-                                    (if (= :steer deliver-as)
-                                      (agent/steer! ag text)
-                                      (agent/follow-up! ag text))))
+
+                                    (= :steer deliver-as)
+                                    (agent/steer! ag text)
+
+                                    :else
+                                    (agent/follow-up! ag text)))
                                 ;; both updates schedule their own frames
                                 (status/update-pending-messages! cs)
                                 (state/update-footer! cs)
@@ -563,13 +573,17 @@
                                display (:details message)))
                             (agent/add-context-message! ag msg)
                             (when (:trigger-turn opts)
-                              (if (= :idle @(:status ag))
+                              (cond
+                                (not (state/turn-running? cs))
                                 (turn/start-agent-run! cs)
-                                (if (= :steer (:deliver-as opts))
-                                  ;; already in context — the next LLM call
-                                  ;; sees it (pi: steer into the current run)
-                                  nil
-                                  (agent/follow-up! ag msg))))
+
+                                ;; already in context — the next LLM call sees
+                                ;; it (pi: steer into the current run)
+                                (= :steer (:deliver-as opts))
+                                nil
+
+                                :else
+                                (agent/follow-up! ag msg)))
                             ;; both updates schedule their own frames
                             (status/update-pending-messages! cs)
                             (state/update-footer! cs)

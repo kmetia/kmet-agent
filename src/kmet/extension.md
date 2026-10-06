@@ -712,6 +712,16 @@ Event types: `:agent-start` `:agent-end` `:agent-settled` `:turn-start`
 `:before-provider-request` `:before-provider-headers`
 `:after-provider-response`.
 
+Most events are notification-only. The one that extends a run: a message
+sent from an `:agent-end` handler — `send-user-message`, or `send-message!`
+with `:trigger-turn` — queues (`:steer` / `:follow-up`) and then starts a
+fresh attempt in the same prompt, with the queued messages as that attempt's
+prompt (pi: `hasQueuedMessages` → `agent.continue`). The same send from an
+`:agent-settled` handler stays queued for the next submission: settle is the
+prompt's last event. Queueing on *every* `:agent-end` therefore keeps
+extending the prompt — cancel (Escape) ends it, since cancelling clears the
+queues and the continuation is abort-guarded.
+
 ### Bundled resources (`io/resource` + self-registration)
 
 An extension reads its own bundled files through `clojure.java.io/resource`
@@ -942,7 +952,9 @@ the transcript's current padding.
 
 `send-user-message` always triggers a turn when the agent is idle; while
 streaming, `:deliver-as` controls whether the message is injected mid-run
-(`:steer`) or queued until the run settles (`:follow-up`, the default).
+(`:steer`) or queued (`:follow-up`, the default) — the loop drains the queue
+at the next turn boundary, or as a fresh attempt in the same prompt when the
+prompt is already settling.
 With `:expand-prompt-templates?`, the message runs through the submit
 chain first — extension commands execute immediately (consuming the
 message), then skill commands and prompt templates expand (pi:

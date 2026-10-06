@@ -11,6 +11,9 @@
    :steering-mode / :follow-up-mode (:all default) control how many queued
    messages are drained per poll cycle: :all takes everything,
    :one-at-a-time takes one. Applied per queue.
+   Both queues are also drained at the prompt's attempt boundary when an
+   :agent-end handler queued a message: the next attempt starts from it (pi:
+   agent.continue's continue() — steering first, then follow-up).
 
    Emits lifecycle events (see kmet.app.event-bus) to the :on-event callback
    (UI) and to kmet.app.event-bus/emit-event! (extension system).
@@ -512,19 +515,25 @@ Be precise and concise in your responses."}}]
 
 ;; ─── Queue helpers ─────────────────────────────────────────────────────────
 
+(defn- queue-batch
+  "The messages MODE selects from QUEUE: :all takes everything,
+   :one-at-a-time the oldest."
+  [queue mode]
+  (if (= mode :all)
+    (vec queue)
+    (vec (take 1 queue))))
+
 (defn- drain-queue!
-  "Atomically remove and return queued messages.
-   mode :all drains everything; :one-at-a-time drains at most one."
+  "Atomically remove and return the batch MODE selects from QUEUE-ATOM."
   [queue-atom mode]
   (loop []
-    (let [v @queue-atom]
-      (if (empty? v)
+    (let [v @queue-atom
+          taken (queue-batch v mode)]
+      (if (empty? taken)
         []
-        (let [taken (if (= mode :all) v (subvec v 0 1))
-              rest-v (if (= mode :all) [] (subvec v 1))]
-          (if (compare-and-set! queue-atom v rest-v)
-            taken
-            (recur)))))))
+        (if (compare-and-set! queue-atom v (subvec v (count taken)))
+          taken
+          (recur))))))
 
 (def ^:private ^:dynamic *run-token*
   "The run token of the attempt executing on this thread, or nil outside a
@@ -1145,6 +1154,19 @@ Be precise and concise in your responses."}}]
   (or (seq @(:steering agent))
       (seq @(:follow-up agent))))
 
+(defn peek-queued-messages
+  "Preview the batch the loop would consume next, without draining anything:
+   the steering queue's while it has messages, otherwise the follow-up
+   queue's (pi: Agent.peekQueuedMessages — steering wins because the inner
+   loop polls it first). Each batch honors that queue's mode, so
+   :one-at-a-time previews a single message."
+  [agent]
+  (let [cfg @(:cfg agent)
+        steering (queue-batch @(:steering agent) (:steering-mode cfg))]
+    (if (seq steering)
+      steering
+      (queue-batch @(:follow-up agent) (:follow-up-mode cfg)))))
+
 ;; ─── Bash result recording ────────────────────────────────────────────────
 
 (defn add-bash-result!
@@ -1195,6 +1217,38 @@ Be precise and concise in your responses."}}]
         msg (assoc msg :content content)]
     (append-message! agent msg)
     (emit agent {:type :message-start :message msg})))
+
+(defn- inject-queued-messages!
+  "Drain one batch from QUEUE (per MODE) and inject it into the live
+   context: strings become user messages, maps pre-injected custom messages
+   (pi: the queues carry full messages — sendMessage queues custom ones
+   there). Emits :queue-update when anything was consumed; returns the
+   number of messages injected."
+  [agent queue mode]
+  (let [msgs (drain-queue! queue mode)]
+    (doseq [m msgs]
+      (if (map? m)
+        (add-context-message! agent m)
+        (add-user-message! agent m)))
+    (when (seq msgs)
+      (emit agent {:type :queue-update
+                   :steering @(:steering agent)
+                   :follow-up @(:follow-up agent)}))
+    (count msgs)))
+
+(defn- drain-next-queue!
+  "Drain the queue the next low-level run should start from and inject its
+   messages into the live context (pi: Agent.continue — with an assistant
+   message last it drains the steering queue first and, when that is empty,
+   the follow-up queue, running the drained messages as the next run's
+   prompt). Each queue drains per its mode; returns the number of messages
+   injected (0 when both queues are empty)."
+  [agent]
+  (let [cfg @(:cfg agent)
+        [queue mode] (if (seq @(:steering agent))
+                       [(:steering agent) (:steering-mode cfg)]
+                       [(:follow-up agent) (:follow-up-mode cfg)])]
+    (inject-queued-messages! agent queue mode)))
 
 ;; ─── Agent run ─────────────────────────────────────────────────────────────
 
@@ -1560,7 +1614,9 @@ Be precise and concise in your responses."}}]
 
 (defn- after-turn!
   "Run post-turn hooks in pi order: prepareNextTurn then shouldStopAfterTurn.
-   Returns true if the loop should stop."
+   TURN-INDEX counts turns within the current attempt (pi's hooks get no
+   index): a retry or continuation attempt starts again at 0. Returns true if
+   the loop should stop."
   [agent turn-index assistant-msg tool-results]
   (when-let [f @(:prepare-next-turn agent)]
     (let [update (f {:turn-index turn-index
@@ -1764,14 +1820,18 @@ Be precise and concise in your responses."}}]
 (defn- run-attempt!
   "Run one low-level agent attempt — one :agent-start/:agent-end pair
    (pi: agent.prompt for the first attempt, agent.continue for retries).
-   Returns the attempt's outcome for the caller's retry state machine:
-     {:status :settled}    — settled normally (on-done called)
+   Returns the attempt's outcome for the caller's state machine:
+     {:status :settled :text t} — settled normally; t is the attempt's final
+                                  response text. The caller owns on-done:
+                                  a message an :agent-end handler queues can
+                                  start another attempt in the same prompt,
+                                  and on-done is the prompt's teardown.
      {:status :aborted}    — cancelled or terminal error
      {:status :retry   :error err :action action} — transient error, budget left
      {:status :overflow :error err}               — context overflow
    :agent-end is emitted here with this attempt's accumulated messages
    (RUN-TOKEN keys the accumulator) and :will-retry."
-  [agent run-token {:keys [on-text on-thinking on-done on-error]}]
+  [agent run-token {:keys [on-text on-thinking on-error]}]
   (let [text-buf (atom "")
         agent-end (fn [error will-retry]
                     (when-let [s (:session agent)]
@@ -1951,35 +2011,23 @@ Be precise and concise in your responses."}}]
                                           (recur (inc t) tool-calls false)))
                                       (let [stop? (final-phase! agent t result)]
                                         (if stop?
-                                          {:settled (inc t)}
+                                          {:status :settled :turn (inc t)}
                                           (recur (inc t) [] false))))))))))))]
           (if (contains? #{:retry :overflow :aborted} (:status inner))
             ;; RETRY/OVERFLOW/ABORTED are already fully-tagged outcomes; only a
             ;; settled attempt continues into the follow-up drain.
             inner
-            (let [turn' (:turn inner)
-                  ;; Outer: poll follow-up queue
-                  follow-ups (drain-queue! (:follow-up agent)
-                                           (:follow-up-mode @(:cfg agent)))]
-              (if (seq follow-ups)
-                (do (doseq [m follow-ups]
-                    ;; strings are user messages; maps are pre-injected custom
-                    ;; messages (pi: the follow-up queue carries full messages,
-                    ;; sendMessage queues custom messages there)
-                      (if (map? m)
-                        (add-context-message! agent m)
-                        (add-user-message! agent m)))
-                    (emit agent {:type :queue-update
-                                 :steering @(:steering agent)
-                                 :follow-up @(:follow-up agent)})
-                    (reset! (:status agent) :thinking)
+            (let [turn' (:turn inner)]
+              ;; Outer: poll the follow-up queue (pi: runLoop's outer poll)
+              (if (pos? (inject-queued-messages! agent (:follow-up agent)
+                                                 (:follow-up-mode @(:cfg agent))))
+                (do (reset! (:status agent) :thinking)
                     (emit agent {:type :status :status :thinking})
                     (recur turn'))
                 (do (reset! (:status agent) :idle)
                     (emit agent {:type :status :status :idle})
                     (agent-end nil false)
-                    (when on-done (on-done @text-buf))
-                    {:status :settled})))))))))
+                    {:status :settled :text @text-buf})))))))))
 
 (defn run-agent-turn
   "Run the agent loop until it settles, owning the attempt/retry state
@@ -1997,7 +2045,9 @@ Be precise and concise in your responses."}}]
                  ({:type :image :data base64 :mime-type str}) attached to
                  the initial user message (pi: image attachments)
      :on-text  — (fn [text-delta]) streaming text callback
-     :on-done  — (fn [response-text]) final response callback
+     :on-done  — (fn [response-text]) final response callback; runs once per
+                 prompt, when it settles (not on cancel or terminal error,
+                 and not between the attempts of one prompt)
      :on-error — (fn [error]) error callback
 
    Loop structure (mirrors pi):
@@ -2005,6 +2055,11 @@ Be precise and concise in your responses."}}]
      inner:   LLM call → tool execution → drain steering queue → repeat
               until no tool calls, no steering messages, and at least one
               turn has run.
+     settle:  a message queued by an :agent-end handler starts another
+              attempt first (pi: _handlePostAgentRun's hasQueuedMessages →
+              agent.continue, which drains the queue into the new attempt's
+              prompt); with no attempt pending the prompt settles — on-done
+              runs and :agent-settled fires from the finally.
 
    Cancellation: cancel-turn sets the signal and delivers {:cancelled true}
    to the in-flight LLM promise (active-call); the attempt exits quietly
@@ -2018,7 +2073,7 @@ Be precise and concise in your responses."}}]
   (let [provider @(:provider agent)
         api-key (resolve-api-key agent)
         opts {:on-text on-text :on-thinking on-thinking
-              :on-done on-done :on-error on-error}]
+              :on-error on-error}]
     (if (not (or api-key (auth/configured? provider)))
       (do (when message
             ;; The run cannot start, but the submitted message is still shown
@@ -2088,11 +2143,17 @@ Be precise and concise in your responses."}}]
                 (let [outcome (run-attempt! agent @attempt-token opts)]
                   (case (:status outcome)
                     :settled
-                    ;; pi runs a post-run compaction check here; kmet keeps
-                    ;; its threshold check at the next prompt's prepare-run!
-                    ;; (and per-turn in tools-phase!). The prompt settles
-                    ;; unconditionally (agent-settled fires in the finally).
-                    nil
+                    ;; pi: _handlePostAgentRun's tail — a message an
+                    ;; :agent-end handler queued starts a fresh attempt here,
+                    ;; from the queue (pi: agent.continue). on-done stays the
+                    ;; prompt's teardown (the UI's running-turn? hinges on it)
+                    ;; and fires only once no attempt is pending. kmet's
+                    ;; compaction check lives in prepare-run!/tools-phase!
+                    ;; (D moves the post-run check here).
+                    (if (and (not @(:signal agent))
+                             (pos? (drain-next-queue! agent)))
+                      (do (begin-attempt!) (recur))
+                      (when on-done (on-done (:text outcome))))
 
                     :aborted
                     nil
