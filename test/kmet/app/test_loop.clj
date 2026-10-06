@@ -3271,6 +3271,82 @@
       (finally
         (fs/delete-tree dir)))))
 
+(t/deftest test-loop-agent-end-after-mid-run-compaction
+  ;; Regression (the live "subvec index out of range: 300 62" report):
+  ;; agent-end sliced the context with the message count captured at run
+  ;; start, but a mid-run auto-compaction (tools-phase! → maybe-compact!)
+  ;; replaces the context vector with a much shorter one — the slice then
+  ;; ran past its end and settled an otherwise completed run as an error.
+  ;; The baseline is re-based on every context replacement.
+  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+        events (atom [])
+        errors (atom [])
+        llm-calls (atom 0)
+        compact-calls (atom 0)
+        real-compact loop/maybe-compact!
+        sess (session/create-session (str dir))
+        agent (loop/make-agent-state
+               :session sess
+               :on-event (fn [e] (swap! events conj e))
+               :compact-token-threshold 10
+               :keep-recent-tokens 40)]
+    (try
+      ;; Seed a context well over the threshold (the reported session had
+      ;; ~300 messages before its compaction).
+      (doseq [i (range 10)]
+        (let [m {:role :user
+                 :content [{:type :text :text
+                            (str "This is message body number " i
+                                 " with plenty of words so the estimated token count "
+                                 "easily exceeds the small test threshold.")}]}]
+          (swap! (:messages agent) conj m)
+          (session/append-entry sess m)))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    ;; Skip the pre-run proactive compaction and run the
+                    ;; mid-run one (after the tool batch) for real — the
+                    ;; trigger the reported session hit.
+                    loop/maybe-compact! (fn [a]
+                                          (if (= 1 (swap! compact-calls inc))
+                                            false
+                                            (real-compact a)))
+                    llm/send-message
+                    (fn [opts]
+                      (future
+                        (if (empty? (:tools opts))
+                          ;; compaction summarization (no tools)
+                          (do (when-let [on-text (:on-text opts)]
+                                (on-text "summary of the old conversation"))
+                              (when-let [on-done (:on-done opts)]
+                                (on-done :stop)))
+                          ;; the run: one tool call, then a final text
+                          (if (= 1 (swap! llm-calls inc))
+                            (do (when-let [on-tc (:on-tool-call opts)]
+                                  (on-tc {:id "tc1" :name "bash" :arguments "{}" :index 0}))
+                                (when-let [on-done (:on-done opts)]
+                                  (on-done :tool-calls)))
+                            (do (when-let [on-text (:on-text opts)]
+                                  (on-text "final answer"))
+                                (when-let [on-done (:on-done opts)]
+                                  (on-done :stop)))))
+                        :done))
+                    tools/execute-tool (fn [_ _ _] {:content "tool output" :is-error false})]
+        ;; deref inside with-redefs keeps the rebinding until the turn completes
+        @(loop/run-agent-turn agent {:message "final question"
+                                     :on-error (fn [e] (swap! errors conj e))}))
+      (t/is (empty? @errors) "a context replacement must not fail the run")
+      (t/is (= 2 @compact-calls) "compaction checked pre-run and mid-run")
+      (t/is (some #(= :compaction (:role %)) @(:entries sess))
+            "the mid-run compaction happened")
+      (let [ae (first (filter #(= :agent-end (:type %)) @events))]
+        (t/is (some? ae) ":agent-end emitted")
+        (t/is (some #(and (= :assistant (:role %))
+                          (= "final answer" (get-in % [:content 0 :text])))
+                    (:messages ae))
+              ":agent-end carries the messages added after the compaction"))
+      (t/is (= :idle @(:status agent)))
+      (finally
+        (fs/delete-tree dir)))))
+
 (t/deftest test-loop-compaction-keeps-tool-call-pairing-in-ui
   "A live compaction whose kept tail includes an assistant tool-call + its
    result must emit a :context-replaced message vector that rebuilds with

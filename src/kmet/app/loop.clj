@@ -133,6 +133,9 @@
                        compaction-signal     ;; atom of bool: abort the in-flight compaction (pi: AbortController —
                                              ;; escape aborts only the compaction; the run continues)
                        pending-bash          ;; atom of vector of bash entries queued while streaming
+                       run-msg-baseline      ;; atom of int: index into :messages where the current
+                                             ;; run's messages begin; re-based on every context
+                                             ;; replacement (see rebase-run-messages!)
                        system-prompt-opts    ;; atom of the build-system-prompt options map (pi: _baseSystemPromptOptions)
                        loop-guard            ;; atom of per-run repeat-loop guard state:
                                              ;;   {:window [signature...] :suppressed n}
@@ -225,6 +228,7 @@ Be precise and concise in your responses."}}]
                     :compacting? (atom false)
                     :compaction-signal (atom false)
                     :pending-bash (atom [])
+                    :run-msg-baseline (atom 0)
                     :system-prompt-opts (atom system-prompt-opts)
                     :loop-guard (atom {:window [] :suppressed 0})}))
 
@@ -1279,6 +1283,22 @@ Be precise and concise in your responses."}}]
                                 :usage @usage-buf})
             :else nil))))))
 
+(defn- run-messages
+  "Messages added to the context since the run started (pi: agent_end
+   messages — newMessages). The baseline index is re-based whenever the
+   context vector is replaced, so a mid-run compaction or context
+   replacement can never make the slice run past a shrunken vector."
+  [agent]
+  (let [msgs @(:messages agent)]
+    (subvec msgs (min @(:run-msg-baseline agent) (count msgs)))))
+
+(defn- rebase-run-messages!
+  "Start the run-message window at the current end of the context. A
+   replaced context vector (compaction, prepareNextTurn :context) shares no
+   prefix with the pre-run one, so the run's messages start over from here."
+  [agent]
+  (reset! (:run-msg-baseline agent) (count @(:messages agent))))
+
 (defn- sync-context-after-compaction!
   "Rebuild the in-memory context from the compacted session (pi: the agent
    context is rebuilt from the session after compaction — buildContextEntries
@@ -1287,7 +1307,8 @@ Be precise and concise in your responses."}}]
   (when-let [sess (:session agent)]
     (reset! (:messages agent)
             (drop-incomplete-tool-calls
-             (vec (mapcat session/context-messages (session/build-context sess)))))))
+             (vec (mapcat session/context-messages (session/build-context sess)))))
+    (rebase-run-messages! agent)))
 
 (defn compact-context!
   "LLM-based compaction (pi: prepareCompaction → compact): summarize the
@@ -1461,6 +1482,7 @@ Be precise and concise in your responses."}}]
   [agent messages]
   (let [msgs (drop-incomplete-tool-calls (vec messages))]
     (reset! (:messages agent) msgs)
+    (rebase-run-messages! agent)
     (when-let [sess (:session agent)]
       ;; Rebuild the session as a fresh linear branch mirroring the new
       ;; context — atomic (temp file + rename) so a crash mid-write can't
@@ -1766,8 +1788,11 @@ Be precise and concise in your responses."}}]
                  :after (fn [ctx] (when-let [h @(:after-tool-call agent)] (h ctx)))}]
         (future
           (try
-            (let [msg-count-before (count @(:messages agent))
-                  text-buf (atom "")
+            ;; Start the run-message window: messages appended from here on
+            ;; are this run's (pi: agent_end messages — newMessages). A
+            ;; context replacement re-bases it (see rebase-run-messages!).
+            (reset! (:run-msg-baseline agent) (count @(:messages agent)))
+            (let [text-buf (atom "")
                   agent-end (fn [& [error]]
                               (when-let [s (:session agent)]
                                 (when (pos? (get-in (session/tool-usage s)
@@ -1775,7 +1800,7 @@ Be precise and concise in your responses."}}]
                                   (debug/log "tool usage (estimated result tokens):\n"
                                              (session/tool-usage-report s))))
                               (emit agent {:type :agent-end
-                                           :messages (subvec @(:messages agent) msg-count-before)
+                                           :messages (run-messages agent)
                                            :error error})
                               ;; pi: agent_settled fires in a finally block after
                               ;; every run — success, error, timeout, or abort —
@@ -2062,7 +2087,8 @@ Be precise and concise in your responses."}}]
   (when-let [sess (:session agent)]
     (reset! (:messages agent)
             (drop-incomplete-tool-calls
-             (vec (mapcat session/context-messages (session/build-context sess)))))))
+             (vec (mapcat session/context-messages (session/build-context sess)))))
+    (rebase-run-messages! agent)))
 
 (defn apply-session-settings!
   "Apply the session-derived model/thinking to the agent state (pi: sdk.ts
