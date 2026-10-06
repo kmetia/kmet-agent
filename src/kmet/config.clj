@@ -151,6 +151,11 @@
 
 ;; ─── Config loading ────────────────────────────────────────────────────────
 
+(def ^:private getenv
+  "Env lookup — indirected so tests can redef it without touching the real
+   environment (babashka cannot set env vars)."
+  (fn [k] (System/getenv k)))
+
 (defn- load-edn-file
   "Load an EDN file, returning nil if it doesn't exist or is invalid."
   [path]
@@ -242,10 +247,12 @@
         _ (warn-retired-dir-keys! user-config project-config)
         global-dir agent-dir
         project-dir (str (fs/absolutize ".kmet"))
+        ;; Only KMET_PROVIDER may override the settings provider; the
+        ;; presence of an opencode-go credential must not silently select
+        ;; that provider over an explicit settings.edn :provider.
         env-provider (when-not no-env?
-                       (or (some-> (System/getenv "KMET_PROVIDER") keyword)
-                           (when (auth/resolve-api-key :opencode-go) :opencode-go)))
-        env-model (System/getenv "KMET_MODEL")
+                       (some-> (getenv "KMET_PROVIDER") keyword))
+        env-model (getenv "KMET_MODEL")
         base (deep-merge (resolve-scope-paths default-config global-dir)
                          (resolve-scope-paths user-config global-dir)
                          (resolve-scope-paths project-config project-dir))
@@ -450,7 +457,7 @@
    An unset setting falls back to the KMET_HARDWARE_CURSOR=1 env default."
   [config]
   (if (nil? (:show-hardware-cursor config))
-    (= (System/getenv "KMET_HARDWARE_CURSOR") "1")
+    (= (getenv "KMET_HARDWARE_CURSOR") "1")
     (boolean (:show-hardware-cursor config))))
 
 (defn set-show-hardware-cursor!
@@ -468,7 +475,7 @@
   [config]
   (let [v (get-setting-live config :show-terminal-progress)]
     (if (nil? v)
-      (= (System/getenv "KMET_TERMINAL_PROGRESS") "1")
+      (= (getenv "KMET_TERMINAL_PROGRESS") "1")
       (boolean v))))
 
 (defn set-show-terminal-progress!
@@ -490,7 +497,7 @@
               (get-in config [:terminal :clear-on-shrink]))
             (get-in config [:terminal :clear-on-shrink]))]
     (if (nil? v)
-      (= (System/getenv "KMET_CLEAR_ON_SHRINK") "1")
+      (= (getenv "KMET_CLEAR_ON_SHRINK") "1")
       (boolean v))))
 
 (defn set-clear-on-shrink!

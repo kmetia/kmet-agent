@@ -33,6 +33,28 @@
     (t/is (= :opencode-go (:provider c)))
     (t/is (= "dark" (:theme c)))))
 
+(t/deftest test-load-config-provider-precedence
+  ;; Regression: a stored opencode-go credential must not override an
+  ;; explicit settings.edn :provider (the default-config provider already
+  ;; applies when the settings file omits one). Only KMET_PROVIDER may
+  ;; override the settings provider. auth-atom is rebound so load-auth!'s
+  ;; reset! cannot leak the temp credential into later tests.
+  (let [tmp (str (fs/create-temp-dir {:dir "target" :prefix "provider-precedence-test-"}))]
+    (try
+      (spit (str (fs/path tmp "settings.edn"))
+            (pr-str {:provider :commandcode :model "deepseek/deepseek-v4.1-flash"}))
+      (spit (str (fs/path tmp "auth.edn")) (pr-str {:opencode-go {:key "ok-1"}}))
+      (with-redefs [cfg/getenv (fn [_] nil) auth/auth-atom (atom {})]
+        (let [c (cfg/load-config :agent-dir tmp)]
+          (t/is (= :commandcode (:provider c))
+                "settings.edn :provider wins over an opencode-go credential")
+          (t/is (= "deepseek/deepseek-v4.1-flash" (:model c)))))
+      (with-redefs [cfg/getenv (fn [k] (when (= k "KMET_PROVIDER") "deepseek"))
+                    auth/auth-atom (atom {})]
+        (t/is (= :deepseek (:provider (cfg/load-config :agent-dir tmp)))
+              "KMET_PROVIDER still overrides settings.edn"))
+      (finally (fs/delete-tree tmp)))))
+
 ;; ─── Accessors ─────────────────────────────────────────────────────────────
 
 (t/deftest test-get-provider
