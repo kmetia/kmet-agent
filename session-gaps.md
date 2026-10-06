@@ -56,14 +56,21 @@ attempts (`record-abandoned-attempt!` used to write the session only).
 
 ## A. (landed) `:agent-end :messages` — the run's accumulated messages
 
-`AgentState` now carries `:run-messages` (`(atom nil)`, declared in the
-record), `append-message!` appends to the live context and to the run list in
-one place, and `record-run-message!` covers the session-only
+`AgentState` now carries `:run-messages` (an atom of `{run-token [message…]}`,
+declared in the record) plus `:run-token` (the in-flight run's token, or nil
+outside a run). `append-message!` appends to the live context and to the run
+list in one place, and `record-run-message!` covers the session-only
 `record-abandoned-attempt!` (pi pushes the errored/aborted message into
 `newMessages` before the stopReason check, `agent-loop.ts:243`).
-`run-agent-turn` resets the list at run start, `agent-end` emits it, and the
-`finally` nils it after `flush-pending-bash-messages!` (pi flushes after
-`agent_end` too, so those entries are not part of the payload).
+`run-agent-turn` publishes a fresh token and an empty list at run start,
+`agent-end` emits this run's list (`(get @:run-messages run-token)`), and the
+`finally` drops only this run's entry — so a cancelled run whose unwind races
+a following run can neither report nor clear the newer run's list. The
+post-settle bash flush appends through `append-context-message!`, so those
+entries are not part of the payload (pi flushes after `agent_end` too; the
+context-only append is explicit rather than a consequence of the reset
+order). `record-run-message!` no-ops when `:run-token` is nil, so idle `!`
+bash results stay context-only.
 `run-messages`, `rebase-run-messages!`, `:run-msg-baseline` and the three
 re-base call sites are gone, as is the `subvec` — nothing indexes the live
 context any more.

@@ -133,12 +133,16 @@
                        compaction-signal     ;; atom of bool: abort the in-flight compaction (pi: AbortController —
                                              ;; escape aborts only the compaction; the run continues)
                        pending-bash          ;; atom of vector of bash entries queued while streaming
-                       run-messages          ;; atom of vector or nil: the messages appended during
-                                             ;; the current run (pi: newMessages, agent-loop); nil
-                                             ;; outside a run. A mid-run context replacement
+                       run-messages          ;; atom of {run-token [message...]}: the messages
+                                             ;; appended during an in-flight run (pi: newMessages,
+                                             ;; agent-loop), keyed by the run that appended them so
+                                             ;; an older run's unwind can never report (or clear) a
+                                             ;; newer run's list. A mid-run context replacement
                                              ;; (compaction, prepareNextTurn :context) does not
                                              ;; touch it, so agent-end still reports the messages
                                              ;; the replacement removed from the context
+                       run-token             ;; atom of the current run's token, or nil outside a
+                                             ;; run — nil makes appends context-only
                        system-prompt-opts    ;; atom of the build-system-prompt options map (pi: _baseSystemPromptOptions)
                        loop-guard            ;; atom of per-run repeat-loop guard state:
                                              ;;   {:window [signature...] :suppressed n}
@@ -231,7 +235,8 @@ Be precise and concise in your responses."}}]
                     :compacting? (atom false)
                     :compaction-signal (atom false)
                     :pending-bash (atom [])
-                    :run-messages (atom nil)
+                    :run-messages (atom {})
+                    :run-token (atom nil)
                     :system-prompt-opts (atom system-prompt-opts)
                     :loop-guard (atom {:window [] :suppressed 0})}))
 
@@ -517,21 +522,33 @@ Be precise and concise in your responses."}}]
             (recur)))))))
 
 (defn- record-run-message!
-  "Record MSG in the current run's message list (pi: newMessages.push —
-   agent-loop). No-op outside a run: the accumulator exists only while
-   run-agent-turn is in flight. A mid-run context replacement (compaction,
-   prepareNextTurn :context) does not touch it, so agent-end still reports
-   the run's messages once the context no longer holds them."
+  "Record MSG in the in-flight run's message list (pi: newMessages.push —
+   agent-loop). No-op outside a run (`:run-token` is nil), so an idle `!`
+   bash result stays context-only. A mid-run context replacement
+   (compaction, prepareNextTurn :context) does not touch the list, so
+   agent-end still reports the run's messages once the context no longer
+   holds them. A `fnil` start tolerates the token being published before its
+   empty list."
   [agent msg]
-  (when-let [rm (:run-messages agent)]
-    (swap! rm conj msg))
+  (when-some [token @(:run-token agent)]
+    (swap! (:run-messages agent) update token (fnil conj []) msg))
   nil)
+
+(defn- append-context-message!
+  "Append MSG to the live context only — never the run's message list. Used
+   for appends that must not enter `agent-end :messages` (the post-settle
+   pending-bash flush, pi: _flushPendingBashMessages runs after agent_end).
+   Returns MSG."
+  [agent msg]
+  (swap! (:messages agent) conj msg)
+  msg)
 
 (defn- append-message!
   "Append MSG to the live context and to the run's message list. Every
-   context append goes through here so the two cannot diverge. Returns MSG."
+   context append that belongs to a run goes through here so the two cannot
+   diverge. Returns MSG."
   [agent msg]
-  (swap! (:messages agent) conj msg)
+  (append-context-message! agent msg)
   (record-run-message! agent msg)
   msg)
 
@@ -1134,13 +1151,15 @@ Be precise and concise in your responses."}}]
   "Add queued bash results (recorded while the agent was streaming) to the
    agent context and session (pi: _flushPendingBashMessages). Called by
    run-agent-turn's finally so every exit path — settle, error, timeout, or
-   cancel — flushes them. Drains entries queued mid-flush via CAS."
+   cancel — flushes them. Drains entries queued mid-flush via CAS. The
+   context-only append keeps them out of `agent-end :messages` (pi flushes
+   after agent_end)."
   [agent]
   (loop []
     (let [pending @(:pending-bash agent)]
       (when (seq pending)
         (doseq [entry pending]
-          (append-message! agent entry)
+          (append-context-message! agent entry)
           (when-let [sess (:session agent)]
             (session/append-entry sess entry)))
         (when-not (compare-and-set! (:pending-bash agent) pending [])
@@ -1747,7 +1766,11 @@ Be precise and concise in your responses."}}]
   [agent {:keys [message images on-text on-thinking on-done on-error]}]
   (reset! (:signal agent) false)
   (let [provider @(:provider agent)
-        api-key (resolve-api-key agent)]
+        api-key (resolve-api-key agent)
+        ;; One token per run, captured by this run's closures: the accumulator
+        ;; is keyed by it, so an older run's unwind can never report or clear
+        ;; a newer run's message list.
+        run-token (Object.)]
     (if (not (or api-key (auth/configured? provider)))
       (do (when message
             ;; The run cannot start, but the submitted message is still shown
@@ -1796,10 +1819,10 @@ Be precise and concise in your responses."}}]
                  :after (fn [ctx] (when-let [h @(:after-tool-call agent)] (h ctx)))}]
         (future
           (try
-            ;; Start the run-message accumulator: messages appended from here
-            ;; on are this run's (pi: agent_end messages — newMessages). A
-            ;; mid-run context replacement does not touch it.
-            (reset! (:run-messages agent) [])
+            ;; Start this run's message accumulator (pi: agent_end messages —
+            ;; newMessages). A mid-run context replacement does not touch it.
+            (reset! (:run-token agent) run-token)
+            (swap! (:run-messages agent) assoc run-token [])
             (let [text-buf (atom "")
                   agent-end (fn [& [error]]
                               (when-let [s (:session agent)]
@@ -1808,7 +1831,8 @@ Be precise and concise in your responses."}}]
                                   (debug/log "tool usage (estimated result tokens):\n"
                                              (session/tool-usage-report s))))
                               (emit agent {:type :agent-end
-                                           :messages @(:run-messages agent)
+                                           :messages (get @(:run-messages agent)
+                                                          run-token)
                                            :error error})
                               ;; pi: agent_settled fires in a finally block after
                               ;; every run — success, error, timeout, or abort —
@@ -2054,11 +2078,15 @@ Be precise and concise in your responses."}}]
             (finally
               ;; pi: _flushPendingBashMessages — bash results recorded while
               ;; streaming are queued to preserve tool_use/tool_result ordering
-              ;; and land in the context/session once the run settles
+              ;; and land in the context/session once the run settles. The
+              ;; flush appends context-only, so those entries stay out of
+              ;; `agent-end :messages` (pi flushes after agent_end too).
               (flush-pending-bash-messages! agent)
-              ;; End the accumulator after the flush — appends outside a run
-              ;; are context-only
-              (reset! (:run-messages agent) nil))))))))
+              ;; Drop only this run's list: a newer run may already own the
+              ;; map (cancel clears the running flag before this finally runs).
+              (swap! (:run-messages agent) dissoc run-token)
+              (when (identical? @(:run-token agent) run-token)
+                (reset! (:run-token agent) nil)))))))))
 
 (defn cancel-turn
   "Cancel the current agent run: signal the LLM stream, drop queued messages,

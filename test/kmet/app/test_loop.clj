@@ -3879,6 +3879,10 @@
       (t/is (= :bash (:role (first (loop/get-context agent)))))
       (t/is (= 1 (count @(:entries sess))))
       (t/is (empty? @(:pending-bash agent)))
+      ;; No run in flight: the append is context-only (pi: newMessages starts
+      ;; empty per run), so the run accumulator stays untouched.
+      (t/is (empty? @(:run-messages agent)))
+      (t/is (nil? @(:run-token agent)))
       (finally
         (fs/delete-tree dir)))))
 
@@ -3896,6 +3900,10 @@
       (t/is (= 1 (count (loop/get-context agent))))
       (t/is (= 1 (count @(:entries sess))))
       (t/is (empty? @(:pending-bash agent)))
+      ;; The flush appends context-only — a settled run's payload must not
+      ;; grow after agent-end (pi: _flushPendingBashMessages runs after
+      ;; agent_end and never touches newMessages).
+      (t/is (empty? @(:run-messages agent)))
       (finally
         (fs/delete-tree dir)))))
 
