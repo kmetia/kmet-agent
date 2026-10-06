@@ -1,29 +1,28 @@
 # session-gaps — pi alignment for the run lifecycle
 
-Open work. Follow-up to `5255fbbc` (`fix(loop): re-base the run-message window
-when the context is replaced`), which removed the crash class behind the
-reported
+Open work after the `subvec` crash fix (`fix(loop): re-base the run-message
+window when the context is replaced`) and its follow-up A (the run-message
+accumulator). Together they removed the crash class behind the reported
 
     Error: subvec index out of range: 300 62
 
-but left the `:agent-end` payload and the retry/compaction orchestration
-differing from pi. This note tracks the four gaps with what pi does, what kmet
-does, the change, and how to verify it.
+and brought the `:agent-end` payload in line with pi. What remains is the
+retry/compaction orchestration (B–D): this note tracks each gap with what pi
+does, what kmet does, the change, and how to verify it.
 
 Reference checkout: `~/src/cvstree/pi`, `packages/agent/src/agent-loop.ts`
 (loop) and `packages/coding-agent/src/core/agent-session.ts` (session layer).
 pi line numbers are from the 2026-10-06 checkout (`HEAD 200387122`); kmet line
-numbers are as of `5255fbbc` and drift.
+numbers are indicative and drift.
 
 | # | gap | touch | depends on |
 |---|-----|-------|------------|
-| A | `:agent-end :messages` is a context slice, not the run's messages | `app/loop.clj` (append sites) | — |
+| A | ~~`:agent-end :messages` is a context slice, not the run's messages~~ | landed — see A below | — |
 | B | `:agent-end` carries no `willRetry` | `app/loop.clj`, UI | C |
 | C | retries recur inside one run instead of being separate runs | `app/loop.clj` + interactive mode | — |
 | D | compaction is dispatched from the loop, not the session layer | `app/loop.clj` + interactive mode | interacts with A |
 
-Recommended order: **A → C → B → D**. A is small and removes the last reason
-`agent-end` can disagree with what actually happened; B is meaningless until C
+Recommended order: **C → B → D** (A landed). B is meaningless until C
 separates attempts.
 
 ## Background — why the payload question exists
@@ -36,9 +35,10 @@ run: the branch had 302, minus 2 abandoned attempts that never entered the
 context) to 62. `agent-end` sliced the context with the count captured at run
 start, ran past the end, and the run's catch reported it as an error.
 
-`5255fbbc` keeps a baseline on the agent (`:run-msg-baseline`) and re-bases it
-whenever the context is replaced, so the slice is always valid. That is a
-fix — not pi's model. pi never indexes the context:
+The crash fix kept a baseline on the agent (`:run-msg-baseline`) and re-based it
+whenever the context is replaced, so the slice was always valid — a fix, not
+pi's model. A then replaced the baseline with an accumulator (see below). pi
+never indexes the context:
 
 - `agent-loop.ts:111/143` — `newMessages` is a list owned by the loop
   (the run's initial messages, else empty), pushed on every append
@@ -50,69 +50,37 @@ fix — not pi's model. pi never indexes the context:
   `newMessages` is not affected, so the event still reports the messages that
   were summarized away.
 
-kmet's window is therefore *smaller* than pi's payload in exactly the cases
+kmet's window was therefore *smaller* than pi's payload in exactly the cases
 that matter: mid-run compaction (summarized part dropped) and failed/aborted
-attempts (`record-abandoned-attempt!` writes the session only). A replaces the
-window with an accumulator and deletes `run-messages` /
-`rebase-run-messages!` and their call sites.
+attempts (`record-abandoned-attempt!` used to write the session only).
 
-## A. `:agent-end :messages` — accumulate the run's messages
+## A. (landed) `:agent-end :messages` — the run's accumulated messages
 
-Today: `run-messages` (`app/loop.clj:1286`) slices `@(:messages agent)` from
-`:run-msg-baseline`; the baseline is set in `run-agent-turn` (1714) and re-based
-by `sync-context-after-compaction!` (1302), `replace-context!` (1478) and
-`restore-session-context!` (2074).
+`AgentState` now carries `:run-messages` (`(atom nil)`, declared in the
+record), `append-message!` appends to the live context and to the run list in
+one place, and `record-run-message!` covers the session-only
+`record-abandoned-attempt!` (pi pushes the errored/aborted message into
+`newMessages` before the stopReason check, `agent-loop.ts:243`).
+`run-agent-turn` resets the list at run start, `agent-end` emits it, and the
+`finally` nils it after `flush-pending-bash-messages!` (pi flushes after
+`agent_end` too, so those entries are not part of the payload).
+`run-messages`, `rebase-run-messages!`, `:run-msg-baseline` and the three
+re-base call sites are gone, as is the `subvec` — nothing indexes the live
+context any more.
 
-Change:
+Covered by tests: `test-loop-agent-end-after-mid-run-compaction` (rewritten —
+the run's user message is dropped from the live context by the mid-run
+compaction and still appears in the event exactly once, with the tool-call
+assistant, the tool result, and the post-compaction answer, in order),
+`test-loop-retry-records-failed-attempt` (the errored attempt is in the
+payload) and `test-loop-cancel-records-aborted-attempt` (the aborted partial
+is). `target/verify_regression.bb` stubs `record-run-message!` and shows the
+seven payload assertions failing without the accumulator.
 
-1. Add `run-messages` (name it `:run-log` or keep `:run-messages`) to
-   `AgentState` + `make-agent-state` (144): `(atom nil)`.
-2. Add one append helper and use it everywhere the context grows, so the
-   context and the run list cannot diverge:
-   `(defn- append-message! [agent msg] (swap! (:messages agent) conj msg) (record-run-message! agent msg))`,
-   with `(defn- record-run-message! [agent msg] (when-let [rm (:run-messages agent)] (swap! rm conj msg)))`.
-3. `run-agent-turn`: `(reset! (:run-messages agent) [])` at run start (same
-   place the baseline reset is now), and emit `@(:run-messages agent)` at
-   `agent-end`.
-4. Append sites to convert (open-coded `swap! (:messages agent) conj` today):
-   - `add-user-message!` (516) — prompt, steering, follow-up
-   - `add-assistant-message!` (527)
-   - `add-custom-message!` (568)
-   - `execute-tool-calls-parallel!` (625) and `-sequential!` (743)
-   - `tools-phase!` (1588; the suppressed-result append at ~1684)
-   - `add-bash-result!` (1093) and `flush-pending-bash-messages!` (1107)
-   - `add-context-message!` (1123)
-5. `record-abandoned-attempt!` (545) keeps writing the session only for the
-   *context* (pi's `_prepareRetry` drops the failed message from agent state,
-   `agent-session.ts:3784-3785`) but must call `record-run-message!` — pi
-   pushes it into `newMessages` before the stopReason check
-   (`agent-loop.ts:243`), so it is in `agent_end.messages`.
-6. Delete `run-messages`, `rebase-run-messages!`, the `:run-msg-baseline`
-   field, and the three re-base calls.
-7. Update the `:agent-end` doc in `app/event_bus.clj` (it currently explains
-   the re-base) and the Appendix row in `development/pi-alignment.md`.
-
-Acceptance:
-
-- mid-run compaction: `:agent-end :messages` contains the run's *pre*-
-  compaction messages too (the assistant tool-call and its tool result, and
-  the user message), matching pi. This inverts
-  `test-loop-agent-end-after-mid-run-compaction`, which today asserts the
-  opposite — rewrite it to assert pi parity.
-- cancelled run: the aborted partial (session-only today) appears.
-- retried attempt (after C): the failed attempt's message appears.
-- a plain tool run: user + assistant + tool result each appear exactly once.
-- an extension listener on `:agent-end` sees the same vector as the UI.
-
-Risks/notes:
-
-- A missed append path silently shrinks the payload — the helper makes that a
-  one-line mistake instead of a hand-written invariant.
-- Appends outside a run (`!` bash while idle) must no-op: `:run-messages` is
-  nil outside `run-agent-turn`.
-- `make-agent-state` currently gets unknown-but-used keys (`:enabled-tools`,
-  `:default-tools`) through the record's extension map — declare the new field
-  in `defrecord AgentState` like `:run-msg-baseline` is.
+Still open (deliberately): the payload is one list for both the UI and the
+extension bus — an extension listener sees the same vector as the UI (pi
+decorates the public event with `willRetry` and leaves the extension event
+alone — item B).
 
 ## B. `:agent-end` carries no `willRetry`
 
@@ -214,8 +182,9 @@ tests for both.
 
 - Scratch repro scripts (gitignored, under `target/`): `check_subvec*.bb`
   recompute the 300/62 counts from the real session file;
-  `verify_regression.bb` runs the new test with the pre-fix slicing simulated
-  in-process (`alter-var-root` on the private helpers) and shows it failing.
+  `verify_regression.bb` disables the run-message accumulator in-process
+  (`alter-var-root` on `record-run-message!`) and shows the agent-end payload
+  assertions failing — the pre-A behavior.
 - Real evidence: the session file above, compaction entry
   `2026-10-06T14:41:12.472Z`, `:tokens-before 166703`,
   `:first-kept-id 1a111a446c2-fa70b8b4`.
@@ -226,9 +195,9 @@ tests for both.
 
 ## Docs to update as items land
 
-- `src/kmet/app/event_bus.clj` — `:agent-end` payload (`:will-retry`, the
-  accumulator instead of the re-base).
-- `src/kmet/development/pi-alignment.md` — Appendix row
-  `agent_start` / `agent_end` / `agent_settled`, the compaction row
-  (`session_before_compact` / `session_compact`), and §2.7 if D lands.
+- `src/kmet/app/event_bus.clj` — done (A: the accumulator; the `:will-retry`
+  key when B lands).
+- `src/kmet/development/pi-alignment.md` — done (A: the Appendix row
+  `agent_start` / `agent_end` / `agent_settled`); the compaction row
+  (`session_before_compact` / `session_compact`) and §2.7 follow with D.
 - This file: strike items as they land; remove it when the table is empty.

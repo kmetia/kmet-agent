@@ -133,9 +133,12 @@
                        compaction-signal     ;; atom of bool: abort the in-flight compaction (pi: AbortController —
                                              ;; escape aborts only the compaction; the run continues)
                        pending-bash          ;; atom of vector of bash entries queued while streaming
-                       run-msg-baseline      ;; atom of int: index into :messages where the current
-                                             ;; run's messages begin; re-based on every context
-                                             ;; replacement (see rebase-run-messages!)
+                       run-messages          ;; atom of vector or nil: the messages appended during
+                                             ;; the current run (pi: newMessages, agent-loop); nil
+                                             ;; outside a run. A mid-run context replacement
+                                             ;; (compaction, prepareNextTurn :context) does not
+                                             ;; touch it, so agent-end still reports the messages
+                                             ;; the replacement removed from the context
                        system-prompt-opts    ;; atom of the build-system-prompt options map (pi: _baseSystemPromptOptions)
                        loop-guard            ;; atom of per-run repeat-loop guard state:
                                              ;;   {:window [signature...] :suppressed n}
@@ -228,7 +231,7 @@ Be precise and concise in your responses."}}]
                     :compacting? (atom false)
                     :compaction-signal (atom false)
                     :pending-bash (atom [])
-                    :run-msg-baseline (atom 0)
+                    :run-messages (atom nil)
                     :system-prompt-opts (atom system-prompt-opts)
                     :loop-guard (atom {:window [] :suppressed 0})}))
 
@@ -513,12 +516,31 @@ Be precise and concise in your responses."}}]
             taken
             (recur)))))))
 
+(defn- record-run-message!
+  "Record MSG in the current run's message list (pi: newMessages.push —
+   agent-loop). No-op outside a run: the accumulator exists only while
+   run-agent-turn is in flight. A mid-run context replacement (compaction,
+   prepareNextTurn :context) does not touch it, so agent-end still reports
+   the run's messages once the context no longer holds them."
+  [agent msg]
+  (when-let [rm (:run-messages agent)]
+    (swap! rm conj msg))
+  nil)
+
+(defn- append-message!
+  "Append MSG to the live context and to the run's message list. Every
+   context append goes through here so the two cannot diverge. Returns MSG."
+  [agent msg]
+  (swap! (:messages agent) conj msg)
+  (record-run-message! agent msg)
+  msg)
+
 (defn- add-user-message!
   "Add a user message to context and session, emitting :message-start.
    images — optional vector of image content blocks (pi: image attachments)."
   [agent text & [images]]
   (let [user-msg (user-message text images)]
-    (swap! (:messages agent) conj user-msg)
+    (append-message! agent user-msg)
     (when (:session agent)
       (session/append-entry (:session agent)
                             {:role :user :content (:content user-msg)}))
@@ -536,7 +558,7 @@ Be precise and concise in your responses."}}]
                                      :provider @(:provider agent)
                                      :model @(:model agent))
                         (seq thinking-signature) (assoc :thinking-signature thinking-signature))]
-    (swap! (:messages agent) conj assistant-msg)
+    (append-message! agent assistant-msg)
     (when (:session agent)
       (session/append-entry (:session agent) assistant-msg))
     (emit agent {:type :message-end :message assistant-msg})
@@ -560,6 +582,10 @@ Be precise and concise in your responses."}}]
                            :stop-reason stop-reason)
               (seq thinking-signature) (assoc :thinking-signature thinking-signature)
               error (assoc :error-message error))]
+    ;; pi pushes the aborted/errored message into newMessages before the
+    ;; stopReason check, so agent_end reports it even though it never enters
+    ;; the live context (_prepareRetry drops it from agent state).
+    (record-run-message! agent msg)
     (when (:session agent)
       (session/append-entry (:session agent) msg))
     (emit agent {:type :message-end :message msg})
@@ -579,7 +605,7 @@ Be precise and concise in your responses."}}]
                   :else content)
         msg (cond-> (assoc m :content content)
               (not (contains? m :role)) (assoc :role :info))]
-    (swap! (:messages agent) conj msg)
+    (append-message! agent msg)
     (when (:session agent)
       (session/append-entry (:session agent) msg))
     (emit agent {:type :message-start :message msg})))
@@ -731,7 +757,7 @@ Be precise and concise in your responses."}}]
       (doseq [tc prepared]
         (let [result (get @finalized (:id tc))
               result-msg (tool-result-message (:id tc) (:name tc) result)]
-          (swap! (:messages agent) conj result-msg)
+          (append-message! agent result-msg)
           (when (:session agent)
             (session/append-entry (:session agent) result-msg)))))
     ;; pi: terminate stops the run after this batch — only when EVERY
@@ -785,7 +811,7 @@ Be precise and concise in your responses."}}]
                       raw)
               result-msg (tool-result-message tc-id tc-name result)]
           (when (not= false append?)
-            (swap! (:messages agent) conj result-msg)
+            (append-message! agent result-msg)
             (when (:session agent)
               (session/append-entry (:session agent) result-msg)))
           (swap! tool-results conj result)
@@ -1099,7 +1125,7 @@ Be precise and concise in your responses."}}]
   (let [entry (session/make-bash-entry command result exclude-from-context?)]
     (if (contains? #{:thinking :executing} @(:status agent))
       (swap! (:pending-bash agent) conj entry)
-      (do (swap! (:messages agent) conj entry)
+      (do (append-message! agent entry)
           (when-let [sess (:session agent)]
             (session/append-entry sess entry))))
     nil))
@@ -1114,7 +1140,7 @@ Be precise and concise in your responses."}}]
     (let [pending @(:pending-bash agent)]
       (when (seq pending)
         (doseq [entry pending]
-          (swap! (:messages agent) conj entry)
+          (append-message! agent entry)
           (when-let [sess (:session agent)]
             (session/append-entry sess entry)))
         (when-not (compare-and-set! (:pending-bash agent) pending [])
@@ -1134,7 +1160,7 @@ Be precise and concise in your responses."}}]
                   (nil? content) []
                   :else content)
         msg (assoc msg :content content)]
-    (swap! (:messages agent) conj msg)
+    (append-message! agent msg)
     (emit agent {:type :message-start :message msg})))
 
 ;; ─── Agent run ─────────────────────────────────────────────────────────────
@@ -1283,22 +1309,6 @@ Be precise and concise in your responses."}}]
                                 :usage @usage-buf})
             :else nil))))))
 
-(defn- run-messages
-  "Messages added to the context since the run started (pi: agent_end
-   messages — newMessages). The baseline index is re-based whenever the
-   context vector is replaced, so a mid-run compaction or context
-   replacement can never make the slice run past a shrunken vector."
-  [agent]
-  (let [msgs @(:messages agent)]
-    (subvec msgs (min @(:run-msg-baseline agent) (count msgs)))))
-
-(defn- rebase-run-messages!
-  "Start the run-message window at the current end of the context. A
-   replaced context vector (compaction, prepareNextTurn :context) shares no
-   prefix with the pre-run one, so the run's messages start over from here."
-  [agent]
-  (reset! (:run-msg-baseline agent) (count @(:messages agent))))
-
 (defn- sync-context-after-compaction!
   "Rebuild the in-memory context from the compacted session (pi: the agent
    context is rebuilt from the session after compaction — buildContextEntries
@@ -1307,8 +1317,7 @@ Be precise and concise in your responses."}}]
   (when-let [sess (:session agent)]
     (reset! (:messages agent)
             (drop-incomplete-tool-calls
-             (vec (mapcat session/context-messages (session/build-context sess)))))
-    (rebase-run-messages! agent)))
+             (vec (mapcat session/context-messages (session/build-context sess)))))))
 
 (defn compact-context!
   "LLM-based compaction (pi: prepareCompaction → compact): summarize the
@@ -1482,7 +1491,6 @@ Be precise and concise in your responses."}}]
   [agent messages]
   (let [msgs (drop-incomplete-tool-calls (vec messages))]
     (reset! (:messages agent) msgs)
-    (rebase-run-messages! agent)
     (when-let [sess (:session agent)]
       ;; Rebuild the session as a fresh linear branch mirroring the new
       ;; context — atomic (temp file + rename) so a crash mid-write can't
@@ -1681,7 +1689,7 @@ Be precise and concise in your responses."}}]
                                :tool-call-id tc-id :tool-name tc-name :args tc-args
                                :result res
                                :is-error (:is-error res false)}))
-                (swap! (:messages agent) conj result-msg)
+                (append-message! agent result-msg)
                 (when (:session agent)
                   (session/append-entry (:session agent) result-msg))))]
       (reset! (:status agent) :thinking)
@@ -1788,10 +1796,10 @@ Be precise and concise in your responses."}}]
                  :after (fn [ctx] (when-let [h @(:after-tool-call agent)] (h ctx)))}]
         (future
           (try
-            ;; Start the run-message window: messages appended from here on
-            ;; are this run's (pi: agent_end messages — newMessages). A
-            ;; context replacement re-bases it (see rebase-run-messages!).
-            (reset! (:run-msg-baseline agent) (count @(:messages agent)))
+            ;; Start the run-message accumulator: messages appended from here
+            ;; on are this run's (pi: agent_end messages — newMessages). A
+            ;; mid-run context replacement does not touch it.
+            (reset! (:run-messages agent) [])
             (let [text-buf (atom "")
                   agent-end (fn [& [error]]
                               (when-let [s (:session agent)]
@@ -1800,7 +1808,7 @@ Be precise and concise in your responses."}}]
                                   (debug/log "tool usage (estimated result tokens):\n"
                                              (session/tool-usage-report s))))
                               (emit agent {:type :agent-end
-                                           :messages (run-messages agent)
+                                           :messages @(:run-messages agent)
                                            :error error})
                               ;; pi: agent_settled fires in a finally block after
                               ;; every run — success, error, timeout, or abort —
@@ -2047,7 +2055,10 @@ Be precise and concise in your responses."}}]
               ;; pi: _flushPendingBashMessages — bash results recorded while
               ;; streaming are queued to preserve tool_use/tool_result ordering
               ;; and land in the context/session once the run settles
-              (flush-pending-bash-messages! agent))))))))
+              (flush-pending-bash-messages! agent)
+              ;; End the accumulator after the flush — appends outside a run
+              ;; are context-only
+              (reset! (:run-messages agent) nil))))))))
 
 (defn cancel-turn
   "Cancel the current agent run: signal the LLM stream, drop queued messages,
@@ -2087,8 +2098,7 @@ Be precise and concise in your responses."}}]
   (when-let [sess (:session agent)]
     (reset! (:messages agent)
             (drop-incomplete-tool-calls
-             (vec (mapcat session/context-messages (session/build-context sess)))))
-    (rebase-run-messages! agent)))
+             (vec (mapcat session/context-messages (session/build-context sess)))))))
 
 (defn apply-session-settings!
   "Apply the session-derived model/thinking to the agent state (pi: sdk.ts

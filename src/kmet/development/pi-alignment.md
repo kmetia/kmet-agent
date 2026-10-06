@@ -377,7 +377,7 @@ pi events (`core/extensions/types.ts`) → kmet status (`app/event_bus.clj` `eve
 | `context` | ✅ `:context` | fired before each LLM call with the outgoing messages (system prompt included — `call-llm` prepends it; tools travel separately); handlers return {:messages [...]} to replace (last non-nil wins). pi 0.87.0: `context` handlers see the conversation only (pi re-applies prompt sections + tool declarations) and `context_with_system` runs after them over the full transcript |
 | `context_with_system` | — | missing (pi 0.87.0 per-request system-message transformations over the full transcript) |
 | `before_agent_start` | ✅ | hook, not event |
-| `agent_start` / `agent_end` / `agent_settled` | ✅ `:agent-start` / `:agent-end` / `:agent-settled` | pi 0.87.0 adds the actionable `agent_before_settle` boundary (missing) |
+| `agent_start` / `agent_end` / `agent_settled` | ✅ `:agent-start` / `:agent-end` / `:agent-settled` | `agent-end :messages` accumulates the run's messages (pi: `newMessages`) — a mid-run compaction does not shrink them, and a cancelled/errored attempt is included; pi 0.87.0 adds the actionable `agent_before_settle` boundary (missing) |
 | `turn_start` / `turn_end` | ✅ `:turn-start` / `:turn-end` | notification-only; pi 0.87.0 makes `turn_end` actionable (`{:entries [...] :continue bool}`) |
 | `message_start` / `message_update` / `message_end` | ✅ | kmet `:message-update` carries `:delta` incl. tool-call |
 | `tool_execution_start` / `_update` / `_end` | ✅ | |

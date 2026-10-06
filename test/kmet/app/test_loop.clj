@@ -2319,6 +2319,14 @@
       (t/is (= 1 (count errored)))
       (t/is (= "partial answer" (get-in (first errored) [:content 0 :text])))
       (t/is (= "upstream connect error" (:error-message (first errored)))))
+    ;; …and agent-end reports the run's messages, the failed attempt included
+    ;; (pi: the errored message is pushed into newMessages before the
+    ;; stopReason check, so agent_end carries it even though agent state drops
+    ;; it — _prepareRetry).
+    (let [ae (first (filter #(= :agent-end (:type %)) @events))]
+      (t/is (some #(= "partial answer" (get-in % [:content 0 :text]))
+                  (:messages ae))
+            ":agent-end reports the failed attempt"))
     ;; …but the live context only carries the user prompt and the recovery
     (let [ctx (loop/get-context agent)]
       (t/is (empty? (filter #(= :error (:stop-reason %)) ctx))
@@ -2366,6 +2374,10 @@
           (t/is (= "half a thought" (get-in (first aborted) [:content 0 :text]))))
         (t/is (empty? (filterv #(= :assistant (:role %)) (loop/get-context agent)))
               "aborted attempt excluded from the live context")
+        (let [ae (first (filter #(= :agent-end (:type %)) @events))]
+          (t/is (some #(= "half a thought" (get-in % [:content 0 :text]))
+                      (:messages ae))
+                ":agent-end reports the aborted partial"))
         (t/is (= :idle @(:status agent)))
         (try (fs/delete-tree dir) (catch Exception _ nil))))))
 
@@ -3273,11 +3285,15 @@
 
 (t/deftest test-loop-agent-end-after-mid-run-compaction
   ;; Regression (the live "subvec index out of range: 300 62" report):
-  ;; agent-end sliced the context with the message count captured at run
-  ;; start, but a mid-run auto-compaction (tools-phase! → maybe-compact!)
-  ;; replaces the context vector with a much shorter one — the slice then
-  ;; ran past its end and settled an otherwise completed run as an error.
-  ;; The baseline is re-based on every context replacement.
+  ;; agent-end used to slice the context with the message count captured at
+  ;; run start. A mid-run auto-compaction (tools-phase! → maybe-compact!)
+  ;; replaces the context vector with a much shorter one, so the stale index
+  ;; ran past its end and the run's catch settled an otherwise completed turn
+  ;; as an error.
+  ;;
+  ;; pi parity: agent_end reports the run's accumulated messages (newMessages
+  ;; — agent-loop.ts), not a slice of the live context, so a message the
+  ;; compaction dropped is still in the event.
   (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
         events (atom [])
         errors (atom [])
@@ -3321,7 +3337,15 @@
                           ;; the run: one tool call, then a final text
                           (if (= 1 (swap! llm-calls inc))
                             (do (when-let [on-tc (:on-tool-call opts)]
-                                  (on-tc {:id "tc1" :name "bash" :arguments "{}" :index 0}))
+                                  ;; The sizes put the mid-run cut point at the
+                                  ;; tool-call assistant message (budget 40:
+                                  ;; result ~30, result + args ~54), so the
+                                  ;; compaction demonstrably drops the run's
+                                  ;; user message from the live context.
+                                  (on-tc {:id "tc1" :name "bash" :index 0
+                                          :arguments (str "{\"command\": \""
+                                                          (apply str (repeat 76 "x"))
+                                                          "\"}")}))
                                 (when-let [on-done (:on-done opts)]
                                   (on-done :tool-calls)))
                             (do (when-let [on-text (:on-text opts)]
@@ -3329,7 +3353,9 @@
                                 (when-let [on-done (:on-done opts)]
                                   (on-done :stop)))))
                         :done))
-                    tools/execute-tool (fn [_ _ _] {:content "tool output" :is-error false})]
+                    tools/execute-tool (fn [_ _ _]
+                                         {:content (apply str (repeat 10 "tool output "))
+                                          :is-error false})]
         ;; deref inside with-redefs keeps the rebinding until the turn completes
         @(loop/run-agent-turn agent {:message "final question"
                                      :on-error (fn [e] (swap! errors conj e))}))
@@ -3337,12 +3363,27 @@
       (t/is (= 2 @compact-calls) "compaction checked pre-run and mid-run")
       (t/is (some #(= :compaction (:role %)) @(:entries sess))
             "the mid-run compaction happened")
-      (let [ae (first (filter #(= :agent-end (:type %)) @events))]
+      (let [ae (first (filter #(= :agent-end (:type %)) @events))
+            run-msgs (:messages ae)]
         (t/is (some? ae) ":agent-end emitted")
-        (t/is (some #(and (= :assistant (:role %))
-                          (= "final answer" (get-in % [:content 0 :text])))
-                    (:messages ae))
-              ":agent-end carries the messages added after the compaction"))
+        (t/is (= [:user :assistant :tool :assistant] (mapv :role run-msgs))
+              ":agent-end carries exactly the run's messages, in order")
+        (t/is (= 1 (count (filter #(and (= :user (:role %))
+                                        (= "final question" (get-in % [:content 0 :text])))
+                                  run-msgs)))
+              "the run's user message is reported exactly once")
+        (t/is (some #(and (= :assistant (:role %)) (seq (:tool-calls %))) run-msgs)
+              "the tool-call assistant message is reported")
+        (t/is (some #(= (apply str (repeat 10 "tool output "))
+                        (get-in % [:content 0 :content]))
+                    (filter #(= :tool (:role %)) run-msgs))
+              "the tool result is reported")
+        (t/is (some #(= "final answer" (get-in % [:content 0 :text])) run-msgs)
+              ":agent-end carries the message added after the compaction")
+        (t/is (not (some #(= "final question" (get-in % [:content 0 :text]))
+                         (loop/get-context agent)))
+              "the mid-run compaction dropped the user message from the live
+               context — agent-end still reports it (pi: newMessages)"))
       (t/is (= :idle @(:status agent)))
       (finally
         (fs/delete-tree dir)))))

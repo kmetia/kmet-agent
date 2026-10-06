@@ -18,9 +18,10 @@
 
    :agent-end
    "Fired when the agent loop finishes (success or error).
-    Payload: :messages (messages added during this loop; a mid-run context
-    replacement — compaction — re-bases the window, since the summarized
-    messages no longer exist in the context), :error (optional)."
+    Payload: :messages (the messages added during this run, accumulated as
+    they are appended — pi: newMessages — so a mid-run context replacement
+    does not shrink the list, and an aborted or errored attempt is included),
+    :error (optional)."
 
    :turn-start
    "Fired before each LLM call.
