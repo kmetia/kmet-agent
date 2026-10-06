@@ -300,7 +300,7 @@
 
 (deftest ^:bb-only bundle-validator-accepts-the-committed-manifest
   (let [manifest (build/validate-bundled-extensions!)]
-    (is (= 10 (count (:artifacts manifest))))
+    (is (= 11 (count (:artifacts manifest))))
     (is (= [] (:exclude manifest)))))
 
 (deftest ^:bb-only bundle-validator-discovery-is-convention-based

@@ -44,8 +44,8 @@
 (t/deftest test-manifest-is-complete-and-well-formed
   (let [m (bundled/manifest)]
     (t/is (= 1 (:schema m)))
-    (t/is (= 10 (count (:artifacts m))))
-    (t/is (= #{"clojure" "grep-tool" "find-tool" "ls-tool" "tools" "deepseek-peak"
+    (t/is (= 11 (count (:artifacts m))))
+    (t/is (= #{"clojure" "grep-tool" "find-tool" "ls-tool" "powershell" "tools" "deepseek-peak"
                "lsp-adapter" "mcp-adapter" "review" "tree-sitter"}
              (set (map :name (:artifacts m)))))
     (t/is (every? #(contains? #{:dir :file} (:kind %)) (:artifacts m)))
@@ -58,13 +58,13 @@
   (let [m (build/validate-bundled-extensions!)]
     (t/is (= (set (map :root (:artifacts (bundled/manifest))))
              (set (map :root (:artifacts m)))))
-    (t/is (= 10 (count (:artifacts m))))))
+    (t/is (= 11 (count (:artifacts m))))))
 
 (t/deftest test-checkout-artifacts-are-real-repo-paths
   ;; the test run is a checkout: the manifest answers a file: URL, so every
   ;; descriptor is a real path under extensions/ (no resource prefix)
   (let [arts (bundled/artifacts)]
-    (t/is (= 10 (count arts)))
+    (t/is (= 11 (count arts)))
     (t/is (every? #(= (:root %) (:path %)) arts))
     (t/is (every? #(fs/exists? (:root %)) arts))
     (t/is (every? :bundled? arts))

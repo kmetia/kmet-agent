@@ -383,19 +383,27 @@
        "\n\n</project_context>\n"))
 
 (defn- build-guidelines
-  "Assemble the de-duplicated Guidelines list (pi: buildSystemPrompt): the
-   bash file-exploration rule whenever bash is selected, then the tool and
-   config guidelines, then the always-on ones. The rule is not suppressed by
-   other tools: kmet's grep/find/ls are opt-in extensions, so the builtin
-   prompt text must not depend on what a user happens to have loaded. The
-   parallel-batching rule is kmet's addition — pi has no parallel-tool-call
-   guidance, while kmet's loop runs a batch's calls in parallel by default
+  "Assemble the de-duplicated Guidelines list (pi: buildSystemPrompt's
+   buildRules): the shell file-exploration rule when a shell tool is selected
+   and no dedicated search tool (grep/find/ls) is, then the tool and config
+   guidelines, then the always-on ones. The parallel-batching rule is kmet's
+   addition — pi has no parallel-tool-call guidance, while kmet's loop runs a
+   batch's calls in parallel by default
    (kmet.app.loop/execute-tool-calls-parallel!)."
   [selected-tools guidelines]
-  (let [tool-set (set selected-tools)]
+  (let [tool-set (set selected-tools)
+        has-bash? (contains? tool-set "bash")
+        has-powershell? (contains? tool-set "powershell")
+        has-search-tool? (boolean (some tool-set ["grep" "find" "ls"]))]
     (-> []
-        (cond-> (contains? tool-set "bash")
-          (conj "Use bash for file operations like ls, rg, find"))
+        (cond-> (and (or has-bash? has-powershell?) (not has-search-tool?))
+          (conj (cond
+                  (and has-bash? has-powershell?)
+                  "Use bash or PowerShell for file operations like listing, searching, and finding files"
+                  has-powershell?
+                  "Use PowerShell for file operations like listing, searching, and finding files"
+                  :else
+                  "Use bash for file operations like ls, rg, find")))
         (into (map (fn [g] (str/trim (str g)))
                    (filter (fn [g] (seq (str/trim (str g)))) guidelines)))
         (conj "When a turn needs several tool calls, batch the independent ones into one message — they run in parallel; wait for a call's result only before using it.")
@@ -418,11 +426,8 @@
 
    The skills section is appended only when the read tool is available, since
    skills are loaded on demand via read (pi: hasRead check). Deviations from
-   pi: no pi-docs section (kmet ships no bundled docs); the bash-exploration
-   guideline fires whenever bash is active — kmet's grep/find/ls are opt-in
-   extensions, so the builtin prompt does not depend on what is loaded; the
-   parallel-batching guideline is kmet's addition (pi has no
-   parallel-tool-call guidance)."
+   pi: no pi-docs section (kmet ships no bundled docs); the parallel-batching
+   guideline is kmet's addition (pi has no parallel-tool-call guidance)."
   [& {:keys [custom-prompt append-prompt cwd context-files tools
              prompt-guidelines skills]
       :or {cwd (str (fs/cwd))}}]

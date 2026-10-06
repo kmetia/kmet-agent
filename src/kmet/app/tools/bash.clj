@@ -75,8 +75,8 @@
 (defn- run-bash
   "Execute through the shared executor with the tool's spawn options (pi: the
    BashToolOptions an execute closure closes over)."
-  [args on-update {:keys [command-prefix shell-path spawn-hook
-                          expose-session-env? operations]}]
+  [args on-update {:keys [command-prefix shell-path shell-args temp-file-prefix
+                          spawn-hook expose-session-env? operations]}]
   (let [{:keys [command timeout]} args
         live-chunks (atom [])  ;; whole decoded chunks — no mid-string truncation
         live-bytes (atom 0)
@@ -107,6 +107,8 @@
                             (*session-env-fn*))  ;; pi: resolveSpawnContext
                      :command-prefix command-prefix  ;; pi: commandPrefix
                      :shell-path shell-path  ;; pi: shellPath
+                     :shell-args shell-args  ;; pi: ShellConfig args
+                     :temp-file-prefix temp-file-prefix  ;; pi: tempFilePrefix
                      :spawn-hook spawn-hook  ;; pi: BashSpawnHook
                      :operations operations  ;; pi: BashOperations
                      :on-chunk (fn [chunk]
@@ -182,6 +184,13 @@
                             default: the :shell-command-prefix setting)
      :shell-path          — custom shell binary (pi: shellPath; default: the
                             :shell-path setting)
+     :shell-args          — explicit argv template for the shell binary
+                            (pi: ShellConfig args) — the command is appended
+                            as the final argv element; overrides the
+                            platform heuristics (cmd /c, WSL -s, sh -c)
+     :temp-file-prefix    — name prefix of the spill file a truncated output
+                            is saved to (pi: tempFilePrefix; default
+                            'kmet-bash-')
      :spawn-hook          — (fn [{:keys [command cwd env]}] → same map) run
                             before spawn, after the KMET_* session env is
                             injected (pi: BashSpawnHook)
@@ -192,8 +201,8 @@
    The closure keeps the built-in streaming contract (:streams? — a
    (fn [args on-update]) execute)."
   ([] (create-tool {}))
-  ([{:keys [name label description command-prefix shell-path spawn-hook
-            expose-session-env? operations]}]
+  ([{:keys [name label description command-prefix shell-path shell-args temp-file-prefix
+            spawn-hook expose-session-env? operations]}]
    (let [expose-session-env? (if (some? expose-session-env?) expose-session-env? true)]
      (tool/make-tool
       :name (or name "bash")
@@ -209,6 +218,8 @@
                  (run-bash args on-update
                            {:command-prefix command-prefix
                             :shell-path shell-path
+                            :shell-args shell-args
+                            :temp-file-prefix temp-file-prefix
                             :spawn-hook spawn-hook
                             :expose-session-env? expose-session-env?
                             :operations operations}))

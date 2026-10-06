@@ -68,8 +68,10 @@ src/kmet/
 │   │                     extensions/context.cljc — per-extension SCI isolation
 │   ├── model_resolver.clj — model pattern/CLI resolution
 │   ├── tools/          — built-in tools: read, write, edit, bash
-│   │                     (grep/find/ls ship as opt-in extensions in
-│   │                     extensions/grep-tool.clj, find-tool.clj, ls-tool.clj)
+│   │                     (grep/find/ls and the Windows-only powershell
+│   │                     ship as opt-in extensions in
+│   │                     extensions/grep-tool.clj, find-tool.clj,
+│   │                     ls-tool.clj, powershell.clj)
 │   └── ui/             — app TUI components (chat history, footer, ...)
 ├── tui/                — Generic TUI library (pi: @earendil-works/pi-tui;
 │   │                     usage docs in src/kmet/tui/tui.md)

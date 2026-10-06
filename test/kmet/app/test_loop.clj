@@ -105,8 +105,8 @@
                :model "m"
                :system prompt
                :system-prompt-opts opts)]
-    ;; initial prompt advertises the builtin tools; the bash-exploration rule
-    ;; is emitted whenever bash is selected
+    ;; initial prompt advertises the builtin tools; the shell-exploration rule
+    ;; fires for a selected shell (pi: buildRules)
     (t/is (str/includes? @(:system agent) "- bash:"))
     (t/is (str/includes? @(:system agent) "Use bash for file operations"))
     ;; disable bash
@@ -115,9 +115,8 @@
              @(:enabled-tools agent)))
     (t/is (not (str/includes? @(:system agent) "- bash:")))
     (t/is (not (str/includes? @(:system agent) "Use bash for file operations")))
-    ;; a search tool in the active set does not suppress the rule: kmet's
-    ;; grep/find/ls are opt-in extensions, so the builtin prompt text stays
-    ;; independent of what is loaded — a stand-in for the grep extension
+    ;; a dedicated search tool in the active set suppresses the shell rule
+    ;; (pi: buildRules — grep/find/ls); the stand-in mirrors the grep extension
     (try
       (tools-registry/register-tool! {:name "grep"
                                       :description "stand-in for the grep extension"
@@ -125,7 +124,7 @@
                                       :execute (fn [_] {:content ""})})
       (loop/set-active-tools! agent ["bash" "read" "grep"])
       (t/is (str/includes? @(:system agent) "- grep:"))
-      (t/is (str/includes? @(:system agent) "Use bash for file operations"))
+      (t/is (not (str/includes? @(:system agent) "Use bash for file operations")))
       (finally
         (tools-registry/unregister-tool! "grep")))
     ;; restore all

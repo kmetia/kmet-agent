@@ -133,6 +133,15 @@
                             setting)
      :shell-path          — custom shell binary (pi: shellPath; default: the
                             :shell-path setting)
+     :shell-args          — explicit argv template for the shell binary
+                            (pi: ShellConfig args): the command is appended
+                            as the final argv element, replacing the platform
+                            heuristics (cmd /c, WSL -s, sh -c) — e.g. a
+                            PowerShell tool passes
+                            ['-NoProfile' '-NonInteractive' '-Command']
+     :temp-file-prefix    — name prefix of the spill file a truncated output
+                            is saved to (pi: tempFilePrefix; default
+                            'kmet-bash-')
      :operations          — custom executor, {:command :cwd :on-data :signal
                             :timeout :env} → {:exit-code :cleanup} (pi:
                             BashOperations — delegate to a remote host)

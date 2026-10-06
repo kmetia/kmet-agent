@@ -184,10 +184,14 @@
          :last-line-partial last-partial :first-line-exceeds-limit false
          :max-lines max-lines :max-bytes max-bytes}))))
 
-(defn- create-temp-file []
+(defn- create-temp-file
+  "Create the spill file for a truncated output (pi: createOutputFileStream).
+   PREFIX names the tool's spill file, defaulting to TEMP-FILE-PREFIX
+   (pi: OutputAccumulator tempFilePrefix)."
+  [prefix]
   (let [tmp-dir (or (System/getenv "TMPDIR")
                     (System/getProperty "java.io.tmpdir"))
-        tmp (fs/create-temp-file {:prefix TEMP-FILE-PREFIX
+        tmp (fs/create-temp-file {:prefix (or prefix TEMP-FILE-PREFIX)
                                   :suffix TEMP-FILE-SUFFIX
                                   :dir tmp-dir})]
     (fs/delete-on-exit tmp)
@@ -254,7 +258,12 @@
   (boolean (re-find #"(?i)(?:windows\\system32|windowsapps)\\bash\.exe"
                     (str/replace shell "/" "\\"))))
 
-(defn create-default-ops [& {:keys [shell-path]}]
+(defn create-default-ops
+  "Pi: createLocalShellOperations/getShellConfig — the local spawn for one
+   shell. SHELL-ARGS is an explicit argv template (pi: ShellConfig args):
+   it replaces the platform heuristics (cmd /c, WSL -s, sh -c) and the
+   command is appended as the final element (argv transport)."
+  [& {:keys [shell-path shell-args]}]
   ;; Pi: throw early if custom shellPath is specified but not found
   (when (and shell-path (not (fs/exists? shell-path)))
     (throw (ex-info (str "Custom shell path not found: " shell-path)
@@ -264,16 +273,26 @@
       (let [_ (when-not (fs/exists? cwd)
                 (throw (ex-info (str "Working directory does not exist: " cwd) {:cwd cwd})))
             ;; Pi: getShellConfig resolves shell + args per platform
-            use-stdin? (and process/windows-os? (wsl-launcher-bash? shell))
-            shell-args (cond
-                         (str/includes? shell "cmd") [shell "/c" command]
-                         use-stdin? [shell "-s"]
-                         ;; setsid makes the sh its own process-group leader so
-                         ;; kill-process-tree! can group-kill it — catches bg
-                         ;; jobs mksh reparents outside the ppid tree.
-                         :else (if-let [setsid @process/setsid-path]
-                                 [setsid shell "-c" command]
-                                 [shell "-c" command]))
+            use-stdin? (and (nil? shell-args)
+                            process/windows-os?
+                            (wsl-launcher-bash? shell))
+            argv (cond
+                   (some? shell-args)
+                   ;; explicit shell args win; the command is the final argv
+                   ;; element (pi: ShellConfig args, argv transport). setsid
+                   ;; still makes the shell its own group leader when the
+                   ;; host has one, so kill-process-tree! keeps working.
+                   (if-let [setsid @process/setsid-path]
+                     (into [setsid shell] (conj (vec shell-args) command))
+                     (into [shell] (conj (vec shell-args) command)))
+                   (str/includes? shell "cmd") [shell "/c" command]
+                   use-stdin? [shell "-s"]
+                   ;; setsid makes the sh its own process-group leader so
+                   ;; kill-process-tree! can group-kill it — catches bg
+                   ;; jobs mksh reparents outside the ppid tree.
+                   :else (if-let [setsid @process/setsid-path]
+                           [setsid shell "-c" command]
+                           [shell "-c" command]))
             proc-opts {:dir cwd :err :pipe :out :pipe :env env
                        ;; Pi: stdio [ignore, pipe, pipe] — stdin is a
                        ;; NUL//dev/null redirect so a command that reads
@@ -284,7 +303,7 @@
                        :in (if use-stdin?
                              :pipe
                              (fs/file (if process/windows-os? "NUL" "/dev/null")))}
-            p (proc/process shell-args proc-opts)
+            p (proc/process argv proc-opts)
             ;; Pi: write command to stdin for WSL -s transport, then close
             ;; it — the EOF pi's stdio `ignore` gives the other transport.
             _ (when (and use-stdin? (:in p))
@@ -401,7 +420,8 @@
 
 (defn execute-bash
   [{:keys [command cwd env on-chunk signal timeout spawn-hook
-           operations shell-path command-prefix max-lines max-bytes]
+           operations shell-path shell-args command-prefix temp-file-prefix
+           max-lines max-bytes]
     :or {cwd (System/getProperty "user.dir")
          max-lines DEFAULT-MAX-LINES
          max-bytes DEFAULT-MAX-BYTES}}]
@@ -417,7 +437,8 @@
                            (str command-prefix "\n" command)
                            command)
         ;; Use provided operations or default (pi: BashOperations)
-        exec-ops (or operations (create-default-ops :shell-path shell-path))
+        exec-ops (or operations (create-default-ops :shell-path shell-path
+                                                    :shell-args shell-args))
 
         raw-chunks (atom [])
         tail-buf (atom [])
@@ -512,7 +533,7 @@
                    (> @total-decoded-bytes max-bytes))
              (do
                (when (nil? @temp-file-path)
-                 (let [path (create-temp-file)
+                 (let [path (create-temp-file temp-file-prefix)
                        output-stream (java.io.FileOutputStream. path)]
                    (reset! temp-file-path path)
                    (reset! temp-file-stream output-stream)
@@ -556,7 +577,7 @@
                 truncated (:truncated truncation)
                 content (:content truncation)]
             (when (and truncated (nil? @temp-file-path))
-              (let [path (create-temp-file)]
+              (let [path (create-temp-file temp-file-prefix)]
                 (reset! temp-file-path path)
                 (spit path clean-output)))
             {:output content
@@ -613,7 +634,7 @@
               truncated (:truncated truncation)
               ;; Pi: persistIfTruncated — save the full output whenever truncated
               _ (when (and truncated (nil? @temp-file-path))
-                  (let [path (create-temp-file)]
+                  (let [path (create-temp-file temp-file-prefix)]
                     (reset! temp-file-path path)
                     (spit path clean-output)))]
           (cond

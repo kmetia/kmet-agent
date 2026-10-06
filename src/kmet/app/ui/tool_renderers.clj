@@ -862,23 +862,32 @@
    counts once, and the expand hint reports the rest."
   5)
 
-(defn render-bash-call
-  "Call line for the shell tool: `$ <command>` (+ timeout suffix), rendered
-   verbatim whatever the display mode (pi: the call line never truncates;
-   Text wraps it at the width)."
-  [_name args theme _width _context]
-  (let [cmd (:command args)
-        timeout (:timeout args)
-        cmd-str (if (string? cmd) cmd (if (nil? cmd) "" nil))
-        cmd-display (cond
-                      (nil? cmd-str) (theme/fg theme :error "[invalid arg]")
-                      (empty? cmd-str) (theme/fg theme :tool-output "...")
-                      :else cmd-str)
-        cmd-line (theme/fg theme :tool-title (theme/bold (str "$ " cmd-display)))
-        timeout-suffix (if (and (number? timeout) (pos? timeout))
-                         (theme/fg theme :muted (str " (timeout " timeout "s)"))
-                         "")]
-    (h/compile-tree (tool-text (str cmd-line timeout-suffix)))))
+(defn shell-call-renderer
+  "Build the shared call renderer for a shell tool with PROMPT (`$` for bash,
+   `PS>` for PowerShell — pi: createShellRenderers(prompt)). The returned fn
+   has the standard (name args theme width context) render-call signature:
+   `PROMPT <command>` (+ timeout suffix), rendered verbatim whatever the
+   display mode (pi: the call line never truncates; Text wraps it at the
+   width)."
+  [prompt]
+  (fn [_name args theme _width _context]
+    (let [cmd (:command args)
+          timeout (:timeout args)
+          cmd-str (if (string? cmd) cmd (if (nil? cmd) "" nil))
+          cmd-display (cond
+                        (nil? cmd-str) (theme/fg theme :error "[invalid arg]")
+                        (empty? cmd-str) (theme/fg theme :tool-output "...")
+                        :else cmd-str)
+          cmd-line (theme/fg theme :tool-title (theme/bold (str prompt " " cmd-display)))
+          timeout-suffix (if (and (number? timeout) (pos? timeout))
+                           (theme/fg theme :muted (str " (timeout " timeout "s)"))
+                           "")]
+      (h/compile-tree (tool-text (str cmd-line timeout-suffix))))))
+
+(def render-bash-call
+  "Call line for the bash tool: `$ <command>` (+ timeout suffix) — the shared
+   shell-call renderer with bash's prompt."
+  (shell-call-renderer "$"))
 
 (defn- output-result-nodes
   "The output body (collapsed to a visual-line window with an expand hint,

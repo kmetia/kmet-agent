@@ -52,6 +52,18 @@
       (is (= 1 (count lines)))
       (is (str/includes? (first lines) "$ ...")))))
 
+(deftest test-shell-call-renderer
+  (testing "the shared shell-call renderer takes the prompt (pi: createShellRenderers)"
+    (let [lines (plain ((r/shell-call-renderer "PS>") "powershell" {:command "Get-ChildItem"}
+                                                      th 60 {})
+                       60)]
+      (is (= 1 (count lines)))
+      (is (str/includes? (first lines) "PS> Get-ChildItem"))))
+  (testing "bash is the same renderer with `$` and the timeout suffix"
+    (let [lines (plain ((r/shell-call-renderer "$") "bash" {:command "ls" :timeout 5} th 60 {})
+                       60)]
+      (is (str/includes? (first lines) "$ ls (timeout 5s)")))))
+
 (deftest test-read-call
   (testing "full call shows name + path"
     (let [lines (plain (r/render-read-call "read" {:file_path "a/b.txt"} th 40 {}) 40)]

@@ -64,7 +64,8 @@
    ;; Pi: createBashTool(cwd) with default options
    "bash"  (bash/create-tool)}
    ;; grep/find/ls are not builtins — they ship as opt-in extensions
-   ;; (extensions/grep-tool.clj, find-tool.clj, ls-tool.clj)
+   ;; (extensions/grep-tool.clj, find-tool.clj, ls-tool.clj); powershell
+   ;; ships the same way (extensions/powershell.clj, Windows-only)
   )
 
 ;; ─── Tool schema helpers ────────────────────────────────────────────────────

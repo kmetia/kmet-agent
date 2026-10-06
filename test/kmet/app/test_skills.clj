@@ -78,6 +78,37 @@
                                                                       :prompt-snippet "Execute bash commands")])]
       (t/is (not (str/includes? result "<available_skills>"))))))
 
+(t/deftest test-build-system-prompt-shell-rules
+  (t/testing "pi: buildRules — the file-exploration rule names the selected shells"
+    (let [prompt (fn [names]
+                   (skills/build-system-prompt
+                    :cwd "/tmp"
+                    :skills []
+                    :tools (mapv (fn [n] (tools/make-tool :name n :description "d"
+                                                          :prompt-snippet n))
+                                 names)))]
+      (t/is (str/includes? (prompt ["bash" "read"])
+                           "Use bash for file operations like ls, rg, find"))
+      (t/is (str/includes? (prompt ["powershell" "read"])
+                           "Use PowerShell for file operations like listing, searching, and finding files"))
+      (t/is (str/includes? (prompt ["bash" "powershell"])
+                           "Use bash or PowerShell for file operations like listing, searching, and finding files"))
+      (t/is (not (str/includes? (prompt ["read"])
+                                "file operations"))
+            "no shell selected, no shell rule")))
+  (t/testing "a dedicated search tool suppresses the shell rule (pi: hasGrep/hasFind/hasLs)"
+    (let [prompt (fn [names]
+                   (skills/build-system-prompt
+                    :cwd "/tmp"
+                    :skills []
+                    :tools (mapv (fn [n] (tools/make-tool :name n :description "d"
+                                                          :prompt-snippet n))
+                                 names)))]
+      (doseq [search ["grep" "find" "ls"]]
+        (t/is (not (str/includes? (prompt ["bash" "read" search])
+                                  "Use bash for file operations"))
+              (str search " suppresses the shell rule"))))))
+
 (t/deftest test-get-skills-returns-list
   (let [name "test-gs"
         description "GS description"]

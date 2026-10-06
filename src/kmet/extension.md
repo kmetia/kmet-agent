@@ -599,7 +599,9 @@ renderer vars are in `kmet.app.ui.tool-renderers`, including
 `render-edit-call`, `render-edit-result`, `state-result-nodes` (the tail
 state line), `render-bash-result` (a
 plain-text output body: styled lines, a collapsed line window with an expand
-hint and truncation warnings — the opt-in grep/find/ls tools use it)
+hint and truncation warnings — the opt-in grep/find/ls and powershell tools
+use it), `shell-call-renderer` (the shell call line for a supplied prompt —
+bash is `(shell-call-renderer "$")`; the powershell tool uses `"PS>"`)
 and `render-code-call` (the `run_code`/`clojure_eval` call line: the code
 argument rendered verbatim, whatever the display mode);
 the namespace is
@@ -659,6 +661,7 @@ and keeps the built-in rendering:
     {:name "sandbox-bash" :description "Run a command inside the sandbox"
      :operations my-remote-ops              ; pi: BashOperations
      :shell-path "/bin/ash"                ; pi: shellPath
+     :shell-args ["-c"]                     ; pi: ShellConfig args
      :command-prefix "export SANDBOX=1"     ; pi: commandPrefix
      :expose-session-env? false}))           ; pi: exposeSessionEnvironment
 ```
@@ -669,7 +672,15 @@ map)` run before spawn, after the `KMET_*` session env is injected (pi:
 `KMET_SESSION_ID`/`KMET_SESSION_FILE`/`KMET_PROVIDER`/`KMET_MODEL`/
 `KMET_REASONING_LEVEL` into every command — and adds the matching prompt
 guideline; `:command-prefix`/`:shell-path` default to the
-`:shell-command-prefix`/`:shell-path` settings; `:operations` replaces the
+`:shell-command-prefix`/`:shell-path` settings (a tool that passes its own,
+e.g. the powershell extension, is unaffected by them); `:shell-args` is an
+explicit argv template for the shell binary (pi: `ShellConfig` args) — the
+command is appended as the final argv element, replacing the platform
+heuristics (cmd `/c`, WSL `-s`, sh `-c`), so a PowerShell tool passes
+`["-NoProfile" "-NonInteractive" "-ExecutionPolicy" "Bypass" "-Command"]`;
+`:temp-file-prefix` names the spill file a truncated output is saved to
+(pi: `tempFilePrefix`; default `"kmet-bash-"` — the powershell extension uses
+`"kmet-powershell-"`); `:operations` replaces the
 local spawn (a remote/SSH executor receiving
 `{:command :cwd :on-data :signal :timeout :env}` and returning
 `{:exit-code :cleanup}`); `:name` `:label` `:description` override the

@@ -9,6 +9,8 @@
             [kmet.ai.api.shared :as schema-shared]
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.bash-executor :as bash-exec]
+            [kmet.app.skills :as skills]
+            [kmet.libs.process :as process]
             [kmet.test-utils :refer [slash]]))
 
 (t/deftest test-tool-cwd-binding
@@ -211,6 +213,65 @@
         (finally
           (extensions/unload-all-extensions!)
           (fs/delete-tree dir))))))
+
+(t/deftest test-powershell-tool-extension
+  (t/testing "powershell ships as an opt-in extension: the bash engine with a
+              PowerShell shell, pi's PS> prompt call line and the shared bash
+              result renderer"
+    (let [r (extensions/load-extension! "extensions/powershell.clj")]
+      (try
+        (t/is (nil? (:error r)) (str (:error r)))
+        (let [tool (tools/get-tool "powershell")]
+          (t/is (some? tool))
+          (t/is (= "powershell" (:name tool)))
+          (t/is (= "Execute PowerShell commands" (:prompt-snippet tool)))
+          (t/is (= (str "Execute a PowerShell command in the current working directory. "
+                        "Returns stdout and stderr. Output is truncated to last 2000 lines "
+                        "or 50KB (whichever is hit first). If truncated, full output is "
+                        "saved to a temp file. Optionally provide a timeout in seconds.")
+                   (:description tool))
+                "pi's shellName-interpolated description")
+          (t/is (= ["You can inspect KMET_* environment variables for current model and session details."]
+                   (:prompt-guidelines tool))
+                "pi's guideline with the KMET_* session vars")
+          (t/is (fn? (:render-call tool)) "the shell-call renderer (PS>)")
+          (t/is (fn? (:render-result tool)) "the shared bash result renderer")
+          (t/is (= "PS> echo hi" ((:title tool) {:command "echo hi"})))
+          (t/is (nil? ((:title tool) {}))))
+        (t/testing "the system prompt names both shells (pi: buildRules)"
+          (t/is (str/includes?
+                 (skills/build-system-prompt :cwd "/tmp" :skills []
+                                             :tools (vals (tools/get-all-tools)))
+                 "Use bash or PowerShell for file operations like listing, searching, and finding files")))
+        (when-not process/windows-os?
+          (let [result (tools/execute-tool "powershell" {:command "Get-Date"})]
+            (t/is (:is-error result))
+            (t/is (str/includes? (:content result)
+                                 "only available on Windows"))))
+        (finally
+          (extensions/unload-all-extensions!)
+          (t/is (nil? (tools/get-tool "powershell")) "unload deregisters the tool"))))))
+
+(t/deftest ^:slow test-powershell-tool-execution
+  ;; pi: powershell-tool.test.ts — UTF-8 output and a process-local
+  ;; execution-policy bypass (Windows only; elsewhere the tool errors, which
+  ;; test-powershell-tool-extension covers)
+  (when process/windows-os?
+    (let [r (extensions/load-extension! "extensions/powershell.clj")]
+      (try
+        (t/is (nil? (:error r)) (str (:error r)))
+        (let [result (tools/execute-tool
+                      "powershell"
+                      {:command "Write-Output 'héllo €'; Get-ExecutionPolicy -Scope Process"})]
+          (t/is (not (:is-error result)) (:content result))
+          (t/is (str/includes? (:content result) "héllo €"))
+          (t/is (str/includes? (:content result) "Bypass")))
+        (t/testing "a truncated output spills to kmet-powershell-*.log (pi: tempFilePrefix)"
+          (let [big (tools/execute-tool "powershell" {:command "1..2100 | ForEach-Object { $_ }"})]
+            (t/is (:truncation big))
+            (t/is (str/includes? (:full-output-path (:truncation big)) "kmet-powershell-"))))
+        (finally
+          (extensions/unload-all-extensions!))))))
 
 (t/deftest test-tools-get
   (let [t (tools/get-tool "read")]
@@ -606,6 +667,32 @@
           result ((:execute tool) {:command "echo x"})]
       (t/is (:is-error result))
       (t/is (str/includes? (:content result) "Custom shell path not found")))))
+
+(t/deftest ^:slow test-tool-bash-shell-args
+  (t/testing "pi: ShellConfig args — an explicit argv template replaces the
+              platform heuristics; the command is the final argv element"
+    (let [shell (if process/windows-os?
+                  (some-> (or (fs/which "pwsh.exe") (fs/which "powershell.exe")) str)
+                  (first (filter fs/exists? ["/bin/sh" "/usr/bin/sh"])))
+          args (if process/windows-os?
+                 ["-NoProfile" "-NonInteractive" "-ExecutionPolicy" "Bypass" "-Command"]
+                 ["-c"])
+          command (if process/windows-os? "Write-Output shell-args-ok" "echo shell-args-ok")]
+      (when shell
+        (let [tool (bash-tool/create-tool {:shell-path shell :shell-args args})
+              result ((:execute tool) {:command command})]
+          (t/is (not (:is-error result)) (:content result))
+          (t/is (str/includes? (:content result) "shell-args-ok")))))))
+
+(t/deftest ^:slow test-tool-bash-temp-file-prefix
+  (t/testing "pi: tempFilePrefix — a truncated output spills to <prefix>*.log"
+    (let [tool (bash-tool/create-tool {:temp-file-prefix "kmet-test-"})
+          result ((:execute tool)
+                  {:command "for i in $(seq 1 2100); do echo line$i; done"})]
+      (t/is (:truncation result))
+      (t/is (str/includes? (:full-output-path (:truncation result)) "kmet-test-"))
+      (t/is (str/includes? (:content result) "kmet-test-")
+            "the footer names the spill file"))))
 
 (t/deftest test-wsl-launcher-bash-detection
   (t/testing "both WSL launchers take the -s stdin transport (pi: legacy WSL bash path)"
