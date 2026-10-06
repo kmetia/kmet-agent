@@ -20,7 +20,9 @@ src/kmet/
 ├── libs/               — Generic, self-contained helpers (edit diffing,
 │                         process tree, SSE framing, the outbound-HTTP
 │                         boundary, terminal protocol + images, YAML
-│                         frontmatter, EDN store + file locks, highlighting,
+│                         frontmatter, EDN store + file locks, durable file
+│                         writes (atomic publish + Windows AV retry),
+│                         highlighting,
 │                         markdown, crypto, AWS SigV4, ...)
 ├── modes/              — Entry modes: interactive TUI + print mode
 │   ├── interactive.clj — interactive TUI entry: run + session start-up

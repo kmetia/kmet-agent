@@ -236,6 +236,7 @@
     kmet.libs.dynamic-value
     kmet.libs.edit-diff
     kmet.libs.edn-store
+    kmet.libs.fs
     kmet.libs.highlight
     kmet.libs.host
     kmet.libs.http

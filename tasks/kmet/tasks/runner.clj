@@ -153,6 +153,7 @@
     kmet.libs.test-highlight
     kmet.libs.test-oauth
     kmet.libs.test-edn-store
+    kmet.libs.test-fs
     kmet.libs.test-edit-diff
     kmet.libs.test-process
     kmet.libs.test-jsonrpc

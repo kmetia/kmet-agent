@@ -3,6 +3,7 @@
    Each entry is an EDN map on one line: {:id str :parent-id str-or-nil :role keyword ...}
    Port of @earendil-works/pi-agent session storage."
   (:require [kmet.ai.usage :as usage]
+            [kmet.libs.fs :as kfs]
             [clojure.java.io :as io]
             [clojure.edn :as edn]
             [clojure.string :as str]
@@ -60,14 +61,11 @@
 (defn- publish-file!
   "Atomically write the session file: the header line followed by the
    entries, via temp file + rename so a crash mid-write can't corrupt the
-   file (pi: temp-file publication). Creates the session dir. Callers must
-   hold the session lock."
+   file (pi: temp-file publication; kmet.libs.fs/publish! creates the
+   session dir). Callers must hold the session lock."
   [session entries]
-  (let [file (:file session)
-        tmp (str file ".tmp")]
-    (fs/create-dirs (fs/parent file))
-    (spit tmp (apply str (map prn-str (cons (:header session) entries))))
-    (fs/move tmp file {:replace-existing true})))
+  (kfs/publish! (:file session)
+                (apply str (map prn-str (cons (:header session) entries)))))
 
 (defn- persist-if-needed!
   "Lazy file creation (pi: _persist — G4): write the file the first time the
@@ -245,10 +243,8 @@
    unacknowledged partial append; malformed middle lines are preserved).
    Returns the repaired lines. Runs during load, before any session exists."
   [file lines]
-  (let [valid (subvec lines 0 (dec (count lines)))
-        tmp (str file ".tmp")]
-    (spit tmp (str (str/join "\n" valid) "\n"))
-    (fs/move tmp file {:replace-existing true}))
+  (let [valid (subvec lines 0 (dec (count lines)))]
+    (kfs/publish! file (str (str/join "\n" valid) "\n")))
   (subvec lines 0 (dec (count lines))))
 
 (defn load-session
@@ -278,7 +274,7 @@
         ;; a final line without a newline would glue the next append onto it
         ;; (pi v4: unterminated-tail repair)
         _ (when (and (not ends-with-newline?) (seq lines) (not torn?))
-            (spit (str file) "\n" :append true))
+            (kfs/append-line! file "\n"))
         parsed (vec (keep (fn [line]
                             (let [e (parse-physical-line path line)]
                               (when-not (= ::invalid e) e)))
@@ -340,7 +336,7 @@
       (swap! (:entries session) conj entry)
       (reset! (:leaf-id session) (:id entry))
       (if (fs/exists? file)
-        (spit file (prn-str entry) :append true)
+        (kfs/append-line! file (prn-str entry))
         (persist-if-needed! session))
       entry)))
 

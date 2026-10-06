@@ -23,6 +23,7 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [kmet.libs.fs :as kfs]
             [kmet.libs.mcp.transport :as transport]
             [kmet.libs.oauth :as oauth]))
 
@@ -201,10 +202,6 @@
   (when (and path (fs/exists? path))
     (slurp path)))
 
-(defn- write-text
-  [path text]
-  (spit path (str text)))
-
 (defn- read-edn
   [path]
   (try
@@ -217,14 +214,10 @@
   "Atomic write (temp + rename) with 0600 perms (best-effort — Windows has
    no posix perms)."
   [path content]
-  (let [tmp (str path ".tmp")]
-    ;; a bare filename has no parent directory to create
-    (when-let [parent (fs/parent path)]
-      (fs/create-dirs parent))
-    (write-text tmp content)
-    (try (fs/set-posix-file-permissions tmp "rw-------") (catch Exception _ nil))
-    (fs/move tmp path {:replace-existing true})
-    nil))
+  (kfs/publish! path (str content)
+                {:prepare (fn [tmp]
+                            (try (fs/set-posix-file-permissions tmp "rw-------")
+                                 (catch Exception _ nil)))}))
 
 ;; ─── :file backend ────────────────────────────────────────────────────────
 

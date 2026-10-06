@@ -110,6 +110,20 @@
     (t/is (= 1 (count @(:entries session))))
     (t/is (string? @(:leaf-id session)))))
 
+(t/deftest test-session-write-round-trips-utf8
+  ;; The byte-stream writer behind kmet.libs.fs/publish! is explicitly UTF-8,
+  ;; matching the reader; non-ASCII message content survives save + reload.
+  (let [dir (str "target/test-sess-utf8-" (System/currentTimeMillis))
+        sess (s/create-session dir)
+        text "héllo — ünïcode ✓ 日本語"]
+    (try
+      (s/append-entry sess {:role :user :content [{:type :text :text text}]})
+      (s/append-entry sess {:role :assistant :content [{:type :text :text text}]})
+      (let [loaded (s/load-session (:file sess))]
+        (t/is (= text (get-in (first @(:entries loaded)) [:content 0 :text])))
+        (t/is (= text (get-in (second @(:entries loaded)) [:content 0 :text]))))
+      (finally (fs/delete-tree dir)))))
+
 (t/deftest test-session-concurrent-appends
   ;; Concurrent appends (a ! bash result on its future thread + a submitted
   ;; message on the agent thread) must not orphan sibling entries from the
