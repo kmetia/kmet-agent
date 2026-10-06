@@ -89,6 +89,32 @@
       (t/is (= ["good"] (mapv :name descs)))
       (t/is (= [(slash (str (fs/path ext "good")))] (slash (mapv :path descs)))))))
 
+(t/deftest test-artifact-manifest-wins-over-checkout-cwd
+  (let [repo (tmp-dir)
+        artifact (fs/path repo "extensions" "demo" "src")
+        manifest-path (fs/path repo "src" "kmet" "bundled-extensions" "manifest.edn")
+        manifest {:artifacts [{:name "demo" :kind :dir :root "demo/src"}]}
+        embedded-url (java.net.URL. "jar:file:/kmet.jar!/embedded")
+        resource (fn [path]
+                   (case (str path)
+                     "kmet/bundled-extensions/manifest.edn" embedded-url
+                     "extensions/demo/src/extension.edn" embedded-url
+                     nil))]
+    (fs/create-dirs artifact)
+    (fs/create-dirs (fs/parent manifest-path))
+    (spit (str manifest-path) "{}")
+    (spit (str (fs/path artifact "extension.edn"))
+          "{:name \"demo\" :entry demo.core :loader [:jolt :sci]}\n")
+    (try
+      (with-redefs [fs/cwd (constantly repo)
+                    io/resource resource
+                    bundled/manifest (constantly manifest)]
+        (let [descriptor (first (bundled/artifacts))]
+          (t/is (= :resource-dir (:kind descriptor)))
+          (t/is (= "extensions/demo/src" (:prefix descriptor)))))
+      (finally
+        (fs/delete-tree repo)))))
+
 (t/deftest test-resource-mode-descriptors
   (with-fixture-resources
     (fn []

@@ -114,14 +114,15 @@
       (str cwd))))
 
 (defn checkout-root
-  "The repo root when the manifest is reachable as a checkout file, else
-   nil: derived from the manifest's own `file:` URL, or — when the resource
-   is not file-based (a built artifact) — the checkout under the process
-   cwd."
+  "The repo root when the manifest is reachable as a file URL, else nil. If
+   no classpath resource answers, fall back to a checkout under the process
+   cwd; a non-file resource identifies an artifact and must not be shadowed
+   by the cwd."
   []
   (let [u (io/resource manifest-resource)]
-    (if (and u (= "file" (.getProtocol u)))
-      (repo-root u)
+    (if u
+      (when (= "file" (.getProtocol u))
+        (repo-root u))
       (cwd-root))))
 
 (defn- checkout-descriptor
