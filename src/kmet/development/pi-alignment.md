@@ -17,8 +17,10 @@ functionally aligned. The remaining gaps cluster in the CLI surface, rendering
 (mermaid/latex/search/images), the settings surface, the extension
 `registerProvider` `streamSimple`/`refreshModels` (wire-layer custom
 provider streaming + dynamic model refresh), and the 0.87.0 session-context
-wave (append-only context edits, actionable `turn_end`/`agent_before_settle`
-extension boundaries, `context_with_system`, per-model image input limits).
+wave (moved to [`lifecycle.md`](../../lifecycle.md) — append-only context
+edits, the actionable `turn_end`/`agent_before_settle` boundaries,
+`finishTurn`/`prepareRequest`/`peekQueuedMessages`, the pending custom-message
+queue, `context_with_system`; per-model image input limits stay in §2).
 
 ## Deliberately out of scope (locked decisions)
 
@@ -283,7 +285,7 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
 | `exec` | **Done** — `extensions/exec` (babashka.process, string capture) |
 | `getActiveTools`/`getAllTools`/`setActiveTools` | **Done** — `:enabled-tools` (runtime selection, pi: setActiveTools) and `:default-tools` (pi: defaultTools) filter the agent state, applied to the wire `:tools` and the run_code sandbox surface; `get-active-tools` returns the effective active names, `get-all-tools` the array |
 | `registerProvider` `streamSimple`/`refreshModels` | Partial — `registerProvider` config registration is done (`extensions/register-provider!` / `models/register-provider-config!`); `streamSimple`/`refreshModels` (wire-layer custom provider streaming + dynamic model refresh) still missing |
-| `context_with_system` event | **Missing** — pi runs it after every `context` handler over the full transcript (system messages included) and sends the result verbatim; dropping the leading system message is an extension error. kmet has one `:context` event over the outgoing message list (system prompt included — `call-llm` prepends it; tools travel separately, so a filtering handler cannot drop them), last non-nil `{:messages ...}` wins |
+| `context_with_system` event | **Missing** — pi runs it after every `context` handler over the full transcript (system messages included) and sends the result verbatim; dropping the leading system message is an extension error. kmet has one `:context` event over the outgoing message list (system prompt included — `call-llm` prepends it; tools travel separately, so a filtering handler cannot drop them), last non-nil `{:messages ...}` wins. Moved — see [`lifecycle.md`](../../lifecycle.md) L |
 | Events: `resources_discover`, `session_before_switch`, `session_before_fork`, `session_before_compact`, `context`, `before_provider_request`, `before_provider_headers`, `after_provider_response` | **Done** — see Appendix (all ✅) |
 | Events: `session_info_changed`, `thinking_level_select` | **Done** — emitted by `/name` and `set-thinking-level!` |
 | Events: `tool_call`/`tool_result` (transform) | **Done** — `extensions/register-tool-call-hook!`/`register-tool-result-hook!` chained as the agent's `:before-tool-call`/`:after-tool-call` callbacks (block / arg-rewrite / result-rewrite). Note: the transform chain is wired into the agent callbacks rather than fired as event-bus events; the event bus still carries the execution lifecycle via `:tool-execution-start`/`:tool-execution-update`/`:tool-execution-end` (see Appendix) |
@@ -334,33 +336,12 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
 
 ### 7. Session context & agent-core (pi 0.87.0)
 
-pi's "canonical session context" wave (`SessionManager` authoritative for
-provider context, append-only context edits, actionable extension
-boundaries) has no kmet counterpart. kmet's session/context model is its own
-(EDNL `app/session.clj` + the `app/loop.clj` state atoms), so these are
-design decisions, not mechanical ports:
-
-- **`ContextEditEntry` / `appendContextEdit`** — append-only per-message
-  context edits: `replacement: null` omits one message from future provider
-  context, a content replacement swaps its text; raw history, usage, and UI
-  history stay untouched. kmet has no per-message context-edit layer;
-  compaction is append-only and changes only the projected context, so it
-  cannot omit one arbitrary message.
-- **Actionable `turn_end` / `agent_before_settle` boundaries** — extension
-  handlers can return `{:entries [...] :continue bool}` to persist
-  structural entries in order and ensure one next provider request without
-  changing steering/follow-up scheduling; kmet's `:turn-end` /
-  `:agent-settled` are notification-only.
-- **`finishTurn` / `prepareRequest` / `peekQueuedMessages`** (`packages/agent`)
-  — `finishTurn` replaces `shouldStopAfterTurn` (breaking change) and runs
-  for normal, error, and aborted responses, with its decision applied after
-  `turn_end`; `prepareRequest` installs canonical context before every
-  provider request; `peekQueuedMessages` previews the next queued batch.
-  kmet's `loop.clj` keeps its own adaptation of the pre-0.87 hooks
-  (`:prepare-next-turn` then `:should-stop-after-turn`, boolean, not run for
-  error/aborted responses) — close, but the hook shape and coverage differ.
-- **Per-model image input limits** — see §2 (catalog `inputLimits` metadata +
-  enforcement).
+Moved. The 0.87.0 session-context wave is a run-lifecycle concern and now
+lives in [`lifecycle.md`](../../lifecycle.md): append-only per-message
+context edits (K), the actionable `turn_end` / `agent_before_settle`
+boundaries (F/G), `finishTurn` / `prepareRequest` / `peekQueuedMessages`
+(F/I/J), the pending custom-message queue and `:next-turn` (H), and
+`context_with_system` (L). Per-model image input limits remain in §2.
 
 ## Appendix: Event type vocabulary
 
@@ -371,14 +352,14 @@ pi events (`core/extensions/types.ts`) → kmet status (`app/event_bus.clj` `eve
 | `session_start` | ✅ `:session-start` | reason startup/reload/new/resume/fork; kmet lacks `reload` reason flag granularity |
 | `session_info_changed` | ✅ `:session-info-changed` | emitted by `/name` |
 | `session_before_switch` / `session_before_fork` | ✅ `:session-before-switch` / `:session-before-fork` | both emitted by `/switch` and `/fork` (reason :user/:auto), cancelable — handlers return {:cancel true} |
-| `session_before_compact` / `session_compact` | ~ | kmet emits `:compaction-start`/`:compaction-end` (reason manual/threshold/overflow/auto) |
+| `session_before_compact` / `session_compact` | ~ | kmet emits `:compaction-start`/`:compaction-end` (reason manual/threshold/overflow/auto); dispatch gap — see [`lifecycle.md`](../../lifecycle.md) D |
 | `session_before_tree` / `session_tree` | ✅ `:session-before-tree` / `:session-tree` | incl. cancel/summary/extension-summary results |
 | `session_shutdown` | ✅ `:session-shutdown` | emitted by `/reload` (reason reload) and `/new` (reason new, target-session-file) before the extension runtime is torn down (pi: teardownCurrent / session.reload) |
-| `context` | ✅ `:context` | fired before each LLM call with the outgoing messages (system prompt included — `call-llm` prepends it; tools travel separately); handlers return {:messages [...]} to replace (last non-nil wins). pi 0.87.0: `context` handlers see the conversation only (pi re-applies prompt sections + tool declarations) and `context_with_system` runs after them over the full transcript |
-| `context_with_system` | — | missing (pi 0.87.0 per-request system-message transformations over the full transcript) |
+| `context` | ✅ `:context` | fired before each LLM call with the outgoing messages (system prompt included — `call-llm` prepends it; tools travel separately); handlers return {:messages [...]} to replace (last non-nil wins). pi 0.87.0 splits this from `context_with_system` — see [`lifecycle.md`](../../lifecycle.md) L |
+| `context_with_system` | — | missing (pi 0.87.0 per-request system-message transformations over the full transcript) — see [`lifecycle.md`](../../lifecycle.md) L |
 | `before_agent_start` | ✅ | hook, not event |
-| `agent_start` / `agent_end` / `agent_settled` | ✅ `:agent-start` / `:agent-end` / `:agent-settled` | one `:agent-start`/`:agent-end` pair per attempt (`agent.prompt` then `agent.continue`, so auto-retry and overflow recovery each get their own); `:agent-end :messages` accumulates that attempt's messages (pi: `newMessages`) — a mid-run compaction does not shrink them, a cancelled/errored attempt is included, and `:will-retry` marks a retryable failure (added for public listeners only, as pi does — `_emitExtensionEvent` precedes the decoration); exactly one `:agent-settled` per prompt; pi 0.87.0 adds the actionable `agent_before_settle` boundary (missing) |
-| `turn_start` / `turn_end` | ✅ `:turn-start` / `:turn-end` | notification-only; pi 0.87.0 makes `turn_end` actionable (`{:entries [...] :continue bool}`) |
+| `agent_start` / `agent_end` / `agent_settled` | ✅ `:agent-start` / `:agent-end` / `:agent-settled` | one `:agent-start`/`:agent-end` pair per attempt (`agent.prompt` then `agent.continue`, so auto-retry and overflow recovery each get their own); `:agent-end :messages` accumulates that attempt's messages (pi: `newMessages`) — a mid-run compaction does not shrink them, a cancelled/errored attempt is included, and `:will-retry` marks a retryable failure (added for public listeners only, as pi does — `_emitExtensionEvent` precedes the decoration); exactly one `:agent-settled` per prompt; pi 0.87.0 adds the actionable `agent_before_settle` boundary and a post-`agent_end` queued-message continuation (both missing — see [`lifecycle.md`](../../lifecycle.md) E/G) |
+| `turn_start` / `turn_end` | ✅ `:turn-start` / `:turn-end` | notification-only; pi 0.87.0 makes `turn_end` actionable (`{:entries [...] :continue bool}`) — see [`lifecycle.md`](../../lifecycle.md) F |
 | `message_start` / `message_update` / `message_end` | ✅ | kmet `:message-update` carries `:delta` incl. tool-call |
 | `tool_execution_start` / `_update` / `_end` | ✅ | |
 | `tool_call` / `tool_result` | ~ (mechanism differs) | kmet does **not** emit `:tool-call`/`:tool-result` events on the event bus; the transform chain (block / arg-rewrite / result-rewrite) is wired into the agent's `:before-tool-call`/`:after-tool-call` callbacks via `register-tool-call-hook!`/`register-tool-result-hook!` instead. See §5. Event-bus execution lifecycle events are `:tool-execution-start`/`:tool-execution-update`/`:tool-execution-end` |

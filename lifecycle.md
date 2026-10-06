@@ -1,0 +1,378 @@
+# Run-lifecycle alignment plan (pi ↔ kmet)
+
+## Purpose
+
+Bring kmet's agent run lifecycle — the low-level attempt loop, the prompt-level
+retry/overflow state machine, and the session-layer boundaries around them —
+in line with pi, after the `subvec` crash fix and its follow-ups A/B/C.
+
+This is an implementation handoff. It records the decisions taken and the
+ordered work; treat it as the intended scope unless implementation findings
+require revisiting a decision. It also owns the pi 0.87.0 session-context wave
+moved here from
+[`src/kmet/development/pi-alignment.md`](src/kmet/development/pi-alignment.md)
+§7, which now points back at this file.
+
+## Reference
+
+`~/src/cvstree/pi` at `HEAD b9ab918c6` (v1.0.3):
+
+- `packages/agent/src/agent-loop.ts` — low-level loop (`runLoop`, `finishTurn`, `prepareRequest`).
+- `packages/coding-agent/src/core/agent-session.ts` — session layer (`_runAgentPrompt`, `_handlePostAgentRun`, boundaries).
+- `packages/coding-agent/src/core/extensions/types.ts` — extension event shapes.
+
+pi line numbers are from that checkout. (The original note named `200387122`;
+it is an ancestor of `b9ab918c6`, touches neither file, and already contains
+the 0.87.0 wave — its `_runAgentPrompt` is at 1775 too, so the note's old
+"1820" figure was stale.) kmet line numbers are indicative and drift.
+
+## Status
+
+Landed baseline — do not redo:
+
+- **A** — `:agent-end :messages` is the attempt's accumulated messages
+  (`:run-messages` atom + `*run-token*` dynamic binding), not a slice of the
+  live context. `append-message!` records; `record-abandoned-attempt!` covers
+  the session-only errored/aborted message; `append-context-message!` is the
+  context-only path for the post-settle bash flush.
+- **B** — `:agent-end :will-retry`, delivered to the UI callback only, not the
+  extension bus (pi's `_emit` decoration precedes `_emitExtensionEvent`).
+- **C** — retries and overflow recovery are separate attempts:
+  `run-agent-turn` owns the state machine, `run-attempt!` is the low-level
+  loop, one `:agent-start`/`:agent-end` pair per attempt, one `:agent-settled`
+  per prompt.
+
+Open: **D–L**, phased below. D is the item the original note tracked; E–L are
+the 0.87.0 session-context / boundary wave.
+
+## Target behavior (pi)
+
+The prompt pipeline (`_runAgentPrompt`, `agent-session.ts:1775`):
+
+1. `agent.prompt()` / `agent.continue()` runs one low-level run (`runLoop`),
+   which drains steering and follow-up and then emits `agent_end`
+   (`agent-loop.ts:320`). `newMessages` is the attempt's own list.
+2. `_handlePostAgentRun` (1806), in order:
+   - retryable error → `_prepareRetry` + backoff, then `continue`;
+   - terminal errored message → `auto_retry_end`;
+   - post-run compaction `_checkCompaction` (1837);
+   - messages queued by `agent_end` handlers → `hasQueuedMessages()` →
+     `continue` (1841).
+3. `_runBeforeSettleBoundary` (1846) — actionable `agent_before_settle`.
+4. settle: flush pending bash/custom messages, emit `agent_settled` once
+   (prompt `finally`).
+
+Inside the loop, `finishTurn` (`agent-loop.ts:252` error/aborted, `286`
+normal) runs before `turn_end` and may return `{action: "continue" | "end"}`;
+`prepareRequest` (219) installs canonical context before every provider
+request. The session wraps `finishTurn` (`_installAgentBoundaryHooks`, 858) to
+make `turn_end` actionable, and `prepareNextTurnWithContext` (877) to run the
+per-turn compaction.
+
+## Scope & decisions
+
+In scope: D–L.
+
+Out of scope: per-model image input limits (stay in `pi-alignment.md` §2),
+RPC/JSON modes, project trust, and the pi-alignment.md locked decisions.
+
+Decisions taken for this plan:
+
+1. Boundary handler results are session entries, appended through the session
+   (`{:entries [...] :continue bool}`), matching pi's `SessionBoundaryDraft`.
+2. Exactly one `:agent-settled` per prompt, emitted last; it stays
+   notification-only.
+3. A low-level attempt stays the unit of `:agent-start`/`:agent-end` (from C).
+4. D must carry the abort guard found necessary in the reverted attempt (see
+   D); do not re-land it unconditionally.
+
+## Dependency order
+
+| phase | items | rationale |
+|-------|-------|-----------|
+| 1 | E, J | localized to `run-agent-turn`; no boundary machinery needed |
+| 2 | F, G | F establishes the boundary result shape; G builds on it |
+| 3 | D | post-run dispatch needs E's queue point and G's pre-settle position, plus the abort guard |
+| 4 | H, I, L | context ingestion; H flushes at F's `turn_end`, L depends on I's request assembly |
+| 5 | K | session context model, largest and most independent |
+
+---
+
+## Phase 1 — post-run continuation
+
+### E. Messages queued by an `:agent-end` handler start a fresh attempt
+
+**Goal.** A follow-up/steer queued during the `:agent-end` extension dispatch
+runs in the same prompt instead of waiting for the next submit.
+
+**pi.** The low-level loop drains both queues before `agent_end`
+(`agent-loop.ts:301-308`, final emit 320), but `agent_end` handlers run after
+that drain. `_handlePostAgentRun` therefore ends with
+`return !abort && this.agent.hasQueuedMessages()` (`agent-session.ts:1841-1843`)
+and `_runAgentPrompt` answers with `agent.continue()` (1775-1794). Note
+`:agent-settled`-handler messages stay queued in pi too (settle fires in the
+prompt `finally`) — the entry point is `:agent-end`.
+
+**kmet.** `run-attempt!` emits `:agent-end` and returns `{:status :settled}`;
+`run-agent-turn` treats `:settled` as the end of the prompt, so the message
+sits until the next user submit.
+
+**Change.**
+
+1. In `run-agent-turn`'s `case :settled`, before leaving the loop, check
+   `has-queued-messages?`; when true, `begin-attempt!` and `recur`.
+2. Keep the per-prompt accumulator reset and the single `:agent-settled`.
+3. Do not consume `:agent-settled`-handler messages (pi parity).
+
+**Acceptance.** A test where an `:agent-end` listener queues a follow-up:
+two `:agent-start`/`:agent-end` pairs in one prompt, one `:agent-settled`.
+
+### J. `peekQueuedMessages`
+
+**Goal.** Preview the next queued batch without draining it, for the F/G
+boundary previews and the UI pending display.
+
+**pi.** `peekQueuedMessages` (`packages/agent/src/agent.ts:330`) is
+non-destructive; `_getPendingBoundaryMessages` (`agent-session.ts:967`) also
+folds in `_pendingCustomMessages`.
+
+**kmet.** `has-pending-messages` checks only the two string queues and never
+previews.
+
+**Change.** Add `peek-queued-messages` over `:steering`/`:follow-up` (and the
+pending-custom queue added in H), used by F/G and the pending display.
+
+**Acceptance.** Peeking does not empty the queues and returns the same messages
+the next drain consumes.
+
+---
+
+## Phase 2 — turn and settle boundaries
+
+### F. Actionable `turn_end` + `finishTurn` (error/aborted coverage, continue/end)
+
+**Goal.** `:turn-end` becomes actionable and runs consistently, including on
+errored and aborted attempts.
+
+**pi.** `finishTurn` runs for normal (`agent-loop.ts:286`), error, and aborted
+(`:252`) responses, before `turn_end` (`:253`, `:287`), and returns
+`{action: "continue" | "end"}` (`:289`, `:294`). The session wraps it
+(`_installAgentBoundaryHooks`, `agent-session.ts:858`) so
+`_dispatchTurnEndBoundary` (818) sets `_lastActivityOutcome` (414/822) and
+hands `turn_end` handlers `{entries, continue}`; entries are committed
+(`_commitBoundaryDrafts`, 996); `continue` forces one more request.
+
+**kmet.** `:turn-end` return values are ignored (`tools-phase!`,
+`final-phase!`); `after-turn!` (`app/loop.clj:1561`) runs
+`prepare-next-turn`/`should-stop-after-turn`, returns a boolean, and is
+reached only on the normal tool/final paths. Errored/aborted attempts emit no
+`:turn-end` at all.
+
+**Change.**
+
+1. Emit `:turn-end` for the errored/aborted assistant message, before
+   `:agent-end`/`:auto-retry-start`.
+2. Run the turn hooks on the error and aborted paths too.
+3. Adopt the `finishTurn` result shape (`:continue`/`:end`) from both the loop
+   hook and the `:turn-end` boundary; let the boundary return
+   `{:entries [...] :continue bool}` and commit entries in order.
+
+**Acceptance.** An errored attempt emits `:turn-end` before `:agent-end` and
+`:auto-retry-start`; a `:turn-end` handler returning `:continue` forces one
+more request; returned `:entries` persist in order.
+
+### G. Actionable `agent_before_settle` boundary
+
+**Goal.** A pre-settle boundary lets handlers append entries and force one
+final request before the prompt settles.
+
+**pi.** `_runBeforeSettleBoundary` (`agent-session.ts:1846`), after
+`_handlePostAgentRun` decides not to continue: emits `agent_before_settle`
+with `outcome: _lastActivityOutcome` and a boundary context preview
+(`_buildBoundaryContext`, 973); handlers return `{entries, continue}`
+(`types.ts:992`, 1604); entries are committed and `continue` runs one more
+request before `agent_settled`.
+
+**kmet.** `:agent-settled` is a notification from `run-agent-turn`'s `finally`;
+no pre-settle boundary, no outcome payload.
+
+**Change.**
+
+1. Emit an actionable `:agent-before-settle` before `:agent-settled`, carrying
+   the run's outcome (`:completed`/`:error`/`:aborted`).
+2. Run handlers, commit returned entries, honor `{:continue true}` by starting
+   one more attempt (reuse F's boundary machinery).
+3. Keep `:agent-settled` terminal and notification-only.
+
+**Acceptance.** A handler returning `{:continue true}` produces one more
+attempt before `:agent-settled`; entries persist in order; `outcome` reflects
+the last attempt's stop reason.
+
+---
+
+## Phase 3 — post-run dispatch
+
+### D. Compaction dispatch belongs to the session layer
+
+**Goal.** Run the automatic compaction check after a settled attempt, as pi
+does, not only at the next prompt's pre-run check.
+
+**pi.** Dispatched outside the low-level loop: before a prompt
+(`_checkCompaction(lastAssistant, false)`, `agent-session.ts:2009`), per turn
+(`_compactBeforeNextAssistantResponse`, 748, called at 877), and after the run
+(`_handlePostAgentRun` → `_checkCompaction`, 1837; `_checkCompaction` 2900,
+`skipAbortedCheck` 2902/2909; overflow `_runAutoCompaction` 2969/2997;
+`compact()` 2717).
+
+**kmet.** `maybe-compact!` (1432) from `prepare-run!` (1545) and `tools-phase!`
+(1588); `compact-for-overflow!` (1469) in the retry branch. The per-turn check
+already matches pi; only the post-run check is deferred to the next prompt.
+
+**Change.**
+
+1. Expose the post-run check to the caller: call it after `agent-end` and
+   before the F/G settle boundary.
+2. A `:threshold` compaction just settles (pi does not retry for threshold).
+3. Place the call so D, E, and G follow pi's order in `_handlePostAgentRun`:
+   retry → compaction → queued-message continue → before-settle boundary.
+
+**Risks / prior art.** A first attempt called `maybe-compact!` after a settled
+attempt and re-triggered forever when the compaction was aborted or failed
+(context still over threshold → next run retries the same compaction), hanging
+`test-loop-abort-compaction-keeps-run` (a `:compact-token-threshold` context
+with a never-finishing summarization stub). pi's `skipAbortedCheck` does not
+cover a successful run whose compaction was separately aborted. Land it only
+with a guard that suppresses the check after an aborted/failed compaction in
+the same prompt (or carry pi's `_overflowRecoveryAttempted`/`skipAbortedCheck`
+state explicitly).
+
+**Acceptance.** A run whose final assistant message crosses the threshold
+emits `agent-end` → `compaction-start` → `compaction-end` in that order, with
+no extra run; an aborted/failed compaction in the same prompt does not
+re-trigger; event-order tests for both.
+
+---
+
+## Phase 4 — context ingestion
+
+### H. Pending custom-message queue + `:next-turn`
+
+**Goal.** A custom message sent mid-stream cannot land between a tool call and
+its result, and `:next-turn` delivery is real.
+
+**pi.** `sendCustomMessage` (`agent-session.ts:2246`) defers a non-triggering
+streaming message into `_pendingCustomMessages` (`:384`, pushed 2278) —
+*"Appending now would put the message between an assistant tool call and its
+result … Defer to the end of the turn."* — flushed by
+`_flushPendingCustomMessages` (2300) at `turn_end` (1165) and before settle
+(1801). `:next-turn` goes to `_pendingNextTurnMessages` (`:382`), injected with
+the next prompt (2041).
+
+**kmet.** Interactive `:send-message!` (`modes/interactive/ui_registry.clj`)
+calls `add-context-message!` unconditionally, before the deliver-as branch.
+No pending-custom queue; `:next-turn` (advertised at `app/extensions.cljc:472`)
+collapses into `follow-up!`.
+
+**Change.**
+
+1. Add a pending-custom queue, flushed at `turn_end` and at the settle flush
+   (`run-agent-turn`'s `finally`).
+2. Add the `:next-turn` queue injected with the next prompt.
+3. Make the interactive registry append exactly once per delivery mode.
+4. Fix the related double-append: for
+   `{:trigger-turn true :deliver-as :follow-up}` while busy, the registry
+   appends immediately *and* queues, and `run-attempt!`'s follow-up drain
+   re-adds the map — the message lands in context twice. Only the headless
+   path is tested today.
+
+**Acceptance.** A custom message sent while a tool is executing is absent from
+context until the turn's results are in; a `:follow-up` custom message appears
+exactly once; `:next-turn` is injected with the following prompt.
+
+### I. `prepareRequest` per-request checkpoint
+
+**Goal.** Install the canonical context immediately before every provider
+request, so a context mutation is reflected without a turn boundary.
+
+**pi.** `prepareRequest` (`agent-loop.ts:219`) may return
+`{context, model, thinkingLevel}`. `prepareNextTurn` (186) is the turn-boundary
+counterpart.
+
+**kmet.** No per-request checkpoint; `transform-context` and the `:context`
+event transform messages, but the canonical install happens only at
+`prepare-next-turn`/compaction.
+
+**Change.** Add a per-request hook with the `apply-next-turn-update!` shape
+(`:context`/`:model`/`:thinking`/`:system`), invoked just before each
+`call-llm`.
+
+**Acceptance.** A hook replacing `:context` is honored on the next request
+with no turn boundary between.
+
+### L. `context_with_system` event
+
+**Goal.** Per-request system-message transformations over the full transcript.
+
+**pi.** After `context` handlers run over the conversation only, after every
+`context_with_system` handler runs over the full transcript (system messages
+included) and the result is sent verbatim; dropping the leading system message
+is an extension error.
+
+**kmet.** One `:context` event over the outgoing messages (`call-llm` prepends
+the system prompt; tools travel separately, so a filtering handler cannot drop
+them); last non-nil `{:messages ...}` wins.
+
+**Change.** Add `:context-with-system` after `:context`, over the full
+transcript, with the leading-system-message validation.
+
+**Acceptance.** A `:context-with-system` handler sees the system message; a
+result that drops it is rejected; ordering is `:context` then
+`:context-with-system`.
+
+---
+
+## Phase 5 — session context model
+
+### K. Append-only per-message context edits
+
+**Goal.** Omit or rewrite one arbitrary message in future provider context
+without touching raw history, usage, or UI history.
+
+**pi.** `ContextEditEntry` / `appendContextEdit`: `replacement: null` omits one
+message from future provider context, a content replacement swaps its text.
+
+**kmet.** No per-message edit layer; compaction is the only append-only context
+change and replaces the projection wholesale, so it cannot omit a single
+message.
+
+**Change.** Add session-level context-edit entries plus projection support and
+a loop API to append one.
+
+**Acceptance.** A `:replacement nil` edit drops exactly that message from the
+next provider context; the raw branch, usage totals, and replay are unchanged.
+
+---
+
+## Verification
+
+- Iterate with `bb changed`, `bb test-changed`, `bb lint-changed`,
+  `bb format-check-changed`. Full gates only on request.
+- Prefer a fresh process for event-order tests (`bb -e`/scratch script) when
+  namespace load order matters.
+- Repro material from the original report (gitignored, under `target/`):
+  `check_subvec*.bb` recompute the 300/62 counts from the real session file;
+  `verify_regression.bb` disables the run-message accumulator in-process
+  (`alter-var-root` on `record-run-message!`) and shows the pre-A payload
+  failures. Real evidence: session
+  `…2026-10-06T13-28-18-767Z_1a11166984d-d286621b.ednl`, compaction entry
+  `2026-10-06T14:41:12.472Z`, `:tokens-before 166703`,
+  `:first-kept-id 1a111a446c2-fa70b8b4`.
+
+## Docs to update as items land
+
+- `src/kmet/app/event_bus.clj` — A/B done; E/F/G/H/L add or reshape events
+  (`:agent-before-settle`, actionable `:turn-end`, `:context-with-system`).
+- `src/kmet/development/pi-alignment.md` — A/B/C done and §7 moved here; the
+  Appendix rows for the agent/turn/context boundaries point at this file. The
+  compaction row (`session_before_compact` / `session_compact`) follows D.
+- This file — strike items as they land; remove it when the open list is empty.
