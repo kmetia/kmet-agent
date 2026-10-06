@@ -1,7 +1,8 @@
 (ns kmet.libs.fs
   "Durable file writes for the app's state files: in-place UTF-8 writes and
-   an atomic publish (temp file + rename), both retried briefly against a
-   Windows AV scanner that opens a freshly written file to inspect it.
+   an atomic publish (temp file + rename), both retried briefly against
+   Windows real-time AV, which opens a freshly written file to inspect it
+   and holds its rename and delete until the scan ends.
 
    Why not spit? Jolt's spit is itself atomic — it writes its own temp file
    and renames that — so a caller that publishes through temp + rename (the
@@ -11,13 +12,14 @@
    exactly one rename, and they write explicit UTF-8 rather than the host's
    default charset.
 
-   The retry: Windows real-time AV opens a newly written file with a handle
-   that blocks rename and delete until it lets go; a rename landing in that
-   window fails with \"permission denied\" even though nothing is wrong with
-   the paths — and the failed temp cannot be cleaned up either, the scanner
-   holds it. Both publish steps are therefore retried on a short ladder
-   before the write is allowed to fail. Upstream ticket behind this:
-   jolt-lang/jolt#1263 (see jolt-bugs.md)."
+   The retry is kmet's own and stays after jolt#1263: that fix retries the
+   rename inside jolt's spit and its loader writes, but kmet renames with
+   fs/move (java.nio.file.Files/move on Jolt), whose rename it does not
+   wrap. A rename landing while the AV handle is open fails with
+   \"permission denied\" even though nothing is wrong with the paths — and
+   the failed temp cannot be cleaned up either, the scanner holds it. Both
+   publish steps are therefore retried on a short ladder before the write
+   is allowed to fail."
   (:require [clojure.java.io :as io]
             [babashka.fs :as fs]))
 
