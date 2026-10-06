@@ -102,17 +102,23 @@ Project settings layer over user settings: a `.kmet/settings.edn` list of only
 `+name`/`-name` entries modifies the user's selection, while a list containing
 a plain name replaces it.
 
-`kmet config` (the resource TUI) lists the built-in tools as their own group
+`kmet config` (the resource TUI) lists the built-in tools in the
+**Bundled with kmet** group, under a `Tools` subgroup before `Extensions`,
 and toggles this setting: the global scope keeps a modifier-only list's shape
 (disabling writes `-name`) and rewrites a plain list as the effective
 selection, while the project scope writes the usual inherit/load/unload
 `+name`/`-name` delta over the user list.
 
-The selection applies at startup and is re-resolved by `/reload` — tools newly
-added to the setting become active, tools removed from it stay as they are,
-and a runtime selection made with the `/tools` selector (bundled `tools`
-extension) wins over the setting. kmet has no CLI equivalent of pi's
-`--tools`/`--exclude-tools`/`--no-tools`/`--no-builtin-tools` yet.
+The selection applies at startup, on a session switch (`/resume`, `/import` —
+pi recreates the runtime from settings there, so the outgoing session's
+runtime selection does not carry over), and on `/reload`, which replaces the
+selection: tools newly added become active and tools removed go inactive. A
+runtime selection made with the `/tools` selector (bundled `tools` extension)
+wins over the setting until the next switch or reload. A tool that is not
+active is also not executable — a call the model makes for a disabled tool
+settles as `Tool <name> not found` (pi: `prepareToolCall`) instead of running.
+kmet has no CLI equivalent of pi's `--tools`/`--exclude-tools`/`--no-tools`/
+`--no-builtin-tools` yet.
 
 ## HTTP and reload
 

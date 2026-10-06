@@ -2008,6 +2008,67 @@
       (t/is (true? (:is-error end)))
       (t/is (.contains (:content (:result end)) "before-tool-call hook error")))))
 
+(t/deftest test-loop-undeclared-tool-call-settles-as-error
+  ;; pi: prepareToolCall resolves the call against the tools declared for the
+  ;; request — a call to a tool the model was not given (disabled built-in,
+  ;; hallucinated name) settles as an error and never executes
+  (let [events (atom [])
+        executed (atom [])
+        agent (loop/make-agent-state
+               :on-event (fn [e] (swap! events conj e))
+               ;; bash is left out of the built-in selection
+               :default-tools ["read" "write" "edit" "run_code"])]
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message (stub-llm-tool-then-text (atom 0))
+                  tools/execute-tool (fn [name _ _] (swap! executed conj name)
+                                       {:content "should not run" :is-error false})]
+      @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+    (t/is (empty? @executed) "an undeclared call must not execute")
+    (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
+      (t/is (= "bash" (:tool-name end)))
+      (t/is (true? (:is-error end)))
+      (t/is (= "Tool bash not found" (:content (:result end)))))))
+
+(t/deftest test-loop-undeclared-tool-call-settles-as-error-in-sequential-batch
+  ;; the guard lives in both executors — a :sequential tool in the batch
+  ;; switches the whole batch to the sequential path
+  (let [events (atom [])
+        executed (atom [])
+        agent (loop/make-agent-state
+               :on-event (fn [e] (swap! events conj e))
+               :default-tools ["read"])]
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  ;; force the sequential executor for this batch
+                  loop/tool-execution-mode (constantly :sequential)
+                  llm/send-message (stub-llm-tool-then-text (atom 0))
+                  tools/execute-tool (fn [name _ _] (swap! executed conj name)
+                                       {:content "should not run" :is-error false})]
+      (t/is (= :sequential (#'loop/tool-execution-mode "bash"))
+            "the batch is on the sequential path")
+      @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+    (t/is (empty? @executed) "an undeclared call must not execute")
+    (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
+      (t/is (true? (:is-error end)))
+      (t/is (= "Tool bash not found" (:content (:result end)))))))
+
+(t/deftest test-loop-declared-tool-call-still-executes
+  ;; the guard is the declared set, not a fixed name list: a call to a tool
+  ;; inside the selection executes as before
+  (let [events (atom [])
+        executed (atom [])
+        agent (loop/make-agent-state
+               :on-event (fn [e] (swap! events conj e))
+               :default-tools ["bash"])]
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message (stub-llm-tool-then-text (atom 0))
+                  tools/execute-tool (fn [name _ _] (swap! executed conj name)
+                                       {:content "ran" :is-error false})]
+      @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+    (t/is (= ["bash"] @executed))
+    (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
+      (t/is (false? (:is-error end)))
+      (t/is (= "ran" (:content (:result end)))))))
+
 (t/deftest test-loop-after-tool-call-rewrites
   (let [events (atom [])
         agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))]

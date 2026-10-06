@@ -416,12 +416,20 @@
                                                               {:type :session-before-switch
                                                                :reason :resume
                                                                :target-session-file path}))
-                                            (let [sess (session/load-session path)
+                                            (let [previous-file (:file @(:session-atom cs))
+                                                  sess (session/load-session path)
                                                   short-id (subs (:id sess) 0 (min 8 (count (:id sess))))]
                                               (session-admin/restore-session! cs sess true)
                                               (chat-history/chat-history-add-message! (:chat-history cs)
                                                                                       {:role :assistant
                                                                                        :content (str "Resumed session " short-id ".")})
+                                              ;; pi: switchSession → createRuntime emits
+                                              ;; session_start (reason resume) — extensions
+                                              ;; restore their per-session state (the
+                                              ;; /tools selection lives on the branch)
+                                              (session-admin/emit-session-start-async!
+                                               (cond-> {:type :session-start :reason :resume}
+                                                 previous-file (assoc :previous-session-file previous-file)))
                                               (tui/tui-request-render (:tui cs))))))))})
   (register-builtin-command!
    {:name "continue"

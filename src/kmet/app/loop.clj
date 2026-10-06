@@ -252,6 +252,14 @@ Be precise and concise in your responses."}}]
   (active-tools-for {:enabled @(:enabled-tools agent)
                      :default-tools @(:default-tools agent)}))
 
+(defn declared-tool-names
+  "The names of the tools declared to the model for the current turn (the
+   active set). A tool call is resolved against this set before execution:
+   a disabled or hallucinated call settles as an error instead of running
+   (pi: prepareToolCall's tools.find → \"Tool X not found\")."
+  [agent]
+  (into #{} (map :name) (active-tools agent)))
+
 (defn set-active-tools!
   "Restrict the tools sent to the LLM to NAMES (a set or seq of tool
    names); nil restores the configured default surface — every tool, minus
@@ -263,7 +271,9 @@ Be precise and concise in your responses."}}]
    options captured at build time (:system-prompt-opts, pi:
    _baseSystemPromptOptions) are re-applied with the filtered set, so the
    prompt's Available tools list and tool-derived guidelines stay in sync
-   with what the model can actually call.
+   with what the model can actually call. The updated options are stored
+   back, so a later rebuild from them — refresh-prompt-cwd! on a session
+   switch — keeps the same tool set (pi: _rebuildSystemPrompt).
    Changes take effect on the next agent turn."
   [agent names]
   (let [names (cond
@@ -290,6 +300,7 @@ Be precise and concise in your responses."}}]
         opts (assoc @(:system-prompt-opts agent) :tools valid)]
     (reset! (:enabled-tools agent) enabled)
     (when (seq @(:system-prompt-opts agent))
+      (reset! (:system-prompt-opts agent) opts)
       (reset! (:system agent)
               (apply skills/build-system-prompt (mapcat identity opts))))
     nil))
@@ -614,10 +625,14 @@ Be precise and concise in your responses."}}]
    tool-execution-end inside its own future, so a tool flips to done — with
    its own Took duration — the moment it finishes (pi: emitToolExecutionEnd
    in the concurrent closure) instead of when the slowest sibling does;
-   blocked calls settle during preparation. Context/session results are
-   appended afterwards, in source order. Returns results in source order."
+   blocked and undeclared calls settle during preparation. Context/session
+   results are appended afterwards, in source order. Returns results in
+   source order."
   [agent tool-calls assistant-msg & [append?]]
   (let [finalized (atom {})
+        ;; the names declared for this request — a call outside the set is
+        ;; an immediate error, never executed (see declared-tool-names)
+        declared (declared-tool-names agent)
         emit-end! (fn [tc result]
                     (emit agent {:type :tool-execution-end
                                  :tool-call-id (:id tc)
@@ -647,20 +662,28 @@ Be precise and concise in your responses."}}]
                                         :tool-call-id tc-id
                                         :tool-name tc-name
                                         :args tc-args})
-                           (let [prep (invoke/prepare-tool-call
-                                       {:tool-name tc-name
-                                        :args tc-args
-                                        :tool-call-id tc-id
-                                        :assistant-message assistant-msg
-                                        :before-hook @(:before-tool-call agent)})]
-                             (cond
-                               (:block prep)
-                               (assoc tc :kmet/blocked (:block prep))
+                           (if-not (contains? declared tc-name)
+                             ;; pi: prepareToolCall's tools.find — an
+                             ;; undeclared call settles immediately as an
+                             ;; error (hooks included), so a disabled tool
+                             ;; cannot run
+                             (assoc tc :kmet/blocked
+                                    {:content (str "Tool " tc-name " not found")
+                                     :is-error true})
+                             (let [prep (invoke/prepare-tool-call
+                                         {:tool-name tc-name
+                                          :args tc-args
+                                          :tool-call-id tc-id
+                                          :assistant-message assistant-msg
+                                          :before-hook @(:before-tool-call agent)})]
+                               (cond
+                                 (:block prep)
+                                 (assoc tc :kmet/blocked (:block prep))
 
-                               (contains? prep :args)
-                               (assoc tc :arguments (:args prep))
+                                 (contains? prep :args)
+                                 (assoc tc :arguments (:args prep))
 
-                               :else tc))))
+                                 :else tc)))))
                        tool-calls)
         ;; Blocked calls settle during preparation (pi: an immediate
         ;; outcome's end fires right away), not after the batch.
@@ -717,7 +740,9 @@ Be precise and concise in your responses."}}]
   "Execute tool calls one at a time (pi: executeToolCallsSequential).
    Same hooks and events as the parallel path; results in source order."
   [agent tool-calls assistant-msg & [append?]]
-  (let [tool-results (atom [])]
+  (let [tool-results (atom [])
+        ;; see the parallel executor — an undeclared call never executes
+        declared (declared-tool-names agent)]
     (doseq [tc tool-calls]
       (let [tc-id (:id tc)
             tc-name (:name tc)
@@ -726,12 +751,15 @@ Be precise and concise in your responses."}}]
                      :tool-call-id tc-id
                      :tool-name tc-name
                      :args tc-args})
-        (let [prep (invoke/prepare-tool-call
-                    {:tool-name tc-name
-                     :args tc-args
-                     :tool-call-id tc-id
-                     :assistant-message assistant-msg
-                     :before-hook @(:before-tool-call agent)})
+        (let [prep (if (contains? declared tc-name)
+                     (invoke/prepare-tool-call
+                      {:tool-name tc-name
+                       :args tc-args
+                       :tool-call-id tc-id
+                       :assistant-message assistant-msg
+                       :before-hook @(:before-tool-call agent)})
+                     {:block {:content (str "Tool " tc-name " not found")
+                              :is-error true}})
               args (if (contains? prep :args) (:args prep) tc-args)
               raw (if (:block prep)
                     (:block prep)
@@ -773,6 +801,8 @@ Be precise and concise in your responses."}}]
   "Execute tool calls. If any target tool is :sequential the whole batch runs
    sequentially; otherwise tools run in parallel (pi: toolExecution mode).
    Runs before/after-tool-call hooks and returns results in source order.
+   Calls outside the declared (active) tool set settle as errors without
+   executing — pi: prepareToolCall resolves against the request's tools.
    APPEND? — whether the executor appends results to the context/session
    itself (true by default). The repeat-loop guard path passes false and
    appends ALL results (suppressed + survivor) in source order itself, so a

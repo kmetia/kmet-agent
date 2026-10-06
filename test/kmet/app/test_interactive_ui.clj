@@ -40,6 +40,7 @@
             [kmet.ai.models :as m]
             [kmet.ai.auth :as auth]
             [kmet.app.loop :as agent]
+            [kmet.app.tools.core :as tools]
             [kmet.libs.http :as http]
             [kmet.libs.terminal-image :as timg]
             [kmet.app.session :as session]
@@ -862,6 +863,43 @@
                     "project context files stay with the launch project")
               (t/is (str/includes? @(:system @(:agent-state cs)) "LAUNCH-PROJECT CONTEXT")
                     "and stay in the rebuilt prompt"))))
+        (finally (fs/delete-tree dir))))))
+
+(deftest test-session-switch-drops-runtime-tool-selection
+  (testing "pi: a session switch (kmet -c at launch, /resume, /import)
+            recreates the runtime from settings — the outgoing session's
+            runtime tool selection must not leak into the resumed one"
+    (let [dir (str (fs/absolutize (str "target/test-switch-tools-" (System/currentTimeMillis))))]
+      (try
+        (let [outgoing (session/create-session (str dir "/out"))
+              _ (append-message! outgoing "hello")
+              incoming (session/create-session (str dir "/in"))
+              _ (append-message! incoming "imported question")
+              cs (import-test-cs outgoing)
+              ag @(:agent-state cs)
+              active-names (fn [] (into #{} (map :name) (agent/active-tools ag)))
+              prompt-tool-names (fn []
+                                  (into #{}
+                                        (map :name)
+                                        (get-in @(:system-prompt-opts ag) [:tools])))]
+          ;; the config-resolved surface at startup (-bash in settings.edn)
+          (reset! (:default-tools ag) (tools/resolve-default-tools ["-bash"]))
+          (t/is (not (contains? (active-names) "bash"))
+                "the configured surface excludes bash")
+          (testing "a /tools selection in the outgoing session enables bash"
+            (agent/set-active-tools! ag (conj (vec (active-names)) "bash"))
+            (t/is (contains? (active-names) "bash"))
+            (t/is (contains? (prompt-tool-names) "bash")
+                  "the system prompt options follow the runtime selection"))
+          (with-redefs [tui/tui-request-render (fn [_])
+                        tui/tui-set-focus (fn [_ _])]
+            (session-admin/restore-session! cs incoming true))
+          (t/is (nil? @(:enabled-tools ag))
+                "the runtime allowlist does not carry over")
+          (t/is (not (contains? (active-names) "bash"))
+                "the configured surface governs the resumed session")
+          (t/is (not (contains? (prompt-tool-names) "bash"))
+                "and the rebuilt prompt options agree"))
         (finally (fs/delete-tree dir))))))
 
 (deftest test-import-cancellation-paths

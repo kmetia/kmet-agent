@@ -34,6 +34,20 @@
 ;; Forward reference inside this namespace (the tree's custom-summary path).
 (declare ask-branch-summary)
 
+(defn emit-session-start-async!
+  "Emit :session-start away from the input path — pi: AgentSession emits
+   session_start on every runtime creation (startup, resume, new, fork) and
+   extension handlers may block on dialog promises. The resources_discover
+   pass follows (pi: extendResourcesFromExtensions after session_start).
+   Used by the switch paths (new/resume); the startup and /reload emissions
+   live with their callers."
+  [payload]
+  (future
+    (try
+      (event-bus/emit-event! payload)
+      (extensions/discover-resources! :startup)
+      (catch Exception e (debug/log "session-start: " e)))))
+
 (defn parse-path-argument
   "Pi: getPathCommandArgument — strip surrounding quotes, else take the
    first whitespace-delimited token. Returns nil when there is no argument —
@@ -350,7 +364,11 @@
    replayed on resume). When APPLY-SETTINGS? is true (startup resume,
    /resume — pi: createAgentSession), the session-derived model/thinking are
    applied to the agent and the footer refreshes; fork and clone pass false
-   (pi: navigateTree keeps the current agent state)."
+   (pi: navigateTree keeps the current agent state). A real switch also
+   drops the previous session's runtime tool selection: pi recreates the
+   runtime from settings on resume, so a set-active-tools!/tools-selector
+   selection does not leak into the resumed session (extensions restore
+   their own per-session state on :session-start)."
   [cs sess apply-settings?]
   (reset! (:session-atom cs) sess)
   (extensions/set-session! sess)
@@ -361,6 +379,13 @@
     (reset! (:agent-state cs) new-ag))
   (agent/restore-session-context! @(:agent-state cs))
   (when apply-settings?
+    ;; pi: createRuntime builds a fresh session with the config-derived tool
+    ;; set — the outgoing session's set-active-tools!/tools-selector
+    ;; selection must not carry over (the switch also emits :session-start,
+    ;; letting extensions restore their own per-session state). set-active-
+    ;; tools! with nil restores the configured surface and rebuilds the
+    ;; system prompt for it.
+    (agent/set-active-tools! @(:agent-state cs) nil)
     (agent/apply-session-settings! @(:agent-state cs))
     (sync-footer-model! cs))
   (replay-branch! cs sess)
@@ -472,15 +497,9 @@
       ;; pi: newSession emits session_start (reason "new",
       ;; previousSessionFile) — on a future, handlers may block on dialog
       ;; promises (same as /reload).
-          (future
-            (try
-              (event-bus/emit-event!
-               (cond-> {:type :session-start :reason :new}
-                 previous-file (assoc :previous-session-file previous-file)))
-              ;; pi: resources_discover fires after session_start (reason
-              ;; startup for non-reload session starts)
-              (extensions/discover-resources! :startup)
-              (catch Exception e (debug/log "session-start: " e))))
+          (emit-session-start-async!
+           (cond-> {:type :session-start :reason :new}
+             previous-file (assoc :previous-session-file previous-file)))
           (state/update-footer! cs)
           (state/update-terminal-title! cs)
           (tui/tui-request-render (:tui cs))
@@ -582,6 +601,10 @@
                    (chat-history/chat-history-show-status! chat "Import cancelled")
                    (do (session/copy-imported-session! plan)
                        (restore-session! cs (session/load-session (:path plan)) true)
+                       ;; pi: the import switch emits session_start (reason
+                       ;; resume) like /resume — extensions restore from the
+                       ;; imported branch
+                       (emit-session-start-async! {:type :session-start :reason :resume})
                        (chat-history/chat-history-show-status!
                         chat (str "Session imported from: " (:source plan)))
                        (tui/tui-request-render (:tui cs))))

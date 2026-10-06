@@ -712,6 +712,10 @@
                                                      (if (:cancel result)
                                                        {:cancelled true}
                                                        (do (session-admin/restore-session! cs sess true)
+                                                           ;; pi: switchSession → createRuntime
+                                                           ;; emits session_start (reason resume)
+                                                           (session-admin/emit-session-start-async!
+                                                            {:type :session-start :reason :resume})
                                                            {:cancelled false})))
                                                    (catch Exception _ {:cancelled true}))))
                              :is-project-trusted (fn [] false)}))
