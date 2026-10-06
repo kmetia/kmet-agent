@@ -3,6 +3,7 @@
    path completion via CombinedAutocompleteProvider."
   (:require [clojure.test :as t]
             [clojure.string :as str]
+            [kmet.libs.host :as host]
             [kmet.tui.autocomplete :as ac]
             [babashka.fs :as fs]))
 
@@ -94,6 +95,59 @@
               s (ac/get-suggestions p ["~/al"] 0 4 {:force false})]
           (t/is (some? s))
           (t/is (= ["~/alpha.txt"] (mapv :value (:items s)))))))))
+
+(t/deftest absolute-path-completion
+  ;; with-temp-dir creates the tree under a real absolute path, so this
+  ;; exercises the host's native form: /… on POSIX and C:/… on Windows
+  ;; (where test-dir itself may carry backslashes from user.home).
+  (with-temp-dir
+    (fn []
+      (let [p (make-provider)
+            abs (str (fs/absolutize test-dir))
+            prefix (str abs "/alp")
+            s (ac/get-suggestions p [prefix] 0 (count prefix) {:force true})
+            value (some-> (first (:items s)) :value (str/replace "\"" ""))]
+        (t/is (some? s))
+        (t/is (= ["alpha.txt"] (mapv :label (:items s))))
+        (t/is (= (str/replace (str abs "/alpha.txt") "\\" "/") value))))))
+
+(t/deftest windows-backslash-absolute-path-completion
+  (when (fs/windows?)
+    (with-temp-dir
+      (fn []
+        (let [p (make-provider)
+              abs (str/replace (str (fs/absolutize test-dir)) "/" "\\")
+              prefix (str abs "\\alp")
+              s (ac/get-suggestions p [prefix] 0 (count prefix) {:force true})]
+          (t/is (some? s))
+          (t/is (= ["alpha.txt"] (mapv :label (:items s))))
+          (t/is (= (str/replace (str abs "\\alpha.txt") "\\" "/")
+                   (:value (first (:items s))))))))))
+
+(t/deftest windows-prefix-shapes-complete-in-slash-form
+  ;; Simulated Windows host, so drive/UNC forms are covered on any
+  ;; platform: separators fold to `/` for display and detection.
+  (with-redefs [host/windows? (constantly true)]
+    (t/is (= "C:/src/kmet/file.clj"
+             (#'ac/relative-path "C:\\src\\kmet\\fi" "file.clj")))
+    (t/is (= "c:/file.clj" (#'ac/relative-path "c:\\fi" "file.clj"))
+          "the typed drive-letter case is preserved")
+    (t/is (= "//server/share/file.clj"
+             (#'ac/relative-path "\\\\server\\share\\fi" "file.clj")))
+    (t/is (= "C:\\src\\fe"
+             (#'ac/extract-path-prefix "attach C:\\src\\fe" false)))
+    (t/is (= "C:/src/fe" (#'ac/to-slash-path "C:\\src\\fe"))))
+  (with-redefs [host/windows? (constantly false)]
+    (t/is (false? (#'ac/windows-absolute-prefix? "C:/x")))
+    (t/is (= "C:\\src\\fe" (#'ac/to-slash-path "C:\\src\\fe"))
+          "a backslash stays a name character away from Windows")
+    (t/is (nil? (#'ac/extract-path-prefix "C:\\src\\fe" false)))))
+
+(t/deftest root-level-absolute-path-completion-value
+  ;; fs/parent of "/x" is the root path, which used to stringify to
+  ;; "//…"; the completion value keeps a single leading slash.
+  (t/is (= "/name.clj" (#'ac/relative-path "/na" "name.clj")))
+  (t/is (= "/tmp/name.clj" (#'ac/relative-path "/tmp/na" "name.clj"))))
 
 (t/deftest file-path-completion-with-slash
   (with-temp-dir

@@ -7,7 +7,8 @@
    fresh from the current editor state."
   (:require [kmet.tui.fuzzy :as fuzzy]
             [babashka.fs :as fs]
-            [clojure.string :as str]))
+            [clojure.string :as str]
+            [kmet.libs.host :as host]))
 
 ;; ─── Records ───────────────────────────────────────────────────────────────
 
@@ -109,6 +110,20 @@
     (System/getProperty "user.home")
     :else path))
 
+(defn- to-slash-path
+  "Normalize `\\` separators to `/` on Windows (a backslash is never a
+   file-name character there), so one slash-based path logic serves both
+   of the native forms. A no-op elsewhere, where a backslash is an
+   ordinary name character."
+  [path]
+  (if (host/windows?) (str/replace path "\\" "/") path))
+
+(defn- windows-absolute-prefix?
+  "True for a Windows drive-anchored prefix (`C:/…`); `/…`-rooted and UNC
+   (`//server/share`) prefixes already read as POSIX-absolute."
+  [path]
+  (and (host/windows?) (boolean (re-find #"(?i)^[a-z]:[\\/]" path))))
+
 (defn- build-completion-value
   [path {:keys [is-at-prefix is-quoted-prefix]}]
   (let [needs-quotes? (or is-quoted-prefix (str/includes? path " "))
@@ -121,34 +136,33 @@
 
 (defn- relative-path
   "Build the completion path for an entry name given the raw prefix,
-   preserving ~/, absolute, and ./ forms (pi: getFileSuggestions)."
+   preserving ~/, absolute, drive-absolute, UNC, and ./ forms (pi:
+   getFileSuggestions). Windows `\\` prefixes normalize to `/` in the
+   completion value."
   [raw-prefix name]
-  (cond
-    (str/ends-with? raw-prefix "/")
-    (str raw-prefix name)
-
-    (or (str/includes? raw-prefix "/") (str/includes? raw-prefix "\\"))
+  (let [prefix (to-slash-path raw-prefix)
+        slash (str/last-index-of prefix "/")]
     (cond
-      (str/starts-with? raw-prefix "~/")
-      (let [home-rel (subs raw-prefix 2)
-            d (or (fs/parent home-rel) "")]
-        (str "~/" (if (or (nil? d) (= d "") (= d ".")) name (str d "/" name))))
+      (str/ends-with? prefix "/")
+      (str prefix name)
 
-      (str/starts-with? raw-prefix "/")
-      (let [d (or (fs/parent raw-prefix) "/")]
-        (if (= d "/") (str "/" name) (str d "/" name)))
+      (str/starts-with? prefix "~/")
+      (let [home-rel (subs prefix 2)
+            d (subs home-rel 0 (or (str/last-index-of home-rel "/") 0))]
+        (str "~/" (if (or (str/blank? d) (= d ".")) name (str d "/" name))))
 
-      :else
-      (let [d (or (fs/parent raw-prefix) "")
-            rp (if (or (nil? d) (= d "") (= d ".")) name (str d "/" name))]
-        (if (and (str/starts-with? raw-prefix "./") (not (str/starts-with? rp "./")))
-          (str "./" rp)
-          rp)))
+      (or (str/starts-with? prefix "/")
+          (windows-absolute-prefix? prefix))
+      (str (subs prefix 0 slash) "/" name)
 
-    (str/starts-with? raw-prefix "~")
-    (str "~/" name)
+      (str/starts-with? prefix "~")
+      (str "~/" name)
 
-    :else name))
+      (str/includes? prefix "/")
+      (let [d (subs prefix 0 slash)]
+        (if (= d ".") (str "./" name) (str d "/" name)))
+
+      :else name)))
 
 (defn- base-path-value
   "The provider's base path: a string, or a 0-arg fn resolved per call. The
@@ -161,12 +175,16 @@
 
 (defn- get-file-suggestions
   "Directory listing for the given path prefix (pi: readdirSync approach).
-   Returns a vector of AutocompleteItem maps."
+   Returns a vector of AutocompleteItem maps. On Windows a `C:\\…` or
+   `\\\\server\\share\\…` prefix is normalized to slash form first."
   [base-path prefix]
   (try
     (let [{:keys [raw-prefix is-at-prefix is-quoted-prefix]} (parse-path-prefix prefix)
+          raw-prefix (to-slash-path raw-prefix)
           expanded (expand-home-path raw-prefix)
-          absolute? (or (str/starts-with? raw-prefix "~") (str/starts-with? expanded "/"))
+          absolute? (or (str/starts-with? raw-prefix "~")
+                        (str/starts-with? expanded "/")
+                        (windows-absolute-prefix? expanded))
           root-prefix? (or (= raw-prefix "") (= raw-prefix "./") (= raw-prefix "../")
                            (= raw-prefix "~") (= raw-prefix "~/") (= raw-prefix "/")
                            (and is-at-prefix (= raw-prefix "")))
@@ -262,7 +280,8 @@
 
 (defn- extract-path-prefix
   "Path-like completion prefix for the text before the cursor. With
-   force-extract? true (Tab) the whole token is treated as a path prefix."
+   force-extract? true (Tab) the whole token is treated as a path prefix;
+   on Windows a backslash-separated token also triggers completion."
   [text force-extract?]
   (if-let [quoted (extract-quoted-prefix text)]
     quoted
@@ -272,6 +291,7 @@
         force-extract? path-prefix
 
         (or (str/includes? path-prefix "/")
+            (and (host/windows?) (str/includes? path-prefix "\\"))
             (str/starts-with? path-prefix ".")
             (str/starts-with? path-prefix "~/"))
         path-prefix
