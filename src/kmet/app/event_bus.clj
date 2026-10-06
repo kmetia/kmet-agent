@@ -14,14 +14,18 @@
    Every listed event is emitted by the loop, the interactive mode, or the
    app — see each entry's description for the emitting path."
   {:agent-start
-   "Fired once per user submission, before the first LLM call."
+   "Fired at the start of each attempt: once per user submission, and once
+    more for every auto-retry or overflow-recovery attempt (pi: agent_start,
+    emitted by agent.prompt and by every agent.continue)."
 
    :agent-end
-   "Fired when the agent loop finishes (success or error).
-    Payload: :messages (the messages added during this run, accumulated as
-    they are appended — pi: newMessages — so a mid-run context replacement
-    does not shrink the list, and an aborted or errored attempt is included),
-    :error (optional)."
+   "Fired when an attempt finishes (success or error) — one per attempt
+    (pi: agent_end). Payload: :messages (the messages added during this
+    attempt, accumulated as they are appended — pi: newMessages — so a
+    mid-run context replacement does not shrink the list, and an aborted or
+    errored attempt is included), :error (optional), :will-retry (true when
+    this attempt's transient error will be retried; pi: willRetry, added for
+    public listeners only — extensions never see the key)."
 
    :turn-start
    "Fired before each LLM call.
@@ -163,10 +167,11 @@
     :overflow), :error-message (when a non-abort failure), :aborted."
 
    :agent-settled
-   "Fired when the agent run is fully settled — immediately after :agent-end
-    on every run exit (success, error, timeout, or cancel). The agent is idle
-    and no further events for this run will be emitted (pi: agent_settled,
-    emitted from a finally block after the run)."
+   "Fired when the prompt is fully settled — after the last attempt's
+    :agent-end, once per prompt, after any retries, overflow recovery, error,
+    timeout, or cancel. The agent is idle and no further events for this
+    prompt will be emitted (pi: agent_settled, emitted from a finally block
+    after the whole prompt loop)."
 
    ;; ─── Provider events (pi: context / before_provider_request /
    ;; ─── before_provider_headers / after_provider_response) ────────────

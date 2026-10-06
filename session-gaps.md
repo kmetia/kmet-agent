@@ -1,14 +1,16 @@
 # session-gaps — pi alignment for the run lifecycle
 
 Open work after the `subvec` crash fix (`fix(loop): re-base the run-message
-window when the context is replaced`) and its follow-up A (the run-message
-accumulator). Together they removed the crash class behind the reported
+window when the context is replaced`) and its follow-ups A (the run-message
+accumulator), B (`:will-retry`) and C (retries as separate attempts). Together
+they removed the crash class behind the reported
 
     Error: subvec index out of range: 300 62
 
-and brought the `:agent-end` payload in line with pi. What remains is the
-retry/compaction orchestration (B–D): this note tracks each gap with what pi
-does, what kmet does, the change, and how to verify it.
+and brought the `:agent-end` payload and the attempt/retry lifecycle in line
+with pi. What remains is the post-run compaction dispatch (D): this note
+tracks each gap with what pi does, what kmet does, the change, and how to
+verify it.
 
 Reference checkout: `~/src/cvstree/pi`, `packages/agent/src/agent-loop.ts`
 (loop) and `packages/coding-agent/src/core/agent-session.ts` (session layer).
@@ -18,12 +20,11 @@ numbers are indicative and drift.
 | # | gap | touch | depends on |
 |---|-----|-------|------------|
 | A | ~~`:agent-end :messages` is a context slice, not the run's messages~~ | landed — see A below | — |
-| B | `:agent-end` carries no `willRetry` | `app/loop.clj`, UI | C |
-| C | retries recur inside one run instead of being separate runs | `app/loop.clj` + interactive mode | — |
+| B | ~~`:agent-end` carries no `willRetry`~~ | landed — see B below | C |
+| C | ~~retries recur inside one run instead of being separate runs~~ | landed — see C below | — |
 | D | compaction is dispatched from the loop, not the session layer | `app/loop.clj` + interactive mode | interacts with A |
 
-Recommended order: **C → B → D** (A landed). B is meaningless until C
-separates attempts.
+Remaining: **D** (A, B, C landed).
 
 ## Background — why the payload question exists
 
@@ -84,12 +85,11 @@ payload) and `test-loop-cancel-records-aborted-attempt` (the aborted partial
 is). `target/verify_regression.bb` stubs `record-run-message!` and shows the
 seven payload assertions failing without the accumulator.
 
-Still open (deliberately): the payload is one list for both the UI and the
-extension bus — an extension listener sees the same vector as the UI (pi
-decorates the public event with `willRetry` and leaves the extension event
-alone — item B).
+Landed as well: the payload is the attempt's own list for both the UI and the
+extension bus — the message vector stays shared; B below splits off only
+`:will-retry` (pi's extension and public `agent_end` both carry `messages`).
 
-## B. `:agent-end` carries no `willRetry`
+## B. (landed) `:agent-end` carries `willRetry`
 
 pi: the session decorates the event for its public listeners —
 `this._emit({ ...event, willRetry: this._willRetryAfterAgentEnd(event) })`
@@ -99,20 +99,18 @@ is a retryable error with attempts left. Note the extension-runner event is
 emitted *before* the decoration and carries `{type, messages}` only (1287-1288),
 so extensions never see `willRetry`.
 
-kmet today: `:agent-end` carries `{:messages ... :error ...}` only; the UI
-learns about a retry from `:auto-retry-start`/`:auto-retry-end`, which fire
-*inside* the run (before `:agent-end`).
+kmet: `run-attempt!` emits `:agent-end` with `:will-retry` when its retry
+decision is `:backoff` (a retryable error with budget left) and `false` on
+every other exit. `emit` (`app/loop.clj`) drops the key from the copy handed to
+`event-bus/emit-event!`, so the UI callback sees it and extension listeners do
+not — the split pi makes explicit at its two emit sites.
 
-Change (after C): compute the flag where the retry decision is made and add it
-to `:agent-end`. Decide whether kmet's single bus (`emit` reaches both the UI
-callback and the extension bus) should expose it to extensions too, or split as
-pi does.
+Covered by `test-loop-auto-retry-succeeds` (`:will-retry [true true false]`),
+`test-loop-auto-retry-exhausted` (`[true false]`, the terminal `:agent-end`
+carries `:error`) and `test-loop-agent-end-will-retry-ui-only` (the UI sees the
+key, the extension bus does not).
 
-Acceptance: a run that ends in a retryable error emits
-`:agent-end {:error msg :will-retry true}` and is followed by another run; a
-terminal failure emits `:will-retry false`.
-
-## C. Retries should be separate runs
+## C. (landed) Retries are separate attempts
 
 pi: `_runAgentPrompt` (`agent-session.ts:1820-1845`) runs
 `agent.prompt(...)`, then loops on `_handlePostAgentRun` (1851-1889):
@@ -122,33 +120,22 @@ and `agent.continue()` starts a *new* low-level run with a fresh
 `newMessages` — so there is one `agent_end` per attempt. `agent_settled` fires
 once, in the `finally` of the whole prompt loop.
 
-kmet: `run-agent-turn` owns the attempt loop. The `:backoff` branch
-(`app/loop.clj:1894`/`1953`) emits `:auto-retry-start`, sleeps
-(`retry/backoff-sleep!`) and recurs; `:overflow-recover` (1947) does the same
-for overflow. One `:agent-end` covers every attempt, and `:agent-settled`
-immediately follows it.
+kmet: `run-agent-turn` is now the prompt-level state machine; the low-level
+loop moved to `run-attempt!`. `run-agent-turn` publishes a fresh run token and
+accumulator per attempt, runs `prepare-run!` once (the submitted message,
+before-agent-start hooks, pre-run compaction — pi: `prompt()` vs `continue()`),
+and the attempt emits its own `:agent-start`/`:agent-end`. `:retry` runs the
+backoff (`retry/backoff-sleep!`, abortable by `cancel-turn`) and starts the
+next attempt; `:overflow` compacts then retries; `:terminal` and `:aborted`
+settle. Exactly one `:agent-settled` is emitted after the loop. Option 1 of the
+original note was chosen — the public signature did not change, so print mode
+and the interactive submit path are untouched.
 
-Options:
-
-1. **Align.** `run-agent-turn` returns when an attempt settles with a
-   retryable error (no in-run recur). The caller — the interactive submit path
-   in `modes/interactive/turn.clj` and print mode — keeps the retry state
-   machine: `retry/retry-decision`, `retry/backoff-sleep!`,
-   `:auto-retry-start`/`:auto-retry-end`, then calls `run-agent-turn` again
-   with `message nil`. Per attempt: one `:agent-end`; after the last attempt:
-   one `:agent-settled`.
-2. **Document** the deviation instead (kmet-only `:auto-retry-*` placement,
-   one `agent-end` per prompt).
-
-Acceptance (option 1): N retries produce N `:agent-end` events and exactly one
-`:agent-settled`; `:auto-retry-start`/`end` still bracket each backoff; the
-failed attempt stays visible in the transcript, with the retried stream opening
-a fresh message below it (pi's TUI behavior).
-
-Risks: the print mode's single result value; `cancel-turn` between attempts;
-steering/follow-up queues (kmet drains them in the inner loop, pi drains before
-`agent_end` — check `has-queued-messages?` consumers); tests that pin the
-current `:auto-retry-*`/`:agent-end` ordering.
+Covered by `test-loop-auto-retry-succeeds` / `-exhausted` (N attempts → N
+`:agent-end`, one `:agent-settled`; `:auto-retry-start`/`:agent-end` bracket
+each backoff), `test-loop-retry-records-failed-attempt`,
+`test-loop-cancel-records-aborted-attempt` and
+`test-loop-retry-cancel-during-backoff`.
 
 ## D. Compaction dispatch belongs to the session layer
 
@@ -168,22 +155,37 @@ the wire is close; the differences are:
 
 1. pi checks compaction *after* `agent_end`; kmet defers that check to the next
    prompt's pre-run check. Same effect on the next request, later in time.
-2. pi's overflow retry is a new run (via C); kmet recurs in-run.
+2. pi's overflow retry is a new run (via C); kmet now also starts a new
+   attempt (`:overflow` → `compact-for-overflow!` → next `run-attempt!`) —
+   only when the compaction actually succeeded. A failed or aborted
+   compaction settles the prompt with the overflow surfaced (pi:
+   `_checkCompaction` returns false), matching pi instead of the old
+   unconditional in-run retry.
 3. kmet emits `:compaction-start`/`:compaction-end`/`:context-replaced`
    (kmet-only events); pi's extension events are
    `session_before_compact`/`session_compact` (`pi-alignment.md` Appendix marks
    that row `~`).
 
-Change (only if 1/2 are wanted): expose a post-run check to the caller, call it
+Change (only if 1 is wanted): expose a post-run check to the caller, call it
 after `agent-end` and before `:agent-settled`; a `:threshold` compaction just
-settles the run (pi does not retry for threshold), overflow keeps its
-continue-style retry. Leave the per-turn check where it is — it already matches
-pi.
+settles the run (pi does not retry for threshold). Leave the per-turn check
+where it is — it already matches pi.
 
-Acceptance: a run whose final assistant message crosses the threshold emits
-`agent-end` → `compaction-start` → `compaction-end` in that order, with no extra
-run; an overflow error compacts and then starts a fresh attempt; event-order
-tests for both.
+**Not landed deliberately.** A first attempt called `maybe-compact!` in the
+wrapper after a settled attempt. That re-triggers immediately when a run's
+compaction was aborted or failed (the context is still over the threshold, so
+the next run's post-run check retries the same compaction), which hung
+`test-loop-abort-compaction-keeps-run` — a `compact-token-threshold` context
+with a never-finishing summarization stub. pi guards the post-run check with
+`skipAbortedCheck`, which does not cover a *successful* run whose compaction
+was separately aborted. Re-introduce it only with a guard that suppresses the
+check after an aborted/failed compaction in the same prompt (or carry pi's
+`_overflowRecoveryAttempted`/`skipAbortedCheck` state explicitly).
+
+Acceptance (if D is picked up): a run whose final assistant message crosses the
+threshold emits `agent-end` → `compaction-start` → `compaction-end` in that
+order, with no extra run; an aborted/failed compaction in the same prompt does
+not re-trigger; event-order tests for both.
 
 ## Verification harness from the original report
 
@@ -202,9 +204,10 @@ tests for both.
 
 ## Docs to update as items land
 
-- `src/kmet/app/event_bus.clj` — done (A: the accumulator; the `:will-retry`
-  key when B lands).
-- `src/kmet/development/pi-alignment.md` — done (A: the Appendix row
+- `src/kmet/app/event_bus.clj` — done (A: the accumulator; B: the `:will-retry`
+  key and the per-attempt `:agent-start`/`:agent-end` / once-per-prompt
+  `:agent-settled`).
+- `src/kmet/development/pi-alignment.md` — done (A/B/C: the Appendix row
   `agent_start` / `agent_end` / `agent_settled`); the compaction row
   (`session_before_compact` / `session_compact`) and §2.7 follow with D.
 - This file: strike items as they land; remove it when the table is empty.

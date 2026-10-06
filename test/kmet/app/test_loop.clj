@@ -2234,6 +2234,20 @@
       (t/is (true? (:success (first ends))))
       (t/is (= 2 (:attempt (first ends)))))
     (t/is (= :idle @(:status agent)))
+    ;; pi parity: one :agent-end per attempt (agent.prompt then
+    ;; agent.continue), each reporting its own messages and whether it will
+    ;; be retried; exactly one :agent-settled for the whole prompt.
+    (t/is (= [true true false]
+             (mapv :will-retry (filter #(= :agent-end (:type %)) @events)))
+          "one :agent-end per attempt; only the transient failures will retry")
+    (t/is (= 1 (count (filter #(= :agent-settled (:type %)) @events)))
+          "exactly one :agent-settled per prompt")
+    (t/is (= [:user :assistant]
+             (mapv :role (:messages (first (filter #(= :agent-end (:type %)) @events)))))
+          "the first attempt's :agent-end carries the submitted user message")
+    (t/is (= [:assistant]
+             (mapv :role (:messages (last (filter #(= :agent-end (:type %)) @events)))))
+          "the retried attempt's :agent-end carries only that attempt's messages (pi: continue adds no prompt)")
     ;; The retried stream's text is the final assistant message
     (t/is (some #(and (= :message-end (:type %))
                       (= "recovered" (get-in % [:message :content 0 :text])))
@@ -2263,6 +2277,15 @@
     (t/is (= :idle @(:status agent))
           "status returns to :idle after retries are exhausted (pi: agent_settled)")
     (t/is (some #(= :error (:type %)) @events) "terminal :error event emitted")
+    ;; pi parity: the initial failure's :agent-end says a retry will follow;
+    ;; the exhausted one does not and carries the terminal error.
+    (let [aes (filter #(= :agent-end (:type %)) @events)]
+      (t/is (= [true false] (mapv :will-retry aes))
+            "the initial failure retries; the exhausted attempt does not")
+      (t/is (= "503 service unavailable" (:error (last aes)))
+            "the terminal attempt's :agent-end carries the error"))
+    (t/is (= 1 (count (filter #(= :agent-settled (:type %)) @events)))
+          "exactly one :agent-settled per prompt")
     ;; Every failed attempt is recorded — one :message-end per LLM call that
     ;; errored (pi: message_end persists each stopReason-error partial, even
     ;; when no retry budget remains) — and none enter the live context
@@ -2274,6 +2297,85 @@
                     (map :message err-ends)))
       (t/is (empty? (filter #(= :assistant (:role %)) (loop/get-context agent)))
             "no assistant message entered the context"))))
+
+(t/deftest test-loop-agent-end-will-retry-ui-only
+  ;; pi: the public agent_end is decorated with :will-retry; the extension
+  ;; runner's copy is emitted before the decoration and omits the key
+  ;; (agent-session.ts, _emitExtensionEvent vs _emit).
+  (let [ui (atom [])
+        ext (atom [])
+        dereg (event-bus/on-event :agent-end #(swap! ext conj %))
+        call-count (atom 0)
+        agent (loop/make-agent-state
+               :on-event (fn [e] (swap! ui conj e))
+               :max-retries 1
+               :base-delay-ms 1)]
+    (try
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [opts]
+                      (future
+                        (if (= 1 (swap! call-count inc))
+                          (when-let [oe (:on-error opts)]
+                            (oe "503 service unavailable"))
+                          (do (when-let [ot (:on-text opts)] (ot "ok"))
+                              (when-let [od (:on-done opts)] (od :stop))))
+                        :done))]
+        @(loop/run-agent-turn agent {:message "hi"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (let [ui-ae (filter #(= :agent-end (:type %)) @ui)
+            ext-ae (filter #(= :agent-end (:type %)) @ext)]
+        (t/is (some true? (map :will-retry ui-ae))
+              "the UI copy carries :will-retry on a retryable attempt")
+        (t/is (every? #(not (contains? % :will-retry)) ext-ae)
+              "the extension copy omits :will-retry"))
+      (finally (dereg)))))
+
+(t/deftest test-loop-appends-keyed-to-attempt-not-agent-token
+  ;; Regression: a newer prompt republishes the agent's :run-token while an
+  ;; older attempt is still running (cancel clears running-turn? before the
+  ;; run settles). The old attempt's appends must still land in its own
+  ;; accumulator via the *run-token* binding, never in the newer token's list.
+  (let [events (atom [])
+        clobbered (atom nil)
+        agent (loop/make-agent-state
+               :on-event (fn [e] (swap! events conj e)))]
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message
+                  (fn [opts]
+                    ;; Simulate a new prompt taking over mid-attempt.
+                    (let [tok (Object.)]
+                      (reset! clobbered tok)
+                      (reset! (:run-token agent) tok)
+                      (swap! (:run-messages agent) assoc tok []))
+                    (future
+                      (when-let [ot (:on-text opts)] (ot "answer"))
+                      (when-let [od (:on-done opts)] (od :stop))
+                      :done))]
+      @(loop/run-agent-turn agent {:message "hi" :on-error (fn [_])}))
+    (let [ae (first (filter #(= :agent-end (:type %)) @events))]
+      (t/is (= [:user :assistant] (mapv :role (:messages ae)))
+            "the attempt's appends stay in its own accumulator")
+      (t/is (empty? (get @(:run-messages agent) @clobbered))
+            "the newer token's accumulator is untouched"))))
+
+(t/deftest test-loop-agent-settled-on-unhandled-exception
+  ;; pi: agent_settled is emitted from a finally, so it fires even when the
+  ;; run throws an unhandled exception (agent-session.js). A throwing UI
+  ;; callback on :turn-start stands in for any unexpected failure.
+  (let [events (atom [])
+        agent (loop/make-agent-state
+               :on-event (fn [e]
+                           (swap! events conj e)
+                           (when (= :turn-start (:type e))
+                             (throw (ex-info "ui boom" {})))))]
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message (fn [_] (future :done))]
+      @(loop/run-agent-turn agent {:message "hi" :on-error (fn [_])}))
+    (t/is (= 1 (count (filter #(= :agent-settled (:type %)) @events)))
+          ":agent-settled fires exactly once from the finally")
+    (t/is (= :idle @(:status agent)) "the agent is idle afterwards")))
 
 (t/deftest test-loop-retry-records-failed-attempt
   ;; pi parity: a transient failure's partial is persisted to the session
@@ -3173,6 +3275,48 @@
       (t/is (= :idle @(:status agent)) "run settles idle after the overflow recovery")
       (finally
         (fs/delete-tree dir)))))
+
+(t/deftest test-loop-overflow-compaction-failure-settles-terminal
+  ;; pi: when the overflow-recovery compaction cannot run (the summarization
+  ;; failed or was aborted), _checkCompaction returns false and the prompt
+  ;; settles instead of retrying into the same overflow. kmet surfaces the
+  ;; overflow so the turn is not silent.
+  (let [events (atom [])
+        errors (atom [])
+        main-call-count (atom 0)
+        dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+        sess (session/create-session (str dir))
+        agent (loop/make-agent-state
+               :on-event (fn [e] (swap! events conj e))
+               :session sess
+               :keep-recent-tokens 5)]
+    (try
+      (dotimes [i 12]
+        (session/append-entry sess {:role :user :content [{:type :text :text (str "msg " i)}]}))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [opts]
+                      (future
+                        (if (seq (:tools opts))
+                          (do (swap! main-call-count inc)
+                              (when-let [on-error (:on-error opts)]
+                                (on-error "prompt is too long: 500000 tokens > 200000 maximum")))
+                          ;; summarization fails
+                          (when-let [on-error (:on-error opts)]
+                            (on-error "summary stream failed")))
+                        :done))]
+        (binding [*err* (java.io.StringWriter.)]
+          @(loop/run-agent-turn agent {:message "hi"
+                                       :on-error (fn [e] (swap! errors conj e))})))
+      (t/is (= 1 @main-call-count) "no retry after the compaction could not run")
+      (t/is (= 1 (count @errors)) "the overflow surfaces to the UI")
+      (t/is (some #(and (= :error (:type %))
+                        (str/includes? (:message %) "prompt is too long"))
+                  @events)
+            "the terminal error is the overflow, not a compaction error")
+      (t/is (= 1 (count (filter #(= :agent-settled (:type %)) @events))))
+      (t/is (= :idle @(:status agent)))
+      (finally (fs/delete-tree dir)))))
 
 ;; ─── Phase 3: dynamic API key ────────────────────────────────────────────
 
