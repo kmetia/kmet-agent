@@ -2056,7 +2056,6 @@
    "Qwen/Qwen3.8-27B"                  [:openrouter "qwen/qwen3.8-27b"]
    "Qwen/Qwen3.8-Max"                  [:qwen-token-plan "qwen3.8-max"]
    "sakana/fugu-ultra"                 [:openrouter "sakana/fugu-ultra"]
-   "stealth/space-bunny-alpha"         [:openrouter "stealth/space-bunny-alpha"]
    "stepfun/Step-3.5-Flash"            [:openrouter "stepfun/step-3.5-flash"]
    "stepfun/Step-3.7-Flash"            [:openrouter "stepfun/step-3.7-flash"]
    "thinkingmachines/inkling"          [:baseten "thinkingmachines/inkling"]

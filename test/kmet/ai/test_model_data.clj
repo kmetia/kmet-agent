@@ -450,36 +450,6 @@
     ;; NVIDIA NIM dropped inkling: Baseten still serves it.
     (check "thinkingmachines/inkling" :baseten "thinkingmachines/inkling")))
 
-(t/deftest test-commandcode-space-bunny-alpha-ref
-  "CommandCode's stealth/space-bunny-alpha entry carried no canonical ref,
-   so it fell back to conservative defaults (:reasoning false, text-only,
-   32768 max-tokens) and the host pinned KMET_REASONING_LEVEL to off even
-   though the model reasons. OpenRouter lists the same id with the full
-   thinking weights; guard the ref and the committed endpoint entry."
-  (let [refs @#'mg/commandcode-canonical-refs
-        [rp rid] (get refs "stealth/space-bunny-alpha")
-        catalogs (#'mg/read-catalogs mg/data-dir)
-        canonical (get-in catalogs [rp :openai-completions rid])
-        cc (get-in catalogs [:commandcode :openai-completions
-                             "stealth/space-bunny-alpha"])]
-    (t/is (= [:openrouter "stealth/space-bunny-alpha"] [rp rid])
-          "the ref must point at OpenRouter's entry for the same id")
-    (t/is (some? canonical)
-          (str "the referenced canonical model must exist in the committed "
-               "catalog (" rp " " rid ")"))
-    (t/is (some? cc) "the commandcode entry must exist")
-    (t/is (= true (:reasoning cc))
-          "the commandcode entry must carry thinking support")
-    (t/is (= (:thinking-level-map canonical) (:thinking-level-map cc))
-          "thinking levels must transfer from the canonical entry")
-    (t/is (= (:thinking-format (:compat canonical))
-             (:thinking-format (:compat cc)))
-          "the model-bound thinking format must transfer")
-    (t/is (= (:input canonical) (:input cc))
-          "canonical input modalities must transfer")
-    (t/is (= (:max-tokens canonical) (:max-tokens cc))
-          "canonical max-tokens must transfer (not the 32768 fallback)")))
-
 (t/deftest test-openai-completions-strict-metadata
   ;; pi 890f92088 + af7359b90: strict tools are explicit metadata — capable
   ;; providers get :supports-strict-mode true against the generator's
