@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-05T07:54:48Z"
+ :generated-at "2026-10-06T08:14:33Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -645,7 +645,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text]
-    :cost {:input 0.25 :output 0.9 :cache-read 0 :cache-write 0}
+    :cost {:input 0.25 :output 0.8 :cache-read 0 :cache-write 0}
     :context-window 262100
     :max-tokens 80000}
    "bytedance/seed-1.6"
@@ -2324,7 +2324,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text]
-    :cost {:input 0.1 :output 0.2 :cache-read 0.01 :cache-write 0}
+    :cost {:input 0.09 :output 0.18 :cache-read 0.009 :cache-write 0}
     :context-window 1000000
     :max-tokens 131072}
    "poolside/laguna-s-2.1-free"

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-02T10:35:50Z"
+ :generated-at "2026-10-06T08:14:34Z"
  :provider {:id :openrouter :name "OpenRouter"}
  :models
  {"black-forest-labs/flux-3-image"
@@ -509,6 +509,15 @@
   "sourceful/riverflow-v2.5-pro"
   {:id "sourceful/riverflow-v2.5-pro"
    :name "Sourceful: Riverflow V2.5 Pro"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text :image]
+   :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+   :output [:image]}
+  "tencent/hy-image-v3.5-preview"
+  {:id "tencent/hy-image-v3.5-preview"
+   :name "Tencent: Hy Image 3.5 Preview"
    :provider :openrouter
    :api :openrouter-images
    :base-url "https://openrouter.ai/api/v1"

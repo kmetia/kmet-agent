@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-05T07:54:48Z"
+ :generated-at "2026-10-06T08:14:33Z"
  :provider {:id :opencode-go
             :name "OpenCode Go"
             :env-vars ["OPENCODE_API_KEY"]
@@ -407,9 +407,9 @@
              :supports-developer-role false
              :max-tokens-field :max-tokens
              :supports-strict-mode true}}
-   "space-bunny-free"
-   {:id "space-bunny-free"
-    :name "Space Bunny Free"
+   "space-bunny"
+   {:id "space-bunny"
+    :name "Space Bunny"
     :provider :opencode-go
     :api :openai-completions
     :base-url "https://opencode.ai/zen/go/v1"
@@ -422,7 +422,7 @@
                          :off nil
                          :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :cost {:input 0.15 :output 0.6 :cache-read 0.03 :cache-write 0}
     :context-window 1048576
     :max-tokens 524288
     :compat {:supports-store false
