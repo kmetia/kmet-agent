@@ -233,6 +233,41 @@
       ;; schedules its own frame.
       (when-let [cs @cs-ref]
         (status/clear-status-indicator! cs :retry))
+      :summarization-retry-scheduled
+      ;; A summarization call failed transiently (pi:
+      ;; summarization_retry_scheduled → showError + RetryStatusIndicator);
+      ;; the error is surfaced once, before the countdown
+      (do
+        (when-let [err (:error-message evt)]
+          (chat-history/show-error! chat-history err))
+        (when-let [cs @cs-ref]
+          (status/show-status-indicator!
+           cs :retry
+           (status-indicator/make-retry-status-indicator
+            (:attempt evt) (:max-attempts evt) (:delay-ms evt)
+            :cancel-hint
+            (status/fmt-key-display (app-kb/key-text "app.interrupt")))))
+        (tui/tui-request-render tui))
+      :summarization-retry-attempt-start
+      ;; The retried summarization starts (pi:
+      ;; clearStatusIndicator("retry") → the compaction or branch-summary
+      ;; indicator again, matching the call that is running)
+      (do (when-let [cs @cs-ref]
+            (status/clear-status-indicator! cs :retry)
+            (if (= :branch-summary (:source evt))
+              (status/show-status-indicator!
+               cs :branch-summary
+               (status-indicator/make-branch-summary-status-indicator))
+              (status/show-status-indicator!
+               cs :compaction
+               (status-indicator/make-compaction-status-indicator
+                :message (turn/compaction-status-message (:reason evt))))))
+          (tui/tui-request-render tui))
+      :summarization-retry-finished
+      ;; Retry loop over (pi: summarization_retry_finished →
+      ;; clearStatusIndicator("retry"))
+      (when-let [cs @cs-ref]
+        (status/clear-status-indicator! cs :retry))
       :compaction-start
       ;; Session compaction in progress (pi:
       ;; compaction_start → CompactionStatusIndicator + terminal progress);
@@ -498,6 +533,7 @@
             :max-retries (let [retry (cfg/get-retry-settings config)]
                            (if (:enabled retry) (:max-retries retry) 0))
             :base-delay-ms (:base-delay-ms (cfg/get-retry-settings config))
+            :max-agent-delay-ms (:max-agent-delay-ms (cfg/get-retry-settings config))
             ;; Repeat-loop guard (kmet-specific): settings.edn :loop-guard
             ;; block — enabled gates threshold to 0 (off)
             :loop-guard-enabled (:enabled (cfg/get-loop-guard-settings config))

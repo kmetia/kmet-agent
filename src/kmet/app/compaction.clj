@@ -438,3 +438,28 @@ Keep each section concise. Preserve exact file paths, function names, and error 
 
                              :else
                              branch-summary-prompt))}]}]))
+
+;; ─── Failure reporting (pi: getSummarizationFailure + agent-session) ──────
+
+(defn summarization-failure
+  "The failure message for a summarization result, or nil when it succeeded
+   (pi: getSummarizationFailure). LABEL names the call (\"Summarization\",
+   \"Branch summarization\", ...); an aborted call is not a failure."
+  [{:keys [stop-reason error-message]} label]
+  (case stop-reason
+    :error (str label " failed: " (or error-message "Unknown error"))
+    :length (str label
+                 " failed: generation hit the token cap and the summary is incomplete")
+    nil))
+
+(defn compaction-failure-message
+  "The message a failed compaction reports, prefixed with its reason (pi:
+   agent-session compact / _runAutoCompaction — `Compaction failed: …`
+   manual, `Auto-compaction failed: …` threshold, `Context overflow recovery
+   failed: …` overflow)."
+  [reason message]
+  (str (case reason
+         :manual "Compaction failed: "
+         :overflow "Context overflow recovery failed: "
+         "Auto-compaction failed: ")
+       (or message "compaction failed")))

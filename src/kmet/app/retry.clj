@@ -1,12 +1,15 @@
 (ns kmet.app.retry
-  "Provider-error retry policy: error classification and the recovery
-   decision for a failed LLM call. Pure — the loop (kmet.app.loop)
-   performs the side effects (status, events, session writes).
+  "Provider-error retry policy: error classification, the recovery
+   decision for a failed LLM call, and the bounded retry driver used by the
+   summarization calls (pi: packages/ai/src/utils/retry.ts).
+   Classification and the driver are side-effect free apart from the
+   abortable backoff sleep; the loop (kmet.app.loop) owns status, events,
+   and session writes.
 
    Retry classification mirrors pi's packages/ai/src/utils/retry.ts +
    overflow.ts; backoff and timeout resolution follow pi: agent-session
-   auto-retry (base-delay-ms * 2^(attempt-1)) and the SDK's
-   timeoutMs ?? httpIdleTimeoutMs deadline rule."
+   auto-retry (base-delay-ms * 2^(attempt-1), capped at max-agent-delay-ms)
+   and the SDK's timeoutMs ?? httpIdleTimeoutMs deadline rule."
   (:require [clojure.string :as str]
             [kmet.libs.concurrent :as concurrent]))
 
@@ -195,6 +198,22 @@
                (str "Provider stopped with: " (name (:stop-reason raw-result)))))
     raw-result))
 
+(def default-max-agent-delay-ms
+  "Cap on a computed agent-level backoff delay (pi:
+   DEFAULT_MAX_AGENT_RETRY_DELAY_MS — `maxAgentDelayMs ?? 60s`)."
+  60000)
+
+(defn retry-delay-ms
+  "Backoff delay before retry ATTEMPT (1-indexed) for a retry POLICY
+   {:base-delay-ms n :max-agent-delay-ms n} (pi: retryDelayMs —
+   baseDelayMs * 2^(attempt-1), clamped to the policy's maxAgentDelayMs,
+   default 60s)."
+  [policy attempt]
+  (let [base (or (:base-delay-ms policy) 2000)
+        delay (* base (long (Math/pow 2 (max 0 (dec attempt)))))]
+    (min (if (and (pos? delay) (< delay Long/MAX_VALUE)) delay Long/MAX_VALUE)
+         (or (:max-agent-delay-ms policy) default-max-agent-delay-ms))))
+
 (defn retry-decision
   "Classify an errored LLM result into the recovery action (pure — no side
    effects; the caller performs them):
@@ -203,8 +222,8 @@
      {:kind :backoff :attempt n :delay-ms ms :max-attempts max-retries} —
        retryable within budget: exponential backoff, same turn
      {:kind :terminal} — non-retryable or retries exhausted"
-  [{:keys [err retry-count max-retries base-delay-ms overflow-recovered
-           has-session]}]
+  [{:keys [err retry-count max-retries base-delay-ms max-agent-delay-ms
+           overflow-recovered has-session]}]
   (cond
     (and (not overflow-recovered)
          (context-overflow? err)
@@ -214,11 +233,68 @@
     (and (<= (inc retry-count) max-retries)
          (not (context-overflow? err))
          (retryable-error? err))
-    (let [attempt (inc retry-count)
-          delay-ms (* base-delay-ms
-                      (long (Math/pow 2 (dec attempt))))]
-      {:kind :backoff :attempt attempt :delay-ms delay-ms
+    (let [attempt (inc retry-count)]
+      {:kind :backoff :attempt attempt
+       :delay-ms (retry-delay-ms {:base-delay-ms base-delay-ms
+                                  :max-agent-delay-ms max-agent-delay-ms}
+                                 attempt)
        :max-attempts max-retries})
 
     :else {:kind :terminal}))
+
+(defn retry-call!
+  "Run PRODUCE — a thunk returning one LLM result map with :stop-reason —
+   with bounded retry on transient errors (pi: retryAssistantCall):
+     :stop-reason :aborted          terminal — never retried
+     any other non-:error reason    returned as-is (success)
+     :stop-reason :error            retried while retryable-error? holds for
+                                    :error-message and retries remain
+   Each retry sleeps retry-delay-ms of POLICY {:max-retries n
+   :base-delay-ms n :max-agent-delay-ms n}; SIGNAL (an atom a transport
+   polls) aborts the sleep, returning the last result as an aborted one
+   (pi: an abort during the backoff normalizes to an aborted response).
+
+   CALLBACKS (pi: RetryCallbacks, all optional):
+     :on-retry-scheduled     (fn [attempt max-attempts delay-ms error-message])
+                             — before each backoff sleep
+     :on-retry-attempt-start (fn []) — after the sleep, before the call
+     :on-retry-finished      (fn [success attempt final-error]) — once,
+                             when a scheduled retry ended the loop (a
+                             first-attempt result never calls it)"
+  [produce policy signal callbacks]
+  (let [max-attempts (max 0 (long (or (:max-retries policy) 0)))]
+    (loop [attempt 0
+           scheduled nil]
+      (let [result (produce)
+            finish! (fn [success attempt & [final-error]]
+                      (when-let [f (:on-retry-finished callbacks)]
+                        (f success attempt final-error)))]
+        (cond
+          (= :aborted (:stop-reason result))
+          (do (when scheduled (finish! false (:attempt scheduled)))
+              result)
+
+          (not= :error (:stop-reason result))
+          (do (when scheduled (finish! true (:attempt scheduled)))
+              result)
+
+          (or (>= attempt max-attempts)
+              (not (retryable-error? (:error-message result))))
+          (do (when scheduled
+                (finish! false (:attempt scheduled) (:error-message result)))
+              result)
+
+          :else
+          (let [attempt' (inc attempt)
+                delay-ms (retry-delay-ms policy attempt')]
+            (when-let [f (:on-retry-scheduled callbacks)]
+              (f attempt' max-attempts delay-ms
+                 (or (:error-message result) "Unknown error")))
+            (if (backoff-sleep! signal delay-ms)
+              (do (when-let [f (:on-retry-attempt-start callbacks)] (f))
+                  (recur attempt' {:attempt attempt'}))
+              (do (finish! false attempt' (:error-message result))
+                  (-> result
+                      (dissoc :error-message)
+                      (assoc :stop-reason :aborted))))))))))
 

@@ -168,6 +168,22 @@
    "Fired when retries finish — success, exhausted, or cancelled.
     Payload: :success, :attempt, :final-error (on failure)."
 
+   :summarization-retry-scheduled
+   "Fired before a summarization retry's backoff sleep — a compaction or
+    branch-summary call failed with a transient error (pi:
+    summarization_retry_scheduled; drives the UI's retry countdown).
+    Payload: :attempt, :max-attempts, :delay-ms, :error-message."
+
+   :summarization-retry-attempt-start
+   "Fired after a summarization retry's backoff, before the retried call
+    (pi: summarization_retry_attempt_start). Payload: :source
+    (:compaction | :branch-summary) and, for a compaction, :reason."
+
+   :summarization-retry-finished
+   "Fired once when a summarization retry loop ends — the retried call
+    succeeded, failed terminally, or the backoff was aborted (pi:
+    summarization_retry_finished). No payload."
+
    :compaction-start
    "Fired before session compaction begins (pi: compaction_start).
     Payload: :reason (:manual | :threshold | :overflow | :auto)."
@@ -176,14 +192,19 @@
    "Fired when compaction finishes (pi: compaction_end).
     Payload: :reason, :result (true when compaction happened), :aborted
     (true when the user cancelled mid-compaction — session untouched),
-    :error-message (set when the summarization call failed), :will-retry
+    :error-message (set when the summarization call failed — pi:
+    `Compaction failed: …` manual, `Auto-compaction failed: …` threshold,
+    `Context overflow recovery failed: …` overflow, each carrying the
+    summarization failure's cause), :will-retry
     (true for overflow compaction — the interrupted turn retries; pi:
     compaction_end willRetry)."
 
    :session-compact-failed
    "Fired after context compaction fails or is aborted (pi:
     session_compact_failed). Payload: :reason (:manual | :threshold |
-    :overflow), :error-message (when a non-abort failure), :aborted."
+    :overflow), :error-message (when a non-abort failure — same text as
+    :compaction-end), :aborted, :will-retry (false — a failed compaction
+    never retries the turn; pi: _emitSessionCompactFailed)."
 
    :agent-before-settle
    "Actionable: fired once before the prompt settles, after the queued-message

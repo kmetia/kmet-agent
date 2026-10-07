@@ -273,7 +273,7 @@
         (deliver done result)))
     (future
       (let [result (deref done 90000 :timeout)]
-        (status/release-background-status! cs :share indicator)
+        (status/release-background-status! cs :share)
         (chat-history/chat-history-add-message!
          chat
          (cond

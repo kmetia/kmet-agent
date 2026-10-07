@@ -610,7 +610,7 @@
       ((var status/activate-working-indicator!) cs)
       ((var status/show-status-indicator!) cs :share share)
       (t/is (not (working-status? cs)))
-      ((var status/release-background-status!) cs :share share)
+      ((var status/release-background-status!) cs :share)
       (t/is (nil? @(:status-current cs)))
       (t/is (working-status? cs))))
   (testing "no revive when the turn ended"
@@ -618,7 +618,7 @@
           share (spinner/make-spinner :text "Creating gist..." :active true)]
       (reset! (:running-turn? cs) false)
       ((var status/show-status-indicator!) cs :share share)
-      ((var status/release-background-status!) cs :share share)
+      ((var status/release-background-status!) cs :share)
       (t/is (blank-status? cs))))
   (testing "a newer transient owns the slot — neither cleared nor displaced"
     (let [cs (test-status-cs)
@@ -626,17 +626,19 @@
       ((var status/show-status-indicator!) cs :share share)
       ((var status/show-status-indicator!) cs :retry
                                            (status-indicator/make-retry-status-indicator 1 3 2000))
-      ((var status/release-background-status!) cs :share share)
+      ((var status/release-background-status!) cs :share)
       (t/is (= :retry (:kind @(:status-current cs))))))
-  (testing "only the indicator the flow installed is released (a second
-            /share keeps its spinner)"
+  (testing "a same-kind replacement is released too (pi:
+            clearStatusIndicator matches the active kind — a branch-summary
+            retry re-shows the branch-summary indicator)"
     (let [cs (test-status-cs)
           first-share (spinner/make-spinner :text "one" :active true)
           second-share (spinner/make-spinner :text "two" :active true)]
       ((var status/show-status-indicator!) cs :share first-share)
       ((var status/show-status-indicator!) cs :share second-share)
-      ((var status/release-background-status!) cs :share first-share)
-      (t/is (identical? second-share (:indicator @(:status-current cs))))))
+      ((var status/release-background-status!) cs :share)
+      (t/is (nil? @(:status-current cs)) "the active indicator was released")
+      (t/is (working-status? cs) "the working spinner is given back")))
   (testing "an already-revived working spinner is not restarted (its
             animation clock survives)"
     (let [cs (test-status-cs)
@@ -647,7 +649,7 @@
       ((var status/activate-working-indicator!) cs)
       (let [start @(:start-atom (:spinner (:status-indicator cs)))]
         (Thread/sleep 5)
-        ((var status/release-background-status!) cs :share share)
+        ((var status/release-background-status!) cs :share)
         (t/is (= start @(:start-atom (:spinner (:status-indicator cs))))))))
   (testing "a turn ending mid-revival must not leave a spinner behind (the
             post-revival re-check rolls it back)"
@@ -657,7 +659,7 @@
       ((var status/show-status-indicator!) cs :share share)
       (with-redefs-fn {(var status/activate-working-indicator!)
                        (fn [c] (reset! (:running-turn? c) false) (real c))}
-        (fn [] ((var status/release-background-status!) cs :share share)))
+        (fn [] ((var status/release-background-status!) cs :share)))
       (t/is (not (status-indicator/status-indicator-active? (:status-indicator cs)))
             "the revived spinner is stopped again"))))
 

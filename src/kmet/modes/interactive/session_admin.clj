@@ -708,16 +708,24 @@
                        abort-atom replace-instructions?))
         (catch Exception e
           (debug/log "branch summarization failed: " e)
-          (deliver done nil))))
+          (deliver done {:error (str "Branch summarization failed: "
+                                     (ex-message e))}))))
     (future
       (let [result (deref done 120000 :timeout)]
         (editor/editor-set-on-action! ed "app.interrupt" prev-interrupt)
-        (status/release-background-status! cs :branch-summary indicator)
+        (status/release-background-status! cs :branch-summary)
         (cond
           (= result :timeout)
           (chat-history/chat-history-add-message! (:chat-history cs)
                                                   {:role :info :label "Tree"
                                                    :content "Branch summarization timed out — branch unchanged."})
+
+          (:error result)
+          ;; pi: navigateTree throws the branch-summary error — the caller
+          ;; shows its message (the branch stays unchanged)
+          (chat-history/chat-history-add-message! (:chat-history cs)
+                                                  {:role :error
+                                                   :content (:error result)})
 
           (nil? result)
           (chat-history/chat-history-add-message! (:chat-history cs)

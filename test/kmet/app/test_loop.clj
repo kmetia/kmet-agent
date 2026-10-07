@@ -1602,6 +1602,86 @@
   (t/is (not (retry/retryable-error? nil)))
   (t/is (not (retry/retryable-error? ""))))
 
+(t/deftest test-loop-retry-delay-and-call
+  (t/testing "retry-delay-ms — pi: retryDelayMs (exponential, capped)"
+    (t/is (= 2000 (retry/retry-delay-ms {:base-delay-ms 2000} 1)))
+    (t/is (= 4000 (retry/retry-delay-ms {:base-delay-ms 2000} 2)))
+    (t/is (= 60000 (retry/retry-delay-ms {:base-delay-ms 2000} 6))
+          "the default cap (pi: maxAgentDelayMs ?? 60s)")
+    (t/is (= 4 (retry/retry-delay-ms {:base-delay-ms 1 :max-agent-delay-ms 5} 3)))
+    (t/is (= 5 (retry/retry-delay-ms {:base-delay-ms 1 :max-agent-delay-ms 5} 4))
+          "an explicit cap wins")
+    (t/is (= 60000 (:delay-ms (retry/retry-decision {:err "rate limit"
+                                                     :retry-count 6
+                                                     :max-retries 10
+                                                     :base-delay-ms 2000})))
+          "the turn-retry decision caps its backoff too (pi: _prepareRetry)"))
+  (t/testing "retry-call! — pi: retryAssistantCall"
+    (let [policy {:max-retries 3 :base-delay-ms 1 :max-agent-delay-ms 5}
+          calls (atom [])
+          events (atom [])
+          callbacks {:on-retry-scheduled
+                     (fn [attempt max-attempts delay-ms err]
+                       (swap! events conj [:scheduled attempt max-attempts delay-ms err]))
+                     :on-retry-attempt-start
+                     (fn [] (swap! events conj [:attempt-start]))
+                     :on-retry-finished
+                     (fn [success attempt & [final-error]]
+                       (swap! events conj [:finished success attempt final-error]))}]
+      (t/is (= {:stop-reason :stop :text "ok"}
+               (retry/retry-call!
+                (fn []
+                  (swap! calls conj :call)
+                  (if (= 1 (count @calls))
+                    {:stop-reason :error :error-message "rate limit exceeded"}
+                    {:stop-reason :stop :text "ok"}))
+                policy (atom false) callbacks))
+            "a retryable error is retried; the retry's result is returned")
+      (t/is (= 2 (count @calls)))
+      (t/is (= [[:scheduled 1 3 1 "rate limit exceeded"]
+                [:attempt-start]
+                [:finished true 1 nil]]
+               @events)
+            "pi's callback order and payloads")
+
+      (reset! calls [])
+      (reset! events [])
+      (t/is (= {:stop-reason :error :error-message "insufficient_quota"}
+               (retry/retry-call!
+                (fn [] (swap! calls conj :call)
+                  {:stop-reason :error :error-message "insufficient_quota"})
+                policy (atom false) callbacks))
+            "a non-retryable failure returns immediately")
+      (t/is (= 1 (count @calls)))
+      (t/is (empty? @events) "no retry callbacks for a deterministic failure")
+
+      (reset! calls [])
+      (reset! events [])
+      (t/is (= {:stop-reason :error :error-message "rate limit exceeded"}
+               (retry/retry-call!
+                (fn [] (swap! calls conj :call)
+                  {:stop-reason :error :error-message "rate limit exceeded"})
+                (assoc policy :max-retries 1) (atom false) callbacks)))
+      (t/is (= 2 (count @calls)) "one retry: the initial call plus max-retries")
+      (t/is (= [[:scheduled 1 1 1 "rate limit exceeded"]
+                [:attempt-start]
+                [:finished false 1 "rate limit exceeded"]]
+               @events))
+
+      (reset! calls [])
+      (reset! events [])
+      (t/is (= {:stop-reason :aborted :text ""}
+               (retry/retry-call!
+                (fn [] (swap! calls conj :call)
+                  {:stop-reason :error :error-message "rate limit exceeded" :text ""})
+                policy (atom true) callbacks))
+            "an abort during the backoff normalizes to an aborted result (pi)")
+      (t/is (= 1 (count @calls)))
+      (t/is (= [[:scheduled 1 3 1 "rate limit exceeded"]
+                [:finished false 1 "rate limit exceeded"]]
+               @events)
+            "no attempt-start after an aborted sleep (pi)"))))
+
 (t/deftest test-loop-context-overflow?
   (t/is (retry/context-overflow? "prompt is too long: 213462 tokens > 200000 maximum"))
   (t/is (retry/context-overflow? "This model's maximum context length is 128000 tokens"))
@@ -4194,6 +4274,217 @@
       (t/is (some #(= :agent-settled (:type %)) @events)
             "the prompt settled")
       (finally (fs/delete-tree dir)))))
+
+(defn- seed-context!
+  "Append N token-heavy user entries to SESS so the estimated context passes
+   the small compaction thresholds the tests configure."
+  [sess n]
+  (dotimes [i n]
+    (session/append-entry sess
+                          {:role :user
+                           :content [{:type :text
+                                      :text (str "This is message body number " i
+                                                 " with plenty of words so the estimated token count "
+                                                 "easily exceeds the small test threshold.")}]})))
+
+(t/deftest test-loop-compaction-failure-reports-the-cause
+  (t/testing "a failed compaction reports the summarization failure with pi's
+              per-reason prefix (threshold: `Auto-compaction failed: …`)"
+    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+          sess (session/create-session (str dir))
+          events (atom [])
+          agent (loop/make-agent-state
+                 :session sess
+                 :compact-token-threshold 10
+                 :keep-recent-tokens 40
+                 :on-event (fn [e] (swap! events conj e)))]
+      (try
+        (seed-context! sess 6)
+        ;; no retries: the cause must surface after a single attempt
+        (swap! (:cfg agent) assoc :max-retries 0)
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [opts]
+                        (future
+                          (if (:tools opts)
+                            (do (when-let [on-text (:on-text opts)] (on-text "answer"))
+                                (when-let [on-done (:on-done opts)] (on-done :stop)))
+                            (when-let [on-error (:on-error opts)]
+                              (on-error "Stream idle timeout after 60000ms")))
+                          :done))]
+          (binding [*err* (java.io.StringWriter.)]
+            @(loop/run-agent-turn agent {:message "go" :on-error (fn [_])})))
+        (let [end (first (filter #(= :compaction-end (:type %)) @events))
+              failed (first (filter #(= :session-compact-failed (:type %)) @events))]
+          (t/is (= "Auto-compaction failed: Summarization failed: Stream idle timeout after 60000ms"
+                   (:error-message end))
+                "the cause rides pi's reason-specific prefix")
+          (t/is (= (:error-message end) (:error-message failed))
+                "session-compact-failed repeats the same message (pi)")
+          (t/is (false? (:will-retry failed))
+                "a failed compaction never retries the turn (pi)"))
+        (t/is (not-any? #(= :summarization-retry-scheduled (:type %)) @events)
+              "a spent retry budget means one attempt")
+        (finally (fs/delete-tree dir)))))
+  (t/testing "a manual compaction reports `Compaction failed: …`"
+    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+          sess (session/create-session (str dir))
+          events (atom [])
+          agent (loop/make-agent-state
+                 :session sess
+                 :compact-token-threshold 10
+                 :keep-recent-tokens 40
+                 :on-event (fn [e] (swap! events conj e)))]
+      (try
+        (seed-context! sess 6)
+        (swap! (:cfg agent) assoc :max-retries 0)
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [opts]
+                        (future
+                          (when-let [on-error (:on-error opts)]
+                            (on-error "provider exploded"))
+                          :done))]
+          (t/is (= :failed
+                   (binding [*err* (java.io.StringWriter.)]
+                     (loop/compact-context! agent "focus on tests" :manual))))
+          (t/is (= "Compaction failed: Summarization failed: provider exploded"
+                   (:error-message (first (filter #(= :compaction-end (:type %))
+                                                  @events)))))
+          (t/is (= "Compaction failed: Summarization failed: provider exploded"
+                   @(:compaction-error agent))
+                "the message /compact's error path reports (pi: compact() rejects)"))
+        (finally (fs/delete-tree dir))))))
+
+(t/deftest test-loop-summarization-retry
+  (t/testing "a transient summarization failure is retried with the
+              configured backoff, reporting pi's summarization_retry_* events"
+    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+          sess (session/create-session (str dir))
+          events (atom [])
+          attempts (atom 0)
+          agent (loop/make-agent-state
+                 :session sess
+                 :compact-token-threshold 10
+                 :keep-recent-tokens 40
+                 :on-event (fn [e] (swap! events conj e)))]
+      (try
+        (seed-context! sess 6)
+        ;; tiny backoff so the retry is instant
+        (swap! (:cfg agent) assoc :max-retries 3
+               :base-delay-ms 1 :max-agent-delay-ms 5)
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [opts]
+                        (future
+                          (if (:tools opts)
+                            (do (when-let [on-text (:on-text opts)] (on-text "answer"))
+                                (when-let [on-done (:on-done opts)] (on-done :stop)))
+                            (if (= 1 (swap! attempts inc))
+                              (when-let [on-error (:on-error opts)]
+                                (on-error "rate limit exceeded"))
+                              (do (when-let [on-text (:on-text opts)] (on-text "the summary"))
+                                  (when-let [on-done (:on-done opts)] (on-done :stop)))))
+                          :done))]
+          (binding [*err* (java.io.StringWriter.)]
+            @(loop/run-agent-turn agent {:message "go" :on-error (fn [_])})))
+        (t/is (= 2 @attempts) "the summarization was attempted twice")
+        (t/is (some #(and (= :summarization-retry-scheduled (:type %))
+                          (= 1 (:attempt %))
+                          (= 3 (:max-attempts %))
+                          (= 1 (:delay-ms %))
+                          (= "rate limit exceeded" (:error-message %)))
+                    @events)
+              "the retry countdown reports pi's payload (delay from the policy)")
+        (t/is (some #(and (= :summarization-retry-attempt-start (:type %))
+                          (= :compaction (:source %))
+                          (= :threshold (:reason %)))
+                    @events)
+              "the retried call reports its source (pi)")
+        (t/is (some #(= :summarization-retry-finished (:type %)) @events)
+              "the retry loop reports its end (pi)")
+        (t/is (some #(and (= :compaction (:role %)) (= "the summary" (:summary %)))
+                    @(:entries sess))
+              "the retried call's summary lands on the compaction entry")
+        (finally (fs/delete-tree dir))))))
+
+(t/deftest test-loop-summarization-request-options
+  (t/testing "the summarization request carries pi's options: a compaction
+              reasons at the session's thinking level, a branch summary sends
+              none and caps its output at 4096 tokens (pi:
+              createSummarizationOptions / branch-summarization.ts)"
+    (models/load-catalogs!)
+    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+          sess (session/create-session (str dir))
+          seen (atom [])
+          agent (loop/make-agent-state
+                 :session sess
+                 :provider :opencode-go
+                 :model "deepseek-v4-flash"
+                 :thinking :xhigh
+                 :compact-token-threshold 10
+                 :compact-reserve-tokens 1000
+                 :keep-recent-tokens 40)]
+      (try
+        (seed-context! sess 6)
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [opts]
+                        (swap! seen conj (select-keys opts [:thinking :tools :max-tokens]))
+                        (future
+                          (when-let [on-text (:on-text opts)] (on-text "summary"))
+                          (when-let [on-done (:on-done opts)] (on-done :stop))
+                          :done))]
+          (binding [*err* (java.io.StringWriter.)]
+            (loop/maybe-compact! agent)))
+        (t/is (= 1 (count @seen)) "one summarization call")
+        (t/is (= :xhigh (:thinking (first @seen)))
+              "the compaction summary reasons at the session level (pi)")
+        (t/is (= 800 (:max-tokens (first @seen)))
+              "floor(0.8 * the reserve) caps the compaction summary (pi)")
+        (t/is (empty? (:tools (first @seen))) "summarization carries no tools")
+        (reset! seen [])
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [opts]
+                        (swap! seen conj (select-keys opts [:thinking :max-tokens]))
+                        (future
+                          (when-let [on-text (:on-text opts)] (on-text "branch"))
+                          (when-let [on-done (:on-done opts)] (on-done :stop))
+                          :done))]
+          (let [result (loop/generate-branch-summary
+                        agent [{:role :user :content [{:type :text :text "x"}]}])]
+            (t/is (str/starts-with? (:summary result)
+                                    "The user explored a different conversation branch")
+                  "the branch preamble is applied")
+            (t/is (nil? (:thinking (first @seen)))
+                  "branch summaries send no reasoning (pi)")
+            (t/is (= 4096 (:max-tokens (first @seen)))
+                  "a flat 4096-token cap (pi)")))
+        (finally (fs/delete-tree dir))))))
+
+(t/deftest test-loop-branch-summary-failure-reports-the-cause
+  (t/testing "a failed branch summarization returns pi's error shape (pi:
+              BranchSummaryResult.error — `Branch summarization failed: …`)"
+    (models/load-catalogs!)
+    (let [agent (loop/make-agent-state :provider :opencode-go
+                                       :model "deepseek-v4-flash")]
+      (swap! (:cfg agent) assoc :max-retries 0)
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [opts]
+                      (future
+                        (when-let [on-error (:on-error opts)]
+                          (on-error "rate limit exceeded"))
+                        :done))]
+        (t/is (= {:error "Branch summarization failed: rate limit exceeded"}
+                 (loop/generate-branch-summary
+                  agent [{:role :user :content [{:type :text :text "x"}]}]))))
+      (reset! (:signal agent) true)
+      (t/is (= {:aborted true}
+               (loop/generate-branch-summary
+                agent [{:role :user :content [{:type :text :text "x"}]}]))
+            "an aborted call reports :aborted (pi)"))))
 
 (t/deftest test-loop-compaction-keeps-tool-call-pairing-in-ui
   "A live compaction whose kept tail includes an assistant tool-call + its

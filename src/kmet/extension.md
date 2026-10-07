@@ -708,7 +708,9 @@ Event types: `:agent-start` `:agent-end` `:agent-settled` `:turn-start`
 `:session-before-tree` `:session-before-switch` `:session-before-fork`
 `:session-before-compact` `:session-tree` `:queue-update` `:model-select`
 `:thinking-level-select` `:context-replaced` `:auto-retry-start`
-`:auto-retry-end` `:compaction-start` `:compaction-end`
+`:auto-retry-end` `:summarization-retry-scheduled`
+`:summarization-retry-attempt-start` `:summarization-retry-finished`
+`:compaction-start` `:compaction-end`
 `:session-compact-failed` `:context` `:context-with-system`
 `:before-provider-request` `:before-provider-headers`
 `:after-provider-response`.

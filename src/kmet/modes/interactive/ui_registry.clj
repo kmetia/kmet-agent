@@ -667,8 +667,11 @@
                                               (if (and (= :failed r) on-error)
                                                 ;; pi: compact() throws on
                                                 ;; summarization failure →
-                                                ;; onError fires
-                                                (on-error (ex-info "Context compaction failed: the summarization call did not return a summary."
+                                                ;; onError fires with
+                                                ;; `Compaction failed: <cause>`
+                                                (on-error (ex-info (str "Compaction failed: "
+                                                                        (or @(:compaction-error @ag-atom)
+                                                                            "Unknown error"))
                                                                    {:type :compaction-failed}))
                                                 (when on-complete (on-complete {:result r}))))
                                             (catch Exception e

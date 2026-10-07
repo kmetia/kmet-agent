@@ -95,6 +95,7 @@
             :max-retries (let [retry (cfg/get-retry-settings config)]
                            (if (:enabled retry) (:max-retries retry) 0))
             :base-delay-ms (:base-delay-ms (cfg/get-retry-settings config))
+            :max-agent-delay-ms (:max-agent-delay-ms (cfg/get-retry-settings config))
             ;; Repeat-loop guard (kmet-specific): settings.edn :loop-guard
             ;; block — enabled gates threshold to 0 (off)
             :loop-guard-enabled (:enabled (cfg/get-loop-guard-settings config))

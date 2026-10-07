@@ -54,7 +54,12 @@
    (measured usage vs. the model's context window) and reactively after a
    context-overflow error (compact once, then retry). Compaction summarizes
    the pre-cut conversation via the LLM (kmet.app.compaction, pi:
-   core/compaction) and replaces it with a summary entry.
+   core/compaction) and replaces it with a summary entry. The summarization
+   call is retried with the configured retry policy (pi:
+   completeSummarization → retryAssistantCall), reports :summarization-retry-*
+   events while it backs off, and reasons at the session's thinking level;
+   a failure surfaces its cause behind pi's reason prefix
+   (kmet.app.compaction/compaction-failure-message).
 
    Model management (pi: setModel / cycleModel): set-scoped-models! sets the
    session scoped model list; cycle-model! moves through it emitting
@@ -126,7 +131,8 @@
                                          ;; _pendingNextTurnMessages)
                        active-call      ;; atom of {:promise p :partials f} while an LLM call is in flight (for cancel)
                        cfg              ;; atom of a config MAP — runtime-tunable knobs, replaced wholesale:
-                                        ;;   {:max-retries int :base-delay-ms int :http-idle-timeout-ms int
+                                        ;;   {:max-retries int :base-delay-ms int :max-agent-delay-ms int
+                                        ;;    :http-idle-timeout-ms int
                                         ;;    :steering-mode :all|:one-at-a-time :follow-up-mode :all|:one-at-a-time
                                         ;;    :auto-compact bool :context-window int-or-nil}
                        retry-count      ;; atom of int: retries performed for the in-flight LLM call
@@ -152,6 +158,9 @@
                        compaction-blocked    ;; atom of bool: an automatic compaction in this prompt aborted
                                              ;; or failed — automatic checks stand down until the next prompt
                                              ;; (pi: skipAbortedCheck / _overflowRecoveryAttempted, extended)
+                       compaction-error      ;; atom of string or nil: the last compaction failure message
+                                             ;; (pi: the Error compact() rejects with) — read by the
+                                             ;; /compact and extension error paths
                        pending-bash          ;; atom of vector of bash entries queued while streaming
                        run-messages          ;; atom of {run-token [message...]}: the messages
                                              ;; appended during an in-flight run (pi: newMessages,
@@ -173,6 +182,7 @@
    opts: :model, :provider, :system, :session, :on-event,
          :thinking, :base-url, :api-type, :steering-mode, :follow-up-mode,
          :max-retries (default 3), :base-delay-ms (default 2000),
+     :max-agent-delay-ms (default 60000 — pi maxAgentDelayMs, the backoff cap),
          :before-tool-call, :after-tool-call, :system-prompt-override,
          :transform-context, :prepare-next-turn, :prepare-request, :finish-turn,
          :get-api-key, :scoped-models (default []),
@@ -191,7 +201,7 @@
          :default-tools (resolved :default-tools selection — the built-in
          tools active at startup, pi: defaultTools; nil = every built-in
          active, see kmet.app.tools.registry/resolve-default-tools)"
-  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms before-tool-call after-tool-call system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools]
+  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms max-agent-delay-ms before-tool-call after-tool-call system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools]
       :or {provider :opencode-go
            thinking :off
            steering-mode :all
@@ -199,6 +209,7 @@
            auto-compact true
            max-retries 3
            base-delay-ms 2000
+           max-agent-delay-ms retry/default-max-agent-delay-ms
            scoped-models []
            compact-reserve-tokens 16384
            keep-recent-tokens 20000
@@ -231,6 +242,7 @@ Be precise and concise in your responses."}}]
                     :active-call (atom nil)
                     :cfg (atom {:max-retries max-retries
                                 :base-delay-ms base-delay-ms
+                                :max-agent-delay-ms max-agent-delay-ms
                                 :http-idle-timeout-ms http-idle-timeout-ms
                                 :http-total-timeout-ms http-total-timeout-ms
                                 :steering-mode steering-mode
@@ -259,6 +271,7 @@ Be precise and concise in your responses."}}]
                     :compacting? (atom false)
                     :compaction-signal (atom false)
                     :compaction-blocked (atom false)
+                    :compaction-error (atom nil)
                     :pending-bash (atom [])
                     :run-messages (atom {})
                     :run-token (atom nil)
@@ -1360,130 +1373,177 @@ Be precise and concise in your responses."}}]
   [agent]
   (or @(:signal agent) @(:compaction-signal agent)))
 
+(defn- summarization-retry-callbacks
+  "The callbacks a summarization retry reports through (pi:
+   _summarizationRetryCallbacks — summarization_retry_scheduled /
+   _attempt_start / _finished drive the UI's retry countdown). SOURCE is
+   {:source :compaction :reason reason} or {:source :branch-summary}."
+  [agent source]
+  {:on-retry-scheduled
+   (fn [attempt max-attempts delay-ms error-message]
+     (emit agent {:type :summarization-retry-scheduled
+                  :attempt attempt
+                  :max-attempts max-attempts
+                  :delay-ms delay-ms
+                  :error-message error-message}))
+
+   :on-retry-attempt-start
+   (fn [] (emit agent (merge {:type :summarization-retry-attempt-start} source)))
+
+   :on-retry-finished
+   (fn [& _] (emit agent {:type :summarization-retry-finished}))})
+
+(defn- summarization-call
+  "One summarization LLM call (pi: completeSummarization — the single call
+   the retry driver wraps). SIGNALS are the raw cancel atoms to watch (the
+   transport polls their OR-view); THINKING (optional) is the reasoning
+   level to request (pi: a compaction passes the session's thinking level,
+   branch summarization passes none). Returns the result map retry-call!
+   classifies: {:stop-reason kw :error-message str :tool-calls [...] :text
+   str :usage map}, :stop-reason :aborted when a cancel signal fired."
+  [agent messages {:keys [signals thinking max-tokens]}]
+  (let [ep (resolve-endpoint agent)
+        signal (apply concurrent/or-signal signals)
+        done (promise)
+        text-buf (atom "")
+        usage-buf (atom nil)
+        tc-buf (atom [])
+        partial (fn [stop & [msg]]
+                  (cond-> {:stop-reason stop
+                           :text @text-buf
+                           :tool-calls @tc-buf
+                           :usage @usage-buf}
+                    msg (assoc :error-message msg)))
+        deliver! (fn [result]
+                   (when-not (realized? done) (deliver done result)))
+        watch-key (str "kmet/summarization-cancel" (random-uuid))]
+    ;; The stream may not deliver an event on cancel (killed curl), so the
+    ;; watches are what make escape abort the call promptly.
+    (doseq [s signals]
+      (when s
+        (add-watch s watch-key (fn [_ _ _ v] (when v (deliver! (partial :aborted)))))))
+    (try
+      (llm/send-message
+       (cond-> {:provider @(:provider agent)
+                :api-type (:api-type ep)
+                :model @(:model agent)
+                :api-key (resolve-api-key agent)
+                :base-url (:base-url ep)
+                :messages messages
+                :signal signal
+                :idle-timeout-ms (:http-idle-timeout-ms @(:cfg agent))
+                ;; Whole-request deadline, same as a normal call (pi: the
+                ;; SDK's timeoutMs ?? httpIdleTimeoutMs reaches the
+                ;; summarization stream too)
+                :total-timeout-ms (retry/llm-total-timeout-ms @(:cfg agent))
+                :session-id (some-> (:session agent) :id)
+                :cache-retention :none
+                :max-tokens max-tokens
+                :on-text (fn [t] (swap! text-buf str t))
+                :on-tool-call (fn [tc] (swap! tc-buf conj tc))
+                :on-usage (fn [u] (reset! usage-buf u))
+                :on-done (fn [reason] (deliver! (partial (or reason :stop))))
+                :on-error (fn [msg] (deliver! (partial :error msg)))}
+         thinking (assoc :thinking thinking)))
+      (when @signal (deliver! (partial :aborted)))
+      ;; Backstop: the transport enforces the same deadline, but a silent
+      ;; stream that never reports must not hang the deref forever.
+      (let [deadline (retry/llm-total-timeout-ms @(:cfg agent))
+            result (deref done deadline :timeout)]
+        (if (map? result)
+          result
+          (partial :error (str "Stream timed out after " deadline "ms"))))
+      (finally
+        (doseq [s signals]
+          (when s (remove-watch s watch-key)))))))
+
 (defn- summarize!
-  "LLM summarization of the pre-cut entries (pi: generateSummaryWithUsage).
-   Returns {:summary str :usage usage-map} — usage is the summarization
-   call's cost-attached provider usage, recorded on the compaction entry so
-   the footer totals include it (pi: CompactionEntry.usage) — or nil when no
-   API key is available, the call fails/times out/returns empty, or a
-   compaction/run cancel signal fired mid-call (the signal watchers deliver
-   nil so cancellation doesn't wait for the stream to die)."
-  [agent prep & [custom-instructions]]
+  "LLM summarization of the pre-cut entries (pi: generateSummaryWithUsage via
+   completeSummarization, retried with the configured retry policy). Returns
+   {:summary str :usage usage-map} — usage is the summarization call's
+   cost-attached provider usage, recorded on the compaction entry so the
+   footer totals include it (pi: CompactionEntry.usage) — {:error message}
+   when the call failed (pi: the `Summarization failed: …` the caller
+   wraps), or nil when a compaction/run cancel fired mid-call (the session
+   is left untouched)."
+  [agent prep & [custom-instructions reason]]
   (let [provider @(:provider agent)
-        ep (resolve-endpoint agent)
-        api-key (resolve-api-key agent)
         ;; pi: the summarization call caps its output at
         ;; min(floor(0.8 * reserveTokens), model.maxTokens) — the summary
         ;; must never consume the context budget or overflow the window
         max-tokens (let [reserve (or (:compact-reserve-tokens agent) 16384)]
                      (when-let [mrec (models/get-model provider @(:model agent))]
                        (min (long (Math/floor (* 0.8 reserve)))
-                            (or (:max-tokens mrec) (long (Math/floor (* 0.8 reserve)))))))]
-    ;; ambient-auth providers (google-vertex ADC, amazon-bedrock AWS
-    ;; credentials) resolve no api-key — configured? covers them
-    (when (or api-key (auth/configured? provider))
-      (let [done (promise)
-            text-buf (atom "")
-            usage-buf (atom nil)
-            run-signal (:signal agent)
-            compact-signal (:compaction-signal agent)
-            ;; The transport polls this OR-view; the watches below cover the
-            ;; deref abort (the stream may not deliver an event on cancel —
-            ;; killed curl — so the watchers make escape abort promptly).
-            signal (concurrent/or-signal run-signal compact-signal)
-            msgs (compaction/summarization-messages
-                  (:messages prep) (:previous-summary prep) custom-instructions)]
-        (llm/send-message
-         {:provider provider
-          :api-type (:api-type ep)
-          :model @(:model agent)
-          :api-key api-key
-          :base-url (:base-url ep)
-          :messages msgs
-          :signal signal
-          :idle-timeout-ms (:http-idle-timeout-ms @(:cfg agent))
-          :session-id (some-> (:session agent) :id)
-          :cache-retention :none
-          :max-tokens max-tokens
-          :on-text (fn [t] (swap! text-buf str t))
-          :on-usage (fn [u] (reset! usage-buf u))
-          :on-done (fn [_] (deliver done @text-buf))
-          :on-error (fn [_] (when-not (realized? done) (deliver done nil)))})
-        ;; Cancel watch: abort the deref the moment either signal fires. The
-        ;; stream may not deliver an event on cancel (killed curl), so this
-        ;; is what makes escape abort compaction promptly.
-        (add-watch run-signal :kmet/summarize-cancel
-                   (fn [_ _ _ v] (when v (deliver done nil))))
-        (add-watch compact-signal :kmet/summarize-cancel
-                   (fn [_ _ _ v] (when v (deliver done nil))))
-        (when @signal (deliver done nil))
-        (let [result (try (deref done 120000 :timeout)
-                          (finally
-                            (remove-watch run-signal :kmet/summarize-cancel)
-                            (remove-watch compact-signal :kmet/summarize-cancel)))]
-          (when (and (string? result) (seq result))
-            {:summary result :usage @usage-buf}))))))
+                            (or (:max-tokens mrec) (long (Math/floor (* 0.8 reserve)))))))
+        signals [(:signal agent) (:compaction-signal agent)]
+        msgs (compaction/summarization-messages
+              (:messages prep) (:previous-summary prep) custom-instructions)
+        result (retry/retry-call!
+                #(summarization-call agent msgs
+                                     {:signals signals
+                                      :thinking @(:thinking agent)
+                                      :max-tokens max-tokens})
+                @(:cfg agent)
+                (apply concurrent/or-signal signals)
+                (summarization-retry-callbacks agent {:source :compaction
+                                                      :reason reason}))]
+    (cond
+      (= :aborted (:stop-reason result)) nil
+      (seq (:tool-calls result))
+      {:error "Summarization attempted to call a tool"}
+      :else
+      (if-let [failure (compaction/summarization-failure result "Summarization")]
+        {:error failure}
+        (if (str/blank? (:text result))
+          ;; kmet deviation: an empty summary would wipe the context; pi
+          ;; appends it (contentText of an empty response).
+          {:error "Summarization failed: the model returned an empty summary"}
+          {:summary (:text result) :usage (:usage result)})))))
 
 (defn generate-branch-summary
   "LLM summary of abandoned branch entries for tree navigation (pi:
-   generateBranchSummary). Returns {:summary str :usage usage-map} with the
-   branch preamble applied (usage = the summarization call's cost-attached
-   provider usage, recorded on the branch-summary entry so the footer totals
-   include it — pi: BranchSummaryEntry.usage), {:aborted true} when the
-   signal fired mid-call, or nil when no API key is available or the call
-   fails/times out/returns empty. SIGNAL (optional, defaults to the agent's
-   cancel signal) aborts the call. REPLACE-INSTRUCTIONS? (pi:
-   replaceInstructions) makes CUSTOM-INSTRUCTIONS replace the builtin
-   branch-summary prompt instead of being appended."
+   generateBranchSummary, retried with the configured retry policy).
+   Returns {:summary str :usage usage-map} with the branch preamble applied
+   (usage = the summarization call's cost-attached provider usage, recorded
+   on the branch-summary entry so the footer totals include it — pi:
+   BranchSummaryEntry.usage), {:aborted true} when the signal fired
+   mid-call, or {:error message} when the call failed (pi:
+   BranchSummaryResult.error — surfaces as `Branch summarization failed:
+   …`). SIGNAL (optional, defaults to the agent's cancel signal) aborts the
+   call. REPLACE-INSTRUCTIONS? (pi: replaceInstructions) makes
+   CUSTOM-INSTRUCTIONS replace the builtin branch-summary prompt instead of
+   being appended."
   [agent entries & [custom-instructions signal replace-instructions?]]
   (let [provider @(:provider agent)
-        ep (resolve-endpoint agent)
-        api-key (resolve-api-key agent)
-        ;; pi: the branch/turn-prefix summarization caps its output at
-        ;; min(floor(0.5 * reserveTokens), model.maxTokens) — a smaller
-        ;; budget than context compaction
-        max-tokens (let [reserve (or (:compact-reserve-tokens agent) 16384)]
-                     (when-let [mrec (models/get-model provider @(:model agent))]
-                       (min (long (Math/floor (* 0.5 reserve)))
-                            (or (:max-tokens mrec) (long (Math/floor (* 0.5 reserve)))))))]
-    ;; ambient-auth providers (google-vertex ADC, amazon-bedrock AWS
-    ;; credentials) resolve no api-key — configured? covers them
-    (when (or api-key (auth/configured? provider))
-      (let [done (promise)
-            text-buf (atom "")
-            usage-buf (atom nil)
-            signal (or signal (:signal agent))
-            msgs (compaction/branch-summary-messages
-                  (vec (mapcat session/context-messages entries))
-                  custom-instructions
-                  replace-instructions?)]
-        (llm/send-message
-         {:provider provider
-          :api-type (:api-type ep)
-          :model @(:model agent)
-          :api-key api-key
-          :base-url (:base-url ep)
-          :messages msgs
-          :signal signal
-          :idle-timeout-ms (:http-idle-timeout-ms @(:cfg agent))
-          :session-id (some-> (:session agent) :id)
-          :cache-retention :none
-          :max-tokens max-tokens
-          :on-text (fn [t] (swap! text-buf str t))
-          :on-usage (fn [u] (reset! usage-buf u))
-          :on-done (fn [_] (deliver done @text-buf))
-          :on-error (fn [_] (when-not (realized? done) (deliver done nil)))})
-        (add-watch signal :kmet/branch-summarize-cancel
-                   (fn [_ _ _ v] (when v (deliver done nil))))
-        (when @signal (deliver done nil))
-        (let [result (try (deref done 120000 :timeout)
-                          (finally (remove-watch signal :kmet/branch-summarize-cancel)))]
-          (cond
-            (and (nil? result) @signal) {:aborted true}
-            (string? result) (when (seq result)
-                               {:summary (str compaction/branch-summary-preamble result)
-                                :usage @usage-buf})
-            :else nil))))))
+        ;; pi: branch summaries cap their output at a flat 4096 tokens
+        ;; (branch-summarization.ts maxTokens) — independent of the
+        ;; compaction reserve
+        model (models/get-model provider @(:model agent))
+        max-tokens (min 4096 (or (:max-tokens model) 4096))
+        signal (or signal (:signal agent))
+        msgs (compaction/branch-summary-messages
+              (vec (mapcat session/context-messages entries))
+              custom-instructions
+              replace-instructions?)
+        result (retry/retry-call!
+                #(summarization-call agent msgs {:signals [signal]
+                                                 :max-tokens max-tokens})
+                @(:cfg agent)
+                signal
+                (summarization-retry-callbacks agent {:source :branch-summary}))]
+    (cond
+      (= :aborted (:stop-reason result)) {:aborted true}
+      (seq (:tool-calls result))
+      {:error "Branch summarization attempted to call a tool"}
+      :else
+      (if-let [failure (compaction/summarization-failure result "Branch summarization")]
+        {:error failure}
+        (if (str/blank? (:text result))
+          ;; kmet deviation: an empty summary would record a blank branch
+          ;; summary entry; pi appends it (contentText of an empty response).
+          {:error "Branch summarization failed: the model returned an empty summary"}
+          {:summary (str compaction/branch-summary-preamble (:text result))
+           :usage (:usage result)})))))
 
 (defn- sync-context-after-compaction!
   "Rebuild the in-memory context from the compacted session (pi: the agent
@@ -1542,7 +1602,8 @@ Be precise and concise in your responses."}}]
       (reset! (:compacting? agent) true)
       (try
         (emit agent {:type :compaction-start :reason reason})
-        (let [result
+        (let [failure (volatile! nil)
+              result
               (if-let [sess (:session agent)]
                 (if (compaction-aborted? agent)
                   :aborted
@@ -1561,10 +1622,17 @@ Be precise and concise in your responses."}}]
                                                 :will-retry false
                                                 :signal (:compaction-signal agent)}))
                         ::cancelled
-                        (if-let [summary-result (summarize! agent prep custom-instructions)]
-                          (if (compaction-aborted? agent)
+                        (if-let [summary-result (summarize! agent prep custom-instructions reason)]
+                          (cond
                           ;; cancelled during summarization — session unchanged
-                            :aborted
+                            (compaction-aborted? agent) :aborted
+
+                            (:error summary-result)
+                            (do (debug/log "Warning: summarization failed; compaction skipped")
+                                (vreset! failure (:error summary-result))
+                                :failed)
+
+                            :else
                             (do (session/compact-with-summary! sess (:summary summary-result)
                                                                (:first-kept-id prep)
                                                                (cond-> {:tokens-before (:tokens-before prep)}
@@ -1582,11 +1650,18 @@ Be precise and concise in your responses."}}]
                                 (emit agent {:type :context-replaced :messages @(:messages agent)})
                                 (debug/log "compacted session with LLM summary")
                                 true))
+                          ;; summarize! returns nil only for an abort
                           (if (compaction-aborted? agent)
                             :aborted
                             (do (debug/log "Warning: summarization failed; compaction skipped")
+                                (vreset! failure "the summarization call did not return a summary")
                                 :failed)))))))
-                false)]
+                false)
+              ;; pi: compact() rejects with `Compaction failed: …` — the
+              ;; message /compact's error path and extension callers report
+              error-message (when (= result :failed)
+                              (compaction/compaction-failure-message reason @failure))]
+          (reset! (:compaction-error agent) error-message)
           (emit agent {:type :compaction-end
                        :reason reason
                        :aborted (or (= result :aborted)
@@ -1595,8 +1670,7 @@ Be precise and concise in your responses."}}]
                                     (not= result ::cancelled)
                                     (not= result :failed)
                                     result)
-                       :error-message (when (= result :failed)
-                                        "Context compaction failed: the summarization call did not return a summary.")
+                       :error-message error-message
                        ;; Overflow compaction retries the interrupted turn
                        ;; (pi: _runAutoCompaction willRetry — compaction_end
                        ;; carries whether the run continues).
@@ -1609,10 +1683,12 @@ Be precise and concise in your responses."}}]
                     (= result ::cancelled))
             (emit agent {:type :session-compact-failed
                          :reason reason
-                         :error-message (when (= result :failed)
-                                          "Context compaction failed: the summarization call did not return a summary.")
+                         :error-message error-message
                          :aborted (or (= result :aborted)
-                                      (= result ::cancelled))}))
+                                      (= result ::cancelled))
+                         ;; pi: _emitSessionCompactFailed — a compaction that
+                         ;; failed or was cancelled never retries the turn
+                         :will-retry false}))
           (when (or (= result :aborted) (= result :failed) (= result ::cancelled))
             (reset! (:compaction-blocked agent) true))
           (if (= result ::cancelled) false result))
@@ -2213,6 +2289,7 @@ Be precise and concise in your responses."}}]
                                           :retry-count @(:retry-count agent)
                                           :max-retries (:max-retries @(:cfg agent))
                                           :base-delay-ms (:base-delay-ms @(:cfg agent))
+                                          :max-agent-delay-ms (:max-agent-delay-ms @(:cfg agent))
                                           :overflow-recovered @(:overflow-recovered agent)
                                           :has-session (some? (:session agent))})]
                                     (if (= :backoff kind)
@@ -2249,6 +2326,7 @@ Be precise and concise in your responses."}}]
                                           :retry-count @(:retry-count agent)
                                           :max-retries (:max-retries @(:cfg agent))
                                           :base-delay-ms (:base-delay-ms @(:cfg agent))
+                                          :max-agent-delay-ms (:max-agent-delay-ms @(:cfg agent))
                                           :overflow-recovered @(:overflow-recovered agent)
                                           :has-session (some? (:session agent))})]
                                     (case kind

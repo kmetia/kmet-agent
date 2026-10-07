@@ -149,15 +149,18 @@
    stopped it, and the next :turn-start (the only other revival point) can
    be arbitrarily far away.
 
-   IDENT is the indicator the flow installed: only it may be cleared, so a
-   later /share or a transient (retry/compaction) that claimed the slot
-   meanwhile is left alone. The working spinner returns only when the turn
-   is still running, nothing else claimed the slot in the meantime, and it
-   isn't already spinning (re-activation would reset its animation
-   clock). The activation itself re-checks the running-turn flag, so a
-   turn ending mid-revival cannot leave a spinner behind."
-  [cs kind ident]
-  (when (identical? ident (:indicator @(:status-current cs)))
+   KIND scopes the release (pi: clearStatusIndicator(kind) — the active
+   indicator's kind must match): a later transient (retry/compaction) that
+   claimed the slot keeps it, while an indicator the same flow re-showed —
+   a branch-summarization retry re-shows the branch-summary indicator
+   after its retry countdown — is still released. The working spinner
+   returns only when the turn is still running, nothing else claimed the
+   slot in the meantime, and it isn't already spinning (re-activation
+   would reset its animation clock). The activation itself re-checks the
+   running-turn flag, so a turn ending mid-revival cannot leave a spinner
+   behind."
+  [cs kind]
+  (when (= kind (:kind @(:status-current cs)))
     (clear-status-indicator! cs kind)
     (when (and @(:running-turn? cs)
                (nil? @(:status-current cs))

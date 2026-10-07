@@ -480,12 +480,15 @@
 
 (t/deftest test-get-retry-settings
   (t/testing "defaults when :retry is absent"
-    (t/is (= {:enabled true :max-retries 3 :base-delay-ms 2000}
+    (t/is (= {:enabled true :max-retries 3 :base-delay-ms 2000
+              :max-agent-delay-ms 60000}
              (cfg/get-retry-settings {}))))
   (t/testing "partial :retry maps merge with defaults (deep-merged config)"
-    (t/is (= {:enabled false :max-retries 5 :base-delay-ms 2000}
+    (t/is (= {:enabled false :max-retries 5 :base-delay-ms 2000
+              :max-agent-delay-ms 60000}
              (cfg/get-retry-settings {:retry {:enabled false :max-retries 5}})))
-    (t/is (= {:enabled true :max-retries 0 :base-delay-ms 500}
+    (t/is (= {:enabled true :max-retries 0 :base-delay-ms 500
+              :max-agent-delay-ms 60000}
              (cfg/get-retry-settings {:retry {:max-retries 0 :base-delay-ms 500}}))
           "0 is a valid max-retries (off)")))
 
@@ -497,21 +500,25 @@
       (with-redefs [cfg/global-settings-path (fn [] settings-file)]
         (t/testing "reads the file :retry block"
           (spit settings-file "{:retry {:enabled false :max-retries 10}}\n")
-          (t/is (= {:enabled false :max-retries 10 :base-delay-ms 2000}
+          (t/is (= {:enabled false :max-retries 10 :base-delay-ms 2000
+                    :max-agent-delay-ms 60000}
                    (cfg/get-retry-settings-live {:retry {:max-retries 5}}))))
         (t/testing "missing file falls back to the config value"
           (fs/delete-tree tmp)
-          (t/is (= {:enabled true :max-retries 5 :base-delay-ms 2000}
+          (t/is (= {:enabled true :max-retries 5 :base-delay-ms 2000
+                    :max-agent-delay-ms 60000}
                    (cfg/get-retry-settings-live {:retry {:max-retries 5}}))))
         (t/testing "file without :retry falls back to the config (project override)"
           (fs/create-dirs tmp)
           (spit settings-file "{:provider :opencode-go}\n")
-          (t/is (= {:enabled true :max-retries 5 :base-delay-ms 2000}
+          (t/is (= {:enabled true :max-retries 5 :base-delay-ms 2000
+                    :max-agent-delay-ms 60000}
                    (cfg/get-retry-settings-live {:retry {:max-retries 5}}))))
         (t/testing "unreadable file falls back to the config value"
           (fs/create-dirs tmp)
           (spit settings-file "not-edn[")
-          (t/is (= {:enabled true :max-retries 5 :base-delay-ms 2000}
+          (t/is (= {:enabled true :max-retries 5 :base-delay-ms 2000
+                    :max-agent-delay-ms 60000}
                    (cfg/get-retry-settings-live {:retry {:max-retries 5}})))))
       (finally (fs/delete-tree tmp)))))
 

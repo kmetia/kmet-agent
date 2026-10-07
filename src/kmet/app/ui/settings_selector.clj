@@ -130,7 +130,8 @@
         apply-retry! (fn []
                        (let [r @retry-atom]
                          (swap! (:cfg ag) assoc :max-retries (if (:enabled r) (:max-retries r) 0))
-                         (swap! (:cfg ag) assoc :base-delay-ms (:base-delay-ms r))))
+                         (swap! (:cfg ag) assoc :base-delay-ms (:base-delay-ms r))
+                         (swap! (:cfg ag) assoc :max-agent-delay-ms (:max-agent-delay-ms r))))
         save-retry! (fn [path value]
                       (cfg/save-setting! path value)
                       (apply-retry!))

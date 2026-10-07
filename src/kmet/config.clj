@@ -26,7 +26,8 @@
    ;; pi: reserveTokens — tokens reserved for prompt + response
    :compact-reserve-tokens 16384
    :keep-recent-tokens 20000
-   :retry {:enabled true :max-retries 3 :base-delay-ms 2000}
+   :retry {:enabled true :max-retries 3 :base-delay-ms 2000
+           :max-agent-delay-ms 60000}
    ;; loop guard: repeat-loop circuit breaker (tool-call + thinking)
    :loop-guard {:enabled true :threshold 3}
    :thinking-loop-guard-enabled true
@@ -551,13 +552,15 @@
 
 (defn get-retry-settings
   "Retry settings (pi: settings-manager retry block — enabled, maxRetries,
-   baseDelayMs). Returns {:enabled bool :max-retries n :base-delay-ms n};
-   the deep-merged config may carry a partial :retry map."
+   baseDelayMs, maxAgentDelayMs). Returns {:enabled bool :max-retries n
+   :base-delay-ms n :max-agent-delay-ms n}; the deep-merged config may carry
+   a partial :retry map."
   [config]
   (let [retry (:retry config)]
     {:enabled (if (contains? retry :enabled) (:enabled retry) true)
      :max-retries (or (:max-retries retry) 3)
-     :base-delay-ms (or (:base-delay-ms retry) 2000)}))
+     :base-delay-ms (or (:base-delay-ms retry) 2000)
+     :max-agent-delay-ms (or (:max-agent-delay-ms retry) 60000)}))
 
 (defn get-retry-settings-live
   "Live :retry settings from the global settings file (the in-memory config
