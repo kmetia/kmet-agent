@@ -738,8 +738,9 @@
 
 (defn make-resource-config-screen
   "Build the config screen. OPTS:
-   :write-scope     — :global (default) or :project (pi: config -l starts
-                      in project-local mode)
+   :write-scope     — :global (screen fallback) or :project; `kmet config`
+                      passes :project when a `.kmet/` project exists (pi:
+                      config -l starts in project-local mode)
    :project-mode?   — whether Tab may switch scopes (pi:
                       projectModeAvailable — kmet: the .kmet project dir
                       exists or -l was passed)

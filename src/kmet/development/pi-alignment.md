@@ -147,7 +147,10 @@ Kmet adaptations (deliberate deviations):
   settings resource array (pi toggleTopLevelResource /
   setProjectTopLevelOverride, including the inherited-global absolute-path
   entry). Project mode is available whenever `.kmet/` exists or `-l` was
-  passed (no trust gate).
+  passed (no trust gate), and the screen starts in project-local scope when
+  `.kmet/` exists — project settings and auto dirs load unconditionally, so
+  project-defined resources show enabled by default (pi starts global
+  because its project mode requires trust).
 - No configurable resource dirs: the auto roots are fixed
   (`~/.kmet/agent/<type>` + `.kmet/<type>`, pi `join(agentDir, type)` +
   `join(cwd, CONFIG_DIR_NAME, type)`); the retired `:*-dir` settings keys

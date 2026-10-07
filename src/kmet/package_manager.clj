@@ -88,8 +88,9 @@
   (println)
   (println "Open the resource configuration TUI to enable or disable resources")
   (println "(packages, top-level settings entries and the auto dirs).")
-  (println "Without -l, starts in global settings (~/.kmet/agent/settings.edn).")
-  (println "Press Tab in the TUI to switch between global and project-local modes.")
+  (println "Starts in project-local mode when .kmet/ exists, global otherwise")
+  (println "(~/.kmet/agent/settings.edn). Press Tab in the TUI to switch between")
+  (println "global and project-local modes.")
   (println)
   (println "Options:")
   (println "  -l, --local       Edit project overrides (.kmet/settings.edn)")
@@ -219,9 +220,13 @@
 (defn- run-config
   "pi handleConfigCommand — the resource configuration TUI (pi
    cli/config-selector.ts: a standalone TuiMainScreen hosting the config
-   selector). LOCAL selects the starting write scope; the screen re-reads
-   and writes the settings files directly. Escape/ctrl+c close with exit
-   code 0."
+   selector). The starting write scope is project-local whenever a `.kmet/`
+   project exists: kmet has no project-trust gate and project settings and
+   auto dirs load unconditionally, so project-defined resources are shown
+   enabled by default (pi starts global because its project mode needs
+   trust). Without a `.kmet/` dir it starts global; `-l` forces
+   project-local. The screen re-reads and writes the settings files
+   directly. Escape/ctrl+c close with exit code 0."
   [{:keys [local]}]
   (let [config (cfg/init!)
         project-mode? (or local (fs/exists? (str (fs/path (fs/cwd) ".kmet"))))
@@ -233,7 +238,7 @@
         ;; theme before the UI starts (pi: initTheme(settings.getTheme()))
         _ (theme/init-theme! (cfg/get-theme-name config))
         screen (resource-config/make-resource-config-screen
-                :write-scope (if local :project :global)
+                :write-scope (if project-mode? :project :global)
                 :project-mode? project-mode?
                 :rows (try (max 10 (term/rows terminal)) (catch Exception _ 24))
                 ;; The TUI publishes the live terminal size: Termux resizes

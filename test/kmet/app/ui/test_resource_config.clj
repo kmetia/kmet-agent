@@ -640,6 +640,8 @@
                                      items))]
         (t/is (some? proj-item))
         (t/is (= :inherit (:override-state proj-item)))
+        (t/is (true? (:enabled proj-item))
+              "project files are enabled by default (no trust gate)")
         (t/testing "renders without throwing"
           (t/is (pos? (count (render-lines screen 80)))))
         (t/testing "space cycles the project override"

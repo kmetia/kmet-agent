@@ -72,9 +72,11 @@ resource dirs.
 - `kmet config` opens a TUI listing every discovered resource — packages,
   top-level settings entries and the auto dirs — with a checkbox; space
   toggles, Tab switches global/project scope (project scope cycles
-  inherit/load/unload), typing filters, escape closes. Package writes are
-  per-type `+path`/`-path` filter entries on the package (pi's object
-  entries); top-level/auto resources toggle via the scope's settings
+  inherit/load/unload), typing filters, escape closes. A project with a
+  `.kmet/` dir starts in project-local scope, so its project-defined
+  resources show enabled by default; `-l` forces project-local. Package
+  writes are per-type `+path`/`-path` filter entries on the package (pi's
+  object entries); top-level/auto resources toggle via the scope's settings
   resource arrays (`:extensions`/`:skills`/`:prompts`/`:themes`).
   Single-extension packages (a file source or an `extension.edn` directory)
   ignore those filters, so their rows are marked *always loaded* and cannot
