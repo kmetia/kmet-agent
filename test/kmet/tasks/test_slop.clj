@@ -162,6 +162,32 @@
              (is (= ["src/a.clj"]
                     (mapv #(slash (fs/relativize dir %)) (slop/source-files dir)))))))
 
+(deftest source-discovery-includes-extensions-src-excludes-test-trees
+  (in-tree {"src/a.clj" "(ns a)"
+            "test/b.clj" "(ns b)"
+            "extensions/foo/src/c.clj" "(ns c)"
+            "extensions/foo/test/d.clj" "(ns d)"}
+           (fn [dir]
+             (let [paths (fn [opts]
+                           (set (map #(slash (fs/relativize dir %))
+                                     (slop/source-files dir opts))))]
+               (is (= #{"extensions/foo/src/c.clj" "src/a.clj"}
+                      (paths {})))
+               (is (= #{"extensions/foo/src/c.clj" "extensions/foo/test/d.clj"
+                        "src/a.clj" "test/b.clj"}
+                      (paths {:test true})))))))
+
+(deftest scan-excludes-tests-unless-requested
+  (in-tree {"src/a.clj" "(defn f [x] (inc x))"
+            "test/a_test.clj" "(defn f [x] (inc x))"}
+           (fn [dir]
+             (let [src (slop/scan dir {})
+                   all (slop/scan dir {:test true})]
+               (is (= 1 (:files src)))
+               (is (false? (:test src)))
+               (is (= 2 (:files all)))
+               (is (true? (:test all)))))))
+
 (deftest report-shows-references-and-outliers-only
   (in-tree {"clean.clj" "(defn f [x] (inc x))"}
            (fn [dir]

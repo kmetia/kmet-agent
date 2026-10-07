@@ -32,7 +32,7 @@
    473 maintained human Python repositories and 2,869 agent checkpoints.
    Lower is better.
 
-   Usage: bb slop [path] [--top N]"
+   Usage: bb slop [path] [--top N] [--test]"
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [edamame.core :as e]
@@ -42,9 +42,10 @@
 ;; ------------------------------------------------------------------ options
 
 (def ^:private usage
-  (str "bb slop [path] [--top N]\n\n"
-       "  path  directory (or single source file) to scan; default: .\n"
-       "  --top number of outliers to list per metric (default 15)"))
+  (str "bb slop [path] [--top N] [--test]\n\n"
+       "  path   directory (or single source file) to scan; default: .\n"
+       "  --top  number of outliers to list per metric (default 15)\n"
+       "  --test also scan test trees (test/ and extensions/*/test)"))
 
 (defn- parse-args [args]
   (loop [as (seq args) opts {:path "." :top 15}]
@@ -53,6 +54,7 @@
       (let [a (first as)]
         (cond
           (or (= a "--help") (= a "-h")) (assoc opts :help true)
+          (= a "--test") (recur (rest as) (assoc opts :test true))
           (str/starts-with? a "--top=") (recur (rest as) (assoc opts :top (parse-long (subs a 6))))
           (= a "--top") (recur (drop 2 as) (assoc opts :top (parse-long (second as))))
           :else (recur (rest as) (assoc opts :path a)))))))
@@ -253,22 +255,29 @@
   (let [name (str (fs/file-name f))]
     (boolean (some #(str/ends-with? name (str "." %)) source-exts))))
 
-(defn- skipped-path? [root f]
+(defn- skipped-path?
+  "True when F under ROOT should be ignored: a build/VCS directory segment,
+   or - unless TEST? - a `test` directory segment."
+  [root f test?]
   (let [parts (map str (fs/components (fs/relativize root f)))]
-    (boolean (some skip-segments parts))))
+    (boolean (or (some skip-segments parts)
+                 (and (not test?) (some #{"test"} parts))))))
 
 (defn source-files
   "Every Clojure source (.clj/.cljc/.cljs/.bb) under ROOT, excluding build
-   and VCS directories. ROOT may itself be a single source file."
-  [root]
-  (let [root-path (fs/path root)]
-    (if (fs/regular-file? root-path)
-      (if (source-path? root-path) [root-path] [])
-      (->> (fs/glob root-path "**")
-           (filter fs/regular-file?)
-           (filter source-path?)
-           (remove #(skipped-path? root-path %))
-           (sort-by str)))))
+   and VCS directories. Test trees (`test` path segments, including
+   `extensions/*/test`) are excluded unless OPTS has :test true. ROOT may
+   itself be a single source file."
+  ([root] (source-files root {}))
+  ([root {:keys [test]}]
+   (let [root-path (fs/path root)]
+     (if (fs/regular-file? root-path)
+       (if (source-path? root-path) [root-path] [])
+       (->> (fs/glob root-path "**")
+            (filter fs/regular-file?)
+            (filter source-path?)
+            (remove #(skipped-path? root-path % test))
+            (sort-by str))))))
 
 (defn- parse-scan
   "Parse one file into {:file :fns :findings :defs}; failures are recorded
@@ -287,9 +296,9 @@
 
 (defn scan
   "Analyze every Clojure source under ROOT.
-   OPTS: :top outlier count (default 15)."
-  [root {:keys [top] :or {top 15}}]
-  (let [files (source-files root)
+   OPTS: :top outlier count (default 15); :test also scan test trees."
+  [root {:keys [top test] :or {top 15}}]
+  (let [files (source-files root {:test test})
         sloc-stats (mapv file-sloc files)
         sloc-by-file (into {} (map (juxt :file :sloc) sloc-stats))
         sloc-lines-by-file (into {} (map (juxt :file :sloc-lines) sloc-stats))
@@ -336,6 +345,7 @@
                                 [r (count (distinct (map (juxt :file :line) fs)))]))
                          (sort-by second >))]
     {:root (str root)
+     :test (boolean test)
      :files (count files)
      :sloc sloc
      :failures @failures
@@ -395,14 +405,15 @@
 (defn format-report
   "Render a `scan` report as plain text: summary, reference comparison and
    outliers only."
-  [{:keys [root files sloc clone-lines rule-lines union-lines overlap rule-counts
+  [{:keys [root test files sloc clone-lines rule-lines union-lines overlap rule-counts
            outlier-files functions failures
            high-cc max-cc total-mass hi-mass verbosity erosion outliers]}]
   (str/join
    "\n"
    (concat
     [(str "SCBench slop - " root)
-     (format "  %d files | %d SLOC | %d functions | %d parse failures"
+     (format "  scope: %s | %d files | %d SLOC | %d functions | %d parse failures"
+             (if test "source + tests" "source only")
              files sloc functions (count failures))
      ""
      (format "VERBOSITY  %.3f  (SCBench: clone + rule-flagged lines / SLOC)"
@@ -454,4 +465,4 @@
     (when (or (nil? top) (< top 1))
       (println (str "bb slop: --top must be a positive integer\n\n" usage))
       (System/exit 1))
-    (println (format-report (scan path (select-keys opts [:top]))))))
+    (println (format-report (scan path (select-keys opts [:top :test]))))))
