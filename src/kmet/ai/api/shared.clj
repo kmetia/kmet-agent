@@ -172,21 +172,6 @@
   (let [clamped (clamp-thinking-level model (or thinking :off))]
     (when-not (= :off clamped) clamped)))
 
-(defn bash-execution-text
-  "Bash result entry → LLM text (pi: bashExecutionToText)."
-  [{:keys [command output exit-code cancelled truncated full-output-path]}]
-  (let [output (or output "")
-        base (str "Ran `" command "`\n"
-                  (if (seq output)
-                    (str "```\n" output "\n```")
-                    "(no output)"))]
-    (str base
-         (when cancelled "\n\n(command cancelled)")
-         (when (and (not cancelled) (some? exit-code) (not (zero? exit-code)))
-           (str "\n\nCommand exited with code " exit-code))
-         (when (and truncated full-output-path)
-           (str "\n\n[Output truncated. Full output: " full-output-path "]")))))
-
 (defn content-text
   "Extract plain text from a message content block vector.
    A block has {:type :text :text \"...\"} or {:type \"text\" :text \"...\"}."
@@ -195,6 +180,35 @@
                   :when (or (= (:type b) :text)
                             (= (:type b) "text"))]
               (:text b))))
+
+(defn- edited-bash-text
+  "The text an append-only context edit installed on a bash entry — a text
+   block vector (see kmet.app.session/append-context-edit!). nil for an
+   un-edited entry (kmet derives the text from :command/:output where pi's
+   tool messages carry content) and for legacy entries carrying some other
+   block shape."
+  [content]
+  (when (and (vector? content)
+             (some #(contains? #{:text "text"} (:type %)) content))
+    (content-text content)))
+
+(defn bash-execution-text
+  "Bash result entry → LLM text (pi: bashExecutionToText). A text block vector
+   installed by a context edit wins over the derived command text."
+  [{:keys [command output exit-code cancelled truncated full-output-path content]}]
+  (if-some [edited (edited-bash-text content)]
+    edited
+    (let [output (or output "")
+          base (str "Ran `" command "`\n"
+                    (if (seq output)
+                      (str "```\n" output "\n```")
+                      "(no output)"))]
+      (str base
+           (when cancelled "\n\n(command cancelled)")
+           (when (and (not cancelled) (some? exit-code) (not (zero? exit-code)))
+             (str "\n\nCommand exited with code " exit-code))
+           (when (and truncated full-output-path)
+             (str "\n\n[Output truncated. Full output: " full-output-path "]"))))))
 
 (defn image-block?
   "True if a content block is an image block (kmet canonical

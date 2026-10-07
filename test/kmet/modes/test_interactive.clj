@@ -549,6 +549,27 @@
             (finally (timg/set-capabilities! prev-caps))))
         (finally (fs/delete-tree sess-dir))))))
 
+(deftest replay-branch-skips-context-edit-entries
+  (testing "a context edit is bookkeeping, not a message: replay renders no
+            bubble for it, while the omitted message stays in the transcript
+            (pi: context_edit is a settings entry; the edit affects the model
+            projection only — raw history, replay and the UI keep the target)"
+    (let [sess-dir (str "target/test-interactive-replay-context-edit-" (System/currentTimeMillis))
+          sess (session/create-session sess-dir)]
+      (try
+        (let [u (session/append-entry sess {:role :user :content "ask"})]
+          (session/append-entry sess {:role :assistant
+                                      :content [{:type :text :text "answer"}]})
+          (session/append-context-edit! sess (:id u) nil)
+          (let [loaded (session/load-session (:file sess))
+                ch (chat-history/make-chat-history)
+                cs (inter/map->CoreState {:chat-history ch})]
+            ((var session-admin/replay-branch!) cs loaded)
+            (let [roles (mapv :role @(:messages-atom ch))]
+              (is (= [:user :assistant] roles)
+                  "the edit renders nothing; the omitted message is still replayed"))))
+        (finally (fs/delete-tree sess-dir))))))
+
 (deftest replay-branch-marks-errored-tool-calls
   (testing "tool calls inside an errored assistant entry render with the
             failure text instead of waiting for a result that never came

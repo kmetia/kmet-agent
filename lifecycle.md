@@ -75,7 +75,12 @@ Landed baseline — do not redo:
   to a replacement) and the new `:context-with-system` runs after it over
   the full transcript, its result sent verbatim.
 
-Open: **K** — the append-only per-message context edits (Phase 5).
+Open: **K**'s pi-parity remainder — the append-only context-edit layer
+itself landed (see Phase 5), but three pieces that make the loop *use* it are
+still open: the request-time canonical install (pi:
+`_installAgentRequestProjection`), the retry/overflow recovery omission (pi:
+`_omitRecoveryAttempt`), and the boundaries' entry ids + context preview
+(the Phase 2 finding).
 
 ## Target behavior (pi)
 
@@ -310,9 +315,11 @@ pi hands the boundaries the persisted entry ids (`messageEntryId`,
 `toolResultEntryIds`) and a `BoundaryContextPreview` (`_buildBoundaryContext`:
 the projected entries/messages, pending messages, `canContinue`). kmet's
 boundaries carry `:pending-messages` and `:can-continue` — the two parts a
-handler decides with — but no ids: K's `context_edit` drafts
-(`{:type :context_edit :target-id ... :replacement ...}`) and H's `turn_end`
-flush need them, so add them when K lands.
+handler decides with — but no ids: K's `{:role :context-edit ...}` drafts
+(pi's `{:type: "context_edit" ...}`) are usable today by reading ids from
+`(:session ctx)` (`get-branch`/`get-entry`), but H's `turn_end` flush and
+pi's own `_omitRecoveryAttempt` resolve them from the payload, so the ids +
+preview stay open under K's remaining list.
 
 ---
 
@@ -515,11 +522,67 @@ message from future provider context, a content replacement swaps its text.
 change and replaces the projection wholesale, so it cannot omit a single
 message.
 
-**Change.** Add session-level context-edit entries plus projection support and
-a loop API to append one.
+**Landed (core).** New `:context-edit` session entries —
+`{:role :context-edit :target-id id :replacement nil | {:content ...}}` —
+appended by `session/append-context-edit!`, which enforces pi's contract: the
+replacement is nil or carries string/block content, the target must exist, be
+on the active branch, and be a message entry contributing editable model
+content (`:user`, `:assistant`, `:tool`, `:bash`, `:custom-message` — kmet's
+`:tool`/`:bash` stand in for pi's toolResult), and a string replacement becomes
+one text block. The projection is `session/project-context` /
+`session/build-context-messages` (pi: `buildSessionProjection`): the latest
+edit per target wins, a nil replacement drops the message, a replacement swaps
+its content, and only the newest compaction contributes a summary message
+(pi's `index > 0` rule — kmet's `context-entries` can retain an older
+compaction whose id fell inside the newest retained range, which
+`context-messages` alone kept projecting). Both context rebuilds now read the
+single projection through `refresh-context-from-session!` (pi:
+`_refreshFinalizedContext`). `kmet.app.loop/append-context-edit!` appends an
+edit and refreshes the live context, and the actionable boundaries accept
+`:context-edit` drafts in `:entries` — validated through the session API,
+reported and skipped when invalid — rebuilding the live context once the batch
+commits, so an extension can omit or rewrite a message mid-prompt. The
+compaction measurement follows the projection when edits are present
+(`compaction/projected-context-tokens`, pi:
+`estimateProjectedContextTokens`): the usage-based measurement stands only
+while its source message comes after the latest edit or compaction, otherwise
+the projection is estimated. `:context-edit` entries render in the session
+tree as pi does (`[context omit|replace: id]`).
+
+**Remaining.** The three pieces that put the layer on the loop's own paths:
+
+1. *Request-time canonical install* (pi: `_installAgentRequestProjection`):
+   `prepare-request!` installs `projection.messages` as the request context
+   before the `:prepare-request` hook runs, so an edit reaches the request even
+   when no rebuild followed it. Deferred from I: kmet keeps an errored or
+   abandoned attempt session-only, so a blind rebuild would resurrect it —
+   hence (2) first.
+2. *Recovery omission* (pi: `_omitRecoveryAttempt`): `_prepareRetry` and the
+   overflow branch append a nil edit for the errored assistant message (and
+   its tool results) before the retry, so the projection-based request never
+   re-sends it. pi's comment: "Keep the failed attempt in raw history while
+   durably omitting it from model projection."
+3. *Boundary ids and context preview* — the Phase 2 finding: `:turn-end`
+   carries `messageEntryId`/`toolResultEntryIds` (pi resolves them from
+   `_entryIdsByMessage`) and both boundaries carry pi's
+   `BoundaryContextPreview` (`contextEntries`/`contextMessages`/`llmMessages`);
+   the shape itself is settled by the `context_entries`/`context_messages`
+   projection, so this is payload plumbing, not new machinery.
+4. *Projection-aware compaction input* (pi: `findProjectedCutPoint` +
+   `getMessagesFromProjectedEntryForCompaction`): `compaction/prepare`
+   summarizes the raw context entries, so an omitted message is still
+   summarized, a rewritten one is summarized with its original text, and the
+   compaction entry's reported `:tokens-before` counts the omitted messages.
+   The threshold/overflow *measurement* already follows the projection
+   (`projected-context-tokens`); only `prepare`'s input and its reported
+   count do not.
 
 **Acceptance.** A `:replacement nil` edit drops exactly that message from the
 next provider context; the raw branch, usage totals, and replay are unchanged.
+(The projection half is covered by `kmet.app.test-session`'s context-edit
+tests, the loop half by `test-loop-append-context-edit-refreshes-the-context`
+and `test-loop-turn-end-boundary-context-edit`; the remaining items land with
+their own tests as in D.)
 
 ---
 
@@ -546,13 +609,17 @@ next provider context; the raw branch, usage totals, and replay are unchanged.
   (the compaction payloads were already pi-shaped; `:agent-settled` now
   names the post-run compaction in its description); H widened the boundary
   `:pending-messages` to include deferred custom messages; L added
-  `:context-with-system` and reshaped `:context`.
+  `:context-with-system` and reshaped `:context`; K documented the
+  `:context-edit` draft on the boundary `:entries`.
 - `src/kmet/extension.md` — done with E/F/G (the `:agent-end` queueing
   paragraph, the two actionable boundaries, and the `send-user-message`
-  note).
+  note); K documented the `:context-edit` boundary draft and the
+  `append-context-edit!` API.
 - `src/kmet/development/pi-alignment.md` — A/B/C done and §7 moved here; the
   Appendix rows for the agent/turn/context boundaries point at this file and
   follow E/F/G/J. The compaction row (`session_before_compact` /
   `session_compact`) follows D, done: it now records the dispatch parity and
-  the residual missing success `:session_compact` event.
+  the residual missing success `:session_compact` event; K added the
+  `ContextEditEntry` / `appendContextEdit` row (landed core, remainder
+  listed).
 - This file — strike items as they land; remove it when the open list is empty.

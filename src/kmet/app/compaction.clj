@@ -67,6 +67,12 @@
                                 (count (str (or (:arguments tc) ""))))))))]
     (quot (+ chars 3) 4))) ;; ceil(chars / 4)
 
+(defn estimated-tokens
+  "Summed estimate-tokens over a sequence of entries (or projected
+   messages) — the chars/4 estimate of a context."
+  [entries]
+  (reduce + 0 (map estimate-tokens entries)))
+
 ;; ─── Context token measurement (pi: calculateContextTokens / estimateContextTokens) ──
 
 (defn assistant-usage-tokens
@@ -109,10 +115,40 @@
     (cond
       known? (if usage-idx
                (+ (assistant-usage-tokens (nth ctx usage-idx))
-                  (reduce + 0 (map estimate-tokens (subvec ctx (inc usage-idx)))))
-               (reduce + 0 (map estimate-tokens ctx)))
-      (nil? comp-idx) (reduce + 0 (map estimate-tokens ctx))
+                  (estimated-tokens (subvec ctx (inc usage-idx))))
+               (estimated-tokens ctx))
+      (nil? comp-idx) (estimated-tokens ctx)
       :else nil)))
+
+(defn projected-context-tokens
+  "Token count of a projected context (pi: estimateProjectedContextTokens):
+   the last usage-carrying assistant message's measured usage plus a chars/4
+   estimate of the messages after it, unless an append-only context edit or a
+   compaction invalidates that usage — the usage source must come after the
+   latest of the two in the branch — in which case the whole projection is
+   estimated. PROJECTED is a session projection (session/project-context),
+   BRANCH the raw session branch."
+  [projected branch]
+  (let [msgs (vec (mapcat :messages projected))
+        usage-idx (last (keep-indexed (fn [i m] (when (assistant-usage-tokens m) i)) msgs))
+        ;; a projected assistant message IS its source entry (content edits
+        ;; keep the entry's :id), so the usage source's branch position is a
+        ;; straight id lookup
+        usage-entry-idx (when usage-idx
+                          (let [usage-id (:id (nth msgs usage-idx))]
+                            (first (keep-indexed (fn [i e] (when (= (:id e) usage-id) i))
+                                                 branch))))
+        invalidating-idx (last (keep-indexed (fn [i e]
+                                               (when (contains? #{:context-edit :compaction}
+                                                                (:role e))
+                                                 i))
+                                             branch))
+        usage-valid? (and usage-idx usage-entry-idx
+                          (> (long usage-entry-idx) (long (or invalidating-idx -1))))]
+    (if usage-valid?
+      (+ (assistant-usage-tokens (nth msgs usage-idx))
+         (estimated-tokens (subvec msgs (inc usage-idx))))
+      (estimated-tokens msgs))))
 
 ;; ─── Cut-point selection (pi: findCutPoint) ────────────────────────────────
 
@@ -200,7 +236,7 @@
          :previous-summary previous-summary
          ;; pi: tokensBefore = context tokens before compaction (the context
          ;; excludes previously-summarized entries)
-         :tokens-before (reduce + 0 (map estimate-tokens (session/context-entries entries)))}))))
+         :tokens-before (estimated-tokens (session/context-entries entries))}))))
 
 ;; ─── Conversation serialization (pi: serializeConversation) ────────────────
 

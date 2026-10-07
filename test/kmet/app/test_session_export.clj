@@ -51,6 +51,16 @@
       (t/is (str/includes? html ">Compaction<"))
       (t/is (str/includes? html "summed up")))))
 
+(t/deftest test-export-context-edit-entry
+  ;; a context edit is bookkeeping, not conversation content: its effect shows
+  ;; in the header instead of an empty block
+  (let [sess (make-session)
+        u (s/append-entry sess {:role :user :content "hello"})]
+    (s/append-context-edit! sess (:id u) nil)
+    (let [html (se/session->html sess)]
+      (t/is (str/includes? html (str "[context omit: " (:id u) "]")))
+      (t/is (= 1 (count (re-seq #"<div class=\"entry context-edit\">" html)))))))
+
 (def ^:private png
   "A 1x1 PNG, base64."
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==")

@@ -601,6 +601,78 @@
           {:thinking-level :off :model nil :provider nil}
           (get-branch session)))
 
+;; ─── Append-only context edits (pi: ContextEditEntry) ─────────────────────
+
+(defn- context-editable?
+  "True when ENTRY contributes editable model content — the targets
+   append-context-edit! accepts: :user, :assistant, :tool (pi's toolResult;
+   :bash is a shell result pi stores as a tool message) and :custom-message
+   (pi: appendContextEdit's editable check)."
+  [entry]
+  (contains? #{:user :assistant :tool :bash :custom-message} (:role entry)))
+
+(defn- normalize-context-content
+  "A string replacement becomes one text block, so every projected message
+   keeps kmet's block content shape (pi: appendContextEdit/projectContextEntry
+   apply the same wrap to assistant/toolResult targets; kmet applies it to
+   every editable role — its messages are always block-based)."
+  [content]
+  (if (string? content) [{:type :text :text content}] content))
+
+(defn- valid-context-replacement?
+  "True when REPLACEMENT is nil (omit the target) or a map whose :content is
+   a string or block vector (pi: appendContextEdit's shape check)."
+  [replacement]
+  (or (nil? replacement)
+      (and (map? replacement)
+           (let [content (:content replacement)]
+             (or (string? content) (vector? content))))))
+
+(defn- normalize-context-replacement
+  "Canonicalize REPLACEMENT: a string content becomes one text block,
+   anything else passes through (pi: appendContextEdit's
+   normalizedReplacement)."
+  [replacement]
+  (if (and replacement (string? (:content replacement)))
+    (assoc replacement :content (normalize-context-content (:content replacement)))
+    replacement))
+
+(defn append-context-edit!
+  "Append an append-only edit to one earlier entry's contribution to model
+   context (pi: appendContextEdit): a nil REPLACEMENT omits TARGET-ID from
+   every future provider context, {:content string-or-blocks} rewrites its
+   content. The session — raw branch, usage totals, replay and the UI — keeps
+   the target entry untouched; only the context projection changes (see
+   build-context-messages). TARGET-ID must exist, lie on the active branch,
+   and be a message entry contributing editable model content (:user,
+   :assistant, :tool, :bash, :custom-message). Returns the appended
+   :context-edit entry.
+
+   Throws ex-info {:type :invalid-context-edit} for a malformed replacement,
+   {:type :entry-not-found}, {:type :entry-not-on-branch}, or
+   {:type :entry-not-editable}."
+  [session target-id replacement]
+  (with-session-lock session
+    (when-not (valid-context-replacement? replacement)
+      (throw (ex-info "Context edit replacement must be nil or contain string/array content"
+                      {:type :invalid-context-edit
+                       :target-id target-id
+                       :replacement replacement})))
+    (let [target (get-entry session target-id)]
+      (when-not target
+        (throw (ex-info (str "Entry " target-id " not found")
+                        {:type :entry-not-found :id target-id})))
+      (when-not (some #(= (:id %) target-id) (get-branch session))
+        (throw (ex-info (str "Entry " target-id " is not on the active branch")
+                        {:type :entry-not-on-branch :id target-id})))
+      (when-not (context-editable? target)
+        (throw (ex-info (str "Entry " target-id " does not contribute editable model content")
+                        {:type :entry-not-editable :id target-id :role (:role target)})))
+      (append-entry session
+                    {:role :context-edit
+                     :target-id target-id
+                     :replacement (normalize-context-replacement replacement)}))))
+
 ;; ─── Context build (pi: buildSessionContext) ─────────────────────────────
 
 (defn context-entries
@@ -635,9 +707,11 @@
    convertToLlm). custom_message entries become a :custom-role message
    (sent to the LLM as a user message — pi: convertToLlm custom→user) with
    string content normalized to a text block; :info, :session_info,
-   :model-change, :thinking-level-change and :custom are metadata/state and
-   excluded. Excluded :bash entries are kept here and dropped later by the
-   LLM conversion (pi: convertToLlm filters excludeFromContext)."
+   :model-change, :thinking-level-change, :custom, :label and :context-edit
+   are metadata/state and excluded (a :context-edit entry's effect is applied
+   by build-context-messages, not as a message of its own). Excluded :bash
+   entries are kept here and dropped later by the LLM conversion (pi:
+   convertToLlm filters excludeFromContext)."
   [entry]
   (case (:role entry)
     (:compaction :branch-summary) [entry]
@@ -654,6 +728,93 @@
       :details (:details entry)}]
     (:user :assistant :tool :bash) [entry]
     []))
+
+(defn context-edit-label
+  "One-line description of a :context-edit entry: what it does to its target
+   (pi: the tree renders [context omit|replace: id])."
+  [entry]
+  (str "[context " (if (nil? (:replacement entry)) "omit" "replace")
+       ": " (:target-id entry) "]"))
+
+(defn- context-edits
+  "Map of target-id → the latest :context-edit entry for it, over
+   CONTEXT-ENTRIES in order (pi: buildSessionProjection's edits map — a
+   later edit of the same target wins)."
+  [context-entries]
+  (reduce (fn [edits entry]
+            (if (= :context-edit (:role entry))
+              (assoc edits (:target-id entry) entry)
+              edits))
+          {}
+          context-entries))
+
+(defn- replacement-text
+  "Plain text of a replacement's content — a string or text blocks."
+  [content]
+  (if (string? content)
+    content
+    (str/join (for [b content :when (= :text (:type b))] (:text b)))))
+
+(defn- replace-message-content
+  "MESSAGE with the edit's CONTENT installed (pi: projectContextEntry).
+   A tool result keeps its block structure: kmet carries the tool-call id
+   inside the :tool_result block (:tool_use_id) where pi's ToolResultMessage
+   carries toolCallId as its own field, so only the block's text is replaced —
+   pi's `{...message, content}` would drop the id kmet needs to pair call and
+   result at the wire."
+  [message content]
+  (if (= :tool (:role message))
+    (if (vector? (:content message))
+      (assoc message :content
+             (mapv (fn [b]
+                     (if (= :tool_result (:type b))
+                       (assoc b :content (replacement-text content))
+                       b))
+                   (:content message)))
+      message)
+    (assoc message :content (normalize-context-content content))))
+
+(defn- context-messages-with-edit
+  "The messages ENTRY projects into after EDIT (pi: projectContextEntry): a
+   nil replacement drops them, a replacement swaps the content of the
+   editable message roles (:user, :assistant, :tool, :bash, :custom)."
+  [entry edit]
+  (let [messages (context-messages entry)]
+    (cond
+      (nil? edit) messages
+      (nil? (:replacement edit)) []
+      :else (let [content (:content (:replacement edit))]
+              (mapv (fn [message]
+                      (if (contains? #{:user :assistant :tool :bash :custom} (:role message))
+                        (replace-message-content message content)
+                        message))
+                    messages)))))
+
+(defn project-context
+  "The active branch's context as projected entries: a vector of
+   {:source entry :messages [...]} in context order (pi:
+   buildSessionProjection). Context edits are applied to the entries they
+   target, and only the newest compaction contributes a summary message — an
+   older compaction retained inside the newest retained range no longer
+   summarizes anything (pi: buildSessionProjection's index > 0 rule)."
+  [session]
+  (let [entries (build-context session)
+        edits (context-edits entries)]
+    (vec (map-indexed
+          (fn [index entry]
+            {:source entry
+             :messages (if (and (= :compaction (:role entry)) (pos? index))
+                         []
+                         (context-messages-with-edit entry (get edits (:id entry))))})
+          entries))))
+
+(defn build-context-messages
+  "Projected context messages along the active branch (pi:
+   buildSessionProjection → messages): build-context with every append-only
+   context edit applied. The one projection the provider request, the
+   in-memory context and the token estimates are built from."
+  [session]
+  (vec (mapcat :messages (project-context session))))
 
 ;; ─── Cache-miss detection (pi: cache-stats.ts detectMiss) ────────────────
 
@@ -770,6 +931,10 @@
                                   (str "[custom: " (name (:custom-type entry)) "]")
                                   (= (:role entry) :custom-message)
                                   (str "[custom: " (name (:custom-type entry)) "]")
+                                  ;; context edits carry their effect instead of content
+                                  ;; (pi: tree-selector's [context omit|replace: id])
+                                  (= (:role entry) :context-edit)
+                                  (context-edit-label entry)
                                   ;; pi getEntryDisplayText: an empty assistant entry
                                   ;; (a recorded empty completion) is labeled
                                   ;; "(no content)" — its only trace anywhere

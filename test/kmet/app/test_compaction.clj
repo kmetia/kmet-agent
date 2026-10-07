@@ -285,3 +285,37 @@
                    {:role :user :content [{:type :text :text "kept"}]}]]
       (t/is (nil? (compaction/context-tokens entries))
             "the kept-tail assistant predates the compaction in the branch — its usage reflects the old, larger context"))))
+
+(t/deftest test-projected-context-tokens
+  ;; pi: estimateProjectedContextTokens — a usage-based measurement stays
+  ;; valid only while its source message comes after the latest context edit
+  ;; or compaction; otherwise the whole projection is estimated.
+  (let [assistant {:id "a1" :role :assistant :content [{:type :text :text "a"}]
+                   :usage {:prompt_tokens 1000 :completion_tokens 200
+                           :prompt_tokens_details {:cached_tokens 300}}}
+        user {:id "u1" :role :user :content [{:type :text :text "hello world"}]}
+        edit {:id "x1" :role :context-edit :target-id "u1" :replacement nil}
+        projected [{:source assistant :messages [assistant]}
+                   {:source user :messages [user]}]]
+    (t/testing "no edit: measured usage + trailing estimate, like context-tokens"
+      ;; 700 input + 200 output + 300 cacheRead, plus ceil(11/4)=3 trailing
+      (t/is (= 1203 (compaction/projected-context-tokens projected [assistant user]))))
+    (t/testing "an edit after the usage source invalidates it — pure estimate"
+      (t/is (= 4 (compaction/projected-context-tokens projected [assistant user edit]))
+            "1 (assistant) + 3 (user), no usage"))
+    (t/testing "an edit before the usage source leaves the measurement valid"
+      (t/is (= 1203 (compaction/projected-context-tokens projected [edit assistant user]))))
+    (t/testing "an omitted message is not counted"
+      (t/is (= 1 (compaction/projected-context-tokens
+                  [{:source assistant :messages [assistant]}]
+                  [assistant user edit]))
+            "the projection carries only the assistant"))
+    (t/testing "a compaction after the usage source invalidates it"
+      (let [compaction-entry {:id "c1" :role :compaction :summary "s"}
+            branch [assistant compaction-entry user]
+            proj [{:source assistant :messages [assistant]}
+                  {:source compaction-entry :messages [compaction-entry]}
+                  {:source user :messages [user]}]]
+        (t/is (= 5 (compaction/projected-context-tokens proj branch))
+              "1 + 1 + 3, estimated — the usage predates the compaction")))))
+

@@ -48,11 +48,15 @@
     false. Handlers may
     return {:entries [entry ...] :continue bool} (pi: emitBoundary): entries
     are session entry maps appended in order (pi: SessionBoundaryDraft — a
-    :custom-message entry also enters the context) and :continue asks for
-    one more request, honored once the entries are committed when the
-    context can back it, and reported then dropped otherwise (:can-continue
-    is that check as the boundary stood). Each handler sees the previous
-    handlers' :entries/:continue merged in, as pi does."
+    :custom-message entry also enters the context; a :context-edit entry
+    {:role :context-edit :target-id id :replacement nil | {:content ...}}
+    omits or rewrites that earlier message in the projection and rebuilds
+    the live context — pi: appendContextEdit + _refreshFinalizedContext).
+    :continue asks for one more request, honored once the entries are
+    committed when the context can back it, and reported then dropped
+    otherwise (:can-continue is that check as the boundary stood). Each
+    handler sees the previous handlers' :entries/:continue merged in, as pi
+    does."
 
    :message-start
    "Fired when a message is added to the context, or when assistant

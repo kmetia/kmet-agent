@@ -54,6 +54,29 @@
     (t/is (str/includes? (text-of (nth msgs 3)) "<summary>\nBRANCH\n</summary>"))
     (t/is (= "hi" (text-of (first msgs))))))
 
+(t/deftest test-bash-execution-text
+  (t/testing "derived from the entry's command/output (pi: bashExecutionToText)"
+    (let [text (shared/bash-execution-text {:command "ls" :output "a\nb" :exit-code 0})]
+      (t/is (str/includes? text "Ran `ls`"))
+      (t/is (str/includes? text "a\nb")))
+    (t/is (str/includes? (shared/bash-execution-text {:command "ls" :output "o" :exit-code 3})
+                         "Command exited with code 3")
+          "a non-zero exit is reported")
+    (t/is (str/includes? (shared/bash-execution-text {:command "ls" :output "o" :cancelled true})
+                         "(command cancelled)")))
+  (t/testing "an explicit text block vector wins — a context edit's replacement"
+    (t/is (= "replacement"
+             (shared/bash-execution-text {:command "ls" :output "original"
+                                          :content [{:type :text :text "replacement"}]})))
+    (t/is (str/includes? (shared/bash-execution-text
+                          {:command "ls" :content [{:content ""}]})
+                         "Ran `ls`")
+          "other block shapes still derive from the command")
+    (t/is (= "" (shared/bash-execution-text
+                 {:command "ls" :output "original" :content [{:type :text :text ""}]}))
+          "an empty text replacement is still a replacement (the block type,
+           not the emptiness, decides)")))
+
 ;; ─── Model resolution & dispatch ───────────────────────────────────────────
 
 (t/deftest test-llm-unknown-model

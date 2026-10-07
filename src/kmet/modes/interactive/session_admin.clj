@@ -202,7 +202,7 @@
                 (session/build-context sess))]
     (doseq [e (session/build-context sess)
             :when (not (contains? #{:session_info :label :model-change
-                                    :thinking-level-change} (:role e)))]
+                                    :thinking-level-change :context-edit} (:role e)))]
       (let [role (:role e)]
         (cond
           (= role :custom)

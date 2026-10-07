@@ -131,7 +131,9 @@
 
 (defn- entry->html
   "Render a single session entry as an HTML <div class=\"entry\"> block.
-   :label entries are skipped (bookkeeping, not conversation content)."
+   :label entries are skipped (bookkeeping, not conversation content); a
+   :context-edit entry carries its effect in the header (pi: the tree
+   renders [context omit|replace: id])."
   [e]
   (let [role (:role e)]
     (when-not (= :label role)
@@ -145,6 +147,8 @@
                      (str "[custom: " (escape-html (name (:custom-type e))) "]")
                      (= :custom-message role)
                      (str "[custom: " (escape-html (name (:custom-type e))) "]")
+                     (= :context-edit role)
+                     (escape-html (session/context-edit-label e))
                      (= :bash role)
                      (str "$ " (escape-html (:command e)))
                      (= :tool role)

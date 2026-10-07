@@ -738,6 +738,21 @@ is that check as the boundary stood) and dropped with a warning otherwise.
 Handlers of the same boundary see each other's `:entries`/`:continue` merged
 in (pi: `emitBoundary`).
 
+A `{:role :context-edit :target-id <entry-id> :replacement ...}` entry is the
+append-only per-message context edit (pi: `appendContextEdit`): `:replacement
+nil` omits that earlier message from every future provider context, and
+`{:content "text"}` / `{:content [{:type :text :text ...} ...]}` rewrites it
+(for a tool result the result text is rewritten and the tool-call id is kept,
+so the call/result pairing survives).
+Only message entries that contribute editable model content can be targeted
+(`:user`, `:assistant`, `:tool`, `:bash`, `:custom-message`) and only on the
+active branch; anything else is reported and skipped. The raw session keeps
+the target untouched — usage totals, replay and the TUI show the original —
+only the projection changes, and the live context is rebuilt so the next
+request already sees it. Entry ids come from `(:session ctx)`
+(`get-branch`/`get-entry`). `kmet.app.loop/append-context-edit!` is the same
+operation outside a boundary handler.
+
 ### Bundled resources (`io/resource` + self-registration)
 
 An extension reads its own bundled files through `clojure.java.io/resource`

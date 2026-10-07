@@ -151,6 +151,22 @@
       (set-mode! tl :all)
       (t/is (= #{"u" "lab" "mc" "w"} (visible-ids tl))))))
 
+(t/deftest context-edit-entries-hidden-by-default
+  ;; pi: isSettingsEntry lists context_edit — the default view and :no-tools
+  ;; hide it, :all shows it
+  (let [tree* [(user-node "u" "go"
+                          (node "ce" :context-edit :target-id "u" :replacement nil)
+                          (user-node "w" "after"))]]
+    (t/is (= #{"u" "w"}
+             (visible-ids (ts/make-tree-list tree* :leaf-id "w"
+                                             :max-visible-lines 10))))
+    (let [tl (ts/make-tree-list tree* :leaf-id "w" :max-visible-lines 10)]
+      (set-mode! tl :no-tools)
+      (t/is (= #{"u" "w"} (visible-ids tl))
+            ":no-tools hides it too")
+      (set-mode! tl :all)
+      (t/is (= #{"u" "ce" "w"} (visible-ids tl))))))
+
 (t/deftest toolcall-only-assistant-hidden-unless-exceptional
   (let [tree* [(user-node "u" "go"
                           (assistant-node "silent" ""
@@ -423,7 +439,13 @@
     (t/is (str/includes? (show {:role :label :label "keep"})
                          "[label: keep]"))
     (t/is (str/includes? (show {:role :label :label nil})
-                         "[label: (cleared)]"))))
+                         "[label: (cleared)]"))
+    ;; pi: tree-selector's [context omit|replace: id]
+    (t/is (str/includes? (show {:role :context-edit :target-id "u1" :replacement nil})
+                         "[context omit: u1]"))
+    (t/is (str/includes? (show {:role :context-edit :target-id "u1"
+                                :replacement {:content "x"}})
+                         "[context replace: u1]"))))
 
 (t/deftest copy-entry-text-extracts
   (t/is (= "cmd" (#'ts/copy-entry-text {:role :bash :command "cmd"})))

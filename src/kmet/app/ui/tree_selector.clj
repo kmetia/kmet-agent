@@ -58,7 +58,7 @@
 
 (def ^:private settings-entry-roles
   "Entry roles hidden in the default view (pi: isSettingsEntry)."
-  #{:label :custom :model-change :thinking-level-change :session_info})
+  #{:label :context-edit :custom :model-change :thinking-level-change :session_info})
 
 ;; ─── Session tree snapshot ──────────────────────────────────────────────────
 
@@ -207,6 +207,7 @@
           :thinking-level-change (th/fg theme :dim (str "[thinking: "
                                                         (name (:thinking-level entry :unknown)) "]"))
           :custom (th/fg theme :dim (str "[custom: " (name (:custom-type entry :custom)) "]"))
+          :context-edit (th/fg theme :dim (session/context-edit-label entry))
           :label (th/fg theme :dim (str "[label: " (or (:label entry) "(cleared)") "]"))
           :session_info (let [nm (str (:name entry))]
                           (th/fg theme :dim
@@ -281,6 +282,7 @@
           :thinking-level-change (add! parts "thinking"
                                        (name (:thinking-level node :unknown)))
           :custom (add! parts "custom" (name (:custom-type node :custom)))
+          :context-edit (add! parts (session/context-edit-label node))
           :label (add! parts "label" (str (:label node)))
           parts)]
     (str/lower-case (str/join " " (persistent! parts)))))

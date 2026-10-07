@@ -1560,15 +1560,17 @@ Be precise and concise in your responses."}}]
               {:summary (str compaction/branch-summary-preamble (:text result))
                :usage (:usage result)})))))))
 
-(defn- sync-context-after-compaction!
-  "Rebuild the in-memory context from the compacted session (pi: the agent
-   context is rebuilt from the session after compaction — buildContextEntries
-   → [compaction, ...from first-kept-id])."
+(defn- refresh-context-from-session!
+  "Rebuild the live context from the session projection — the canonical
+   context every request is built from (pi: _refreshFinalizedContext). Both
+   compaction and the append-only context edits land here, so the session
+   stays the source of truth: raw history, usage totals and the UI replay
+   are untouched. In-memory-only messages (add-context-message!, which never
+   persists) are not in the session and are dropped by the rebuild."
   [agent]
   (when-let [sess (:session agent)]
     (reset! (:messages agent)
-            (drop-incomplete-tool-calls
-             (vec (mapcat session/context-messages (session/build-context sess)))))))
+            (drop-incomplete-tool-calls (session/build-context-messages sess)))))
 
 (defn- record-compaction!
   "Append the compaction entry for SUMMARY-RESULT (pi: appendCompaction),
@@ -1600,14 +1602,14 @@ Be precise and concise in your responses."}}]
                       (assoc :details (:details summary-result))
                       from-extension?
                       (assoc :from-hook true)))]
-    (sync-context-after-compaction! agent)
+    (refresh-context-from-session! agent)
     (emit agent {:type :context-replaced :messages @(:messages agent)})
     (debug/log "compacted session with LLM summary")
     {:summary (:summary summary-result)
      :first-kept-id first-kept-id
      :tokens-before tokens-before
-     :estimated-tokens-after (reduce + 0 (map compaction/estimate-tokens
-                                              (session/build-context sess)))
+     :estimated-tokens-after (compaction/estimated-tokens
+                              (session/build-context-messages sess))
      :usage (:usage summary-result)
      :details (:details summary-result)
      :entry entry}))
@@ -1803,8 +1805,9 @@ Be precise and concise in your responses."}}]
   (if-let [sess (and (not @(:compaction-blocked agent))
                      (:auto-compact @(:cfg agent))
                      (:session agent))]
-    (let [context (session/build-context sess)
+    (let [projected (session/project-context sess)
           branch (session/get-branch sess)
+          projected-msgs (vec (mapcat :messages projected))
           token-threshold (:compact-token-threshold agent)
           window (:context-window @(:cfg agent))
           reserve (:compact-reserve-tokens agent)
@@ -1813,9 +1816,14 @@ Be precise and concise in your responses."}}]
           ;; compaction is append-only, so the full branch never shrinks —
           ;; counting it would re-trigger compaction every turn after the
           ;; first one (pi: the threshold is evaluated against the context).
-          measured (compaction/context-tokens branch)
+          ;; Context edits change what the provider sees, so an edited
+          ;; projection measures itself (pi: estimateProjectedContextTokens;
+          ;; a stale edit usage source falls back to a pure estimate).
+          measured (if (some #(= :context-edit (:role (:source %))) projected)
+                     (compaction/projected-context-tokens projected branch)
+                     (compaction/context-tokens branch))
           has-usage? (boolean (some compaction/assistant-usage-tokens branch))
-          tokens (or measured (reduce + 0 (map compaction/estimate-tokens context)))]
+          tokens (or measured (compaction/estimated-tokens projected-msgs))]
       (if (or (and token-threshold (>= tokens token-threshold))
               ;; the window check requires a positive window-reserve and fresh
               ;; measured usage: right after a compaction the last measured
@@ -1985,22 +1993,50 @@ Be precise and concise in your responses."}}]
     (vec entries)
     :else nil))
 
+(defn- commit-boundary-entry!
+  "Commit one boundary ENTRY through the session (pi: _applyBoundaryDrafts):
+   a :context-edit entry goes through the validating session API, any other
+   entry is appended as given (the session assigns id/parent/timestamp).
+   Returns the committed entry (nil when nothing was committed — no session,
+   or an invalid context edit, which is reported and skipped rather than
+   taking the boundary down)."
+  [agent entry event]
+  (when-let [sess (:session agent)]
+    (if (= :context-edit (:role entry))
+      (try (session/append-context-edit! sess (:target-id entry) (:replacement entry))
+           (catch Exception e
+             (binding [*out* *err*]
+               (println "Warning: invalid" (name event) "context edit:"
+                        (ex-message e)))
+             nil))
+      (session/append-entry sess entry))))
+
 (defn- apply-boundary-entries!
   "Commit a boundary's ENTRIES for EVENT (pi: _commitBoundaryDrafts): each is
    appended through the session, in order, and its context projection (pi:
    convertToLlm — :custom-message entries become :custom messages) is
-   appended to the live context so the next request sees it. The context
+   appended to the live context so the next request sees it. A :context-edit
+   entry ({:role :context-edit :target-id id :replacement nil|{:content ...}})
+   is committed through the validating session API (pi: appendContextEdit)
+   and rebuilds the live context from the projection, so the targeted message
+   is omitted or rewritten there while the raw history keeps it. The context
    append is context-only: committed entries are not part of the attempt's
    :agent-end :messages (pi: newMessages is the loop's own list). Returns
    true when the batch was valid."
   [agent entries event]
   (if-some [valid (boundary-entries entries)]
-    (do (doseq [entry valid]
-          (when-let [sess (:session agent)]
-            (session/append-entry sess entry))
-          (doseq [msg (session/context-messages entry)]
-            (append-context-message! agent msg)
-            (emit agent {:type :message-start :message msg})))
+    (do (let [edited? (volatile! false)]
+          (doseq [entry valid]
+            (when (and (commit-boundary-entry! agent entry event)
+                       (= :context-edit (:role entry)))
+              (vreset! edited? true))
+            (doseq [msg (session/context-messages entry)]
+              (append-context-message! agent msg)
+              (emit agent {:type :message-start :message msg})))
+          ;; an edit changes what the target projects into, so the live context
+          ;; is rebuilt from the projection (pi: _commitBoundaryDrafts →
+          ;; _refreshFinalizedContext)
+          (when @edited? (refresh-context-from-session! agent)))
         true)
     (do (binding [*out* *err*]
           (println "Warning: invalid" (name event)
@@ -2782,22 +2818,45 @@ Be precise and concise in your responses."}}]
   @(:messages agent))
 
 (defn restore-session-context!
-  "Rebuild the agent's in-memory context from the session (pi: the session is
-   the source of truth — buildSessionContext). build-context walks root→leaf
-   through the latest compaction; compaction entries keep their roles in the
-   rebuilt messages (pi: compactionSummary AgentMessage; convertToLlm wraps
-   them at the wire), :info/:session_info are metadata and excluded. Messages
-   only — like pi's buildSessionContext consumers, the agent's model/thinking
-   are left untouched here; the session-derived settings are applied on
-   session load via apply-session-settings! (pi: sdk.ts createAgentSession
-   restore logic). No-op without a session. Used when a session is
-   resumed/continued (and on tree navigation / fork / clone, which rebuild
-   the context without touching the model/thinking)."
+  "Rebuild the agent's in-memory context from the session projection (pi: the
+   session is the source of truth — buildSessionContext). build-context walks
+   root→leaf through the latest compaction; compaction entries keep their roles
+   in the rebuilt messages (pi: compactionSummary AgentMessage; convertToLlm
+   wraps them at the wire), :info/:session_info are metadata and excluded, and
+   the append-only context edits (append-context-edit!) apply — an omitted
+   message is dropped, a rewritten one carries its replacement. Messages only —
+   like pi's buildSessionContext consumers, the agent's model/thinking are left
+   untouched here; the session-derived settings are applied on session load via
+   apply-session-settings! (pi: sdk.ts createAgentSession restore logic). No-op
+   without a session. Used when a session is resumed/continued (and on tree
+   navigation / fork / clone, which rebuild the context without touching the
+   model/thinking)."
   [agent]
-  (when-let [sess (:session agent)]
-    (reset! (:messages agent)
-            (drop-incomplete-tool-calls
-             (vec (mapcat session/context-messages (session/build-context sess)))))))
+  (refresh-context-from-session! agent))
+
+(defn append-context-edit!
+  "Append an append-only edit to one earlier entry's contribution to model
+   context (pi: appendContextEdit): a nil REPLACEMENT omits TARGET-ID from
+   every future provider context, {:content string-or-blocks} rewrites its
+   content. The session keeps the raw entry — usage totals, replay and the UI
+   are untouched — while the live context is rebuilt from the projection so the
+   next request already sees the change (pi: _refreshFinalizedContext). Returns
+   the appended :context-edit entry.
+
+   TARGET-ID must exist, lie on the active branch, and be a message entry
+   contributing editable model content (:user, :assistant, :tool, :bash,
+   :custom-message); otherwise this throws (see
+   kmet.app.session/append-context-edit!). Throws {:type :no-session} without a
+   session. Nothing is emitted: the edit changes the model projection only,
+   and the UI deliberately keeps rendering the raw conversation (unlike
+   :context-replaced, which makes the UI mirror a new message list)."
+  [agent target-id replacement]
+  (if-let [sess (:session agent)]
+    (let [entry (session/append-context-edit! sess target-id replacement)]
+      (refresh-context-from-session! agent)
+      entry)
+    (throw (ex-info "No session to append a context edit to"
+                    {:type :no-session :target-id target-id}))))
 
 (defn apply-session-settings!
   "Apply the session-derived model/thinking to the agent state (pi: sdk.ts

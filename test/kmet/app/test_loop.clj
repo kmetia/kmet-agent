@@ -3419,6 +3419,122 @@
     (t/is (str/includes? warn "invalid") "the invalid batch is reported")
     (t/is (= [:user :assistant] (mapv :role (loop/get-context agent)))
           "nothing was committed")))
+
+(t/deftest test-loop-append-context-edit-refreshes-the-context
+  ;; K: kmet.app.loop/append-context-edit! — the session keeps the raw entry,
+  ;; the live context is rebuilt from the projection (pi: appendContextEdit +
+  ;; _refreshFinalizedContext)
+  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-context-edit")))
+        calls (atom 0)
+        opts (atom [])
+        agent (loop/make-agent-state :session (session/create-session dir))]
+    (try
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (stub-llm-text-turns calls ["first"] opts)]
+        @(loop/run-agent-turn agent {:message "run"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (let [branch (session/get-branch (:session agent))
+            user-id (:id (first branch))
+            before (loop/get-context agent)]
+        (t/is (= ["run" "first"] (mapv #(get-in % [:content 0 :text]) before)))
+        (t/is (= :context-edit (:role (loop/append-context-edit! agent user-id nil))))
+        (t/is (= ["first"] (mapv #(get-in % [:content 0 :text]) (loop/get-context agent)))
+              "the omitted message leaves the live context")
+        (t/is (= ["run" "first"]
+                 (mapv #(get-in % [:content 0 :text])
+                       (filter #(contains? #{:user :assistant} (:role %))
+                               (session/get-branch (:session agent)))))
+              "the raw branch keeps it")
+        (loop/append-context-edit! agent user-id {:content "rewritten"})
+        (t/is (= "rewritten" (get-in (first (loop/get-context agent)) [:content 0 :text]))
+              "a later edit restores the message with new content"))
+      (t/is (thrown? Exception (loop/append-context-edit! agent "missing" nil))
+            "an unknown target throws (see session/append-context-edit!)")
+      (finally
+        (fs/delete-tree dir)))))
+
+(t/deftest test-loop-turn-end-boundary-context-edit
+  ;; a :turn-end handler's context_edit draft is committed through the
+  ;; validating session API and rebuilds the live context, so a later request
+  ;; no longer carries the omitted message
+  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-turn-end-edit")))
+        calls (atom 0)
+        opts (atom [])
+        boundaries (atom 0)
+        agent (loop/make-agent-state :session (session/create-session dir))]
+    (try
+      ;; first prompt: seed the session with the message we later omit
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (stub-llm-text-turns calls ["first"] opts)]
+        @(loop/run-agent-turn agent {:message "seed"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (let [seed-id (:id (first (session/get-branch (:session agent))))]
+        (event-bus/on-event
+         :turn-end
+         (fn [_]
+           ;; only the first boundary dispatches a draft
+           (when (= 1 (swap! boundaries inc))
+             {:entries [{:role :context-edit
+                         :target-id seed-id
+                         :replacement nil}]})))
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message (stub-llm-text-turns calls ["second"] opts)]
+          @(loop/run-agent-turn agent {:message "second"
+                                       :on-done (fn [_])
+                                       :on-error (fn [_])}))
+        (t/is (= 1 @boundaries) "the boundary ran")
+        (t/is (= ["seed" "second"] (request-user-texts (second @opts)))
+              "the request before the boundary still carried the message")
+        (t/is (= :context-edit (:role (last (session/get-branch (:session agent)))))
+              "the draft was committed as a real session entry")
+        (t/is (= ["second"]
+                 (mapv #(get-in % [:content 0 :text])
+                       (filter #(= :user (:role %)) (loop/get-context agent))))
+              "the live context no longer carries the omitted message")
+        (t/is (some #(= "seed" (get-in % [:content 0 :text]))
+                    (session/get-branch (:session agent)))
+              "the raw branch keeps it")
+        ;; the next prompt's request is built from the edited projection
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message (stub-llm-text-turns calls ["third"] opts)]
+          @(loop/run-agent-turn agent {:message "third"
+                                       :on-done (fn [_])
+                                       :on-error (fn [_])}))
+        (t/is (= ["second" "third"] (request-user-texts (last @opts)))
+              "the next prompt's request excludes the omitted message"))
+      (finally
+        (event-bus/clear-event-listeners!)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-loop-turn-end-boundary-invalid-context-edit-is-dropped
+  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-turn-end-bad-edit")))
+        calls (atom 0)
+        opts (atom [])
+        warn (java.io.StringWriter.)
+        agent (loop/make-agent-state :session (session/create-session dir))]
+    (try
+      (event-bus/on-event
+       :turn-end
+       (fn [_]
+         {:entries [{:role :context-edit :target-id "missing" :replacement nil}
+                    {:role :custom :custom-type "state" :data {}}]}))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (stub-llm-text-turns calls ["done"] opts)]
+        (binding [*err* warn]
+          @(loop/run-agent-turn agent {:message "run"
+                                       :on-done (fn [_])
+                                       :on-error (fn [_])})))
+      (t/is (str/includes? (str warn) "context edit")
+            "the bad edit is reported, not fatal")
+      (t/is (some #(= "state" (:custom-type %)) (session/get-branch (:session agent)))
+            "the rest of the batch still commits")
+      (t/is (= 1 @calls) "the prompt settled normally")
+      (finally
+        (event-bus/clear-event-listeners!)
+        (fs/delete-tree dir)))))
+
 (t/deftest test-loop-finish-turn-hook-decisions
   (t/testing ":end settles the attempt"
     (let [calls (atom 0)
@@ -4227,6 +4343,43 @@
         (t/is (= 1 (count (filter #(= :agent-settled (:type %)) @events))))
         (t/is (= :idle @(:status agent))))
       (finally (fs/delete-tree dir)))))
+
+(t/deftest test-loop-threshold-compaction-measures-the-projection
+  ;; K: with a context edit present the threshold check measures the
+  ;; projection (pi: estimateProjectedContextTokens) — a message the session
+  ;; still stores but the provider no longer sees must not count
+  (let [stub (fn [opts]
+               (future
+                 (when-let [on-text (:on-text opts)] (on-text "ok"))
+                 (when-let [on-done (:on-done opts)] (on-done :stop))
+                 :done))
+        compactions (fn [omit?]
+                      (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+                            sess (session/create-session (str dir))
+                            events (atom [])
+                            agent (loop/make-agent-state
+                                   :session sess
+                                   :compact-token-threshold 100
+                                   :on-event (fn [e] (swap! events conj e)))]
+                        (try
+                          ;; ~1000 estimated tokens on the raw branch
+                          (let [u (session/append-entry
+                                   sess {:role :user
+                                         :content [{:type :text
+                                                    :text (apply str (repeat 4000 "x"))}]})]
+                            (when omit?
+                              (session/append-context-edit! sess (:id u) nil))
+                            (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                                          llm/send-message stub]
+                              (binding [*err* (java.io.StringWriter.)]
+                                @(loop/run-agent-turn agent {:message "go"
+                                                             :on-error (fn [_])}))))
+                          (count (filter #(= :compaction-start (:type %)) @events))
+                          (finally (fs/delete-tree dir)))))]
+    (t/is (pos? (compactions false))
+          "without an edit the raw context drives the check")
+    (t/is (zero? (compactions true))
+          "the omitted message leaves the projection below the threshold")))
 
 (t/deftest test-loop-post-run-compaction-not-retriggered-after-failure
   ;; An auto compaction that failed (or was aborted) stands down for the rest
