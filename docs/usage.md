@@ -96,7 +96,7 @@ resource dirs.
 | `/hotkeys` | Show all keyboard shortcuts — the bindings the app actually wired, resolved live (keybindings.edn overrides and extension shortcuts included) |
 | `/quit` | Exit kmet |
 | `/model <provider:model[:thinking]>` | Switch model (Ctrl+L opens a selector; an unmatched term opens the selector pre-filled with it) |
-| `/thinking [level]` | Set thinking level — bare: selector with search, ✓ current, `· default` marker (Enter selects, Ctrl+S sets as default); with a level arg: apply it directly |
+| `/thinking [level]` | Set thinking level — bare: selector with search, ✓ current, `· default` marker (Enter applies to this session, Ctrl+S also saves it as the default); with a level arg: apply it and save it as the default |
 | `/scoped-models` | Enable/disable/reorder the models Ctrl+P cycles through (Ctrl+S saves to settings) |
 | `/settings` | Settings menu — thinking, display, tool display, steering/follow-up mode, HTTP transport + timeouts, auto-compact, retry, repeat guard, images, skill commands, terminal progress, clear on shrink, theme (single or automatic light/dark) |
 | `/tools` | List available tools with parameters |

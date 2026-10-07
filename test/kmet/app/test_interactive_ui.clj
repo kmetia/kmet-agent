@@ -240,14 +240,15 @@
             "thinking completes its level argument"))))
 
 (deftest test-thinking-command-arg-sets-level
-  (testing "/thinking <level> applies the level to the session (pi
-            selectThinkingLevel without persist — no settings write)"
+  (testing "/thinking <level> applies the level to the session AND saves it
+            as the settings default — the choice survives a restart (kmet
+            deviation: pi's direct command stays session-scoped)"
     (commands/clear-commands!)
     (m/load-catalogs!)
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [ag (agent/make-agent-state :provider :deepseek :model "deepseek-v4-pro")
           status (atom nil)
-          saved (atom ::none)
+          saved (atom nil)
           cs {:agent-state (atom ag)
               :chat-history nil
               :editor (editor/make-editor)
@@ -257,16 +258,19 @@
               :tui nil}]
       (with-redefs [chat-history/chat-history-show-status! (fn [_ m] (reset! status m))
                     model-selector/sync-footer-model! (fn [_] nil)
-                    cfg/save-setting! (fn [_ _] (reset! saved ::called))
+                    cfg/save-setting! (fn [path value] (reset! saved [path value]))
                     tui/tui-request-render (fn [_])]
-        (testing "a supported level applies"
+        (testing "a supported level applies and persists"
           ((:handler (commands/find-command "thinking")) cs "high")
           (t/is (= :high @(:thinking ag)) "agent thinking level set")
-          (t/is (= "Thinking level: high" @status) "status reports the level")
-          (t/is (= ::none @saved) "plain Enter does not persist the default"))
+          (t/is (= "Default thinking level: high" @status)
+                "status reports the saved default")
+          (t/is (= [[:thinking] :high] @saved)
+                "the level is written to settings.edn"))
         (testing "matching is case-insensitive"
           ((:handler (commands/find-command "thinking")) cs "MAX")
-          (t/is (= :max @(:thinking ag))))
+          (t/is (= :max @(:thinking ag)))
+          (t/is (= [[:thinking] :max] @saved) "the matched level is persisted"))
         (testing "an unsupported level warns with the available list"
           (let [warning (atom nil)]
             (with-redefs [chat-history/show-warning! (fn [_ m] (reset! warning m))]
@@ -274,7 +278,9 @@
               (t/is (= "Unknown thinking level \"medium\". Available levels: off, high, max."
                        @warning)
                     "warns listing the model's levels")
-              (t/is (= :max @(:thinking ag)) "thinking unchanged"))))))))
+              (t/is (= :max @(:thinking ag)) "thinking unchanged")
+              (t/is (= [[:thinking] :max] @saved)
+                    "a miss does not rewrite the saved default"))))))))
 
 (deftest test-thinking-command-bare-opens-selector
   (testing "bare /thinking mounts the level selector for a reasoning model;

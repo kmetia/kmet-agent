@@ -61,9 +61,12 @@
    footer and the editor border color, and report via a status line. When
    PERSIST? the level is additionally saved as [:thinking] in settings.edn,
    the default for future sessions (pi options.persist →
-   settingsManager.setDefaultThinkingLevel — kmet's Ctrl+S path; kmet's own
-   Shift+Tab cycle and /settings row persist unconditionally, this command
-   follows pi)."
+   settingsManager.setDefaultThinkingLevel). The /thinking argument passes
+   true — an explicit command request must survive a restart (kmet
+   deviation: pi keeps the direct command session-scoped; kmet's Shift+Tab
+   cycle, /settings row and /model argument all persist too) — while the
+   selector keeps pi's split: Enter applies the level to the session only,
+   Ctrl+S also sets the default."
   [cs level persist?]
   (let [ag @(:agent-state cs)]
     (agent/set-thinking-level! ag level)
@@ -78,9 +81,13 @@
 
 (defn- handle-thinking-command!
   "pi handleThinkingCommand: a bare /thinking mounts the level selector; an
-   argument applies the matching level directly — matched case-insensitively
-   against the current model's supported levels, with a warning listing the
-   available levels on a miss (pi showError)."
+   argument applies the matching level directly and saves it as the settings
+   default — matched case-insensitively against the current model's
+   supported levels, with a warning listing the available levels on a miss
+   (pi showError). Persisting is a kmet deviation: pi's direct command is
+   session-scoped, but every explicit kmet path (Shift+Tab, /settings,
+   /model) persists, so a level set from the command must survive a
+   restart."
   [cs search-term]
   (let [levels (thinking-selector/available-levels cs)]
     (if (str/blank? search-term)
@@ -97,7 +104,7 @@
       (let [wanted (str/lower-case (str/trim search-term))
             level (first (filter #(= (name %) wanted) levels))]
         (if level
-          (apply-thinking-level! cs level false)
+          (apply-thinking-level! cs level true)
           (chat-history/show-warning!
            (:chat-history cs)
            (str "Unknown thinking level \"" search-term
