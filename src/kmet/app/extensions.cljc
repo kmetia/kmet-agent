@@ -77,8 +77,9 @@
             #?(:jolt [kmet.loader.jolt-loader :as loader-jolt])
             [kmet.extension]))
 
-;; ─── Provider-event bridges (pi: context / before_provider_request /
-;; ─── before_provider_headers / after_provider_response) ────────────────
+;; ─── Provider-event bridges (pi: context / context_with_system /
+;; ─── before_provider_request / before_provider_headers /
+;; ─── after_provider_response) ──────────────────────────────────────────
 ;; The ai layer exposes injectable hooks (kmet.ai.api.shared) — it cannot
 ;; depend on kmet.app (the event bus). These bridges translate bus events
 ;; into hook results. The bus returns the LAST non-nil handler result;
@@ -88,15 +89,42 @@
 ;; return the replacement header map (Clojure maps are immutable — the
 ;; return value IS the mutation; pi mutates in place).
 
+(defn- emit-context-events
+  "Run the two request-time context phases (pi: runner.emitContext): the
+   :context handlers see the conversation only — the leading system message
+   belongs to kmet and is re-attached to a replacement, so a pruning handler
+   cannot drop the prompt — then the :context-with-system handlers see the
+   full transcript and their output is used verbatim. kmet's bus keeps the
+   last non-nil result, so the leading-system check in the second phase is
+   against that result (pi checks each handler's)."
+  [messages]
+  (let [messages (vec messages)
+        head (when (= :system (:role (first messages))) (first messages))
+        visible (filterv #(not= :system (:role %)) messages)
+        context-result (event-bus/emit-event! {:type :context :messages visible})
+        context-replaced (:messages context-result)
+        messages (if (and context-replaced (not= context-replaced visible))
+                   (into (if head [head] []) context-replaced)
+                   messages)
+        result (event-bus/emit-event! {:type :context-with-system
+                                       :messages messages})
+        system-replaced (:messages result)]
+    (cond
+      (nil? system-replaced) messages
+
+      ;; Providers read the prompt from the leading system message; losing it
+      ;; is never intended. Reported and honored, as pi does.
+      (and head (not= :system (:role (first system-replaced))))
+      (do (binding [*out* *err*]
+            (println "Warning: a :context-with-system handler removed the leading system message; the request has no prompt."))
+          system-replaced)
+
+      :else system-replaced)))
+
 (defn- install-provider-event-bridges!
   "Wire the bus to the ai-layer hooks once (idempotent)."
   []
-  (ai-hooks/set-context-hook!
-   (fn [messages]
-     (let [result (event-bus/emit-event! {:type :context :messages messages})]
-       (if (and result (contains? result :messages))
-         (:messages result)
-         messages))))
+  (ai-hooks/set-context-hook! emit-context-events)
   (ai-hooks/set-before-provider-request-hook!
    (fn [payload]
      (let [result (event-bus/emit-event! {:type :before-provider-request
@@ -464,16 +492,19 @@
 (declare append-custom-message!)
 
 (defn send-message!
-  "Extension api: send-message! (pi: sendMessage). MESSAGE:
+  "Extension api: send-message! (pi: sendCustomMessage). MESSAGE:
    {:custom-type :content :display :details} — appended to the session as a
-   custom_message entry (persisted), injected into the agent context (sent
-   to the LLM as a user message; rendered in the chat when :display), and
-   optionally triggering a turn. OPTIONS: {:trigger-turn bool :deliver-as
-   :steer | :follow-up | :next-turn}. Idle + trigger-turn starts the run
-   (the custom message is already in context); busy queues per deliver-as
-   (:steer injects into the current run immediately, :follow-up/:next-turn
-   defer to the next turn). Headless (no UI registry): persists + injects
-   via the sinks. Returns nil."
+   custom_message entry and injected into the agent context (sent to the LLM
+   as a user message; rendered in the chat when :display). OPTIONS:
+   {:trigger-turn bool :deliver-as :steer | :follow-up | :next-turn}.
+   :next-turn queues the message for the next prompt. While the agent is
+   running, :trigger-turn (default true) queues it into the run — :steer
+   into the current turn, :follow-up after it — and :trigger-turn false
+   defers it to the end of the turn, so it cannot land between a tool call
+   and its result. While idle, :trigger-turn starts a run with the message
+   as its prompt; without it the message is appended without running.
+   Headless (no UI registry): persists + injects via the sinks, without
+   queueing. Returns nil."
   [message & [opts]]
   (if (nil? (ui-call :send-message! message opts))
     ;; headless fallback: persist + inject through the sinks

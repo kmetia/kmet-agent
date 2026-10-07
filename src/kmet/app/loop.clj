@@ -42,12 +42,13 @@
    if any tool call targets a :sequential tool the whole batch runs
    sequentially (see :execution-mode on the Tool record).
 
-   Per-turn hooks (pi: prepareNextTurn / finishTurn / transformContext): the
-   :prepare-next-turn and :finish-turn hooks run after each completed turn (in
-   pi order; :finish-turn alone also runs for errored and aborted turns, whose
-   decision is ignored); :transform-context rewrites the conversation before
-   each LLM call. The :system-prompt-override atom holds a per-run system prompt
-   override.
+   Per-turn hooks (pi: prepareNextTurn / prepareRequest / finishTurn /
+   transformContext): the :prepare-next-turn and :finish-turn hooks run after
+   each completed turn (in pi order; :finish-turn alone also runs for errored
+   and aborted turns, whose decision is ignored); :prepare-request runs
+   before every provider request (pi: config.prepareRequest) and
+   :transform-context rewrites the conversation before each LLM call. The
+   :system-prompt-override atom holds a per-run system prompt override.
 
    Compaction (pi: auto-compaction): the session is compacted proactively
    (measured usage vs. the model's context window) and reactively after a
@@ -116,6 +117,13 @@
                        api-type      ;; wire api override (:openai-completions | :openai-responses | :anthropic-messages | :google-generative-ai)
                        steering      ;; atom of vector of queued steer messages
                        follow-up     ;; atom of vector of queued follow-up messages
+                       pending-custom ;; atom of vector of custom messages deferred while the agent
+                                      ;; is streaming — flushed at the end of the turn so one never
+                                      ;; lands between a tool call and its result (pi:
+                                      ;; _pendingCustomMessages)
+                       pending-next-turn ;; atom of vector of custom messages injected with the next
+                                         ;; prompt, alongside its user message (pi:
+                                         ;; _pendingNextTurnMessages)
                        active-call      ;; atom of {:promise p :partials f} while an LLM call is in flight (for cancel)
                        cfg              ;; atom of a config MAP — runtime-tunable knobs, replaced wholesale:
                                         ;;   {:max-retries int :base-delay-ms int :http-idle-timeout-ms int
@@ -127,6 +135,8 @@
                        system-prompt-override ;; atom of string or nil (per-run override, pi: _systemPromptOverride)
                        transform-context      ;; atom of (fn [messages]) → messages (pi: transformContext)
                        prepare-next-turn      ;; atom of (fn [ctx]) → update map | nil (pi: prepareNextTurn)
+                       prepare-request        ;; atom of (fn [request]) → update map | nil (pi: config.prepareRequest —
+                                              ;; runs before every provider request, after prepareNextTurn)
                        finish-turn            ;; atom of (fn [ctx]) → :end | :continue | nil — the loop's
                                               ;; per-turn decision (pi: finishTurn)
                        last-outcome           ;; atom of :completed | :error | :aborted: the last turn's
@@ -164,7 +174,7 @@
          :thinking, :base-url, :api-type, :steering-mode, :follow-up-mode,
          :max-retries (default 3), :base-delay-ms (default 2000),
          :before-tool-call, :after-tool-call, :system-prompt-override,
-         :transform-context, :prepare-next-turn, :finish-turn,
+         :transform-context, :prepare-next-turn, :prepare-request, :finish-turn,
          :get-api-key, :scoped-models (default []),
          :system-prompt-opts (build-system-prompt options map, pi:
          _baseSystemPromptOptions),
@@ -181,7 +191,7 @@
          :default-tools (resolved :default-tools selection — the built-in
          tools active at startup, pi: defaultTools; nil = every built-in
          active, see kmet.app.tools.registry/resolve-default-tools)"
-  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms before-tool-call after-tool-call system-prompt-override transform-context prepare-next-turn finish-turn get-api-key scoped-models system-prompt-opts compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools]
+  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms before-tool-call after-tool-call system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools]
       :or {provider :opencode-go
            thinking :off
            steering-mode :all
@@ -216,6 +226,8 @@ Be precise and concise in your responses."}}]
                     :api-type api-type
                     :steering (atom [])
                     :follow-up (atom [])
+                    :pending-custom (atom [])
+                    :pending-next-turn (atom [])
                     :active-call (atom nil)
                     :cfg (atom {:max-retries max-retries
                                 :base-delay-ms base-delay-ms
@@ -235,6 +247,7 @@ Be precise and concise in your responses."}}]
                     :system-prompt-override (atom system-prompt-override)
                     :transform-context (atom transform-context)
                     :prepare-next-turn (atom prepare-next-turn)
+                    :prepare-request (atom prepare-request)
                     :finish-turn (atom finish-turn)
                     :last-outcome (atom :completed)
                     :get-api-key (atom get-api-key)
@@ -640,6 +653,15 @@ Be precise and concise in your responses."}}]
     (emit agent {:type :message-end :message msg})
     msg))
 
+(defn- normalize-content
+  "Normalize a message's :content to the canonical block vector: a string
+   becomes one text block, nil an empty vector, blocks pass through."
+  [content]
+  (cond
+    (string? content) [{:type :text :text content}]
+    (nil? content) []
+    :else content))
+
 (defn- add-custom-message!
   "Add a before-agent-start injected message to context and session, emitting
    :message-start. Role defaults to :info (display-only — rendered in the UI,
@@ -647,17 +669,31 @@ Be precise and concise in your responses."}}]
    String :content is normalized to a text block so the message matches the
    canonical kmet message format (session persistence and resume display)."
   [agent m]
-  (let [content (:content m)
-        content (cond
-                  (string? content) [{:type :text :text content}]
-                  (nil? content) []
-                  :else content)
-        msg (cond-> (assoc m :content content)
+  (let [msg (cond-> (assoc m :content (normalize-content (:content m)))
               (not (contains? m :role)) (assoc :role :info))]
     (append-message! agent msg)
     (when (:session agent)
       (session/append-entry (:session agent) msg))
     (emit agent {:type :message-start :message msg})))
+
+(defn append-custom-message!
+  "Append a custom message outside a tool call/result pair: persist it as a
+   custom_message session entry, inject its context projection, and emit
+   :message-start (pi: _appendCustomMessage). The context append is
+   context-only — pi keeps these out of the loop's newMessages — so an idle
+   send and the pending-custom flush share this path. MSG is a canonical
+   {:role :custom :custom-type :content :display :details} map. Returns MSG."
+  [agent msg]
+  ;; the session keeps the raw content (its projection normalizes strings —
+  ;; pi: appendCustomMessageEntry stores the message as given); the context
+  ;; message is normalized here
+  (when-let [sess (:session agent)]
+    (session/append-custom-message-entry! sess (:custom-type msg) (:content msg)
+                                          (:display msg) (:details msg)))
+  (let [msg (assoc msg :content (normalize-content (:content msg)))]
+    (append-context-message! agent msg)
+    (emit agent {:type :message-start :message msg})
+    msg))
 
 (defn- tool-execution-mode
   "Execution mode for a tool name: :sequential or :parallel.
@@ -1124,7 +1160,9 @@ Be precise and concise in your responses."}}]
 (defn steer!
   "Queue a user message for mid-turn injection.
    The agent loop polls the steering queue between turns (after tool results,
-   before the next LLM call) and injects queued messages into the context."
+   before the next LLM call) and injects queued messages into the context.
+   A message map is injected as a custom message (pi: the queues carry full
+   messages — sendMessage queues custom ones there)."
   [agent text]
   (swap! (:steering agent) conj text)
   (emit agent {:type :queue-update
@@ -1135,7 +1173,8 @@ Be precise and concise in your responses."}}]
 (defn follow-up!
   "Queue a user message to be processed after the current run settles.
    The outer loop drains the follow-up queue when the inner loop finishes and
-   continues the run with the queued messages."
+   continues the run with the queued messages. A message map is injected as a
+   custom message (see steer!)."
   [agent text]
   (swap! (:follow-up agent) conj text)
   (emit agent {:type :queue-update
@@ -1218,26 +1257,67 @@ Be precise and concise in your responses."}}]
    honored by the TUI handler). String :content is normalized to a text
    block, matching the canonical kmet message format."
   [agent msg]
-  (let [content (:content msg)
-        content (cond
-                  (string? content) [{:type :text :text content}]
-                  (nil? content) []
-                  :else content)
-        msg (assoc msg :content content)]
+  (let [msg (assoc msg :content (normalize-content (:content msg)))]
     (append-message! agent msg)
     (emit agent {:type :message-start :message msg})))
 
+(defn defer-custom-message!
+  "Defer a custom message sent while the agent is streaming: appending now
+   would put it between an assistant tool call and its result (pi:
+   _pendingCustomMessages). Nothing is persisted or emitted until the flush,
+   which lands the message once the turn's tool results are in the context
+   (see flush-pending-custom-messages!)."
+  [agent msg]
+  (swap! (:pending-custom agent) conj msg)
+  nil)
+
+(defn queue-next-turn-message!
+  "Queue a custom message that is injected with the next prompt rather than
+   the current turn (pi: deliverAs \"nextTurn\" → _pendingNextTurnMessages).
+   It never triggers a turn and never joins the steering/follow-up queues."
+  [agent msg]
+  (swap! (:pending-next-turn agent) conj msg)
+  nil)
+
+(defn flush-pending-custom-messages!
+  "Append custom messages deferred while the agent was streaming, once the
+   current turn's tool results are in the context (pi:
+   _flushPendingCustomMessages — called at every turn end, before a new
+   prompt, at the pre-settle boundary, and by the prompt's settle flush).
+   Drains in a CAS loop, so a defer that lands mid-flush is still included
+   instead of being lost."
+  [agent]
+  (loop []
+    (when-let [msgs (seq (drain-queue! (:pending-custom agent) :all))]
+      (doseq [msg msgs]
+        (append-custom-message! agent msg))
+      (recur))))
+
+(defn- inject-next-turn-messages!
+  "Inject the custom messages queued for the next prompt alongside its user
+   message, then clear the queue (pi: prompt() pushes _pendingNextTurnMessages
+   after the user message and clears them). Each is persisted and recorded in
+   this attempt's messages."
+  [agent]
+  (loop []
+    (when-let [msgs (seq (drain-queue! (:pending-next-turn agent) :all))]
+      (doseq [msg msgs]
+        (record-run-message! agent (append-custom-message! agent msg)))
+      (recur))))
+
 (defn- inject-queued-messages!
   "Drain one batch from QUEUE (per MODE) and inject it into the live
-   context: strings become user messages, maps pre-injected custom messages
-   (pi: the queues carry full messages — sendMessage queues custom ones
-   there). Emits :queue-update when anything was consumed; returns the
-   number of messages injected."
+   context: strings become user messages; maps are custom messages (pi: the
+   queues carry full messages — sendMessage queues custom ones there),
+   persisted and recorded in this attempt's messages here, as the loop
+   consumes them (pi: message_end persistence; the loop pushes a consumed
+   queue message into newMessages). Emits :queue-update when anything was
+   consumed; returns the number of messages injected."
   [agent queue mode]
   (let [msgs (drain-queue! queue mode)]
     (doseq [m msgs]
       (if (map? m)
-        (add-context-message! agent m)
+        (record-run-message! agent (append-custom-message! agent m))
         (add-user-message! agent m)))
     (when (seq msgs)
       (emit agent {:type :queue-update
@@ -1631,6 +1711,35 @@ Be precise and concise in your responses."}}]
       (reset! (:system-prompt-override agent) o))
     (when-let [c (:context update)] (replace-context! agent c))))
 
+(defn- apply-request-update!
+  "Apply a :prepare-request update map to the agent state (pi: prepareRequest
+   returning {context, model, thinkingLevel}). :context replaces the
+   in-flight conversation only — pi assigns it to the loop's currentContext
+   and never writes the session, so the replacement is not persisted; the
+   other keys apply as for prepare-next-turn."
+  [agent update]
+  (when update
+    (when-let [c (:context update)]
+      (reset! (:messages agent) (vec c)))
+    (apply-next-turn-update! agent (dissoc update :context))))
+
+(defn- prepare-request!
+  "Run the :prepare-request hook for the request about to be sent and apply
+   its update (pi: agent-loop's config.prepareRequest, called before every
+   provider request; the session's install wraps it with the canonical
+   context). The hook receives {:context (the live messages) :model
+   :thinking :system} and may return an update map with
+   apply-next-turn-update!'s keys; a :context replacement applies to this
+   request and the rest of the attempt without a turn boundary between."
+  [agent]
+  (when-let [f @(:prepare-request agent)]
+    (apply-request-update!
+     agent
+     (f {:context @(:messages agent)
+         :model (models/get-model @(:provider agent) @(:model agent))
+         :thinking @(:thinking agent)
+         :system (or @(:system-prompt-override agent) @(:system agent))}))))
+
 (defn- turn-context
   "What a per-turn hook receives (pi: PrepareNextTurnContext /
    finishTurn's turn): the turn's message and tool results, and the live
@@ -1738,9 +1847,10 @@ Be precise and concise in your responses."}}]
 (defn- boundary-state
   "The accumulated state an actionable boundary hands its handlers, merged
    into the event each one sees (pi: emitBoundary's {entries, continue} over
-   the boundary context's pendingMessages/canContinue)."
+   the boundary context's pendingMessages/canContinue). Pending messages
+   include the deferred custom queue (pi: _getPendingBoundaryMessages)."
   [agent]
-  {:pending-messages (peek-queued-messages agent)
+  {:pending-messages (into (peek-queued-messages agent) @(:pending-custom agent))
    :can-continue (boundary-can-continue? agent)
    :entries []
    :continue false})
@@ -1776,6 +1886,10 @@ Be precise and concise in your responses."}}]
                                  (honor-continuation? agent :turn-end))
         decision (when-let [f @(:finish-turn agent)]
                    (f (turn-context agent turn-index assistant-msg tool-results)))]
+    ;; pi: _handleAgentEvent flushes deferred custom messages after every
+    ;; turn's boundary dispatch — the first point in the run where a context
+    ;; append cannot land between a tool call and its result
+    (flush-pending-custom-messages! agent)
     (cond
       (= :end decision) :end
       (or boundary-continues? (= :continue decision)) :continue
@@ -1805,6 +1919,9 @@ Be precise and concise in your responses."}}]
   (reset! (:system-prompt-override agent) nil)
   (reset! (:overflow-recovered agent) false)
   (reset! (:compaction-blocked agent) false)
+  ;; pi: prompt() flushes messages a previous run deferred before building
+  ;; the new prompt
+  (flush-pending-custom-messages! agent)
   ;; :agent-before-settle reports this run's last turn outcome
   (reset! (:last-outcome agent) :completed)
   ;; Repeat-loop guard is per-run: a legit bash ls x2 in run 1 must not
@@ -1812,6 +1929,9 @@ Be precise and concise in your responses."}}]
   (reset! (:loop-guard agent) {:window [] :suppressed 0})
   (when message
     (add-user-message! agent message images))
+  ;; pi: pending nextTurn messages ride with the prompt, after the user
+  ;; message and before before_agent_start's injected messages
+  (inject-next-turn-messages! agent)
   (let [bas (extensions/apply-before-agent-start-hooks
              message @(:system agent))]
     (when (:system-prompt bas)
@@ -2027,17 +2147,17 @@ Be precise and concise in your responses."}}]
                               (agent-end nil false)
                               {:status :aborted}) ;; cancelled — exit quietly
                           {:status :settled :turn t})
-                        (let [steer-msgs (drain-queue! (:steering agent)
-                                                       (:steering-mode @(:cfg agent)))]
-                          (doseq [m steer-msgs]
-                            (add-user-message! agent m))
-                        ;; Consumed messages left the queue — refresh the
-                        ;; pending display (pi: message_start → queue_update)
-                          (when (seq steer-msgs)
-                            (emit agent {:type :queue-update
-                                         :steering @(:steering agent)
-                                         :follow-up @(:follow-up agent)}))
+                        ;; The injection drains the steering queue and
+                        ;; refreshes the pending display (pi: message_start →
+                        ;; queue_update)
+                        (do
+                          (inject-queued-messages! agent (:steering agent)
+                                                   (:steering-mode @(:cfg agent)))
                           (emit agent {:type :turn-start :turn-index t})
+                          ;; pi: config.prepareRequest — the per-request
+                          ;; checkpoint, after the queued messages joined the
+                          ;; context and before the request is built
+                          (prepare-request! agent)
                           (let [{:keys [promise] :as call}
                                 (do (reset! text-buf "")
                                     (call-llm agent (resolve-api-key agent) text-buf on-text on-thinking))]
@@ -2211,6 +2331,9 @@ Be precise and concise in your responses."}}]
                                              :type :agent-before-settle
                                              :outcome @(:last-outcome agent)))
         requested? (requested-continuation? agent boundary :agent-before-settle)]
+    ;; pi: _runBeforeSettleBoundary flushes deferred custom messages after
+    ;; the boundary's entries are committed, before the continuation check
+    (flush-pending-custom-messages! agent)
     (and (not @(:signal agent))
          (or requested? (has-queued-messages? agent))
          (honor-continuation? agent :agent-before-settle))))
@@ -2447,6 +2570,9 @@ Be precise and concise in your responses."}}]
                 ;; flush appends context-only, so those entries stay out of
                 ;; `agent-end :messages` (pi flushes after agent_end too).
                 (flush-pending-bash-messages! agent)
+                ;; pi: _flushPendingCustomMessages — custom messages deferred
+                ;; while streaming land before the prompt settles
+                (flush-pending-custom-messages! agent)
                 ;; pi: agent_settled fires once in a finally, after the
                 ;; pending-bash flush — success, retry, error, timeout, or
                 ;; abort; the prompt is fully settled (agent-session.js).

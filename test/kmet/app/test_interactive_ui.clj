@@ -1654,6 +1654,75 @@
                           "nothing was steered with no run active"))))))
           (finally (clear-installed-context!)))))))
 
+(deftest test-send-message-delivery-modes
+  (testing "a custom message follows pi's sendCustomMessage branches:
+            :next-turn queues for the next prompt, a streaming send queues
+            into the run (steer/follow-up) or defers without a trigger, and
+            an idle send is appended — exactly once, at the delivery point
+            (the session entry and the context append never happen twice)"
+    (let [dir (-> (fs/create-dirs (fs/path "target" (str "test-send-message-modes-"
+                                                         (System/currentTimeMillis))))
+                  fs/absolutize str)
+          sess (session/create-session dir)
+          ag (agent/make-agent-state :session sess)
+          cs {:agent-state (atom ag)
+              :config cfg/default-config
+              :session-atom (atom sess)
+              :footer-provider (fdp/make-footer-data-provider)
+              :compaction-queued (atom [])
+              :pending-messages-comp {:steering-atom (atom [])
+                                      :follow-up-atom (atom [])}
+              :running-turn? (atom false)}
+          custom-entries #(filter (fn [e] (= :custom-message (:role e)))
+                                  (session/get-branch sess))
+          custom-context #(filter (fn [m] (= :custom (:role m))) @(:messages ag))]
+      (try
+        (let [registry ((var ui-registry/build-extension-ui-registry)
+                        {:tui nil :cs cs}
+                        {:fdp (:footer-provider cs)}
+                        nil)
+              send (fn
+                     ([m] ((:send-message! registry) m))
+                     ([m o] ((:send-message! registry) m o)))
+              started (atom 0)]
+          (with-redefs [turn/start-agent-run! (fn [& _] (swap! started inc))]
+            (testing "idle, no trigger: appended now, no run"
+              (send {:custom-type :note :content "idle"})
+              (t/is (= 1 (count (custom-entries))) "persisted")
+              (t/is (= 1 (count (custom-context))) "appended to the context")
+              (t/is (= 0 @started) "no turn"))
+            (testing "next turn: queued for the next prompt, even with :trigger-turn"
+              (send {:custom-type :note :content "next"}
+                    {:trigger-turn true :deliver-as :next-turn})
+              (t/is (= 1 (count @(:pending-next-turn ag))))
+              (t/is (= 1 (count (custom-entries))) "not persisted yet")
+              (t/is (= 1 (count (custom-context))) "not in context yet")
+              (t/is (= 0 @started) "next-turn wins over :trigger-turn"))
+            (testing "streaming + trigger-turn: queued into the run"
+              (reset! (:running-turn? cs) true)
+              (send {:custom-type :note :content "steer"} {:trigger-turn true})
+              (t/is (= 1 (count @(:steering ag))) ":steer is the default mode")
+              (send {:custom-type :note :content "follow"}
+                    {:trigger-turn true :deliver-as :follow-up})
+              (t/is (= 1 (count @(:follow-up ag))) ":follow-up queues separately")
+              (t/is (= 1 (count (custom-entries))) "neither is persisted here")
+              (t/is (= 1 (count (custom-context))) "nor appended to the context")
+              (t/is (= 0 @started) "no concurrent run"))
+            (testing "streaming without a trigger: deferred to the end of the turn"
+              (send {:custom-type :note :content "deferred"} {:trigger-turn false})
+              (t/is (= 1 (count @(:pending-custom ag))))
+              (t/is (= 1 (count (custom-entries))) "not persisted yet")
+              (t/is (= 1 (count (custom-context))) "not in context yet"))
+            (testing "idle + trigger-turn: appended once and starts the run"
+              (reset! (:running-turn? cs) false)
+              (send {:custom-type :note :content "now"} {:trigger-turn true})
+              (t/is (= 2 (count (custom-entries))) "persisted once")
+              (t/is (= 2 (count (custom-context))) "appended once")
+              (t/is (= 1 @started) "starts the run"))))
+        (finally
+          (clear-installed-context!)
+          (fs/delete-tree dir))))))
+
 (deftest test-build-context-resolves-current-model
   (let [native (m/map->Model {:provider :test-native :id "test-model"
                               :base-url "https://native.test/v1"})

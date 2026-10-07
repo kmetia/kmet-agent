@@ -709,7 +709,7 @@ Event types: `:agent-start` `:agent-end` `:agent-settled` `:turn-start`
 `:session-before-compact` `:session-tree` `:queue-update` `:model-select`
 `:thinking-level-select` `:context-replaced` `:auto-retry-start`
 `:auto-retry-end` `:compaction-start` `:compaction-end`
-`:session-compact-failed` `:context`
+`:session-compact-failed` `:context` `:context-with-system`
 `:before-provider-request` `:before-provider-headers`
 `:after-provider-response`.
 
@@ -814,13 +814,17 @@ Three events fire **before** session mutations; handlers may return
   (fn [ev ctx] ...))   ; {:preparation .. :branch-entries .. :reason .. :signal ..}
 ```
 
-Provider events fire around each LLM call (pi: context /
+Provider events fire around each LLM call (pi: context / context_with_system /
 before_provider_request / before_provider_headers / after_provider_response);
 for each, the **last non-nil handler result wins**:
 
 ```clojure
-;; replace the outgoing messages
+;; replace the conversation — :context sees it without the system prompt,
+;; which is re-attached to a replacement (rewrite the prompt itself in
+;; :context-with-system); :context-with-system then sees the full transcript
+;; and its result is sent verbatim
 (ext/on-event api :context (fn [ev ctx] {:messages [...]}))
+(ext/on-event api :context-with-system (fn [ev ctx] {:messages [...]}))
 ;; replace the assembled request payload
 (ext/on-event api :before-provider-request (fn [ev ctx] new-payload))
 ;; replace the request headers (return the map; a nil header value deletes
@@ -906,11 +910,14 @@ the `run_code` tool itself is the only real gate.
 ### Custom messages and agent control
 
 ```clojure
-;; send a custom message (pi: sendMessage): persisted as a custom_message
+;; send a custom message (pi: sendCustomMessage): persisted as a custom_message
 ;; session entry, injected into the LLM context (sent as a user message),
-;; rendered in the chat when :display. :trigger-turn starts a run when the
-;; agent is idle; while streaming, :deliver-as queues it (:steer injects
-;; into the current run, :follow-up/:next-turn defer to the next turn).
+;; rendered in the chat when :display. :next-turn queues it for the next
+;; prompt. While streaming, :trigger-turn (default true) queues it into the
+;; run (:steer into the current turn, :follow-up after it) and :trigger-turn
+;; false defers it to the end of the turn, so it cannot land between a tool
+;; call and its result. While idle, :trigger-turn starts a run with the
+;; message as its prompt; without it the message is appended without running.
 (ext/send-message! api
   {:custom-type :note :content "remember this" :display true :details {:x 1}}
   {:trigger-turn true :deliver-as :next-turn})

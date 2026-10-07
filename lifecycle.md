@@ -63,9 +63,19 @@ Landed baseline — do not redo:
   `_handlePostAgentRun` → `_checkCompaction`), and `:compaction-blocked`
   stands the automatic checks down after an aborted or failed compaction in
   the same prompt. The Phase 1 status finding landed alongside it.
+- **H** — the pending custom-message queues: a custom message deferred
+  while streaming lands at the end of the turn (context-only), `:next-turn`
+  is injected with the next prompt, and the interactive registry appends
+  exactly once per delivery mode (the busy follow-up double append is gone).
+- **I** — the per-request checkpoint: a `:prepare-request` hook runs before
+  every provider request and may replace the in-flight context (and the
+  model / thinking / system) without a turn boundary. The session-side
+  canonical install is deferred to K.
+- **L** — `:context` sees the conversation only (the prompt is re-attached
+  to a replacement) and the new `:context-with-system` runs after it over
+  the full transcript, its result sent verbatim.
 
-Open: **H–L**, phased below — the rest of the 0.87.0 session-context /
-boundary wave.
+Open: **K** — the append-only per-message context edits (Phase 5).
 
 ## Target behavior (pi)
 
@@ -115,7 +125,7 @@ Decisions taken for this plan:
 | 1 | E, J | localized to `run-agent-turn`; no boundary machinery needed |
 | 2 | F, G (landed) | F establishes the boundary result shape; G builds on it |
 | 3 | D (landed) | post-run dispatch needs E's queue point and G's pre-settle position, plus the abort guard |
-| 4 | H, I, L | context ingestion; H flushes at F's `turn_end`, L depends on I's request assembly |
+| 4 | H, I, L (landed) | context ingestion; H flushes at F's `turn_end`, L depends on I's request assembly |
 | 5 | K | session context model, largest and most independent |
 
 ---
@@ -371,6 +381,26 @@ pre-run compaction is not retried post-run); the aborted case extends
 
 ### H. Pending custom-message queue + `:next-turn`
 
+**Landed.** New agent-state queues `:pending-custom` and
+`:pending-next-turn` (pi: `_pendingCustomMessages` /
+`_pendingNextTurnMessages`). A custom message deferred while streaming is
+appended once the turn's tool results are in: at every turn end
+(`finish-turn!`), at the pre-settle boundary after its entries commit, and
+by the prompt's settle flush (`run-agent-turn`'s `finally`); the append is
+context-only, so it stays out of `:agent-end :messages`. The next-turn queue
+is injected with the next prompt, after its user message and before the
+before-agent-start messages. A message the loop consumes from a
+steering/follow-up queue is persisted and appended there, as it joins the
+context (pi: message_end persistence) — the interactive registry now queues
+without appending, so every delivery mode appends exactly once (the busy
+`{:trigger-turn true :deliver-as :follow-up}` send used to append immediately
+*and* again on the drain). The boundary preview's `:pending-messages`
+includes the deferred queue (pi: `_getPendingBoundaryMessages`). An idle send
+that triggers a run appends before the run starts, so it is not part of that
+attempt's `:agent-end :messages` (pi's prompt carries it). The headless
+fallback still appends immediately through the sinks — it has no queue of its
+own.
+
 **Goal.** A custom message sent mid-stream cannot land between a tool call and
 its result, and `:next-turn` delivery is real.
 
@@ -405,6 +435,19 @@ exactly once; `:next-turn` is injected with the following prompt.
 
 ### I. `prepareRequest` per-request checkpoint
 
+**Landed.** A `:prepare-request` agent hook (pi: `config.prepareRequest`)
+runs before every provider request — `run-attempt!`, after the queued
+messages joined the context and before `call-llm`. It receives `{:context
+:model :thinking :system}` and returns an update map with
+`apply-next-turn-update!`'s keys; `:context` replaces the in-flight
+conversation for this request and the rest of the attempt (pi:
+`currentContext = requestUpdate.context`), in memory only — the session keeps
+its own entries, so the projection is not persisted. pi's session-side
+install also replaces the request context with the session projection; that
+half waits for K: kmet keeps an errored or abandoned attempt session-only and
+pi omits it from the projection with a context edit (`_omitRecoveryAttempt`),
+so a blind rebuild would resurrect it.
+
 **Goal.** Install the canonical context immediately before every provider
 request, so a context mutation is reflected without a turn boundary.
 
@@ -425,6 +468,16 @@ with no turn boundary between.
 
 ### L. `context_with_system` event
 
+**Landed.** `:context-with-system` fires after `:context` with the full
+transcript (system prompt included) and its result is sent verbatim;
+`:context` now sees the conversation only, with the leading system message
+re-attached to a replacement (pi: `restoreSystemMessages`), so a pruning
+handler cannot drop the prompt. A `:context-with-system` result that drops the
+leading system message is reported as an extension warning and honored, as
+pi does. Both phases run for every `llm/send-message` call, the compaction
+summarization included: kmet's "each LLM call" contract, while pi routes
+summarization outside `transformContext`.
+
 **Goal.** Per-request system-message transformations over the full transcript.
 
 **pi.** After `context` handlers run over the conversation only, after every
@@ -440,8 +493,8 @@ them); last non-nil `{:messages ...}` wins.
 transcript, with the leading-system-message validation.
 
 **Acceptance.** A `:context-with-system` handler sees the system message; a
-result that drops it is rejected; ordering is `:context` then
-`:context-with-system`.
+result that drops it is reported and honored (pi: `emitError` then the
+handler's output); ordering is `:context` then `:context-with-system`.
 
 ---
 
@@ -488,8 +541,9 @@ next provider context; the raw branch, usage totals, and replay are unchanged.
   `:agent-start`/`:agent-end` descriptions; F/G added `:agent-before-settle`
   and the actionable `:turn-end`, plus `emit-boundary!`); D adds no events
   (the compaction payloads were already pi-shaped; `:agent-settled` now
-  names the post-run compaction in its description); H/L add or reshape
-  events (`:context-with-system`).
+  names the post-run compaction in its description); H widened the boundary
+  `:pending-messages` to include deferred custom messages; L added
+  `:context-with-system` and reshaped `:context`.
 - `src/kmet/extension.md` — done with E/F/G (the `:agent-end` queueing
   paragraph, the two actionable boundaries, and the `send-user-message`
   note).

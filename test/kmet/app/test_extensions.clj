@@ -1135,6 +1135,49 @@
         (t/is (= {"h" "v"} (:headers @seen)))
         (u1)))))
 
+(t/deftest test-context-with-system-phase
+  (testing "the request-time context phases (pi: emitContext): :context sees
+            the conversation only and the system prompt is re-attached to a
+            replacement; :context-with-system then sees the full transcript
+            and its result is used verbatim"
+    (let [system-msg {:role :system :content [{:type :text :text "prompt"}]}
+          user-msg {:role :user :content [{:type :text :text "hi"}]}
+          seen (atom [])
+          u1 (event-bus/on-event :context
+                                 (fn [ev]
+                                   (swap! seen conj [:context (mapv :role (:messages ev))])
+                                   nil))
+          u2 (event-bus/on-event :context-with-system
+                                 (fn [ev]
+                                   (swap! seen conj [:with-system (mapv :role (:messages ev))])
+                                   nil))]
+      (try
+        (t/is (= [system-msg user-msg] (ai-hooks/apply-context-hook [system-msg user-msg]))
+              "no replacement — the transcript passes through")
+        (t/is (= [[:context [:user]] [:with-system [:system :user]]] @seen)
+              "phase order, and what each phase sees")
+        (finally (u1) (u2))))
+    (testing "a :context replacement gets the system prompt re-attached"
+      (let [system-msg {:role :system :content [{:type :text :text "prompt"}]}
+            u (event-bus/on-event :context
+                                  (fn [_] {:messages [{:role :user :content "pruned"}]}))]
+        (try
+          (t/is (= [system-msg {:role :user :content "pruned"}]
+                   (ai-hooks/apply-context-hook [system-msg {:role :user :content "orig"}]))
+                "pi: restoreSystemMessages — a pruning handler keeps the prompt")
+          (finally (u)))))
+    (testing "a :context-with-system result is used verbatim, even without the prompt"
+      (let [system-msg {:role :system :content [{:type :text :text "prompt"}]}
+            user-msg {:role :user :content [{:type :text :text "hi"}]}
+            u (event-bus/on-event :context-with-system (fn [_] {:messages [user-msg]}))
+            err (java.io.StringWriter.)]
+        (try
+          (let [out (binding [*err* err] (ai-hooks/apply-context-hook [system-msg user-msg]))]
+            (t/is (= [user-msg] out) "honored as returned (pi: report, honor)")
+            (t/is (str/includes? (str err) "removed the leading system message")
+                  "and reported as an extension error"))
+          (finally (u)))))))
+
 (t/deftest test-resources-discover
   (extensions/clear-extensions!)
   (event-bus/clear-event-listeners!)

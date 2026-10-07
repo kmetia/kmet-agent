@@ -43,7 +43,9 @@
     call). Payload: :turn-index, :message, :tool-results, :outcome
     (:completed | :error | :aborted), plus the boundary state
     :pending-messages (the queued batches the next attempt would start
-    from), :can-continue, :entries [] and :continue false. Handlers may
+    from, plus custom messages deferred while streaming — pi:
+    _getPendingBoundaryMessages), :can-continue, :entries [] and :continue
+    false. Handlers may
     return {:entries [entry ...] :continue bool} (pi: emitBoundary): entries
     are session entry maps appended in order (pi: SessionBoundaryDraft — a
     :custom-message entry also enters the context) and :continue asks for
@@ -188,7 +190,8 @@
     continuation check, and before :agent-settled (pi: agent_before_settle,
     emitted by _runBeforeSettleBoundary). Payload: :outcome — the last turn's
     outcome (:completed | :error | :aborted) — plus the boundary state
-    :pending-messages, :can-continue, :entries [] and :continue false.
+    :pending-messages (see :turn-end), :can-continue, :entries [] and
+    :continue false.
     Handlers return {:entries [...] :continue bool} as for :turn-end; one
     that merely queues a message also runs one more attempt before the
     prompt settles (pi: shouldContinue includes hasQueuedMessages). A
@@ -204,10 +207,19 @@
    ;; ─── Provider events (pi: context / before_provider_request /
    ;; ─── before_provider_headers / after_provider_response) ────────────
    :context
-   "Fired before each LLM call with the outgoing messages (pi: context —
-    emitContext). Payload: :messages. Handlers may return {:messages [...]}
-    to replace them; the last non-nil result wins (pi chains handler
-    results)."
+   "Fired before each LLM call with the conversation the request would send,
+    without the system prompt (pi: context — emitContext). Payload: :messages.
+    Handlers may return {:messages [...]} to replace the conversation; the
+    leading system message is re-attached, so a handler cannot drop the prompt
+    (pi: restoreSystemMessages). The last non-nil result wins (pi chains
+    handler results; kmet's bus keeps the last)."
+
+   :context-with-system
+   "Fired after :context with the full transcript — system prompt included — and
+    the result is sent verbatim (pi: context_with_system). Payload: :messages.
+    Handlers may return {:messages [...]}; a result that drops the leading
+    system message is reported as an extension error and honored, as pi does.
+    The last non-nil result wins."
 
    :before-provider-request
    "Fired with the assembled request payload before the provider HTTP call

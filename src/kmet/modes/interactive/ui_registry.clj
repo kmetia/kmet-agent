@@ -545,13 +545,14 @@
                                 (status/update-pending-messages! cs)
                                 (state/update-footer! cs)
                                 nil))
-         ;; pi: sendMessage — a custom message: persisted as a custom_message
-         ;; session entry, injected into the agent context (sent to the LLM
-         ;; as a user message; rendered when :display) and optionally
-         ;; triggering a turn. Idle + trigger-turn starts the run (the
-         ;; message is already in context); busy queues via deliver-as
-         ;; (:steer injects immediately — the next LLM call sees it;
-         ;; anything else defers to the next turn).
+         ;; pi: sendCustomMessage — a custom message: persisted as a
+         ;; custom_message session entry (sent to the LLM as a user message;
+         ;; rendered when :display) and optionally triggering a turn. The
+         ;; branches mirror pi's: :next-turn never triggers (it rides the next
+         ;; prompt), a streaming send queues into the run or, without
+         ;; :trigger-turn, defers to the end of the turn so it cannot land
+         ;; between a tool call and its result, and an idle send appends now —
+         ;; starting a run when :trigger-turn is set.
          :send-message! (fn [message & [opts]]
                           (let [ag @(:agent-state cs)
                                 ;; pi: sendMessage → prompt — custom messages
@@ -566,24 +567,26 @@
                                      :custom-type custom-type
                                      :content (:content message)
                                      :display display
-                                     :details (:details message)}]
-                            (when (:session ag)
-                              (session/append-custom-message-entry!
-                               (:session ag) custom-type (:content message)
-                               display (:details message)))
-                            (agent/add-context-message! ag msg)
-                            (when (:trigger-turn opts)
-                              (cond
-                                (not (state/turn-running? cs))
-                                (turn/start-agent-run! cs)
+                                     :details (:details message)}
+                                busy? (state/turn-running? cs)]
+                            (cond
+                              (= :next-turn (:deliver-as opts))
+                              (agent/queue-next-turn-message! ag msg)
 
-                                ;; already in context — the next LLM call sees
-                                ;; it (pi: steer into the current run)
-                                (= :steer (:deliver-as opts))
-                                nil
+                              (and busy? (not (false? (:trigger-turn opts))))
+                              (if (= :follow-up (:deliver-as opts))
+                                (agent/follow-up! ag msg)
+                                (agent/steer! ag msg))
 
-                                :else
-                                (agent/follow-up! ag msg)))
+                              (:trigger-turn opts)
+                              (do (agent/append-custom-message! ag msg)
+                                  (turn/start-agent-run! cs))
+
+                              busy?
+                              (agent/defer-custom-message! ag msg)
+
+                              :else
+                              (agent/append-custom-message! ag msg))
                             ;; both updates schedule their own frames
                             (status/update-pending-messages! cs)
                             (state/update-footer! cs)

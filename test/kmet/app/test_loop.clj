@@ -5057,3 +5057,171 @@
       (t/is (= 6 (count @(:entries sess))) "session untouched by failed compaction")
       (finally
         (fs/delete-tree dir)))))
+
+;; ─── Phase 4: custom-message delivery (pi: sendCustomMessage) ────────────
+
+(t/deftest test-loop-next-turn-custom-message-rides-the-next-prompt
+  (t/testing "a custom message queued for the next prompt rides with it,
+              after its user message (pi: _pendingNextTurnMessages injected
+              in prompt() and cleared)"
+    (let [dir (-> (fs/create-dirs (fs/path "target" (str "test-next-turn-"
+                                                         (System/currentTimeMillis))))
+                  fs/absolutize str)
+          sess (session/create-session dir)
+          agent (loop/make-agent-state :session sess)
+          requests (atom [])]
+      (try
+        (loop/queue-next-turn-message! agent {:role :custom
+                                              :custom-type :note
+                                              :content "queued"
+                                              :display true})
+        (t/is (empty? @(:messages agent))
+              "the message waits for a prompt — nothing is in context yet")
+        (t/is (empty? (session/get-branch sess))
+              "and nothing is persisted yet")
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [opts]
+                        (future
+                          (swap! requests conj (:messages opts))
+                          (when-let [on-text (:on-text opts)] (on-text "ok"))
+                          (when-let [on-done (:on-done opts)] (on-done :stop))
+                          :done))]
+          @(loop/run-agent-turn agent {:message "hi" :on-error (fn [_])}))
+        (t/is (= 1 (count @requests)))
+        (t/is (= [:system :user :custom] (mapv :role (first @requests)))
+              "the queued message rides after the user message")
+        (t/is (= [:user :custom-message] (mapv :role (take 2 (session/get-branch sess))))
+              "persisted once, after the user entry")
+        (finally
+          (fs/delete-tree dir))))))
+
+(t/deftest test-loop-deferred-custom-message-lands-after-the-tool-result
+  (t/testing "a custom message deferred while streaming waits for the end of
+              the turn, then lands after the tool result (pi:
+              _pendingCustomMessages flushed at turn_end)"
+    (let [agent (loop/make-agent-state)
+          requests (atom [])
+          calls (atom 0)]
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    tools/execute-tool (fn [_ _ _] {:content "ok" :is-error false})
+                    llm/send-message
+                    (fn [opts]
+                      (future
+                        (swap! requests conj (:messages opts))
+                        (if (= 1 (swap! calls inc))
+                          (do
+                            (loop/defer-custom-message! agent {:role :custom
+                                                               :custom-type :note
+                                                               :content "deferred"
+                                                               :display true})
+                            (t/is (not-any? #(= "deferred" (get-in % [:content 0 :text]))
+                                            @(:messages agent))
+                                  "not appended while the turn is in flight")
+                            (when-let [on-tc (:on-tool-call opts)]
+                              (on-tc {:id "tc1" :name "bash" :arguments "{}" :index 0}))
+                            (when-let [on-done (:on-done opts)]
+                              (on-done :tool-calls)))
+                          (do (when-let [on-text (:on-text opts)] (on-text "ok"))
+                              (when-let [on-done (:on-done opts)] (on-done :stop))))
+                        :done))]
+        @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+      (t/is (= 2 (count @requests)))
+      (let [second-request (second @requests)]
+        (t/is (= :tool (:role (last (butlast second-request))))
+              "the tool result is in before the deferred message")
+        (t/is (= "deferred" (get-in (last second-request) [:content 0 :text]))
+              "the deferred message follows it"))
+      (t/is (= 1 (count (filter #(= "deferred" (get-in % [:content 0 :text]))
+                                @(:messages agent))))
+            "appended exactly once"))))
+
+(t/deftest test-loop-queued-custom-message-appended-once
+  (t/testing "a custom message queued into the running prompt (pi: steer) is
+              persisted and appended exactly once, when the loop consumes it"
+    (let [dir (-> (fs/create-dirs (fs/path "target" (str "test-queued-custom-"
+                                                         (System/currentTimeMillis))))
+                  fs/absolutize str)
+          sess (session/create-session dir)
+          agent (loop/make-agent-state :session sess)
+          calls (atom 0)]
+      (try
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      tools/execute-tool (fn [_ _ _] {:content "ok" :is-error false})
+                      llm/send-message
+                      (fn [opts]
+                        (future
+                          (if (= 1 (swap! calls inc))
+                            (do
+                              (loop/steer! agent {:role :custom
+                                                  :custom-type :note
+                                                  :content "steered"
+                                                  :display true})
+                              (when-let [on-tc (:on-tool-call opts)]
+                                (on-tc {:id "tc1" :name "bash" :arguments "{}" :index 0}))
+                              (when-let [on-done (:on-done opts)]
+                                (on-done :tool-calls)))
+                            (do (when-let [on-text (:on-text opts)] (on-text "ok"))
+                                (when-let [on-done (:on-done opts)] (on-done :stop))))
+                          :done))]
+          @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+        (t/is (= 2 @calls))
+        (t/is (= 1 (count (filter #(= "steered" (get-in % [:content 0 :text]))
+                                  @(:messages agent))))
+              "appended exactly once — the queue drain is the only append")
+        (t/is (= 1 (count (filter #(and (= :custom-message (:role %))
+                                        (= "steered" (:content %)))
+                                  (session/get-branch sess))))
+              "persisted exactly once")
+        (finally
+          (fs/delete-tree dir))))))
+
+(t/deftest test-loop-prepare-request-checkpoint
+  (t/testing "the per-request checkpoint runs before every provider request
+              (pi: config.prepareRequest): a :context update applies to the
+              request that follows with no turn boundary between, and it is
+              not persisted (the session projection stays authoritative for
+              what is stored)"
+    (let [dir (-> (fs/create-dirs (fs/path "target" (str "test-prepare-request-"
+                                                         (System/currentTimeMillis))))
+                  fs/absolutize str)
+          sess (session/create-session dir)
+          agent (loop/make-agent-state :session sess)
+          requests (atom [])
+          hook-calls (atom 0)
+          calls (atom 0)]
+      (try
+        (reset! (:prepare-request agent)
+                (fn [req]
+                  (swap! hook-calls inc)
+                  (cond-> {:model (models/map->Model {:provider :anthropic
+                                                      :id "model-b"})}
+                    ;; replace the conversation on the first request only —
+                    ;; the replacement must already reach that request
+                    (= 1 @hook-calls)
+                    (assoc :context (conj (vec (:context req))
+                                          {:role :user
+                                           :content [{:type :text :text "checkpoint"}]})))))
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      tools/execute-tool (fn [_ _ _] {:content "ok" :is-error false})
+                      llm/send-message
+                      (fn [opts]
+                        (swap! requests conj opts)
+                        ((stub-llm-tool-then-text calls) opts))]
+          @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+        (t/is (= 2 @hook-calls) "once per provider request")
+        (t/is (= "model-b" (:model (first @requests)))
+              "the model swap reaches the first request — no turn boundary needed")
+        (t/is (= :anthropic (:provider (first @requests)))
+              "and its provider follows")
+        (t/is (= [:system :user :user] (mapv :role (:messages (first @requests))))
+              "the replaced context is what the first request sends")
+        (t/is (= "checkpoint" (get-in (:messages (first @requests)) [2 :content 0 :text])))
+        (t/is (= "checkpoint" (get-in (:messages (second @requests)) [2 :content 0 :text]))
+              "the replacement stays in the loop context for later requests (pi: currentContext)")
+        (t/is (= 1 (count (filter #(= :user (:role %)) (session/get-branch sess))))
+              "the request projection is not persisted — only the prompt's user entry")
+        (finally
+          (fs/delete-tree dir))))))
+
+

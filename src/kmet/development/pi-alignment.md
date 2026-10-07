@@ -282,6 +282,7 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
 | `registerMarkdownTransformer` | **Done** — `extensions/register-markdown-transformer!` (applied in registration order, idempotent, errors skipped) |
 | `registerEntryRenderer` | **Done** — `extensions/register-entry-renderer!` (custom entry types, live + replay) |
 | `sendUserMessage` (deliverAs steer/followUp) | **Done** — `extensions/send-user-message` → loop steer!/follow-up! |
+| `sendCustomMessage` (deliverAs steer/followUp/nextTurn) | **Done** (H) — `extensions/send-message!` → the registry's pi branch logic: `:next-turn` queues for the next prompt, a streaming send queues into the run (steer/follow-up) or defers to the end of the turn (`:pending-custom`), an idle send appends and optionally starts a turn. Headless (no UI registry) still appends immediately via the sinks |
 | `setModel`, `getThinkingLevel`, `setThinkingLevel` | **Done** — via the ui registry (auth-gated setModel, validated levels) |
 | `exec` | **Done** — `extensions/exec` (babashka.process, string capture) |
 | `getActiveTools`/`getAllTools`/`setActiveTools` | **Done** — `:enabled-tools` (runtime selection, pi: setActiveTools) and `:default-tools` (pi: defaultTools) filter the agent state, applied to the wire `:tools` and the run_code sandbox surface; `get-active-tools` returns the effective active names, `get-all-tools` the array |
@@ -338,11 +339,12 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
 ### 7. Session context & agent-core (pi 0.87.0)
 
 Moved. The 0.87.0 session-context wave is a run-lifecycle concern and now
-lives in [`lifecycle.md`](../../lifecycle.md): append-only per-message
-context edits (K), the actionable `turn_end` / `agent_before_settle`
-boundaries (F/G), `finishTurn` / `prepareRequest` / `peekQueuedMessages`
-(F/I/J), the pending custom-message queue and `:next-turn` (H), and
-`context_with_system` (L). Per-model image input limits remain in §2.
+lives in [`lifecycle.md`](../../lifecycle.md): the actionable `turn_end` /
+`agent_before_settle` boundaries (F/G), `finishTurn` / `prepareRequest` /
+`peekQueuedMessages` (F/I/J), the pending custom-message queue and
+`:next-turn` (H), and `context_with_system` (L) landed; append-only
+per-message context edits (K) remain. Per-model image input limits remain in
+§2.
 
 ## Appendix: Event type vocabulary
 
@@ -356,8 +358,8 @@ pi events (`core/extensions/types.ts`) → kmet status (`app/event_bus.clj` `eve
 | `session_before_compact` / `session_compact` | ~ | `:session-before-compact` (cancelable), `:compaction-start`/`:compaction-end` (reason manual/threshold/overflow/auto), and `:session-compact-failed`; a success `:session_compact` event is not emitted. Dispatch parity landed as D — the threshold check also runs post-run, between `:agent-end` and the pre-settle boundary (pi: `_handlePostAgentRun` → `_checkCompaction`) |
 | `session_before_tree` / `session_tree` | ✅ `:session-before-tree` / `:session-tree` | incl. cancel/summary/extension-summary results |
 | `session_shutdown` | ✅ `:session-shutdown` | emitted by `/reload` (reason reload) and `/new` (reason new, target-session-file) before the extension runtime is torn down (pi: teardownCurrent / session.reload) |
-| `context` | ✅ `:context` | fired before each LLM call with the outgoing messages (system prompt included — `call-llm` prepends it; tools travel separately); handlers return {:messages [...]} to replace (last non-nil wins). pi 0.87.0 splits this from `context_with_system` — see [`lifecycle.md`](../../lifecycle.md) L |
-| `context_with_system` | — | missing (pi 0.87.0 per-request system-message transformations over the full transcript) — see [`lifecycle.md`](../../lifecycle.md) L |
+| `context` | ✅ `:context` | fired before each LLM call with the conversation only — the leading system message is re-attached to a replacement (pi: `restoreSystemMessages`); handlers return `{:messages [...]}` to replace (last non-nil wins). Fires for every LLM call, the compaction summarization included — pi routes that outside `transformContext` |
+| `context_with_system` | ✅ `:context-with-system` | runs after `:context` over the full transcript and its result is sent verbatim; a result that drops the leading system message is reported and honored (pi 0.87.0 — landed as L, see [`lifecycle.md`](../../lifecycle.md)) |
 | `before_agent_start` | ✅ | hook, not event |
 | `agent_start` / `agent_end` / `agent_settled` | ✅ `:agent-start` / `:agent-end` / `:agent-settled` | one `:agent-start`/`:agent-end` pair per attempt (`agent.prompt` then `agent.continue`, so auto-retry and overflow recovery each get their own); `:agent-end :messages` accumulates that attempt's messages (pi: `newMessages`) — a mid-run compaction does not shrink them, a cancelled/errored attempt is included, and `:will-retry` marks a retryable failure (added for public listeners only, as pi does — `_emitExtensionEvent` precedes the decoration); exactly one `:agent-settled` per prompt; a message an `:agent-end` handler queues starts a fresh attempt in the same prompt, with the queued messages as its prompt (pi: `hasQueuedMessages` → `agent.continue`; landed as E) |
 | `agent_before_settle` | ✅ `:agent-before-settle` | actionable; fires once before `:agent-settled` with the run's `:outcome`, commits returned entries, and `{:continue true}` runs one more attempt (landed as G — see [`lifecycle.md`](../../lifecycle.md)) |
