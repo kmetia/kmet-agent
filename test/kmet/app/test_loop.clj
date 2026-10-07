@@ -5069,7 +5069,8 @@
                   fs/absolutize str)
           sess (session/create-session dir)
           agent (loop/make-agent-state :session sess)
-          requests (atom [])]
+          calls (atom 0)
+          opts (atom [])]
       (try
         (loop/queue-next-turn-message! agent {:role :custom
                                               :custom-type :note
@@ -5080,17 +5081,12 @@
         (t/is (empty? (session/get-branch sess))
               "and nothing is persisted yet")
         (with-redefs [cfg/get-api-key (fn [_] "test-key")
-                      llm/send-message
-                      (fn [opts]
-                        (future
-                          (swap! requests conj (:messages opts))
-                          (when-let [on-text (:on-text opts)] (on-text "ok"))
-                          (when-let [on-done (:on-done opts)] (on-done :stop))
-                          :done))]
+                      llm/send-message (stub-llm-text-turns calls ["ok"] opts)]
           @(loop/run-agent-turn agent {:message "hi" :on-error (fn [_])}))
-        (t/is (= 1 (count @requests)))
-        (t/is (= [:system :user :custom] (mapv :role (first @requests)))
-              "the queued message rides after the user message")
+        (let [requests (mapv :messages @opts)]
+          (t/is (= 1 (count requests)))
+          (t/is (= [:system :user :custom] (mapv :role (first requests)))
+                "the queued message rides after the user message"))
         (t/is (= [:user :custom-message] (mapv :role (take 2 (session/get-branch sess))))
               "persisted once, after the user entry")
         (finally
@@ -5102,7 +5098,8 @@
               _pendingCustomMessages flushed at turn_end)"
     (let [agent (loop/make-agent-state)
           requests (atom [])
-          calls (atom 0)]
+          calls (atom 0)
+          deferred? (fn [m] (= "deferred" (get-in m [:content 0 :text])))]
       (with-redefs [cfg/get-api-key (fn [_] "test-key")
                     tools/execute-tool (fn [_ _ _] {:content "ok" :is-error false})
                     llm/send-message
@@ -5115,8 +5112,7 @@
                                                                :custom-type :note
                                                                :content "deferred"
                                                                :display true})
-                            (t/is (not-any? #(= "deferred" (get-in % [:content 0 :text]))
-                                            @(:messages agent))
+                            (t/is (not-any? deferred? @(:messages agent))
                                   "not appended while the turn is in flight")
                             (when-let [on-tc (:on-tool-call opts)]
                               (on-tc {:id "tc1" :name "bash" :arguments "{}" :index 0}))
@@ -5130,10 +5126,9 @@
       (let [second-request (second @requests)]
         (t/is (= :tool (:role (last (butlast second-request))))
               "the tool result is in before the deferred message")
-        (t/is (= "deferred" (get-in (last second-request) [:content 0 :text]))
+        (t/is (deferred? (last second-request))
               "the deferred message follows it"))
-      (t/is (= 1 (count (filter #(= "deferred" (get-in % [:content 0 :text]))
-                                @(:messages agent))))
+      (t/is (= 1 (count (filter deferred? @(:messages agent))))
             "appended exactly once"))))
 
 (t/deftest test-loop-queued-custom-message-appended-once
@@ -5231,9 +5226,11 @@
               its {:continue true} is honored, with the flush landing the
               message before the continuation request"
     (let [agent (loop/make-agent-state)
-          requests (atom [])
+          calls (atom 0)
+          opts (atom [])
           boundaries (atom [])
-          ends (atom 0)]
+          ends (atom 0)
+          late? (fn [m] (= "late" (get-in m [:content 0 :text])))]
       (try
         (event-bus/on-event :agent-end
                             (fn [_]
@@ -5249,27 +5246,21 @@
                               (swap! boundaries conj e)
                               {:continue true}))
         (with-redefs [cfg/get-api-key (fn [_] "test-key")
-                      llm/send-message
-                      (fn [opts]
-                        (swap! requests conj (:messages opts))
-                        (future
-                          (when-let [on-text (:on-text opts)] (on-text "ok"))
-                          (when-let [on-done (:on-done opts)] (on-done :stop))
-                          :done))]
+                      llm/send-message (stub-llm-text-turns calls ["ok"] opts)]
           ;; the second boundary's rejected continuation warns to stderr
           (binding [*err* (java.io.StringWriter.)]
             @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])})))
-        (let [boundary (first @boundaries)]
+        (let [requests (mapv :messages @opts)
+              boundary (first @boundaries)]
           (t/is (true? (:can-continue boundary))
                 "the deferred message makes the boundary runnable")
           (t/is (= ["late"] (mapv :content (:pending-messages boundary)))
-                "and is previewed in :pending-messages"))
-        (t/is (= 2 (count @requests))
-              "the continuation ran one more attempt")
-        (t/is (= "late" (get-in (last (second @requests)) [:content 0 :text]))
-              "the flush landed the message before the continuation request")
-        (t/is (= 1 (count (filter #(= "late" (get-in % [:content 0 :text]))
-                                  @(:messages agent))))
+                "and is previewed in :pending-messages")
+          (t/is (= 2 (count requests))
+                "the continuation ran one more attempt")
+          (t/is (late? (last (second requests)))
+                "the flush landed the message before the continuation request"))
+        (t/is (= 1 (count (filter late? @(:messages agent))))
               "appended exactly once")
         (finally
           (event-bus/clear-event-listeners!))))))
@@ -5283,7 +5274,8 @@
     (let [agent (loop/make-agent-state)
           opts (atom [])
           turns (atom 0)
-          calls (atom 0)]
+          calls (atom 0)
+          late? (fn [m] (= "late" (get-in m [:content 0 :text])))]
       (try
         (event-bus/on-event :turn-end
                             (fn [_] (when (= 1 (swap! turns inc)) {:continue true})))
@@ -5303,14 +5295,9 @@
                           :done))]
           @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
         (t/is (= 2 @calls) "the boundary continuation ran one more request")
-        (t/is (= "late" (get-in (last (:messages (second @opts))) [:content 0 :text]))
+        (t/is (late? (last (:messages (second @opts))))
               "with the deferred message flushed in")
-        (t/is (= 1 (count (filter #(= "late" (get-in % [:content 0 :text]))
-                                  @(:messages agent))))
+        (t/is (= 1 (count (filter late? @(:messages agent))))
               "appended exactly once")
         (finally
           (event-bus/clear-event-listeners!))))))
-
-
-
-

@@ -204,8 +204,9 @@
     further events for this prompt will be emitted (pi: agent_settled,
     emitted from a finally block after the whole prompt loop)."
 
-   ;; ─── Provider events (pi: context / before_provider_request /
-   ;; ─── before_provider_headers / after_provider_response) ────────────
+   ;; ─── Provider events (pi: context / context_with_system /
+   ;; ─── before_provider_request / before_provider_headers /
+   ;; ─── after_provider_response) ──────────────────────────────────────────
    :context
    "Fired before each LLM call with the conversation the request would send,
     without the system prompt (pi: context — emitContext). Payload: :messages.
