@@ -1,6 +1,7 @@
 (ns kmet.app.test-run-code
-  "The run_code tool: per-call SCI sandbox, async tools bridge, capture and
-   deadline behavior (design: run_code.md)."
+  "The run_code tool: per-call SCI sandbox with the full babashka namespace/
+   class surface, emit-only output, async tools bridge and deadline behavior
+   (design: run_code.md)."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
@@ -8,7 +9,8 @@
             [kmet.app.tools.core :as tools]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.run-code :as run-code]
-            [kmet.app.tools.util :as tool-util]))
+            [kmet.app.tools.util :as tool-util]
+            [kmet.libs.host :as host]))
 
 (defn- run
   "Execute the run_code tool the way the registry does."
@@ -30,24 +32,31 @@
     (fs/create-dirs dir)
     dir))
 
-(t/deftest test-run-code-return-value
-  (let [r (run "(+ 1 2)")]
+(t/deftest test-run-code-emit-is-the-only-output
+  (let [r (run "(emit (+ 1 2))")]
     (t/is (not (:is-error r)))
     (t/is (= "3" (:content r)))
-    (t/is (nil? (get-in r [:details :timeout])) "no deadline unless asked")))
+    (t/is (nil? (get-in r [:details :timeout])) "no deadline unless asked"))
+  (t/is (= "(no output)" (:content (run "(+ 1 2)")))
+        "the final value is not reported"))
 
-(t/deftest test-run-code-print-and-return
+(t/deftest test-run-code-print-and-return-are-not-reported
   (let [r (run "(println \"hello\") 42")]
     (t/is (not (:is-error r)))
-    (t/is (str/includes? (:content r) "hello"))
-    (t/is (str/includes? (:content r) "42")))
+    (t/is (= "(no output)" (:content r))
+          "stdout and the final value stay out of the result"))
   (t/is (= "(no output)" (:content (run "nil")))))
 
 (t/deftest test-run-code-emit-compact-result
   (let [r (run "(sandbox/emit {:count 2 :items [1 2]})")]
     (t/is (not (:is-error r)))
     (t/is (= "{:count 2, :items [1 2]}" (str/trim (:content r))))
-    (t/is (nil? (:truncation r)))))
+    (t/is (nil? (:truncation r))))
+  (let [r (run "(emit {:count 2 :items [1 2]})")]
+    (t/is (= "{:count 2, :items [1 2]}" (str/trim (:content r)))
+          "bare emit works too"))
+  (let [r (run "(emit \"a\") (emit 1) (emit :k)")]
+    (t/is (= "a\n1\n:k" (:content r)) "emits join in order")))
 
 (t/deftest test-run-code-error
   (let [r (run "(this-does-not-exist 1)")]
@@ -127,26 +136,25 @@
       (t/is (= :aborted (get-in r [:details :error]))))))
 
 (t/deftest ^:slow test-run-code-caught-interrupt-still-aborts
-  ;; Throwable is not resolvable in the sandbox (no class access), but
-  ;; Exception is — and the interrupt exception is catchable, so the abort
-  ;; reason must win over whatever the script returns.
+  ;; the interrupt exception is catchable, so the abort reason must win over
+  ;; whatever the script returns (the full surface exposes Throwable too, but
+  ;; a catch of Exception is the realistic case).
   (let [r (run "(try (loop [] (recur)) (catch Exception e :caught))" {:timeout 0.3})]
     (t/is (:is-error r))
     (t/is (= :timeout (get-in r [:details :error])))))
 
-(t/deftest test-run-code-spawn-output-captured
-  (let [r (run "@(sandbox/spawn (fn [] (println \"from-future\"))) :done")]
+(t/deftest test-run-code-spawn-emit-reported
+  (let [r (run "@(sandbox/spawn (fn [] (emit :from-future)))")]
     (t/is (not (:is-error r)) (:content r))
-    (t/is (str/includes? (:content r) "from-future"))))
+    (t/is (= ":from-future" (:content r)))))
 
 (t/deftest test-run-code-emit-from-spawn
-  (let [r (run "@(sandbox/spawn (fn [] (sandbox/emit :from-future))) :done")]
+  (let [r (run "@(sandbox/spawn (fn [] (sandbox/emit :from-future)))")]
     (t/is (not (:is-error r)) (:content r))
-    (t/is (str/includes? (:content r) ":from-future"))
-    (t/is (str/includes? (:content r) ":done"))))
+    (t/is (= ":from-future" (:content r)))))
 
 (t/deftest test-run-code-capabilities
-  (let [r (run (str "[(fs/exists? \"deps.edn\")"
+  (let [r (run (str "(emit [(fs/exists? \"deps.edn\")"
                     "  (> (count (slurp \"deps.edn\")) 0)"
                     "  (json/generate-string {:a 1})"
                     "  (vec (pmap inc [1 2 3]))"
@@ -157,21 +165,21 @@
                     "  (str/upper-case \"x\")"
                     "  (set/union #{1} #{2})"
                     "  (edn/read-string \"1\")"
-                    "  (walk/postwalk identity [[1]])]"))]
+                    "  (walk/postwalk identity [[1]])])"))]
     (t/is (not (:is-error r)) (:content r))
     (t/is (= (str "[true true \"{\\\"a\\\":1}\" [2 3 4] 42 true true true "
                   "\"X\" #{1 2} 1 [[1]]]")
              (:content r)))))
 
 (t/deftest test-run-code-explicit-require
-  (let [r (run "(require '[clojure.string :as cs]) (cs/upper-case \"y\")")]
+  (let [r (run "(require '[clojure.string :as cs]) (emit (cs/upper-case \"y\"))")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (= "Y" (:content r)))))
 
 (t/deftest test-run-code-reload-is-noop
   ;; SCI consults the sandbox :load-fn even for a :reload; a known namespace
   ;; stays available (the pre-simplification loader returned its handle)
-  (let [r (run "(require 'clojure.set :reload) (require '[babashka.fs :as fs] :reload) :ok")]
+  (let [r (run "(require 'clojure.set :reload) (require '[babashka.fs :as fs] :reload) (emit :ok)")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (= ":ok" (:content r)))))
 
@@ -180,20 +188,21 @@
     (try
       (spit (str dir "/hello.txt") "from-cwd")
       (binding [tool-util/*cwd* dir]
-        (let [r (run (str "[(slurp \"hello.txt\") (= (sandbox/cwd) " (pr-str dir) ")]"))]
+        (let [r (run (str "(emit [(slurp \"hello.txt\") (= (sandbox/cwd) " (pr-str dir) ")])"))]
           (t/is (not (:is-error r)) (:content r))
           (t/is (str/includes? (:content r) "from-cwd"))
           (t/is (str/includes? (:content r) "true"))))
       (finally (fs/delete-tree dir)))))
 
-(t/deftest test-run-code-stderr-capture
-  (let [r (run "(binding [*out* *err*] (println \"oops\")) :done")]
+(t/deftest test-run-code-stderr-not-reported
+  (let [r (run "(binding [*out* *err*] (println \"oops\")) (emit :done)")]
     (t/is (not (:is-error r)))
-    (t/is (str/includes? (:content r) "[stderr]"))
-    (t/is (str/includes? (:content r) "oops"))))
+    (t/is (= ":done" (:content r)))
+    (t/is (not (str/includes? (:content r) "oops"))
+          "stderr is captured but not reported")))
 
 (t/deftest test-run-code-output-truncation
-  (let [r (run "(dotimes [i 3000] (println i))")]
+  (let [r (run "(dotimes [i 3000] (emit i))")]
     (t/is (not (:is-error r)))
     (t/is (some? (:truncation r)))
     (t/is (= :lines (get-in r [:truncation :truncated-by])))
@@ -201,22 +210,22 @@
     (t/is (str/includes? (:content r) "truncated"))))
 
 (t/deftest test-run-code-output-budget
-  (let [r (run "(dotimes [i 1000] (println (apply str (repeat 100 \"x\"))))"
+  (let [r (run "(dotimes [i 1000] (emit (apply str (repeat 100 \"x\"))))"
                {:max-output-bytes 1024})]
     (t/is (not (:is-error r)))
     (t/is (= 1024 (get-in r [:truncation :max-bytes])))
     (t/is (= :bytes (get-in r [:truncation :truncated-by])))
     (t/is (str/includes? (:content r) "[run_code output truncated")))
-  (let [r (run "(dotimes [i 1000] (println (apply str (repeat 100 \"x\"))))")]
+  (let [r (run "(dotimes [i 1000] (emit (apply str (repeat 100 \"x\"))))")]
     (t/is (= (* 16 1024) (get-in r [:truncation :max-bytes]))
           "the script default is smaller than bash's shared cap")))
 
 (t/deftest test-run-code-output-limit-normalization
-  (let [r (run "(dotimes [i 1000] (println (apply str (repeat 100 \"x\"))))"
+  (let [r (run "(dotimes [i 1000] (emit (apply str (repeat 100 \"x\"))))"
                {:max-output-bytes 999999})]
     (t/is (= (* 50 1024) (get-in r [:truncation :max-bytes]))
           "limits clamp to the tool-wide byte cap"))
-  (let [r (run "(dotimes [i 1000] (println (apply str (repeat 100 \"x\"))))"
+  (let [r (run "(dotimes [i 1000] (emit (apply str (repeat 100 \"x\"))))"
                {:max-output-bytes 0})]
     (t/is (= (* 16 1024) (get-in r [:truncation :max-bytes])))
     (t/is (= 2000 (get-in r [:truncation :max-lines]))
@@ -224,7 +233,7 @@
 
 (t/deftest test-run-code-streaming
   (let [updates (atom [])
-        r (run "(dotimes [i 4] (println i) (sandbox/sleep 50))"
+        r (run "(dotimes [i 4] (emit i) (sandbox/sleep 50))"
                {}
                (fn [partial] (swap! updates conj partial)))]
     (t/is (not (:is-error r)))
@@ -237,7 +246,7 @@
                      :description "Echo args"
                      :execute (fn [args] {:content (pr-str args)})}
     (fn []
-      (let [r (run "@(tools/call \"run-code-test-echo\" {:x 1})")]
+      (let [r (run "(emit @(tools/call \"run-code-test-echo\" {:x 1}))")]
         (t/is (not (:is-error r)) (:content r))
         (t/is (str/includes? (:content r) ":x 1"))
         (t/is (= [{:tool "run-code-test-echo" :ok true}]
@@ -249,10 +258,10 @@
                      :description "Echo args"
                      :execute (fn [args] {:content (pr-str args)})}
     (fn []
-      (let [r (run (str "(let [a (tools/call \"run-code-test-echo\" {:n 1})"
+      (let [r (run (str "(emit (let [a (tools/call \"run-code-test-echo\" {:n 1})"
                         "      b (tools/call \"run-code-test-echo\" {:n 2})]"
                         "  [(clojure.string/includes? (:content @a) \":n 1\")"
-                        "   (clojure.string/includes? (:content @b) \":n 2\")])"))]
+                        "   (clojure.string/includes? (:content @b) \":n 2\")]))"))]
         (t/is (not (:is-error r)) (:content r))
         (t/is (= "[true true]" (:content r)))
         (t/is (= 2 (count (get-in r [:details :calls]))))))))
@@ -263,9 +272,9 @@
                      :description "Echo args"
                      :execute (fn [args] {:content (str "echo-" (:n args))})}
     (fn []
-      (let [r (run (str "(let [ps (tools/call-many [{:name \"run-code-test-echo\""
+      (let [r (run (str "(emit (let [ps (tools/call-many [{:name \"run-code-test-echo\""
                         " :args {:n 1}} [\"run-code-test-echo\" {:n 2}]])]"
-                        "  (mapv :content (tools/await-all ps)))"))]
+                        "  (mapv :content (tools/await-all ps))))"))]
         (t/is (not (:is-error r)) (:content r))
         (t/is (= "[\"echo-1\" \"echo-2\"]" (:content r)))
         (t/is (= 2 (count (get-in r [:details :calls]))))
@@ -294,8 +303,8 @@
                      :description "Echo args"
                      :execute (fn [args] {:content (pr-str args)})}
     (fn []
-      (let [r (run (str "(count (mapv deref (mapv #(tools/call \"run-code-test-echo\" {:n %})"
-                        " (range 40))))"))]
+      (let [r (run (str "(emit (count (mapv deref (mapv #(tools/call \"run-code-test-echo\" {:n %})"
+                        " (range 40)))))"))]
         (t/is (not (:is-error r)) (:content r))
         (t/is (= "40" (:content r)))
         (t/is (= 40 (count (get-in r [:details :calls]))))
@@ -321,8 +330,8 @@
                    :after (fn [ctx]
                             (when (= "run-code-test-echo" (:tool-name ctx))
                               {:content (str (:content (:result ctx)) "|after")}))}]
-          (let [r (run (str "[(deref (tools/call \"run-code-test-echo\" {:n 1}))"
-                            " (deref (tools/call \"run-code-test-echo\" {:block true}))]"))]
+          (let [r (run (str "(emit [(deref (tools/call \"run-code-test-echo\" {:n 1}))"
+                            " (deref (tools/call \"run-code-test-echo\" {:block true}))])"))]
             (t/is (not (:is-error r)) (:content r))
             (t/is (str/includes? (:content r) ":n 1, :hooked true"))
             (t/is (str/includes? (:content r) "|after"))
@@ -401,15 +410,15 @@
       (finally (fs/delete-tree dir)))))
 
 (t/deftest test-run-code-gate
-  (let [r (run "@(tools/call \"no-such-tool\" {})")]
+  (let [r (run "(emit @(tools/call \"no-such-tool\" {}))")]
     (t/is (not (:is-error r)))
     (t/is (str/includes? (:content r) ":is-error true"))
     (t/is (str/includes? (:content r) "no-such-tool")))
-  (let [r (run "@(tools/call \"script\" {:code \"1\"})")]
+  (let [r (run "(emit @(tools/call \"script\" {:code \"1\"}))")]
     (t/is (str/includes? (:content r) "not active")))
   (binding [run-code/*enabled-tools-fn* (fn [] #{"read"})]
-    (t/is (= "[\"read\"]" (:content (run "(tools/list)"))))
-    (let [r (run "@(tools/call \"bash\" {})")]
+    (t/is (= "[\"read\"]" (:content (run "(emit (tools/list))"))))
+    (let [r (run "(emit @(tools/call \"bash\" {}))")]
       (t/is (str/includes? (:content r) "not active")))))
 
 (t/deftest test-run-code-discovery
@@ -418,11 +427,11 @@
                      :description "Echo args"
                      :execute (fn [_] {:content "x"})}
     (fn []
-      (let [r (run "(let [names (tools/list)] [(boolean (some #{\"run-code-test-echo\"} names)) (boolean (some #{\"run_code\"} names))])")]
+      (let [r (run "(emit (let [names (tools/list)] [(boolean (some #{\"run-code-test-echo\"} names)) (boolean (some #{\"run_code\"} names))]))")]
         (t/is (= "[true false]" (:content r))))
-      (let [r (run "(let [d (tools/describe \"run-code-test-echo\")] [(:name d) (:label d) (contains? d :execute)])")]
+      (let [r (run "(emit (let [d (tools/describe \"run-code-test-echo\")] [(:name d) (:label d) (contains? d :execute)]))")]
         (t/is (= "[\"run-code-test-echo\" \"Echo\" false]" (:content r))))
-      (let [r (run "(tools/describe \"no-such-tool\")")]
+      (let [r (run "(emit (tools/describe \"no-such-tool\"))")]
         (t/is (str/includes? (:content r) ":is-error true"))))))
 
 (t/deftest test-run-code-contributed-tools
@@ -441,22 +450,22 @@
        {:name "run_code" :label "Evil"
         :execute (fn [_] {:content "should never run" :is-error false})}})
     (fn []
-      (t/is (str/includes? (:content (run "(tools/list)")) "run-code-test-contributed"))
-      (let [r (run (str "(let [d (tools/describe \"run-code-test-contributed\")]"
+      (t/is (str/includes? (:content (run "(emit (tools/list))")) "run-code-test-contributed"))
+      (let [r (run (str "(emit (let [d (tools/describe \"run-code-test-contributed\")]"
                         "  [(:name d) (:label d) (contains? d :execute)"
-                        "   (get-in d [:parameters :properties \"x\" :type])])"))]
+                        "   (get-in d [:parameters :properties \"x\" :type])]))"))]
         (t/is (= "[\"run-code-test-contributed\" \"Contributed\" false \"number\"]"
                  (:content r))))
-      (let [r (run "@(tools/call \"run-code-test-contributed\" {:x 7})")]
+      (let [r (run "(emit @(tools/call \"run-code-test-contributed\" {:x 7}))")]
         (t/is (str/includes? (:content r) "contributed:7"))
         (t/is (= [{:tool "run-code-test-contributed" :ok true}]
                  (get-in r [:details :calls]))))
       ;; the exclusion list covers contributions too
-      (let [r (run "@(tools/call \"script\" {:code \"1\"})")]
+      (let [r (run "(emit @(tools/call \"script\" {:code \"1\"}))")]
         (t/is (str/includes? (:content r) "not active"))
         (t/is (not (str/includes? (:content r) "should never run"))))
       ;; a registry name wins a collision (the model's names keep meaning)
-      (let [r (run "(let [d (tools/describe \"read\")] (:label d))")]
+      (let [r (run "(emit (let [d (tools/describe \"read\")] (:label d)))")]
         (t/is (= "Read file" (:content r)))))))
 
 (t/deftest test-run-code-contributed-tools-bypass-enabled
@@ -468,17 +477,17 @@
                                          :execute (fn [_] {:content "x" :is-error false})}})
     (fn []
       (binding [run-code/*enabled-tools-fn* (fn [] #{"read"})]
-        (t/is (= "[\"read\" \"run-code-test-contributed\"]" (:content (run "(tools/list)"))))
-        (t/is (str/includes? (:content (run "@(tools/call \"bash\" {})")) "not active"))))))
+        (t/is (= "[\"read\" \"run-code-test-contributed\"]" (:content (run "(emit (tools/list))"))))
+        (t/is (str/includes? (:content (run "(emit @(tools/call \"bash\" {}))")) "not active"))))))
 
 (t/deftest test-run-code-contributed-tools-unregister
   (registry/register-tool-source! ::extension
                                   (fn [] {"run-code-test-gone" {:name "run-code-test-gone"
                                                                 :execute (fn [_] {:content "x"})}}))
   (try
-    (t/is (str/includes? (:content (run "(tools/list)")) "run-code-test-gone"))
+    (t/is (str/includes? (:content (run "(emit (tools/list))")) "run-code-test-gone"))
     (finally (registry/unregister-tool-source! ::extension)))
-  (t/is (not (str/includes? (:content (run "(tools/list)")) "run-code-test-gone"))))
+  (t/is (not (str/includes? (:content (run "(emit (tools/list))")) "run-code-test-gone"))))
 
 (t/deftest test-run-code-broken-tool-source
   ;; a source that throws (or returns a non-map) contributes nothing and
@@ -486,7 +495,7 @@
   (registry/register-tool-source! ::broken (fn [] (throw (ex-info "boom" {}))))
   (registry/register-tool-source! ::bad-shape (fn [] [1 2 3]))
   (try
-    (let [r (run "(+ 1 2)")]
+    (let [r (run "(emit (+ 1 2))")]
       (t/is (not (:is-error r)) (:content r))
       (t/is (= "3" (:content r))))
     (finally
@@ -507,30 +516,39 @@
                         {:content "done" :is-error false})}})
     (fn []
       (let [updates (atom [])
-            r (run "@(tools/call \"run-code-test-stream\" {})" {}
+            r (run "(emit @(tools/call \"run-code-test-stream\" {}))" {}
                    (fn [partial] (swap! updates conj partial)))]
         (t/is (not (:is-error r)) (:content r))
         (t/is (str/includes? (:content r) "done"))
         (t/is (some #(str/includes? (:content %) "inner-progress") @updates))))))
 
+(t/deftest test-run-code-full-script-surface
+  ;; the sandbox carries the host's clojure.*/babashka.* namespaces; on
+  ;; babashka it also carries the class table (jolt's SCI exposes none), so a
+  ;; normal script resolves System/Throwable and uses future
+  (t/is (= "x" (:content (run "(require '[clojure.java.io :as io]) (emit (str (io/file \"x\")))"))))
+  (t/is (= "true" (:content (run "(emit (boolean (resolve 'clojure.pprint/pprint)))"))))
+  (t/is (= "3" (:content (run "(emit @(future 3))"))))
+  (when-not (host/jolt?)
+    (t/is (= "true" (:content (run "(emit (pos? (System/currentTimeMillis)))"))))
+    (t/is (= ":caught" (:content (run "(emit (try (throw (Throwable. \"x\")) (catch Throwable t :caught)))"))))))
+
 (t/deftest test-run-code-boundary
-  (let [r (run "(System/currentTimeMillis)")]
-    (t/is (:is-error r))
-    (t/is (str/includes? (:content r) "System/currentTimeMillis")))
+  ;; kmet's own namespaces stay out of the sandbox
   (let [r (run "(require 'kmet.app.loop)")]
     (t/is (:is-error r))
     (t/is (str/includes? (:content r) "kmet.app.loop"))
     (t/is (str/includes? (:content r) "cannot load namespace")
           "the sandbox's own boundary error, not SCI's generic one"))
-  (let [r (run "(future 1)")]
+  (let [r (run "(require 'kmet.app.tools.core)")]
     (t/is (:is-error r))
-    (t/is (str/includes? (:content r) "future"))))
+    (t/is (str/includes? (:content r) "cannot load namespace"))))
 
 (t/deftest test-run-code-context-isolation
-  (let [r (run "(def leaked 42) (defn tally [] 1) leaked")]
+  (let [r (run "(def leaked 42) (defn tally [] 1) (emit leaked)")]
     (t/is (not (:is-error r)))
     (t/is (= "42" (:content r))))
-  (let [r (run "[(resolve 'leaked) (resolve 'tally)]")]
+  (let [r (run "(emit [(resolve 'leaked) (resolve 'tally)])")]
     (t/is (not (:is-error r)))
     (t/is (= "[nil nil]" (:content r)))))
 
@@ -540,17 +558,23 @@
       (binding [tool-util/*cwd* dir]
         ;; both babashka.process shapes: tokens with opts first, a command
         ;; vector with opts last (the wrapper normalizes them)
-        (let [r (run (str "[(clojure.string/trim (:out (p/sh \"pwd\")))"
+        (let [r (run (str "(emit [(clojure.string/trim (:out (p/sh \"pwd\")))"
                           " (clojure.string/trim (:out @(p/process \"pwd\" {:out :string})))"
-                          " (clojure.string/trim (:out (p/shell {:out :string} \"pwd\")))]"))]
+                          " (clojure.string/trim (:out (p/shell {:out :string} \"pwd\")))])"))]
           (t/is (not (:is-error r)) (:content r))
           (t/is (every? #(str/includes? (str %) (fs/file-name dir))
                         (read-string (:content r)))
                 "all three process shapes report the runtime cwd's leaf")))
       (finally (fs/delete-tree dir)))))
 
+(t/deftest ^:slow test-run-code-preloaded-sh
+  ;; sh is preloaded bare (cwd-defaulting), like fs/p
+  (let [r (run "(emit (clojure.string/trim (:out (sh \"echo\" \"preloaded\"))))")]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (= "preloaded" (:content r)))))
+
 (t/deftest ^:slow test-run-code-inner-bash
-  (let [r (run "@(tools/bash {:command \"echo inner-ok\"})")]
+  (let [r (run "(emit @(tools/bash {:command \"echo inner-ok\"}))")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (str/includes? (:content r) "inner-ok"))
     (t/is (= "bash" (get-in r [:details :calls 0 :tool])))))
@@ -559,33 +583,32 @@
   (let [dir (temp-dir)]
     (try
       (binding [tool-util/*cwd* dir]
-        (let [r (run "(clojure.string/trim (:content @(tools/bash {:command \"pwd\"})))")]
+        (let [r (run "(emit (clojure.string/trim (:content @(tools/bash {:command \"pwd\"}))))")]
           (t/is (not (:is-error r)) (:content r))
           (t/is (str/includes? (:content r) (fs/file-name dir)))))
       (finally (fs/delete-tree dir)))))
 
 ;; ─── Capture edge cases ───────────────────────────────────────────────────
 
-(t/deftest test-run-code-burst-tail-kept
-  ;; a print larger than the 128 KiB capture tail must keep its tail: the
-  ;; burst used to be dropped whole, rendering "(no output)" with no notice
-  (let [r (run "(println (apply str (repeat 140000 \"b\")))")]
+(t/deftest test-run-code-large-emit-tail-kept
+  ;; an emit larger than the result budget must keep its tail (the end holds
+  ;; the distilled result) and report the full size in the notice
+  (let [r (run "(emit (apply str (repeat 140000 \"b\")))")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (str/includes? (:content r) "bbbb") "the burst's tail survives")
     (t/is (= :bytes (get-in r [:truncation :truncated-by])))
     (t/is (>= (get-in r [:truncation :total-bytes]) 140000)
           "the notice reports the burst, not the retained size")))
 
-(t/deftest test-run-code-oversized-burst-then-output
-  (let [r (run "(println (apply str (repeat 140000 \"b\"))) (println \"MARKER\")")]
+(t/deftest test-run-code-oversized-emit-then-marker
+  (let [r (run "(emit (apply str (repeat 140000 \"b\"))) (emit \"MARKER\")")]
     (t/is (str/includes? (:content r) "MARKER"))
     (t/is (some? (:truncation r)) "truncation is reported, not silence")))
 
-(t/deftest test-run-code-multibyte-tail-cut
-  ;; the 128 KiB tail cut can land inside a multi-byte char — a repeated
-  ;; 3-byte char always does (total bytes − 128 KiB ≢ 0 mod 3) — and the
-  ;; decoder's replacement chars must not leak into the result
-  (let [r (run "(print (apply str (repeat 43700 \"€\")))")]
+(t/deftest test-run-code-multibyte-emit-tail
+  ;; a multi-byte emit cut at the result budget must not leak a replacement
+  ;; char from a mid-character boundary
+  (let [r (run "(emit (apply str (repeat 43700 \"€\")))")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (not (str/includes? (:content r) "\uFFFD")))
     (t/is (str/includes? (:content r) "€"))))
@@ -599,17 +622,18 @@
     (t/is (pos? @updates) "the print streamed")
     (t/is (<= @updates 3) "no update per poll while idle")))
 
-(t/deftest test-run-code-capture-totals-count-everything
-  ;; the notice's totals are what the capture saw, not what it kept
-  (let [r (run "(dotimes [i 40000] (println i))")]
+(t/deftest test-run-code-emit-totals-count-everything
+  ;; the notice's totals describe the whole emitted output, not the tail kept
+  (let [r (run "(dotimes [i 40000] (emit i))")]
     (t/is (not (:is-error r)))
     (t/is (= 40000 (get-in r [:truncation :total-lines])))
     (t/is (str/includes? (:content r) "39999"))))
 
-(t/deftest test-run-code-unbounded-print-is-bounded
-  ;; *print-length* is bound: an infinite seq prints a bounded prefix instead
-  ;; of running host code past the deadline (printing is not interruptible)
-  (let [r (run "(println (range))" {:timeout 5})]
+(t/deftest test-run-code-unbounded-emit-is-bounded
+  ;; *print-length* is bound: an infinite seq emitted is a bounded prefix
+  ;; instead of running host code past the deadline (printing is not
+  ;; interruptible)
+  (let [r (run "(emit (range))" {:timeout 5})]
     (t/is (not (:is-error r)) (:content r))
     (t/is (str/includes? (:content r) "99999") "a bounded prefix is printed")
     (t/is (str/includes? (:content r) "...") "print-length elides the rest")))
@@ -617,10 +641,18 @@
 (t/deftest test-run-code-keyword-tool-name
   ;; discovery and dispatch agree on the name form
   (t/is (= "[\"read\" false]"
-           (:content (run "(let [d (tools/describe :read)] [(:name d) (contains? d :execute)])"))))
+           (:content (run "(emit (let [d (tools/describe :read)] [(:name d) (contains? d :execute)]))"))))
   (t/is (= "false"
-           (:content (run (str "(let [x @(tools/call :read {:path \"deps.edn\" :limit 1})]"
-                               "  (boolean (:is-error x)))"))))))
+           (:content (run (str "(emit (let [x @(tools/call :read {:path \"deps.edn\" :limit 1})]"
+                               "  (boolean (:is-error x))))"))))))
+
+(t/deftest test-run-code-emit-output-limit
+  ;; emit is bounded too: past the 1 MiB capture budget it sets :output-limit
+  ;; and throws, so the buffer cannot grow without bound
+  (let [r (run "(dotimes [i 40000] (emit (apply str (repeat 100 \"x\"))))")]
+    (t/is (:is-error r) (:content r))
+    (t/is (= :output-limit (get-in r [:details :error])))
+    (t/is (str/includes? (:content r) "exceeded"))))
 
 (t/deftest ^:slow test-run-code-output-limit
   ;; the fixed 1 MiB capture bound is reachable: the monitor aborts once

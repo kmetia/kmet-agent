@@ -52,7 +52,8 @@ server's MCP resources by default. Server `searchKeywords`
 MCP tools are contributed to kmet's builtin `run_code` sandbox, so several
 MCP calls run in one request — loop, filter, chain, or fan out — and only
 the script's output enters the conversation. The sandbox is Clojure with
-the tools bridge; it has no host access and no `mcpScript` (the old
+the tools bridge — on babashka a full babashka surface, on other hosts the
+require-able clojure.* vocabulary — and has no `mcpScript` (the old
 separate runtime retired into this engine):
 
 ```clojure
@@ -68,14 +69,14 @@ separate runtime retired into this engine):
 ;; fan out: start calls before derefing any of them
 (let [a (tools/call "server_a_query" {:q "x"})
       b (tools/call "server_b_query" {:q "y"})]
-  (println (:content @a))
-  (println (:content @b)))
+  (emit (:content @a))
+  (emit (:content @b)))
 
 ;; shorter ordered batches: call-many submits, await-all waits
-(mapv :content
-      (tools/await-all
-       (tools/call-many [{:name "server_a_query" :args {:q "x"}}
-                         {:name "server_b_query" :args {:q "y"}}])))
+(emit (mapv :content
+            (tools/await-all
+             (tools/call-many [{:name "server_a_query" :args {:q "x"}}
+                               {:name "server_b_query" :args {:q "y"}}]))))
 ```
 
 - MCP tools appear by their prefixed names (`server_toolname`) from the
@@ -85,11 +86,12 @@ separate runtime retired into this engine):
   template's `{var}` placeholders as parameters. A server that has
   never been connected has no cache entry yet, so connect it once
   (`mcp({connect: "name"})`) before scripting it.
-- Print with `println`; the script's return value is reported too. For one
-  compact result, `(sandbox/emit value)` prints the value and returns `nil`,
-  avoiding duplicate stdout/return output. The old unqualified `emit` and
-  `console.log` APIs remain retired. `tools/await-all` waits in input order
-  while observing the script cancellation signal.
+- Report results with `(emit value)` (also `(sandbox/emit value)`): it
+  prints one compact result and returns `nil`. `emit` is the script's only
+  reported channel — stdout/stderr and the final value are captured but not
+  returned, so pass everything you want the model to see to `emit`.
+  `tools/await-all` waits in input order while observing the script
+  cancellation signal.
 - `timeout` (seconds; omit or 0 = no deadline, like bash) bounds the whole
   script; calls still in
   flight appear in `:details :calls` as `incomplete` with their elapsed

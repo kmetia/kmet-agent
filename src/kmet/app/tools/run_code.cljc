@@ -255,21 +255,6 @@
                   s)))))))
     (catch Throwable _ "")))
 
-(defn- scan-file
-  "Scan FILE once, returning its exact UTF-8 byte and newline totals."
-  [file]
-  (try
-    (with-open [in (java.io.FileInputStream. (str file))
-                r (java.io.InputStreamReader. in "UTF-8")]
-      (let [buf (char-array 8192)]
-        (loop [bytes 0 lines 0]
-          (let [n (.read r buf)]
-            (if (pos? n)
-              (let [s (String. buf 0 n)]
-                (recur (+ bytes (byte-length s)) (+ lines (text-lines s))))
-              {:bytes bytes :lines lines})))))
-    (catch Throwable _ {:bytes 0 :lines 0})))
-
 (defn- start-capture
   "Open the capture files and start the monitor thread. The monitor streams
    throttled on-update tails while output is arriving and sets ABORT to
@@ -320,19 +305,13 @@
      :err-w err-w}))
 
 (defn- finish-capture!
-  "Stop the monitor and snapshot the capture: the exact totals (one scan per
-   file) and the retained tails. The writers were closed by the eval thread's
-   finally before it delivered `done`, so a finished run's files are complete;
-   an abandoned thread's flushed bytes are read as-is."
+  "Stop the monitor and remove the capture directory. The script's reported
+   output is the emit buffer (assemble-result), not the captured streams: the
+   files exist to swallow the script's stdout/stderr and to enforce the
+   capture budget, so there is nothing to read back."
   [capture]
   (reset! (:closed? capture) true)
-  (let [{out-bytes :bytes out-lines :lines} (scan-file (:out-file capture))
-        {err-bytes :bytes err-lines :lines} (scan-file (:err-file capture))
-        out (read-tail (:out-file capture) max-tail-bytes)
-        err (read-tail (:err-file capture) max-tail-bytes)]
-    (try (fs/delete-tree (:dir capture)) (catch Throwable _ nil))
-    {:out out :out-bytes out-bytes :out-lines out-lines
-     :err err :err-bytes err-bytes :err-lines err-lines}))
+  (try (fs/delete-tree (:dir capture)) (catch Throwable _ nil)))
 
 ;; ─── Capabilities ─────────────────────────────────────────────────────────
 
@@ -413,24 +392,42 @@
       (contains? fns 'shell) (update 'shell with-dir)
       (contains? fns 'process) (update 'process #(tracked (with-dir %))))))
 
-(defn- emit-value
-  "Write one compact script result to the captured writer; host println is not bound to SCI output on Jolt."
-  [out-w v]
-  (binding [*out* out-w
-            *print-length* print-length-limit
-            *print-level* print-level-limit]
-    (println (if (string? v) v (pr-str v)))))
+(defn- format-value
+  "Render a script value for reported output: strings raw, everything else
+   pr-str — a Clojure sandbox reports Clojure data. The print limits bound it
+   here on the host: printing is host code, and an unbounded value would grow
+   in an abandoned thread past the interrupt."
+  [v]
+  (if (string? v)
+    v
+    (binding [*print-length* print-length-limit
+              *print-level* print-level-limit]
+      (pr-str v))))
 
-(defn- sandbox-fns [cwd writers]
+(defn- emit!
+  "Append one value to the call's reported output and stream it. `emit` is
+   the script's only result channel: stdout/stderr and the final value are
+   captured but never reported. The buffer is bounded at the capture budget —
+   past it the abort is set to :output-limit and emit throws, so a runaway
+   emit loop cannot grow the buffer without bound. Returns nil."
+  [{:keys [emitted emitted-bytes on-update abort capture-limit]} v]
+  (let [s (format-value v)
+        total (swap! emitted-bytes + (byte-length s))]
+    (when (and capture-limit (> total capture-limit))
+      (compare-and-set! abort nil :output-limit)
+      (throw (ex-info "run_code output limit exceeded"
+                      {:type :run-code/output-limit :reason :output-limit})))
+    (swap! emitted conj s)
+    (when on-update
+      (on-update {:content s :is-partial true}))
+    nil))
+
+(defn- sandbox-fns [cwd writers emit-state]
   {'cwd (fn [] cwd)
    'env (fn [k] (System/getenv (str k)))
    'now (fn [] (System/currentTimeMillis))
    'sleep (fn [ms] (Thread/sleep (long ms)))
-   'emit (fn [v]
-           (if-let [{:keys [out-w]} @writers]
-             (emit-value out-w v)
-             (throw (ex-info "run_code output is not initialized"
-                             {:type :run-code/no-output}))))
+   'emit (fn [v] (emit! emit-state v))
    ;; a derefable result on a daemon thread (babashka/jolt futures are
    ;; daemon-backed; SCI's own future is unavailable in a value-shared ctx).
    ;; The writers are re-bound: a future does not convey SCI's var bindings
@@ -463,6 +460,88 @@
                   :content (str "Unknown tool: " name ". Active tools: "
                                 (str/join ", " (keys surface)))}))})
 
+(defn- copyable-namespace?
+  "True for a loaded host namespace the full-babashka surface copies: the
+   babashka/clojure vocabulary, minus clojure.core (SCI's builtin core is the
+   interpreter's own and must not be shadowed) and babashka.nrepl (a host
+   server, not a script API). kmet's own namespaces are never in this set."
+  [ns-sym]
+  (let [n (str ns-sym)]
+    (and (or (str/starts-with? n "clojure.")
+             (str/starts-with? n "babashka."))
+         (not= n "clojure.core")
+         (not (str/starts-with? n "babashka.nrepl")))))
+
+(defn- copy-ns-publics
+  "The SCI namespace map for host namespace NS-SYM: every public var's value
+   re-wrapped in a fresh sci var (macros keep their :macro meta), so a script
+   can `require` it just like in babashka. Fresh vars per call keep a script's
+   def/redefinitions call-local instead of leaking into the host namespace."
+  [ns-sym]
+  (let [sns (sci/create-ns ns-sym)]
+    (reduce-kv
+     (fn [m k v]
+       (try
+         (assoc m k (sci/new-var k @v (assoc (meta v) :ns sns :name k)))
+         (catch Throwable _ m)))
+     {}
+     (ns-publics ns-sym))))
+
+(defn- full-babashka-namespaces
+  "Map of the host's babashka/clojure namespaces, copied for the per-call
+   context — the `full babashka script` surface: clojure.pprint, java.io,
+   clojure.zip, babashka http/process/… all `require`-able, unlike the old
+   fixed capability table. Rebuilt each call so a script's redefinitions stay
+   call-local; the copy costs a few ms (measured ~3ms copy + ~9ms sci/init)."
+  []
+  (into {}
+        (for [n (all-ns)
+              :let [s (ns-name n)]
+              :when (copyable-namespace? s)]
+          [s (copy-ns-publics s)])))
+
+(defn- host-class-map
+  "symbol → Class for every class babashka exposes, under both its full and
+   simple name, so System/Thread/java.io.*/Throwable/… resolve as in a
+   babashka script. Empty where the host has no class table (jolt's SCI does
+   not expose one); SCI's small default class set still applies there."
+  []
+  #?(:bb
+     (try
+       (let [all-classes (deref (requiring-resolve 'babashka.classes/all-classes))]
+         (reduce
+          (fn [m c]
+            (try
+              (let [full (symbol (.getName c))
+                    simple (symbol (.getSimpleName c))]
+                (cond-> (assoc m full c)
+                  (not= full simple) (assoc simple c)))
+              (catch Throwable _ m)))
+          {}
+          (all-classes)))
+       (catch Throwable _ {}))
+     :default {}))
+
+(def ^:private extra-core-vars
+  "Host clojure.core vars copied into the sandbox core as sci vars (macros keep
+   their :macro meta), so a script that reaches for them behaves like a
+   babashka script. `slurp`/`spit`/`file-seq`/`pmap` are injected separately
+   with cwd resolution."
+  '[future future-call])
+
+(defn- extra-core-vars-map
+  "The extra-core-vars sci-var map for the sandbox's clojure.core namespace."
+  []
+  (let [sns (sci/create-ns 'clojure.core)
+        pubs (ns-publics 'clojure.core)]
+    (into {}
+          (keep (fn [s]
+                  (when-let [v (get pubs s)]
+                    (try
+                      [s (sci/new-var s @v (assoc (meta v) :ns sns :name s))]
+                      (catch Throwable _ nil)))))
+          extra-core-vars)))
+
 (defn- require-host-namespaces!
   "Host-require before value-sharing: babashka preloads babashka.fs/process,
    Jolt does not."
@@ -475,8 +554,8 @@
   "The boundary error for a namespace the sandbox cannot serve."
   [namespace]
   (throw (ex-info (str "run_code cannot load namespace " namespace
-                       "; the sandbox only has its injected namespaces and"
-                       " SCI's built-in namespaces")
+                       "; it is not part of the sandbox's script surface"
+                       " (kmet's own namespaces are excluded)")
                   {:type :run-code/unreadable :namespace (str namespace)})))
 
 (defn- sandbox-load-fn
@@ -492,10 +571,12 @@
 
 (defn- sandbox-context
   "Build the per-call SCI context: NAMESPACES plus the sandbox's features,
-   load-fn and interrupt-fn."
+   the host class table (a full babashka script resolves classes), load-fn and
+   interrupt-fn."
   [namespaces interrupt-fn]
   (let [holder (atom nil)
         ctx (sci/init {:namespaces namespaces
+                       :classes (host-class-map)
                        :features (if (host/jolt?) #{:jolt} #{:bb})
                        :load-fn (sandbox-load-fn holder)
                        :interrupt-fn interrupt-fn})]
@@ -503,24 +584,32 @@
     ctx))
 
 (defn- context-namespaces
-  "The per-call sandbox namespaces: the capability vocabulary (SCI's builtin
-   clojure.core plus slurp/spit/file-seq/pmap, babashka.fs/json, the process
-   wrappers), the surface's discovery fns and the per-call bridge, cwd fns
-   and writers. Built fresh for every call — a fresh sci/init is cheap, so
-   there is no cached base to fork and no registry generation to key on. No
-   :classes/:imports (no Java interop); the context's :load-fn is
-   sandbox-load-fn, so an unknown require fails with the boundary error and a
-   reload of a known namespace is a no-op."
-  [surface cwd bridge writers]
+  "The per-call sandbox namespaces. The host's babashka/clojure namespaces are
+   copied in first (the full-babashka surface), then the sandbox's own
+   overrides layer on top: SCI core patches (slurp/spit/file-seq/pmap), json,
+   the cwd/pid-tracking process wrappers, the per-call bridge and discovery
+   fns, the cwd/emit/spawn helpers, and the bare `emit`/`sh`. Built fresh every
+   call, so a def in one script is invisible to the next, and the context's
+   :load-fn (sandbox-load-fn) makes an unknown require fail with the boundary
+   error while a reload of a known namespace is a no-op."
+  [surface cwd bridge writers emit-state]
   (require-host-namespaces!)
-  {'clojure.core (merge {'pmap (deref #'pmap)} (core-fns cwd))
-   'babashka.fs (shared-fns 'babashka.fs)
-   ;; kmet.libs.json under its real name and the short `json` alias scripts
-   ;; would otherwise have to require
-   'kmet.libs.json (shared-fns 'kmet.libs.json)
-   'babashka.process (process-fns cwd)
-   'sandbox (sandbox-fns cwd writers)
-   'tools (merge (discovery-fns surface) bridge)})
+  (let [process (process-fns cwd)]
+    (merge-with
+     merge
+     (full-babashka-namespaces)
+     (cond-> {'clojure.core (merge {'pmap (deref #'pmap)}
+                                   (core-fns cwd)
+                                   (extra-core-vars-map))
+              ;; kmet.libs.json under its real name and the short `json` alias
+              ;; scripts would otherwise have to require
+              'kmet.libs.json (shared-fns 'kmet.libs.json)
+              'babashka.process process
+              'sandbox (sandbox-fns cwd writers emit-state)
+              'tools (merge (discovery-fns surface) bridge)
+              'user {'emit (fn [v] (emit! emit-state v))}}
+       ;; the cwd-defaulting sh is preloaded bare alongside the aliases
+       (contains? process 'sh) (assoc-in ['user 'sh] (get process 'sh))))))
 
 ;; ─── The callable surface ───────────────────────────────────────────────────────
 
@@ -687,18 +776,6 @@
 
 ;; ─── Result assembly ──────────────────────────────────────────────────────
 
-(defn- format-value
-  "Format a script's return value: strings raw, everything else pr-str —
-   a Clojure sandbox reports Clojure data (T2 formats MCP envelopes itself).
-   The print limits bound it here on the host: printing is host code, and an
-   unbounded value would grow in an abandoned thread past the interrupt."
-  [v]
-  (if (string? v)
-    v
-    (binding [*print-length* print-length-limit
-              *print-level* print-level-limit]
-      (pr-str v))))
-
 (defn- truncation-notice [t]
   (str "[run_code output truncated: " (:total-lines t) " lines / "
        (bash-exec/format-size (:total-bytes t))
@@ -787,17 +864,15 @@
     {:done done :result result}))
 
 (defn- assemble-result
-  "Build the tool result from the eval outcome and the capture snapshot.
-   ABORT-REASON wins when set: a script unwound by the interrupt (however it
-   reports, e.g. a catch that rethrows) cannot outlive its deadline.
-   TIMEOUT-MS nil = no deadline (bash parity) and the result's :timeout is
-   nil; ELAPSED-MS is the measured wall clock of the whole call."
-  [{:keys [res capture timeout-ms trace abort-reason elapsed-ms
+  "Build the tool result from the eval outcome and the emitted output. `emit`
+   is the script's only reported channel — captured stdout/stderr and the
+   final value are intentionally absent. ABORT-REASON wins when set: a script
+   unwound by the interrupt (however it reports, e.g. a catch that rethrows)
+   cannot outlive its deadline. TIMEOUT-MS nil = no deadline (bash parity) and
+   the result's :timeout is nil; ELAPSED-MS is the measured wall clock."
+  [{:keys [res emitted timeout-ms trace abort-reason elapsed-ms
            output-bytes output-lines capture-bytes]}]
-  (let [{:keys [out err out-bytes out-lines err-bytes err-lines]} capture
-        status (or abort-reason (:status res))
-        value (when (= :ok status) (:value res))
-        ret (when (some? value) (format-value value))
+  (let [status (or abort-reason (:status res))
         error-text (case status
                      :timeout (str "run_code timed out after " (ms->sec timeout-ms) "s")
                      :aborted "run_code aborted"
@@ -806,14 +881,10 @@
                                         " — stopped")
                      :error (:error res)
                      nil)
-        parts (cond-> []
-                (seq out) (conj out)
-                (seq err) (conj (str "[stderr]\n" err))
-                (some? ret) (conj ret)
+        parts (cond-> (vec emitted)
                 error-text (conj error-text))
         body (if (seq parts) (str/join "\n" parts) "(no output)")
-        totals {:bytes (+ out-bytes err-bytes (byte-length ret) (byte-length error-text))
-                :lines (+ out-lines err-lines (text-lines ret) (text-lines error-text))}
+        totals {:bytes (byte-length body) :lines (text-lines body)}
         {:keys [content truncation]} (bound-content body totals output-bytes output-lines)
         calls @trace]
     (cond-> {:content content
@@ -852,8 +923,16 @@
         abort (atom nil)
         cancelled (combined-signal signal abort)
         writers (atom nil)
+        ;; the script's only reported output channel
+        emitted (atom [])
+        emitted-bytes (atom 0)
         deadline (when timeout-ms (+ started-at timeout-ms))
         trace (atom [])
+        emit-state {:emitted emitted
+                    :emitted-bytes emitted-bytes
+                    :on-update on-update
+                    :abort abort
+                    :capture-limit (:capture-bytes limits)}
         bridge (bridge-fns {:surface surface
                             :execute-tool execute-tool
                             :signal cancelled
@@ -865,7 +944,7 @@
                             :assistant-message assistant-message
                             :on-update on-update
                             :trace trace})
-        fork-ctx (sandbox-context (context-namespaces surface cwd bridge writers)
+        fork-ctx (sandbox-context (context-namespaces surface cwd bridge writers emit-state)
                                   (interrupt-fn abort signal deadline))
         capture (start-capture on-update abort (:capture-bytes limits))
         _ (reset! writers capture)
@@ -885,10 +964,10 @@
             (compare-and-set! abort nil :aborted)
             (recur)))))
     (try
-      (let [snapshot (finish-capture! capture)
-            res (or @result {:status (or @abort :timeout)})]
+      (finish-capture! capture)
+      (let [res (or @result {:status (or @abort :timeout)})]
         (assemble-result {:res res
-                          :capture snapshot
+                          :emitted @emitted
                           :timeout-ms timeout-ms
                           :output-bytes (:bytes limits)
                           :output-lines (:lines limits)
@@ -901,9 +980,10 @@
 ;; ─── Tool record ──────────────────────────────────────────────────────────
 
 (def ^:private description
-  (str "Run a Clojure program against the available tools. `code` is the program body; top-level forms run in order and the last value is returned. Call tools from inside the program — inner results stay there and never enter the conversation. Only what you print or return is program output — curate it.\n\n"
-       "Tool calls are async: @(tools/call \"name\" args). Fire independent calls before derefing them; use (deref p ms ::timeout) when needed. For batches, use (tools/await-all (tools/call-many [{:name \"read\" :args {...}} ...])). Discover active tools with (tools/list) and (tools/describe \"name\"). (sandbox/emit value) prints one compact result and returns nil. Calls settle as {:content :is-error :details :truncation :images}; branch on :is-error and read :content.\n\n"
-       "Aliases: fs, str/set/edn/walk, json, p, tools, and sandbox; core adds slurp/spit/file-seq/pmap. No Java interop. `fs` is process-relative; `slurp`/`spit`/`sh` use the session cwd. Catch `Exception` (`Throwable` is unavailable); `:content` may be a block vector/image. Extension-contributed tools join the active surface. :timeout is seconds (0 or omitted means no deadline). Output is capped at 16 KiB/2000 lines by default; :max-output-bytes can raise the byte cap up to 50 KiB."))
+  (str "Run a Clojure script with the active tools bridged in: one call can do a whole task — data work, loops over many files, chained or fanned-out tool calls — while every inner result stays out of the conversation. Only values you pass to (emit value) come back — stdout/stderr and the final value are discarded.\n\n"
+       "Use it for general scripting and multi-step work — parse/transform/generate data, scan or filter many files with fs/slurp/sh, run a search→read→verify chain, or fan out N tool calls and reduce them. Use bash for one small command and read for one file.\n\n"
+       "Tools: (tools/call \"name\" args) returns a promise — start independent calls before derefing. Batch with (tools/await-all (tools/call-many [{:name ... :args ...} ...])); discover with (tools/list) and (tools/describe \"name\"). Results are {:content :is-error :details :truncation :images}; branch on :is-error. (emit value) returns nil and may be called as often as needed — the emitted values are returned in order.\n\n"
+       "Sandbox: Clojure; on babashka a full babashka surface — you can require clojure.*/babashka.* namespaces and resolve System/java.io.*/Throwable. Aliases: fs, str/set/edn/walk, json, p, sh, tools, sandbox. :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB."))
 
 (defn title
   "Quiet one-liner body for the run_code tool: the first code line, shortened."
@@ -928,11 +1008,11 @@
    :name "run_code"
    :label "Run code"
    :description description
-   :prompt-snippet "Run a Clojure program against the available tools, curating its output"
+   :prompt-snippet "Run a Clojure script for general scripting, scans, or tool fan-out; emit curated output"
    :prompt-guidelines
-   ["Use run_code when a task needs several tool calls, a loop over many files, or a search/read/verify chain; use bash for one small command and read for one file."
-    "Call tools from inside the program; only what it prints or returns enters the conversation — curate it. Fire independent calls before derefing them, and use tools/call-many + tools/await-all for batches."
-    "Filter and aggregate locally, then use sandbox/emit (or return one distilled value) instead of printing raw file/search output."]
+   ["Use run_code for general scripting and multi-step work — transforming or generating data, scanning/filtering many files, or a search/read/verify chain — instead of chaining bash cat/head/rg. Use bash for one small command and read for one file."
+    "Call tools from inside the script: inner results never enter the conversation, and only what you pass to (emit value) does. Start independent calls before derefing them; use tools/call-many + tools/await-all for batches and (deref p ms ::timeout) to bound one."
+    "Emit only curated output — the values you computed, counts, matches, a short summary — not raw file/search output. println and the final value are discarded."]
    :params {:code {:type :string :description "Clojure program body to run"}
             :timeout {:type :number
                       :description (str "Timeout in seconds — like bash's :timeout: omit or 0 "

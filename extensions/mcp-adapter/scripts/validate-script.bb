@@ -75,35 +75,36 @@
 
     (println "\n── script execution over the contributed MCP catalog ──")
     ;; discovery: the cached catalog is in the sandbox surface
-    (let [r (script-exec "(let [names (tools/list)] [(boolean (some #{\"fake_echo\"} names)) (boolean (some #{\"script\"} names))])")]
+    (let [r (script-exec "(emit (let [names (tools/list)] [(boolean (some #{\"fake_echo\"} names)) (boolean (some #{\"script\"} names))]))")]
       (check "tools/list carries the MCP catalog, never script"
              (= "[true false]" (:content r))))
     ;; describe returns the contributed record's schema (not :execute)
-    (let [r (script-exec "(let [d (tools/describe \"fake_echo\")] [(:name d) (:label d) (contains? d :execute) (str/includes? (pr-str (:parameters d)) \"message\")])")]
+    (let [r (script-exec "(emit (let [d (tools/describe \"fake_echo\")] [(:name d) (:label d) (contains? d :execute) (str/includes? (pr-str (:parameters d)) \"message\")]))")]
       (check "tools/describe carries name/label/parameters, no :execute"
              (= "[\"fake_echo\" \"MCP: echo\" false true]" (:content r))))
     ;; call: deref the promise, branch on the kmet result map
-    (let [r (script-exec "@(tools/call \"fake_echo\" {:message \"hi from script\"})")]
+    (let [r (script-exec "(emit @(tools/call \"fake_echo\" {:message \"hi from script\"}))")]
       (check "tools/call result"
              (and (not (:is-error r))
                   (str/includes? (:content r) "echo: hi from script"))))
     ;; call error: server marks the result isError
-    (let [r (script-exec "@(tools/call \"fake_boom\" {})")]
+    (let [r (script-exec "(emit @(tools/call \"fake_boom\" {}))")]
       (check "MCP error result reaches the script"
              (and (not (:is-error r)) (str/includes? (:content r) ":is-error true"))))
     ;; gate: unknown names never dispatch
-    (let [r (script-exec "@(tools/call \"nope\" {})")]
+    (let [r (script-exec "(emit @(tools/call \"nope\" {}))")]
       (check "unknown tool gated"
              (and (not (:is-error r)) (str/includes? (:content r) "not active"))))
     ;; the registry shadows a colliding contribution
-    (let [r (script-exec "(:label (tools/describe \"read\"))")]
+    (let [r (script-exec "(emit (:label (tools/describe \"read\")))")]
       (check "registry wins name collisions" (= "Read file" (:content r))))
-    ;; stdout + return value ride the shared capture
-    (let [r (script-exec "(println \"captured\") (+ 1 2)")]
-      (check "stdout + return value"
+    ;; stdout + return value are not reported: only emit is
+    (let [r (script-exec "(println \"captured\") (+ 1 2) (emit :emitted)")]
+      (check "emit is the only reported output"
              (and (not (:is-error r))
-                  (str/includes? (:content r) "captured")
-                  (str/includes? (:content r) "3"))))
+                  (= ":emitted" (:content r))
+                  (not (str/includes? (:content r) "captured"))
+                  (not (str/includes? (:content r) "3")))))
     ;; timeout (:timeout is seconds — bash's unit)
     (let [r (script-exec "(loop [] (recur))" {:timeout 1.5})]
       (check "timeout"
@@ -111,19 +112,19 @@
                   (= :timeout (get-in r [:details :error]))
                   (str/includes? (:content r) "timed out after 1.5s"))))
     ;; call trace
-    (let [r (script-exec "@(tools/call \"fake_add\" {:a 1 :b 2})")]
+    (let [r (script-exec "(emit @(tools/call \"fake_add\" {:a 1 :b 2}))")]
       (check "details :calls"
              (some (fn [c] (and (= "fake_add" (:tool c)) (true? (:ok c))))
                    (get-in r [:details :calls]))))
     ;; progress notifications stream through the script's on-update
     (let [partials (atom [])
-          r (script-exec "@(tools/call \"fake_slow\" {:ms 600})"
+          r (script-exec "(emit @(tools/call \"fake_slow\" {:ms 600}))"
                          {:on-update (fn [partial] (swap! partials conj (:content partial)))})]
       (check "inner progress partials arrive" (seq @partials))
       (check "slow call result" (str/includes? (:content r) "slept")))
     ;; removal: the generation bump drops the catalog from the next script
     (registry/unregister-tool-source! :mcp)
-    (let [r (script-exec "(tools/list)")]
+    (let [r (script-exec "(emit (tools/list))")]
       (check "unregister removes the catalog"
              (not (str/includes? (:content r) "fake_echo"))))
     (mcp/shutdown api)

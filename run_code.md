@@ -12,7 +12,7 @@ result-token attribution — so the build/no-build decision can be made on data.
 
 Status: **T1, T2 and T4 implemented** in this tree —
 `src/kmet/app/tools/run_code.cljc`, a builtin (read/write/edit/bash + `run_code`),
-`kmet.app.test-run-code` (52 tests: 39 fast + 13 `^:slow`, smoke-verified on
+`kmet.app.test-run-code` (56 tests: 39 fast + 17 `^:slow`, smoke-verified on
 babashka and jolt); the mcp-adapter's `mcpScript` tool and `bb`-subprocess
 runtime retired into the same engine (its catalog joins the sandbox as a
 contributed tool source — T2 below). T4 shares the invocation pipeline with
@@ -26,6 +26,21 @@ single compact result path, `tools/call-many`/`tools/await-all` shorten
 ordered fan-out, the result byte budget defaults to 16 KiB (tunable per
 call, capped at 50 KiB), the capture budget is fixed at 1 MiB, and the
 provider-facing description/guidelines are substantially shorter.
+
+**Superseding revision (landed): full-babashka surface, `emit`-only output.**
+The sandbox now builds its per-call SCI context from the host's loaded
+`clojure.*`/`babashka.*` namespaces (public vars re-wrapped as fresh sci vars,
+so macros survive) plus babashka's class table on the bb host — a script
+`require`s `clojure.pprint`/`clojure.java.io`/… and resolves `System`,
+`java.io.*`, `Throwable`, `future` as in a babashka script. kmet's own
+namespaces stay blocked (the boundary error below), and jolt's SCI exposes no
+class table, so classes remain bb-only. The fixed capability table below is
+superseded for the bb host. Output is **`emit`-only**: `(emit value)` (also
+`(sandbox/emit value)`, and a bare `emit` in the script namespace) is the
+single reported channel; stdout, stderr and the final value are captured (and
+still bound the run) but never enter the result. The capture files no longer
+feed the result — they exist to swallow host printing and enforce the 1 MiB
+budget.
 
 **Native Jolt evaluator now unblocked.** `jolt.loader/eval-in` landed
 upstream after v0.8.14, closing the gap the loader investigation below
@@ -462,8 +477,9 @@ comes first.
     `tool_proxy.clj` (search/describe envelopes, TS-shape renderer,
     rank-suggestions, paginate) were deleted with the runtime.
   - **Surface carried over:** kmet result map + explicit `@` deref instead of
-    `{:ok :data}` envelopes; `println` plus the compact `sandbox/emit` helper
-    (the old unqualified `emit`/`console.*` surface is retired);
+    `{:ok :data}` envelopes; the compact `emit` helper (now the only reported
+    output; the unqualified `emit` name is restored by the full-babashka
+    revision above);
     progress notifications still stream (the bridge now passes the script's
     `on-update` to inner `:streams?` calls). Isolation consequence as
     recorded: scripted MCP code is T1's in-process SCI — strictly sandboxier
@@ -515,19 +531,22 @@ Decisions from the design pass, so implementation doesn't re-derive them.
 (tools/list) (tools/describe "name")    ; discovery; synchronous bridge-local reads
 (sandbox/cwd) (sandbox/env k)           ; runtime cwd; env vars
 (sandbox/now) (sandbox/sleep ms)        ; time
-(sandbox/emit value)                    ; print one compact result; returns nil
+(emit value) (sandbox/emit value)       ; THE reported output; returns nil
 (sandbox/spawn f)                       ; host future (derefable)
 ```
 
 The namespace is `tools` (mcpScript's surface, so T2's skill snippets survive);
 `sandbox` carries the small host helpers. **Aliases are preloaded** — `fs`
 (babashka.fs), `str`/`set`/`edn`/`walk` (clojure.*), `json`
-(kmet.libs.json), `p` (babashka.process) — so a script is body-only: nothing
-to `require` beyond that vocabulary. The script's printed output and its
-return value are reported together — strings raw, other data `pr-str` (a
-Clojure sandbox reports Clojure data; T2 formats MCP envelopes itself).
-For a single compact result, `(sandbox/emit value)` prints the value and
-returns `nil`, so the final expression does not duplicate it.
+(kmet.libs.json), `p` (babashka.process), and the bare `sh` (the
+cwd-defaulting `babashka.process/sh`) — so a script is body-only for the
+common vocabulary; the host's `clojure.*`/`babashka.*` namespaces are also
+require-able (full-babashka revision above). `emit` is the script's only
+reported output: `(emit value)` prints strings raw and other data `pr-str` (a
+Clojure sandbox reports Clojure data; T2 formats MCP envelopes itself) and
+returns `nil`. stdout/stderr and the final value are captured for the output
+budget but never reported, so a script that wants the model to see something
+must emit it.
 
 - **Call fns return promises.** The call returns immediately with a promise
   that settles with the verbatim result map; the script derefs when it needs
@@ -655,11 +674,13 @@ jolt pin): value-shared `babashka.*` namespaces work in a context with **no
 | cwd/env | `(sandbox/cwd)` (the runtime cwd), `(sandbox/env k)` | SCI has no `System/getenv`. slurp/spit/file-seq and sh/shell/process resolve relative paths against the runtime cwd like the tools; **babashka.fs stays process-relative** (no wrapper can safely guess which args are paths) — build paths from `(sandbox/cwd)` |
 | time | `(sandbox/now)` / `(sandbox/sleep ms)` | any polling or scan-timeout loop needs them |
 | reader features | the host's own feature (`:bb` or `:jolt`) | kmet's convention — `:clj` matches both hosts and is not exposed |
-| output | `*out*`/`*err*` captured + the script's return value | captured to bounded temp files: a monitor thread polls them, streams throttled `on-update` tails while output is arriving, and aborts the run past the fixed 1 MiB capture budget, so a print loop can't OOM or fill the disk. The final result scans each file once for the exact byte/line totals and the 128 KiB retained tail. The result defaults to a 16 KiB/2000-line tail; `:max-output-bytes` can raise the byte cap up to the 50 KiB tool-wide cap |
+| output | `emit`-only: `(emit value)` / `(sandbox/emit value)` / the bare `emit` is the single reported channel; stdout/stderr and the final value are captured but never reported | the emitted buffer is bounded by the 1 MiB capture budget; `*out*`/`*err*` are bound to temp files so host printing is swallowed and a runaway print still aborts at `:output-limit`. The emitted body is capped with `bash-executor/truncate-tail` (default 16 KiB / 2000 lines; `:max-output-bytes` raises the byte cap up to the shared 50 KiB tool cap) |
 
-Excluded deliberately: class access (empty `:classes`/`:imports` — host fns
-hide their own; SCI's default reflective instance-method calls on host values
-still work, and are harmless without class resolution),
+Excluded deliberately (superseded in part by the full-babashka revision above:
+bb now gets the host class table, so class access is no longer excluded there):
+class access (empty `:classes`/`:imports` on hosts with no class table — host
+fns hide their own; SCI's default reflective instance-method calls on host
+values still work, and are harmless without class resolution),
 `kmet.app.*`/`kmet.tui.*`/`kmet.extension` (the extension contract is not the
 script contract), `kmet.loader`, arbitrary `require` of Maven deps (dependency
 resolution is an extension-manifest feature — a missing require fails with the
@@ -737,7 +758,8 @@ The plan above is now the record of what landed:
 3. ✅ **Capabilities** — the table above as value maps; `pmap` patched into
    `clojure.core` alongside slurp/spit/file-seq; json aliased as `json`; a
    per-call prelude (on the eval thread) aliases fs/str/set/edn/walk/json/p so
-   scripts are body-only; `sandbox` for cwd/env/now/sleep/emit/spawn; the
+   scripts are body-only; `sandbox` for cwd/env/now/sleep/emit/spawn; bare
+   `emit`/`sh` alongside the aliases; the
    process wrappers add the cwd default and pid tracking; `tools/call-many`
    validates a complete batch before dispatch, while `tools/await-all` polls
    cancellation while preserving input order; `:features` is the host's own;
@@ -759,16 +781,17 @@ The plan above is now the record of what landed:
    (seconds, nil = no deadline) and the measured total `:elapsed-ms` in
    `:details` — wall clock for the whole call, so it includes that grace and
    the capture drain, not just script runtime.
-6. ✅ **Output** — `*out*`/`*err*` bound to temp files; one monitor thread
-   polls them: it emits throttled `on-update` tails while output is
+6. ✅ **Output** — `emit`-only. `(emit value)` / `(sandbox/emit value)` / the
+   bare `emit` append to a per-call buffer and are the only reported output;
+   stdout, stderr and the final value are captured but never enter the
+   result. `*out*`/`*err*` are still bound to temp files and one monitor
+   thread polls them: it streams throttled `on-update` tails while output is
    arriving and sets the abort to `:output-limit` once both files pass the
-   fixed 1 MiB capture budget. `finish-capture!` stops the monitor and scans
-   each file once for the exact byte/line totals and the retained 128 KiB
-   tail, which the result assembler then caps with
-   `bash-executor/truncate-tail`. The result body defaults to a 16 KiB /
-   2000-line tail; `:max-output-bytes` can raise the byte cap up to the
-   shared 50 KiB tool cap. `(sandbox/emit value)` provides a compact result path that
-   returns `nil` and avoids stdout/return-value duplication. Printing is
+   fixed 1 MiB capture budget, so a print loop can't OOM or fill the disk.
+   `finish-capture!` stops the monitor and removes the files; the emitted
+   body is capped with `bash-executor/truncate-tail` (default 16 KiB / 2000
+   lines; `:max-output-bytes` raises the byte cap up to the shared 50 KiB
+   tool cap). Printing is
    bounded (`*print-length*` 100000, `*print-level*` 30 — host vars on
    babashka, `sci/print-*` on Jolt), so an infinite seq cannot print host
    code past the deadline. On Jolt the writers are bound with `sci/binding`
@@ -780,12 +803,14 @@ The plan above is now the record of what landed:
    line, and strips the model-facing truncation notice in favor of its own
    warn line.
 7. ✅ **Tests** — `test/kmet/app/test_run_code.clj`, registered in
-   `kmet.tasks.runner/all-namespaces`: 37 fast tests and 16 `^:slow` tests
-   covering return/output, compact `sandbox/emit` (including spawned output),
+   `kmet.tasks.runner/all-namespaces`: 39 fast tests and 17 `^:slow` tests
+   covering emit-only output, the full-babashka surface (classes, requires,
+   `future`), compact `emit` (including spawned output),
    ordered `call-many` / cancellation-aware `await-all`, batch validation,
    per-call output budgets and the fixed capture budget, errors, timeout, signal abort,
    a caught interrupt still reporting its abort, capabilities (incl. the
-   preloaded aliases and an explicit `require`), cwd resolution, stderr,
+   preloaded aliases and an explicit `require`), cwd resolution,
+   stderr-not-reported,
    truncation, streaming, promise fan-out, the gate, discovery (with
    `:execute` sanitized), the excluded surface, context isolation, the capture
    edges (incl. a multi-byte tail cut and idle streaming), the print bounds

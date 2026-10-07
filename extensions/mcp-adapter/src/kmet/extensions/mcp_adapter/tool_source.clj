@@ -13,8 +13,8 @@
    auth and the output guard apply unchanged.
 
    Scripting consequence (run_code.md T2): scripted MCP code now runs in the
-   shared in-process SCI sandbox like every other script — print with
-   println or use `(sandbox/emit value)`, deref tools/call explicitly
+   shared in-process SCI sandbox like every other script — report results
+   with `(emit value)`, deref tools/call explicitly
    (`@(tools/call \"server_tool\" args)`), and branch on the kmet result
    map (:is-error/:content), not on mcpScript's {:ok :data} envelope."
   (:require [kmet.extensions.mcp-adapter.tool-proxy :as proxy]
