@@ -246,10 +246,11 @@
     (emit-event-collect!)."})
 
 (def app-event-types
-  "Event types emitted OUTSIDE the agent loop (the interactive mode and
-   extensions) — routed straight to the event bus (emit-event!), never
-   through the loop's :on-event UI callback. The UI handler only needs to
-   consume loop-event-types."
+  "Event types emitted outside the agent loop's emit/:on-event path — the
+   interactive mode, extensions, and the provider-event bridges — routed
+   straight to the event bus (emit-event!), never through the loop's
+   :on-event UI callback. The UI handler only needs to consume
+   loop-event-types."
   #{:session-start
     :session-shutdown
     :user-bash
@@ -259,7 +260,13 @@
     :session-before-compact
     :session-tree
     :session-info-changed
-    :resources-discover})
+    :resources-discover
+    ;; provider events (fired by the ai layer's hook bridges, not the loop)
+    :context
+    :context-with-system
+    :before-provider-request
+    :before-provider-headers
+    :after-provider-response})
 
 (def loop-event-types
   "The subset of event-types emitted by the agent loop (kmet.app.loop/emit —
