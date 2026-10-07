@@ -711,7 +711,7 @@ Event types: `:agent-start` `:agent-end` `:agent-settled` `:turn-start`
 `:auto-retry-end` `:summarization-retry-scheduled`
 `:summarization-retry-attempt-start` `:summarization-retry-finished`
 `:compaction-start` `:compaction-end`
-`:session-compact-failed` `:context` `:context-with-system`
+`:session-compact` `:session-compact-failed` `:context` `:context-with-system`
 `:before-provider-request` `:before-provider-headers`
 `:after-provider-response`.
 
@@ -811,9 +811,19 @@ Three events fire **before** session mutations; handlers may return
   (fn [ev ctx] ...))   ; {:entry-id .. :position :at}
 
 ;; before context compaction (manual, threshold, or overflow) — the run's
-;; abort signal rides in the event
+;; abort signal rides in the event; return {:cancel true} to skip it, or
+;; {:compaction {:summary .. :first-kept-id .. :tokens-before .. :usage ..
+;;               :details ..}} to supply the content instead of the
+;; summarizer (pi: SessionBeforeCompactResult — the entry then records
+;; :from-hook and the events carry :from-extension)
 (ext/on-event api :session-before-compact
-  (fn [ev ctx] ...))   ; {:preparation .. :branch-entries .. :reason .. :signal ..}
+  (fn [ev ctx] ...))   ; {:preparation .. :branch-entries .. :custom-instructions
+                       ;  :reason .. :will-retry .. :signal ..}
+
+;; after a successful compaction — the appended rollup entry
+(ext/on-event api :session-compact
+  (fn [ev ctx] ...))   ; {:compaction-entry .. :from-extension .. :reason
+                       ;  :will-retry ..}
 ```
 
 Provider events fire around each LLM call (pi: context / context_with_system /

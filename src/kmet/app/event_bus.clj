@@ -190,21 +190,34 @@
 
    :compaction-end
    "Fired when compaction finishes (pi: compaction_end).
-    Payload: :reason, :result (true when compaction happened), :aborted
+    Payload: :reason, :result (the compaction result map — pi:
+    CompactionResult, kmet keys: :summary, :first-kept-id, :tokens-before,
+    :estimated-tokens-after, :usage, :details — or nil when the compaction
+    failed or was cancelled), :aborted
     (true when the user cancelled mid-compaction — session untouched),
-    :error-message (set when the summarization call failed — pi:
+    :from-extension (true when the summary came from a
+    :session-before-compact handler's :compaction result), :error-message
+    (set when the summarization call failed — pi:
     `Compaction failed: …` manual, `Auto-compaction failed: …` threshold,
     `Context overflow recovery failed: …` overflow, each carrying the
     summarization failure's cause), :will-retry
-    (true for overflow compaction — the interrupted turn retries; pi:
-    compaction_end willRetry)."
+    (true for a successful overflow compaction — the interrupted turn
+    retries; pi: compaction_end willRetry)."
+
+   :session-compact
+   "Fired after a successful compaction, carrying the appended entry (pi:
+    session_compact). Payload: :compaction-entry (the :role :compaction
+    session entry), :from-extension (true when a :session-before-compact
+    handler supplied the summary — pi: fromExtension), :reason,
+    :will-retry (true for overflow recovery)."
 
    :session-compact-failed
    "Fired after context compaction fails or is aborted (pi:
     session_compact_failed). Payload: :reason (:manual | :threshold |
     :overflow), :error-message (when a non-abort failure — same text as
-    :compaction-end), :aborted, :will-retry (false — a failed compaction
-    never retries the turn; pi: _emitSessionCompactFailed)."
+    :compaction-end), :aborted, :from-extension, :will-retry (false — a
+    failed compaction never retries the turn; pi:
+    _emitSessionCompactFailed)."
 
    :agent-before-settle
    "Actionable: fired once before the prompt settles, after the queued-message

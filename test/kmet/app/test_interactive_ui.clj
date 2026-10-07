@@ -1095,7 +1095,10 @@
               cs {:tui {:render-requested? (atom false)}
                   :session-atom (atom sess)}]
           (with-redefs [dock/mount! (capture-mount! sel-ref)
-                        tui/tui-request-render (fn [_])]
+                        tui/tui-request-render (fn [_])
+                        ;; hermetic: no branchSummary.skipPrompt from the
+                        ;; developer's settings file
+                        cfg/global-settings-path (fn [] (str dir "/no-settings.edn"))]
             (testing "Summarize branch? selector is framed in the dock with all options"
               ((var session-admin/ask-branch-summary) cs sess entry)
               (let [text (str/join "\n" (map strip-ansi
@@ -1113,6 +1116,64 @@
                 (t/is (str/includes? text "submit")
                       "the input dialog's keybinding hint renders")))))
         (finally (fs/delete-tree dir))))))
+
+(deftest test-tree-summarize-prompt-skip-prompt-setting
+  (testing "branchSummary.skipPrompt skips the question and defaults to no
+            summary (pi: getBranchSummarySkipPrompt)"
+    (let [dir (str (fs/absolutize (str "target/test-tree-skip-prompt-"
+                                       (System/currentTimeMillis))))
+          settings-file (str dir "/settings.edn")
+          sel-ref (atom nil)
+          navigated (atom nil)]
+      (fs/create-dirs dir)
+      (try
+        (spit settings-file "{:branch-summary {:skip-prompt true}}\n")
+        (let [sess (session/create-session dir)
+              entry (session/append-entry sess
+                                          {:role :user
+                                           :content [{:type :text :text "q"}]})
+              cs {:tui {:render-requested? (atom false)}
+                  :session-atom (atom sess)}]
+          (with-redefs [dock/mount! (capture-mount! sel-ref)
+                        tui/tui-request-render (fn [_])
+                        cfg/global-settings-path (fn [] settings-file)
+                        session-admin/navigate-tree!
+                        (fn [& args] (reset! navigated args))]
+            ((var session-admin/ask-branch-summary) cs sess entry))
+          (t/is (some? @navigated) "the navigation runs without the question")
+          (t/is (= [false nil false nil] (drop 3 @navigated))
+                "defaults to no summary (pi: wantsSummary stays false)")
+          (t/is (nil? @sel-ref) "no selector was mounted"))
+        (finally (fs/delete-tree dir))))))
+
+(deftest test-summarization-retry-event-handlers
+  (testing "the summarization retry events drive the status area (pi:
+            summarization_retry_scheduled → error line + RetryStatusIndicator,
+            _attempt_start → the compaction/branch-summary indicator,
+            _finished → the kind-gated retry clear)"
+    (let [cs (test-status-cs)
+          h ((var layout/make-agent-event-handler)
+             {:chat-history (chat-history/make-chat-history)
+              :tui {:render-requested? (atom false)}
+              :cs-ref (atom cs)
+              :pending-tool-comps (atom {})})]
+      (h {:type :summarization-retry-scheduled
+          :attempt 1 :max-attempts 3 :delay-ms 2000
+          :error-message "rate limit exceeded"})
+      (t/is (= :retry (:kind @(:status-current cs)))
+            "the retry countdown took the status slot")
+      (t/is (some #(str/includes? % "Retrying (1/3)") (status-lines cs))
+            "pi's countdown text renders")
+      (h {:type :summarization-retry-attempt-start :source :compaction
+          :reason :threshold})
+      (t/is (= :compaction (:kind @(:status-current cs)))
+            "the retried compaction re-shows its indicator")
+      (h {:type :summarization-retry-attempt-start :source :branch-summary})
+      (t/is (= :branch-summary (:kind @(:status-current cs)))
+            "a retried branch summarization re-shows the branch indicator")
+      (h {:type :summarization-retry-finished})
+      (t/is (= :branch-summary (:kind @(:status-current cs)))
+            "the retry clear is kind-gated (pi: clearStatusIndicator)"))))
 
 (deftest test-same-cwd-spelled-differently-is-not-a-switch
   (testing "a session whose recorded cwd differs only in spelling (trailing

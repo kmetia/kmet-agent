@@ -221,7 +221,8 @@ http-idle-timeout-ms/system-prompt/append-system-prompt/retry
 auto-compact/show-cache-miss-notices/steering-mode/follow-up-mode/
 tree-filter-mode/output-pad/editor-padding-x/autocomplete-max-visible/
 show-hardware-cursor/enable-skill-commands/extensions/skills/prompts/themes dirs,
-compaction thresholds, terminal display (`:terminal` — show-images /
+compaction thresholds, branch summarization (`:branch-summary` —
+`:reserve-tokens`/`:skip-prompt`), terminal display (`:terminal` — show-images /
 image-width-cells / clear-on-shrink), terminal progress
 (`:show-terminal-progress`), provider image blocking (`:images` — block-images),
 shell customization (`:shell-path` / `:shell-command-prefix` — applied to
@@ -243,8 +244,6 @@ Missing (pi `docs/settings.md`):
 | `tuiMode`, `fullscreenExitOutput`, `fullscreenScrollbar`, `fullscreenCopyOnSelect` | fullscreen TUI mode |
 | `httpProxy` | proxy URL applied as HTTP(S)_PROXY (kmet reads proxy env vars only — `libs/http.cljc`) |
 | `warnings.anthropicExtraUsage` | Anthropic subscription extra-usage warning |
-| `branchSummary.reserveTokens`, `branchSummary.skipPrompt` | branch summarization config |
-| `retry.provider.timeoutMs` / `maxRetries` / `maxRetryDelayMs` | provider/SDK-level retry tuning (the agent-level retry block is covered: `enabled` / `max-retries` / `base-delay-ms` / `max-agent-delay-ms`, pi `maxAgentDelayMs`) |
 | `transport`, `websocketConnectTimeoutMs` | provider transport selection (`sse` / `websocket` / `websocket-cached` / `auto`) — kmet's `/settings` "HTTP transport" row is a different axis (`http-client`/`curl`) |
 | `cacheWarming` | prompt cache warming (`off` / `streaming` / `idle`, pi #9668 / `core/cache-warmer.ts`) — no kmet counterpart |
 | `images.autoResize` | image resize before sending (needs a resizer backend — babashka has no ImageIO/AWT; `images.blockImages` is done — see §2) |
@@ -256,10 +255,21 @@ row, live `tui-set-clear-on-shrink!`, env default preserved),
 `terminal.showTerminalProgress` (row + live read; the indicator also clears
 when the setting is disabled mid-turn and on `tui-stop`, like pi's `stop`),
 `enableSkillCommands` (`:enable-skill-commands` + row, gates the
-`/skill:name` autocomplete entries), and the theme row's pi shape (a
+`/skill:name` autocomplete entries), the theme row's pi shape (a
 `ThemeSubmenu`: single names + the Automatic `light/dark` mode with
 light/dark pickers and live preview — enabled by `SettingItem.submenu`
-support in `kmet.tui.components.settings-list`).
+support in `kmet.tui.components.settings-list`), and `branchSummary`
+(`:branch-summary` — `:reserve-tokens` budgets the branch entries a branch
+summary covers to the model's context window minus it, `:skip-prompt` skips
+the "Summarize branch?" question and defaults to no summary).
+
+Layer difference, not a gap: pi's `retry.provider.*` block
+(`timeoutMs`/`maxRetries`/`maxRetryDelayMs`) configures retries *inside* the
+provider request. kmet has no transport-level retry — the agent-level
+`:retry` policy re-runs the whole assistant call with the same
+classification (429/5xx/timeouts retryable, quota/billing terminal) and
+bounded backoff, and `:http-total-timeout-ms` is the per-request deadline
+pi's `timeoutMs` sets (`retry.provider.timeoutMs ?? httpIdleTimeoutMs`).
 
 ### 5. Extension API
 
@@ -360,13 +370,15 @@ Full pi parity in `loop/summarize!` and `loop/generate-branch-summary` (pi
 | call-site failure text: `Compaction failed: …` (manual), `Auto-compaction failed: …` (threshold), `Context overflow recovery failed: …` (overflow) | ✅ `compaction/compaction-failure-message` — the cause rides `:compaction-end`, `:session-compact-failed`, and `/compact`'s error path (kmet previously emitted a fixed string with no cause) |
 | `createSummarizationOptions` — `reasoning = thinkingLevel` unless `off` (compaction); branch summaries pass no reasoning | ✅ `summarize!` passes the session thinking level, the branch summary none |
 | output cap `min(floor(0.8 * reserveTokens), model.maxTokens)` (compaction); a flat `4096` (branch) | ✅ same |
+| branch entries budgeted to `contextWindow - branchSummary.reserveTokens`, newest whole entries first, a summary entry still joining under 90% (`prepareBranchEntries`); nothing fits → `"No content to summarize"` with no call | ✅ `compaction/prepare-branch-entries` (kmet collects no file lists) |
+| an empty response is appended (compaction) / yields the preamble alone (branch) | ✅ same, with a debug log |
+| a manual compaction of an already-compacted session fails with `Already compacted`; the automatic paths stay silent | ✅ same |
 | a `length` stop reason means the summary is incomplete → failure | ✅ |
 
-Deviations kept: an *empty* summary counts as a failure in kmet
-(`Summarization failed: the model returned an empty summary`) where pi appends
-the empty text; and the summarization auth decision is delegated to the LLM
-layer (`No API key for …` surfaces as the cause) instead of a pre-call guard,
-so an oauth-bearer credential is not misreported as unconfigured.
+No deviations kept in this area. The summarization auth decision is delegated
+to the LLM layer (`No API key for …` surfaces as the cause) rather than a
+pre-call guard, matching pi's thrown auth error while also covering an
+oauth-bearer credential.
 
 ## Appendix: Event type vocabulary
 
@@ -377,7 +389,7 @@ pi events (`core/extensions/types.ts`) → kmet status (`app/event_bus.clj` `eve
 | `session_start` | ✅ `:session-start` | reason startup/reload/new/resume/fork; kmet lacks `reload` reason flag granularity |
 | `session_info_changed` | ✅ `:session-info-changed` | emitted by `/name` |
 | `session_before_switch` / `session_before_fork` | ✅ `:session-before-switch` / `:session-before-fork` | both emitted by `/switch` and `/fork` (reason :user/:auto), cancelable — handlers return {:cancel true} |
-| `session_before_compact` / `session_compact` | ~ | `:session-before-compact` (cancelable), `:compaction-start`/`:compaction-end` (reason manual/threshold/overflow/auto), and `:session-compact-failed` (carries `:will-retry false` — pi `_emitSessionCompactFailed`); each failure reports the summarization's cause behind pi's reason prefix (`Compaction failed: …` / `Auto-compaction failed: …` / `Context overflow recovery failed: …`). Still missing: a success `:session_compact` event, and an extension-supplied compaction result (pi `{compaction: …}` → `fromExtension`). Dispatch parity landed as D — the threshold check also runs post-run, between `:agent-end` and the pre-settle boundary (pi: `_handlePostAgentRun` → `_checkCompaction`); the summarization call parity (retry policy, events, thinking level, caps) is in §8 |
+| `session_before_compact` / `session_compact` / `session_compact_failed` | ✅ `:session-before-compact` / `:session-compact` / `:session-compact-failed` | the before-event is cancelable and may supply the content (`{:compaction {:summary … :first-kept-id … :tokens-before … :usage … :details …}}` — the entry then records `:from-hook`, and every event carries `:from-extension`); `:session-compact` carries the appended entry, and `:session-compact-failed` the cause behind pi's reason prefix (`Compaction failed: …` / `Auto-compaction failed: …` / `Context overflow recovery failed: …`) with `:will-retry false`; `:compaction-end` carries the pi-shaped result map. Dispatch parity landed as D — the threshold check also runs post-run, between `:agent-end` and the pre-settle boundary (pi: `_handlePostAgentRun` → `_checkCompaction`); the summarization call parity (retry policy, events, thinking level, caps, budget) is in §8 |
 | `session_before_tree` / `session_tree` | ✅ `:session-before-tree` / `:session-tree` | incl. cancel/summary/extension-summary results |
 | `session_shutdown` | ✅ `:session-shutdown` | emitted by `/reload` (reason reload) and `/new` (reason new, target-session-file) before the extension runtime is torn down (pi: teardownCurrent / session.reload) |
 | `context` | ✅ `:context` | fired before each LLM call with the conversation only — the leading system message is re-attached to a replacement (pi: `restoreSystemMessages`); handlers return `{:messages [...]}` to replace (last non-nil wins). Fires for every LLM call, the compaction summarization included — pi routes that outside `transformContext` |

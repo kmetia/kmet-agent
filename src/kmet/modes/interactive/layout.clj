@@ -421,6 +421,7 @@
       :agent-before-settle nil
       :agent-settled nil
       :session-compact-failed nil
+      :session-compact nil
       :error nil
       :model-select nil
       :thinking-level-select nil
@@ -512,6 +513,9 @@
             :default-tools default-tools
             :context-window ctx-window
             :compact-reserve-tokens (or (:compact-reserve-tokens config) 16384)
+            :branch-summary-reserve-tokens (or (:reserve-tokens
+                                                (cfg/get-branch-summary-settings config))
+                                               16384)
             :compact-token-threshold (:compact-token-threshold config)
             ;; get (not :kw) — an absent key must hit make-agent-state's
             ;; :or default, not be overridden with nil

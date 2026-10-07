@@ -183,6 +183,8 @@
          :thinking, :base-url, :api-type, :steering-mode, :follow-up-mode,
          :max-retries (default 3), :base-delay-ms (default 2000),
      :max-agent-delay-ms (default 60000 — pi maxAgentDelayMs, the backoff cap),
+     :branch-summary-reserve-tokens (default 16384 — pi
+     branchSummary.reserveTokens, the branch-summary input budget),
          :before-tool-call, :after-tool-call, :system-prompt-override,
          :transform-context, :prepare-next-turn, :prepare-request, :finish-turn,
          :get-api-key, :scoped-models (default []),
@@ -201,7 +203,7 @@
          :default-tools (resolved :default-tools selection — the built-in
          tools active at startup, pi: defaultTools; nil = every built-in
          active, see kmet.app.tools.registry/resolve-default-tools)"
-  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms max-agent-delay-ms before-tool-call after-tool-call system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools]
+  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms max-agent-delay-ms branch-summary-reserve-tokens before-tool-call after-tool-call system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools]
       :or {provider :opencode-go
            thinking :off
            steering-mode :all
@@ -268,6 +270,7 @@ Be precise and concise in your responses."}}]
                     :compact-token-threshold compact-token-threshold
                     :compact-reserve-tokens compact-reserve-tokens
                     :keep-recent-tokens keep-recent-tokens
+                    :branch-summary-reserve-tokens branch-summary-reserve-tokens
                     :compacting? (atom false)
                     :compaction-signal (atom false)
                     :compaction-blocked (atom false)
@@ -1494,10 +1497,11 @@ Be precise and concise in your responses."}}]
       :else
       (if-let [failure (compaction/summarization-failure result "Summarization")]
         {:error failure}
-        (if (str/blank? (:text result))
-          ;; kmet deviation: an empty summary would wipe the context; pi
-          ;; appends it (contentText of an empty response).
-          {:error "Summarization failed: the model returned an empty summary"}
+        (do
+          ;; pi appends whatever contentText returned — an empty string
+          ;; included; log it so an empty summary stays diagnosable
+          (when (str/blank? (:text result))
+            (debug/log "Warning: summarization returned an empty summary"))
           {:summary (:text result) :usage (:usage result)})))))
 
 (defn generate-branch-summary
@@ -1515,35 +1519,47 @@ Be precise and concise in your responses."}}]
    being appended."
   [agent entries & [custom-instructions signal replace-instructions?]]
   (let [provider @(:provider agent)
+        model (models/get-model provider @(:model agent))
         ;; pi: branch summaries cap their output at a flat 4096 tokens
         ;; (branch-summarization.ts maxTokens) — independent of the
         ;; compaction reserve
-        model (models/get-model provider @(:model agent))
         max-tokens (min 4096 (or (:max-tokens model) 4096))
-        signal (or signal (:signal agent))
-        msgs (compaction/branch-summary-messages
-              (vec (mapcat session/context-messages entries))
-              custom-instructions
-              replace-instructions?)
-        result (retry/retry-call!
-                #(summarization-call agent msgs {:signals [signal]
-                                                 :max-tokens max-tokens})
-                @(:cfg agent)
-                signal
-                (summarization-retry-callbacks agent {:source :branch-summary}))]
-    (cond
-      (= :aborted (:stop-reason result)) {:aborted true}
-      (seq (:tool-calls result))
-      {:error "Branch summarization attempted to call a tool"}
-      :else
-      (if-let [failure (compaction/summarization-failure result "Branch summarization")]
-        {:error failure}
-        (if (str/blank? (:text result))
-          ;; kmet deviation: an empty summary would record a blank branch
-          ;; summary entry; pi appends it (contentText of an empty response).
-          {:error "Branch summarization failed: the model returned an empty summary"}
-          {:summary (str compaction/branch-summary-preamble (:text result))
-           :usage (:usage result)})))))
+        ;; pi: the summarized entries are budgeted to the model's context
+        ;; window minus branchSummary.reserveTokens (prepareBranchEntries
+        ;; keeps whole entries newest-first)
+        entries (compaction/prepare-branch-entries
+                 entries
+                 (- (or (:context-window model) 128000)
+                    (or (:branch-summary-reserve-tokens agent) 16384)))
+        signal (or signal (:signal agent))]
+    (if (empty? entries)
+      ;; pi: nothing fits the budget — no summarization call
+      {:summary "No content to summarize"}
+      (let [msgs (compaction/branch-summary-messages
+                  (vec (mapcat session/context-messages entries))
+                  custom-instructions
+                  replace-instructions?)
+            result (retry/retry-call!
+                    #(summarization-call agent msgs {:signals [signal]
+                                                     :max-tokens max-tokens})
+                    @(:cfg agent)
+                    signal
+                    (summarization-retry-callbacks agent {:source :branch-summary}))]
+        (cond
+          (= :aborted (:stop-reason result)) {:aborted true}
+          (seq (:tool-calls result))
+          {:error "Branch summarization attempted to call a tool"}
+          :else
+          (if-let [failure (compaction/summarization-failure result "Branch summarization")]
+            {:error failure}
+            (do
+              ;; pi prepends the preamble to whatever contentText returned —
+              ;; an empty response yields the preamble alone; log it so an
+              ;; empty summary stays diagnosable
+              (when (str/blank? (:text result))
+                (debug/log "Warning: branch summarization returned an empty summary"))
+              {:summary (str compaction/branch-summary-preamble (:text result))
+               :usage (:usage result)})))))))
 
 (defn- sync-context-after-compaction!
   "Rebuild the in-memory context from the compacted session (pi: the agent
@@ -1563,22 +1579,29 @@ Be precise and concise in your responses."}}]
    (pi: session.compact) — custom-instructions are appended to the
    summarization prompt, and a manual compaction (reason :manual) starts
    with a fresh abort state: Escape's run-cancel signal is cleared, so a
-   stale one cannot abort it.
+   stale one cannot abort it. A manual compaction of an already-compacted
+   session fails with pi's `Already compacted`; the automatic paths stay
+   silent for both that and an empty session.
 
    Emits :compaction-start/:compaction-end around the work (pi:
-   compaction_start/compaction_end); the end event carries :aborted true
-   when the compaction's own signal fired mid-compaction (escape — pi:
-   session.abortCompaction), the run's cancel signal fired (a run cancel
-   aborts compaction too), or an extension's :session-before-compact
-   handler returned {:cancel true} (pi: aborted compaction_end), in which
-   cases the session is left untouched.
+   compaction_start/compaction_end — the end carries the pi-shaped result
+   map, and :from-extension true when the summary came from a
+   :session-before-compact handler's :compaction result), and
+   :session-compact on success (pi: session_compact, carrying the appended
+   entry). A failed or aborted compaction ends with :compaction-end
+   :result nil, :will-retry false, and a :session-compact-failed follow-up;
+   the end carries :aborted true when the compaction's own signal fired
+   mid-compaction (escape — pi: session.abortCompaction), the run's cancel
+   signal fired (a run cancel aborts compaction too), or an extension's
+   :session-before-compact handler returned {:cancel true} (pi: aborted
+   compaction_end), in which cases the session is left untouched.
 
    Returns true when a compaction happened, false when there was nothing to
-   compact (or compaction is already in progress, or an extension
-   cancelled it), and :aborted when the user cancelled mid-compaction.
-   A compaction that did not complete — :failed, :aborted, or an extension
-   cancel — blocks this prompt's automatic checks (see maybe-compact!); the
-   next prompt starts fresh."
+   compact (or compaction is already in progress, or an extension cancelled
+   it), and :aborted when the user cancelled mid-compaction. A compaction
+   that did not complete — :failed, :aborted, or an extension cancel —
+   blocks this prompt's automatic checks (see maybe-compact!); the next
+   prompt starts fresh."
   [agent & [custom-instructions reason]]
   (if @(:compacting? agent)
     false
@@ -1603,6 +1626,7 @@ Be precise and concise in your responses."}}]
       (try
         (emit agent {:type :compaction-start :reason reason})
         (let [failure (volatile! nil)
+              from-extension (volatile! false)
               result
               (if-let [sess (:session agent)]
                 (if (compaction-aborted? agent)
@@ -1610,35 +1634,78 @@ Be precise and concise in your responses."}}]
                   (let [entries (session/get-branch sess)
                         prep (compaction/prepare entries (or (:keep-recent-tokens agent) 20000))]
                     (if (or (nil? prep) (empty? (:messages prep)))
-                      false
+                      ;; pi: compact() separates an already-compacted session
+                      ;; from one with nothing to summarize
+                      (if (and (= :manual reason)
+                               (= :compaction (:role (last entries))))
+                        (do (vreset! failure "Already compacted")
+                            :failed)
+                        false)
                       ;; pi: session_before_compact — extensions may cancel
-                      ;; the compaction (a {:cancel true} result skips the
-                      ;; summarization; compaction_start/compaction_end still
-                      ;; fire, the end carrying :aborted true — pi parity)
-                      (if (:cancel (emit agent {:type :session-before-compact
+                      ;; the compaction, or supply its content
+                      ;; ({:compaction {:summary .. :first-kept-id ..
+                      ;; :tokens-before .. :usage .. :details ..}}, used
+                      ;; instead of the summarizer); a cancel still fires
+                      ;; compaction_start/compaction_end, the end carrying
+                      ;; :aborted true (pi parity)
+                      (let [before (emit agent {:type :session-before-compact
                                                 :preparation prep
                                                 :branch-entries entries
+                                                :custom-instructions custom-instructions
                                                 :reason reason
-                                                :will-retry false
-                                                :signal (:compaction-signal agent)}))
-                        ::cancelled
-                        (if-let [summary-result (summarize! agent prep custom-instructions reason)]
-                          (cond
-                          ;; cancelled during summarization — session unchanged
-                            (compaction-aborted? agent) :aborted
+                                                :will-retry (= reason :overflow)
+                                                :signal (:compaction-signal agent)})]
+                        (if (:cancel before)
+                          ::cancelled
+                          (let [supplied (:compaction before)
+                                supplied? (boolean (and supplied
+                                                        (or (:summary supplied)
+                                                            (:first-kept-id supplied))))
+                                _ (when supplied?
+                                    (vreset! from-extension true))
+                                summary-result
+                                (if supplied?
+                                  {:summary (str (:summary supplied))
+                                   :first-kept-id (:first-kept-id supplied)
+                                   :tokens-before (:tokens-before supplied)
+                                   :usage (:usage supplied)
+                                   :details (:details supplied)}
+                                  (summarize! agent prep custom-instructions reason))]
+                            (cond
+                              (compaction-aborted? agent)
+                              :aborted
 
-                            (:error summary-result)
-                            (do (debug/log "Warning: summarization failed; compaction skipped")
-                                (vreset! failure (:error summary-result))
-                                :failed)
+                              (:error summary-result)
+                              (do (debug/log "Warning: summarization failed; compaction skipped")
+                                  (vreset! failure (:error summary-result))
+                                  :failed)
 
-                            :else
-                            (do (session/compact-with-summary! sess (:summary summary-result)
-                                                               (:first-kept-id prep)
-                                                               (cond-> {:tokens-before (:tokens-before prep)}
-                                                                 (:usage summary-result)
-                                                                 (assoc :usage (:usage summary-result))))
-                                (sync-context-after-compaction! agent)
+                              :else
+                              (let [first-kept-id (or (:first-kept-id summary-result)
+                                                      (:first-kept-id prep))
+                                    tokens-before (or (:tokens-before summary-result)
+                                                      (:tokens-before prep))
+                                    entry (session/compact-with-summary!
+                                           sess (:summary summary-result)
+                                           first-kept-id
+                                           (cond-> {:tokens-before tokens-before}
+                                             (:usage summary-result)
+                                             (assoc :usage (:usage summary-result))
+                                             (:details summary-result)
+                                             (assoc :details (:details summary-result))
+                                             @from-extension
+                                             (assoc :from-hook true)))]
+                                (if (nil? entry)
+                                  ;; the first-kept entry vanished from the
+                                  ;; branch - nothing was appended, so this
+                                  ;; is a failure, not a silent no-op
+                                  (do (debug/log
+                                       "Warning: compaction target entry not found; compaction skipped")
+                                      (vreset! failure
+                                               "the first kept entry is no longer in the session")
+                                      :failed)
+                                  (do
+                                    (sync-context-after-compaction! agent)
                                 ;; Mirror the new context into the UI (pi: compaction_end → the
                                 ;; interactive mode clears the chat and re-renders the compacted
                                 ;; context, showing the compaction summary entry). Without this the
@@ -1647,34 +1714,41 @@ Be precise and concise in your responses."}}]
                                 ;; order (summary first, then kept tail), so the live view matches
                                 ;; the reloaded view; pi's live path appends the summary at the
                                 ;; bottom (its own replay renders it first) — kmet keeps one order.
-                                (emit agent {:type :context-replaced :messages @(:messages agent)})
-                                (debug/log "compacted session with LLM summary")
-                                true))
-                          ;; summarize! returns nil only for an abort
-                          (if (compaction-aborted? agent)
-                            :aborted
-                            (do (debug/log "Warning: summarization failed; compaction skipped")
-                                (vreset! failure "the summarization call did not return a summary")
-                                :failed)))))))
+                                    (emit agent {:type :context-replaced
+                                                 :messages @(:messages agent)})
+                                    (debug/log "compacted session with LLM summary")
+                                    {:summary (:summary summary-result)
+                                     :first-kept-id first-kept-id
+                                     :tokens-before tokens-before
+                                     :estimated-tokens-after (reduce + 0 (map compaction/estimate-tokens
+                                                                              (session/build-context sess)))
+                                     :usage (:usage summary-result)
+                                     :details (:details summary-result)
+                                     :entry entry}))))))))))
                 false)
-              ;; pi: compact() rejects with `Compaction failed: …` — the
-              ;; message /compact's error path and extension callers report
               error-message (when (= result :failed)
                               (compaction/compaction-failure-message reason @failure))]
           (reset! (:compaction-error agent) error-message)
           (emit agent {:type :compaction-end
                        :reason reason
+                       :from-extension @from-extension
                        :aborted (or (= result :aborted)
                                     (= result ::cancelled))
-                       :result (and (not= result :aborted)
-                                    (not= result ::cancelled)
-                                    (not= result :failed)
-                                    result)
+                       :result (when (map? result) (dissoc result :entry))
                        :error-message error-message
                        ;; Overflow compaction retries the interrupted turn
                        ;; (pi: _runAutoCompaction willRetry — compaction_end
-                       ;; carries whether the run continues).
-                       :will-retry (= reason :overflow)})
+                       ;; carries whether the run continues); a failed or
+                       ;; cancelled compaction never does.
+                       :will-retry (and (map? result) (= reason :overflow))})
+          ;; pi: session_compact — fired after a successful compaction with
+          ;; the appended entry (extensions index/re-render it)
+          (when (map? result)
+            (emit agent {:type :session-compact
+                         :compaction-entry (:entry result)
+                         :from-extension @from-extension
+                         :reason reason
+                         :will-retry (= reason :overflow)}))
           ;; pi: session_compact_failed — fired when compaction fails or is
           ;; aborted (the summarization errored, or a compaction/run cancel
           ;; signal fired mid-compaction).
@@ -1684,6 +1758,7 @@ Be precise and concise in your responses."}}]
             (emit agent {:type :session-compact-failed
                          :reason reason
                          :error-message error-message
+                         :from-extension @from-extension
                          :aborted (or (= result :aborted)
                                       (= result ::cancelled))
                          ;; pi: _emitSessionCompactFailed — a compaction that
@@ -1691,7 +1766,10 @@ Be precise and concise in your responses."}}]
                          :will-retry false}))
           (when (or (= result :aborted) (= result :failed) (= result ::cancelled))
             (reset! (:compaction-blocked agent) true))
-          (if (= result ::cancelled) false result))
+          (cond
+            (= result ::cancelled) false
+            (map? result) true
+            :else result))
         (finally
           (reset! (:compacting? agent) false))))))
 

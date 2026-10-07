@@ -26,6 +26,10 @@
    ;; pi: reserveTokens — tokens reserved for prompt + response
    :compact-reserve-tokens 16384
    :keep-recent-tokens 20000
+   ;; pi: branchSummary — the summarized branch entries are budgeted to the
+   ;; context window minus :reserve-tokens; :skip-prompt skips the
+   ;; "Summarize branch?" question (default: no summary)
+   :branch-summary {:reserve-tokens 16384 :skip-prompt false}
    :retry {:enabled true :max-retries 3 :base-delay-ms 2000
            :max-agent-delay-ms 60000}
    ;; loop guard: repeat-loop circuit breaker (tool-call + thinking)
@@ -573,6 +577,30 @@
                         ;; :retry falls back to the config (project override)
                         (assoc config :retry (get settings :retry (:retry config)))
                         config)))
+
+(defn get-branch-summary-settings
+  "Branch-summary settings (pi: settings-manager branchSummary block —
+   reserveTokens, skipPrompt). Returns {:reserve-tokens n :skip-prompt
+   bool}; the deep-merged config may carry a partial :branch-summary map.
+   reserveTokens is the token budget the summarized branch entries must fit
+   into (pi: prepareBranchEntries — the model's context window minus this);
+   skip-prompt skips the \"Summarize branch?\" question and defaults to no
+   summary (pi: getBranchSummarySkipPrompt)."
+  [config]
+  (let [bs (:branch-summary config)]
+    {:reserve-tokens (or (:reserve-tokens bs) 16384)
+     :skip-prompt (boolean (:skip-prompt bs))}))
+
+(defn get-branch-summary-settings-live
+  "Live :branch-summary settings from the global settings file (the
+   in-memory config is a startup snapshot — /settings re-reads after a
+   same-session change). Falls back to the CONFIG value when the file is
+   missing, unreadable, or lacks :branch-summary (project overrides)."
+  [config]
+  (get-branch-summary-settings (if-let [settings (read-global-settings)]
+                                 (assoc config :branch-summary
+                                        (get settings :branch-summary (:branch-summary config)))
+                                 config)))
 
 ;; ─── Loop guard (repeat-loop circuit breaker) ────────────────────────────
 

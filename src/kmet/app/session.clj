@@ -805,7 +805,8 @@
    appendCompaction). Append-only: the summarized entries stay in the file;
    build-context returns [compaction, ...from first-kept-id], so old content
    stays reachable (tree, fork) while being excluded from the LLM context.
-   opts may carry :tokens-before, :usage, :details (pi: CompactionEntry).
+   opts may carry :tokens-before, :usage, :details, :from-hook (true when an
+   extension supplied the summary — pi: CompactionEntry.fromHook).
    Returns the compaction entry, or nil when first-kept-id is not found."
   [session summary first-kept-id & [opts]]
   (when (some #(= (:id %) first-kept-id) @(:entries session))
@@ -813,7 +814,7 @@
                   (merge {:role :compaction
                           :summary summary
                           :first-kept-id first-kept-id}
-                         (select-keys opts [:tokens-before :usage :details])))))
+                         (select-keys opts [:tokens-before :usage :details :from-hook])))))
 
 (defn fork-session
   "Create a new session containing the branch root→ENTRY-ID (pi:

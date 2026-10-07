@@ -628,10 +628,21 @@
                                                             :content "GitHub CLI did not respond (timed out)."})
 
                    :ok
-                   (if (nil? @(:session-atom cs))
+                   (cond
+                     (nil? @(:session-atom cs))
                      (chat-history/chat-history-add-message! chat
                                                              {:role :info :label "Share"
                                                               :content "No active session."})
+
+                     ;; one share at a time: the background-status release is
+                     ;; kind-gated, so a second flow would take over the slot
+                     ;; the first one clears when it finishes
+                     (= :share (:kind (some-> (:status-current cs) deref)))
+                     (chat-history/chat-history-add-message! chat
+                                                             {:role :info :label "Share"
+                                                              :content "A share is already in progress."})
+
+                     :else
                      (share-session! cs)))))})
   (register-builtin-command!
    {:name "copy"

@@ -4463,6 +4463,236 @@
                   "a flat 4096-token cap (pi)")))
         (finally (fs/delete-tree dir))))))
 
+(t/deftest test-loop-compaction-result-and-session-compact-event
+  (t/testing "a successful compaction reports the pi-shaped result map on
+              :compaction-end and the appended entry via :session-compact
+              (pi: CompactionResult / session_compact)"
+    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+          sess (session/create-session (str dir))
+          events (atom [])
+          agent (loop/make-agent-state
+                 :session sess
+                 :compact-token-threshold 10
+                 :keep-recent-tokens 40
+                 :on-event (fn [e] (swap! events conj e)))]
+      (try
+        (seed-context! sess 6)
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [opts]
+                        (future
+                          (when-let [on-text (:on-text opts)] (on-text "the summary"))
+                          (when-let [on-usage (:on-usage opts)]
+                            (on-usage {:prompt_tokens 100 :completion_tokens 10
+                                       :cost {:total 0.001}}))
+                          (when-let [on-done (:on-done opts)] (on-done :stop))
+                          :done))]
+          (binding [*err* (java.io.StringWriter.)]
+            (loop/maybe-compact! agent)))
+        (let [end (first (filter #(= :compaction-end (:type %)) @events))
+              compact (first (filter #(= :session-compact (:type %)) @events))
+              result (:result end)
+              entry (first (filter #(= :compaction (:role %)) @(:entries sess)))]
+          (t/is (map? result) "the end carries the result map (pi: CompactionResult)")
+          (t/is (= "the summary" (:summary result)))
+          (t/is (= (:first-kept-id entry) (:first-kept-id result))
+                "the result names the first kept entry")
+          (t/is (pos? (:tokens-before result)))
+          (t/is (pos? (:estimated-tokens-after result)))
+          (t/is (= {:input 100 :output 10 :cache-read 0 :cache-write 0 :cost 0.001}
+                   (usage/entry-usage (:usage result))))
+          (t/is (false? (:from-extension end))
+                "a kmet-generated summary is not from an extension")
+          (t/is (some? compact) "session-compact fired (pi: session_compact)")
+          (t/is (= entry (:compaction-entry compact))
+                "it carries the appended session entry")
+          (t/is (= :threshold (:reason compact)))
+          (t/is (false? (:will-retry compact))))
+        (finally (fs/delete-tree dir))))))
+
+(t/deftest test-loop-extension-supplied-compaction
+  (t/testing "a :session-before-compact handler may supply the compaction
+              content — no summarization call, fromExtension true on the
+              events and the entry (pi: SessionBeforeCompactResult.compaction)"
+    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+          sess (session/create-session (str dir))
+          events (atom [])
+          calls (atom 0)
+          agent (loop/make-agent-state
+                 :session sess
+                 :compact-token-threshold 10
+                 :keep-recent-tokens 40
+                 :on-event (fn [e] (swap! events conj e)))]
+      (try
+        (seed-context! sess 6)
+        (event-bus/on-event :session-before-compact
+                            (fn [ev]
+                              (t/is (some? (:custom-instructions ev))
+                                    "the handler sees pi's customInstructions")
+                              {:compaction
+                               {:summary "extension summary"
+                                :first-kept-id (get-in ev [:preparation :first-kept-id])
+                                :tokens-before 123
+                                :usage {:prompt_tokens 7 :completion_tokens 2}
+                                :details {:artifact 42}}}))
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message (fn [_] (swap! calls inc) (future :done))]
+          (binding [*err* (java.io.StringWriter.)]
+            (loop/compact-context! agent "focus" :manual)))
+        (let [end (first (filter #(= :compaction-end (:type %)) @events))
+              compact (first (filter #(= :session-compact (:type %)) @events))
+              entry (first (filter #(= :compaction (:role %)) @(:entries sess)))]
+          (t/is (zero? @calls) "the summarizer was never called")
+          (t/is (= "extension summary" (get-in end [:result :summary])))
+          (t/is (= 123 (get-in end [:result :tokens-before])))
+          (t/is (= {:artifact 42} (get-in end [:result :details])))
+          (t/is (true? (:from-extension end)))
+          (t/is (true? (:from-extension compact)))
+          (t/is (= "extension summary" (:summary entry)))
+          (t/is (= 123 (:tokens-before entry)))
+          (t/is (= {:artifact 42} (:details entry)))
+          (t/is (true? (:from-hook entry))
+                "the entry records the extension origin (pi: fromHook)"))
+        (finally
+          (event-bus/clear-event-listeners!)
+          (fs/delete-tree dir))))))
+
+(t/deftest test-loop-extension-supplied-compaction-bad-target
+  (t/testing "an extension-supplied compaction whose first-kept-id is not in
+              the branch fails instead of reporting an empty success"
+    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+          sess (session/create-session (str dir))
+          events (atom [])
+          agent (loop/make-agent-state
+                 :session sess
+                 :compact-token-threshold 10
+                 :keep-recent-tokens 40
+                 :on-event (fn [e] (swap! events conj e)))]
+      (try
+        (seed-context! sess 6)
+        (event-bus/on-event :session-before-compact
+                            (fn [_] {:compaction {:summary "bogus"
+                                                  :first-kept-id "no-such-entry"
+                                                  :tokens-before 1}}))
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message (fn [_] (future :done))]
+          (t/is (= :failed (binding [*err* (java.io.StringWriter.)]
+                             (loop/compact-context! agent "x" :manual)))))
+        (t/is (str/includes? (:error-message (first (filter #(= :compaction-end (:type %))
+                                                            @events)))
+                             "no longer in the session"))
+        (t/is (nil? (first (filter #(= :compaction (:role %)) @(:entries sess))))
+              "nothing was appended")
+        (t/is (not-any? #(= :session-compact (:type %)) @events)
+              "no success event")
+        (finally
+          (event-bus/clear-event-listeners!)
+          (fs/delete-tree dir))))))
+
+(t/deftest test-loop-empty-summary-is-appended
+  (t/testing "an empty summarization response is appended as-is (pi:
+              contentText of an empty response) instead of failing the
+              compaction"
+    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+          sess (session/create-session (str dir))
+          events (atom [])
+          agent (loop/make-agent-state
+                 :session sess
+                 :compact-token-threshold 10
+                 :keep-recent-tokens 40
+                 :on-event (fn [e] (swap! events conj e)))]
+      (try
+        (seed-context! sess 6)
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [opts]
+                        (future
+                          (when-let [on-done (:on-done opts)] (on-done :stop))
+                          :done))]
+          (binding [*err* (java.io.StringWriter.)]
+            (t/is (true? (loop/maybe-compact! agent)) "the compaction ran")))
+        (t/is (= "" (:summary (first (filter #(= :compaction (:role %))
+                                             @(:entries sess))))))
+        (t/is (some #(= :session-compact (:type %)) @events)
+              "a successful compaction, not a failure")
+        (t/is (not-any? #(= :session-compact-failed (:type %)) @events))
+        (finally (fs/delete-tree dir))))))
+
+(t/deftest test-loop-manual-compaction-already-compacted
+  (t/testing "a manual /compact on an already-compacted session fails with
+              pi's `Already compacted`; the automatic path stays silent"
+    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+          sess (session/create-session (str dir))
+          events (atom [])
+          agent (loop/make-agent-state
+                 :session sess
+                 :compact-token-threshold 10
+                 :keep-recent-tokens 40
+                 :on-event (fn [e] (swap! events conj e)))]
+      (try
+        (seed-context! sess 6)
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [opts]
+                        (future
+                          (when-let [on-text (:on-text opts)] (on-text "summary"))
+                          (when-let [on-done (:on-done opts)] (on-done :stop))
+                          :done))]
+          (t/is (true? (binding [*err* (java.io.StringWriter.)]
+                         (loop/compact-context! agent nil :manual)))
+                "the first manual compaction runs")
+          (reset! events [])
+          (t/is (= :failed (binding [*err* (java.io.StringWriter.)]
+                             (loop/compact-context! agent nil :manual)))
+                "the second fails — the newest entry is the compaction")
+          (t/is (= "Compaction failed: Already compacted"
+                   (:error-message (first (filter #(= :compaction-end (:type %))
+                                                  @events)))))
+          (reset! events [])
+          (t/is (false? (loop/maybe-compact! agent))
+                "the automatic check stays silent (pi: nothing to compact)"))
+        (finally (fs/delete-tree dir))))))
+
+(t/deftest test-loop-branch-summary-budget
+  (t/testing "the branch entries are budgeted to the model's context window
+              minus reserveTokens; nothing that fits means no summarization
+              call at all (pi: prepareBranchEntries — \"No content to
+              summarize\")"
+    (let [entries [{:id "1" :role :user
+                    :content [{:type :text :text (apply str (repeat 100 "a"))}]}
+                   {:id "2" :role :user
+                    :content [{:type :text :text (apply str (repeat 100 "b"))}]}]
+          seen (atom [])
+          agent (loop/make-agent-state :provider :opencode-go
+                                       :model "m"
+                                       :branch-summary-reserve-tokens 100)
+          stub (fn [opts]
+                 (swap! seen conj opts)
+                 (future
+                   (when-let [on-text (:on-text opts)] (on-text "s"))
+                   (when-let [on-done (:on-done opts)] (on-done :stop))
+                   :done))]
+      (with-redefs [models/get-model (fn [_ _] {:id "m" :context-window 120
+                                                :max-tokens 5000})
+                    cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message stub]
+        ;; reserve 100 → budget 20 tokens; each entry estimates 25
+        (t/is (= {:summary "No content to summarize"}
+                 (loop/generate-branch-summary agent entries))
+              "nothing fits the budget")
+        (t/is (empty? @seen) "no summarization call"))
+      (reset! seen [])
+      (with-redefs [models/get-model (fn [_ _] {:id "m" :context-window 130
+                                                :max-tokens 5000})
+                    cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message stub]
+        ;; budget 30 tokens → the newest fits (25), the older does not
+        (t/is (str/starts-with? (:summary (loop/generate-branch-summary agent entries))
+                                "The user explored a different conversation branch"))
+        (let [text (get-in (first @seen) [:messages 1 :content 0 :text])]
+          (t/is (str/includes? text "bbb") "the newest entry was summarized")
+          (t/is (not (str/includes? text "aaa")) "the older entry was dropped"))))))
+
 (t/deftest test-loop-branch-summary-failure-reports-the-cause
   (t/testing "a failed branch summarization returns pi's error shape (pi:
               BranchSummaryResult.error — `Branch summarization failed: …`)"
@@ -4484,7 +4714,22 @@
       (t/is (= {:aborted true}
                (loop/generate-branch-summary
                 agent [{:role :user :content [{:type :text :text "x"}]}]))
-            "an aborted call reports :aborted (pi)"))))
+            "an aborted call reports :aborted (pi)")))
+  (t/testing "an empty response yields the preamble alone (pi prepends it to
+              contentText)"
+    (models/load-catalogs!)
+    (let [agent (loop/make-agent-state :provider :opencode-go
+                                       :model "deepseek-v4-flash")]
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [opts]
+                      (future
+                        (when-let [on-done (:on-done opts)] (on-done :stop))
+                        :done))]
+        (t/is (str/starts-with? (:summary (loop/generate-branch-summary
+                                           agent [{:role :user
+                                                   :content [{:type :text :text "x"}]}]))
+                                "The user explored a different conversation branch"))))))
 
 (t/deftest test-loop-compaction-keeps-tool-call-pairing-in-ui
   "A live compaction whose kept tail includes an assistant tool-call + its
@@ -4710,7 +4955,7 @@
                    (.indexOf types :compaction-end))
                 "session-before-compact fires before compaction-end (pi)")
           (t/is (:aborted end) "compaction-end carries :aborted true on extension cancel")
-          (t/is (false? (:result end)) "compaction-end carries result false"))
+          (t/is (nil? (:result end)) "compaction-end carries no result"))
         (t/is (= 6 (count @(:entries sess))) "session untouched")
         (t/is (= 6 (count @(:messages agent))) "in-memory context untouched")
         (finally
@@ -5339,7 +5584,7 @@
           (let [end (first (filter #(= :compaction-end (:type %)) @events))
                 failed (first (filter #(= :session-compact-failed (:type %)) @events))]
             (t/is (some? end) "compaction-end emitted")
-            (t/is (false? (:result end)) "no compaction happened")
+            (t/is (nil? (:result end)) "no compaction result")
             (t/is (some? (:error-message end)) "compaction-end carries the error")
             (t/is (= :threshold (:reason end)) "reason preserved")
             (t/is (some? failed) "session-compact-failed emitted (pi: session_compact_failed)")

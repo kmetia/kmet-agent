@@ -830,30 +830,34 @@
    editor dock like pi, not an overlay, so the framed dialog renders over
    clean chrome). Escape re-opens the tree with the entry still selected."
   [cs sess entry]
-  (let [sel-atom (atom nil)
-        on-select (fn [choice]
-                    (state/close-selector! cs sel-atom)
-                    (tui/tui-request-render (:tui cs))
-                    (case choice
-                      "No summary" (navigate-tree! cs sess entry false nil false nil)
-                      "Summarize" (navigate-tree! cs sess entry true nil false nil)
-                      "Summarize with custom prompt" (prompt-custom-summary! cs sess entry)))
-        on-escape (fn []
-                    (state/close-selector! cs sel-atom)
-                    ;; re-open with the highlight on the entry being
-                    ;; navigated to (pi showTreeSelector initialSelectedId)
-                    (show-session-tree cs
-                                       (fn [entry]
-                                         (ask-branch-summary cs @(:session-atom cs) entry))
-                                       (:id entry)))
-        dlg (dialogs/make-selector-dialog
-             "Summarize branch?"
-             ["No summary" "Summarize" "Summarize with custom prompt"]
-             on-select
-             on-escape
-             (th/get-current-theme))]
-    (state/mount-selector! cs sel-atom dlg)
-    (tui/tui-request-render (:tui cs))))
+  ;; pi: branchSummary.skipPrompt — skip the question and default to no
+  ;; summary
+  (if (:skip-prompt (cfg/get-branch-summary-settings-live (:config cs)))
+    (navigate-tree! cs sess entry false nil false nil)
+    (let [sel-atom (atom nil)
+          on-select (fn [choice]
+                      (state/close-selector! cs sel-atom)
+                      (tui/tui-request-render (:tui cs))
+                      (case choice
+                        "No summary" (navigate-tree! cs sess entry false nil false nil)
+                        "Summarize" (navigate-tree! cs sess entry true nil false nil)
+                        "Summarize with custom prompt" (prompt-custom-summary! cs sess entry)))
+          on-escape (fn []
+                      (state/close-selector! cs sel-atom)
+                      ;; re-open with the highlight on the entry being
+                      ;; navigated to (pi showTreeSelector initialSelectedId)
+                      (show-session-tree cs
+                                         (fn [entry]
+                                           (ask-branch-summary cs @(:session-atom cs) entry))
+                                         (:id entry)))
+          dlg (dialogs/make-selector-dialog
+               "Summarize branch?"
+               ["No summary" "Summarize" "Summarize with custom prompt"]
+               on-select
+               on-escape
+               (th/get-current-theme))]
+      (state/mount-selector! cs sel-atom dlg)
+      (tui/tui-request-render (:tui cs)))))
 
 ;; ─── Fork / clone (pi: /fork, /clone) ─────────────────────────────────────
 

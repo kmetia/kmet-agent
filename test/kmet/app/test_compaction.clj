@@ -215,6 +215,44 @@
           text (-> msgs second :content first :text)]
       (t/is (not (str/includes? text "Additional focus"))))))
 
+(t/deftest test-prepare-branch-entries
+  (t/testing "pi: prepareBranchEntries — whole entries newest-first within the
+              token budget"
+    (let [u (fn [id text] {:id id :role :user
+                           :content [{:type :text :text text}]})
+          entries [(u "1" (apply str (repeat 100 "a")))
+                   (u "2" (apply str (repeat 100 "b")))
+                   (u "3" (apply str (repeat 100 "c")))]]
+      (t/is (= entries (compaction/prepare-branch-entries entries 0))
+            "0 = no limit")
+      (t/is (= entries (compaction/prepare-branch-entries entries nil)))
+      (t/is (= entries (compaction/prepare-branch-entries entries 1000)))
+      (t/is (= ["3"] (mapv :id (compaction/prepare-branch-entries entries 25)))
+            "only the newest entry (25 tokens) fits")
+      (t/is (= ["2" "3"] (mapv :id (compaction/prepare-branch-entries entries 50)))
+            "whole entries, chronological order")))
+  (t/testing "entries that project to no context message neither count nor end
+              the walk"
+    (let [entries [{:id "1" :role :user
+                    :content [{:type :text :text (apply str (repeat 100 "a"))}]}
+                   {:id "info" :role :info :content "display only"}
+                   {:id "2" :role :user
+                    :content [{:type :text :text (apply str (repeat 100 "b"))}]}]]
+      (t/is (= ["1" "2"] (mapv :id (compaction/prepare-branch-entries entries 50)))
+            "the :info entry is skipped without consuming budget")))
+  (t/testing "a summary entry still joins while the total stays under 90% of
+              the budget (pi)"
+    (let [entries [{:id "c" :role :compaction :summary (apply str (repeat 200 "s"))}
+                   {:id "1" :role :user
+                    :content [{:type :text :text (apply str (repeat 100 "a"))}]}]]
+      ;; user = 25 tokens, compaction = 50; budget 40: the compaction does not
+      ;; fit, but 25 < 0.9 * 40
+      (t/is (= ["c" "1"] (mapv :id (compaction/prepare-branch-entries entries 40)))
+            "the summary joins even though it overflows the budget")
+      ;; budget 27: 25 < 0.9 * 27 is false → dropped, and the walk ends
+      (t/is (= ["1"] (mapv :id (compaction/prepare-branch-entries entries 27)))
+            "past the 90% line it is dropped like anything else"))))
+
 (t/deftest test-context-tokens
   (t/testing "measured usage of the latest assistant + estimate of trailing entries"
     (let [entries [{:role :assistant :content [{:type :text :text "a"}]

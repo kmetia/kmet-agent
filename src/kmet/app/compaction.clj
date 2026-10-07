@@ -410,6 +410,46 @@ Use this EXACT format:
 
 Keep each section concise. Preserve exact file paths, function names, and error messages.")
 
+(defn- branch-budget-step
+  "One newest-first step of prepare-branch-entries: ACC is
+   {:kept [entries] :total tokens :stop? bool}, ENTRY the next (older) entry
+   considered, BUDGET the token ceiling (0 = unlimited). Entries that
+   project to no context message neither count nor end the walk; the first
+   entry that does not fit ends it, except a summary entry, which still
+   joins while TOTAL stays under 90% of the budget."
+  [acc entry budget]
+  (if (:stop? acc)
+    acc
+    (let [visible? (boolean (seq (session/context-messages entry)))
+          tokens (if visible? (estimate-tokens entry) 0)
+          total (:total acc)]
+      (cond
+        (not visible?) acc
+
+        (or (not (pos? budget)) (<= (+ total tokens) budget))
+        (-> acc
+            (assoc :kept (cons entry (:kept acc)))
+            (assoc :total (+ total tokens)))
+
+        (and (contains? #{:compaction :branch-summary} (:role entry))
+             (< total (* 0.9 budget)))
+        (-> acc
+            (assoc :kept (cons entry (:kept acc)))
+            (assoc :total (+ total tokens))
+            (assoc :stop? true))
+
+        :else (assoc acc :stop? true)))))
+
+(defn prepare-branch-entries
+  "The branch entries a summary should cover within TOKEN-BUDGET, in
+   chronological order (pi: prepareBranchEntries — kmet has no
+   file-operation tracking, so the read/modified file lists are not
+   collected). A nil or zero budget keeps everything."
+  [entries token-budget]
+  (vec (:kept (reduce #(branch-budget-step %1 %2 (or token-budget 0))
+                      {:kept [] :total 0 :stop? false}
+                      (reverse entries)))))
+
 (defn branch-summary-messages
   "The full message list for a branch summarization call (pi:
    generateBranchSummary): the summarization system prompt + a single user
