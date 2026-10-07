@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-29T16:15:58Z"
+ :generated-at "2026-10-07T06:36:59Z"
  :provider {:id :mistral
             :name "Mistral"
             :env-vars ["MISTRAL_API_KEY"]
@@ -112,9 +112,9 @@
     :api :mistral-conversations
     :base-url "https://api.mistral.ai"
     :reasoning false
-    :input [:text]
+    :input [:text :image]
     :cost {:input 0.04 :output 0.04 :cache-read 0.004 :cache-write 0}
-    :context-window 128000
+    :context-window 131072
     :max-tokens 128000}
    "ministral-8b-latest"
    {:id "ministral-8b-latest"
@@ -123,9 +123,9 @@
     :api :mistral-conversations
     :base-url "https://api.mistral.ai"
     :reasoning false
-    :input [:text]
+    :input [:text :image]
     :cost {:input 0.1 :output 0.1 :cache-read 0.01 :cache-write 0}
-    :context-window 128000
+    :context-window 262144
     :max-tokens 128000}
    "mistral-large-2411"
    {:id "mistral-large-2411"
@@ -148,6 +148,17 @@
     :input [:text :image]
     :cost {:input 0.5 :output 1.5 :cache-read 0.05 :cache-write 0}
     :context-window 262144
+    :max-tokens 262144}
+   "mistral-large-4"
+   {:id "mistral-large-4"
+    :name "Mistral Large 4"
+    :provider :mistral
+    :api :mistral-conversations
+    :base-url "https://api.mistral.ai"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.68 :output 2.09 :cache-read 0.07 :cache-write 0}
+    :context-window 524288
     :max-tokens 262144}
    "mistral-large-latest"
    {:id "mistral-large-latest"
@@ -246,7 +257,7 @@
     :reasoning true
     :input [:text :image]
     :cost {:input 0.15 :output 0.6 :cache-read 0.015 :cache-write 0}
-    :context-window 256000
+    :context-window 262144
     :max-tokens 256000}
    "mistral-small-latest"
    {:id "mistral-small-latest"
@@ -257,7 +268,7 @@
     :reasoning true
     :input [:text :image]
     :cost {:input 0.15 :output 0.6 :cache-read 0.015 :cache-write 0}
-    :context-window 256000
+    :context-window 262144
     :max-tokens 256000}
    "open-mistral-7b"
    {:id "open-mistral-7b"
@@ -334,7 +345,7 @@
     :reasoning false
     :input [:text]
     :cost {:input 0.1 :output 0.3 :cache-read 0.01 :cache-write 0}
-    :context-window 32000
+    :context-window 32768
     :max-tokens 32000}
    "zai-glm-5-2"
    {:id "zai-glm-5-2"
@@ -345,7 +356,7 @@
     :reasoning true
     :input [:text]
     :cost {:input 1.4 :output 4.4 :cache-read 0.14 :cache-write 0}
-    :context-window 1000000
+    :context-window 1048576
     :max-tokens 131072}
    "zai-glm-5-3"
    {:id "zai-glm-5-3"
@@ -356,5 +367,5 @@
     :reasoning true
     :input [:text]
     :cost {:input 1.4 :output 4.4 :cache-read 0.14 :cache-write 0}
-    :context-window 1000000
+    :context-window 1048576
     :max-tokens 131072}}}}
