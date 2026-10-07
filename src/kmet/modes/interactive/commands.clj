@@ -671,7 +671,7 @@
                      agent-state @(:agent-state cs)
                      instructions (when (seq args) args)]
                  (cond
-                   (not= :idle @(:status agent-state))
+                   (state/turn-running? cs)
                    (chat-history/chat-history-add-message! chat-history
                                                            {:role :info :label "Compact"
                                                             :content "Wait for the current response to finish before compacting."})
@@ -751,7 +751,7 @@
   [cs _]
   (let [{:keys [chat-history]} cs
         agent-state @(:agent-state cs)]
-    (if-not (= :idle @(:status agent-state))
+    (if (state/turn-running? cs)
       (chat-history/chat-history-add-message! chat-history
                                               {:role :info :label "Reload"
                                                :content "Wait for the current response to finish before reloading."})

@@ -4020,12 +4020,11 @@
           (swap! (:messages agent) conj m)
           (session/append-entry sess m)))
       (with-redefs [cfg/get-api-key (fn [_] "test-key")
-                    ;; Skip the pre-run proactive compaction and run the
-                    ;; mid-run one (after the tool batch) for real — the
-                    ;; trigger the reported session hit.
+                    ;; Run only the mid-run check (after the tool batch) for
+                    ;; real — the trigger the reported session hit; the pre-run
+                    ;; and post-run (D) checks are skipped.
                     loop/maybe-compact! (fn [a]
-                                          (if (= 1 (swap! compact-calls inc))
-                                            false
+                                          (when (= 2 (swap! compact-calls inc))
                                             (real-compact a)))
                     llm/send-message
                     (fn [opts]
@@ -4062,7 +4061,8 @@
         @(loop/run-agent-turn agent {:message "final question"
                                      :on-error (fn [e] (swap! errors conj e))}))
       (t/is (empty? @errors) "a context replacement must not fail the run")
-      (t/is (= 2 @compact-calls) "compaction checked pre-run and mid-run")
+      (t/is (= 3 @compact-calls)
+            "compaction checked pre-run, mid-run, and post-run (D)")
       (t/is (some #(= :compaction (:role %)) @(:entries sess))
             "the mid-run compaction happened")
       (let [ae (first (filter #(= :agent-end (:type %)) @events))
@@ -4089,6 +4089,111 @@
       (t/is (= :idle @(:status agent)))
       (finally
         (fs/delete-tree dir)))))
+
+(t/deftest test-loop-post-run-threshold-compaction
+  ;; pi: _handlePostAgentRun runs the compaction check after a settled
+  ;; attempt, before the queued-message continuation and the pre-settle
+  ;; boundary. A threshold compaction never retries the turn.
+  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+        sess (session/create-session (str dir))
+        events (atom [])
+        agent (loop/make-agent-state
+               :session sess
+               :compact-token-threshold 100
+               :keep-recent-tokens 40
+               :on-event (fn [e] (swap! events conj e)))]
+    (try
+      ;; The session starts below the threshold; the run's long final answer
+      ;; pushes the estimate over it, so only the post-run check fires.
+      (session/append-entry sess {:role :user
+                                  :content [{:type :text :text "hi"}]})
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [opts]
+                      (future
+                        (if (:tools opts)
+                          ;; the run: one long final text response
+                          (do (when-let [on-text (:on-text opts)]
+                                (on-text (apply str (repeat 2000 "x"))))
+                              (when-let [on-done (:on-done opts)]
+                                (on-done :stop)))
+                          ;; the summarization call
+                          (do (when-let [on-text (:on-text opts)]
+                                (on-text "summary of the old conversation"))
+                              (when-let [on-done (:on-done opts)]
+                                (on-done :stop))))
+                        :done))]
+        (binding [*err* (java.io.StringWriter.)]
+          @(loop/run-agent-turn agent {:message "go" :on-error (fn [_])})))
+      (let [types (mapv :type @events)
+            idx (fn [t] (.indexOf types t))]
+        (t/is (some #(and (= :compaction-start (:type %))
+                          (= :threshold (:reason %)))
+                    @events)
+              "the post-run check compacts the context")
+        (t/is (= 1 (count (filter #(= :compaction-start (:type %)) @events)))
+              "only the post-run check ran (the pre-run context is below the
+               threshold)")
+        (t/is (some #(= :compaction (:role %)) @(:entries sess))
+              "a compaction entry was appended")
+        (t/is (< (idx :agent-end) (idx :compaction-start))
+              ":agent-end precedes the post-run compaction")
+        (t/is (< (idx :compaction-start) (idx :compaction-end))
+              "compaction-start precedes compaction-end")
+        (t/is (< (idx :compaction-end) (idx :agent-settled))
+              "compaction-end precedes the prompt's settle")
+        (t/is (= 1 (count (filter #(= :agent-start (:type %)) @events)))
+              "no extra run (pi: a threshold compaction does not retry)")
+        (t/is (= 1 (count (filter #(= :agent-settled (:type %)) @events))))
+        (t/is (= :idle @(:status agent))))
+      (finally (fs/delete-tree dir)))))
+
+(t/deftest test-loop-post-run-compaction-not-retriggered-after-failure
+  ;; An auto compaction that failed (or was aborted) stands down for the rest
+  ;; of the prompt: the context is unchanged, so a later check would retry
+  ;; the same summarization. Regression for D — without the guard the
+  ;; post-run check runs the failing compaction again.
+  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+        sess (session/create-session (str dir))
+        events (atom [])
+        agent (loop/make-agent-state
+               :session sess
+               :compact-token-threshold 10
+               :keep-recent-tokens 40
+               :on-event (fn [e] (swap! events conj e)))]
+    (try
+      (dotimes [i 6]
+        (session/append-entry sess
+                              {:role :user
+                               :content [{:type :text :text
+                                          (str "This is message body number " i
+                                               " with plenty of words so the estimated token count "
+                                               "easily exceeds the small test threshold.")}]}))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    ;; the run answers normally; the summarization call fails
+                    llm/send-message
+                    (fn [opts]
+                      (future
+                        (if (:tools opts)
+                          (do (when-let [on-text (:on-text opts)]
+                                (on-text "answer"))
+                              (when-let [on-done (:on-done opts)]
+                                (on-done :stop)))
+                          (when-let [on-error (:on-error opts)]
+                            (on-error "summary stream failed")))
+                        :done))]
+        (binding [*err* (java.io.StringWriter.)]
+          @(loop/run-agent-turn agent {:message "go" :on-error (fn [_])})))
+      (t/is (= 1 (count (filter #(= :compaction-start (:type %)) @events)))
+            "the failed pre-run compaction is not retried by the post-run check")
+      (t/is (some #(and (= :compaction-end (:type %)) (:error-message %)) @events)
+            "the failure was reported")
+      (t/is (not-any? #(= :error (:type %)) @events)
+            "the run itself completed")
+      (t/is (= 1 (count (filter #(= :agent-start (:type %)) @events))))
+      (t/is (some #(= :agent-settled (:type %)) @events)
+            "the prompt settled")
+      (finally (fs/delete-tree dir)))))
 
 (t/deftest test-loop-compaction-keeps-tool-call-pairing-in-ui
   "A live compaction whose kept tail includes an assistant tool-call + its
@@ -4484,6 +4589,8 @@
       (t/is (false? @(:compacting? agent)) "the compaction flag is cleared")
       (let [end (first (filter #(= :compaction-end (:type %)) @events))]
         (t/is (:aborted end) "compaction-end reports the abort"))
+      (t/is (= 1 (count (filter #(= :compaction-start (:type %)) @events)))
+            "the aborted compaction is not retried by the post-run check (D)")
       (t/is (not-any? #(contains? #{:error :on-error} (:type %)) @events)
             "no error event — the abort is not a failure")
       (t/is (some #(and (= :assistant (:role %))

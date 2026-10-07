@@ -196,10 +196,10 @@
 
    :agent-settled
    "Fired when the prompt is fully settled — after the last attempt's
-    :agent-end, once per prompt, after any retries, overflow recovery, error,
-    timeout, or cancel. The agent is idle and no further events for this
-    prompt will be emitted (pi: agent_settled, emitted from a finally block
-    after the whole prompt loop)."
+    :agent-end, once per prompt, after any retries, overflow recovery,
+    post-run compaction, error, timeout, or cancel. The agent is idle and no
+    further events for this prompt will be emitted (pi: agent_settled,
+    emitted from a finally block after the whole prompt loop)."
 
    ;; ─── Provider events (pi: context / before_provider_request /
    ;; ─── before_provider_headers / after_provider_response) ────────────

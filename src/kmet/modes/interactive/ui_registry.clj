@@ -609,7 +609,13 @@
                           ;; record's :session field goes stale (compact);
                           ;; the atom fields are shared and always current
                           (let [ag-atom (:agent-state cs)
-                                ag @ag-atom]
+                                ag @ag-atom
+                                ;; pi: isIdle — a run stays active through the
+                                ;; settle window (isStreaming outlives the last
+                                ;; attempt) and a compaction is not idle either
+                                idle? (fn []
+                                        (and (not (state/turn-running? cs))
+                                             (not @(:compacting? @ag-atom))))]
                             {:mode :interactive
                              :has-ui true
                              :cwd (fdp/fdp-get-cwd fdp)
@@ -617,14 +623,17 @@
                              :scoped-models (resolver/scoped-models-for-context
                                              @(:scoped-models ag) @(:provider ag))
                              :thinking-level @(:thinking ag)
-                             :is-idle (fn [] (= :idle @(:status @ag-atom)))
+                             :is-idle idle?
                              :has-pending-messages (fn []
                                                      (boolean
                                                       (agent/has-queued-messages?
                                                        @ag-atom)))
                              :signal (fn [] @(:signal @ag-atom))
                              :abort (fn []
-                                      (when-not (= :idle @(:status @ag-atom))
+                                      ;; pi: abort() acts while a run is active
+                                      ;; (including the settle window) or a
+                                      ;; compaction is running
+                                      (when-not (idle?)
                                         ;; pi: ctx.abort() restores queued
                                         ;; steering/follow-up messages to the
                                         ;; editor before aborting — a message
@@ -674,12 +683,13 @@
                                                                              (cfg/get-agent-dir)
                                                                              (str (fs/cwd)))}))
                              :wait-for-idle (fn []
-                                              (if (= :idle @(:status @ag-atom))
+                                              ;; pi: waitForIdle
+                                              (if (idle?)
                                                 nil
                                                 (let [p (promise)]
                                                   (future
                                                     (loop []
-                                                      (if (= :idle @(:status @ag-atom))
+                                                      (if (idle?)
                                                         (deliver p true)
                                                         (do (Thread/sleep 100) (recur)))))
                                                   p)))

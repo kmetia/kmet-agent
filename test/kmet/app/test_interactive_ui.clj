@@ -393,6 +393,27 @@
         ((:handler (commands/find-command "continue")) cs ""))
       (t/is (= "No conversation to continue." (:content @msg))))))
 
+(deftest test-compact-refuses-while-running
+  (testing "/compact refuses while a run is active even when the status atom
+            already reads idle — the settle window (a post-run compaction or
+            a pre-settle continuation) keeps the run flag true, and the run
+            flag is what counts (pi: isStreaming)"
+    (commands/clear-commands!)
+    ((var builtins/register-builtin-commands!) cfg/default-config)
+    (let [ag (agent/make-agent-state)
+          msg (atom nil)
+          cs {:agent-state (atom ag)
+              :chat-history nil
+              :running-turn? (atom true)
+              :tui nil}]
+      (t/is (= :idle @(:status ag))
+            "precondition: the status atom already reads idle")
+      (with-redefs [chat-history/chat-history-add-message! (fn [_ m] (reset! msg m))]
+        ((:handler (commands/find-command "compact")) cs ""))
+      (t/is (= "Wait for the current response to finish before compacting."
+               (:content @msg))
+            "refuses while a turn is running"))))
+
 (deftest test-continue-starts-run-without-message
   (testing "/continue starts an agent run on the existing context with no new
             user message — the model picks up the interrupted turn (e.g. after
@@ -1532,6 +1553,50 @@
           ;; Registry installation is a side effect: clean up even if a
           ;; capability throws, so later contexts cannot see the fake cs.
           (finally (clear-installed-context!)))))))
+
+(deftest test-build-context-idle-follows-the-run-and-compaction-flags
+  (testing "the extension ctx's idle state, wait-for-idle and abort follow the
+            run and compaction flags, not the status atom — the settle window
+            (e.g. D's post-run compaction) has status idle while the prompt is
+            still in flight (pi: isIdle / isStreaming / abort)"
+    (let [ag (agent/make-agent-state)
+          cs {:agent-state (atom ag)
+              :config cfg/default-config
+              :session-atom (atom nil)
+              :compaction-queued (atom [])
+              :running-turn? (atom false)}
+          registry ((var ui-registry/build-extension-ui-registry)
+                    {:tui nil :cs cs}
+                    {:fdp (fdp/make-footer-data-provider)}
+                    nil)]
+      (try
+        (let [ctx ((:build-context registry))]
+          (t/is (= :idle @(:status ag)) "precondition: the status atom reads idle")
+          (t/is (true? ((:is-idle ctx))))
+          ;; The settle window: a prompt is in flight with the status idle
+          (reset! (:running-turn? cs) true)
+          (t/is (false? ((:is-idle ctx))) "the run flag beats the status atom")
+          (t/is (some? ((:wait-for-idle ctx))) "running → a wait promise")
+          ((:abort ctx))
+          (t/is (true? @(:signal ag)) "abort cancels the run even with the status idle")
+          (reset! (:running-turn? cs) false)
+          (reset! (:signal ag) false)
+          (t/is (true? ((:is-idle ctx))) "idle again once the run flag drops")
+          ;; A compaction alone is not idle, and abort aborts it too
+          (reset! (:compaction-signal ag) false)
+          (reset! (:compacting? ag) true)
+          (t/is (false? ((:is-idle ctx))) "a compaction is not idle (pi: isIdle)")
+          (t/is (some? ((:wait-for-idle ctx))) "a compaction → a wait promise")
+          ((:abort ctx))
+          (t/is (true? @(:compaction-signal ag)) "abort aborts the compaction")
+          (reset! (:compacting? ag) false)
+          ;; fully idle → abort is a no-op, not a stale run cancel
+          (reset! (:signal ag) false)
+          ((:abort ctx))
+          (t/is (false? @(:signal ag)) "idle → abort does nothing"))
+        (finally
+          (reset! (:running-turn? cs) false)
+          (clear-installed-context!))))))
 
 (deftest test-send-user-message-queues-while-the-prompt-settles
   (testing "a send during the settle window queues into the running prompt

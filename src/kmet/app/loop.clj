@@ -139,6 +139,9 @@
                        compacting?           ;; atom of bool: a compaction is in progress (escape cancels it)
                        compaction-signal     ;; atom of bool: abort the in-flight compaction (pi: AbortController —
                                              ;; escape aborts only the compaction; the run continues)
+                       compaction-blocked    ;; atom of bool: an automatic compaction in this prompt aborted
+                                             ;; or failed — automatic checks stand down until the next prompt
+                                             ;; (pi: skipAbortedCheck / _overflowRecoveryAttempted, extended)
                        pending-bash          ;; atom of vector of bash entries queued while streaming
                        run-messages          ;; atom of {run-token [message...]}: the messages
                                              ;; appended during an in-flight run (pi: newMessages,
@@ -242,6 +245,7 @@ Be precise and concise in your responses."}}]
                     :keep-recent-tokens keep-recent-tokens
                     :compacting? (atom false)
                     :compaction-signal (atom false)
+                    :compaction-blocked (atom false)
                     :pending-bash (atom [])
                     :run-messages (atom {})
                     :run-token (atom nil)
@@ -1431,7 +1435,10 @@ Be precise and concise in your responses."}}]
 
    Returns true when a compaction happened, false when there was nothing to
    compact (or compaction is already in progress, or an extension
-   cancelled it), and :aborted when the user cancelled mid-compaction."
+   cancelled it), and :aborted when the user cancelled mid-compaction.
+   A compaction that did not complete — :failed, :aborted, or an extension
+   cancel — blocks this prompt's automatic checks (see maybe-compact!); the
+   next prompt starts fresh."
   [agent & [custom-instructions reason]]
   (if @(:compacting? agent)
     false
@@ -1526,6 +1533,8 @@ Be precise and concise in your responses."}}]
                                           "Context compaction failed: the summarization call did not return a summary.")
                          :aborted (or (= result :aborted)
                                       (= result ::cancelled))}))
+          (when (or (= result :aborted) (= result :failed) (= result ::cancelled))
+            (reset! (:compaction-blocked agent) true))
           (if (= result ::cancelled) false result))
         (finally
           (reset! (:compacting? agent) false))))))
@@ -1537,10 +1546,15 @@ Be precise and concise in your responses."}}]
    reserveTokens) — the default trigger — or when an explicit
    :compact-token-threshold (estimated tokens) is configured. Gated by the
    :auto-compact flag (pi: autoCompact); overflow recovery is separate and
-   always available. Returns true when compaction happened."
+   always available. A compaction that aborted or failed earlier in this
+   prompt stands down too (:compaction-blocked — pi: skipAbortedCheck,
+   extended). Returns true when compaction happened."
   [agent]
-  ;; nil session OR auto-compact off → no proactive compaction
-  (if-let [sess (and (:auto-compact @(:cfg agent)) (:session agent))]
+  ;; nil session, auto-compact off, or a blocked compaction this prompt →
+  ;; no proactive compaction
+  (if-let [sess (and (not @(:compaction-blocked agent))
+                     (:auto-compact @(:cfg agent))
+                     (:session agent))]
     (let [context (session/build-context sess)
           branch (session/get-branch sess)
           token-threshold (:compact-token-threshold agent)
@@ -1784,11 +1798,13 @@ Be precise and concise in your responses."}}]
 
 (defn- prepare-run!
   "Per-run setup (pi: _systemPromptOverride / _overflowRecoveryAttempted
-   resets, the submitted user message, before-agent-start hook overrides +
-   injected messages, proactive pre-run compaction)."
+   resets, the per-prompt compaction-blocked reset, the submitted user
+   message, before-agent-start hook overrides + injected messages,
+   proactive pre-run compaction)."
   [agent message images]
   (reset! (:system-prompt-override agent) nil)
   (reset! (:overflow-recovered agent) false)
+  (reset! (:compaction-blocked agent) false)
   ;; :agent-before-settle reports this run's last turn outcome
   (reset! (:last-outcome agent) :completed)
   ;; Repeat-loop guard is per-run: a legit bash ls x2 in run 1 must not
@@ -2218,9 +2234,10 @@ Be precise and concise in your responses."}}]
    (pi: agent.prompt then agent.continue), and exactly one :agent-settled
    fires once the prompt is fully settled. A transient error retries with
    exponential backoff (pi: _prepareRetry) and a context overflow compacts
-   once and retries; every attempt that ends without a retry then reaches the
-   prompt-level continuation checks — queued messages and the actionable
-   :agent-before-settle boundary — and a cancel ends the prompt.
+   once and retries; every settled or terminally-errored attempt then runs
+   the post-run compaction check (pi: _handlePostAgentRun → _checkCompaction)
+   and the prompt-level continuation checks — queued messages and the
+   actionable :agent-before-settle boundary — and a cancel ends the prompt.
 
    agent    — AgentState record
    opts:
@@ -2239,9 +2256,11 @@ Be precise and concise in your responses."}}]
      inner:   LLM call → tool execution → drain steering queue → repeat
               until no tool calls, no steering messages, and at least one
               turn has run.
-     settle:  a message queued by an :agent-end handler starts another
-              attempt first (pi: _handlePostAgentRun's hasQueuedMessages →
-              agent.continue, which drains the queues into the new attempt's
+     settle:  the post-run compaction check first (pi: _handlePostAgentRun →
+              _checkCompaction — threshold only; a threshold compaction
+              never retries the turn), then a message queued by an
+              :agent-end handler starts another attempt (pi: hasQueuedMessages
+              → agent.continue, which drains the queues into the new attempt's
               prompt), then the actionable :agent-before-settle boundary may
               ask for one (pi: _runBeforeSettleBoundary); with no attempt
               pending the prompt settles — on-done runs and :agent-settled
@@ -2332,24 +2351,29 @@ Be precise and concise in your responses."}}]
                 (let [outcome (run-attempt! agent @attempt-token opts)]
                   (case (:status outcome)
                     :settled
-                    ;; pi: _handlePostAgentRun's queued-message continuation
-                    ;; then _runBeforeSettleBoundary. on-done stays the
-                    ;; prompt's teardown (the UI's running-turn? hinges on it)
-                    ;; and fires only once no attempt is pending. kmet's
-                    ;; compaction check lives in prepare-run!/tools-phase!
-                    ;; (D moves the post-run check here).
-                    (if (continue-prompt? agent)
-                      (do (continue-attempt!) (recur))
-                      (when on-done (on-done (:text outcome))))
+                    ;; pi: _handlePostAgentRun's post-run compaction check,
+                    ;; then queued-message continuation, then
+                    ;; _runBeforeSettleBoundary. A threshold compaction never
+                    ;; retries the turn (pi: _checkCompaction returns
+                    ;; hasQueuedMessages). on-done stays the prompt's teardown
+                    ;; (the UI's running-turn? hinges on it) and fires only
+                    ;; once no attempt is pending.
+                    (do (maybe-compact! agent)
+                        (if (continue-prompt? agent)
+                          (do (continue-attempt!) (recur))
+                          (when on-done (on-done (:text outcome)))))
 
                     :error
-                    ;; pi: a terminal error ends the attempt, and the prompt
-                    ;; still reaches the pre-settle boundary — a handler can
-                    ;; revive it. on-done stays unsent: the error was
-                    ;; surfaced instead.
-                    (when (continue-prompt? agent)
-                      (continue-attempt!)
-                      (recur))
+                    ;; pi: a terminal error ends the attempt, but
+                    ;; _handlePostAgentRun still runs the compaction check
+                    ;; (an error response has no usable usage, so the
+                    ;; estimate decides) before the pre-settle boundary — a
+                    ;; handler can revive the prompt. on-done stays unsent:
+                    ;; the error was surfaced instead.
+                    (do (maybe-compact! agent)
+                        (when (continue-prompt? agent)
+                          (continue-attempt!)
+                          (recur)))
 
                     :aborted
                     ;; Cancelled: the prompt ends here, without the

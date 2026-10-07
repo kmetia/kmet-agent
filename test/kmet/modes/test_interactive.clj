@@ -991,6 +991,24 @@
       (is (str/includes? @(:system ag) "LAUNCH CONTEXT")
           "the launch dir's context files are in the rebuilt prompt"))))
 
+(deftest reload-refuses-while-running
+  (testing "/reload refuses while a run is active even when the status atom
+            already reads idle — the settle window keeps the run flag true,
+            and the run flag is what counts (pi: isStreaming)"
+    (let [ag (agent/make-agent-state)
+          msg (atom nil)
+          cs {:agent-state (atom ag)
+              :chat-history nil
+              :running-turn? (atom true)
+              :tui nil}]
+      (is (= :idle @(:status ag))
+          "precondition: the status atom already reads idle")
+      (with-redefs [chat-history/chat-history-add-message! (fn [_ m] (reset! msg m))]
+        ((var builtins/handle-reload) cs nil))
+      (is (= "Wait for the current response to finish before reloading."
+             (:content @msg))
+          "refuses while a run is active"))))
+
 (deftest heal-stale-scrollback-when-idle-gating
   (testing "input heals a stale scrollback only at a streaming-free moment"
     (let [make (fn [running bash compacting dirty]

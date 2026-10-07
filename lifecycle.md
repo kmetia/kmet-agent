@@ -58,9 +58,14 @@ Landed baseline — do not redo:
 - **G** — the actionable `:agent-before-settle` boundary: `:outcome`,
   `:pending-messages`, `:can-continue`, committed entries, and
   `{:continue true}` → one more attempt before `:agent-settled`.
+- **D** — the post-run compaction check: `run-agent-turn` runs
+  `maybe-compact!` in the `:settled` and `:error` arms (pi:
+  `_handlePostAgentRun` → `_checkCompaction`), and `:compaction-blocked`
+  stands the automatic checks down after an aborted or failed compaction in
+  the same prompt. The Phase 1 status finding landed alongside it.
 
-Open: **D, H–L**, phased below. D is the item the original note tracked;
-H–L are the rest of the 0.87.0 session-context / boundary wave.
+Open: **H–L**, phased below — the rest of the 0.87.0 session-context /
+boundary wave.
 
 ## Target behavior (pi)
 
@@ -109,7 +114,7 @@ Decisions taken for this plan:
 |-------|-------|-----------|
 | 1 | E, J | localized to `run-agent-turn`; no boundary machinery needed |
 | 2 | F, G (landed) | F establishes the boundary result shape; G builds on it |
-| 3 | D | post-run dispatch needs E's queue point and G's pre-settle position, plus the abort guard |
+| 3 | D (landed) | post-run dispatch needs E's queue point and G's pre-settle position, plus the abort guard |
 | 4 | H, I, L | context ingestion; H flushes at F's `turn_end`, L depends on I's request assembly |
 | 5 | K | session context model, largest and most independent |
 
@@ -178,17 +183,19 @@ pending-custom queue added in H), used by F/G and the pending display.
 **Acceptance.** Peeking does not empty the queues and returns the same messages
 the next drain consumes.
 
-### Phase 1 finding: the settle window still reports "idle"
+### Phase 1 finding: the settle window reported "idle" (fixed with D)
 
 The `:status` atom reads `:idle` from the attempt tail on, so between that
-point and the prompt's finally the agent looks idle while a prompt is in
+point and the prompt's finally the agent looked idle while a prompt was in
 flight — pi's `isStreaming` (`_isAgentRunActive`) stays true for the whole
-prompt. E fixed the two sites the continuation depends on; these still key on
-the status atom and are wrong in the same window (D's post-run compaction
-widens it, so fix them with or before D):
+prompt. E fixed the two sites the continuation depends on. D widened the
+window (the post-run compaction), so the remaining sites now key on the run
+flag — `state/turn-running?` (pi: `isStreaming`), with `:compacting?` folded
+in where pi's `isIdle` includes it — instead of the status atom:
 
 - `ui_registry.clj` `:is-idle` (ext ctx, pi `isIdle`), `:wait-for-idle`,
-  `:abort` (pi `abort()` works while a run is active)
+  `:abort` (pi `abort()` works while a run is active, and aborts a
+  compaction too)
 - `commands.clj` `/compact` and `/reload` "wait for the current response"
   guards
 
@@ -299,9 +306,23 @@ flush need them, so add them when K lands.
 
 ---
 
-## Phase 3 — post-run dispatch
+## Phase 3 — post-run dispatch (D landed)
 
 ### D. Compaction dispatch belongs to the session layer
+
+**Landed.** `run-agent-turn` runs `maybe-compact!` in the `:settled` and
+`:error` arms, after the attempt's `:agent-end` and before
+`continue-prompt?` — pi's `_handlePostAgentRun` order (retry → compaction →
+queued-message continue → before-settle boundary). The result is not a
+continuation (pi's `_checkCompaction` returns `hasQueuedMessages` for the
+threshold case, so a `:threshold` compaction just settles), and an errored
+attempt is checked too (no usable usage, so the estimate decides — pi:
+sessions that hit persistent API errors can still compact). The guard is
+`:compaction-blocked`: `compact-context!` sets it when the attempt aborts
+(including an extension cancel) or fails, `maybe-compact!` stands down while
+it is set, and `prepare-run!` clears it per prompt, so the unchanged context
+is not retried within the same prompt. The Phase 1 status finding landed in
+the same change, since D widens the settle window.
 
 **Goal.** Run the automatic compaction check after a settled attempt, as pi
 does, not only at the next prompt's pre-run check.
@@ -338,7 +359,11 @@ state explicitly).
 **Acceptance.** A run whose final assistant message crosses the threshold
 emits `agent-end` → `compaction-start` → `compaction-end` in that order, with
 no extra run; an aborted/failed compaction in the same prompt does not
-re-trigger; event-order tests for both.
+re-trigger; event-order tests for both. Landed as
+`test-loop-post-run-threshold-compaction` (order + no extra run) and
+`test-loop-post-run-compaction-not-retriggered-after-failure` (a failed
+pre-run compaction is not retried post-run); the aborted case extends
+`test-loop-abort-compaction-keeps-run`.
 
 ---
 
@@ -461,7 +486,9 @@ next provider context; the raw branch, usage totals, and replay are unchanged.
 
 - `src/kmet/app/event_bus.clj` — A/B/E/F/G done (E reshaped the
   `:agent-start`/`:agent-end` descriptions; F/G added `:agent-before-settle`
-  and the actionable `:turn-end`, plus `emit-boundary!`); H/L add or reshape
+  and the actionable `:turn-end`, plus `emit-boundary!`); D adds no events
+  (the compaction payloads were already pi-shaped; `:agent-settled` now
+  names the post-run compaction in its description); H/L add or reshape
   events (`:context-with-system`).
 - `src/kmet/extension.md` — done with E/F/G (the `:agent-end` queueing
   paragraph, the two actionable boundaries, and the `send-user-message`
@@ -469,5 +496,6 @@ next provider context; the raw branch, usage totals, and replay are unchanged.
 - `src/kmet/development/pi-alignment.md` — A/B/C done and §7 moved here; the
   Appendix rows for the agent/turn/context boundaries point at this file and
   follow E/F/G/J. The compaction row (`session_before_compact` /
-  `session_compact`) follows D.
+  `session_compact`) follows D, done: it now records the dispatch parity and
+  the residual missing success `:session_compact` event.
 - This file — strike items as they land; remove it when the open list is empty.
