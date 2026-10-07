@@ -1782,11 +1782,15 @@ Be precise and concise in your responses."}}]
          (not= :assistant (:role (last msgs))))))
 
 (defn- boundary-can-continue?
-  "pi's canContinue for a boundary: the context can back one more request, or
-   messages are queued. Reported to handlers as :can-continue (the value
+  "pi's canContinue for a boundary: the context can back one more request,
+   messages are queued, or custom messages are deferred — the boundary's
+   flush lands those before the next request (pi: _buildBoundaryContext's
+   pendingCustomContext). Reported to handlers as :can-continue (the value
    before a handler's entries are committed — a runnable batch enables it)."
   [agent]
-  (boolean (or (can-continue? agent) (has-queued-messages? agent))))
+  (boolean (or (can-continue? agent)
+               (has-queued-messages? agent)
+               (seq @(:pending-custom agent)))))
 
 (defn- honor-continuation?
   "Whether a boundary's requested continuation can run, reporting the

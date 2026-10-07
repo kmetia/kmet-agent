@@ -395,7 +395,10 @@ context (pi: message_end persistence) — the interactive registry now queues
 without appending, so every delivery mode appends exactly once (the busy
 `{:trigger-turn true :deliver-as :follow-up}` send used to append immediately
 *and* again on the drain). The boundary preview's `:pending-messages`
-includes the deferred queue (pi: `_getPendingBoundaryMessages`). An idle send
+includes the deferred queue (pi: `_getPendingBoundaryMessages`) and
+`:can-continue` counts it as runnable (pi: `pendingCustomContext`), so a
+handler can ask for a continuation the boundary's flush will make possible.
+An idle send
 that triggers a run appends before the run starts, so it is not part of that
 attempt's `:agent-end :messages` (pi's prompt carries it). The headless
 fallback still appends immediately through the sinks — it has no queue of its

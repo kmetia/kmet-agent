@@ -5224,4 +5224,93 @@
         (finally
           (fs/delete-tree dir))))))
 
+(t/deftest test-loop-deferred-custom-message-enables-a-boundary-continuation
+  (t/testing "a custom message deferred during the settle window counts toward
+              the boundary's :can-continue (pi: _buildBoundaryContext's
+              pendingCustomContext): the handler sees a runnable boundary and
+              its {:continue true} is honored, with the flush landing the
+              message before the continuation request"
+    (let [agent (loop/make-agent-state)
+          requests (atom [])
+          boundaries (atom [])
+          ends (atom 0)]
+      (try
+        (event-bus/on-event :agent-end
+                            (fn [_]
+                              ;; deferred once, during the settle window —
+                              ;; after the last turn's flush
+                              (when (= 1 (swap! ends inc))
+                                (loop/defer-custom-message! agent {:role :custom
+                                                                   :custom-type :note
+                                                                   :content "late"
+                                                                   :display true}))))
+        (event-bus/on-event :agent-before-settle
+                            (fn [e]
+                              (swap! boundaries conj e)
+                              {:continue true}))
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [opts]
+                        (swap! requests conj (:messages opts))
+                        (future
+                          (when-let [on-text (:on-text opts)] (on-text "ok"))
+                          (when-let [on-done (:on-done opts)] (on-done :stop))
+                          :done))]
+          ;; the second boundary's rejected continuation warns to stderr
+          (binding [*err* (java.io.StringWriter.)]
+            @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])})))
+        (let [boundary (first @boundaries)]
+          (t/is (true? (:can-continue boundary))
+                "the deferred message makes the boundary runnable")
+          (t/is (= ["late"] (mapv :content (:pending-messages boundary)))
+                "and is previewed in :pending-messages"))
+        (t/is (= 2 (count @requests))
+              "the continuation ran one more attempt")
+        (t/is (= "late" (get-in (last (second @requests)) [:content 0 :text]))
+              "the flush landed the message before the continuation request")
+        (t/is (= 1 (count (filter #(= "late" (get-in % [:content 0 :text]))
+                                  @(:messages agent))))
+              "appended exactly once")
+        (finally
+          (event-bus/clear-event-listeners!))))))
+
+(t/deftest test-loop-turn-end-continue-honors-a-deferred-custom-message
+  (t/testing "a deferred custom message makes the turn-end boundary runnable
+              (pi: canContinue includes pendingCustomContext), so a handler's
+              {:continue true} is honored even though the live context still
+              ends with the assistant message — the flush follows the
+              boundary"
+    (let [agent (loop/make-agent-state)
+          opts (atom [])
+          turns (atom 0)
+          calls (atom 0)]
+      (try
+        (event-bus/on-event :turn-end
+                            (fn [_] (when (= 1 (swap! turns inc)) {:continue true})))
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [o]
+                        (swap! opts conj o)
+                        (future
+                          (when (= 1 (swap! calls inc))
+                            ;; deferred mid-turn, still pending at the boundary
+                            (loop/defer-custom-message! agent {:role :custom
+                                                               :custom-type :note
+                                                               :content "late"
+                                                               :display true}))
+                          (when-let [on-text (:on-text o)] (on-text "ok"))
+                          (when-let [on-done (:on-done o)] (on-done :stop))
+                          :done))]
+          @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+        (t/is (= 2 @calls) "the boundary continuation ran one more request")
+        (t/is (= "late" (get-in (last (:messages (second @opts))) [:content 0 :text]))
+              "with the deferred message flushed in")
+        (t/is (= 1 (count (filter #(= "late" (get-in % [:content 0 :text]))
+                                  @(:messages agent))))
+              "appended exactly once")
+        (finally
+          (event-bus/clear-event-listeners!))))))
+
+
+
 
