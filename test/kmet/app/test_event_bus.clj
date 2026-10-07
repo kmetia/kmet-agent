@@ -13,6 +13,7 @@
 
 (t/deftest test-events-core-types-known
   (doseq [t [:agent-start :agent-end :agent-settled :turn-start :turn-end
+             :agent-before-settle
              :message-start :message-update :message-end
              :tool-execution-start :tool-execution-update :tool-execution-end
              :status :error :user-bash]]
@@ -113,3 +114,38 @@
   (binding [*err* (java.io.StringWriter.)]
     (t/is (= {:ok true} (event-bus/emit-event! {:type :bad}))
           "an errored handler doesn't prevent later handlers or throw")))
+
+;; ─── Boundary dispatch (pi: runner.emitBoundary) ──────────────────────────
+
+(t/deftest test-boundary-threads-handler-results
+  (let [seen (atom [])]
+    (event-bus/clear-event-listeners!)
+    (event-bus/on-event :b1 (fn [e] (swap! seen conj e) {:entries [:a]}))
+    (event-bus/on-event :b1 (fn [e] (swap! seen conj e) {:continue true}))
+    (t/is (= {:entries [:a] :continue true}
+             (event-bus/emit-boundary! {:type :b1 :entries [] :continue false}))
+          "each handler's keys replace the accumulated ones")
+    (t/is (= [] (:entries (first @seen))) "the first handler sees the event as given")
+    (t/is (= [:a] (:entries (second @seen)))
+          "the second handler sees the first handler's entries (pi: emitBoundary)")
+    (t/is (false? (:continue (first @seen))))
+    (t/is (nil? (event-bus/emit-boundary! {:type :unregistered}))
+          "no listeners → nil")))
+
+(t/deftest test-boundary-nil-and-non-map-results-keep-the-state
+  (event-bus/clear-event-listeners!)
+  (event-bus/on-event :b2 (fn [_] {:entries [:a]}))
+  (event-bus/on-event :b2 (fn [_] nil))
+  (event-bus/on-event :b2 (fn [_] :bogus))
+  (t/is (= {:entries [:a]}
+           (event-bus/emit-boundary! {:type :b2 :entries []}))
+        "a nil or non-map result leaves the accumulated state alone"))
+
+(t/deftest test-boundary-handler-error-swallowed
+  (event-bus/clear-event-listeners!)
+  (event-bus/on-event :b3 (fn [_] (throw (ex-info "boom" {}))))
+  (event-bus/on-event :b3 (fn [_] {:continue true}))
+  ;; The throwing listener prints a warning to stderr — suppress it.
+  (binding [*err* (java.io.StringWriter.)]
+    (t/is (= {:continue true} (event-bus/emit-boundary! {:type :b3}))
+          "an errored boundary handler is skipped, later handlers still run")))

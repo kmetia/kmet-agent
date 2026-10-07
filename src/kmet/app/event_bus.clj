@@ -37,8 +37,20 @@
     Payload: :turn-index."
 
    :turn-end
-   "Fired after a turn completes (LLM call plus any tool execution).
-    Payload: :message, :tool-results."
+   "Actionable: fired after a turn completes — the LLM call plus any tool
+    execution — including a response that errored or was aborted, where it
+    precedes :agent-end (pi: turn_end, emitted by the loop's finishTurn
+    call). Payload: :turn-index, :message, :tool-results, :outcome
+    (:completed | :error | :aborted), plus the boundary state
+    :pending-messages (the queued batches the next attempt would start
+    from), :can-continue, :entries [] and :continue false. Handlers may
+    return {:entries [entry ...] :continue bool} (pi: emitBoundary): entries
+    are session entry maps appended in order (pi: SessionBoundaryDraft — a
+    :custom-message entry also enters the context) and :continue asks for
+    one more request, honored once the entries are committed when the
+    context can back it, and reported then dropped otherwise (:can-continue
+    is that check as the boundary stood). Each handler sees the previous
+    handlers' :entries/:continue merged in, as pi does."
 
    :message-start
    "Fired when a message is added to the context, or when assistant
@@ -171,6 +183,17 @@
     session_compact_failed). Payload: :reason (:manual | :threshold |
     :overflow), :error-message (when a non-abort failure), :aborted."
 
+   :agent-before-settle
+   "Actionable: fired once before the prompt settles, after the queued-message
+    continuation check, and before :agent-settled (pi: agent_before_settle,
+    emitted by _runBeforeSettleBoundary). Payload: :outcome — the last turn's
+    outcome (:completed | :error | :aborted) — plus the boundary state
+    :pending-messages, :can-continue, :entries [] and :continue false.
+    Handlers return {:entries [...] :continue bool} as for :turn-end; one
+    that merely queues a message also runs one more attempt before the
+    prompt settles (pi: shouldContinue includes hasQueuedMessages). A
+    cancelled prompt never reaches this event."
+
    :agent-settled
    "Fired when the prompt is fully settled — after the last attempt's
     :agent-end, once per prompt, after any retries, overflow recovery, error,
@@ -260,6 +283,18 @@
   []
   (reset! event-listeners {}))
 
+(defn- invoke-handler
+  "Call CB with EVENT, returning nil and warning on a throw — a broken
+   extension never breaks the bus (pi: the runner reports the handler error
+   and carries on)."
+  [cb event]
+  (try
+    (cb event)
+    (catch Exception e
+      (binding [*out* *err*]
+        (println "Warning: extension event handler error:" (ex-message e)))
+      nil)))
+
 (defn emit-event!
   "Emit an event to all registered listeners.
    event — map with :type keyword and any additional data.
@@ -270,12 +305,7 @@
         listeners (get @event-listeners type)]
     (when listeners
       (reduce (fn [acc [_ cb]]
-                (let [result (try
-                               (cb event)
-                               (catch Exception e
-                                 (binding [*out* *err*]
-                                   (println "Warning: extension event handler error:" (ex-message e)))
-                                 nil))]
+                (let [result (invoke-handler cb event)]
                   (if (some? result) result acc)))
               nil
               listeners))))
@@ -289,14 +319,25 @@
   (let [type (:type event)
         listeners (get @event-listeners type)]
     (when listeners
-      (into []
-            (keep (fn [[_ cb]]
-                    (try (cb event)
-                         (catch Exception e
-                           (binding [*out* *err*]
-                             (println "Warning: extension event handler error:" (ex-message e)))
-                           nil))))
-            listeners))))
+      (into [] (keep (fn [[_ cb]] (invoke-handler cb event))) listeners))))
+
+(defn emit-boundary!
+  "Emit an actionable boundary event (a :turn-end or :agent-before-settle
+   boundary), threading each handler's result into the next handler's event
+   (pi: runner.emitBoundary): a handler receives the event merged with the
+   accumulated result so far and returns a map ({:entries [...] :continue
+   bool}) whose keys replace the accumulated ones; nil (or a non-map) keeps
+   them. Returns the accumulated map — nil when no handler returned one.
+   Throwing handlers are skipped and warned, same as emit-event!."
+  [event]
+  (let [type (:type event)
+        listeners (get @event-listeners type)]
+    (when listeners
+      (reduce (fn [acc [_ cb]]
+                (let [result (invoke-handler cb (if acc (merge event acc) event))]
+                  (if (map? result) (merge acc result) acc)))
+              nil
+              listeners))))
 
 (defn get-event-types
   "List all registered event types."

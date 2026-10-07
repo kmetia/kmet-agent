@@ -2799,7 +2799,7 @@
     (t/is (instance? clojure.lang.Atom (:system-prompt-override agent)))
     (t/is (instance? clojure.lang.Atom (:transform-context agent)))
     (t/is (instance? clojure.lang.Atom (:prepare-next-turn agent)))
-    (t/is (instance? clojure.lang.Atom (:should-stop-after-turn agent)))
+    (t/is (instance? clojure.lang.Atom (:finish-turn agent)))
     (t/is (instance? clojure.lang.Atom (:get-api-key agent)))
     (t/is (= [] @(:scoped-models agent)))
     (t/is (false? @(:overflow-recovered agent)))
@@ -3096,7 +3096,7 @@
     (reset! (:system-prompt-override agent) nil)
     (t/is (nil? @(:system-prompt-override agent)))))
 
-;; ─── Phase 3: prepareNextTurn / shouldStopAfterTurn ──────────────────────
+;; ─── Phase 3: prepareNextTurn / finishTurn ───────────────────────────────
 
 (t/deftest test-loop-prepare-next-turn-updates-state
   (let [agent (loop/make-agent-state :model "model-a" :thinking :off)]
@@ -3115,10 +3115,10 @@
     (t/is (= "custom" @(:system-prompt-override agent))
           "prepare-next-turn sets the system prompt override for later turns")))
 
-(t/deftest test-loop-should-stop-after-turn
+(t/deftest test-loop-finish-turn-end-after-tool-calls
   (let [calls (atom 0)
         agent (loop/make-agent-state)]
-    (reset! (:should-stop-after-turn agent) (fn [_] true))
+    (reset! (:finish-turn agent) (fn [_] :end))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message
                   (fn [opts]
@@ -3133,15 +3133,15 @@
     (t/is (= 1 @calls) "loop stops after the first turn")
     (t/is (= :idle @(:status agent)))))
 
-(t/deftest test-loop-stop-after-turn-still-drains-a-queued-follow-up
-  ;; The tool-phase stop path settles with a :turn tag and resumes from it
+(t/deftest test-loop-finish-turn-still-drains-a-queued-follow-up
+  ;; The tool-phase :end path settles with a :turn tag and resumes from it
   ;; (pi: runLoop's follow-up poll after the turn keeps counting turns). The
   ;; final-response variant below also checks the message reaches the context.
   (let [calls (atom 0)
         errors (atom [])
         events (atom [])
         agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))]
-    (reset! (:should-stop-after-turn agent) (fn [_] true))
+    (reset! (:finish-turn agent) (fn [_] :end))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message (stub-llm-tool-then-text calls)
                   tools/execute-tool
@@ -3152,14 +3152,14 @@
                             {:message "run"
                              :on-done (fn [_])
                              :on-error (fn [e] (swap! errors conj e))}))
-    (t/is (empty? @errors) "the stop path resumed the run instead of crashing")
+    (t/is (empty? @errors) "the :end path resumed the run instead of crashing")
     (t/is (= 2 @calls) "the queued follow-up ran")
     (t/is (= [0 1]
              (mapv :turn-index (filter #(= :turn-start (:type %)) @events)))
           "turn numbering resumes from the stopped turn")))
 
-(t/deftest test-loop-stop-after-turn-final-drains-a-queued-follow-up
-  ;; The final-response stop path must settle with a :turn tag too: a
+(t/deftest test-loop-finish-turn-final-drains-a-queued-follow-up
+  ;; The final-response :end path must settle with a :turn tag too: a
   ;; follow-up queued while that response streamed (the user's Alt+Enter) is
   ;; drained by the outer poll, and an untagged outcome resumes the loop with
   ;; a nil turn index — the resumed turn then crashes computing the next one.
@@ -3167,7 +3167,7 @@
         errors (atom [])
         events (atom [])
         agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))]
-    (reset! (:should-stop-after-turn agent) (fn [_] true))
+    (reset! (:finish-turn agent) (fn [_] :end))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message
                   (fn [opts]
@@ -3182,7 +3182,7 @@
                             {:message "run"
                              :on-done (fn [_])
                              :on-error (fn [e] (swap! errors conj e))}))
-    (t/is (empty? @errors) "the stop path resumed the run instead of crashing")
+    (t/is (empty? @errors) "the :end path resumed the run instead of crashing")
     (t/is (= 2 @calls) "the queued follow-up ran a second turn")
     (t/is (= [0 1]
              (mapv :turn-index (filter #(= :turn-start (:type %)) @events)))
@@ -3191,6 +3191,400 @@
              (get-in (last (filter #(= :user (:role %)) (loop/get-context agent)))
                      [:content 0 :text])))
     (t/is (= :idle @(:status agent)))))
+
+;; ─── Turn and settle boundaries (lifecycle.md Phase 2: F/G) ──────────────
+
+(defn- stub-llm-text-turns
+  "send-message stub: the Nth call streams TEXTS' Nth entry (\"ok\" once the
+   list runs out) and finishes with :stop. Each call's opts are recorded in
+   OPTS."
+  [calls texts opts]
+  (fn [o]
+    (swap! opts conj o)
+    (future
+      (let [n (swap! calls inc)]
+        (when-let [on-text (:on-text o)]
+          (on-text (nth texts (dec n) "ok")))
+        (when-let [on-done (:on-done o)]
+          (on-done :stop))
+        :done))))
+
+(defn- request-user-texts
+  "The user-message texts a send-message opts map carries."
+  [o]
+  (mapv #(get-in % [:content 0 :text])
+        (filter #(= :user (:role %)) (:messages o))))
+
+(defn- events-of
+  "The event types in EVENTS that are members of TYPES, in order."
+  [events types]
+  (into [] (comp (filter #(contains? types (:type %))) (map :type)) events))
+
+(t/deftest test-loop-turn-end-boundary-commits-entries
+  ;; pi: _commitBoundaryDrafts — a turn_end handler's :entries are appended
+  ;; through the session in order, and a custom_message also reaches the live
+  ;; context (as a context-only append: pi's newMessages stays the loop's own
+  ;; list).
+  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-turn-end-entries")))
+        events (atom [])
+        boundaries (atom [])
+        calls (atom 0)
+        opts (atom [])
+        agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e))
+                                     :session (session/create-session dir))]
+    (try
+      (event-bus/on-event
+       :turn-end
+       (fn [e]
+         (swap! boundaries conj e)
+         {:entries [{:role :custom :custom-type "state" :data {:n 1}}
+                    {:role :custom-message :custom-type "note"
+                     :content "boundary note" :display true}]}))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (stub-llm-text-turns calls ["done"] opts)]
+        @(loop/run-agent-turn agent {:message "run"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (let [boundary (first @boundaries)]
+        (t/is (= :turn-end (:type boundary)))
+        (t/is (= 0 (:turn-index boundary)))
+        (t/is (= :completed (:outcome boundary)) "a normal turn's outcome")
+        (t/is (= :assistant (get-in boundary [:message :role])))
+        (t/is (= [] (:tool-results boundary)))
+        (t/is (= [] (:pending-messages boundary)))
+        (t/is (false? (:can-continue boundary))
+              "assistant-last and nothing queued: a continuation needs an entry")
+        (t/is (= [] (:entries boundary))
+              "the first handler sees the accumulated boundary state"))
+      (let [branch (session/get-branch (:session agent))
+            appended (filterv #(contains? #{"state" "note"} (:custom-type %)) branch)]
+        (t/is (= [:custom :custom-message] (mapv :role appended))
+              "both entries were committed in order")
+        (t/is (= (:id (first appended)) (:parent-id (second appended)))
+              "the second entry chains after the first"))
+      (t/is (= "boundary note"
+               (get-in (last (loop/get-context agent)) [:content 0 :text]))
+            "the custom-message projected into the context")
+      (t/is (not-any? #(= "state" (:custom-type %)) (loop/get-context agent))
+            "a :custom entry stays out of the context (pi: metadata/state)")
+      (t/is (not-any? #(= "boundary note" (get-in % [:content 0 :text]))
+                      (mapcat :messages (filter #(= :agent-end (:type %)) @events)))
+            "committed entries stay out of the attempt's :agent-end :messages")
+      (t/is (= [:turn-end :message-start]
+               (mapv :type (take 2 (drop-while #(not= :turn-end (:type %)) @events))))
+            "the committed message is announced as the boundary closes")
+      (finally
+        (event-bus/clear-event-listeners!)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-loop-turn-end-boundary-continue-runs-one-more-turn
+  (let [calls (atom 0)
+        events (atom [])
+        opts (atom [])
+        agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))]
+    (try
+      (event-bus/on-event :turn-end
+                          (fn [e]
+                            (when (zero? (:turn-index e))
+                              {:entries [{:role :user
+                                          :content [{:type :text :text "nudge"}]}]
+                               :continue true})))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (stub-llm-text-turns calls ["first" "second"] opts)]
+        @(loop/run-agent-turn agent {:message "run"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (t/is (= 2 @calls) "the boundary's :continue ran one more request")
+      (t/is (= [0 1]
+               (mapv :turn-index (filter #(= :turn-start (:type %)) @events))))
+      (t/is (= ["run"] (request-user-texts (first @opts))))
+      (t/is (= ["run" "nudge"] (request-user-texts (second @opts)))
+            "the committed entry is part of the next request")
+      (finally
+        (event-bus/clear-event-listeners!)))))
+
+(defn- run-prompt-asking-to-continue
+  "Run a one-turn prompt whose EVENT handler returns `(merge EXTRA {:continue
+   true})` and capture the stderr warning. Returns {:calls n :warn str :agent
+   ag}."
+  [event extra]
+  (let [calls (atom 0)
+        opts (atom [])
+        warn (java.io.StringWriter.)
+        agent (loop/make-agent-state)]
+    (event-bus/on-event event (fn [_] (assoc extra :continue true)))
+    (try
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (stub-llm-text-turns calls ["done"] opts)]
+        (binding [*err* warn]
+          @(loop/run-agent-turn agent {:message "run"
+                                       :on-done (fn [_])
+                                       :on-error (fn [_])})))
+      (finally
+        (event-bus/clear-event-listeners!)))
+    {:calls @calls :warn (str warn) :agent agent}))
+
+(t/deftest test-loop-turn-end-continue-without-a-runnable-context-is-rejected
+  (let [{:keys [calls warn]} (run-prompt-asking-to-continue :turn-end {})]
+    (t/is (= 1 calls)
+          "assistant-last with nothing queued: the continuation is dropped")
+    (t/is (str/includes? warn "turn-end")
+          "the rejected continuation is reported (pi: _reportInvalidBoundaryContinuation)")))
+
+(t/deftest test-loop-turn-end-invalid-entries-are-dropped
+  (let [{:keys [calls warn agent]}
+        (run-prompt-asking-to-continue :turn-end {:entries [:not-an-entry]})]
+    (t/is (= 1 calls)
+          "an invalid batch drops the continuation too (pi: valid=false)")
+    (t/is (str/includes? warn "invalid") "the invalid batch is reported")
+    (t/is (= [:user :assistant] (mapv :role (loop/get-context agent)))
+          "nothing was committed")))
+(t/deftest test-loop-finish-turn-hook-decisions
+  (t/testing ":end settles the attempt"
+    (let [calls (atom 0)
+          opts (atom [])
+          agent (loop/make-agent-state)]
+      (reset! (:finish-turn agent) (fn [_] :end))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (stub-llm-text-turns calls ["done"] opts)]
+        @(loop/run-agent-turn agent {:message "run"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (t/is (= 1 @calls) "the hook stopped the attempt after the first turn")))
+  (t/testing ":continue runs one context-only turn"
+    (let [calls (atom 0)
+          events (atom [])
+          opts (atom [])
+          agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))]
+      (reset! (:finish-turn agent)
+              (fn [e] (when (zero? (:turn-index e)) :continue)))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (stub-llm-text-turns calls ["first" "second"] opts)]
+        @(loop/run-agent-turn agent {:message "run"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (t/is (= 2 @calls) "the hook's :continue forces another request")
+      (t/is (= ["run"] (request-user-texts (second @opts)))
+            "no new input: the extra turn is context-only (pi: explicitContinuation)")
+      (t/is (= [0 1]
+               (mapv :turn-index (filter #(= :turn-start (:type %)) @events))))))
+  (t/testing ":continue runs one more turn after a terminated tool batch"
+    (let [calls (atom 0)
+          opts (atom [])
+          agent (loop/make-agent-state)]
+      (reset! (:before-tool-call agent)
+              (fn [_] {:block true :reason "Policy" :terminate true}))
+      (reset! (:finish-turn agent)
+              (fn [e] (when (zero? (:turn-index e)) :continue)))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [o]
+                      (swap! opts conj o)
+                      (future
+                        (if (= 1 (swap! calls inc))
+                          (do (when-let [on-tc (:on-tool-call o)]
+                                (on-tc {:id "tc1" :name "bash" :arguments "{}" :index 0}))
+                              (when-let [on-done (:on-done o)] (on-done :tool-calls)))
+                          (do (when-let [on-text (:on-text o)] (on-text "after"))
+                              (when-let [on-done (:on-done o)] (on-done :stop))))
+                        :done))]
+        @(loop/run-agent-turn agent {:message "run"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (t/is (= 2 @calls)
+            "a terminated batch settles without the decision; :continue overrides it")
+      (t/is (= ["run"] (request-user-texts (second @opts)))
+            "context-only: the model resumes from the blocked tool result")))
+  (t/testing ":end wins over a boundary :continue"
+    (let [calls (atom 0)
+          opts (atom [])
+          agent (loop/make-agent-state)]
+      (reset! (:finish-turn agent) (fn [_] :end))
+      (event-bus/on-event :turn-end
+                          (fn [_] {:entries [{:role :user
+                                              :content [{:type :text :text "nudge"}]}]
+                                   :continue true}))
+      (try
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message (stub-llm-text-turns calls ["done"] opts)]
+          @(loop/run-agent-turn agent {:message "run"
+                                       :on-done (fn [_])
+                                       :on-error (fn [_])}))
+        (t/is (= 1 @calls) "pi checks the :end decision before :continue")
+        (t/is (= "nudge" (get-in (last (loop/get-context agent)) [:content 0 :text]))
+              "the boundary's entries are committed regardless")
+        (finally
+          (event-bus/clear-event-listeners!))))))
+
+(t/deftest test-loop-turn-end-fires-for-a-failed-attempt
+  ;; pi: finishTurn and turn_end run for a stopReason-error response too, so an
+  ;; errored turn ends before its :agent-end (and its :auto-retry-start).
+  (let [calls (atom 0)
+        events (atom [])
+        agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e))
+                                     :max-retries 1
+                                     :base-delay-ms 1)]
+    (try
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [o]
+                      (future
+                        (if (= 1 (swap! calls inc))
+                          (when-let [on-error (:on-error o)]
+                            (on-error "upstream connect error"))
+                          (do (when-let [on-text (:on-text o)] (on-text "recovered"))
+                              (when-let [on-done (:on-done o)] (on-done :stop))))
+                        :done))]
+        @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+      (t/is (= [:turn-end :agent-end :auto-retry-start :turn-end :agent-end]
+               (events-of @events #{:turn-end :agent-end :auto-retry-start}))
+            "each failed turn ends before its :agent-end")
+      (let [tes (filter #(= :turn-end (:type %)) @events)]
+        (t/is (= [:error :completed] (mapv :outcome tes))
+              "the errored turn reports :error, the recovered one :completed")
+        (t/is (= :error (get-in (first tes) [:message :stop-reason])))
+        (t/is (= 0 (:turn-index (first tes)))))
+      (finally
+        (event-bus/clear-event-listeners!)))))
+
+(t/deftest test-loop-turn-end-fires-for-an-aborted-turn
+  (let [events (atom [])
+        agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))]
+    (try
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (fn [o]
+                                       (future
+                                         (when-let [on-text (:on-text o)]
+                                           (on-text "partial"))
+                                         (loop/cancel-turn agent)
+                                         :done))]
+        @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+      (let [te (first (filter #(= :turn-end (:type %)) @events))]
+        (t/is (= :aborted (:outcome te)))
+        (t/is (= "partial" (get-in te [:message :content 0 :text]))
+              "the aborted partial is the turn's message")
+        (t/is (= [:turn-end :agent-end :agent-settled]
+                 (events-of @events #{:turn-end :agent-end :agent-settled}))))
+      (finally
+        (event-bus/clear-event-listeners!)))))
+
+(t/deftest test-loop-agent-before-settle-continue-runs-another-attempt
+  (let [calls (atom 0)
+        dones (atom 0)
+        events (atom [])
+        boundaries (atom [])
+        opts (atom [])
+        agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))]
+    (try
+      (event-bus/on-event
+       :agent-before-settle
+       (fn [e]
+         (swap! boundaries conj e)
+         (when (= 1 (count @boundaries))
+           {:entries [{:role :user
+                       :content [{:type :text :text "settle nudge"}]}]
+            :continue true})))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (stub-llm-text-turns calls ["first" "second"] opts)]
+        @(loop/run-agent-turn agent {:message "run"
+                                     :on-done (fn [_] (swap! dones inc))
+                                     :on-error (fn [_])}))
+      (t/is (= 2 (count @boundaries)) "one boundary per settle")
+      (t/is (= :agent-before-settle (:type (first @boundaries))))
+      (t/is (= :completed (:outcome (first @boundaries))))
+      (t/is (false? (:can-continue (first @boundaries))))
+      (t/is (= 2 @calls) "the boundary ran one more attempt")
+      (t/is (= 2 (count (filter #(= :agent-start (:type %)) @events))))
+      (t/is (= ["run" "settle nudge"] (request-user-texts (second @opts)))
+            "the committed entry is the next attempt's context")
+      (t/is (= 1 @dones) "on-done fires once per prompt, at the settle point")
+      (t/is (= [:agent-before-settle :agent-before-settle :agent-settled]
+               (events-of @events #{:agent-before-settle :agent-settled}))
+            "the boundary precedes the terminal :agent-settled")
+      (finally
+        (event-bus/clear-event-listeners!)))))
+
+(t/deftest test-loop-agent-before-settle-continue-without-context-is-rejected
+  (let [{:keys [calls warn]} (run-prompt-asking-to-continue :agent-before-settle {})]
+    (t/is (= 1 calls) "a continuation without a runnable context is dropped")
+    (t/is (str/includes? warn "agent-before-settle")
+          "the rejected continuation is reported")))
+
+(t/deftest test-loop-agent-before-settle-queued-message-runs-an-attempt
+  ;; A boundary handler that queues a message continues the prompt without
+  ;; asking (pi: _runBeforeSettleBoundary's hasQueuedMessages), and the queued
+  ;; batch becomes the next attempt's prompt (pi: agent.continue).
+  (let [calls (atom 0)
+        opts (atom [])
+        queued (atom 0)
+        agent (loop/make-agent-state)]
+    (try
+      (event-bus/on-event :agent-before-settle
+                          (fn [_]
+                            (when (= 1 (swap! queued inc))
+                              (loop/follow-up! agent "settle follow-up"))))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (stub-llm-text-turns calls ["first" "second"] opts)]
+        @(loop/run-agent-turn agent {:message "run"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (t/is (= 2 @calls) "the queued message ran a second attempt")
+      (t/is (= ["run" "settle follow-up"] (request-user-texts (second @opts))))
+      (t/is (empty? @(:follow-up agent)) "the queue was drained into the prompt")
+      (finally
+        (event-bus/clear-event-listeners!)))))
+
+(t/deftest test-loop-agent-before-settle-reports-an-error-outcome
+  ;; pi: a terminal error still reaches the pre-settle boundary, with the
+  ;; errored turn's outcome — and the boundary can revive the prompt.
+  (let [calls (atom 0)
+        errors (atom 0)
+        boundaries (atom [])
+        agent (loop/make-agent-state :max-retries 0 :base-delay-ms 1)]
+    (try
+      (event-bus/on-event
+       :agent-before-settle
+       (fn [e]
+         (swap! boundaries conj e)
+         (when (= 1 (count @boundaries))
+           {:entries [{:role :user
+                       :content [{:type :text :text "retry nudge"}]}]
+            :continue true})))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (fn [o]
+                                       (future
+                                         (swap! calls inc)
+                                         (when-let [on-error (:on-error o)]
+                                           (on-error "down"))
+                                         :done))]
+        @(loop/run-agent-turn agent {:message "run"
+                                     :on-error (fn [_] (swap! errors inc))}))
+      (t/is (= [:error :error] (mapv :outcome @boundaries)))
+      (t/is (= 2 @calls) "the boundary revived the errored prompt")
+      (t/is (= 2 @errors) "the second attempt's error surfaces too")
+      (finally
+        (event-bus/clear-event-listeners!)))))
+
+(t/deftest test-loop-agent-before-settle-not-run-for-a-cancelled-prompt
+  (let [events (atom [])
+        agent (loop/make-agent-state :on-event (fn [e] (swap! events conj e)))]
+    (try
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (fn [o]
+                                       (future
+                                         (when-let [on-text (:on-text o)]
+                                           (on-text "partial"))
+                                         (loop/cancel-turn agent)
+                                         :done))]
+        @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+      (t/is (= [:turn-end :agent-end :agent-settled]
+               (events-of @events #{:turn-end :agent-end :agent-settled}))
+            "the aborted turn still ends, then the prompt settles")
+      (t/is (not-any? #(= :agent-before-settle (:type %)) @events)
+            "a cancelled prompt skips the pre-settle boundary (pi: the prompt
+             loop's abort exits before _runBeforeSettleBoundary)")
+      (finally
+        (event-bus/clear-event-listeners!)))))
 
 ;; ─── Phase 3: parallel tool execution ────────────────────────────────────
 

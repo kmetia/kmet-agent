@@ -17,10 +17,11 @@ functionally aligned. The remaining gaps cluster in the CLI surface, rendering
 (mermaid/latex/search/images), the settings surface, the extension
 `registerProvider` `streamSimple`/`refreshModels` (wire-layer custom
 provider streaming + dynamic model refresh), and the 0.87.0 session-context
-wave (moved to [`lifecycle.md`](../../lifecycle.md) — append-only context
-edits, the actionable `turn_end`/`agent_before_settle` boundaries,
-`finishTurn`/`prepareRequest`/`peekQueuedMessages`, the pending custom-message
-queue, `context_with_system`; per-model image input limits stay in §2).
+wave (moved to [`lifecycle.md`](../../lifecycle.md) — its post-run
+continuation, the actionable `turn_end`/`agent_before_settle` boundaries and
+`peekQueuedMessages` landed as E/F/G/J; append-only context edits,
+`prepareRequest`, the pending custom-message queue and
+`context_with_system` remain; per-model image input limits stay in §2).
 
 ## Deliberately out of scope (locked decisions)
 
@@ -358,8 +359,9 @@ pi events (`core/extensions/types.ts`) → kmet status (`app/event_bus.clj` `eve
 | `context` | ✅ `:context` | fired before each LLM call with the outgoing messages (system prompt included — `call-llm` prepends it; tools travel separately); handlers return {:messages [...]} to replace (last non-nil wins). pi 0.87.0 splits this from `context_with_system` — see [`lifecycle.md`](../../lifecycle.md) L |
 | `context_with_system` | — | missing (pi 0.87.0 per-request system-message transformations over the full transcript) — see [`lifecycle.md`](../../lifecycle.md) L |
 | `before_agent_start` | ✅ | hook, not event |
-| `agent_start` / `agent_end` / `agent_settled` | ✅ `:agent-start` / `:agent-end` / `:agent-settled` | one `:agent-start`/`:agent-end` pair per attempt (`agent.prompt` then `agent.continue`, so auto-retry and overflow recovery each get their own); `:agent-end :messages` accumulates that attempt's messages (pi: `newMessages`) — a mid-run compaction does not shrink them, a cancelled/errored attempt is included, and `:will-retry` marks a retryable failure (added for public listeners only, as pi does — `_emitExtensionEvent` precedes the decoration); exactly one `:agent-settled` per prompt; a message an `:agent-end` handler queues starts a fresh attempt in the same prompt, with the queued messages as its prompt (pi: `hasQueuedMessages` → `agent.continue`; landed as E); pi 0.87.0's actionable `agent_before_settle` boundary is still missing — see [`lifecycle.md`](../../lifecycle.md) G |
-| `turn_start` / `turn_end` | ✅ `:turn-start` / `:turn-end` | notification-only; pi 0.87.0 makes `turn_end` actionable (`{:entries [...] :continue bool}`) — see [`lifecycle.md`](../../lifecycle.md) F |
+| `agent_start` / `agent_end` / `agent_settled` | ✅ `:agent-start` / `:agent-end` / `:agent-settled` | one `:agent-start`/`:agent-end` pair per attempt (`agent.prompt` then `agent.continue`, so auto-retry and overflow recovery each get their own); `:agent-end :messages` accumulates that attempt's messages (pi: `newMessages`) — a mid-run compaction does not shrink them, a cancelled/errored attempt is included, and `:will-retry` marks a retryable failure (added for public listeners only, as pi does — `_emitExtensionEvent` precedes the decoration); exactly one `:agent-settled` per prompt; a message an `:agent-end` handler queues starts a fresh attempt in the same prompt, with the queued messages as its prompt (pi: `hasQueuedMessages` → `agent.continue`; landed as E) |
+| `agent_before_settle` | ✅ `:agent-before-settle` | actionable; fires once before `:agent-settled` with the run's `:outcome`, commits returned entries, and `{:continue true}` runs one more attempt (landed as G — see [`lifecycle.md`](../../lifecycle.md)) |
+| `turn_start` / `turn_end` | ✅ `:turn-start` / `:turn-end` | pi 0.87.0's actionable `turn_end`: handlers return `{:entries [...] :continue bool}`, entries are committed in order, `:continue` forces one more request; also fires for an errored or aborted response, before `:agent-end` (landed as F — see [`lifecycle.md`](../../lifecycle.md)) |
 | `message_start` / `message_update` / `message_end` | ✅ | kmet `:message-update` carries `:delta` incl. tool-call |
 | `tool_execution_start` / `_update` / `_end` | ✅ | |
 | `tool_call` / `tool_result` | ~ (mechanism differs) | kmet does **not** emit `:tool-call`/`:tool-result` events on the event bus; the transform chain (block / arg-rewrite / result-rewrite) is wired into the agent's `:before-tool-call`/`:after-tool-call` callbacks via `register-tool-call-hook!`/`register-tool-result-hook!` instead. See §5. Event-bus execution lifecycle events are `:tool-execution-start`/`:tool-execution-update`/`:tool-execution-end` |

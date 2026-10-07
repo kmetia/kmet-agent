@@ -49,10 +49,18 @@ Landed baseline — do not redo:
   after-turn-stop settled outcome's missing `:status`, which resumed the
   follow-up drain with a nil turn index and crashed the next turn.
 - **J** — `peek-queued-messages`: a non-destructive, mode-aware preview of
-  the next batch (steering wins), ready for the F/G boundary previews.
+  the next batch (steering wins), carried by the F/G boundaries as
+  `:pending-messages`.
+- **F** — the actionable `:turn-end` boundary: the loop hook is pi's
+  `finishTurn` (`:end`/`:continue`), handlers return
+  `{:entries [...] :continue bool}`, and an errored or aborted response emits
+  `:turn-end` too, before `:agent-end`.
+- **G** — the actionable `:agent-before-settle` boundary: `:outcome`,
+  `:pending-messages`, `:can-continue`, committed entries, and
+  `{:continue true}` → one more attempt before `:agent-settled`.
 
-Open: **D, F–L**, phased below. D is the item the original note tracked;
-F–L are the 0.87.0 session-context / boundary wave.
+Open: **D, H–L**, phased below. D is the item the original note tracked;
+H–L are the rest of the 0.87.0 session-context / boundary wave.
 
 ## Target behavior (pi)
 
@@ -100,7 +108,7 @@ Decisions taken for this plan:
 | phase | items | rationale |
 |-------|-------|-----------|
 | 1 | E, J | localized to `run-agent-turn`; no boundary machinery needed |
-| 2 | F, G | F establishes the boundary result shape; G builds on it |
+| 2 | F, G (landed) | F establishes the boundary result shape; G builds on it |
 | 3 | D | post-run dispatch needs E's queue point and G's pre-settle position, plus the abort guard |
 | 4 | H, I, L | context ingestion; H flushes at F's `turn_end`, L depends on I's request assembly |
 | 5 | K | session context model, largest and most independent |
@@ -186,9 +194,29 @@ widens it, so fix them with or before D):
 
 ---
 
-## Phase 2 — turn and settle boundaries
+## Phase 2 — turn and settle boundaries (F, G landed)
 
 ### F. Actionable `turn_end` + `finishTurn` (error/aborted coverage, continue/end)
+
+**Landed.** `:turn-end` is actionable and fires for every completed turn,
+including a response that errored or was aborted (before `:agent-end` and
+`:auto-retry-start`). The loop hook is pi's `finishTurn`: the agent field
+`:should-stop-after-turn` became `:finish-turn` and returns `:end` /
+`:continue` / nil; the boundary result `{:entries [...] :continue bool}`
+merges with it the way pi's wrapper does — `:end` wins, a boundary
+`:continue` is honored only when the context can back one more request (pi's
+`canContinue`), and a rejected one is reported and dropped. Entries are
+session entry maps appended in order; their context projection is a
+context-only append, so committed entries stay out of `:agent-end :messages`.
+
+Three notes beyond the sketch. Errored and aborted turns run the hook and the
+boundary but their decision is dropped, as pi's low-level loop does;
+`:prepare-next-turn` still runs only for completed turns (pi runs
+`prepareNextTurn` at the next turn's start). The mid-run compaction now runs
+after the turn boundary, matching pi's next-turn preparation. And a terminal
+error returns an `:error` attempt outcome (a failed overflow compaction uses
+the same continuation path), so the prompt still reaches the pre-settle
+boundary — `on-done` stays unsent.
 
 **Goal.** `:turn-end` becomes actionable and runs consistently, including on
 errored and aborted attempts.
@@ -222,6 +250,18 @@ more request; returned `:entries` persist in order.
 
 ### G. Actionable `agent_before_settle` boundary
 
+**Landed.** `:agent-before-settle` fires once per settle, after the queued-
+message continuation and before `:agent-settled`, carrying `:outcome` (the
+run's last turn outcome, tracked in an agent atom reset per prompt),
+`:pending-messages` and `:can-continue`. Handlers commit entries and
+`{:continue true}` runs one more attempt; a handler that queues a message
+continues as well (pi's `shouldContinue` includes `hasQueuedMessages`), and
+the next attempt starts from the queues (pi: `agent.continue`). A cancelled
+prompt never reaches the boundary, and a cancel during the handlers drops the
+continuation (pi: `_abortDuringBeforeSettle`). Both boundaries dispatch
+through a new `event-bus/emit-boundary!`, which threads each handler's
+`:entries`/`:continue` into the next handler's event (pi: `emitBoundary`).
+
 **Goal.** A pre-settle boundary lets handlers append entries and force one
 final request before the prompt settles.
 
@@ -246,6 +286,16 @@ no pre-settle boundary, no outcome payload.
 **Acceptance.** A handler returning `{:continue true}` produces one more
 attempt before `:agent-settled`; entries persist in order; `outcome` reflects
 the last attempt's stop reason.
+
+### Phase 2 finding: the boundary payloads carry no entry ids or context preview
+
+pi hands the boundaries the persisted entry ids (`messageEntryId`,
+`toolResultEntryIds`) and a `BoundaryContextPreview` (`_buildBoundaryContext`:
+the projected entries/messages, pending messages, `canContinue`). kmet's
+boundaries carry `:pending-messages` and `:can-continue` — the two parts a
+handler decides with — but no ids: K's `context_edit` drafts
+(`{:type :context_edit :target-id ... :replacement ...}`) and H's `turn_end`
+flush need them, so add them when K lands.
 
 ---
 
@@ -409,12 +459,15 @@ next provider context; the raw branch, usage totals, and replay are unchanged.
 
 ## Docs to update as items land
 
-- `src/kmet/app/event_bus.clj` — A/B/E done (E reshaped the `:agent-start`
-  and `:agent-end` descriptions); F/G/H/L add or reshape events
-  (`:agent-before-settle`, actionable `:turn-end`, `:context-with-system`).
-- `src/kmet/extension.md` — done with E (the `:agent-end` queueing
-  paragraph and the `send-user-message` note).
+- `src/kmet/app/event_bus.clj` — A/B/E/F/G done (E reshaped the
+  `:agent-start`/`:agent-end` descriptions; F/G added `:agent-before-settle`
+  and the actionable `:turn-end`, plus `emit-boundary!`); H/L add or reshape
+  events (`:context-with-system`).
+- `src/kmet/extension.md` — done with E/F/G (the `:agent-end` queueing
+  paragraph, the two actionable boundaries, and the `send-user-message`
+  note).
 - `src/kmet/development/pi-alignment.md` — A/B/C done and §7 moved here; the
-  Appendix rows for the agent/turn/context boundaries point at this file. The
-  compaction row (`session_before_compact` / `session_compact`) follows D.
+  Appendix rows for the agent/turn/context boundaries point at this file and
+  follow E/F/G/J. The compaction row (`session_before_compact` /
+  `session_compact`) follows D.
 - This file — strike items as they land; remove it when the open list is empty.

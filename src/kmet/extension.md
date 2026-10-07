@@ -700,7 +700,8 @@ be passed for a per-tool override.
 ```
 
 Event types: `:agent-start` `:agent-end` `:agent-settled` `:turn-start`
-`:turn-end` `:message-start` `:message-update` `:message-end`
+`:turn-end` `:agent-before-settle` `:message-start` `:message-update`
+`:message-end`
 `:tool-execution-start` `:tool-execution-update` `:tool-execution-end`
 `:status` `:error` `:session-start` `:session-shutdown`
 `:session-info-changed` `:user-bash`
@@ -712,15 +713,28 @@ Event types: `:agent-start` `:agent-end` `:agent-settled` `:turn-start`
 `:before-provider-request` `:before-provider-headers`
 `:after-provider-response`.
 
-Most events are notification-only. The one that extends a run: a message
-sent from an `:agent-end` handler — `send-user-message`, or `send-message!`
-with `:trigger-turn` — queues (`:steer` / `:follow-up`) and then starts a
-fresh attempt in the same prompt, with the queued messages as that attempt's
-prompt (pi: `hasQueuedMessages` → `agent.continue`). The same send from an
-`:agent-settled` handler stays queued for the next submission: settle is the
-prompt's last event. Queueing on *every* `:agent-end` therefore keeps
-extending the prompt — cancel (Escape) ends it, since cancelling clears the
-queues and the continuation is abort-guarded.
+Most events are notification-only. Two things extend a run:
+
+A message sent from an `:agent-end` handler — `send-user-message`, or
+`send-message!` with `:trigger-turn` — queues (`:steer` / `:follow-up`) and
+then starts a fresh attempt in the same prompt, with the queued messages as
+that attempt's prompt (pi: `hasQueuedMessages` → `agent.continue`). The same
+send from an `:agent-settled` handler stays queued for the next submission:
+settle is the prompt's last event. Queueing on *every* `:agent-end`
+therefore keeps extending the prompt — cancel (Escape) ends it, since
+cancelling clears the queues and the continuation is abort-guarded.
+
+The two actionable boundaries — `:turn-end` after every turn (including an
+errored or aborted response, where it precedes `:agent-end`) and
+`:agent-before-settle` once before the prompt settles, both carrying
+`:entries []` / `:continue false` — honor what a handler returns:
+`:entries` are session entry maps appended in order (`{:role :custom ...}`
+extension state; `{:role :custom-message ...}` also enters the context, so
+the next request sees it), and `:continue true` runs one more turn — honored
+once the entries are committed, when the context can back it (`:can-continue`
+is that check as the boundary stood) and dropped with a warning otherwise.
+Handlers of the same boundary see each other's `:entries`/`:continue` merged
+in (pi: `emitBoundary`).
 
 ### Bundled resources (`io/resource` + self-registration)
 

@@ -42,10 +42,11 @@
    if any tool call targets a :sequential tool the whole batch runs
    sequentially (see :execution-mode on the Tool record).
 
-   Per-turn hooks (pi: prepareNextTurn / shouldStopAfterTurn / transformContext):
-   the :prepare-next-turn / :should-stop-after-turn hooks run after each turn
-   (in pi order); :transform-context rewrites the conversation before each
-   LLM call. The :system-prompt-override atom holds a per-run system prompt
+   Per-turn hooks (pi: prepareNextTurn / finishTurn / transformContext): the
+   :prepare-next-turn and :finish-turn hooks run after each completed turn (in
+   pi order; :finish-turn alone also runs for errored and aborted turns, whose
+   decision is ignored); :transform-context rewrites the conversation before
+   each LLM call. The :system-prompt-override atom holds a per-run system prompt
    override.
 
    Compaction (pi: auto-compaction): the session is compacted proactively
@@ -126,7 +127,10 @@
                        system-prompt-override ;; atom of string or nil (per-run override, pi: _systemPromptOverride)
                        transform-context      ;; atom of (fn [messages]) → messages (pi: transformContext)
                        prepare-next-turn      ;; atom of (fn [ctx]) → update map | nil (pi: prepareNextTurn)
-                       should-stop-after-turn ;; atom of (fn [ctx]) → boolean (pi: shouldStopAfterTurn)
+                       finish-turn            ;; atom of (fn [ctx]) → :end | :continue | nil — the loop's
+                                              ;; per-turn decision (pi: finishTurn)
+                       last-outcome           ;; atom of :completed | :error | :aborted: the last turn's
+                                              ;; outcome, reported by :agent-before-settle (pi: _lastActivityOutcome)
                        get-api-key            ;; atom of (fn [provider]) → key | nil (dynamic auth)
                        scoped-models          ;; atom of vector of "provider/id" full ids (scoped list for cycling; pi: session.scopedModels)
                        overflow-recovered     ;; atom of bool: context-overflow compacted once this run
@@ -157,7 +161,7 @@
          :thinking, :base-url, :api-type, :steering-mode, :follow-up-mode,
          :max-retries (default 3), :base-delay-ms (default 2000),
          :before-tool-call, :after-tool-call, :system-prompt-override,
-         :transform-context, :prepare-next-turn, :should-stop-after-turn,
+         :transform-context, :prepare-next-turn, :finish-turn,
          :get-api-key, :scoped-models (default []),
          :system-prompt-opts (build-system-prompt options map, pi:
          _baseSystemPromptOptions),
@@ -174,7 +178,7 @@
          :default-tools (resolved :default-tools selection — the built-in
          tools active at startup, pi: defaultTools; nil = every built-in
          active, see kmet.app.tools.registry/resolve-default-tools)"
-  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms before-tool-call after-tool-call system-prompt-override transform-context prepare-next-turn should-stop-after-turn get-api-key scoped-models system-prompt-opts compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools]
+  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms before-tool-call after-tool-call system-prompt-override transform-context prepare-next-turn finish-turn get-api-key scoped-models system-prompt-opts compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools]
       :or {provider :opencode-go
            thinking :off
            steering-mode :all
@@ -228,7 +232,8 @@ Be precise and concise in your responses."}}]
                     :system-prompt-override (atom system-prompt-override)
                     :transform-context (atom transform-context)
                     :prepare-next-turn (atom prepare-next-turn)
-                    :should-stop-after-turn (atom should-stop-after-turn)
+                    :finish-turn (atom finish-turn)
+                    :last-outcome (atom :completed)
                     :get-api-key (atom get-api-key)
                     :scoped-models (atom (vec (distinct scoped-models)))
                     :overflow-recovered (atom false)
@@ -1612,24 +1617,162 @@ Be precise and concise in your responses."}}]
       (reset! (:system-prompt-override agent) o))
     (when-let [c (:context update)] (replace-context! agent c))))
 
-(defn- after-turn!
-  "Run post-turn hooks in pi order: prepareNextTurn then shouldStopAfterTurn.
-   TURN-INDEX counts turns within the current attempt (pi's hooks get no
-   index): a retry or continuation attempt starts again at 0. Returns true if
-   the loop should stop."
+(defn- turn-context
+  "What a per-turn hook receives (pi: PrepareNextTurnContext /
+   finishTurn's turn): the turn's message and tool results, and the live
+   messages. TURN-INDEX counts turns within the current attempt (pi's hooks
+   get no index): a retry or continuation attempt starts again at 0."
+  [agent turn-index assistant-msg tool-results]
+  {:turn-index turn-index
+   :message assistant-msg
+   :tool-results tool-results
+   :messages @(:messages agent)})
+
+(defn- prepare-next-turn!
+  "Run the :prepare-next-turn hook for a completed turn and apply its update
+   (pi: prepareNextTurn — model/system/context for the turn that follows)."
   [agent turn-index assistant-msg tool-results]
   (when-let [f @(:prepare-next-turn agent)]
-    (let [update (f {:turn-index turn-index
-                     :message assistant-msg
-                     :tool-results tool-results
-                     :messages @(:messages agent)})]
-      (apply-next-turn-update! agent update)))
-  (boolean
-   (when-let [f @(:should-stop-after-turn agent)]
-     (f {:turn-index turn-index
-         :message assistant-msg
-         :tool-results tool-results
-         :messages @(:messages agent)}))))
+    (apply-next-turn-update! agent (f (turn-context agent turn-index
+                                                    assistant-msg tool-results)))))
+
+(defn- turn-outcome
+  "A turn's outcome, from its assistant message's stop reason (pi:
+   _dispatchTurnEndBoundary's _lastActivityOutcome)."
+  [msg]
+  (case (:stop-reason msg)
+    :aborted :aborted
+    :error :error
+    :completed))
+
+(defn- can-continue?
+  "True when the live context can back one more provider request: at least
+   one message that reaches the provider, and no assistant message last (pi:
+   _buildBoundaryContext's canContinue — a boundary continuation needs
+   something to send). Queued messages can also back one; see
+   boundary-can-continue?."
+  [agent]
+  (let [msgs (into []
+                   (remove #(or (= :info (:role %)) (:exclude-from-context? %)))
+                   @(:messages agent))]
+    (and (seq msgs)
+         (not= :assistant (:role (last msgs))))))
+
+(defn- boundary-can-continue?
+  "pi's canContinue for a boundary: the context can back one more request, or
+   messages are queued. Reported to handlers as :can-continue (the value
+   before a handler's entries are committed — a runnable batch enables it)."
+  [agent]
+  (boolean (or (can-continue? agent) (has-queued-messages? agent))))
+
+(defn- honor-continuation?
+  "Whether a boundary's requested continuation can run, reporting the
+   rejected request for EVENT (pi: canContinue gating
+   _dispatchTurnEndBoundary / _runBeforeSettleBoundary, and
+   _reportInvalidBoundaryContinuation)."
+  [agent event]
+  (if (boundary-can-continue? agent)
+    true
+    (do (binding [*out* *err*]
+          (println "Warning:" (name event)
+                   "handler requested a continuation without a runnable context"))
+        false)))
+
+(defn- boundary-entries
+  "Validate a boundary handler's :entries: a sequential collection of session
+   entry maps (each with a :role). Returns them as a vector, or nil when the
+   batch is invalid — pi drops an unapplicable batch wholesale."
+  [entries]
+  (cond
+    (nil? entries) []
+    (and (sequential? entries)
+         (every? #(and (map? %) (keyword? (:role %))) entries))
+    (vec entries)
+    :else nil))
+
+(defn- apply-boundary-entries!
+  "Commit a boundary's ENTRIES for EVENT (pi: _commitBoundaryDrafts): each is
+   appended through the session, in order, and its context projection (pi:
+   convertToLlm — :custom-message entries become :custom messages) is
+   appended to the live context so the next request sees it. The context
+   append is context-only: committed entries are not part of the attempt's
+   :agent-end :messages (pi: newMessages is the loop's own list). Returns
+   true when the batch was valid."
+  [agent entries event]
+  (if-some [valid (boundary-entries entries)]
+    (do (doseq [entry valid]
+          (when-let [sess (:session agent)]
+            (session/append-entry sess entry))
+          (doseq [msg (session/context-messages entry)]
+            (append-context-message! agent msg)
+            (emit agent {:type :message-start :message msg})))
+        true)
+    (do (binding [*out* *err*]
+          (println "Warning: invalid" (name event)
+                   "boundary :entries (expected session entry maps):"
+                   (pr-str entries)))
+        false)))
+
+(defn- requested-continuation?
+  "Commit a boundary's entries and report whether it asked for one more
+   request. An invalid batch is dropped wholesale, and with it the request
+   (pi: valid=false → {entries: [], continue: false})."
+  [agent boundary event]
+  (and (apply-boundary-entries! agent (:entries boundary) event)
+       (true? (:continue boundary))))
+
+(defn- boundary-state
+  "The accumulated state an actionable boundary hands its handlers, merged
+   into the event each one sees (pi: emitBoundary's {entries, continue} over
+   the boundary context's pendingMessages/canContinue)."
+  [agent]
+  {:pending-messages (peek-queued-messages agent)
+   :can-continue (boundary-can-continue? agent)
+   :entries []
+   :continue false})
+
+(defn- emit-boundary
+  "Route an actionable boundary event: the UI callback gets it as a plain
+   notification and the extension bus dispatches it as a boundary, where each
+   handler sees the accumulated {:entries [] :continue false} state merged in
+   (pi: emitBoundary). Returns the accumulated handler result, or nil."
+  [agent event]
+  (when-let [cb (:on-event agent)]
+    (cb event))
+  (event-bus/emit-boundary! event))
+
+(defn- finish-turn!
+  "Finish a turn (pi: the session's wrapped finishTurn, installed by
+   _installAgentBoundaryHooks): run the loop's :finish-turn decision hook and
+   dispatch the actionable :turn-end boundary, committing the entries its
+   handlers return. The hook's :end wins (pi checks it first); :continue asks
+   for one more request and is honored when the context can back it. Runs for
+   errored and aborted turns too, whose decision the caller ignores. Returns
+   the merged decision :end | :continue | nil."
+  [agent turn-index assistant-msg tool-results]
+  (let [outcome (turn-outcome assistant-msg)
+        _ (reset! (:last-outcome agent) outcome)
+        boundary (emit-boundary agent (assoc (boundary-state agent)
+                                             :type :turn-end
+                                             :turn-index turn-index
+                                             :message assistant-msg
+                                             :tool-results tool-results
+                                             :outcome outcome))
+        boundary-continues? (and (requested-continuation? agent boundary :turn-end)
+                                 (honor-continuation? agent :turn-end))
+        decision (when-let [f @(:finish-turn agent)]
+                   (f (turn-context agent turn-index assistant-msg tool-results)))]
+    (cond
+      (= :end decision) :end
+      (or boundary-continues? (= :continue decision)) :continue
+      :else nil)))
+
+(defn- complete-turn!
+  "Complete a turn — pi's hook order: prepareNextTurn, then finishTurn (see
+   finish-turn!). Returns the merged decision :end | :continue | nil."
+  [agent turn-index assistant-msg tool-results]
+  (prepare-next-turn! agent turn-index assistant-msg tool-results)
+  (finish-turn! agent turn-index assistant-msg tool-results))
 
 (defn- resolve-api-key
   "Resolve the API key for the agent's provider, preferring the dynamic
@@ -1646,6 +1789,8 @@ Be precise and concise in your responses."}}]
   [agent message images]
   (reset! (:system-prompt-override agent) nil)
   (reset! (:overflow-recovered agent) false)
+  ;; :agent-before-settle reports this run's last turn outcome
+  (reset! (:last-outcome agent) :completed)
   ;; Repeat-loop guard is per-run: a legit bash ls x2 in run 1 must not
   ;; count toward a trip in run 2
   (reset! (:loop-guard agent) {:window [] :suppressed 0})
@@ -1682,22 +1827,26 @@ Be precise and concise in your responses."}}]
    run. The status atom returns to :idle — the run is fully over (pi:
    agent_settled fires in a finally after every run, success or error, and
    the session is idle); a sticky :error would make /compact, /reload and the
-   extension :is-idle check refuse until the next successful run."
+   extension :is-idle check refuse until the next successful run. The attempt
+   outcome is :error — the prompt still runs the pre-settle boundary (pi: a
+   terminal error reaches _runBeforeSettleBoundary), while on-done stays
+   unsent: the error was surfaced instead."
   [agent err on-error agent-end]
   (close-retry-and-surface-error! agent err on-error)
   ;; Will not be retried — pi: _willRetryAfterAgentEnd is false here.
   (agent-end err false)
   (reset! (:status agent) :idle)
   (emit agent {:type :status :status :idle})
-  {:status :aborted})
+  {:status :error})
 
 (defn- tools-phase!
   "Execute a turn's tool calls (pi: assistant message → executing status →
    results → thinking → turn-end → mid-run compaction). Returns:
-     false      — continue the inner loop
-     :terminate — stop after this batch (every call blocked with :terminate)
-     :loop-guard— repeat-loop guard tripped (caller settles the run)
-     true       — an after-turn hook stopped the continuation
+     nil         — continue the inner loop with this batch's tool results
+     :settled    — settle after this batch (a :finish-turn / :turn-end :end
+                   decision, or every call blocked with :terminate)
+     :continue   — run one more turn even though nothing else would
+     :loop-guard — repeat-loop guard tripped (caller settles the run)
 
    Repeat-loop guard (kmet-specific): the batch is filtered through
    loop-guard-filter first. Suppressed calls get a synthetic guard result
@@ -1792,30 +1941,25 @@ Be precise and concise in your responses."}}]
                   (session/append-entry (:session agent) result-msg))))]
       (reset! (:status agent) :thinking)
       (emit agent {:type :status :status :thinking})
-      (emit agent {:type :turn-end
-                   :message assistant-msg
-                   :tool-results results})
-      ;; Proactive mid-run compaction (pi: after tool results, before next call)
-      (maybe-compact! agent)
-      ;; pi: after-turn hooks (prepareNextTurn/shouldStopAfterTurn) run
+      ;; pi: the post-turn hooks and the :turn-end boundary run
       ;; unconditionally — even when terminate stops the tool-call continuation
-      (let [stop? (after-turn! agent t assistant-msg results)]
+      (let [decision (complete-turn! agent t assistant-msg results)]
+        ;; Proactive mid-run compaction, after the turn boundary and before
+        ;; the next request (pi: the next turn's preparation compacts)
+        (maybe-compact! agent)
         (cond
           give-up? :loop-guard
-          terminate? :terminate
-          stop? true
-          :else false)))))
+          (= :end decision) :settled
+          (= :continue decision) :continue
+          terminate? :settled
+          :else nil)))))
 
 (defn- final-phase!
-  "Settle a final response (no tool calls): assistant message + turn-end.
-   Returns whether an after-turn hook stopped the loop."
+  "Complete a final response (no tool calls): assistant message + the turn
+   boundary. Returns the merged decision — :end (settle), :continue (one more
+   turn), or nil (the loop settles naturally)."
   [agent t result]
-  (let [assistant-msg (add-assistant-message! agent result)
-        tool-results []]
-    (emit agent {:type :turn-end
-                 :message assistant-msg
-                 :tool-results tool-results})
-    (after-turn! agent t assistant-msg tool-results)))
+  (complete-turn! agent t (add-assistant-message! agent result) []))
 
 (defn- run-attempt!
   "Run one low-level agent attempt — one :agent-start/:agent-end pair
@@ -1894,7 +2038,8 @@ Be precise and concise in your responses."}}]
                               (reset! (:active-call agent) nil)
                               (cond
                                 (:cancelled result)
-                                (do (record-abandoned-attempt! agent result :aborted)
+                                (do (finish-turn! agent t (record-abandoned-attempt!
+                                                           agent result :aborted) [])
                                     (agent-end nil false)
                                     {:status :aborted})
 
@@ -1919,8 +2064,9 @@ Be precise and concise in your responses."}}]
                                 ;; stalled attempt never loses its
                                 ;; text/thinking, while the retry classifier
                                 ;; still sees a normal error map.
-                                  (record-abandoned-attempt!
-                                   agent (merge ((:partials call)) {:error err}) :error)
+                                  (finish-turn! agent t (record-abandoned-attempt!
+                                                         agent (merge ((:partials call)) {:error err})
+                                                         :error) [])
                                   (let [{:keys [kind] :as action}
                                         (retry/retry-decision
                                          {:err err
@@ -1940,7 +2086,8 @@ Be precise and concise in your responses."}}]
                                 ;; error — settle the run with the explanation
                                 ;; (no auto-retry, no red error line; the
                                 ;; :loop-guard event shows a warning)
-                                  (do (record-abandoned-attempt! agent result :error)
+                                  (do (finish-turn! agent t (record-abandoned-attempt!
+                                                             agent result :error) [])
                                       (loop-guard-give-up!
                                        agent text-buf :thinking
                                        "Stopped: repeated reasoning detected (thinking-loop guard)")
@@ -1951,8 +2098,11 @@ Be precise and concise in your responses."}}]
                                       ;; never the live context (pi:
                                       ;; _prepareRetry drops the errored
                                       ;; message from agent state while
-                                      ;; keeping it in the file)
-                                        _ (record-abandoned-attempt! agent result :error)
+                                      ;; keeping it in the file). pi runs
+                                      ;; finishTurn/turn_end for an errored
+                                      ;; response too (the decision is dropped).
+                                        msg (record-abandoned-attempt! agent result :error)
+                                        _ (finish-turn! agent t msg [])
                                         {:keys [kind] :as action}
                                         (retry/retry-decision
                                          {:err err
@@ -2005,17 +2155,22 @@ Be precise and concise in your responses."}}]
                                                (str "Stopped: repeated identical tool calls "
                                                     "(threshold " (:loop-guard-threshold @(:cfg agent)) ")"))
                                               {:status :settled :turn (inc t)})
-                                          phase
+                                          (= :settled phase)
                                           {:status :settled :turn (inc t)}
+                                          (= :continue phase)
+                                        ;; A :finish-turn / :turn-end decision
+                                        ;; asked for one more request
+                                          (recur (inc t) tool-calls true)
                                           :else
                                           (recur (inc t) tool-calls false)))
-                                      (let [stop? (final-phase! agent t result)]
-                                        (if stop?
-                                          {:status :settled :turn (inc t)}
-                                          (recur (inc t) [] false))))))))))))]
-          (if (contains? #{:retry :overflow :aborted} (:status inner))
-            ;; RETRY/OVERFLOW/ABORTED are already fully-tagged outcomes; only a
-            ;; settled attempt continues into the follow-up drain.
+                                      (case (final-phase! agent t result)
+                                        :end {:status :settled :turn (inc t)}
+                                        :continue (recur (inc t) [] true)
+                                        (recur (inc t) [] false)))))))))))]
+          (if (contains? #{:retry :overflow :aborted :error} (:status inner))
+            ;; RETRY/OVERFLOW/ABORTED/ERROR are already fully-tagged outcomes
+            ;; (they emitted their :agent-end); only a settled attempt
+            ;; continues into the follow-up drain.
             inner
             (let [turn' (:turn inner)]
               ;; Outer: poll the follow-up queue (pi: runLoop's outer poll)
@@ -2029,14 +2184,43 @@ Be precise and concise in your responses."}}]
                     (agent-end nil false)
                     {:status :settled :text @text-buf})))))))))
 
+(defn- before-settle!
+  "Run the actionable :agent-before-settle boundary (pi:
+   _runBeforeSettleBoundary): handlers may commit entries and/or ask for one
+   more request. Returns true when the prompt should run another attempt —
+   the continuation is runnable and the prompt was not cancelled while the
+   handlers ran (pi: _abortDuringBeforeSettle)."
+  [agent]
+  (let [boundary (emit-boundary agent (assoc (boundary-state agent)
+                                             :type :agent-before-settle
+                                             :outcome @(:last-outcome agent)))
+        requested? (requested-continuation? agent boundary :agent-before-settle)]
+    (and (not @(:signal agent))
+         (or requested? (has-queued-messages? agent))
+         (honor-continuation? agent :agent-before-settle))))
+
+(defn- continue-prompt?
+  "Whether the prompt runs another attempt instead of settling: a message
+   queued while the attempt ended (pi: _handlePostAgentRun's
+   hasQueuedMessages), or the actionable :agent-before-settle boundary (pi:
+   _runBeforeSettleBoundary). The caller drains the next queue batch into that
+   attempt's prompt (pi: agent.continue, which runs the drained messages as
+   the continuation prompt). A cancelled prompt never continues."
+  [agent]
+  (and (not @(:signal agent))
+       (or (has-queued-messages? agent)
+           (before-settle! agent))))
+
 (defn run-agent-turn
   "Run the agent loop until it settles, owning the attempt/retry state
    machine (pi: _runAgentPrompt). Each attempt is a low-level run with its
    own :agent-start/:agent-end pair and its own accumulated messages
    (pi: agent.prompt then agent.continue), and exactly one :agent-settled
    fires once the prompt is fully settled. A transient error retries with
-   exponential backoff (pi: _prepareRetry), a context overflow compacts
-   once and retries, and a terminal error or cancel ends the prompt.
+   exponential backoff (pi: _prepareRetry) and a context overflow compacts
+   once and retries; every attempt that ends without a retry then reaches the
+   prompt-level continuation checks — queued messages and the actionable
+   :agent-before-settle boundary — and a cancel ends the prompt.
 
    agent    — AgentState record
    opts:
@@ -2057,9 +2241,11 @@ Be precise and concise in your responses."}}]
               turn has run.
      settle:  a message queued by an :agent-end handler starts another
               attempt first (pi: _handlePostAgentRun's hasQueuedMessages →
-              agent.continue, which drains the queue into the new attempt's
-              prompt); with no attempt pending the prompt settles — on-done
-              runs and :agent-settled fires from the finally.
+              agent.continue, which drains the queues into the new attempt's
+              prompt), then the actionable :agent-before-settle boundary may
+              ask for one (pi: _runBeforeSettleBoundary); with no attempt
+              pending the prompt settles — on-done runs and :agent-settled
+              fires from the finally.
 
    Cancellation: cancel-turn sets the signal and delivers {:cancelled true}
    to the in-flight LLM promise (active-call); the attempt exits quietly
@@ -2129,7 +2315,10 @@ Be precise and concise in your responses."}}]
                                    (reset! (:run-token agent) tok)
                                    (swap! (:run-messages agent) assoc tok [])
                                    (when old
-                                     (swap! (:run-messages agent) dissoc old))))]
+                                     (swap! (:run-messages agent) dissoc old))))
+                ;; pi: agent.continue() — the queued batch becomes the next
+                ;; attempt's prompt (steering first, then follow-up, per mode)
+                continue-attempt! (fn [] (drain-next-queue! agent) (begin-attempt!))]
             (try
               (begin-attempt!)
               ;; Prompt-level setup — the user message, before-agent-start
@@ -2143,19 +2332,30 @@ Be precise and concise in your responses."}}]
                 (let [outcome (run-attempt! agent @attempt-token opts)]
                   (case (:status outcome)
                     :settled
-                    ;; pi: _handlePostAgentRun's tail — a message an
-                    ;; :agent-end handler queued starts a fresh attempt here,
-                    ;; from the queue (pi: agent.continue). on-done stays the
+                    ;; pi: _handlePostAgentRun's queued-message continuation
+                    ;; then _runBeforeSettleBoundary. on-done stays the
                     ;; prompt's teardown (the UI's running-turn? hinges on it)
                     ;; and fires only once no attempt is pending. kmet's
                     ;; compaction check lives in prepare-run!/tools-phase!
                     ;; (D moves the post-run check here).
-                    (if (and (not @(:signal agent))
-                             (pos? (drain-next-queue! agent)))
-                      (do (begin-attempt!) (recur))
+                    (if (continue-prompt? agent)
+                      (do (continue-attempt!) (recur))
                       (when on-done (on-done (:text outcome))))
 
+                    :error
+                    ;; pi: a terminal error ends the attempt, and the prompt
+                    ;; still reaches the pre-settle boundary — a handler can
+                    ;; revive it. on-done stays unsent: the error was
+                    ;; surfaced instead.
+                    (when (continue-prompt? agent)
+                      (continue-attempt!)
+                      (recur))
+
                     :aborted
+                    ;; Cancelled: the prompt ends here, without the
+                    ;; pre-settle boundary (pi: the prompt loop's abort exits
+                    ;; before _runBeforeSettleBoundary; the :turn-end boundary
+                    ;; of an aborted turn has already run).
                     nil
 
                     :retry
@@ -2192,12 +2392,15 @@ Be precise and concise in your responses."}}]
                         ;; aborted: a retry would overflow again. pi settles
                         ;; here (_checkCompaction returns false); kmet surfaces
                         ;; the overflow so the turn does not end silently and
-                        ;; the UI leaves "Working".
+                        ;; the UI leaves "Working". The pre-settle boundary
+                        ;; still runs, as it does after any non-retry attempt.
                         (do (close-retry-and-surface-error! agent error on-error)
-                            (reset! (:status agent) :idle)
-                            (emit agent {:type :status :status :idle}))))
+                            (if (continue-prompt? agent)
+                              (do (continue-attempt!) (recur))
+                              (do (reset! (:status agent) :idle)
+                                  (emit agent {:type :status :status :idle}))))))
 
-                    ;; Unreachable: run-attempt! returns one of the four
+                    ;; Unreachable: run-attempt! returns one of the five
                     ;; outcomes. Throwing (rather than a bare case failure)
                     ;; names the culprit.
                     (throw (ex-info "Unknown attempt outcome"

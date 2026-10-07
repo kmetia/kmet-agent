@@ -383,6 +383,7 @@
         (chat-history/chat-history-remove-streaming-placeholder! chat-history)
         (tui/tui-request-render tui))
       :turn-end nil
+      :agent-before-settle nil
       :agent-settled nil
       :session-compact-failed nil
       :error nil
