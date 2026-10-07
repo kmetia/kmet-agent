@@ -1407,6 +1407,11 @@ Be precise and concise in your responses."}}]
   [agent messages {:keys [signals thinking max-tokens]}]
   (let [ep (resolve-endpoint agent)
         signal (apply concurrent/or-signal signals)
+        ;; Whole-request deadline, like a normal call (pi: the SDK's
+        ;; timeoutMs ?? httpIdleTimeoutMs reaches the summarization stream
+        ;; too); the deref below uses the same value as its backstop, since
+        ;; a silent stream that never reports must not hang it forever
+        deadline (retry/llm-total-timeout-ms @(:cfg agent))
         done (promise)
         text-buf (atom "")
         usage-buf (atom nil)
@@ -1435,10 +1440,7 @@ Be precise and concise in your responses."}}]
                 :messages messages
                 :signal signal
                 :idle-timeout-ms (:http-idle-timeout-ms @(:cfg agent))
-                ;; Whole-request deadline, same as a normal call (pi: the
-                ;; SDK's timeoutMs ?? httpIdleTimeoutMs reaches the
-                ;; summarization stream too)
-                :total-timeout-ms (retry/llm-total-timeout-ms @(:cfg agent))
+                :total-timeout-ms deadline
                 :session-id (some-> (:session agent) :id)
                 :cache-retention :none
                 :max-tokens max-tokens
@@ -1449,10 +1451,7 @@ Be precise and concise in your responses."}}]
                 :on-error (fn [msg] (deliver! (partial :error msg)))}
          thinking (assoc :thinking thinking)))
       (when @signal (deliver! (partial :aborted)))
-      ;; Backstop: the transport enforces the same deadline, but a silent
-      ;; stream that never reports must not hang the deref forever.
-      (let [deadline (retry/llm-total-timeout-ms @(:cfg agent))
-            result (deref done deadline :timeout)]
+      (let [result (deref done deadline :timeout)]
         (if (map? result)
           result
           (partial :error (str "Stream timed out after " deadline "ms"))))
@@ -1571,6 +1570,48 @@ Be precise and concise in your responses."}}]
             (drop-incomplete-tool-calls
              (vec (mapcat session/context-messages (session/build-context sess)))))))
 
+(defn- record-compaction!
+  "Append the compaction entry for SUMMARY-RESULT (pi: appendCompaction),
+   rebuild the in-memory context to mirror it, and return the result map
+   (pi: CompactionResult — :summary, :first-kept-id, :tokens-before,
+   :estimated-tokens-after, :usage, :details, plus the appended session
+   :entry). Returns nil when FIRST-KEPT-ID is no longer in the branch, so the
+   caller can report a failure instead of a silent no-op. FROM-EXTENSION?
+   records the extension origin on the entry (pi:
+   CompactionEntry.fromHook).
+
+   Mirrors the new context into the UI (pi: compaction_end → the interactive
+   mode clears the chat and re-renders the compacted context, showing the
+   compaction summary entry). Without this the transcript keeps the
+   pre-compaction messages and the compaction is invisible until the session
+   is reloaded. The rebuild uses context order (summary first, then kept
+   tail), so the live view matches the reloaded view; pi's live path appends
+   the summary at the bottom (its own replay renders it first) — kmet keeps
+   one order."
+  [agent sess summary-result first-kept-id tokens-before from-extension?]
+  (when-let [entry (session/compact-with-summary!
+                    sess
+                    (:summary summary-result)
+                    first-kept-id
+                    (cond-> {:tokens-before tokens-before}
+                      (:usage summary-result)
+                      (assoc :usage (:usage summary-result))
+                      (:details summary-result)
+                      (assoc :details (:details summary-result))
+                      from-extension?
+                      (assoc :from-hook true)))]
+    (sync-context-after-compaction! agent)
+    (emit agent {:type :context-replaced :messages @(:messages agent)})
+    (debug/log "compacted session with LLM summary")
+    {:summary (:summary summary-result)
+     :first-kept-id first-kept-id
+     :tokens-before tokens-before
+     :estimated-tokens-after (reduce + 0 (map compaction/estimate-tokens
+                                              (session/build-context sess)))
+     :usage (:usage summary-result)
+     :details (:details summary-result)
+     :entry entry}))
+
 (defn compact-context!
   "LLM-based compaction (pi: prepareCompaction → compact): summarize the
    pre-cut entries, append a compaction entry (append-only — summarized
@@ -1661,15 +1702,14 @@ Be precise and concise in your responses."}}]
                                 supplied? (boolean (and supplied
                                                         (or (:summary supplied)
                                                             (:first-kept-id supplied))))
-                                _ (when supplied?
-                                    (vreset! from-extension true))
                                 summary-result
                                 (if supplied?
-                                  {:summary (str (:summary supplied))
-                                   :first-kept-id (:first-kept-id supplied)
-                                   :tokens-before (:tokens-before supplied)
-                                   :usage (:usage supplied)
-                                   :details (:details supplied)}
+                                  (do (vreset! from-extension true)
+                                      {:summary (str (:summary supplied))
+                                       :first-kept-id (:first-kept-id supplied)
+                                       :tokens-before (:tokens-before supplied)
+                                       :usage (:usage supplied)
+                                       :details (:details supplied)})
                                   (summarize! agent prep custom-instructions reason))]
                             (cond
                               (compaction-aborted? agent)
@@ -1681,94 +1721,68 @@ Be precise and concise in your responses."}}]
                                   :failed)
 
                               :else
-                              (let [first-kept-id (or (:first-kept-id summary-result)
-                                                      (:first-kept-id prep))
-                                    tokens-before (or (:tokens-before summary-result)
-                                                      (:tokens-before prep))
-                                    entry (session/compact-with-summary!
-                                           sess (:summary summary-result)
-                                           first-kept-id
-                                           (cond-> {:tokens-before tokens-before}
-                                             (:usage summary-result)
-                                             (assoc :usage (:usage summary-result))
-                                             (:details summary-result)
-                                             (assoc :details (:details summary-result))
-                                             @from-extension
-                                             (assoc :from-hook true)))]
-                                (if (nil? entry)
-                                  ;; the first-kept entry vanished from the
-                                  ;; branch - nothing was appended, so this
-                                  ;; is a failure, not a silent no-op
-                                  (do (debug/log
-                                       "Warning: compaction target entry not found; compaction skipped")
-                                      (vreset! failure
-                                               "the first kept entry is no longer in the session")
-                                      :failed)
-                                  (do
-                                    (sync-context-after-compaction! agent)
-                                ;; Mirror the new context into the UI (pi: compaction_end → the
-                                ;; interactive mode clears the chat and re-renders the compacted
-                                ;; context, showing the compaction summary entry). Without this the
-                                ;; transcript keeps the pre-compaction messages and the compaction is
-                                ;; invisible until the session is reloaded. The rebuild uses context
-                                ;; order (summary first, then kept tail), so the live view matches
-                                ;; the reloaded view; pi's live path appends the summary at the
-                                ;; bottom (its own replay renders it first) — kmet keeps one order.
-                                    (emit agent {:type :context-replaced
-                                                 :messages @(:messages agent)})
-                                    (debug/log "compacted session with LLM summary")
-                                    {:summary (:summary summary-result)
-                                     :first-kept-id first-kept-id
-                                     :tokens-before tokens-before
-                                     :estimated-tokens-after (reduce + 0 (map compaction/estimate-tokens
-                                                                              (session/build-context sess)))
-                                     :usage (:usage summary-result)
-                                     :details (:details summary-result)
-                                     :entry entry}))))))))))
+                              (if-let [compacted
+                                       (record-compaction!
+                                        agent sess summary-result
+                                        (or (:first-kept-id summary-result)
+                                            (:first-kept-id prep))
+                                        (or (:tokens-before summary-result)
+                                            (:tokens-before prep))
+                                        @from-extension)]
+                                compacted
+                                ;; the first-kept entry vanished from the
+                                ;; branch — nothing was appended, so this is a
+                                ;; failure, not a silent no-op
+                                (do (debug/log
+                                     "Warning: compaction target entry not found; compaction skipped")
+                                    (vreset! failure
+                                             "the first kept entry is no longer in the session")
+                                    :failed)))))))))
                 false)
-              error-message (when (= result :failed)
+              succeeded? (map? result)
+              aborted? (or (= result :aborted) (= result ::cancelled))
+              failed? (= result :failed)
+              error-message (when failed?
                               (compaction/compaction-failure-message reason @failure))]
           (reset! (:compaction-error agent) error-message)
-          (emit agent {:type :compaction-end
-                       :reason reason
-                       :from-extension @from-extension
-                       :aborted (or (= result :aborted)
-                                    (= result ::cancelled))
-                       :result (when (map? result) (dissoc result :entry))
-                       :error-message error-message
-                       ;; Overflow compaction retries the interrupted turn
-                       ;; (pi: _runAutoCompaction willRetry — compaction_end
-                       ;; carries whether the run continues); a failed or
-                       ;; cancelled compaction never does.
-                       :will-retry (and (map? result) (= reason :overflow))})
           ;; pi: session_compact — fired after a successful compaction with
-          ;; the appended entry (extensions index/re-render it)
-          (when (map? result)
+          ;; the appended entry (extensions index/re-render it), BEFORE
+          ;; compaction_end so handlers see the entry before the queue flush
+          ;; (pi: the manual and automatic paths both emit it first)
+          (when succeeded?
             (emit agent {:type :session-compact
                          :compaction-entry (:entry result)
                          :from-extension @from-extension
                          :reason reason
                          :will-retry (= reason :overflow)}))
+          (emit agent {:type :compaction-end
+                       :reason reason
+                       :from-extension @from-extension
+                       :aborted aborted?
+                       :result (when succeeded? (dissoc result :entry))
+                       :error-message error-message
+                       ;; Overflow compaction retries the interrupted turn
+                       ;; (pi: _runAutoCompaction willRetry — compaction_end
+                       ;; carries whether the run continues); a failed or
+                       ;; cancelled compaction never does.
+                       :will-retry (and succeeded? (= reason :overflow))})
           ;; pi: session_compact_failed — fired when compaction fails or is
           ;; aborted (the summarization errored, or a compaction/run cancel
-          ;; signal fired mid-compaction).
-          (when (or (= result :failed)
-                    (= result :aborted)
-                    (= result ::cancelled))
+          ;; signal fired mid-compaction); this prompt's automatic checks
+          ;; then stand down
+          (when (or failed? aborted?)
             (emit agent {:type :session-compact-failed
                          :reason reason
                          :error-message error-message
                          :from-extension @from-extension
-                         :aborted (or (= result :aborted)
-                                      (= result ::cancelled))
+                         :aborted aborted?
                          ;; pi: _emitSessionCompactFailed — a compaction that
                          ;; failed or was cancelled never retries the turn
-                         :will-retry false}))
-          (when (or (= result :aborted) (= result :failed) (= result ::cancelled))
+                         :will-retry false})
             (reset! (:compaction-blocked agent) true))
           (cond
             (= result ::cancelled) false
-            (map? result) true
+            succeeded? true
             :else result))
         (finally
           (reset! (:compacting? agent) false))))))

@@ -663,17 +663,32 @@
                                                       on-complete on-error]}]]
                                         (future
                                           (try
-                                            (let [r (agent/compact-context! @ag-atom custom-instructions :manual)]
-                                              (if (and (= :failed r) on-error)
-                                                ;; pi: compact() throws on
-                                                ;; summarization failure →
-                                                ;; onError fires with
-                                                ;; `Compaction failed: <cause>`
-                                                (on-error (ex-info (str "Compaction failed: "
-                                                                        (or @(:compaction-error @ag-atom)
-                                                                            "Unknown error"))
-                                                                   {:type :compaction-failed}))
-                                                (when on-complete (on-complete {:result r}))))
+                                            (cond
+                                              ;; pi: compact() aborts the
+                                              ;; running operation first; kmet's
+                                              ;; cancel is cooperative and a
+                                              ;; manual compaction clears the run
+                                              ;; signal, so mid-turn the safe
+                                              ;; answer is to refuse (same as
+                                              ;; /compact)
+                                              (state/turn-running? cs)
+                                              (when on-error
+                                                (on-error (ex-info
+                                                           "Wait for the current response to finish before compacting."
+                                                           {:type :busy})))
+
+                                              :else
+                                              (let [r (agent/compact-context! @ag-atom custom-instructions :manual)]
+                                                (if (and (= :failed r) on-error)
+                                                  ;; pi: compact() throws on
+                                                  ;; summarization failure →
+                                                  ;; onError fires with
+                                                  ;; `Compaction failed: <cause>`
+                                                  (on-error (ex-info (str "Compaction failed: "
+                                                                          (or @(:compaction-error @ag-atom)
+                                                                              "Unknown error"))
+                                                                     {:type :compaction-failed}))
+                                                  (when on-complete (on-complete {:result r})))))
                                             (catch Exception e
                                               (when on-error (on-error e))))))
                              :get-system-prompt (fn [] @(:system @ag-atom))

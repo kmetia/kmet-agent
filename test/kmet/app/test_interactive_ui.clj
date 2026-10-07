@@ -2292,6 +2292,30 @@
         (h {:type :compaction-end :reason :threshold :result true :will-retry false}))
       (t/is (seq @started) "queued message prompted a run after compaction"))))
 
+(deftest test-ui-compact-refuses-while-a-turn-runs
+  (testing "the extension UI's compact refuses mid-turn — pi's compact() aborts
+            the running operation first, but kmet's cancel is cooperative and a
+            manual compaction clears the run signal, so refusing (like
+            /compact) is the safe answer"
+    (let [ag (agent/make-agent-state)
+          cs {:agent-state (atom ag)
+              :config cfg/default-config
+              :session-atom (atom nil)
+              :running-turn? (atom true)}
+          registry ((var ui-registry/build-extension-ui-registry)
+                    {:tui nil :cs cs}
+                    {:fdp (fdp/make-footer-data-provider)}
+                    nil)
+          ctx ((:build-context registry))
+          errors (atom [])]
+      (with-redefs [agent/compact-context! (fn [& _]
+                                             (throw (ex-info "must not compact" {})))]
+        @((:compact ctx)
+          {:on-error (fn [e] (swap! errors conj (ex-message e)))}))
+      (t/is (= ["Wait for the current response to finish before compacting."]
+               @errors)
+            "the caller is refused with an error, not compacted"))))
+
 (deftest test-cancel-during-compaction-keeps-turn
   (testing "escape during compaction aborts ONLY the compaction — a running
             turn is not cancelled (pi: compaction_start swaps the escape

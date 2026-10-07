@@ -213,6 +213,13 @@ kmet covers: settings, model, thinking, scoped-models, export (HTML), import, sh
 session, hotkeys, fork, clone, tree, login, logout, new, compact, resume, continue,
 reload, quit, help, tools, theme — full parity with pi's built-in command set.
 
+One flow difference: pi's manual compaction aborts the running operation first
+(`compact()` → `await this.abort()`), so `/compact` mid-response stops the
+response and compacts. kmet refuses while a turn is streaming (the same answer
+for `/compact` and the extension UI's `compact`) — its cancel is cooperative,
+and the manual path clears the run signal so a stale Escape cannot abort the
+compaction, which makes abort-then-compact unsafe without an idle wait.
+
 ### 4. Settings
 
 kmet (`config.clj`) covers: provider/model/thinking/theme/session-dir/

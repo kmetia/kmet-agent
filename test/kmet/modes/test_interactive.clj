@@ -358,6 +358,27 @@
           (is (= (if expected-content [expected-content] [])
                  (mapv :content @(:messages-atom chat)))))))))
 
+(deftest share-command-refuses-a-second-share
+  (let [registered (atom {})]
+    (with-redefs [commands/find-command (constantly nil)
+                  commands/register-command! (fn [cmd]
+                                               (swap! registered assoc (:name cmd) cmd))]
+      (builtins/register-builtin-commands! {}))
+    (testing "a share already in progress is refused — the background status is
+              released kind-gated, so a second flow would take over the slot
+              the first one clears"
+      (let [shared (atom [])
+            chat (chat-history/make-chat-history)
+            cs {:session-atom (atom {:id "session"})
+                :chat-history chat
+                :status-current (atom {:kind :share})}]
+        (with-redefs [builtins/gh-auth-status (constantly :ok)
+                      builtins/share-session! (fn [cs] (swap! shared conj cs))]
+          ((:handler (get @registered "share")) cs ""))
+        (is (empty? @shared) "no second upload starts")
+        (is (= ["A share is already in progress."]
+               (mapv :content @(:messages-atom chat))))))))
+
 (deftest share-completion-requests-frame-after-message
   (testing "the async share reply requests a frame after appending its chat message"
     (let [dir (str (fs/create-temp-dir {:prefix "test-share-render-" :dir "target"}))
