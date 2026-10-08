@@ -27,8 +27,6 @@
 (def ->CoreState state/->CoreState)
 (def map->CoreState state/map->CoreState)
 
-;; ─── Run ───────────────────────────────────────────────────────────────────
-
 ;; ─── Mode teardown ─────────────────────────────────────────────────────────
 
 (defn- dispose-mode-tree!
@@ -68,6 +66,9 @@
   (try (theme-ctrl/shutdown! (:theme-controller cs)) (catch Throwable _))
   (try (reakt/discard-queued!) (catch Throwable _))
   nil)
+
+;; ─── Run ───────────────────────────────────────────────────────────────────
+
 (defn run
   "Start the interactive TUI with the given config and CLI opts.
    Loads extensions, resolves the session (:resume/:continue/new), builds the

@@ -928,22 +928,20 @@
   ;; finding-4 class: the rows watch key must not be derived from the screen
   ;; object — with System/identityHashCode two registrations share a key, so
   ;; the first cancel silently removes the other registration's watch
-  (let [dir (many-extension-package 3)
-        size (atom {:cols 80 :rows 24})]
-    (with-settings
-      (fn [_]
-        (let [screen (rc/make-resource-config-screen :rows 24)
-              watch-fn (var-get #'rc/watch-terminal-rows!)
-              cancel-1 (watch-fn screen size (fn []))
-              cancel-2 (watch-fn screen size (fn []))]
-          (try
-            (t/is (= 2 (count (.getWatches size)))
-                  "each registration owns a distinct watch key")
-            (cancel-1)
-            (t/is (= 1 (count (.getWatches size)))
-                  "cancelling one registration leaves the other")
-            (finally (cancel-2)))))
-      {:user {:packages [dir]}})))
+  (with-settings
+    (fn [_]
+      (let [screen (rc/make-resource-config-screen :rows 24)
+            size (atom {:cols 80 :rows 24})
+            cancel-1 (#'rc/watch-terminal-rows! screen size (fn []))
+            cancel-2 (#'rc/watch-terminal-rows! screen size (fn []))]
+        (try
+          (t/is (= 2 (count (.getWatches size)))
+                "each registration owns a distinct watch key")
+          (cancel-1)
+          (t/is (= 1 (count (.getWatches size)))
+                "cancelling one registration leaves the other")
+          (finally (cancel-2)))))
+    {}))
 
 (t/deftest test-theme-switch-restyles-the-frame
   ;; the frame body tracks the theme subscription: a live switch re-derives

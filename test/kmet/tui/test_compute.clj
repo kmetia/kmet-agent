@@ -248,15 +248,16 @@
   (let [shared (atom nil)
         dep-a (atom 0)
         dep-b (atom 0)
-        c1 (map->Probe {:cache-atom shared
-                        :render-count-atom (atom 0)
-                        :body (fn [] [(str (rag/tracked-deref dep-a))])})
-        c2 (map->Probe {:cache-atom shared
-                        :render-count-atom (atom 0)
-                        :body (fn [] [(str (rag/tracked-deref dep-b))])})]
+        make-probe (fn [dep]
+                     (map->Probe {:cache-atom shared
+                                  :render-count-atom (atom 0)
+                                  :body (fn [] [(str (rag/tracked-deref dep))])}))
+        c1 (make-probe dep-a)
+        c2 (make-probe dep-b)]
     (t/is (= ["0"] (protocols/render c1 40)))
     (let [key (:kmet.tui.macros/watch-key (meta shared))]
       (t/is (contains? (.getWatches dep-a) key))
+      ;; width 41 busts c1's cache, so c2 reaches the register path
       (t/is (thrown? clojure.lang.ExceptionInfo (protocols/render c2 41)))
       (t/is (contains? (.getWatches dep-a) key) "the live entry keeps its watch")
       (t/is (empty? (.getWatches dep-b)) "the throwing render installed nothing"))

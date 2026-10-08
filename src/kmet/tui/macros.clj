@@ -53,7 +53,7 @@
   [component]
   (when-let [a (component-cache-atom component)]
     (or (::watch-key (meta a))
-        (let [k (keyword (str (gensym "track!")))]
+        (let [k (keyword (gensym "track!"))]
           ;; alter-meta! is atomic, and the fn preserves a key another thread
           ;; already installed — both allocators converge on the first key
           ;; (an unconditional assoc would let a later writer overwrite it
@@ -183,9 +183,7 @@
                                     (invalidate-cache c)))))]
                 ;; Register FIRST: a throw here (a shared cache atom) must
                 ;; not leave watches installed under a key
-                ;; remove-track-watches! cannot find. The entry is the
-                ;; teardown record — unregister on dispose, sweep on collect —
-                ;; refreshed per pass with the refs this pass watches.
+                ;; remove-track-watches! cannot find.
                 (weak/register! watch-key component {:atoms atoms}
                                 (fn [k {:keys [atoms]}]
                                   (unwatch-all! k atoms)))
