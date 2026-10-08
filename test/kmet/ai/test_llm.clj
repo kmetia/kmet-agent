@@ -3023,6 +3023,93 @@
       (finally
         (.close ss)))))
 
+(t/deftest ^:slow test-llm-google-stream-end-to-end
+  ;; Full send-message → Google Generative Language request (x-goog-api-key)
+  ;; → Google SSE response → events/usage. The twin of the vertex e2e below:
+  ;; google-request's success path previously had no end-to-end coverage
+  ;; (only its payload helpers were unit-tested).
+  (m/load-catalogs!)
+  (let [ss (java.net.ServerSocket. 0)
+        port (.getLocalPort ss)
+        request-url (atom nil)
+        request-headers (atom {})
+        request-body (atom nil)
+        _ (doto (Thread.
+                 (fn []
+                   (try
+                     (let [s (.accept ss)
+                           rdr (java.io.BufferedReader. (java.io.InputStreamReader. (.getInputStream s)))
+                           first-line (.readLine rdr)
+                           clen (atom 0)
+                           req-headers (atom {})
+                           _ (loop []
+                               (let [l (.readLine rdr)]
+                                 (when (seq (or l ""))
+                                   (when (str/starts-with? (str/lower-case (or l "")) "content-length:")
+                                     (reset! clen (Long/parseLong (str/trim (subs l 15)))))
+                                   (when-let [colon (str/index-of l ":")]
+                                     (reset! req-headers (assoc @req-headers
+                                                                (str/trim (subs l 0 colon))
+                                                                (str/trim (subs l (inc colon))))))
+                                   (recur))))
+                           _ (reset! request-headers @req-headers)
+                           sb (StringBuilder.)
+                           _ (loop [n 0]
+                               (if (< n @clen)
+                                 (let [buf (char-array (- @clen n)) m (.read rdr buf)]
+                                   (when (pos? m) (.append sb buf 0 m) (recur (+ n m))))
+                                 nil))
+                           _ (reset! request-url first-line)
+                           _ (reset! request-body (str sb))
+                           out (.getOutputStream s)
+                           stream-body (str "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\"}]}}]}\n\n"
+                                            "data: {\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"totalTokenCount\":15,\"cachedContentTokenCount\":2},\"candidates\":[{\"finishReason\":\"STOP\"}]}\n\n")]
+                       (.write out (.getBytes (str "HTTP/1.1 200 OK\r\n"
+                                                   "Content-Type: text/event-stream\r\n"
+                                                   "Content-Length: " (count stream-body) "\r\n\r\n"
+                                                   stream-body)))
+                       (.flush out)
+                       (.close s))
+                     (catch Exception _ nil))))
+            (.setDaemon true)
+            (.start))
+        errors (atom [])
+        text (atom "")
+        done-reason (atom nil)
+        usage (atom nil)
+        fut (llm/send-message {:provider :google
+                               :model "gemini-3.1-pro-preview"
+                               :api-key "gk"
+                               :base-url (str "http://localhost:" port)
+                               :thinking :high
+                               :messages [{:role :user :content [{:type :text :text "hi"}]}]
+                               :on-text (fn [t] (swap! text str t))
+                               :on-done (fn [r] (reset! done-reason r))
+                               :on-usage (fn [u] (reset! usage u))
+                               :on-error (fn [e] (swap! errors conj e))})]
+    (try
+      @fut
+      (t/is (= [] @errors) (str "no stream errors: " @errors))
+      (t/is (= "hi" @text))
+      (t/is (= :stop @done-reason))
+      (t/is (= 8 (:input @usage)) "usage: input excludes cached tokens")
+      (t/testing "the wire request is Google Generative Language-shaped"
+        ;; the :base-url override wins (the /models/<id>:streamGenerateContent
+        ;; path construction is unit-tested separately); the request still
+        ;; sends the body, the key, and a JSON content type
+        (t/is (str/starts-with? @request-url "POST / HTTP")
+              (str "request line: " @request-url))
+        (t/is (= "gk" (get @request-headers "x-goog-api-key")))
+        (t/is (= "application/json" (get @request-headers "Content-Type")))
+        (let [payload (json/parse-string @request-body true)]
+          (t/is (= [{:parts [{:text "hi"}] :role "user"}] (:contents payload)))
+          (t/is (= {:maxOutputTokens 65536
+                    :thinkingConfig {:includeThoughts true :thinkingLevel "HIGH"}}
+                   (:generationConfig payload))
+                "gemini-3.1-pro at :high → includeThoughts + thinkingLevel HIGH")))
+      (finally
+        (.close ss)))))
+
 (t/deftest ^:slow test-llm-vertex-stream-end-to-end
   ;; Full send-message → Vertex request (project/location URL, x-goog-api-key)
   ;; → Google SSE response → events.
