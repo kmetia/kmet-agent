@@ -864,7 +864,7 @@
 
 (defn shell-call-renderer
   "Build the shared call renderer for a shell tool with PROMPT (`$` for bash,
-   `PS>` for PowerShell — pi: createShellRenderers(prompt)). The returned fn
+   `ps $` for PowerShell — pi: createShellRenderers(prompt)). The returned fn
    has the standard (name args theme width context) render-call signature:
    `PROMPT <command>` (+ timeout suffix), rendered verbatim whatever the
    display mode (pi: the call line never truncates; Text wraps it at the
@@ -1016,7 +1016,7 @@
     (h/compile-tree (tool-text (str code-line suffix)))))
 
 (defn render-run-code-call
-  "Call line for the run_code tool: `run_code <code>` (+ an explicit timeout
+  "Call line for the run_code tool: `run $ <code>` (+ an explicit timeout
    suffix), via the shared code-call renderer. The quiet title mirrors the
    one-line head of the same call."
   [_name args theme width context]
@@ -1024,7 +1024,7 @@
         suffix (if (and (number? timeout) (pos? timeout))
                  (theme/fg theme :muted (str " (" timeout "s)"))
                  "")]
-    (render-code-call "run_code" (:code args) suffix theme width context)))
+    (render-code-call "run $" (:code args) suffix theme width context)))
 
 (defn- run-code-calls-nodes
   "One muted summary line for the run_code tool's inner-call trace (details

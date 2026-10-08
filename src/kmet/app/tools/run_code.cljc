@@ -986,12 +986,13 @@
        "Sandbox: Clojure; on babashka a full babashka surface — you can require clojure.*/babashka.* namespaces and resolve System/java.io.*/Throwable. Aliases: fs, str/set/edn/walk, json, p, sh, tools, sandbox. :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB."))
 
 (defn title
-  "Quiet one-liner body for the run_code tool: the first code line, shortened."
+  "Quiet one-liner body for the run_code tool: `run $ ` and the first code
+   line, shortened."
   [args]
   (when-let [code (tool-util/title-str-arg args :code)]
     (let [line (first (str/split-lines code))
           line (if (> (count line) 80) (str (subs line 0 80) "…") line)]
-      (str "run_code " line))))
+      (str "run $ " line))))
 
 (defn create-tool
   "Build the script Tool record. OPTS wires the registry seams (registry.clj

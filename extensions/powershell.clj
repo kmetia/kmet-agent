@@ -7,7 +7,7 @@
    (\"-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command\"), and
    pi's UTF-8 output prefix so non-ASCII output survives the console's
    default code page. The call line is the shared shell-call renderer with
-   pi's `PS>` prompt; results render through the bash result renderer.
+   the `ps $` prompt; results render through the bash result renderer.
 
    Pi parity: the tool is Windows-only. On a host without PowerShell the
    tool still registers and every call reports pi's error instead of
@@ -24,7 +24,9 @@
 
 ;; ─── pi constants ──────────────────────────────────────────────────────────
 
-(def ^:private prompt "PS>")
+;; kmet's shell-style prefix (pi renders `PS>`): `ps $ <cmd>` reads like the
+;; bash tool's `$ <cmd>`.
+(def ^:private prompt "ps $")
 
 (def ^:private powershell-args
   "pi: POWERSHELL_ARGS. The command is appended as the final argv element."
@@ -71,15 +73,15 @@
 ;; ─── Rendering ─────────────────────────────────────────────────────────────
 
 (defn- title
-  "Quiet one-liner body: `PS> <cmd>` (the bash tool's `$ <cmd>` with pi's
-   PowerShell prompt). Nil when the command is missing or empty."
+  "Quiet one-liner body: `ps $ <cmd>` (the bash tool's `$ <cmd>` with a
+   PowerShell marker). Nil when the command is missing or empty."
   [args]
   (let [cmd (:command args)]
     (when (and (string? cmd) (not (str/blank? cmd)))
       (str prompt " " cmd))))
 
 (defn- shell-tool
-  "The tool-facing shape both branches share: pi's PowerShell prompt for the
+  "The tool-facing shape both branches share: the `ps $` prompt for the
    call line and the quiet title, the bash result body for output."
   [tool]
   (assoc tool

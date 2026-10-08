@@ -394,7 +394,7 @@
 (deftest test-run-code-render-call
   (testing "run_code call shows the code, not the raw args map"
     (let [plain (render-tool :name "run_code" :args {:code "(+ 1 2)"})]
-      (is (some #(re-find #"run_code \(\+ 1 2\)" %) plain))
+      (is (some #(re-find #"run \$ \(\+ 1 2\)" %) plain))
       (is (not-any? #(re-find #":code" %) plain)))))
 
 (deftest test-run-code-render-result

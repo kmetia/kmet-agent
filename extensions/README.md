@@ -147,7 +147,7 @@ date whenever the contract changes.
 | `grep-tool.clj` | Opt-in `grep` tool — regex search over file contents, matching lines only (`file:line: text`, 100-match cap), runtime-cwd resolution, bash-style result rendering (not a builtin) |
 | `find-tool.clj` | Opt-in `find` tool — regex match against file names/paths, path-only results (200 cap), runtime-cwd resolution, bash-style result rendering |
 | `ls-tool.clj` | Opt-in `ls` tool — directory listing sorted by name, long form with type/size, runtime-cwd resolution, bash-style result rendering |
-| `powershell.clj` | Opt-in `powershell` tool (Windows) — port of pi's powershell tool: same bash engine and renderers with `PS>` prompt, PowerShell 7 preferred over Windows PowerShell, `-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command`, UTF-8 output prefix; errors with pi's message on other hosts |
+| `powershell.clj` | Opt-in `powershell` tool (Windows) — port of pi's powershell tool: same bash engine and renderers with a `ps $` prompt, PowerShell 7 preferred over Windows PowerShell, `-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command`, UTF-8 output prefix; errors with pi's message on other hosts |
 | `tools.clj` | Interactive `/tools` command to enable/disable tools, with selection persisted across session reloads and branch navigation (port of pi's example tools extension) |
 | `deepseek-peak.clj` | `/deepseek-peak` — DeepSeek API peak/off-peak hours in your local time zone, shown as a `/session`-style chat info panel (flash fallback in headless mode) |
 | `clojure/` | Clojure-aware tools ported from clojure-mcp: `clojure_edit`, `clojure_edit_replace_sexp`, `clojure_paren_repair`, `clojure_eval` (nREPL evaluation), plus the `clojure-edit` skill — see `clojure/README.md` |

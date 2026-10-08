@@ -54,11 +54,11 @@
 
 (deftest test-shell-call-renderer
   (testing "the shared shell-call renderer takes the prompt (pi: createShellRenderers)"
-    (let [lines (plain ((r/shell-call-renderer "PS>") "powershell" {:command "Get-ChildItem"}
-                                                      th 60 {})
+    (let [lines (plain ((r/shell-call-renderer "ps $") "powershell" {:command "Get-ChildItem"}
+                                                       th 60 {})
                        60)]
       (is (= 1 (count lines)))
-      (is (str/includes? (first lines) "PS> Get-ChildItem"))))
+      (is (str/includes? (first lines) "ps $ Get-ChildItem"))))
   (testing "bash is the same renderer with `$` and the timeout suffix"
     (let [lines (plain ((r/shell-call-renderer "$") "bash" {:command "ls" :timeout 5} th 60 {})
                        60)]
@@ -385,7 +385,7 @@
   (testing "short code renders as one line"
     (let [lines (plain (r/render-run-code-call "run_code" {:code "(+ 1 2)"} th 60 {:expanded false}) 60)]
       (is (= 1 (count lines)))
-      (is (str/includes? (first lines) "run_code (+ 1 2)"))))
+      (is (str/includes? (first lines) "run $ (+ 1 2)"))))
   (testing "an explicit timeout renders as a suffix"
     (let [lines (plain (r/render-run-code-call "run_code" {:code "1" :timeout 5} th 60 {}) 60)]
       (is (str/includes? (first lines) "(5s)"))))
@@ -393,7 +393,7 @@
     (let [code (str/join "\n" (mapv #(str "(println " % ")") (range 20)))
           lines (plain (r/render-run-code-call "run_code" {:code code} th 60 {:expanded false}) 60)]
       (is (= 20 (count lines)) "the whole script, no cap")
-      (is (str/starts-with? (first lines) "run_code (println 0)"))
+      (is (str/starts-with? (first lines) "run $ (println 0)"))
       (is (some #(str/includes? % "(println 19)") lines) "the tail renders")
       (is (not-any? #(str/includes? % "toggle") lines) "no expand hint")))
   (testing "expanded renders the script verbatim"
@@ -401,23 +401,23 @@
           lines (plain (r/render-run-code-call "run_code" {:code code} th 60 {:expanded true}) 60)]
       (is (= 12 (count lines)))
       (is (str/includes? (peek lines) "line 11"))))
-  (testing "missing code keeps the `run_code ...` placeholder"
-    (let [lines (plain (r/render-run-code-call "run_code" {} th 60 {:expanded false}) 60)]
+  (testing "missing code keeps the `run $ ...` placeholder"
+    (let [lines (plain (r/render-run-code-call "run $" {} th 60 {:expanded false}) 60)]
       (is (= 1 (count lines)))
-      (is (str/includes? (first lines) "run_code ...")))))
+      (is (str/includes? (first lines) "run $ ...")))))
 
 (deftest test-render-code-call
   (testing "a custom label and suffix render like the run_code call"
-    (let [lines (plain (r/render-code-call "clojure>" "(+ 1 2)"
+    (let [lines (plain (r/render-code-call "clj eval $" "(+ 1 2)"
                                            (theme/fg th :dim "  :7888") th 60 {}) 60)]
       (is (= 1 (count lines)))
-      (is (str/includes? (first lines) "clojure> (+ 1 2)"))
+      (is (str/includes? (first lines) "clj eval $ (+ 1 2)"))
       (is (str/includes? (first lines) ":7888"))))
   (testing "multi-line code renders verbatim when collapsed"
     (let [code (str/join "\n" (mapv #(str "(println " % ")") (range 20)))
-          lines (plain (r/render-code-call "clojure>" code "" th 60 {:expanded false}) 60)]
+          lines (plain (r/render-code-call "clj eval $" code "" th 60 {:expanded false}) 60)]
       (is (= 20 (count lines)) "the whole payload, no cap")
-      (is (str/starts-with? (first lines) "clojure> (println 0)"))
+      (is (str/starts-with? (first lines) "clj eval $ (println 0)"))
       (is (some #(str/includes? % "(println 7)") lines))
       (is (some #(str/includes? % "(println 19)") lines) "the tail renders")
       (is (not-any? #(str/includes? % "toggle") lines) "no expand hint")))

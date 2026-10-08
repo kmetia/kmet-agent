@@ -153,14 +153,14 @@
                                                    {:code "(+ 1 2)" :port 7888}
                                                    theme/dark-theme 60 {}) 60)]
       (is (= 1 (count lines)))
-      (is (str/includes? (first lines) "clojure> (+ 1 2)"))
+      (is (str/includes? (first lines) "clj eval $ (+ 1 2)"))
       (is (str/includes? (first lines) ":7888"))))
   (testing "a large multi-line payload renders in full (no head window)"
     (let [code (str/join "\n" (mapv #(str "(println " % ")") (range 20)))
           lines (plain (eval-tool/render-eval-call "clojure_eval" {:code code}
                                                    theme/dark-theme 60 {:expanded false}) 60)]
       (is (= 20 (count lines)) "every payload line renders")
-      (is (str/starts-with? (first lines) "clojure> (println 0)"))
+      (is (str/starts-with? (first lines) "clj eval $ (println 0)"))
       (is (str/includes? (peek lines) "(println 19)") "the tail renders")
       (is (not-any? #(str/includes? % "more lines,") lines) "no collapse hint")))
   (testing "expanded renders the payload verbatim"
@@ -170,10 +170,10 @@
       (is (= 12 (count lines)))
       (is (str/includes? (peek lines) "line 11"))))
   (testing "the quiet title keeps the first line, shortened"
-    (is (= "clj $ (+ 1 2)" (eval-tool/title {:code "(+ 1 2)\n(+ 3 4)"})))
+    (is (= "clj eval $ (+ 1 2)" (eval-tool/title {:code "(+ 1 2)\n(+ 3 4)"})))
     (let [long-title (eval-tool/title {:code (apply str (repeat 200 "x"))})]
       (is (str/ends-with? long-title "…"))
-      (is (= (+ (count "clj $ ") 81) (count long-title))))
+      (is (= (+ (count "clj eval $ ") 81) (count long-title))))
     (is (nil? (eval-tool/title {})))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════════

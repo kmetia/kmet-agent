@@ -125,23 +125,23 @@
 ;; ─── Renderers ────────────────────────────────────────────────────────────
 
 (defn render-eval-call
-  "Call line: `clojure> <code>` (+ the target port when one was given), via
+  "Call line: `clj eval $ <code>` (+ the target port when one was given), via
    the shared code-call renderer — rendered verbatim, whatever the display
    mode."
   [_name args theme width context]
   (let [code (or (:code args) (get args "code"))
         port (or (:port args) (get args "port"))
         suffix (when port (theme/fg theme :dim (str "  :" port)))]
-    (renderers/render-code-call "clojure>" code suffix theme width context)))
+    (renderers/render-code-call "clj eval $" code suffix theme width context)))
 
 (defn title
-  "Quiet-mode one-liner: `clj $ <first line of the code>`, shortened."
+  "Quiet-mode one-liner: `clj eval $ <first line of the code>`, shortened."
   [args]
   (let [code (or (:code args) (get args "code"))]
     (when (string? code)
       (let [line (first (str/split-lines code))
             line (if (> (count line) 80) (str (subs line 0 80) "…") line)]
-        (when (seq line) (str "clj $ " line))))))
+        (when (seq line) (str "clj eval $ " line))))))
 
 ;; ─── Registration ─────────────────────────────────────────────────────────
 

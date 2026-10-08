@@ -245,7 +245,7 @@
 
 (t/deftest test-powershell-tool-extension
   (t/testing "powershell ships as an opt-in extension: the bash engine with a
-              PowerShell shell, pi's PS> prompt call line and the shared bash
+              PowerShell shell, the ps $ prompt call line and the shared bash
               result renderer"
     (let [r (extensions/load-extension! "extensions/powershell.clj")]
       (try
@@ -263,9 +263,9 @@
           (t/is (= ["You can inspect KMET_* environment variables for current model and session details."]
                    (:prompt-guidelines tool))
                 "pi's guideline with the KMET_* session vars")
-          (t/is (fn? (:render-call tool)) "the shell-call renderer (PS>)")
+          (t/is (fn? (:render-call tool)) "the shell-call renderer (ps $)")
           (t/is (fn? (:render-result tool)) "the shared bash result renderer")
-          (t/is (= "PS> echo hi" ((:title tool) {:command "echo hi"})))
+          (t/is (= "ps $ echo hi" ((:title tool) {:command "echo hi"})))
           (t/is (nil? ((:title tool) {}))))
         (t/testing "the system prompt names both shells (pi: buildRules)"
           (t/is (str/includes?
