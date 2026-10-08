@@ -32,20 +32,27 @@
    473 maintained human Python repositories and 2,869 agent checkpoints.
    Lower is better.
 
-   Usage: bb slop [path] [--top N] [--test]"
+   `--dups` swaps the outlier listings for the duplicate groups: the clone
+   groups behind the metric's clone-line count plus the shape-identical
+   defns the clone floor misses (kmet.tasks.slop.dups).
+
+   Usage: bb slop [path] [--top N] [--test] [--dups]"
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [edamame.core :as e]
             [kmet.tasks.slop.clones :as clones]
+            [kmet.tasks.slop.dups :as dups]
             [kmet.tasks.slop.rules :as rules]))
 
 ;; ------------------------------------------------------------------ options
 
 (def ^:private usage
-  (str "bb slop [path] [--top N] [--test]\n\n"
+  (str "bb slop [path] [--top N] [--test] [--dups]\n\n"
        "  path   directory (or single source file) to scan; default: .\n"
-       "  --top  number of outliers to list per metric (default 15)\n"
-       "  --test also scan test trees (test/ and extensions/*/test)"))
+       "  --top  number of outliers/duplicate groups to list per metric (default 15)\n"
+       "  --test also scan test trees (test/ and extensions/*/test)\n"
+       "  --dups list duplicate groups (clone groups + shape-identical defns)\n"
+       "         instead of the outlier file/function listings"))
 
 (defn- parse-args [args]
   (loop [as (seq args) opts {:path "." :top 15}]
@@ -55,6 +62,7 @@
         (cond
           (or (= a "--help") (= a "-h")) (assoc opts :help true)
           (= a "--test") (recur (rest as) (assoc opts :test true))
+          (= a "--dups") (recur (rest as) (assoc opts :dups true))
           (str/starts-with? a "--top=") (recur (rest as) (assoc opts :top (parse-long (subs a 6))))
           (= a "--top") (recur (drop 2 as) (assoc opts :top (parse-long (second as))))
           :else (recur (rest as) (assoc opts :path a)))))))
@@ -280,25 +288,29 @@
             (sort-by str))))))
 
 (defn- parse-scan
-  "Parse one file into {:file :fns :findings :defs}; failures are recorded
-   and yield empty results instead of aborting the scan."
+  "Parse one file into {:file :lines :fns :findings :defs}; failures are
+   recorded and yield empty results instead of aborting the scan."
   [path failures]
   (try
     (let [{:keys [file lines forms]} (parse-file path)]
       {:file file
+       :lines lines
        :forms forms
        :fns (vec (file-fns {:file file :lines lines :forms forms}))
        :findings (mapv #(assoc % :file file) (rules/ast-findings forms))
        :defs (mapv #(assoc % :file file) (rules/definitions forms))})
     (catch Exception ex
       (swap! failures conj {:file (str path) :error (ex-message ex)})
-      {:file (str path) :forms [] :fns [] :findings [] :defs []})))
+      {:file (str path) :lines [] :forms [] :fns [] :findings [] :defs []})))
 
 (defn scan
   "Analyze every Clojure source under ROOT.
-   OPTS: :top outlier count (default 15); :test also scan test trees."
-  [root {:keys [top test] :or {top 15}}]
-  (let [files (source-files root {:test test})
+   OPTS: :top outlier/duplicate-group count (default 15); :test also scan
+   test trees; :dups also collect the duplicate groups (see
+   kmet.tasks.slop.dups)."
+  [root {:keys [top test] :as opts :or {top 15}}]
+  (let [dups? (:dups opts)
+        files (source-files root {:test test})
         sloc-stats (mapv file-sloc files)
         sloc-by-file (into {} (map (juxt :file :sloc) sloc-stats))
         sloc-lines-by-file (into {} (map (juxt :file :sloc-lines) sloc-stats))
@@ -308,6 +320,9 @@
                              (map #(assoc % :file file) (clones/candidates forms)))
                            parsed)
         clone-by-file (clones/clone-lines-by-file candidates sloc-lines-by-file)
+        dup-clones (when dups? (dups/clone-groups candidates))
+        dup-shapes (when dups? (dups/shape-groups parsed))
+        lines-by-file (when dups? (into {} (map (juxt :file :lines) parsed)))
         fns (vec (mapcat :fns parsed))
         defs (mapcat :defs parsed)
         wrappers (mapv (fn [w]
@@ -346,6 +361,11 @@
                          (sort-by second >))]
     {:root (str root)
      :test (boolean test)
+     :top top
+     :dups (boolean dups?)
+     :dup-clones dup-clones
+     :dup-shapes dup-shapes
+     :lines-by-file lines-by-file
      :files (count files)
      :sloc sloc
      :failures @failures
@@ -404,9 +424,10 @@
 
 (defn format-report
   "Render a `scan` report as plain text: summary, reference comparison and
-   outliers only."
+   the outlier listings — or, for a :dups scan, the duplicate groups
+   (kmet.tasks.slop.dups) instead of the outlier listings."
   [{:keys [root test files sloc clone-lines rule-lines union-lines overlap rule-counts
-           outlier-files functions failures
+           outlier-files functions failures top dups dup-clones dup-shapes lines-by-file
            high-cc max-cc total-mass hi-mass verbosity erosion outliers]}]
   (str/join
    "\n"
@@ -425,29 +446,38 @@
             (str/join " | " (map (fn [[r n]] (str r " " n)) rule-counts)))
        "  top rules: none")
      (ref-line verbosity :verbosity)]
-    (if (seq outlier-files)
-      (cons (format "  outlier files (top %d by flagged lines):" (count outlier-files))
-            (map (fn [f]
-                   (format "    flagged=%-5d clone=%-5d rule=%-5d %5.1f%% of file  %s"
-                           (:flagged f) (:clone-lines f) (:rule-lines f)
-                           (* 100.0 (/ (double (:flagged f)) (max 1 (:sloc f))))
-                           (rel-path root (:file f))))
-                 outlier-files))
-      ["  outlier files: none"])
+    (when-not dups
+      (if (seq outlier-files)
+        (cons (format "  outlier files (top %d by flagged lines):" (count outlier-files))
+              (map (fn [f]
+                     (format "    flagged=%-5d clone=%-5d rule=%-5d %5.1f%% of file  %s"
+                             (:flagged f) (:clone-lines f) (:rule-lines f)
+                             (* 100.0 (/ (double (:flagged f)) (max 1 (:sloc f))))
+                             (rel-path root (:file f))))
+                   outlier-files))
+        ["  outlier files: none"]))
     [""
      (format "EROSION  %.3f  (mass share of CC>10 functions; mass = CC * sqrt(SLOC))"
              erosion)
      (format "  %d of %d functions CC>10 | max CC %d | mass %.1f of %.1f"
              high-cc functions max-cc hi-mass total-mass)
      (ref-line erosion :erosion)]
-    (if (seq outliers)
-      (cons (format "  outlier functions (top %d of %d by mass):" (count outliers) high-cc)
-            (map (fn [f]
-                   (format "    cc=%-3d sloc=%-4d mass=%6.1f  %s  (%s:%d)"
-                           (:cc f) (:sloc f) (:mass f) (:label f)
-                           (rel-path root (:file f)) (:row f)))
-                 outliers))
-      ["  outlier functions: none"])
+    (when-not dups
+      (if (seq outliers)
+        (cons (format "  outlier functions (top %d of %d by mass):" (count outliers) high-cc)
+              (map (fn [f]
+                     (format "    cc=%-3d sloc=%-4d mass=%6.1f  %s  (%s:%d)"
+                             (:cc f) (:sloc f) (:mass f) (:label f)
+                             (rel-path root (:file f)) (:row f)))
+                   outliers))
+        ["  outlier functions: none"]))
+    (when dups
+      (dups/format-duplicates {:clones dup-clones
+                               :shapes dup-shapes
+                               :lines-by-file lines-by-file
+                               :clone-lines clone-lines
+                               :top top
+                               :rel-path (fn [f] (rel-path root f))}))
     (when (seq failures)
       (cons (format "PARSE FAILURES  %d" (count failures))
             (map (fn [{:keys [file error]}]
@@ -465,4 +495,4 @@
     (when (or (nil? top) (< top 1))
       (println (str "bb slop: --top must be a positive integer\n\n" usage))
       (System/exit 1))
-    (println (format-report (scan path (select-keys opts [:top :test]))))))
+    (println (format-report (scan path (select-keys opts [:top :test :dups]))))))

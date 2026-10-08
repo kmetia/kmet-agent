@@ -199,3 +199,72 @@
                (is (str/includes? text "below human mean"))
                (is (str/includes? text "outlier files: none"))
                (is (str/includes? text "outlier functions: none"))))))
+
+;; ─── --dups: duplicate listing ──────────────────────────────────────────────
+
+(deftest dups-groups-clones-by-instance
+  (in-tree {"a.clj" "(defn f [v] (let [s (clean v)] (println s) s))\n"
+            "b.clj" "(defn g [w] (let [t (clean w)] (println t) t))\n"}
+           (fn [dir]
+             (let [report (slop/scan dir {:dups true})
+                   group (first (:dup-clones report))]
+               (is (true? (:dups report)))
+               (is (true? (:cross? group)))
+               (is (= 2 (:files group)))
+               (is (= 2 (count (:instances group))))
+               (is (pos? (:lines group)))
+               (is (= #{"a.clj" "b.clj"}
+                      (set (map #(slash (fs/relativize dir (:file %))) (:instances group)))))))))
+
+(deftest dups-find-single-expression-helper-copies
+  ;; A one-expression body has no second statement, so the clone metric's
+  ;; candidate floor never sees the copy; the shape lens does. The trailing
+  ;; nil is the explicit-return idiom, not a behavioural difference.
+  (in-tree {"core.clj" (str "(defn editor-set-text! [ed text]\n"
+                            "  (if (satisfies? protocols/IEditorComponent ed)\n"
+                            "    (protocols/editor-set-text! ed text)\n"
+                            "    (editor/editor-set-text! ed text)))\n")
+            "app.clj" (str "(defn editor-text-set! [ed text]\n"
+                           "  (if (satisfies? protocols/IEditorComponent ed)\n"
+                           "    (protocols/editor-set-text! ed text)\n"
+                           "    (editor/editor-set-text! ed text))\n"
+                           "  nil)\n")}
+           (fn [dir]
+             (let [report (slop/scan dir {:dups true})
+                   group (first (:dup-shapes report))]
+               (is (zero? (:clone-lines report)))
+               (is (= 2 (:files group)))
+               (is (= #{"app.clj" "core.clj"}
+                      (set (map #(slash (fs/relativize dir (:file %))) (:instances group)))))))))
+
+(deftest dups-keep-callee-names-so-unrelated-helpers-differ
+  (in-tree {"a.clj" "(defn f [x] (str/trim x))\n"
+            "b.clj" "(defn g [y] (str/lower-case y))\n"
+            "c.clj" "(defn h [s] (str s))\n"
+            "d.clj" "(defn i [t] (str t))\n"}
+           (fn [dir]
+             (let [groups (:dup-shapes (slop/scan dir {:dups true}))]
+               ;; forwarding to different fns is not a copy ...
+               (is (not-any? #(= #{"a.clj" "b.clj"}
+                                 (set (map (fn [i] (slash (fs/relativize dir (:file i))))
+                                           (:instances %))))
+                             groups))
+               ;; ... while a byte-identical helper still is one.
+               (is (some #(= #{"c.clj" "d.clj"}
+                             (set (map (fn [i] (slash (fs/relativize dir (:file i))))
+                                       (:instances %))))
+                         groups))))))
+
+(deftest dups-report-section-replaces-the-outlier-listings
+  (in-tree {"a.clj" "(defn f [v] (let [s (clean v)] (println s) s))\n"
+            "b.clj" "(defn g [w] (let [t (clean w)] (println t) t))\n"}
+           (fn [dir]
+             (let [text (slop/format-report (slop/scan dir {:dups true}))]
+               (is (str/includes? text "DUPLICATES"))
+               (is (str/includes? text "cross-file clone groups"))
+               (is (str/includes? text "a.clj"))
+               (is (str/includes? text "b.clj"))
+               (is (not (str/includes? text "outlier files"))))
+             (let [plain (slop/format-report (slop/scan dir {}))]
+               (is (str/includes? plain "outlier files"))
+               (is (not (str/includes? plain "DUPLICATES")))))))

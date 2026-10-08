@@ -75,7 +75,7 @@
 
 ;; ---------------------------------------------------------- body containers
 
-(defn- strip-doc-attrs
+(defn strip-doc-attrs
   "Drop a leading docstring and/or attribute map from FORMS."
   [forms]
   (cond-> forms

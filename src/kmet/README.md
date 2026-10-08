@@ -168,7 +168,7 @@ bb check           # Verify all source namespaces compile
 bb generate-models     # Regenerate provider + image model catalogs (network)
 kmet --generate-models # Refresh the user-level catalog caches (network)
 bb check-model-data      # Offline catalog validation (providers + images)
-bb slop                # SCBench verbosity (clones+rules)/erosion vs. reference rows, outliers only (source trees; --test adds tests)
+bb slop                # SCBench verbosity (clones+rules)/erosion vs. reference rows, outliers only; --dups lists duplicate groups (source trees; --test adds tests)
 bb pack-extension <src-dir> [out.jar]  # Verify + pack an extension artifact root
 bb help            # Show task entry points
 ```
