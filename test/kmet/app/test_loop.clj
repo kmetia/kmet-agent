@@ -20,6 +20,7 @@
             [kmet.app.loop-guard :as guard]
             [kmet.app.retry :as retry]
             [kmet.config :as cfg]
+            [kmet.debug :as debug]
             [kmet.app.ui.chat-history :as ui]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.theme :as th]
@@ -4770,6 +4771,100 @@
                    @(:compaction-error agent))
                 "the message /compact's error path reports (pi: compact() rejects)"))
         (finally (fs/delete-tree dir))))))
+
+(t/deftest test-loop-summarization-call-exception
+  ;; A summarization call that throws synchronously (auth, request setup, a
+  ;; payload hook) is reported like any other failure: the retry driver sees
+  ;; an :error result and the compaction still ends with its failure events,
+  ;; so the UI never sticks on the compaction indicator (pi: the stream fn
+  ;; reports failures, it never throws into the summarization driver).
+  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+        sess (session/create-session (str dir))
+        events (atom [])
+        agent (loop/make-agent-state
+               :session sess
+               :compact-token-threshold 10
+               :keep-recent-tokens 40
+               :on-event (fn [e] (swap! events conj e)))]
+    (try
+      (seed-context! sess 6)
+      (swap! (:cfg agent) assoc :max-retries 0)
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [_opts]
+                      (throw (ex-info (str "network error: Proxy request failed: curl: (97) "
+                                           "Failed to receive SOCKS response, proxy closed connection")
+                                      {:type :transport-error})))]
+        (let [result (binding [*err* (java.io.StringWriter.)]
+                       (loop/compact-context! agent nil :manual))]
+          (t/is (= :failed result) "the throw is a compaction failure")
+          (t/is (= (str "Compaction failed: Summarization failed: network error: "
+                        "Proxy request failed: curl: (97) Failed to receive SOCKS response, "
+                        "proxy closed connection")
+                   (:error-message (event-of events :compaction-end)))
+                "the thrown cause rides pi's failure report")
+          (t/is (some #(= :session-compact-failed (:type %)) @events)
+                "the failure event still fires (the UI clears on it)")
+          (t/is (false? @(:compacting? agent)) "the compaction flag is cleared")))
+      (finally (fs/delete-tree dir))))
+  (t/testing "a throw after the cancel signal fired reports as aborted"
+    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+          sess (session/create-session (str dir))
+          events (atom [])
+          agent (loop/make-agent-state
+                 :session sess
+                 :compact-token-threshold 10
+                 :keep-recent-tokens 40
+                 :on-event (fn [e] (swap! events conj e)))]
+      (try
+        (seed-context! sess 6)
+        (swap! (:cfg agent) assoc :max-retries 0)
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [_opts]
+                        (reset! (:compaction-signal agent) true)
+                        (throw (ex-info "aborted transport" {:type :transport-error})))]
+          (t/is (= :aborted
+                   (binding [*err* (java.io.StringWriter.)]
+                     (loop/compact-context! agent nil :manual))))
+          (t/is (true? (:aborted (event-of events :compaction-end)))
+                "an aborted call reports :aborted, not a failure")
+          (t/is (nil? (:error-message (event-of events :compaction-end)))
+                "pi: an aborted compaction carries no error message"))
+        (finally (fs/delete-tree dir))))))
+
+(t/deftest test-loop-compaction-unexpected-exception-still-ends
+  ;; pi: compact()/_runAutoCompaction catch any error and still emit
+  ;; compaction_end + session_compact_failed. Without the catch the exception
+  ;; escapes the caller (an interactive /compact runs it on a future that
+  ;; swallows it) and the UI stays on the compaction indicator forever.
+  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+        sess (session/create-session (str dir))
+        events (atom [])
+        err-logged (atom nil)
+        agent (loop/make-agent-state
+               :session sess
+               :compact-token-threshold 10
+               :keep-recent-tokens 40
+               :on-event (fn [e] (swap! events conj e)))]
+    (try
+      (seed-context! sess 6)
+      (with-redefs [session/get-branch (fn [_] (throw (ex-info "session read failed" {})))
+                    debug/log-error (fn [& parts] (reset! err-logged (apply str parts)))]
+        (t/is (= :failed
+                 (binding [*err* (java.io.StringWriter.)]
+                   (loop/compact-context! agent nil :manual))))
+        (t/is (= "Compaction failed: session read failed"
+                 (:error-message (event-of events :compaction-end)))
+              "the unexpected cause rides the reason-prefixed failure report")
+        (t/is (some #(= :session-compact-failed (:type %)) @events)
+              "the failure event still fires")
+        (t/is (true? @(:compaction-blocked agent))
+              "the prompt's automatic checks stand down")
+        (t/is (and @err-logged
+                   (str/includes? @err-logged "compaction failed unexpectedly"))
+              "the unexpected error is logged"))
+      (finally (fs/delete-tree dir)))))
 
 (t/deftest test-loop-summarization-retry
   (t/testing "a transient summarization failure is retried with the

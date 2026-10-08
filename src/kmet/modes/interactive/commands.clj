@@ -705,18 +705,24 @@
                    ;; is async). The :compaction-end event reports an
                    ;; aborted compaction; only the result replies go here.
                    (future
-                     (let [result (agent/compact-context! agent-state instructions :manual)]
-                       (when-not (or (= :aborted result) (= :failed result))
-                         ;; pi: handleCompactCommand ignores the thrown
-                         ;; compaction error — compaction_end surfaces it
-                         ;; (showError for manual); the future only replies
-                         ;; for success and nothing-to-compact.
-                         (chat-history/chat-history-add-message!
-                          chat-history
-                          {:role :info :label "Compact"
-                           :content (if result
-                                      "Session compacted."
-                                      "Nothing to compact (session too small).")})))))))})
+                     (try
+                       (let [result (agent/compact-context! agent-state instructions :manual)]
+                         (when-not (or (= :aborted result) (= :failed result))
+                           ;; pi: handleCompactCommand ignores the thrown
+                           ;; compaction error — compaction_end surfaces it
+                           ;; (showError for manual); the future only replies
+                           ;; for success and nothing-to-compact.
+                           (chat-history/chat-history-add-message!
+                            chat-history
+                            {:role :info :label "Compact"
+                             :content (if result
+                                        "Session compacted."
+                                        "Nothing to compact (session too small).")})))
+                       (catch Exception e
+                         ;; pi: handleCompactCommand catches and ignores (the
+                         ;; events carry the failure) — but a future that
+                         ;; swallows the exception hides real bugs, so log it.
+                         (debug/log-error "manual compaction failed: " e)))))))})
   (register-builtin-command!
    {:name "theme"
     :description "Switch theme"

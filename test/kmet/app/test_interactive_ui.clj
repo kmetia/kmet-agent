@@ -2422,6 +2422,46 @@
                @errors)
             "the caller is refused with an error, not compacted"))))
 
+(deftest test-ui-compact-reports-the-failure-message
+  (testing "a failed compaction reaches the extension caller with pi's
+            `Compaction failed: …` message exactly once — :compaction-error
+            already carries the reason prefix"
+    (let [ag (agent/make-agent-state)
+          cs {:agent-state (atom ag)
+              :config cfg/default-config
+              :session-atom (atom nil)
+              :running-turn? (atom false)}
+          registry ((var ui-registry/build-extension-ui-registry)
+                    {:tui nil :cs cs}
+                    {:fdp (fdp/make-footer-data-provider)}
+                    nil)
+          ctx ((:build-context registry))
+          errors (atom [])]
+      (with-redefs [agent/compact-context!
+                    (fn [ag & _]
+                      (reset! (:compaction-error ag)
+                              "Compaction failed: Summarization failed: provider exploded")
+                      :failed)]
+        @((:compact ctx)
+          {:on-error (fn [e] (swap! errors conj (ex-message e)))}))
+      (t/is (= ["Compaction failed: Summarization failed: provider exploded"]
+               @errors)
+            "the message is reported verbatim, once"))))
+
+(deftest test-compact-command-logs-an-escaping-error
+  (testing "the /compact future logs an exception escaping compact-context!
+            (pi: handleCompactCommand catches and ignores — the events carry
+            the failure; kmet logs it so a future never swallows a bug)"
+    (commands/clear-commands!)
+    (let [cs (compaction-cs)
+          logged (promise)]
+      ((var builtins/register-builtin-commands!) cfg/default-config)
+      (with-redefs [agent/compact-context! (fn [& _] (throw (ex-info "boom" {})))
+                    debug/log-error (fn [& parts] (deliver logged (apply str parts)))]
+        @((:handler (commands/find-command "compact")) cs ""))
+      (t/is (str/includes? (deref logged 2000 "") "boom")
+            "the escaping error is logged"))))
+
 (deftest test-cancel-during-compaction-keeps-turn
   (testing "escape during compaction aborts ONLY the compaction — a running
             turn is not cancelled (pi: compaction_start swaps the escape

@@ -402,8 +402,11 @@ Full pi parity in `loop/summarize!` and `loop/generate-branch-summary` (pi
 | an empty response is appended (compaction) / yields the preamble alone (branch) | ✅ same, with a debug log |
 | a manual compaction of an already-compacted session fails with `Already compacted`; the automatic paths stay silent | ✅ same |
 | a `length` stop reason means the summary is incomplete → failure | ✅ |
+| `compact()` / `_runAutoCompaction` catch any error and still emit `compaction_end` + `session_compact_failed` (no error message when the abort signal fired), rethrowing only to the caller | ✅ an escaping exception is caught the same way (`:failed`, or `:aborted` when a cancel signal had fired), logged via `debug/log-error`, and reported through the same events |
+| a summarization call that *throws* (auth resolution, the context hook, request setup) propagates out of `retryAssistantCall` unretried into that catch | deviation: `summarization-call` normalizes the throw to an `:error` result, so the retry classifier applies — the call re-resolves auth per attempt, so a transient throw (a token refresh over a dead proxy) is worth retrying |
 
-No deviations kept in this area. The summarization auth decision is delegated
+One deviation is kept in this area (the synchronous-throw normalization
+above); otherwise the summarization auth decision is delegated
 to the LLM layer (`No API key for …` surfaces as the cause) rather than a
 pre-call guard, matching pi's thrown auth error while also covering an
 oauth-bearer credential.

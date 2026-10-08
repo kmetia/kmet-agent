@@ -680,11 +680,12 @@
                                                 (if (and (= :failed r) on-error)
                                                   ;; pi: compact() throws on
                                                   ;; summarization failure →
-                                                  ;; onError fires with
+                                                  ;; onError fires with the
                                                   ;; `Compaction failed: <cause>`
-                                                  (on-error (ex-info (str "Compaction failed: "
-                                                                          (or @(:compaction-error @ag-atom)
-                                                                              "Unknown error"))
+                                                  ;; message (:compaction-error
+                                                  ;; already carries the prefix)
+                                                  (on-error (ex-info (or @(:compaction-error @ag-atom)
+                                                                         "Compaction failed: Unknown error")
                                                                      {:type :compaction-failed}))
                                                   (when on-complete (on-complete {:result r})))))
                                             (catch Exception e
