@@ -8,7 +8,7 @@ plan; nothing in it is implemented yet.
   (three from the audit, one from the review, one from the design review of
   Part 2).
 - Part 2: principles, the `kmet.libs.weak` helper, the `track!` and `reakt`
-  integrations, the deterministic leftovers, mode exit, guards, tests,
+  integrations, the deterministic fixes, mode exit, guards, tests,
   rollout stages, risks.
 
 ## Status & implementation checklist
@@ -20,6 +20,9 @@ plan; nothing in it is implemented yet.
 - **Gates:** iterate with `bb changed`, `bb test-changed`, `bb lint-changed`,
   `bb format-check-changed`; full gates only on request. New test namespaces
   register in `kmet.tasks.runner/all-namespaces`.
+- **Order:** A closes the identified leaks deterministically (findings 1, 3,
+  4 and the dispose gaps); B adds `kmet.libs.weak` + weak `track!` as the
+  systemic backstop; C is conditional on B's gate test; D is hardening/docs.
 - **Stage C is conditional:** run the Stage-B gate test first (drop a
   `ComponentFn` tree, GC + sweep, check a `WeakReference` to its reaction —
   `live-reaction-count` does not exist yet, see 2.8). Record the result here
@@ -31,7 +34,42 @@ plan; nothing in it is implemented yet.
 - [x] Review pass + corrections (Part 1, "Review corrections")
 - [x] Detailed design (Part 2)
 
-### Stage A — `kmet.libs.weak`
+### Stage A — close the identified leaks (deterministic)
+
+No new infrastructure: each item is a local fix with a regression test.
+This closes findings 1, 3 and 4 outright and clears the mode's global roots
+(finding 2); the component tree itself stays rooted until Stage C (2.5).
+
+- [ ] unique `tracker-key` in the cache atom's metadata (collision-free; the
+      re-read is not a strict CAS — see 2.2; fixes finding 4)
+- [ ] `remove-track-watches!` meta-only lookup, nil-safe for cache-less
+      components (I4)
+- [ ] test accessors over the current registry: `macros/tracked?`,
+      `component-watch-key`, kind-filtered `macros/live-watch-count`
+- [ ] migrate the 15 test namespaces off `#'macros/watch-registry` (4 also
+      build the identity-hash key: `test_tool_execution.clj:771,790`,
+      `test_container.clj:46`, `test_track.clj:95`)
+- [ ] tolerant `protocols/dispose-component!` + `cda` delegate +
+      `tui-remove-child`/`tui-clear`; reconcile/containers stay strict (I8)
+- [ ] five `ui_registry` sites with identity guards (`hdr`, default `ed`)
+- [ ] status indicator disposal in all three swap sites (show / clear /
+      activate-working; transient only — never the working one)
+- [ ] `ChatHistoryComponent.dispose` + `declare`
+- [ ] `run-config` try/finally + screen dispose
+- [ ] hoist `cs-ref` so `run`'s `finally` can reach the state (B5)
+- [ ] `teardown-mode!` (isolated steps, best-effort abort signals)
+- [ ] `extensions/clear-runtime!` (session/context/entry sinks)
+- [ ] `theme-ctrl/shutdown!` (`on-theme-change nil` + watcher stop)
+- [ ] `reakt/discard-queued!`
+- [ ] per-site leak tests (widget reset, header/editor swap, status swap —
+      show, clear AND activate-working; chat clear, duck-map `tui-clear`)
+- [ ] mid-session `/reload` cycle: explicit-dispose counts flat (fast)
+- [ ] mode-exit test: `teardown-mode!` clears all roots, idempotent
+- [ ] changed-file gates green
+
+### Stage B — `kmet.libs.weak` + weak `track!`
+
+The systemic backstop, on top of the Stage-A key scheme and accessors:
 
 - [ ] `src/kmet/libs/weak.clj`: registry + queue, `register!` (with a
       `:kind`), `subject`, `payload`, `unregister!`, `sweep!`, `live-count`,
@@ -40,54 +78,15 @@ plan; nothing in it is implemented yet.
       reuse, throw on a different live subject, `unregister!` payload,
       `sweep!` (concurrent + queue drain), `on-dead` isolation
 - [ ] register the test ns in `kmet.tasks.runner/all-namespaces`
-- [ ] changed-file gates green
-
-### Stage B — `track!` + deterministic leftovers + mode exit
-
-Weak `track!`:
-
-- [ ] unique `tracker-key` via cache-atom metadata (collision-free; the
-      re-read is not a strict CAS — see 2.2; fixes finding 4)
-- [ ] key-only handler + weak registry entry + `on-dead` unwatch (2.2)
-- [ ] `remove-track-watches!` meta-only lookup, nil-safe for cache-less
-      components (I4)
+- [ ] key-only handler + weak registry entry + `on-dead` unwatch (2.2),
+      registering before installing watches
 - [ ] `(weak/sweep!)` in `run-render-loop!` and after a non-empty
-      `reakt/flush!`; `macros/sweep-dead-watches!`, `macros/live-watch-count`
-      (kind-filtered on `:track!`)
-
-Deterministic leftovers (2.4):
-
-- [ ] tolerant `protocols/dispose-component!` + `cda` delegate +
-      `tui-remove-child`/`tui-clear`; reconcile/containers stay strict (I8)
-- [ ] five `ui_registry` sites with identity guards (`hdr`, default `ed`)
-- [ ] status indicator disposal in all three swap sites (show / clear /
-      activate-working; transient only — never the working one)
-- [ ] `ChatHistoryComponent.dispose` + `declare`
-- [ ] `run-config` try/finally + screen dispose
-
-Mode exit (2.5):
-
-- [ ] hoist `cs-ref` so `run`'s `finally` can reach the state (B5)
-- [ ] `teardown-mode!` (isolated steps, best-effort abort signals)
-- [ ] `extensions/clear-runtime!` (session/context/entry sinks)
-- [ ] `theme-ctrl/shutdown!` (`on-theme-change nil` + watcher stop)
-- [ ] `reakt/discard-queued!`
+      `reakt/flush!`; `macros/sweep-dead-watches!`
 - [ ] guard counters + `--debug` survivor helpers (2.7)
-
-Tests:
-
-- [ ] migrate the 15 test namespaces off `#'macros/watch-registry` (4 also
-      build the identity-hash key: `test_tool_execution.clj:771,790`,
-      `test_container.clj:46`, `test_track.clj:95`); add a
-      `macros/tracked?`/`component-watch-key` accessor for them
-- [ ] per-site leak tests (widget reset, header/editor swap, status swap —
-      show, clear AND activate-working; chat clear, duck-map `tui-clear`)
-- [ ] mid-session `/reload` cycle: explicit-dispose counts flat (fast)
 - [ ] dropped-anyway counts flat after GC + sweep (`^:slow`; track! entries
       only — reactions are the Stage-C gate)
-- [ ] mode-exit test: `teardown-mode!` clears all roots, idempotent
-- [ ] existing count assertions stay exact on dispose paths (via the new
-      accessors or a kind-filtered `live-watch-count`)
+- [ ] existing count assertions stay exact on dispose paths (via the Stage-A
+      accessors)
 - [ ] changed-file gates green
 
 ### Stage C — weak `reakt` (conditional)
@@ -116,7 +115,8 @@ Tests:
       check, optional submenu replace, optional stale-theme prune
 - [ ] `--debug` exit report including `timers/scheduled` (I7)
 - [ ] `src/kmet/tui/tui.md` §5.1 + §3.1/§12; `src/kmet/extension.md`;
-      `src/kmet/README.md` (`kmet.libs.weak` in the libs layer)
+      `src/kmet/README.md` (`kmet.libs.weak` in the libs layer + the
+      layer-rule sentence; 2.11)
 - [ ] check off Stages A-C here and record the Stage C decision
 
 ---
@@ -773,7 +773,7 @@ dirtied at stop are not retained by it. It must never run bodies.
   is correct (nothing could deref it), but it is a behavior change for any
   caller relying on that — there are none in-tree (audited).
 
-## 2.4 Deterministic leftovers (exact edits)
+## 2.4 Deterministic fixes (exact edits)
 
 Resources need these; the weak layer is not a substitute.
 
@@ -904,7 +904,8 @@ New pieces:
 Deliberately **not** in this pass: tree disposal (no `dock/clear!`,
 `chat-history-clear!`, `tui-clear`), quiescing the agent turn, taint for late
 appends. Rationale: with the roots cleared, everything only the mode reaches
-becomes collectable — but **Stage B alone does not free the component tree**:
+becomes collectable — but **root clearing alone (Stage A) does not free the
+component tree**:
 a `ComponentFn`'s reaction is still rooted by process-global deps (theme
 atoms, shared computes) through the strong `dep-handler → self` chain, so the
 tree stays reachable until weak `reakt` (Stage C) lands. A late agent append
@@ -925,7 +926,7 @@ surfaces are disposed by `ui-reset!`, which is also what resolves open
 | dropped lead record with `track!` (future drop sites) | weak `track!` + sweep |
 | dropped `ComponentFn`/panel/compute (third-party, future) | weak `reakt` + sweep (Stage C) |
 | transient status indicator (finding 3) | 2.4.3, falls back to weak |
-| mode exit (finding 2) | 2.5 root clearing (Stage B) + weak `reakt` (Stage C) + GC — Stage B alone leaves the tree rooted by global dep atoms |
+| mode exit (finding 2) | 2.5 root clearing (Stage A) + weak `reakt` (Stage C) + GC — root clearing alone leaves the tree rooted by global dep atoms |
 | global roots (finding 10) | 2.5 explicitly; weakness cannot help while they root |
 | dropped component with an armed timer | **not reclaimed** until its `dispose` cancels the timer — deliberate; surfaced by the guard |
 | transcript / session growth (finding 9) | by design; `/new` or compaction policy |
@@ -979,7 +980,7 @@ GC-based (`^:slow`, both hosts):
   reference clears, Stage C is purely defensive; if not (expected), it is
   required. Record the result here.
 - Mid-session regression: 50 `/reload` cycles with a widget tree → counts
-  flat (Stage B).
+  flat (Stage A).
 
 Performance (Stage C): dep-change overhead and frame time with an 8–10k-line
 transcript, before/after; budget agreed before merging.
@@ -991,8 +992,8 @@ scope summary.
 
 | stage | contents | acceptance |
 |---|---|---|
-| **A** | `kmet.libs.weak` + unit tests; no behavior change | probes pass on bb and Jolt; helper tests green |
-| **B** | unique `track!` keys + weak `track!` registry; loop/flush sweep; 2.4.1-2.4.5; 2.5 root clearing; guard counters; test migration | audited track!/deterministic leaks have regression tests; 50-reload mid-session test flat; full suite green |
+| **A** | unique `track!` keys + accessors; test migration; 2.4.1-2.4.5; 2.5 root clearing | findings 1/3/4 have regression tests; 50-reload counts flat; teardown idempotent; full suite green |
+| **B** | `kmet.libs.weak` + unit tests; weak `track!` registry; loop/flush sweep; guard counters | helper tests green on bb and Jolt; dropped-anyway counts flat after GC + sweep; full suite green |
 | **C** | weak `reakt` dep watches + `track-render` cache holds reactions + `discard-queued!` | Stage-C gate test result recorded; liveness tests; GC tests on both hosts; perf within budget |
 | **D** | 2.4.6 minors; `--debug` exit report; docs | zero-finding lint/format; docs updated |
 
@@ -1041,7 +1042,7 @@ Dropped from the design (precedents in Part 1): owning-atom framework,
   "namespaces and jars become unreachable" is not read as "immediately".
 - Should the timer registry grow an ownership hint for the exit report?
   Minimum is the count.
-- Naming: `kmet.libs.weak` vs `kmet.libs.subscriptions` — pick at Stage A.
+- Naming: `kmet.libs.weak` vs `kmet.libs.subscriptions` — pick at Stage B.
 
 ---
 
