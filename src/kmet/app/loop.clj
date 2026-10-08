@@ -8,9 +8,9 @@
      :follow-up — user messages processed after the current run settles.
                    Polled when the inner loop drains; the run continues with
                    them. Use follow-up!.
-   :steering-mode / :follow-up-mode (:all default) control how many queued
-   messages are drained per poll cycle: :all takes everything,
-   :one-at-a-time takes one. Applied per queue.
+   :steering-mode / :follow-up-mode control how many queued messages are
+   drained per poll cycle: :all takes everything, :one-at-a-time takes one.
+   Defaults are :all for steering and :one-at-a-time for follow-up.
    Both queues are also drained at the prompt's attempt boundary when an
    :agent-end handler queued a message: the next attempt starts from it (pi:
    agent.continue's continue() — steering first, then follow-up).
@@ -133,7 +133,8 @@
                        cfg              ;; atom of a config MAP — runtime-tunable knobs, replaced wholesale:
                                         ;;   {:max-retries int :base-delay-ms int :max-agent-delay-ms int
                                         ;;    :http-idle-timeout-ms int
-                                        ;;    :steering-mode :all|:one-at-a-time :follow-up-mode :all|:one-at-a-time
+                                        ;;    :steering-mode :all|:one-at-a-time
+                                        ;;    :follow-up-mode :all|:one-at-a-time
                                         ;;    :auto-compact bool :context-window int-or-nil}
                        retry-count      ;; atom of int: retries performed for the in-flight LLM call
                        before-tool-call ;; atom of (fn [ctx]) → {:block true :reason} | nil
@@ -188,6 +189,8 @@
          :before-tool-call, :after-tool-call, :system-prompt-override,
          :transform-context, :prepare-next-turn, :prepare-request, :finish-turn,
          :get-api-key, :scoped-models (default []),
+         :steering-mode (default :all), :follow-up-mode (default
+         :one-at-a-time),
          :system-prompt-opts (build-system-prompt options map, pi:
          _baseSystemPromptOptions),
          :compact-token-threshold, :auto-compact (default true, pi:
@@ -205,7 +208,7 @@
       :or {provider :opencode-go
            thinking :off
            steering-mode :all
-           follow-up-mode :all
+           follow-up-mode :one-at-a-time
            auto-compact true
            max-retries 3
            base-delay-ms 2000

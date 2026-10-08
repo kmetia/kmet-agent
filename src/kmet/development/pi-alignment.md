@@ -228,7 +228,7 @@ compaction, which makes abort-then-compact unsafe without an idle wait.
 kmet (`config.clj`) covers: provider/model/thinking/theme/session-dir/
 http-idle-timeout-ms/system-prompt/append-system-prompt/retry
 (enabled/max-retries/base-delay-ms/max-agent-delay-ms)/enabled-models/hide-thinking-block/
-auto-compact/show-cache-miss-notices/steering-mode/follow-up-mode/
+auto-compact/show-cache-miss-notices/
 tree-filter-mode/output-pad/editor-padding-x/autocomplete-max-visible/
 show-hardware-cursor/enable-skill-commands/extensions/skills/prompts/themes dirs,
 compaction thresholds, branch summarization (`:branch-summary` —

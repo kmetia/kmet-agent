@@ -48,9 +48,10 @@
    :shell-path nil
    :shell-command-prefix nil
    :show-cache-miss-notices false
-   ;; pi: queue drain modes (:all | :one-at-a-time)
+   ;; Queue drain modes: steering takes all queued messages; follow-up takes
+   ;; one at a time by default.
    :steering-mode :all
-   :follow-up-mode :all
+   :follow-up-mode :one-at-a-time
    ;; pi: outputPad | editorPaddingX | autocompleteMaxVisible
    :output-pad 1
    :editor-padding-x 0

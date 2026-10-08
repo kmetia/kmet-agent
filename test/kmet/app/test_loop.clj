@@ -1123,8 +1123,9 @@
     (loop/clear-queues! agent)
     (loop/follow-up! agent "f1")
     (loop/follow-up! agent "f2")
+    (swap! (:cfg agent) assoc :follow-up-mode :all)
     (t/is (= ["f1" "f2"] (loop/peek-queued-messages agent))
-          "follow-up previews once steering is empty")
+          "follow-up previews all queued messages when set to :all")
     (swap! (:cfg agent) assoc :follow-up-mode :one-at-a-time)
     (t/is (= ["f1"] (loop/peek-queued-messages agent)))
     (t/is (= ["f1"] (vec (next-drain)))
@@ -1396,7 +1397,7 @@
 (t/deftest test-loop-queue-modes-default
   (let [agent (loop/make-agent-state)]
     (t/is (= :all (:steering-mode @(:cfg agent))))
-    (t/is (= :all (:follow-up-mode @(:cfg agent))))))
+    (t/is (= :one-at-a-time (:follow-up-mode @(:cfg agent))))))
 
 (t/deftest test-loop-queue-mode-setters
   ;; /settings applies queue modes + idle timeout live (pi: setSteeringMode /

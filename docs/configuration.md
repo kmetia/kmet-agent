@@ -30,6 +30,8 @@ Example `~/.kmet/agent/settings.edn`:
  :http-transport :platform      ; :platform (default) = babashka.http-client on both hosts,
                                 ; curl for SOCKS/https-scheme proxies; :curl = everything through curl
  :http-total-timeout-ms 0       ; whole-request deadline in ms; 0 disables, nil follows idle
+ :steering-mode :all
+ :follow-up-mode :one-at-a-time
  :shell-command-prefix nil      ; line prepended to every bash command, e.g. "shopt -s expand_aliases"; nil = none
  :shell-path nil                ; custom shell binary for bash execution (e.g. Cygwin/Git Bash on Windows); a leading ~ expands
  :system-prompt "You are a helpful assistant."   ; replaces the default system prompt

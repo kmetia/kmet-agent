@@ -521,7 +521,7 @@
             ;; :or default, not be overridden with nil
             :auto-compact (get config :auto-compact true)
             :steering-mode (or (:steering-mode config) :all)
-            :follow-up-mode (or (:follow-up-mode config) :all)
+            :follow-up-mode (or (:follow-up-mode config) :one-at-a-time)
             :keep-recent-tokens (or (:keep-recent-tokens config) 20000)
             :http-idle-timeout-ms (:http-idle-timeout-ms config)
             :http-total-timeout-ms (get config :http-total-timeout-ms)
