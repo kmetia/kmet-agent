@@ -110,6 +110,10 @@
 
 ;; ─── ChatHistoryComponent record ───────────────────────────────────────────
 
+;; chat-history-clear! is defined below the record; the dispose method
+;; delegates to it.
+(declare chat-history-clear!)
+
 (defcomponent ChatHistoryComponent nil
               [messages-atom  ;; atom of vec of message maps, each with :component
                info-comp-atom  ;; atom of CustomMessageComponent or nil
@@ -132,6 +136,11 @@
       (if (seq info-lines)
         (into (vec info-lines) msg-lines)
         msg-lines)))
+
+  (dispose [_this]
+    ;; tui-clear/container disposal must cascade into the messages, or a
+    ;; dropped chat history leaves every message component rooted
+    (chat-history-clear! _this))
 
   (invalidate [_this]
     (when-let [i @info-comp-atom] (protocols/invalidate i))

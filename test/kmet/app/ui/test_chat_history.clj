@@ -926,6 +926,26 @@
         (is (= baseline (watchers))
             "the replaced banner's watches were torn down")))))
 
+(deftest test-dispose-cascades-into-messages-and-banner
+  (testing "finding 2: ChatHistoryComponent disposal clears and disposes the
+            transcript and the banner, so a tui-clear/container cascade
+            cannot leave message components (and their track! watches)
+            rooted"
+    (let [watchers #(count @(deref #'macros/watch-registry))
+          before (watchers)
+          ch (ch/make-chat-history)]
+      (ch/chat-history-add-message! ch {:role :user :content "hello"})
+      (ch/chat-history-add-message! ch {:role :assistant :content "hi there"})
+      (ch/chat-history-set-info-msg! ch {:label "banner" :content "info"})
+      (core/render ch 60)
+      (is (> (watchers) before) "messages and banner are tracked")
+      (protocols/dispose ch)
+      (is (empty? (ch/chat-history-get-messages ch)) "messages cleared")
+      (is (nil? @(:info-comp-atom ch)) "banner cleared")
+      (is (= before (watchers)) "message/banner watches torn down")
+      (protocols/dispose ch)
+      (is (= before (watchers)) "dispose stays idempotent"))))
+
 (deftest test-info-banner-survives-rebuild-with-images
   (testing "chat-history-rebuild! preserves the banner's content images"
     (let [prev-caps (timg/get-capabilities)]

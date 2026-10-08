@@ -10,6 +10,19 @@
   (:import (org.jline.terminal TerminalBuilder Terminal)
            (org.jline.utils NonBlockingReader)))
 
+(defn- read-bounded
+  "Read P's (a raw java.lang.Process) stdout with a 2000ms deadline. On
+   timeout the child is destroyed (which unblocks the reader) and nil is
+   returned — a bounded read must not leave the child or its reader thread
+   behind. Returns the string otherwise."
+  [p]
+  (let [out (deref (future (slurp (.getInputStream p))) 2000 nil)]
+    (if (nil? out)
+      (do (try (.destroy p) (catch Exception _))
+          (try (.destroyForcibly p) (catch Exception _))
+          nil)
+      out)))
+
 (defn- run-stty
   "Run `stty` with inherited stdin so it sees the controlling terminal
    (Java's default pipe-redirect hides it). Returns trimmed stdout, or nil
@@ -21,7 +34,7 @@
           _ (.redirectInput pb java.lang.ProcessBuilder$Redirect/INHERIT)
           _ (.redirectErrorStream pb true)
           p (.start pb)
-          out (deref (future (slurp (.getInputStream p))) 2000 nil)]
+          out (read-bounded p)]
       (when out
         (.waitFor p)
         (let [out (str/trim out)]
@@ -55,7 +68,7 @@
       (let [pb (ProcessBuilder. (into-array String (cons exe args)))
             _ (.redirectErrorStream pb true)
             p (.start pb)
-            out (deref (future (slurp (.getInputStream p))) 2000 nil)]
+            out (read-bounded p)]
         (when out
           (.waitFor p)
           (chcp-output->codepage out)))

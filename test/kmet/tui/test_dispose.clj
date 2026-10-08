@@ -81,6 +81,34 @@
     (t/is (= [:probe :probe] @flag))
     (t/is (empty? @(:components tui)))))
 
+(t/deftest tolerant-disposal-handles-foreign-shapes
+  ;; finding 1: extension widget/footer paths hand the TUI raw maps and
+  ;; multi-root compiled trees; strict protocol dispatch used to throw on
+  ;; them, so the removal paths silently skipped disposal
+  (let [called (atom [])]
+    (protocols/dispose-component! nil)
+    (t/is true "nil is a no-op")
+    (protocols/dispose-component!
+     {:render (fn [_] []) :dispose (fn [] (swap! called conj :duck))})
+    (t/is (= [:duck] @called) "a duck-typed map disposes through :dispose")
+    (protocols/dispose-component! {:render (fn [_] ["no dispose key"])})
+    (t/is (= [:duck] @called) "a map without :dispose does not propagate")
+    (protocols/dispose-component!
+     [{:dispose (fn [] (swap! called conj :a))}
+      {:dispose (fn [] (swap! called conj :b))}])
+    (t/is (= [:duck :a :b] @called) "a sequence disposes every element")))
+
+(t/deftest tui-clear-disposes-duck-typed-children
+  ;; finding 1: a duck-typed child (extension footer/widget) reaches
+  ;; tui-remove-child / tui-clear — both must dispose it, not throw
+  (let [tui (core/create-tui nil)
+        called (atom [])
+        duck {:render (fn [_] []) :dispose (fn [] (swap! called conj :duck))}]
+    (core/tui-add-child tui duck)
+    (core/tui-clear tui)
+    (t/is (= [:duck] @called) "the duck-typed child was disposed")
+    (t/is (empty? @(:components tui)))))
+
 (t/deftest track-watches-are-removed-on-dispose
   (let [c (text/make-text "hello" 0 0)
         ta (:text-atom c)

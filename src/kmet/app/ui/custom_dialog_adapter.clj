@@ -17,25 +17,21 @@
    its lifetime stays with ui-custom's dialog bookkeeping — trees never
    dispose it (foreign splice contract).
 
-   dispose-component! here is THE disposal entry point for values of any
-   shape (records, reifies, duck-typed maps) — shared by the dialog
-   bookkeeping and the tool-execution renderer children."
+   dispose-component! delegates to kmet.tui.protocols/dispose-component!,
+   THE disposal entry point for values of any shape (records, reifies,
+   duck-typed maps, sequences) — shared by the dialog bookkeeping and the
+   tool-execution renderer children."
   (:require [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]))
 
 (defn dispose-component!
-  "Dispose a component of ANY shape — a defcomponent record, a reify, or a
-   duck-typed {:render … :dispose …} map. A :dispose key wins (duck-typed
-   maps and records carrying one); otherwise the protocol's multimethod,
-   which dispatches correctly under SCI even where satisfies? lies (bb reify
-   limitation). Exceptions are swallowed — disposal is cleanup, and a broken
-   foreign component must not take the frame down. Idempotent by convention;
-   nil is a no-op."
+  "Dispose a component of ANY shape — a defcomponent record, a reify,
+   a duck-typed {:render … :dispose …} map, or a sequence of these.
+   Delegates to kmet.tui.protocols/dispose-component!, THE disposal entry
+   point for foreign values (shared by the dialog bookkeeping and the
+   tool-execution renderer children); kept here for the existing callers."
   [component]
-  (when (some? component)
-    (if-let [dispose (:dispose component)]
-      (try (dispose) (catch Exception _))
-      (try (protocols/dispose component) (catch Exception _)))))
+  (protocols/dispose-component! component))
 
 (defcomponent CustomDialogAdapter nil [render-fn handle-input-fn
                                        invalidate-fn dispose-fn]

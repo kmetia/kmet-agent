@@ -35,11 +35,38 @@
     (set? form) (into (empty form) (map rewrite-derefs form))
     :else form))
 
-(defn- tracker-key
-  "Stable per-component watch key. add-watch replaces an existing watch with
-   the same key, so re-registration after re-renders is idempotent."
+(defn- component-cache-atom
+  "The render cache field: :cache-atom (current) or legacy :cache (Text/Box)."
   [component]
-  (keyword (str "track!" (System/identityHashCode component))))
+  (or (:cache-atom component) (:cache component)))
+
+(defn- tracker-key
+  "The component's stable watch key, allocated once in its cache atom's
+   metadata. The cache atom is the component's one per-instance cell, so the
+   key dies with the component and can never collide with another live
+   component's key (System/identityHashCode could: a 32-bit hash over
+   thousands of live components). add-watch replaces an existing watch with
+   the same key, so re-registration after re-renders is idempotent. Returns
+   nil for a component with no cache atom (Container, Spacer, …) — track!
+   itself requires one."
+  [component]
+  (when-let [a (component-cache-atom component)]
+    (or (::watch-key (meta a))
+        (let [k (keyword (str (gensym "track!")))]
+          ;; alter-meta! is atomic, and the fn preserves a key another thread
+          ;; already installed — both allocators converge on the first key
+          ;; (an unconditional assoc would let a later writer overwrite it
+          ;; after an earlier reader had already returned it)
+          (alter-meta! a (fn [m] (if (::watch-key m) m (assoc m ::watch-key k))))
+          (::watch-key (meta a))))))
+
+(defn- existing-tracker-key
+  "The key already allocated for COMPONENT's cache atom, or nil. Never
+   allocates: teardown must not mint a key for a component that never ran
+   track! or for a cache-less record."
+  [component]
+  (when-let [a (component-cache-atom component)]
+    (::watch-key (meta a))))
 
 ;; Watch key → {:component c :atoms #{...}} for every live track! scope
 ;; (the set mixes plain atoms and reactive refs — both watched per pass).
@@ -51,11 +78,6 @@
 (defonce ^:private watch-registry (atom {}))
 
 (declare invalidate-cache schedule-frame!)
-
-(defn- component-cache-atom
-  "The render cache field: :cache-atom (current) or legacy :cache (Text/Box)."
-  [component]
-  (or (:cache-atom component) (:cache component)))
 
 (defn- atoms-unchanged?
   "reduce-kv hit check over a cache's plain refs: true while ATOM still
@@ -216,7 +238,7 @@
    the component and keep firing invalidate-cache on each source write.
    Idempotent; a no-op for components that never ran a track! body."
   [component]
-  (let [k (tracker-key component)]
+  (when-some [k (existing-tracker-key component)]
     (when-some [{:keys [atoms]} (get @watch-registry k)]
       (doseq [a atoms]
         (reakt/unwatch-ref a k))

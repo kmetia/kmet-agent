@@ -562,6 +562,16 @@
 (defn set-context-sink! [f] (reset! context-sink-atom f) nil)
 (defn set-entry-sink! [f] (reset! entry-sink-atom f) nil)
 
+(defn clear-runtime!
+  "Teardown-only: drop the mode-bound runtime sinks (live session and the
+   extension append sinks) so a stopped mode is no longer reachable through
+   this namespace. Idempotent."
+  []
+  (reset! session-atom nil)
+  (reset! context-sink-atom nil)
+  (reset! entry-sink-atom nil)
+  nil)
+
 (defn append-custom-entry!
   "Append a custom entry (extension state, never in LLM context) to the live
    session (extension api: session :append-entry!). Returns the entry id."

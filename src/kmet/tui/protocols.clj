@@ -18,6 +18,21 @@
                    defcomponent) MUST include this method — there is no
                    universal default under SCI."))
 
+(defn dispose-component!
+  "Dispose a value of any shape: a defcomponent record, a reify, a
+   duck-typed {:render … :dispose …} map, or a sequence of any of these
+   (widget strips can hold multi-root compiled trees). A :dispose key wins;
+   otherwise the protocol's dispose. Exceptions are swallowed — disposal is
+   cleanup, and a broken foreign component must not take the frame down.
+   Idempotent by convention; nil is a no-op."
+  [component]
+  (when (some? component)
+    (if (sequential? component)
+      (doseq [c component] (dispose-component! c))
+      (if-let [f (:dispose component)]
+        (try (f) (catch Exception _))
+        (try (dispose component) (catch Exception _))))))
+
 (defprotocol IFocusable
   (focused [this])
   (set-focused! [this val]))

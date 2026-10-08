@@ -13,6 +13,7 @@
             [kmet.app.ui.resource-config :as resource-config]
             [kmet.config :as cfg]
             [kmet.tui.core :as tui]
+            [kmet.tui.protocols :as protocols]
             [kmet.tui.terminal :as term]
             [kmet.tui.theme :as theme]))
 
@@ -251,8 +252,13 @@
                 :on-close (fn [] (tui/tui-stop tui)))]
     (tui/tui-add-child tui screen)
     (tui/tui-set-focus tui screen)
-    (tui/tui-start tui)
-    (tui/tui-stop tui)
+    ;; the screen owns the terminal-size watch cancel; its dispose must run
+    ;; even when tui-start throws, or the cancel is lost with the screen
+    (try
+      (tui/tui-start tui)
+      (finally
+        (tui/tui-stop tui)
+        (protocols/dispose screen)))
     0))
 
 (defn run-package-command

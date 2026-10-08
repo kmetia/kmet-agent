@@ -4,6 +4,9 @@
   (:require [clojure.string :as str]
             [clojure.test :as t]
             [kmet.tui.core :as core]
+            [kmet.tui.macros :as macros]
+            [kmet.tui.protocols :as protocols]
+            [kmet.tui.components.container :as container]
             [kmet.tui.components.text :as text]
             [kmet.tui.components.markdown :as md]
             [kmet.tui.components.select-list :as sl]
@@ -91,13 +94,40 @@
   ;; Simulates the watch-registration race: a value changed after the watch
   ;; was removed never fires a notification — the value re-verification on
   ;; cache hit must catch it anyway.
-  (let [c (text/make-text "a" 0 0)
-        tracker-key (keyword (str "track!" (System/identityHashCode c)))]
+  (let [c (text/make-text "a" 0 0)]
     (core/render c 5)
-    (remove-watch (:text-atom c) tracker-key)
+    (remove-watch (:text-atom c)
+                  (:kmet.tui.macros/watch-key (meta (:cache c))))
     (text/text-set! c "b") ;; no watch → no invalidation
     (let [lines (core/render c 5)]
       (t/is (.contains (first lines) "b")))))
+
+(t/deftest test-tracker-keys-are-unique-and-meta-owned
+  (t/testing "finding 4: the watch key lives in the component's cache atom
+            metadata — unique per component, never allocated for a
+            cache-less record"
+    (let [a (text/make-text "a" 0 0)
+          b (text/make-text "b" 0 0)]
+      (core/render a 5)
+      (core/render b 5)
+      (let [ka (:kmet.tui.macros/watch-key (meta (:cache a)))
+            kb (:kmet.tui.macros/watch-key (meta (:cache b)))]
+        (t/is (keyword? ka) "a render allocates the key once")
+        (t/is (not= ka kb) "two live components never share a key"))))
+  (t/testing "a cache-less component disposes without minting a key"
+    (t/is (nil? (protocols/dispose (container/make-container []))))))
+
+(t/deftest test-tracker-key-concurrent-allocation-converges
+  (t/testing "finding 4: concurrent first renders converge on one key — a
+            lost update would leave one thread watching under a key the
+            others can never unwatch"
+    (let [c (text/make-text "x" 0 0)
+          key-fn (var-get #'macros/tracker-key)
+          ks (->> (range 32)
+                  (mapv (fn [_] (future (key-fn c))))
+                  (mapv deref))]
+      (t/is (= 1 (count (distinct ks))) "one key for every allocator")
+      (t/is (= (first ks) (:kmet.tui.macros/watch-key (meta (:cache c))))))))
 
 (t/deftest test-equal-value-reset-keeps-cache
   ;; equal-value reset! must not invalidate — the cached result stays valid

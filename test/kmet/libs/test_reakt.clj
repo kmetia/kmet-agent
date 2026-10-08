@@ -177,6 +177,19 @@
       (r/force-run! rx)
       (is (= :ok @rx) "run! retries through sticky failure"))))
 
+(deftest test-discard-queued-drops-without-running
+  (testing "teardown drops queued reactions without running them"
+    (let [a (atom 0)
+          runs (atom 0)
+          d (r/derive [a] (fn [v] (swap! runs inc) v))]
+      (is (= 0 @d))
+      (is (= 1 @runs))
+      (swap! a inc)
+      (is (pos? (r/queued-count)) "the derived ref is queued")
+      (r/discard-queued!)
+      (is (zero? (r/queued-count)) "the queue is empty")
+      (is (= 1 @runs) "discard never ran the reaction body"))))
+
 (deftest test-enqueue-hook-fires-per-new-invalidation
   ;; an event-driven host (kmet.tui.core) wakes its parked loop from this:
   ;; a derived ref dirtied with no frame requested yet must not wait for a

@@ -6,9 +6,12 @@
             [clojure.test :as t :refer [deftest testing]]
             [kmet.debug :as debug]
             [kmet.tui.autocomplete :as ac]
+            [kmet.tui.components.container :as container]
             [kmet.tui.components.editor :as editor]
+            [kmet.tui.components.expandable-text :as expandable-text]
             [kmet.tui.components.settings-list :as settings-list]
             [kmet.tui.components.spinner :as spinner]
+            [kmet.tui.components.text :as text]
             [kmet.tui.hiccup :as hiccup]
             [kmet.tui.macros :as macros]
             [kmet.tui.theme :as theme]
@@ -1953,6 +1956,99 @@
           (t/is (false? (tui/tui-has-overlay? ui)) "the overlay stack is empty")
           (t/is (empty? @logged) "no disposed-while-mounted violation"))
         (finally
+          (clear-installed-context!))))))
+
+(deftest test-reset-disposes-extension-widgets-header-and-editor
+  (testing "finding 1: the /reload :reset path, the header swap and the
+            editor swap dispose the values they drop — records carry no
+            :dispose key, so the old duck-typed probes lost them with the
+            swap"
+    (let [ui (tui/create-tui nil)
+          ed (editor/make-editor)
+          above (atom {})
+          below (atom {})
+          header-container (container/make-container [])
+          hdr (expandable-text/make-expandable-text (fn [] "hdr") (fn [] "hdr"))
+          sp1 (text/make-text " " 0 0)
+          ch (chat-history/make-chat-history)
+          cs {:tui ui
+              :dock-stack (atom [])
+              :current-editor-atom (atom ed)
+              :status-indicator (status-indicator/make-status-indicator)
+              :config cfg/default-config
+              :session-atom (atom nil)}
+          registry ((var ui-registry/build-extension-ui-registry)
+                    {:tui ui :cs cs}
+                    {:ftr {:extension-statuses-atom (atom {})}
+                     :ed ed
+                     :ch ch
+                     :fdp (fdp/make-footer-data-provider)
+                     :hdr hdr
+                     :sp1 sp1
+                     :header-container header-container
+                     :widgets-above-atom above
+                     :widgets-below-atom below}
+                    nil)
+          cleanups (atom 0)
+          widget (fn []
+                   ((var ui-registry/make-extension-widget-component)
+                    nil
+                    [:container {}
+                     [:text {:padding-x 0 :padding-y 0} "w"]
+                     [(fn [_props]
+                        (macros/with-let [_ (swap! cleanups inc)]
+                          [:text {:padding-x 0 :padding-y 0} "owned"]
+                          (finally (swap! cleanups dec)))) {}]]))
+          headers (atom [])
+          header-factory (fn [tag]
+                           (fn [_t _theme]
+                             {:render (fn [_] [])
+                              :dispose (fn [] (swap! headers conj tag))}))]
+      (try
+        ;; widgets: the replace path already worked; reset must dispose too
+        ((:set-widget registry) :w1 (widget) {})
+        (protocols/render (get @above :w1) 40)
+        (t/is (= 1 @cleanups) "widget subtree initialized by render")
+        ((:set-widget registry) :w1 (widget) {})
+        (t/is (= 0 @cleanups) "replace disposed the previous widget")
+        (protocols/render (get @above :w1) 40)
+        ((:reset registry))
+        (t/is (= 0 @cleanups) "reset disposed the dropped widget")
+        (t/is (empty? @above))
+        ;; header: a swap and the reset must dispose the previous header
+        ((:set-header registry) (header-factory :one))
+        ((:set-header registry) (header-factory :two))
+        (t/is (= [:one] @headers) "header swap disposed the previous header")
+        ((:reset registry))
+        (t/is (= [:one :two] @headers) "reset disposed the custom header")
+        ;; footer: set-footer replace and reset dispose through
+        ;; tui-remove-child's tolerant verb
+        (let [footers (atom [])
+              footer-factory (fn [tag]
+                               (fn [_t _theme _data]
+                                 {:render (fn [_] [])
+                                  :dispose (fn [] (swap! footers conj tag))}))]
+          ((:set-footer registry) (footer-factory :one))
+          ((:set-footer registry) (footer-factory :two))
+          (t/is (= [:one] @footers) "footer swap disposed the previous footer")
+          ((:reset registry))
+          (t/is (= [:one :two] @footers) "reset disposed the custom footer"))
+        ;; editor: a swap must dispose the replaced custom editor (never the
+        ;; default `ed`)
+        (let [seen (atom [])
+              ed-a (editor/make-editor)
+              ed-b (editor/make-editor)]
+          (with-redefs-fn
+            (assoc {} #'ui-registry/dispose-dialog-component!
+                   (fn [c] (swap! seen conj c)))
+            (fn []
+              ((:set-editor-component registry) (fn [_ _ _] ed-a))
+              ((:set-editor-component registry) (fn [_ _ _] ed-b))))
+          (t/is (= [ed-a] @seen)
+                "the previous custom editor was disposed; the default ed was not"))
+        (finally
+          (protocols/dispose hdr)
+          (protocols/dispose sp1)
           (clear-installed-context!))))))
 
 ;; ─── DSL stage 4 review: dock generation gate + widget-area reactivity ────

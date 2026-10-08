@@ -5,6 +5,7 @@
    updatePendingMessagesDisplay)."
   (:require [clojure.string :as str]
             [kmet.tui.core :as tui]
+            [kmet.tui.protocols :as protocols]
             [kmet.app.loop :as agent]
             [kmet.app.ui.pending-messages :as pending-messages]
             [kmet.app.ui.status-indicator :as status-indicator]
@@ -72,6 +73,17 @@
     (future-cancel t))
   nil)
 
+(defn- dispose-transient-indicator!
+  "Dispose the transient indicator currently recorded in :status-current —
+   a Retry/Compaction/BranchSummary/share indicator being replaced or
+   cleared. Never touches the working indicator: the implicit status has no
+   :status-current entry and is reused, not dropped."
+  [cs]
+  ;; tolerant verb: a foreign indicator shape still disposes instead of
+  ;; throwing into the swap
+  (when-let [indicator (:indicator @(:status-current cs))]
+    (protocols/dispose-component! indicator)))
+
 (defn stop-anim-timer!
   "Cancel the animation timer."
   [cs]
@@ -113,6 +125,7 @@
    timer already drives frames)."
   [cs kind indicator]
   (cancel-indicator-driver! cs)
+  (dispose-transient-indicator! cs)
   (status-indicator/status-indicator-stop! (:status-indicator cs))
   (reset! (:status-current cs)
           {:kind kind
@@ -132,6 +145,7 @@
   ;; indicator's frame driver stops — the working spinner animates via the
   ;; anim timer once the turn runs.
   (cancel-indicator-driver! cs)
+  (dispose-transient-indicator! cs)
   (reset! (:status-current cs) nil)
   (status-indicator/status-indicator-start! (:status-indicator cs))
   ;; A background thread (share/branch-summary completion, an extension's
@@ -187,6 +201,7 @@
       ;; A real swap (transient → idle) schedules its own frame through the
       ;; status-area root reaction; an already-idle clear needs no frame.
       (cancel-indicator-driver! cs)
+      (dispose-transient-indicator! cs)
       (reset! (:status-current cs) nil)
       (status-indicator/status-indicator-stop! (:status-indicator cs)))))
 

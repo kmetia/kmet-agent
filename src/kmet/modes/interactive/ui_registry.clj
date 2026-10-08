@@ -336,9 +336,9 @@
                          ;; roots' first render anyway
                          nil))
          :set-footer (fn [factory]
+                       ;; tui-remove-child removes AND disposes through the
+                       ;; tolerant verb — one disposal, not two
                        (when-let [cf @custom-footer-atom]
-                         (when-let [dispose (:dispose cf)]
-                           (try (dispose) (catch Exception _)))
                          (tui/tui-remove-child t cf))
                        (tui/tui-remove-child t ftr)
                        (if factory
@@ -349,11 +349,14 @@
                              (tui/tui-add-child t ftr)))
                        (tui/tui-request-render t))
          :set-header (fn [factory]
-                       (when @custom-header-atom
-                         (when-let [dispose (:dispose @custom-header-atom)]
-                           (try (dispose) (catch Exception _)))
+                       (when-some [prev @custom-header-atom]
+                         (when-not (identical? prev hdr)
+                           (dispose-dialog-component! prev))
                          (reset! custom-header-atom nil))
                        (let [child (if factory (factory t (th/get-current-theme)) hdr)]
+                         ;; track the custom header so a later swap/reset can
+                         ;; dispose it; the default hdr is never stored
+                         (reset! custom-header-atom (when factory child))
                          (container/container-clear header-container)
                          (container/container-add-child header-container sp1)
                          (container/container-add-child header-container child)
@@ -405,12 +408,18 @@
                                       (chat-history/chat-history-set-hidden-thinking-label!
                                        ch label))
          :set-editor-component (fn [factory]
-                                 (let [current-text (tui/editor-get-text @current-editor-atom)]
+                                 (let [current-text (tui/editor-get-text @current-editor-atom)
+                                       prev-ed @current-editor-atom]
                                    ;; pi parity: setCustomEditorComponent runs
                                    ;; disposeActiveSelector() then clears the dock —
                                    ;; the swap disposes whatever it held, and a
                                    ;; displaced selector's done() goes inert
                                    (dock/clear! cs)
+                                   ;; the editor is not a dock entry (the dock area
+                                   ;; splices it foreign), so the swap must dispose
+                                   ;; the editor it displaces — never the default `ed`
+                                   (when-not (identical? prev-ed ed)
+                                     (dispose-dialog-component! prev-ed))
                                    (if factory
                                      (let [new-ed (factory t (th/get-current-theme) (tui-kb/get-global-keybindings))]
                                        (transfer-editor! ed new-ed (tui-kb/get-global-keybindings))
@@ -768,19 +777,16 @@
                   ;; customization, drop terminal input listeners
                   (doseq [m [widgets-above-atom widgets-below-atom]]
                     (doseq [w (vals @m)]
-                      (when-let [dispose (:dispose w)]
-                        (try (dispose) (catch Exception _)))))
+                      (dispose-dialog-component! w)))
                   (reset! widgets-above-atom {})
                   (reset! widgets-below-atom {})
-                  (when @custom-footer-atom
-                    (when-let [dispose (:dispose @custom-footer-atom)]
-                      (try (dispose) (catch Exception _)))
-                    (tui/tui-remove-child t @custom-footer-atom)
+                  (when-some [prev @custom-footer-atom]
+                    (tui/tui-remove-child t prev)
                     (reset! custom-footer-atom nil)
                     (tui/tui-add-child t ftr))
-                  (when @custom-header-atom
-                    (when-let [dispose (:dispose @custom-header-atom)]
-                      (try (dispose) (catch Exception _)))
+                  (when-some [prev @custom-header-atom]
+                    (when-not (identical? prev hdr)
+                      (dispose-dialog-component! prev))
                     (reset! custom-header-atom nil)
                     (container/container-clear header-container)
                     (container/container-add-child header-container sp1)
@@ -799,9 +805,12 @@
                   (reset! extension-autocomplete-factories [])
                   (rebuild-autocomplete-provider!)
                   (when @editor-factory-atom
-                    (let [current-text (tui/editor-get-text @current-editor-atom)]
+                    (let [current-text (tui/editor-get-text @current-editor-atom)
+                          prev-ed @current-editor-atom]
                       (tui/editor-set-text! ed current-text)
                       (tui/tui-set-focus t ed)
+                      (when-not (identical? prev-ed ed)
+                        (dispose-dialog-component! prev-ed))
                       (reset! current-editor-atom ed))
                     (reset! editor-factory-atom nil))
                   ;; restore any open dialog

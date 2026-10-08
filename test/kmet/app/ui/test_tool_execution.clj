@@ -767,8 +767,8 @@
       (fn []
         (let [c (image-tool)
               watched? (fn [comp]
-                         (contains? @(deref #'kmet.tui.macros/watch-registry)
-                                    (keyword (str "track!" (System/identityHashCode comp)))))]
+                         (boolean (some (fn [[_ e]] (identical? comp (:component e)))
+                                        @(deref #'kmet.tui.macros/watch-registry))))]
           (core/render c 60)
           (let [[_old-spacer old-img] @(:image-children-atom c)]
             (is (watched? old-img) "the rendered image block is watched")
@@ -786,8 +786,8 @@
   "True when COMP is registered in the track! watch registry (its render ran
    with watches)."
   [comp]
-  (contains? @(deref #'kmet.tui.macros/watch-registry)
-             (keyword (str "track!" (System/identityHashCode comp)))))
+  (boolean (some (fn [[_ e]] (identical? comp (:component e)))
+                 @(deref #'kmet.tui.macros/watch-registry))))
 
 (deftest test-renderer-children-disposed-on-rebuild
   (testing "a cache-miss rebuild disposes the previous renderer outputs — no

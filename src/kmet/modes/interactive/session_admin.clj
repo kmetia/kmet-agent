@@ -665,6 +665,18 @@
                                                :content (str "Navigation failed: " (ex-message e))})
       (tui/tui-request-render (:tui cs)))))
 
+(defn- start-branch-summary-render-driver!
+  "Request a render every 100ms while the branch summarization runs and the
+   TUI is still live; returns the future. `done` is only delivered by the
+   summarization future, so the running check is what keeps a mode stop (or
+   an Error in that future) from leaving the poller behind forever."
+  [tui done]
+  (future
+    (while (and (not (realized? done))
+                (some-> (:running? tui) deref))
+      (Thread/sleep 100)
+      (tui/tui-request-render tui))))
+
 (defn- branch-summarize-and-apply!
   "Run the LLM branch summarization (pi: navigateTree summarize) with the
    BranchSummaryStatusIndicator and editor-escape abort, then branch with
@@ -684,20 +696,18 @@
                                   (fn [] (reset! abort-atom true)))
     (status/show-status-indicator! cs :branch-summary indicator)
     (tui/tui-request-render (:tui cs))
-    ;; render driver: tick the indicator while the summarization runs
-    (future
-      (while (not (realized? done))
-        (Thread/sleep 100)
-        (tui/tui-request-render (:tui cs))))
+    ;; render driver: tick the indicator while the summarization runs; the
+    ;; driver stops with the TUI or when `done` lands (finding 8)
+    (start-branch-summary-render-driver! (:tui cs) done)
     (future
       (try
         (deliver done (agent/generate-branch-summary
                        ag (:entries-to-summarize prep) custom-instructions
                        abort-atom replace-instructions?))
-        (catch Exception e
+        (catch Throwable e
           (debug/log "branch summarization failed: " e)
           (deliver done {:error (str "Branch summarization failed: "
-                                     (ex-message e))}))))
+                                     (or (ex-message e) (str (class e))))}))))
     (future
       (let [result (deref done 120000 :timeout)]
         (editor/editor-set-on-action! ed "app.interrupt" prev-interrupt)

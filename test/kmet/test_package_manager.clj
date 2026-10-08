@@ -8,6 +8,12 @@
             [babashka.fs :as fs]
             [kmet.package-manager :as pm]
             [kmet.config :as cfg]
+            [kmet.app.packages :as pkgs]
+            [kmet.app.ui.resource-config :as resource-config]
+            [kmet.tui.core :as tui]
+            [kmet.tui.protocols :as protocols]
+            [kmet.tui.terminal :as term]
+            [kmet.tui.theme :as theme]
             [kmet.test-utils :refer [slash]]))
 
 (defn- tmp-dir []
@@ -206,3 +212,37 @@
           (t/is (str/includes? out (str "  " (fs/file-name pkg))))
           (t/is (str/includes? (slash out) (str "    " (slash pkg))))
           (t/is (str/includes? out "  ../proj")))))))
+
+(t/deftest config-disposes-its-screen-on-every-exit-path
+  (t/testing "finding 5: run-config disposes the screen (the terminal-size
+            watch cancel) on the normal path and when tui-start throws"
+    (let [disposed (atom 0)
+          size-ref (atom {:rows 24})
+          screen (reify protocols/IComponent
+                   (render [_ _] [])
+                   (handle-input [_ _] nil)
+                   (invalidate [_] nil)
+                   (dispose [_] (swap! disposed inc)))
+          redefs {#'cfg/init! (fn [] {})
+                  #'pkgs/load-themes! (fn [] nil)
+                  #'term/create-terminal (fn [] {:term true})
+                  #'term/rows (fn [_] 24)
+                  #'tui/create-tui (fn [_] {:components (atom [])})
+                  #'theme/init-theme! (fn [_] nil)
+                  #'cfg/get-theme-name (fn [_] "dark")
+                  #'resource-config/make-resource-config-screen (fn [& _] screen)
+                  #'tui/tui-terminal-size-ref (fn [_] size-ref)
+                  #'tui/tui-add-child (fn [& _] nil)
+                  #'tui/tui-set-focus (fn [& _] nil)
+                  #'tui/tui-stop (fn [_] nil)}]
+      (with-redefs-fn (assoc redefs #'tui/tui-start
+                             (fn [_] (throw (ex-info "boom" {}))))
+        (fn []
+          (t/is (thrown? Exception ((deref #'pm/run-config) nil)))
+          (t/is (= 1 @disposed) "disposed on the throw path")))
+      (reset! disposed 0)
+      (with-redefs-fn (assoc redefs #'tui/tui-start (fn [_] nil))
+        (fn []
+          (t/is (= 0 ((deref #'pm/run-config) nil)))
+          (t/is (= 1 @disposed) "disposed on the normal path"))))))
+

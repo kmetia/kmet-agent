@@ -218,3 +218,13 @@
       (let [before (tc/get-active-theme-name ctrl)]
         (tc/apply-terminal-theme! ctrl :light)
         (t/is (= before (tc/get-active-theme-name ctrl)) "no switch")))))
+
+(t/deftest shutdown-detaches-callback-and-stops-watcher
+  (theme/on-theme-change (fn [] nil))
+  (t/is (some? @(deref #'theme/theme-change-callback)))
+  (tc/shutdown! {:probe true})
+  (t/is (nil? @(deref #'theme/theme-change-callback))
+        "the theme-change callback is detached")
+  (t/is (nil? @(deref #'theme/theme-watcher)) "no watcher survives")
+  (t/is (nil? (tc/shutdown! nil)) "nil-safe"))
+

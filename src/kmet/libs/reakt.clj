@@ -221,6 +221,15 @@
   []
   (count @queue))
 
+(defn discard-queued!
+  "Teardown-only: drop every queued reaction without running it, so a mode
+   that stops mid-batch does not keep the queue (and the closures a queued
+   reaction reaches) alive. Never runs bodies; the next host starts from an
+   empty queue."
+  []
+  (reset! queue [])
+  nil)
+
 (defn flush!
   "Drain the batch queue: bring every queued reaction current, repeating
    until empty (one reaction's run may dirty another — chained updates

@@ -42,8 +42,8 @@
   "True when COMP is registered in the track! watch registry (its render ran
    with watches)."
   [comp]
-  (contains? @(deref #'macros/watch-registry)
-             (keyword (str "track!" (System/identityHashCode comp)))))
+  (boolean (some (fn [[_ e]] (identical? comp (:component e)))
+                 @(deref #'macros/watch-registry))))
 
 (t/deftest test-container-replace-children-disposes-dropped
   (let [kept (text/make-text "keep" 0 0)

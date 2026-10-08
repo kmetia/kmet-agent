@@ -3,6 +3,7 @@
    starts the render loop, and emits the session-start event.
    pi: modes/interactive/interactive-mode.ts."
   (:require [kmet.tui.core :as tui]
+            [kmet.tui.protocols :as protocols]
             [kmet.tui.terminal :as term]
             [kmet.tui.theme :as th]
             [kmet.config :as cfg]
@@ -11,9 +12,12 @@
             [kmet.app.extensions :as extensions]
             [kmet.app.session :as session]
             [kmet.app.theme-controller :as theme-ctrl]
+            [kmet.app.ui.bash-execution :as bash-execution]
             [kmet.app.ui.chat-history :as chat-history]
+            [kmet.app.ui.dock :as dock]
             [kmet.app.ui.session-selector :refer [show-session-selector]]
             [kmet.libs.process :as process]
+            [kmet.libs.reakt :as reakt]
             [kmet.modes.interactive.layout :as layout]
             [kmet.modes.interactive.session-admin :as session-admin]
             [kmet.modes.interactive.state :as state]))
@@ -25,16 +29,58 @@
 
 ;; ─── Run ───────────────────────────────────────────────────────────────────
 
+;; ─── Mode teardown ─────────────────────────────────────────────────────────
+
+(defn- dispose-mode-tree!
+  "Release the layout tree's components after the TUI stopped (finding 2).
+   Pending bash components and open overlays live outside the TUI's child
+   list, so they are disposed explicitly: pending bash first, then
+   dock/clear! (leave-before-dispose for dock entries), then the remaining
+   overlays, then the TUI's direct children (document container, pending
+   messages, status, widget strips, footer) via tui-clear; the chat-history
+   cascade runs through ChatHistoryComponent.dispose. Each step is isolated
+   and idempotent."
+  [cs]
+  (try (bash-execution/dispose-pending-bash! @(:pending-bash-components cs))
+       (catch Throwable _))
+  (try (reset! (:pending-bash-components cs) []) (catch Throwable _))
+  (try (dock/clear! cs) (catch Throwable _))
+  (try (doseq [ov @(:overlays (:tui cs))]
+         (protocols/dispose-component! (:component ov)))
+       (catch Throwable _))
+  (try (tui/tui-clear (:tui cs)) (catch Throwable _))
+  nil)
+
+(defn teardown-mode!
+  "Best-effort release of everything that roots the mode after the TUI
+   stopped (findings 2 and 10). Each step is isolated: a throw here must
+   not mask the original exception on the finally path. Order is signal →
+   extension surfaces → tree → process-global roots. Idempotent, so a
+   second call is a no-op."
+  [cs]
+  (try (when-let [ag (some-> (:agent-state cs) deref)]
+         (reset! (:signal ag) true))
+       (catch Throwable _))
+  (try (reset! (:bash-signal cs) true) (catch Throwable _))
+  (try (extensions/ui-reset!) (catch Throwable _))
+  (try (dispose-mode-tree! cs) (catch Throwable _))
+  (try (extensions/clear-runtime!) (catch Throwable _))
+  (try (theme-ctrl/shutdown! (:theme-controller cs)) (catch Throwable _))
+  (try (reakt/discard-queued!) (catch Throwable _))
+  nil)
 (defn run
   "Start the interactive TUI with the given config and CLI opts.
    Loads extensions, resolves the session (:resume/:continue/new), builds the
    layout, and runs the TUI loop until quit. Releases the mode when it
    ends: tracked child processes, the TUI on error, and (finally, on every
-   path) the extension UI registry, which closes over the whole mode.
+   path) the mode teardown — tree disposal, runtime sinks, theme
+   callback/watcher, reakt queue — then the extension UI registry, which
+   closes over the whole mode.
    Error paths rethrow for the top-level handler.
    pi: cli.js dispatch to interactive mode."
   [config opts]
-  (let [tui-ref (atom nil)]
+  (let [tui-ref (atom nil)
+        cs-ref (atom nil)]
     (try
       ;; Extensions were loaded before dispatch (core/-main, pi: extension
       ;; discovery before model resolution); /reload re-loads them.
@@ -63,6 +109,7 @@
                                          (session/create-session (state/ensure-cwd-session-dir)))
                       :else (session/create-session (state/ensure-cwd-session-dir)))
             cs (layout/build-layout config session)]
+        (reset! cs-ref cs)
         (reset! tui-ref (:tui cs))
         (when (:resume opts)
           (show-session-selector cs state/ensure-session-dir
@@ -151,8 +198,11 @@
           (try (tui/tui-stop t) (catch Exception _)))
         (throw e))
       (finally
-        ;; The extension UI registry closes over the whole mode (TUI, chat
-        ;; history, editor, session); a stopped mode must not stay reachable
-        ;; through the global registry until the next one installs. The CLI
-        ;; exits right after this, but embedded hosts and tests keep going.
+        ;; A stopped mode must be fully released: the tree, the runtime
+        ;; sinks, the theme callback/watcher and the reakt queue
+        ;; (teardown-mode! — findings 2 and 10), then the extension UI
+        ;; registry, which closes over the whole mode. The CLI exits right
+        ;; after this, but embedded hosts and tests keep going.
+        (when-let [cs @cs-ref]
+          (teardown-mode! cs))
         (extensions/clear-ui-registry!)))))

@@ -35,6 +35,7 @@
             [kmet.app.context :as context]
             [kmet.libs.host :as host]
             [kmet.libs.process :as process]
+            [kmet.libs.reakt :as reakt]
             [kmet.app.extensions :as extensions]
             [kmet.app.theme-controller :as theme-ctrl]
             [kmet.ai.models :as models]
@@ -45,6 +46,7 @@
             [kmet.tui.components.expandable-text :as expandable-text]
             [kmet.libs.terminal-image :as timg]
             [kmet.tui.protocols :as protocols]
+            [kmet.tui.theme :as theme]
             [kmet.tui.core :as tui]
             [kmet.tui.keybindings :as tui-kb]
             [babashka.fs :as fs]
@@ -1186,6 +1188,66 @@
             "the registry is cleared when the mode ends")
         (finally
           (extensions/clear-ui-registry!))))))
+
+(deftest teardown-mode!-clears-the-mode-roots
+  (testing "finding 10: teardown-mode! drops the runtime sinks, the theme
+            callback/watcher and the reakt queue; idempotent and safe on a
+            stub CoreState"
+    (let [a (atom 0)
+          d (reakt/derive [a] (fn [v] v))]
+      (is (= 0 @d))
+      (swap! a inc)
+      (is (pos? (reakt/queued-count)) "sanity: a derived ref is queued")
+      (extensions/set-session! {:probe true})
+      (extensions/set-context-sink! identity)
+      (extensions/set-entry-sink! identity)
+      (theme/on-theme-change (fn [] nil))
+      (inter/teardown-mode! {:tui {:overlays (atom [])}})
+      (is (nil? (extensions/get-session)))
+      (is (nil? @(deref #'extensions/context-sink-atom)))
+      (is (nil? @(deref #'extensions/entry-sink-atom)))
+      (is (nil? @(deref #'theme/theme-change-callback)))
+      (is (zero? (reakt/queued-count)))
+      (inter/teardown-mode! {:tui {:overlays (atom [])}})
+      (is (nil? (extensions/get-session))
+          "a second call is a no-op"))))
+
+(deftest teardown-mode!-disposes-the-tree
+  (testing "finding 2: a stopped mode's TUI children are disposed — the
+            chat-history cascade reaches the messages a tui-clear alone
+            used to strand"
+    (let [ui (tui/create-tui nil)
+          ch (chat-history/make-chat-history)
+          cs {:tui ui
+              :chat-history ch
+              :dock-stack (atom [])
+              :pending-bash-components (atom [])
+              :bash-signal (atom false)
+              :agent-state (atom nil)
+              :theme-controller nil}]
+      (chat-history/chat-history-add-message! ch {:role :user :content "hello"})
+      (tui/tui-add-child ui ch)
+      (protocols/render ch 40)
+      (is (seq (chat-history/chat-history-get-messages ch)))
+      (inter/teardown-mode! cs)
+      (is (empty? @(:components ui)) "TUI children cleared")
+      (is (empty? (chat-history/chat-history-get-messages ch))
+          "the chat history cascaded into its messages"))))
+
+(deftest branch-summary-render-driver-stops-with-the-tui
+  (testing "finding 8: the branch-summary frame driver exits when the TUI
+            stops or the summary promise lands — a mode stop must not leave
+            a 100ms poller behind"
+    (let [driver (var session-admin/start-branch-summary-render-driver!)]
+      (let [done (promise)
+            f (driver {:running? (atom false)} done)]
+        (is (nil? (deref f 2000 ::timeout))
+            "a stopped TUI ends the driver"))
+      (let [done (promise)
+            _ (deliver done :already-done)
+            f (driver {:running? (atom true)} done)]
+        (is (nil? (deref f 2000 ::timeout))
+            "an already-delivered promise ends the driver")))))
 
 (deftest session-info-shows-per-tool-usage
   (testing "/session's Tool Results section: per-tool calls + estimated result tokens, highest first, with a TOTAL (run_code.md T0)"

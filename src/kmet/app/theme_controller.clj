@@ -129,6 +129,17 @@
     (tui/tui-on-terminal-color-scheme-change ui #(apply-terminal-theme! ctrl %))
     ctrl))
 
+(defn shutdown!
+  "Teardown-only: detach the theme-change callback and stop the theme-file
+   watcher, so a stopped mode is not reachable through the theme registry
+   and no 1s poller outlives it. Idempotent; the controller argument is
+   accepted for symmetry with the other teardown steps and may be nil (a
+   stub CoreState in tests)."
+  [_ctrl]
+  (theme/on-theme-change nil)
+  (theme/stop-theme-watcher!)
+  nil)
+
 ;; ─── Public API (pi: InteractiveThemeController methods) ──────────────────
 
 (defn apply-from-settings!
