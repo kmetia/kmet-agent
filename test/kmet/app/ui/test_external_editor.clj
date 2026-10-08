@@ -18,7 +18,7 @@
           run (fn [cs]
                 (with-redefs [tui/tui-suspend! (fn [_] nil)
                               tui/tui-resume! (fn [_] nil)
-                              external-editor/editor-text-get-expanded (fn [_] "text")
+                              tui/editor-get-expanded-text (fn [_] "text")
                               proc/process (fn [_argv opts]
                                              (swap! seen conj opts)
                                              (delay {:exit 0}))]

@@ -32,8 +32,6 @@
             [kmet.app.ui.chat-history :as chat-history]
             [kmet.app.ui.custom-dialog-adapter :as cda]
             [kmet.app.ui.dock :as dock]
-            [kmet.app.ui.external-editor :refer [editor-text-get editor-text-get-expanded
-                                                 editor-text-set!]]
             [kmet.app.ui.footer :as footer]
             [kmet.app.ui.footer-data-provider :as fdp]
             [kmet.app.ui.loaded-resources :as loaded-resources]
@@ -271,7 +269,7 @@
          ;; the returned promise
          :custom (fn [factory {:keys [overlay overlay-options on-handle]}]
                    (let [p (promise)
-                         saved-text (editor-text-get @current-editor-atom)
+                         saved-text (tui/editor-get-text @current-editor-atom)
                          closed (atom false)
                          close (fn [result]
                                  (when-not @closed
@@ -280,7 +278,7 @@
                                    ;; the dock also restores the editor text
                                    ;; the dialog covered
                                    (when-not overlay
-                                     (editor-text-set!
+                                     (tui/editor-set-text!
                                       @current-editor-atom saved-text))
                                    (deliver p result)))]
                      (try
@@ -372,9 +370,9 @@
                                 (swap! terminal-input-unsubscribers conj unsub)
                                 unsub))
          :set-editor-text (fn [text]
-                            (editor-text-set! @current-editor-atom text)
+                            (tui/editor-set-text! @current-editor-atom text)
                             (tui/tui-request-render t))
-         :get-editor-text (fn [] (editor-text-get-expanded @current-editor-atom))
+         :get-editor-text (fn [] (tui/editor-get-expanded-text @current-editor-atom))
          :paste-to-editor (fn [text]
                             (tui/handle-input @current-editor-atom
                                               (str "\u001b[200~" text "\u001b[201~")))
@@ -408,7 +406,7 @@
                                       (chat-history/chat-history-set-hidden-thinking-label!
                                        ch label))
          :set-editor-component (fn [factory]
-                                 (let [current-text (editor-text-get @current-editor-atom)]
+                                 (let [current-text (tui/editor-get-text @current-editor-atom)]
                                    ;; pi parity: setCustomEditorComponent runs
                                    ;; disposeActiveSelector() then clears the dock —
                                    ;; the swap disposes whatever it held, and a
@@ -417,11 +415,11 @@
                                    (if factory
                                      (let [new-ed (factory t (th/get-current-theme) (tui-kb/get-global-keybindings))]
                                        (transfer-editor! ed new-ed (tui-kb/get-global-keybindings))
-                                       (editor-text-set! new-ed current-text)
+                                       (tui/editor-set-text! new-ed current-text)
                                        (tui/tui-set-focus t new-ed)
                                        ;; tracked by the dock area: the swap alone re-derives
                                        (reset! current-editor-atom new-ed))
-                                     (do (editor-text-set! ed current-text)
+                                     (do (tui/editor-set-text! ed current-text)
                                          (tui/tui-set-focus t ed)
                                          (reset! current-editor-atom ed)))
                                    (reset! editor-factory-atom factory)
@@ -801,8 +799,8 @@
                   (reset! extension-autocomplete-factories [])
                   (rebuild-autocomplete-provider!)
                   (when @editor-factory-atom
-                    (let [current-text (editor-text-get @current-editor-atom)]
-                      (editor-text-set! ed current-text)
+                    (let [current-text (tui/editor-get-text @current-editor-atom)]
+                      (tui/editor-set-text! ed current-text)
                       (tui/tui-set-focus t ed)
                       (reset! current-editor-atom ed))
                     (reset! editor-factory-atom nil))

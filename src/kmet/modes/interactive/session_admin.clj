@@ -23,7 +23,6 @@
             [kmet.app.ui.tool-execution :as tool-execution]
             [kmet.app.event-bus :as event-bus]
             [kmet.app.extensions :as extensions]
-            [kmet.app.ui.external-editor :refer [editor-text-get editor-text-set!]]
             [kmet.app.ui.model-selector :refer [sync-footer-model!]]
             [kmet.app.ui.tree-selector :refer [show-session-tree]]
             [kmet.app.skills :as skills]
@@ -479,7 +478,7 @@
           (when-let [pm (:pending-messages-comp cs)]
             (container/container-add-child (:pending-messages-container cs) pm))
           (reset! (:pending-bash-components cs) [])
-          (editor-text-set! @(:current-editor-atom cs) "")
+          (tui/editor-set-text! @(:current-editor-atom cs) "")
           (reset! (:session-atom cs) new-session)
           (extensions/set-session! new-session)
           (let [new-ag (assoc ag :session new-session)]
@@ -655,8 +654,8 @@
       ;; pi: restore the user message only when the editor is empty — a draft
       ;; the user is composing is not clobbered by navigation
       (when (and user-msg-text
-                 (str/blank? (editor-text-get (:editor cs))))
-        (editor-text-set! (:editor cs) user-msg-text))
+                 (str/blank? (tui/editor-get-text (:editor cs))))
+        (tui/editor-set-text! (:editor cs) user-msg-text))
       (state/update-footer! cs)
       (event-bus/emit-event!
        (cond-> {:type :session-tree
@@ -897,7 +896,7 @@
                 (do
                   (debug/log "forked session " (:id fork) " from " (:id sess))
                   (restore-session! cs fork false)
-                  (editor-text-set! (:editor cs) (session/session-entry-text entry))
+                  (tui/editor-set-text! (:editor cs) (session/session-entry-text entry))
                   (chat-history/chat-history-add-message! (:chat-history cs)
                                                           {:role :assistant
                                                            :content (str "Forked to new session " (subs (:id fork) 0 8) ".")})
