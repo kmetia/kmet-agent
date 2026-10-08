@@ -725,7 +725,7 @@
    old-height frame leaves stale rows and cursors on screen. Returns a
    cancel fn for the screen's dispose."
   [screen size-ref request-render!]
-  (let [k (keyword (str "resource-config-rows-" (System/identityHashCode screen)))
+  (let [k (keyword (str (gensym "resource-config-rows-")))
         last-rows (atom @(:rows-count screen))]
     (add-watch size-ref k
                (fn [_ _ _ size]
