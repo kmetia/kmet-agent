@@ -18,12 +18,6 @@
 
 ;; ─── Key dispatch ─────────────────────────────────────────────────────────
 
-(defn- match?
-  "Resolve DATA against keybinding ID through the global manager (pi:
-   getKeybindings().matches) so user overrides apply to the list's keys."
-  [data keybinding-id]
-  (kb/global-match? data keybinding-id))
-
 ;; ─── Theme ──────────────────────────────────────────────────────────────────
 
 (defrecord SettingsListTheme [label value description cursor hint])
@@ -224,23 +218,23 @@
             selected @selected-idx-atom]
         (cond
         ;; Escape — close
-          (match? data "tui.select.cancel")
+          (kb/global-match? data "tui.select.cancel")
           (do (when-let [cb @on-escape-atom] (cb))
               nil)
 
         ;; Down / Ctrl+n — wrap around (pi; ctrl+n rides the id)
-          (match? data "tui.select.down")
+          (kb/global-match? data "tui.select.down")
           (do (when (pos? n) (swap! selected-idx-atom #(mod (inc %) n)))
               nil)
 
         ;; Up / Ctrl+p — wrap around (pi; ctrl+p rides the id)
-          (match? data "tui.select.up")
+          (kb/global-match? data "tui.select.up")
           (do (when (pos? n) (swap! selected-idx-atom #(mod (dec %) n)))
               nil)
 
         ;; Enter, or Space when not searching (or the query is empty) —
         ;; open the item's submenu, else cycle its value (pi: activateItem)
-          (or (match? data "tui.select.confirm")
+          (or (kb/global-match? data "tui.select.confirm")
               (and (keys/matches-key? data "space")
                    (or (not search?) (empty? flt))))
           (do (when (pos? n)
@@ -259,11 +253,11 @@
               nil)
 
         ;; kmet extras (pi ignores these keys): right/left cycle values
-          (match? data "tui.settings.cycleForward")
+          (kb/global-match? data "tui.settings.cycleForward")
           (do (when (pos? n) (cycle-value! this display selected 1))
               nil)
 
-          (match? data "tui.settings.cycleBackward")
+          (kb/global-match? data "tui.settings.cycleBackward")
           (do (when (pos? n) (cycle-value! this display selected -1))
               nil)
 

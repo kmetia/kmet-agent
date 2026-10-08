@@ -192,6 +192,23 @@
                         {:type :dock/disposed-while-mounted
                          :component (type component)}))))))
 
+(defn close!
+  "Leave the dock and dispose COMPONENT — the pair dispose!'s invariant asks
+   for (release!, then dispose!), for a caller holding the component itself.
+   No-op for nil. Returns nil."
+  [cs component]
+  (when (some? component)
+    (release! cs component)
+    (dispose! cs component))
+  nil)
+
+(defn close-atom!
+  "close! whatever COMP-ATOM holds — the recorded-panel shape, where the
+   never-mounted / already-closed case is a no-op. Returns nil."
+  [cs comp-atom]
+  (when-let [component @comp-atom]
+    (close! cs component)))
+
 (defn- enter!
   "The shared mount!/cover! path: take focus before publishing the stack
    (only the caller knows the new panel's target; no watch could guess a

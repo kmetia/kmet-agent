@@ -1201,8 +1201,7 @@
                    ;; frame's DSL chrome via dock/dispose! (leave then
                    ;; dispose), the spliced tree-list explicitly (the tree
                    ;; does not own it)
-                   (dock/release! cs panel)
-                   (dock/dispose! cs panel)
+                   (dock/close! cs panel)
                    (protocols/dispose tl)))
          (dock/mount! cs panel {:focus-target area})
          (tui/tui-request-render (:tui cs)))))))

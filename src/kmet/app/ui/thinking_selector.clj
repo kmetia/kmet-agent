@@ -16,6 +16,7 @@
             [kmet.libs.reakt :as r]
             [kmet.tui.components.input :as input]
             [kmet.tui.core :as tui]
+            [kmet.tui.fuzzy :as fuzzy]
             [kmet.tui.hiccup :as h]
             [kmet.tui.keys :as keys]
             [kmet.tui.keybindings :as kb]
@@ -47,21 +48,6 @@
   (let [t (app-kb/key-label id)]
     (if (seq t) t fallback)))
 
-(defn- fuzzy-match?
-  "Subsequence fuzzy match (same as the SelectList filter)."
-  [pattern text]
-  (let [pl (count pattern) tl (count text)]
-    (if (zero? pl)
-      true
-      (loop [pi 0 ti 0]
-        (if (>= pi pl)
-          true
-          (if (>= ti tl)
-            false
-            (if (= (nth pattern pi) (nth text ti))
-              (recur (inc pi) (inc ti))
-              (recur pi (inc ti)))))))))
-
 (defn- filtered-levels
   "LEVELS matching the search query, fuzzy over level name + description."
   [st]
@@ -69,9 +55,9 @@
     (if (str/blank? query)
       (:levels st)
       (vec (filter (fn [level]
-                     (fuzzy-match? query
-                                   (str/lower-case
-                                    (str (name level) " " (level-description level)))))
+                     (fuzzy/subsequence-match? query
+                                               (str/lower-case
+                                                (str (name level) " " (level-description level)))))
                    (:levels st))))))
 
 ;; ─── Component ─────────────────────────────────────────────────────────────
@@ -313,9 +299,7 @@
         ;; reaction and foreign input (the dock drops foreign records
         ;; without disposing them)
         close! (fn []
-                 (when-let [s @sel-atom]
-                   (dock/release! cs s)
-                   (dock/dispose! cs s)))
+                 (dock/close-atom! cs sel-atom))
         sel (make-thinking-selector
              (available-levels cs)
              @(:thinking ag)

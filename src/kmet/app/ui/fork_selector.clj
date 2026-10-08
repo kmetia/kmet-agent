@@ -160,8 +160,7 @@
                 ;; dispose), the spliced list explicitly (the tree does not
                 ;; own it)
                 close! (fn []
-                         (dock/release! cs panel)
-                         (dock/dispose! cs panel)
+                         (dock/close! cs panel)
                          (protocols/dispose list))]
             (reset! on-select-atom
                     (fn [entry-id]

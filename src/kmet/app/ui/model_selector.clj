@@ -348,9 +348,7 @@
              ;; leave, then dispose: dispose unwinds the selector's root
              ;; reaction and foreign input
              close! (fn []
-                      (when-let [s @sel-atom]
-                        (dock/release! cs s)
-                        (dock/dispose! cs s)))
+                      (dock/close-atom! cs sel-atom))
              sel (make-model-selector
                   available scoped current
                   :search search-term

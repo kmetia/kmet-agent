@@ -308,6 +308,4 @@
    remove-before-dispose invariant before unwinding its root reaction and
    foreign inputs."
   [cs sel-atom]
-  (when-let [sel @sel-atom]
-    (dock/release! cs sel)
-    (dock/dispose! cs sel)))
+  (dock/close-atom! cs sel-atom))

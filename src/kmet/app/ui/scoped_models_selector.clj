@@ -19,6 +19,7 @@
             [kmet.tui.hiccup :as h]
             [kmet.tui.components.input :as input]
             [kmet.tui.core :as tui]
+            [kmet.tui.fuzzy :as fuzzy]
             [kmet.tui.keybindings :as kb]
             [kmet.tui.keys :as keys]
             [kmet.tui.macros :refer [defcomponent]]
@@ -93,21 +94,6 @@
     (let [enabled-set (set enabled-ids)]
       (into [] (concat enabled-ids (remove enabled-set all-ids))))))
 
-(defn- fuzzy-match?
-  "Subsequence fuzzy match (same as the SelectList filter)."
-  [pattern text]
-  (let [pl (count pattern) tl (count text)]
-    (if (zero? pl)
-      true
-      (loop [pi 0 ti 0]
-        (if (>= pi pl)
-          true
-          (if (>= ti tl)
-            false
-            (if (= (nth pattern pi) (nth text ti))
-              (recur (inc pi) (inc ti))
-              (recur pi (inc ti)))))))))
-
 (defn- filtered-items
   "Sorted visible items for the current search (pi refresh — fuzzy filter
    over \"provider/id\" + model name)."
@@ -122,8 +108,8 @@
     (if (str/blank? query)
       items
       (vec (filter (fn [{:keys [full-id model]}]
-                     (fuzzy-match? query (str/lower-case
-                                          (str full-id " " (or (:name model) "")))))
+                     (fuzzy/subsequence-match? query (str/lower-case
+                                                      (str full-id " " (or (:name model) "")))))
                    items)))))
 
 ;; ─── Component ─────────────────────────────────────────────────────────────
@@ -411,9 +397,7 @@
         ;; leave, then dispose: dispose unwinds the selector's root
         ;; reaction and foreign input
         close! (fn []
-                 (when-let [s @sel-atom]
-                   (dock/release! cs s)
-                   (dock/dispose! cs s)))
+                 (dock/close-atom! cs sel-atom))
         available (models/get-available)
         ag @(:agent-state cs)
         session-scoped (vec @(:scoped-models ag))

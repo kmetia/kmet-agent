@@ -360,9 +360,7 @@
 (defn- clear-status!
   "Drop the header status message and its auto-hide timer."
   [this]
-  (when-let [id @(:timer-atom this)]
-    (timers/cancel! id)
-    (reset! (:timer-atom this) nil))
+  (timers/cancel-atom! (:timer-atom this))
   (swap! (:state-atom this) dissoc :status))
 
 (defn- set-status!
@@ -877,9 +875,7 @@
     ;; a disposed selector must not keep streaming loads alive
     (swap! state-atom assoc :cancelled true)
     ;; cancel the pending status auto-hide before the tree goes (§6.1)
-    (when-let [id @(:timer-atom this)]
-      (timers/cancel! id)
-      (reset! (:timer-atom this) nil))
+    (timers/cancel-atom! (:timer-atom this))
     ;; unwind the content tree's reaction (tracked read of the state atom)
     ;; with the selector — hide! disposes it on editor restore. The search and
     ;; rename inputs are tag-owned now, so this cascades to them.
@@ -1065,6 +1061,6 @@
      ;; dispose — the dock never disposes a removal itself)
      (reset! (:hide-fn-atom sel)
              {:hide (do (dock/mount! cs sel)
-                        (fn [] (dock/release! cs sel) (dock/dispose! cs sel)))})
+                        (fn [] (dock/close! cs sel)))})
      (load-scope! sel :current :initial)
      sel)))

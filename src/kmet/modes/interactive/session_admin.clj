@@ -532,9 +532,7 @@
                  ;; leave, then dispose (the invariant dispose! checks):
                  ;; a late close cannot touch a newer occupant, and the
                  ;; frame's dispose cascades to its chrome + the list
-                 (when-let [dlg @dlg-atom]
-                   (dock/release! cs dlg)
-                   (dock/dispose! cs dlg))
+                 (dock/close-atom! cs dlg-atom)
                  (tui/tui-request-render tui))
         cancelled! (fn []
                      (chat-history/chat-history-show-status! chat "Import cancelled")
@@ -613,15 +611,6 @@
             (import-failed! chat e)))))))
 
 ;; ─── Session tree navigation (pi: TreeSelectorComponent) ──────────────────
-
-(defn- session-entry-text
-  "Plain trimmed text of a session entry's content blocks (pi:
-   extractUserMessageText — used for fork/tree editor restore)."
-  [e]
-  (let [content (:content e)]
-    (if (string? content)
-      (str/trim content)
-      (str/trim (str/join (map :text (filter #(= :text (:type %)) content)))))))
 
 (defn- complete-tree-navigation!
   "Apply a tree navigation (pi: navigateTree tail): branch the session leaf

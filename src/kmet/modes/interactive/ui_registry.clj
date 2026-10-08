@@ -219,8 +219,7 @@
                         (when-let [component @custom-dialog-comp]
                           (reset! custom-dialog-comp nil)
                           (tui/tui-hide-overlay t component)
-                          (dock/release! cs component)
-                          (dock/dispose! cs component))
+                          (dock/close! cs component))
                         (tui/tui-request-render t))
         rebuild-autocomplete-provider! (fn []
                                          ;; pi: setupAutocompleteProvider — each

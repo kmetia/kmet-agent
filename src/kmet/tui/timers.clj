@@ -64,6 +64,15 @@
   (swap! registry update :entries dissoc id)
   nil)
 
+(defn cancel-atom!
+  "Stop the timer id held in ATOM and clear it — the dispose/idle shape
+   where a component cancels its one pending timer and forgets it.
+   Idempotent, like cancel!."
+  [id-atom]
+  (when-let [id @id-atom]
+    (cancel! id)
+    (reset! id-atom nil)))
+
 (defn cancel-all!
   "Stop every timer. tui.core calls this on stop, so nothing outlives the
    session; tests call it to isolate cases."

@@ -11,12 +11,6 @@
 
 ;; ─── Key dispatch ─────────────────────────────────────────────────────────
 
-(defn- match?
-  "Resolve DATA against keybinding ID through the global manager (pi:
-   getKeybindings().matches) so user overrides apply to the input's keys."
-  [data keybinding-id]
-  (kb/global-match? data keybinding-id))
-
 ;; ─── Grapheme helpers and kill ring ──────────────────────────────────────
 ;; Imported from kmet.tui.components.editing
 
@@ -319,84 +313,84 @@
             nil)
 
         ;; Escape / Cancel
-        (match? data "tui.select.cancel")
+        (kb/global-match? data "tui.select.cancel")
         (do (when-let [cb @on-escape] (cb)) nil)
 
         ;; Undo
-        (match? data "tui.editor.undo")
+        (kb/global-match? data "tui.editor.undo")
         (do (when-let [snapshot (undo-pop undo-stack)]
               (reset! last-action nil)
               (edit-value! this (:value snapshot) (:cursor snapshot)))
             nil)
 
         ;; Submit
-        (match? data "tui.input.submit")
+        (kb/global-match? data "tui.input.submit")
         (do (when-let [cb @on-submit] (cb @value-atom)) nil)
 
         ;; Backspace
-        (match? data "tui.editor.deleteCharBackward")
+        (kb/global-match? data "tui.editor.deleteCharBackward")
         (do (handle-backspace this) nil)
 
         ;; Forward delete
-        (match? data "tui.editor.deleteCharForward")
+        (kb/global-match? data "tui.editor.deleteCharForward")
         (do (handle-forward-delete this) nil)
 
         ;; Delete word backward
-        (match? data "tui.editor.deleteWordBackward")
+        (kb/global-match? data "tui.editor.deleteWordBackward")
         (do (delete-word-backwards this) nil)
 
         ;; Delete word forward
-        (match? data "tui.editor.deleteWordForward")
+        (kb/global-match? data "tui.editor.deleteWordForward")
         (do (delete-word-forward this) nil)
 
         ;; Delete to line start
-        (match? data "tui.editor.deleteToLineStart")
+        (kb/global-match? data "tui.editor.deleteToLineStart")
         (do (delete-to-line-start this) nil)
 
         ;; Delete to line end
-        (match? data "tui.editor.deleteToLineEnd")
+        (kb/global-match? data "tui.editor.deleteToLineEnd")
         (do (delete-to-line-end this) nil)
 
         ;; Yank
-        (match? data "tui.editor.yank")
+        (kb/global-match? data "tui.editor.yank")
         (do (yank-action this) nil)
 
         ;; Yank pop
-        (match? data "tui.editor.yankPop")
+        (kb/global-match? data "tui.editor.yankPop")
         (do (yank-pop-action this) nil)
 
         ;; Cursor left
-        (match? data "tui.editor.cursorLeft")
+        (kb/global-match? data "tui.editor.cursorLeft")
         (do (reset! last-action nil)
             (set-cursor-clamped! this (edit/grapheme-left value cursor))
             nil)
 
         ;; Cursor right
-        (match? data "tui.editor.cursorRight")
+        (kb/global-match? data "tui.editor.cursorRight")
         (do (reset! last-action nil)
             (set-cursor-clamped! this (edit/grapheme-right value cursor))
             nil)
 
         ;; Cursor line start
-        (match? data "tui.editor.cursorLineStart")
+        (kb/global-match? data "tui.editor.cursorLineStart")
         (do (reset! last-action nil)
             (set-cursor-clamped! this 0)
             nil)
 
         ;; Cursor line end
-        (match? data "tui.editor.cursorLineEnd")
+        (kb/global-match? data "tui.editor.cursorLineEnd")
         (do (reset! last-action nil)
             (set-cursor-clamped! this (count @value-atom))
             nil)
 
         ;; Cursor word left
-        (match? data "tui.editor.cursorWordLeft")
+        (kb/global-match? data "tui.editor.cursorWordLeft")
         (do (reset! last-action nil)
             (set-cursor-clamped! this (edit/word-boundary-left @value-atom @cursor-atom))
             nil)
 
         ;; Cursor word right
-        (match? data "tui.editor.cursorWordRight")
+        (kb/global-match? data "tui.editor.cursorWordRight")
         (do (reset! last-action nil)
             (set-cursor-clamped! this (edit/word-boundary-right @value-atom @cursor-atom))
             nil)

@@ -403,9 +403,7 @@
                     ;; the chrome AND the settings list, so one dock/dispose!
                     ;; (leave then dispose) releases both (the frame is
                     ;; late-bound — built below)
-                    (when-let [frame @frame-atom]
-                      (dock/release! cs frame)
-                      (dock/dispose! cs frame))
+                    (dock/close-atom! cs frame-atom)
                     (tui/tui-request-render (:tui cs)))
         ;; Frame the list like pi's SettingsSelectorComponent (DynamicBorder +
         ;; SettingsList + DynamicBorder); the list is the focus target (pi:

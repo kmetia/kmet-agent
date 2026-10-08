@@ -7,10 +7,10 @@
             [kmet.tui.utils :as utils]
             [kmet.tui.macros :refer [track! defcomponent]]))
 
-(defn- current-image-id
-  "Read the image id atom WITHOUT tracking: the render body allocates and
-   resets it on first render, so a tracked read would self-invalidate the
-   track! cache and re-render every frame."
+(defn image-get-id
+  "The component's image id — read WITHOUT tracking: the render body
+   allocates and resets the atom on first render, so a tracked read would
+   self-invalidate the track! cache and re-render every frame."
   [comp]
   @(:image-id-atom comp))
 
@@ -39,7 +39,7 @@
                                           (:height-px cell-dims))))
             max-height (or (:max-height-cells (:options this)) default-max-height)
             lines (if (:images caps)
-                    (let [image-id (or (current-image-id this)
+                    (let [image-id (or (image-get-id this)
                                        (let [id (img/allocate-image-id)]
                                          (reset! image-id-atom id)
                                          id))
@@ -85,9 +85,6 @@
       :cache-atom (atom nil)})))
 
 ;; ─── Public API ─────────────────────────────────────────────────────────
-
-(defn image-get-id [comp]
-  @(:image-id-atom comp))
 
 (defn image-set-theme! [comp theme]
   (reset! (:theme-atom comp) theme)

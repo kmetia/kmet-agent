@@ -4,6 +4,7 @@
    two-column item layout with aligned descriptions, `→ ` selected prefix,
    `  (N/M)` scroll info, `  No matching commands` empty state."
   (:require [clojure.string :as str]
+            [kmet.tui.fuzzy :as fuzzy]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.keys :as keys]
             [kmet.tui.keybindings :as kb]
@@ -11,12 +12,6 @@
             [kmet.tui.macros :refer [track! defcomponent]]))
 
 ;; ─── Key dispatch ─────────────────────────────────────────────────────────
-
-(defn- match?
-  "Resolve DATA against keybinding ID through the global manager (pi:
-   getKeybindings().matches) so user overrides apply to the list's keys."
-  [data keybinding-id]
-  (kb/global-match? data keybinding-id))
 
 ;; ─── Default theme ──────────────────────────────────────────────────────────
 ;; Matches pi's SelectListTheme interface.
@@ -39,18 +34,6 @@
 (def ^:private MIN-DESCRIPTION-WIDTH 10)
 
 ;; ─── Fuzzy matching ─────────────────────────────────────────────────────────
-
-(defn- fuzzy-match?
-  "Check if pattern fuzzy-matches within text."
-  [pattern text]
-  (let [pl (count pattern) tl (count text)]
-    (if (zero? pl) true
-        (loop [pi 0 ti 0]
-          (if (>= pi pl) true
-              (if (>= ti tl) false
-                  (if (= (nth pattern pi) (nth text ti))
-                    (recur (inc pi) (inc ti))
-                    (recur pi (inc ti)))))))))
 
 (defn- score-match
   "Simple score: prefer matches at word boundaries and start of string."
@@ -172,7 +155,7 @@
             filtered (if (empty? filter-str)
                        items
                        (vec (->> items
-                                 (clojure.core/filter #(fuzzy-match? filter-str (:label %)))
+                                 (clojure.core/filter #(fuzzy/subsequence-match? filter-str (:label %)))
                                  (sort-by #(- (score-match filter-str (:label %)))))))
             n (count filtered)
             selected (min @selected-idx-atom (max 0 (dec n)))
@@ -212,23 +195,23 @@
             filter-str @filter-atom
             filtered (if (empty? filter-str)
                        items
-                       (vec (clojure.core/filter #(fuzzy-match? filter-str (:label %)) items)))
+                       (vec (clojure.core/filter #(fuzzy/subsequence-match? filter-str (:label %)) items)))
             n (count filtered)
             selected @selected-idx-atom]
         (cond
         ;; Enter — select
-          (and (match? data "tui.select.confirm") (pos? n))
+          (and (kb/global-match? data "tui.select.confirm") (pos? n))
           (do (when-let [cb @on-select]
                 (cb (nth filtered selected)))
               nil)
 
         ;; Escape — cancel
-          (match? data "tui.select.cancel")
+          (kb/global-match? data "tui.select.cancel")
           (do (when-let [cb @on-escape] (cb))
               nil)
 
         ;; Down — pi wraps to the top at the bottom (ctrl+n rides the id)
-          (match? data "tui.select.down")
+          (kb/global-match? data "tui.select.down")
           (do (when (pos? n)
                 (if (= selected (dec n))
                   (reset! selected-idx-atom 0)
@@ -237,7 +220,7 @@
               nil)
 
         ;; Up — pi wraps to the bottom at the top (ctrl+p rides the id)
-          (match? data "tui.select.up")
+          (kb/global-match? data "tui.select.up")
           (do (when (pos? n)
                 (if (zero? selected)
                   (reset! selected-idx-atom (dec n))
@@ -260,13 +243,13 @@
               nil)
 
         ;; Home (kmet: tui.select.first)
-          (match? data "tui.select.first")
+          (kb/global-match? data "tui.select.first")
           (do (reset! selected-idx-atom 0)
               (notify-selection-change! this filtered n)
               nil)
 
         ;; End (kmet: tui.select.last)
-          (match? data "tui.select.last")
+          (kb/global-match? data "tui.select.last")
           (do (when (pos? n)
                 (reset! selected-idx-atom (dec n))
                 (notify-selection-change! this filtered n))
@@ -274,7 +257,7 @@
 
         ;; Backspace — remove last filter char (the editor's delete id, so a
         ;; rebind moves filter editing with it)
-          (match? data "tui.editor.deleteCharBackward")
+          (kb/global-match? data "tui.editor.deleteCharBackward")
           (do (swap! filter-atom #(subs % 0 (max 0 (dec (count %)))))
               (reset! selected-idx-atom 0)
               nil)
@@ -387,7 +370,7 @@
         filter-str @(:filter-atom sl)
         filtered (if (empty? filter-str)
                    items
-                   (vec (clojure.core/filter #(fuzzy-match? filter-str (:label %)) items)))
+                   (vec (clojure.core/filter #(fuzzy/subsequence-match? filter-str (:label %)) items)))
         idx @(:selected-idx-atom sl)]
     (when (and (seq filtered) (>= idx 0) (< idx (count filtered)))
       (nth filtered idx))))

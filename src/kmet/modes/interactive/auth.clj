@@ -141,8 +141,7 @@
           ;; leave, then dispose (the invariant dispose! checks): the
           ;; dialog may sit below a covered selector after a prompt round
           ;; trip, and release! finds it by identity
-          (dock/release! cs dlg)
-          (dock/dispose! cs dlg)
+          (dock/close! cs dlg)
           (tui/tui-request-render (:tui cs)))))))
 
 (defn- api-key-login!
@@ -179,8 +178,7 @@
                                              (ex-message e)))))
         (finally
           ;; leave, then dispose (see oauth-login!)
-          (dock/release! cs dlg)
-          (dock/dispose! cs dlg)
+          (dock/close! cs dlg)
           (tui/tui-request-render (:tui cs)))))))
 
 ;; ─── Provider options (pi getLoginProviderOptions / getLogoutProviderOptions

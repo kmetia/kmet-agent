@@ -44,6 +44,23 @@
             (recur (inc qi) (inc i) score' i consecutive'))
           (recur qi (inc i) score last-match consecutive))))))
 
+(defn subsequence-match?
+  "True when every character of PATTERN appears in TEXT in order (not
+   necessarily consecutively) — the plain filter the list widgets share.
+   Case-sensitive: callers lowercase the strings they compare."
+  [pattern text]
+  (let [pl (count pattern) tl (count text)]
+    (if (zero? pl)
+      true
+      (loop [pi 0 ti 0]
+        (if (>= pi pl)
+          true
+          (if (>= ti tl)
+            false
+            (if (= (nth pattern pi) (nth text ti))
+              (recur (inc pi) (inc ti))
+              (recur pi (inc ti)))))))))
+
 (defn fuzzy-match
   "Fuzzy match pattern against text (case-insensitive).
    Returns {:matches bool :score n} — lower score is a better match.

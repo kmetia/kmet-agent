@@ -51,9 +51,7 @@
     ;; cancel our own transient-scrollbar timer BEFORE delegating — a
     ;; disposed scroll-view must not fire a zombie render-request when the
     ;; pending hide-timer wakes (timers/cancel! is idempotent)
-    (when-let [id @(:scrollbar-hide-timer-id-atom this)]
-      (timers/cancel! id)
-      (reset! (:scrollbar-hide-timer-id-atom this) nil))
+    (timers/cancel-atom! (:scrollbar-hide-timer-id-atom this))
     (when-let [child @child-atom]
       (protocols/dispose child))))
 
@@ -80,9 +78,7 @@
 (defn- hide-transient-scrollbar!
   [this]
   (reset! (:transient-scrollbar-visible-atom this) false)
-  (when-let [id @(:scrollbar-hide-timer-id-atom this)]
-    (timers/cancel! id)
-    (reset! (:scrollbar-hide-timer-id-atom this) nil)))
+  (timers/cancel-atom! (:scrollbar-hide-timer-id-atom this)))
 
 ;; ─── Scrollbar geometry (pi: getScrollbarGeometry, window-local rows) ─────
 
