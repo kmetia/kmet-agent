@@ -181,6 +181,14 @@
                                               (= old new))
                                   (when-let [c (weak/subject k)]
                                     (invalidate-cache c)))))]
+                ;; Register FIRST: a throw here (a shared cache atom) must
+                ;; not leave watches installed under a key
+                ;; remove-track-watches! cannot find. The entry is the
+                ;; teardown record — unregister on dispose, sweep on collect —
+                ;; refreshed per pass with the refs this pass watches.
+                (weak/register! watch-key component {:atoms atoms}
+                                (fn [k {:keys [atoms]}]
+                                  (unwatch-all! k atoms)))
                 (doseq [a atoms]
                   (reakt/watch-ref a watch-key handler))
                 ;; A previous pass's refs this pass no longer reads (branch
@@ -189,13 +197,6 @@
                 (doseq [a prev-atoms]
                   (when-not (contains? atoms a)
                     (reakt/unwatch-ref a watch-key)))
-                ;; The weak entry is the teardown record: remove-track-watches!
-                ;; unregisters it, and the sweep claims it when the component
-                ;; is collected without dispose, running the same unwatches.
-                ;; Refreshed per pass with the refs this pass watches.
-                (weak/register! watch-key component {:atoms atoms}
-                                (fn [k {:keys [atoms]}]
-                                  (unwatch-all! k atoms)))
                 (when-not @invalidated?
                   (reset! cache-atom {:width width
                                       :atoms atom-vals
