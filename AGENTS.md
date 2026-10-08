@@ -122,6 +122,19 @@ to their source package. The temporary notes `run_code.md`, `perf.md`,
   `kmet.debug/log` for opt-in debug output and `kmet.debug/log-error` for
   unhandled top-level errors.
 
+### Shared layers are extended, not copied
+
+- Call a facility where it lives; never re-implement it next to the caller.
+  `kmet.tui.core` re-exports protocol-dispatching accessors (e.g.
+  `editor-get-text`, `editor-set-text!`, `editor-add-to-history!`) precisely
+  so upper layers never open-code a `(satisfies? …)` dispatch with a
+  field-based fallback, and `kmet.libs.*` owns its generic helpers the same
+  way.
+- Needing a variant is the signal to extend the lower layer (or the nearest
+  shared namespace) — a second implementation is a bug even when it works.
+  The layer map is in [`src/kmet/README.md`](src/kmet/README.md); the
+  dispatcher list is in [`src/kmet/tui/tui.md`](src/kmet/tui/tui.md).
+
 ## Testing
 
 - Tests use `clojure.test` and mirror `src/kmet/` under `test/kmet/`.

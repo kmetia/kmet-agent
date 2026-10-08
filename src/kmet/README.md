@@ -109,6 +109,12 @@ listed in the root `AGENTS.md` topic map.
   dispatches.
 - `kmet.tasks.*` lives under `tasks/kmet/tasks/`, is never required by shipped
   code, and is not packaged. Task tests live under `test/kmet/tasks/`.
+- Facilities are extended at the layer that owns them, never copied into the
+  caller: upper layers call the `kmet.tui.*` / `kmet.libs.*` API. The
+  `kmet.tui.core` dispatchers (`editor-get-text`, `editor-set-text!`,
+  `editor-add-to-history!`, …) exist so app and mode code never open-codes the
+  `satisfies?`/field-based fallback pair; a variant belongs in the lower
+  layer.
 
 Prefer `defrecord` over `deftype`, protocols for extension points, and atoms
 for mutable state. `AgentState` deliberately uses independent per-field atoms

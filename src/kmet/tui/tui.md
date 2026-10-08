@@ -1219,6 +1219,15 @@ Exactly three component protocols, by design:
   (editor-get-text [this]) (editor-set-text! [this text]) …)
 ```
 
+`kmet.tui.core` re-exports the protocols and the protocol-dispatching
+accessors, so call sites never open-code the `satisfies?` + field-based
+fallback pair: the IEditorComponent members (`editor-get-text`,
+`editor-set-text!`, `editor-get-expanded-text`, `editor-add-to-history!`,
+`editor-insert-text-at-cursor!`, the `editor-set-*!` setters) and the
+IComponent verbs (`handle-input`, `invalidate`, `focused`, `set-focused!`),
+besides the one-frame `render` / `render-and-dispose` entries. App and mode
+code calls those — an editor accessor of its own is a duplicate.
+
 The package has one more protocol, outside the component model:
 `kmet.tui.terminal/ITerminal` — the lean platform seam every terminal
 backend implements (`start!`/`stop!`/`started?`/`write-output`/
