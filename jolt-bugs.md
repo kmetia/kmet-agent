@@ -122,3 +122,96 @@ collection has been waiting 2 s for 2 threads...") and drop any
 jolt-specific guard added for this ticket. `test-tool-bash-background-pipe-closed`
 stays as the regression guard.
 
+### [jolt#1284](https://github.com/jolt-lang/jolt/issues/1284) — `--opt` builds: concurrent `extend-protocol` dispatch miscompiles
+
+Open (filed 2026-10-08). In an optimized-emission binary (`jolt build --opt`,
+which `jolt dist` uses by default), a single protocol call site that
+dispatches over eight `extend-protocol` record types, driven from eight
+concurrent `future`s, throws
+`java.lang.ClassCastException: fx=: #[chez-jrdesc-v3 "…R6" …] is not a fixnum`
+(also seen: `*: … is not a number`, and `vector-set!: 10 is not a valid index
+…` from a lazily grown dispatch cache). The record value is fed to fixnum
+arithmetic inside the dispatch path. The same program is clean interpreted
+(`jolt run`), in a `--dev` build, and sequentially in the same `--opt` binary
+with the same total dispatch count — so the trigger is concurrent dispatch
+through the optimized per-site inline cache, not workload size, record count,
+or file content.
+
+Downstream, this is the "jolt/rewrite-clj backend bug" seen in the
+`tools + duplication` session: parallel `clojure_edit` /
+`clojure_edit_replace_sexp` batches on the jolt dist host failed with
+`$record-oops: invalid who argument jfn$rewrite-clj.node.whitespace/$…
+(… WhitespaceNode …)` and `… CommentNode … is not a fixnum`, while the same
+calls succeeded sequentially, under `jolt run`, under `--dev`, and on bb/JVM.
+kmet runs one assistant batch's tool calls in parallel `future`s by default
+(`kmet.app.loop/tool-execution-mode`, `:parallel`), and cljfmt/rewrite-clj
+dispatch through protocols — so the race lands in the Clojure extension
+tools first.
+
+Environment: jolt `v0.8.19-5-g8753e115` on Windows 11 Enterprise 10.0.26200
+(AMD64); `--dynamic` in the build commands is only this machine's link
+choice. Repro (reduced, no kmet code; full text in the issue):
+
+```clojure
+(ns jolt-proto-race)
+
+(defrecord R0 [v]) (defrecord R1 [v]) (defrecord R2 [v]) (defrecord R3 [v])
+(defrecord R4 [v]) (defrecord R5 [v]) (defrecord R6 [v]) (defrecord R7 [v])
+
+(defprotocol Tag (tag [x]))
+
+(extend-protocol Tag
+  R0 (tag [_] 0) R1 (tag [_] 1) R2 (tag [_] 2) R3 (tag [_] 3)
+  R4 (tag [_] 4) R5 (tag [_] 5) R6 (tag [_] 6) R7 (tag [_] 7))
+
+(defn make-xs [n]
+  (loop [i 0 acc (transient [])]
+    (if (< i n)
+      (recur (inc i) (conj! (conj! (conj! (conj! (conj! (conj! (conj! (conj! acc
+                                                                              (->R0 i))
+                                                                    (->R1 i))
+                                                          (->R2 i))
+                                                (->R3 i))
+                                      (->R4 i))
+                            (->R5 i))
+                  (->R6 i))
+           (->R7 i)))
+      (persistent! acc))))
+
+(defn work [xs n]
+  (dotimes [_ n]
+    (doseq [x xs]
+      (tag x))))
+
+(defn -main [& _]
+  (let [xs (make-xs 200)
+        ;; same total dispatch work as the concurrent phase below
+        seq-result (try (work xs 2400) :ok (catch Throwable t [:throw (str t)]))
+        workers (mapv (fn [_]
+                        (future (try (work xs 300) :ok
+                                     (catch Throwable t [:throw (str t)]))))
+                      (range 8))
+        results (mapv deref workers)
+        bad (into {} (keep-indexed (fn [i r] (when (not= :ok r) [i r])) results))]
+    (println "sequential-2400-iters:" seq-result)
+    (println "concurrent-8x300-bad:" (count bad) "of 8")
+    (doseq [[i r] bad]
+      (println "  worker" i ":" (subs (str r) 0 240)))
+    (System/exit (if (or (seq bad) (not= :ok seq-result)) 1 0))))
+```
+
+`jolt build -m jolt-proto-race -o proto-race-opt --opt --dynamic` then
+running it: 7-8 of 8 workers throw on every run; the `--dev` build, `jolt
+run`, and the sequential phase are clean.
+
+Workaround: none yet — do not rely on parallel clojure-tool batches in a
+jolt `--opt` build (they may still succeed; the race is timing-dependent).
+If the race interferes with a session, the stopgap is to make the affected
+batch run sequentially: register the Clojure extension's tools with
+`:execution-mode :sequential` (any sequential call makes kmet run the whole
+batch sequentially) or build the artifact with `jolt dist --dev` at the cost
+of the smaller/faster opt binary. Once the fix is in a tagged release at or
+above the declared floor, remove that pin (if taken) and re-check parallel
+`clojure_edit` batches against the dist binary; the reduced repro above is
+the regression guard.
+
