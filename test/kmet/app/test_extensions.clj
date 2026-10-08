@@ -1538,7 +1538,8 @@
     (try
       (with-open [zos (java.util.zip.ZipOutputStream. (io/output-stream jar))]
         (doseq [f (sort-by str (filter #(fs/regular-file? %) (fs/glob "extensions/clojure/src" "**")))]
-          (let [rel (str (fs/relativize "extensions/clojure/src" f))]
+          ;; jar entries must use / separators — fs/relativize gives \ on Windows
+          (let [rel (str/replace (str (fs/relativize "extensions/clojure/src" f)) "\\" "/")]
             (.putNextEntry zos (java.util.zip.ZipEntry. rel))
             (io/copy (io/file (str f)) zos)
             (.closeEntry zos))))
