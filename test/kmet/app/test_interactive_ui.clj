@@ -2153,6 +2153,72 @@
     (t/is (thrown? Exception
                    ((var ui-registry/make-extension-widget-component) nil ["just" "lines"])))))
 
+;; ─── Editor submit ordering (pi: submitValue clears before onSubmit) ───────
+
+(deftest test-submit-clears-editor-before-command-dispatch
+  (testing "a submitted command finds the editor already empty (pi: the
+            editor clears in submitValue before onSubmit runs): a ui-custom
+            dialog the command mounts saves that empty draft, so closing
+            the /tools dialog cannot put the submitted '/tools' line back
+            into the editor — while a dialog opened outside a submit still
+            restores the draft it covered"
+    (commands/clear-commands!)
+    (let [ui (tui/create-tui nil)
+          ed (editor/make-editor)
+          ch (chat-history/make-chat-history)
+          fdp-instance (fdp/make-footer-data-provider)
+          cs {:tui ui
+              :dock-stack (atom [])
+              :current-editor-atom (atom ed)
+              :editor ed
+              :chat-history ch
+              :footer-provider fdp-instance
+              :status-indicator (status-indicator/make-status-indicator)
+              :config cfg/default-config
+              :agent-state (atom (agent/make-agent-state))
+              :session-atom (atom nil)
+              :running-turn? (atom false)}
+          seen (atom ::unset)
+          close-ref (atom nil)
+          submit ((var layout/make-editor-submit-handler) cs)
+          factory (fn [_tui _th _kb close]
+                    (reset! close-ref close)
+                    {:render (fn [_width] [""])})]
+      (try
+        ((var ui-registry/build-extension-ui-registry)
+         {:tui ui :cs cs}
+         {:ftr {:extension-statuses-atom (atom {})}
+          :ed ed
+          :ch ch
+          :fdp fdp-instance
+          :widgets-above-atom (atom {})
+          :widgets-below-atom (atom {})}
+         nil)
+        (commands/register-command!
+         {:name "tools"
+          :description "test"
+          :extension-handler (fn [_ctx _args]
+                               (reset! seen (extensions/ui-get-editor-text))
+                               (extensions/ui-custom factory {}))})
+        (editor/editor-set-text! ed "/tools")
+        (submit "/tools")
+        (t/is (= "" @seen)
+              "the command handler sees the cleared editor")
+        (t/is (= 1 (count @(:dock-stack cs)))
+              "the dialog mounted over the editor")
+        (@close-ref nil)
+        (t/is (= "" (editor/editor-get-text ed))
+              "closing the dialog leaves the editor empty — no resurrected /tools")
+        (t/is (empty? @(:dock-stack cs)) "the dialog left the dock")
+        (testing "a dialog opened outside a submit still restores the draft"
+          (editor/editor-set-text! ed "draft")
+          (extensions/ui-custom factory {})
+          (@close-ref nil)
+          (t/is (= "draft" (editor/editor-get-text ed))))
+        (finally
+          (commands/clear-commands!)
+          (clear-installed-context!))))))
+
 ;; ─── Compaction queue (pi: queueCompactionMessage / flushCompactionQueue) ──
 
 (defn- compaction-cs
@@ -2183,6 +2249,40 @@
      :pending-messages-comp (pending-messages/make-pending-messages)
      :session-atom (atom (session/create-session
                           (str "target/test-compaction-queue-" (System/currentTimeMillis))))}))
+
+(deftest test-bash-already-running-restores-the-command
+  (testing "pi: a bash submit while another command runs warns and puts the
+            typed command back into the editor (the submit wiring cleared
+            it before dispatch), so it can be re-submitted after cancelling
+            the running one"
+    (let [cs (compaction-cs)
+          ed @(:current-editor-atom cs)
+          msgs (atom [])]
+      (editor/editor-set-text! ed "")
+      (reset! (:bash-running? cs) true)
+      (with-redefs [chat-history/chat-history-add-message! (fn [_ m] (swap! msgs conj m))
+                    tui/tui-request-render (fn [_] nil)]
+        ((var turn/handle-submit) cs "!ls -la"))
+      (t/is (= "!ls -la" (editor/editor-get-text ed))
+            "the typed command is back in the editor")
+      (t/is (= ["A bash command is already running. Cancel it first."]
+               (mapv :content @msgs))
+            "the warning is the only chat output"))))
+
+(deftest test-submit-history-targets-the-active-editor
+  (testing "submitted text lands in the ACTIVE editor's Up/Down history
+            (pi: this.editor.addToHistory) — a custom editor swapped in via
+            ui-set-editor-component gets the history, not the default editor"
+    (let [cs (compaction-cs)
+          default-ed (:editor cs)
+          custom-ed (editor/make-editor)]
+      (reset! (:current-editor-atom cs) custom-ed)
+      (reset! (:compacting? @(:agent-state cs)) true)
+      (with-redefs [tui/tui-request-render (fn [_] nil)]
+        ((var turn/handle-submit) cs "queued draft"))
+      (t/is (= ["queued draft"] (editor/editor-get-history custom-ed)))
+      (t/is (empty? (editor/editor-get-history default-ed))
+            "the default editor's history is untouched"))))
 
 (deftest test-submit-queues-during-compaction
   (testing "a plain message submitted during compaction queues as steer

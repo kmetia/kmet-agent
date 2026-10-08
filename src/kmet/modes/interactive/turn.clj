@@ -7,16 +7,13 @@
             [kmet.debug :as debug]
             [kmet.config :as cfg]
             [kmet.tui.core :as tui]
-            [kmet.tui.protocols :as protocols]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.tui.theme :as th]
             [kmet.tui.terminal :as term]
-            [kmet.tui.components.editor :as editor]
             [kmet.tui.components.container :as container]
             [kmet.app.loop :as agent]
             [kmet.app.ui.chat-history :as chat-history]
             [kmet.app.ui.bash-execution :as be]
-            [kmet.app.ui.external-editor :refer [editor-text-get editor-text-set!]]
             [kmet.app.bash-executor :as bash-exec]
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.util :as tools-util]
@@ -115,7 +112,7 @@
       ;; expansion, then the run (pi: flushCompactionQueue → prompt runs
       ;; input event → expansion; editor history like any submit)
       (when-let [text (apply-hooks cs (:text m))]
-        (editor/editor-push-history! (:editor cs) text)
+        (tui/editor-add-to-history! @(:current-editor-atom cs) text)
         (send-message cs (expand-compaction-text text))))))
 
 (defn- queue-compaction-message-into-turn!
@@ -572,12 +569,7 @@
    Returns nil."
   [cs text]
   (when-let [text (apply-hooks cs text)]
-    (let [ed @(:current-editor-atom cs)]
-      ;; IEditorComponent when available (custom editors), else the
-      ;; field-based fn (duck-typed editors — same pattern as editor-text-set!)
-      (if (satisfies? protocols/IEditorComponent ed)
-        (protocols/editor-add-to-history! ed text)
-        (editor/editor-push-history! ed text)))
+    (tui/editor-add-to-history! @(:current-editor-atom cs) text)
     (send-message cs text)))
 
 (defn- command-line?
@@ -617,7 +609,7 @@
             ;; delivery like a normal submit (pi: unknown commands fall
             ;; through to the compaction check and queue raw text).
             (if @(:compacting? @(:agent-state cs))
-              (do (editor/editor-push-history! (:editor cs) trimmed)
+              (do (tui/editor-add-to-history! @(:current-editor-atom cs) trimmed)
                   (queue-compaction-message! cs trimmed :steer))
               (when-let [text (apply-hooks cs trimmed)]
                 (send-message cs
@@ -632,11 +624,15 @@
               command (str/trim (subs trimmed (if exclude-from-context? 2 1)))]
           (when (seq command)
             (if @(:bash-running? cs)
-              (chat-history/chat-history-add-message! (:chat-history cs)
-                                                      {:role :assistant :content "A bash command is already running. Cancel it first."})
               (do
-                (editor/editor-push-history! (:editor cs) trimmed)
-                (editor/editor-set-text! (:editor cs) "")
+                (chat-history/chat-history-add-message! (:chat-history cs)
+                                                        {:role :assistant :content "A bash command is already running. Cancel it first."})
+                ;; pi: keep the typed command — restore it into the editor
+                ;; (the submit wiring cleared it before dispatch) so it can
+                ;; be re-submitted once the running one is cancelled
+                (tui/editor-set-text! @(:current-editor-atom cs) trimmed))
+              (do
+                (tui/editor-add-to-history! @(:current-editor-atom cs) trimmed)
                 (handle-bash-command cs command exclude-from-context?)))))
 
         ;; Regular message — agent loop handles session persistence.
@@ -652,7 +648,7 @@
         ;; only plain messages land here). Flushed by the :compaction-end
         ;; handler.
         (if @(:compacting? @(:agent-state cs))
-          (do (editor/editor-push-history! (:editor cs) trimmed)
+          (do (tui/editor-add-to-history! @(:current-editor-atom cs) trimmed)
               (queue-compaction-message! cs trimmed :steer))
           (submit-message cs trimmed))))))
 
@@ -693,10 +689,10 @@
    submit like regular Enter."
   [cs]
   (let [ed @(:current-editor-atom cs)
-        text (str/trim (editor-text-get ed))]
+        text (str/trim (tui/editor-get-text ed))]
     (when (seq text)
-      (editor/editor-push-history! ed text)
-      (editor-text-set! ed "")
+      (tui/editor-add-to-history! ed text)
+      (tui/editor-set-text! ed "")
       (queue-follow-up-text! cs text)
       (tui/tui-request-render (:tui cs)))))
 
@@ -711,12 +707,12 @@
         all (into (vec steering) (concat follow-up (map :text cq)))]
     (when (seq all)
       (let [ed @(:current-editor-atom cs)
-            current (editor-text-get ed)
+            current (tui/editor-get-text ed)
             queued-text (str/join "\n\n" all)
             combined (str/join "\n\n" (remove str/blank? [queued-text current]))]
         (agent/clear-queues! @(:agent-state cs))
         (reset! (:compaction-queued cs) [])
-        (editor-text-set! ed combined)
+        (tui/editor-set-text! ed combined)
         (status/update-pending-messages! cs)))
     (count all)))
 

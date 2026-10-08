@@ -428,6 +428,27 @@
       ;; Trailing default expression (SCI's case rejects the :default keyword)
       nil)))
 
+(defn- make-editor-submit-handler
+  "The app editor's on-submit callback (pi: setupEditorSubmitHandler).
+
+   The active editor is cleared BEFORE the text is dispatched. pi's editor
+   clears itself in submitValue before it calls onSubmit, and kmet must
+   clear first for the same observable contract: an extension dialog
+   mounted over the editor saves the editor text when it opens and restores
+   it when it closes (ui-custom, see
+   kmet.modes.interactive.ui-registry), so clearing afterwards would make
+   closing the /tools dialog put the submitted '/tools' line back into the
+   editor. Clearing first also lets a command handler write to the editor
+   while it runs — the app does not wipe it afterwards.
+
+   TEXT nil is the editor's escape/cancel callback, not a submit."
+  [cs]
+  (fn [text]
+    (when text
+      (tui/editor-set-text! @(:current-editor-atom cs) "")
+      (turn/handle-submit cs text)
+      (tui/tui-request-render (:tui cs)))))
+
 (defn build-layout
   "Create TUI layout and return CoreState."
   [config session]
@@ -831,13 +852,9 @@
        t
        (fn [_data] (turn/heal-stale-scrollback-when-idle! cs) nil))
 
-      ;; Wire editor submit
-      (editor/editor-set-on-submit! ed
-                                    (fn [text]
-                                      (when text
-                                        (turn/handle-submit cs text)
-                                        (editor/editor-set-text! ed "")
-                                        (tui/tui-request-render t))))
+      ;; Wire editor submit (pi: setupEditorSubmitHandler — the clear
+      ;; order is part of the contract, see make-editor-submit-handler)
+      (editor/editor-set-on-submit! ed (make-editor-submit-handler cs))
 
       ;; Editor actions (pi: CustomEditor.onAction) — app keybindings dispatched
       ;; through the editor's action system, which also checks the autocomplete
