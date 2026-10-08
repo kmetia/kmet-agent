@@ -33,30 +33,46 @@
   (t/is (zero? (compaction/estimate-tokens {:role :label :target-id "x" :label "l"}))
         "labels are navigation metadata — never in context"))
 
-;; ─── Cut point (pi: findCutPoint) ──────────────────────────────────────────
+;; ─── Cut point (pi: findProjectedCutPoint) ────────────────────────────────
 
-(t/deftest test-find-cut-point
-  (t/testing "empty entries"
+(defn- projected
+  "Raw entries as an unedited session projection (see
+   session/project-entries): each entry projects to itself."
+  [entries]
+  (mapv (fn [e] {:source e :messages [e]}) entries))
+
+(t/deftest test-find-projected-cut-point
+  (t/testing "empty projection"
     (t/is (= {:first-kept-index 0 :split-turn? false}
-             (compaction/find-cut-point [] 100))))
+             (compaction/find-projected-cut-point [] 100))))
   (t/testing "never cuts at tool results"
     (let [entries [{:role :user :content "aaaa"}          ;; 1 token
                    {:role :tool :content [{:type :tool_result :content "bbbbbbbb"}]} ;; 2 tokens
                    {:role :user :content "cccc"}]         ;; 1 token
-          cut (compaction/find-cut-point entries 1)]
+          cut (compaction/find-projected-cut-point (projected entries) 1)]
       (t/is (not= 1 (:first-kept-index cut))
             "tool result index is not a valid cut point")))
   (t/testing "budget not reached → keep from first valid"
     (let [entries [{:role :user :content "a"}
                    {:role :assistant :content "b"}]]
-      (t/is (= 0 (:first-kept-index (compaction/find-cut-point entries 1000))))))
+      (t/is (= 0 (:first-kept-index
+                  (compaction/find-projected-cut-point (projected entries) 1000))))))
   (t/testing "split-turn detection"
     (let [entries [{:role :user :content "q"}
                    {:role :assistant :content "aaaaaaaaaaaaaaaaaaaa"}  ;; 5 tokens
                    {:role :tool :content [{:type :tool_result :content "bbbbbbbbbbbbbbbbbbbb"}]}
                    {:role :assistant :content "cccccccccccccccccccc"}] ;; 5 tokens
-          cut (compaction/find-cut-point entries 8)]
-      (t/is (true? (:split-turn? cut)) "cut lands mid-turn (not a turn start)"))))
+          cut (compaction/find-projected-cut-point (projected entries) 8)]
+      (t/is (true? (:split-turn? cut)) "cut lands mid-turn (not a turn start)")))
+  (t/testing "an omitted (empty) projected entry is no cut point, and the cut
+              walks back over it (pi: the while loop after the budget walk)"
+    (let [entries [{:role :user :content "aaaa"}
+                   {:role :user :content "bbbb"}
+                   {:role :user :content "cccc"}]
+          cut (compaction/find-projected-cut-point
+               (assoc (projected entries) 1 {:source (second entries) :messages []}) 1)]
+      (t/is (= 1 (:first-kept-index cut))
+            "the empty entry is kept rather than summarized — it costs nothing"))))
 
 ;; ─── Preparation (pi: prepareCompaction) ───────────────────────────────────
 
@@ -75,16 +91,18 @@
       (t/is (pos? (count (:messages prep))))
       (t/is (every? #(= :user (:role %)) (:messages prep)))))
   (t/testing "previous summary found and reported"
-    (let [entries (into [{:id "s1" :role :system :summary "OLD SUMMARY"
-                          :content [{:type :text :text "OLD SUMMARY"}]}]
+    (let [entries (into [{:id "c1" :role :compaction :summary "OLD SUMMARY"
+                          :first-kept-id "e0"}]
                         (for [i (range 20)]
                           {:id (str "e" i)
                            :role :user
                            :content (apply str (repeat 100 (str i)))}))
           prep (compaction/prepare entries 100)]
       (t/is (= "OLD SUMMARY" (:previous-summary prep)))
-      (t/is (not-any? #(= "s1" (:id %)) (:messages prep))
-            "previous summary entry is not summarized again")))
+      (t/is (not-any? #(= "c1" (:id %)) (:messages prep))
+            "the previous summary entry is carried as previous-summary, not
+             summarized again (pi: getMessagesFromProjectedEntryForCompaction
+             skips compaction sources)")))
   (t/testing "tokens-before is the total estimate"
     (let [entries [{:id "a" :role :user :content (apply str (repeat 16 "x"))}
                    {:id "b" :role :user :content (apply str (repeat 16 "y"))}
@@ -122,6 +140,38 @@
                  {:id "c1" :role :compaction :summary "SUM" :first-kept-id "m0"}]]
     (t/is (nil? (compaction/prepare entries 100)))))
 
+(t/deftest test-prepare-follows-the-projection
+  ;; pi: findProjectedCutPoint / getMessagesFromProjectedEntryForCompaction —
+  ;; the compaction input is the projection: an omitted message is not
+  ;; summarized, a rewritten one is summarized with its replacement text, and
+  ;; :tokens-before counts only what the projection sends
+  (t/testing "an omitted message is neither summarized nor counted"
+    (let [entries (into [{:id "u1" :role :user :content (apply str (repeat 100 "s"))}
+                         {:id "e1" :role :context-edit :target-id "u1" :replacement nil}]
+                        (for [i (range 2 5)]
+                          {:id (str "u" i) :role :user
+                           :content (apply str (repeat 100 (str i)))}))
+          prep (compaction/prepare entries 50)]
+      (t/is (some? prep))
+      (t/is (not-any? #(= "u1" (:id %)) (:messages prep))
+            "the omitted message is not summarized")
+      (t/is (= 75 (:tokens-before prep))
+            "tokens-before follows the projection (3 visible messages x 25)")))
+  (t/testing "a rewritten message is summarized with its replacement"
+    (let [entries [{:id "u1" :role :user :content (apply str (repeat 100 "s"))}
+                   {:id "e1" :role :context-edit :target-id "u1"
+                    :replacement {:content [{:type :text :text "public note"}]}}
+                   {:id "u2" :role :user :content (apply str (repeat 100 "a"))}
+                   {:id "u3" :role :user :content (apply str (repeat 100 "b"))}]
+          prep (compaction/prepare entries 50)
+          text (compaction/serialize-conversation (:messages prep))]
+      (t/is (some? prep))
+      (t/is (str/includes? text "[User]: public note"))
+      (t/is (not (str/includes? text "ssss"))
+            "the original text is not summarized")
+      (t/is (< (:tokens-before prep) 75)
+            "the replacement counts instead of the original"))))
+
 ;; ─── Serialization (pi: serializeConversation) ─────────────────────────────
 
 (t/deftest test-serialize-conversation
@@ -140,6 +190,17 @@
                 [{:role :info :content "ignored"}
                  {:role :bash :command "ls" :output "out" :exclude-from-context? true}])]
       (t/is (empty? text))))
+  (t/testing "bash results and custom messages serialize as user text
+              (pi: convertToLlm maps both to user before serializeConversation)"
+    (let [text (compaction/serialize-conversation
+                [{:role :bash :command "ls" :output "out"}
+                 {:role :custom :custom-type :note
+                  :content [{:type :text :text "note text"}]}
+                 {:role :custom-message :custom-type :note :content "raw note"}])]
+      (t/is (str/includes? text "[User]: Ran `ls`\n```\nout\n```"))
+      (t/is (str/includes? text "[User]: note text"))
+      (t/is (str/includes? text "[User]: raw note")
+            "a raw :custom-message entry (branch summaries) serializes too")))
   (t/testing "compaction/branch_summary entries serialize their summary (pi:
               convertToLlm maps both to user messages before serialization —
               they survive a later compaction)"

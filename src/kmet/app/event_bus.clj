@@ -41,8 +41,16 @@
     execution — including a response that errored or was aborted, where it
     precedes :agent-end (pi: turn_end, emitted by the loop's finishTurn
     call). Payload: :turn-index, :message, :tool-results, :outcome
-    (:completed | :error | :aborted), plus the boundary state
-    :pending-messages (the queued batches the next attempt would start
+    (:completed | :error | :aborted), :message-entry-id (the persisted
+    session entry the turn's assistant message became; nil without a
+    session) and :tool-result-entry-ids (the turn's tool results' entry ids,
+    in call order — pi: _dispatchTurnEndBoundary's messageEntryId /
+    toolResultEntryIds), plus the boundary state: :context-entries /
+    :context-messages / :llm-messages (the session projection, so a handler
+    can read the transcript or pick an edit target without touching the
+    session — pi: BoundaryContextPreview; :llm-messages is the
+    provider-agnostic part of pi's convertToLlm), :pending-messages (the
+    queued batches the next attempt would start
     from, plus custom messages deferred while streaming — pi:
     _getPendingBoundaryMessages), :can-continue, :entries [] and :continue
     false. Handlers may
@@ -227,9 +235,10 @@
    "Actionable: fired once before the prompt settles, after the queued-message
     continuation check, and before :agent-settled (pi: agent_before_settle,
     emitted by _runBeforeSettleBoundary). Payload: :outcome — the last turn's
-    outcome (:completed | :error | :aborted) — plus the boundary state
-    :pending-messages (see :turn-end), :can-continue, :entries [] and
-    :continue false.
+    outcome (:completed | :error | :aborted) — plus the boundary state:
+    :context-entries / :context-messages / :llm-messages (the session
+    projection — pi: BoundaryContextPreview), :pending-messages (see
+    :turn-end), :can-continue, :entries [] and :continue false.
     Handlers return {:entries [...] :continue bool} as for :turn-end; one
     that merely queues a message also runs one more attempt before the
     prompt settles (pi: shouldContinue includes hasQueuedMessages). A

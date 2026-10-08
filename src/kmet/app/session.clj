@@ -790,16 +790,15 @@
                         message))
                     messages)))))
 
-(defn project-context
-  "The active branch's context as projected entries: a vector of
-   {:source entry :messages [...]} in context order (pi:
+(defn project-entries
+  "Project context-ordered ENTRIES (session/context-entries order) into a
+   session projection: a vector of {:source entry :messages [...]} (pi:
    buildSessionProjection). Context edits are applied to the entries they
    target, and only the newest compaction contributes a summary message — an
    older compaction retained inside the newest retained range no longer
    summarizes anything (pi: buildSessionProjection's index > 0 rule)."
-  [session]
-  (let [entries (build-context session)
-        edits (context-edits entries)]
+  [entries]
+  (let [edits (context-edits entries)]
     (vec (map-indexed
           (fn [index entry]
             {:source entry
@@ -807,6 +806,11 @@
                          []
                          (context-messages-with-edit entry (get edits (:id entry))))})
           entries))))
+
+(defn project-context
+  "The active branch's context as projected entries (see project-entries)."
+  [session]
+  (project-entries (build-context session)))
 
 (defn build-context-messages
   "Projected context messages along the active branch (pi:

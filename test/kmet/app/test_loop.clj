@@ -2623,6 +2623,114 @@
                         (= "recovered" (get-in % [:content 0 :text])))
                   ctx)))))
 
+(t/deftest test-loop-retry-omits-failed-attempt-from-projection
+  ;; pi parity (_prepareRetry → _omitRecoveryAttempt): the failed attempt
+  ;; stays in raw history but is durably omitted from the model projection —
+  ;; the retried request does not re-send it, and a later rebuild cannot
+  ;; resurrect it.
+  (let [dir (str "target/test-loop-retry-omits-" (System/currentTimeMillis))
+        requests (atom [])
+        call-count (atom 0)
+        sess (session/create-session dir)
+        agent (loop/make-agent-state
+               :session sess
+               :max-retries 2
+               :base-delay-ms 1)]
+    (try
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [opts]
+                      (swap! requests conj opts)
+                      (future
+                        (case (swap! call-count inc)
+                          1 (do (when-let [ot (:on-text opts)] (ot "partial answer"))
+                                (when-let [oe (:on-error opts)] (oe "upstream connect error")))
+                          (do (when-let [ot (:on-text opts)] (ot "recovered"))
+                              (when-let [od (:on-done opts)] (od :stop))))
+                        :done))]
+        @(loop/run-agent-turn agent {:message "hi"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (let [branch (session/get-branch sess)
+            errored (first (filter #(= :error (:stop-reason %)) branch))
+            edit (first (filter #(= :context-edit (:role %)) branch))]
+        (t/is (= 2 @call-count) "one retry")
+        (t/is (some? errored) "the failed attempt stays in raw history")
+        (t/is (= (:id errored) (:target-id edit))
+              "a nil context edit targets the persisted failed entry")
+        (t/is (nil? (:replacement edit)))
+        (t/is (not-any? #(= "partial answer" (get-in % [:content 0 :text]))
+                        (session/build-context-messages sess))
+              "the projection omits the failed attempt")
+        (t/is (not-any? #(= "partial answer" (get-in % [:content 0 :text]))
+                        (:messages (second @requests)))
+              "the retried request does not re-send it"))
+      (finally
+        (fs/delete-tree dir)))))
+
+(t/deftest test-loop-retry-omits-failed-attempt-after-a-context-rebuild
+  ;; a turn-end boundary's committed context-edit draft rebuilds the live
+  ;; context from the session and thereby pulls the persisted failed attempt
+  ;; in; the recovery omission's own rebuild must drop it again *before* the
+  ;; retry attempt starts (pi: _omitRecoveryAttempt → _refreshFinalizedContext),
+  ;; not merely have the next request's install clean it up
+  (let [dir (str "target/test-loop-retry-omit-rebuild-" (System/currentTimeMillis))
+        requests (atom [])
+        call-count (atom 0)
+        boundaries (atom 0)
+        starts (atom [])
+        agent-ref (atom nil)
+        sess (session/create-session dir)
+        agent (loop/make-agent-state
+               :session sess
+               :max-retries 2
+               :base-delay-ms 1
+               :on-event (fn [e]
+                           (when (= :agent-start (:type e))
+                             (swap! starts conj (loop/get-context @agent-ref)))))]
+    (try
+      (reset! agent-ref agent)
+      (event-bus/on-event
+       :turn-end
+       (fn [_]
+         (when (= 1 (swap! boundaries inc))
+           {:entries [{:role :context-edit
+                       :target-id (:id (first (session/get-branch sess)))
+                       :replacement {:content [{:type :text :text "rewritten"}]}}]})))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [opts]
+                      (swap! requests conj opts)
+                      (future
+                        (case (swap! call-count inc)
+                          1 (do (when-let [ot (:on-text opts)] (ot "partial answer"))
+                                (when-let [oe (:on-error opts)] (oe "upstream connect error")))
+                          (do (when-let [ot (:on-text opts)] (ot "recovered"))
+                              (when-let [od (:on-done opts)] (od :stop))))
+                        :done))]
+        @(loop/run-agent-turn agent {:message "hi"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (t/is (= 2 @boundaries)
+            "the boundary ran for the failed turn and the successful retry turn")
+      (t/is (= 2 (count @starts)) "one :agent-start per attempt")
+      (t/is (not-any? #(= "partial answer" (get-in % [:content 0 :text]))
+                      (second @starts))
+            "the omission's rebuild dropped the failed attempt before the retry
+             attempt started — no request install involved yet")
+      (let [retried (:messages (second @requests))
+            texts (mapv #(get-in % [:content 0 :text]) retried)]
+        (t/is (some #{"rewritten"} texts)
+              "the boundary's rebuild reached the retried request")
+        (t/is (not-any? #{"partial answer"} texts)
+              "the retried request does not re-send the failed attempt"))
+      (t/is (not-any? #(= "partial answer" (get-in % [:content 0 :text]))
+                      (loop/get-context agent))
+            "the live context excludes the failed attempt")
+      (finally
+        (event-bus/clear-event-listeners!)
+        (fs/delete-tree dir)))))
+
 (t/deftest test-loop-cancel-records-aborted-attempt
   ;; pi parity: an abort mid-stream finalizes the partial as a
   ;; stopReason-aborted assistant message persisted to the session (never
@@ -3273,7 +3381,7 @@
                      [:content 0 :text])))
     (t/is (= :idle @(:status agent)))))
 
-;; ─── Turn and settle boundaries (lifecycle.md Phase 2: F/G) ──────────────
+;; ─── Turn and settle boundaries (pi: actionable turn_end / agent_before_settle) ──
 
 (defn- stub-llm-text-turns
   "send-message stub: the Nth call streams TEXTS' Nth entry (\"ok\" once the
@@ -3354,6 +3462,53 @@
       (t/is (= [:turn-end :message-start]
                (mapv :type (take 2 (drop-while #(not= :turn-end (:type %)) @events))))
             "the committed message is announced as the boundary closes")
+      (finally
+        (event-bus/clear-event-listeners!)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-loop-turn-end-boundary-carries-persisted-entry-ids
+  ;; pi: _dispatchTurnEndBoundary hands :turn-end the persisted entry ids
+  ;; (messageEntryId / toolResultEntryIds) and _buildBoundaryContext's
+  ;; projection preview, so a handler can target an edit without reading the
+  ;; session itself
+  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-turn-end-ids")))
+        boundaries (atom [])
+        calls (atom 0)
+        agent (loop/make-agent-state :session (session/create-session dir))]
+    (try
+      (event-bus/on-event :turn-end (fn [e] (swap! boundaries conj e) nil))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    tools/execute-tool (fn [_ _ _] {:content "ok" :is-error false})
+                    llm/send-message (stub-llm-tool-then-text calls)]
+        @(loop/run-agent-turn agent {:message "run"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (let [branch (session/get-branch (:session agent))
+            assistant (first (filter #(= :assistant (:role %)) branch))
+            tool-entry (first (filter #(= :tool (:role %)) branch))
+            tool-turn (first @boundaries)
+            final-turn (second @boundaries)]
+        (t/is (= 2 (count @boundaries)) "one boundary per turn")
+        (t/is (= (:id assistant) (:message-entry-id tool-turn))
+              "the tool-call turn carries its assistant entry id")
+        (t/is (= [(:id tool-entry)] (:tool-result-entry-ids tool-turn))
+              "and its tool results' entry ids, in call order")
+        (t/is (some? (session/get-entry (:session agent) (:message-entry-id tool-turn)))
+              "the id resolves to a real session entry")
+        (t/is (= [] (:tool-result-entry-ids final-turn))
+              "a turn without tool calls carries no result ids")
+        (t/is (= (:id (last (filter #(= :assistant (:role %)) branch)))
+                 (:message-entry-id final-turn)))
+        (t/is (= [:user :assistant :tool]
+                 (mapv :role (:context-messages tool-turn)))
+              "the preview carries the projected context messages")
+        (t/is (= (mapv (comp :id :source) (:context-entries tool-turn))
+                 (mapv :id (take 3 branch)))
+              "the preview entries carry their source session entries (the
+               preview was built at the first boundary — before the final
+               assistant entry was appended)")
+        (t/is (= (:context-messages tool-turn) (:llm-messages tool-turn))
+              "nothing to flatten: the llm view is the projection"))
       (finally
         (event-bus/clear-event-listeners!)
         (fs/delete-tree dir)))))
@@ -3664,6 +3819,34 @@
                  (events-of @events #{:turn-end :agent-end :agent-settled}))))
       (finally
         (event-bus/clear-event-listeners!)))))
+
+(t/deftest test-loop-agent-before-settle-carries-the-context-preview
+  ;; pi: _buildBoundaryContext — the pre-settle boundary carries the same
+  ;; projection preview as :turn-end (BoundaryContextPreview)
+  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-before-settle-preview")))
+        boundaries (atom [])
+        calls (atom 0)
+        opts (atom [])
+        agent (loop/make-agent-state :session (session/create-session dir))]
+    (try
+      (event-bus/on-event :agent-before-settle (fn [e] (swap! boundaries conj e) nil))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (stub-llm-text-turns calls ["done"] opts)]
+        @(loop/run-agent-turn agent {:message "run"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (let [boundary (first @boundaries)]
+        (t/is (= :agent-before-settle (:type boundary)))
+        (t/is (= [:user :assistant] (mapv :role (:context-messages boundary)))
+              "the projected context messages")
+        (t/is (= (mapv :id (session/get-branch (:session agent)))
+                 (mapv (comp :id :source) (:context-entries boundary)))
+              "the projected entries keep their source session entries")
+        (t/is (= (:context-messages boundary) (:llm-messages boundary))
+              "nothing to flatten: the llm view is the projection"))
+      (finally
+        (event-bus/clear-event-listeners!)
+        (fs/delete-tree dir)))))
 
 (t/deftest test-loop-agent-before-settle-continue-runs-another-attempt
   (let [calls (atom 0)
@@ -4021,6 +4204,15 @@
             "overflow appends a compaction entry (append-only)")
       (t/is (< (count (session/build-context sess)) 12)
             "compaction excludes the summarized history from context")
+      (let [edit (first (filter #(= :context-edit (:role %)) @(:entries sess)))
+            target (session/get-entry sess (:target-id edit))]
+        (t/is (some? edit)
+              "the failed overflow attempt is durably omitted (pi: _omitRecoveryAttempt)")
+        (t/is (nil? (:replacement edit)))
+        (t/is (= :assistant (:role target)))
+        (t/is (= :error (:stop-reason target)))
+        (t/is (not-any? #(= (:id target) (:id %)) (session/build-context-messages sess))
+              "the omitted attempt is not in the projection"))
       (t/is (some #(and (= :message-end (:type %))
                         (= "recovered" (get-in % [:message :content 0 :text])))
                   @events)
@@ -4028,6 +4220,52 @@
       (t/is (some #(= :context-replaced (:type %)) @events)
             "overflow compaction mirrors the new context to the UI (pi: compaction_end re-renders)")
       (t/is (= :idle @(:status agent)) "run settles idle after the overflow recovery")
+      (finally
+        (fs/delete-tree dir)))))
+
+(t/deftest test-loop-compaction-input-follows-the-projection
+  ;; pi: findProjectedCutPoint / getMessagesFromProjectedEntryForCompaction —
+  ;; a compaction summarizes the projected context: an omitted message is not
+  ;; summarized and does not inflate :tokens-before, and a rewritten one is
+  ;; summarized with its replacement text
+  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-compaction-projection")))
+        prompts (atom [])
+        sess (session/create-session dir)
+        agent (loop/make-agent-state :session sess :keep-recent-tokens 30)]
+    (try
+      (let [user! (fn [c]
+                    (session/append-entry
+                     sess {:role :user
+                           :content [{:type :text
+                                      :text (apply str (repeat 100 c))}]}))
+            u0 (user! "0")
+            u1 (user! "1")]
+        (user! "2")
+        (user! "3")
+        (user! "4")
+        (session/append-context-edit! sess (:id u0) nil)
+        (session/append-context-edit! sess (:id u1)
+                                      {:content [{:type :text :text "rewritten"}]}))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [opts]
+                      (swap! prompts conj opts)
+                      (future
+                        (when-let [ot (:on-text opts)] (ot "summary"))
+                        (when-let [od (:on-done opts)] (od :stop))
+                        :done))]
+        (t/is (true? (loop/compact-context! agent nil :manual))))
+      (let [text (-> @prompts first :messages second :content first :text)
+            compaction-entry (last (session/get-branch sess))]
+        (t/is (str/includes? text "rewritten")
+              "the rewritten message is summarized with its replacement")
+        (t/is (not (str/includes? text (apply str (repeat 100 "0"))))
+              "the omitted message is not summarized")
+        (t/is (not (str/includes? text (apply str (repeat 100 "1"))))
+              "the rewritten message's original text is not summarized")
+        (t/is (str/includes? text (apply str (repeat 100 "2"))))
+        (t/is (= 78 (:tokens-before compaction-entry))
+              "tokens-before counts the projection (replacement + three kept)"))
       (finally
         (fs/delete-tree dir)))))
 
@@ -5860,11 +6098,13 @@
           agent (loop/make-agent-state :session sess)
           requests (atom [])
           hook-calls (atom 0)
+          hook-contexts (atom [])
           calls (atom 0)]
       (try
         (reset! (:prepare-request agent)
                 (fn [req]
                   (swap! hook-calls inc)
+                  (swap! hook-contexts conj (:context req))
                   (cond-> {:model (models/map->Model {:provider :anthropic
                                                       :id "model-b"})}
                     ;; replace the conversation on the first request only —
@@ -5888,12 +6128,80 @@
         (t/is (= [:system :user :user] (mapv :role (:messages (first @requests))))
               "the replaced context is what the first request sends")
         (t/is (= "checkpoint" (get-in (:messages (first @requests)) [2 :content 0 :text])))
-        (t/is (= "checkpoint" (get-in (:messages (second @requests)) [2 :content 0 :text]))
-              "the replacement stays in the loop context for later requests (pi: currentContext)")
+        (t/is (not-any? #(= "checkpoint" (get-in % [:content 0 :text]))
+                        (second @hook-contexts))
+              "the next request's hook sees the canonical projection again
+               (pi: the session wrapper re-installs it before config.prepareRequest)")
+        (t/is (= 1 (count (filter #(= :user (:role %)) (:messages (second @requests)))))
+              "a one-shot replacement does not survive the next request — the
+               install rebuilds the context from the session (pi parity)")
         (t/is (= 1 (count (filter #(= :user (:role %)) (session/get-branch sess))))
               "the request projection is not persisted — only the prompt's user entry")
         (finally
           (fs/delete-tree dir))))))
+
+(t/deftest test-loop-request-installs-the-session-projection
+  ;; pi parity (_installAgentRequestProjection): the canonical session
+  ;; projection is installed as the request context, so an append-only edit
+  ;; appended straight to the session — no loop rebuild after it — still
+  ;; reaches the request
+  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-request-projection")))
+        requests (atom [])
+        calls (atom 0)
+        sess (session/create-session dir)
+        agent (loop/make-agent-state :session sess)]
+    (try
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (stub-llm-text-turns calls ["first"] requests)]
+        @(loop/run-agent-turn agent {:message "seed"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (let [seed-id (:id (first (session/get-branch sess)))]
+        (session/append-context-edit! sess seed-id nil)
+        (t/is (some #(= "seed" (get-in % [:content 0 :text]))
+                    (loop/get-context agent))
+              "the live context still carries the edited message — no rebuild ran")
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message (stub-llm-text-turns calls ["second"] requests)]
+          @(loop/run-agent-turn agent {:message "second"
+                                       :on-done (fn [_])
+                                       :on-error (fn [_])}))
+        (t/is (not-any? #(= "seed" (get-in % [:content 0 :text]))
+                        (:messages (last @requests)))
+              "the request's install applied the edit with no rebuild between")
+        (t/is (= ["second"] (request-user-texts (last @requests))))
+        (t/is (not-any? #(= "seed" (get-in % [:content 0 :text]))
+                        (loop/get-context agent))
+              "the live context follows the installed projection"))
+      (finally
+        (fs/delete-tree dir)))))
+
+(t/deftest test-loop-request-install-keeps-extension-custom-messages
+  ;; the extension context sink injects a custom message the session already
+  ;; holds (extensions/append-custom-message! persists the entry, then calls
+  ;; the sink); the request install rebuilds the context from the session, so
+  ;; the injected message must survive that rebuild
+  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-request-custom")))
+        requests (atom [])
+        calls (atom 0)
+        sess (session/create-session dir)
+        agent (loop/make-agent-state :session sess)]
+    (try
+      (extensions/set-session! sess)
+      (extensions/set-context-sink! (fn [msg] (loop/add-context-message! agent msg)))
+      (extensions/append-custom-message! :note "injected" true)
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message (stub-llm-text-turns calls ["done"] requests)]
+        @(loop/run-agent-turn agent {:message "hi"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (t/is (some #(= "injected" (get-in % [:content 0 :text]))
+                  (:messages (first @requests)))
+            "the persisted custom message reaches the request after the install")
+      (finally
+        (extensions/set-session! nil)
+        (extensions/set-context-sink! nil)
+        (fs/delete-tree dir)))))
 
 (t/deftest test-loop-deferred-custom-message-enables-a-boundary-continuation
   (t/testing "a custom message deferred during the settle window counts toward

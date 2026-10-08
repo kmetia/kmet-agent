@@ -728,8 +728,15 @@ cancelling clears the queues and the continuation is abort-guarded.
 
 The two actionable boundaries — `:turn-end` after every turn (including an
 errored or aborted response, where it precedes `:agent-end`) and
-`:agent-before-settle` once before the prompt settles, both carrying
-`:entries []` / `:continue false` — honor what a handler returns:
+`:agent-before-settle` once before the prompt settles — carry the boundary
+state alongside `:entries []` / `:continue false`: the projected context
+(`:context-entries` / `:context-messages`, plus `:llm-messages`, the
+projection after compaction/branch summaries are flattened to user messages
+— pi: `BoundaryContextPreview`), `:pending-messages` and `:can-continue`.
+`:turn-end` additionally carries `:message-entry-id` (the persisted entry the
+turn's assistant message became) and `:tool-result-entry-ids` (the turn's
+tool results' entry ids, in call order) — the ids an edit draft can target
+without reading the session. They honor what a handler returns:
 `:entries` are session entry maps appended in order (`{:role :custom ...}`
 extension state; `{:role :custom-message ...}` also enters the context, so
 the next request sees it), and `:continue true` runs one more turn — honored
@@ -749,7 +756,8 @@ Only message entries that contribute editable model content can be targeted
 active branch; anything else is reported and skipped. The raw session keeps
 the target untouched — usage totals, replay and the TUI show the original —
 only the projection changes, and the live context is rebuilt so the next
-request already sees it. Entry ids come from `(:session ctx)`
+request already sees it. Entry ids come from the boundary payload
+(`:message-entry-id` / `:tool-result-entry-ids`) or from `(:session ctx)`
 (`get-branch`/`get-entry`). `kmet.app.loop/append-context-edit!` is the same
 operation outside a boundary handler.
 
@@ -834,6 +842,11 @@ Three events fire **before** session mutations; handlers may return
 (ext/on-event api :session-before-compact
   (fn [ev ctx] ...))   ; {:preparation .. :branch-entries .. :custom-instructions
                        ;  :reason .. :will-retry .. :signal ..}
+                       ; the preparation is the projection-aware pi
+                       ; CompactionPreparation: :messages are the projected
+                       ; messages to summarize (an omitted message is absent,
+                       ; a rewritten one carries its replacement) and
+                       ; :tokens-before counts the projection
 
 ;; after a successful compaction — the appended rollup entry
 (ext/on-event api :session-compact
@@ -1086,7 +1099,12 @@ from the api.
 ;; return the component OR a promise of one (deref'd with a 5s timeout);
 ;; when the component carries a :dispose fn, it is called when the dialog
 ;; closes (pi: dispose?()) — same for widgets, custom footer/header and the
-;; :reset path (extension reload).
+;; :reset path (extension reload). A non-overlay dialog mounts in the
+;; editor's slot; the draft it covered is restored when the dialog closes.
+;; A submit clears the editor before the command dispatches (pi: the
+;; editor clears before onSubmit), so a command-opened dialog saves and
+;; restores an empty draft — closing /tools cannot put "/tools" back into
+;; the editor.
 (ext/ui-custom api (fn [tui theme kb close] (my-selector comp close))
                 {:overlay true :overlay-options {:anchor :center :width 82}})
 ```

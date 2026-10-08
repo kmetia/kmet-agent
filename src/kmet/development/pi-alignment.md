@@ -14,14 +14,10 @@ framework, agent loop, tools, provider/auth subsystem (kmet.ai), sessions (EDNL)
 compaction, skills, prompt templates, themes, and the extension API (hooks,
 events, commands, tools, flags, renderers, agent control, tool hooks) are
 functionally aligned. The remaining gaps cluster in the CLI surface, rendering
-(mermaid/latex/search/images), the settings surface, the extension
+(mermaid/latex/search/images), the settings surface, and the extension
 `registerProvider` `streamSimple`/`refreshModels` (wire-layer custom
-provider streaming + dynamic model refresh), and the 0.87.0 session-context
-wave (moved to [`lifecycle.md`](../../lifecycle.md) — its post-run
-continuation, the actionable `turn_end`/`agent_before_settle` boundaries and
-`peekQueuedMessages` landed as E/F/G/J; append-only context edits,
-`prepareRequest`, the pending custom-message queue and
-`context_with_system` remain; per-model image input limits stay in §2).
+provider streaming + dynamic model refresh). The 0.87.0 session-context wave
+is fully landed — see §7; per-model image input limits stay in §2.
 
 ## Deliberately out of scope (locked decisions)
 
@@ -303,7 +299,7 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
 | `registerMarkdownTransformer` | **Done** — `extensions/register-markdown-transformer!` (applied in registration order, idempotent, errors skipped) |
 | `registerEntryRenderer` | **Done** — `extensions/register-entry-renderer!` (custom entry types, live + replay) |
 | `sendUserMessage` (deliverAs steer/followUp) | **Done** — `extensions/send-user-message` → loop steer!/follow-up! |
-| `sendCustomMessage` (deliverAs steer/followUp/nextTurn) | **Done** (H) — `extensions/send-message!` → the registry's pi branch logic: `:next-turn` queues for the next prompt, a streaming send queues into the run (steer/follow-up) or defers to the end of the turn (`:pending-custom`), an idle send appends and optionally starts a turn. Headless (no UI registry) still appends immediately via the sinks |
+| `sendCustomMessage` (deliverAs steer/followUp/nextTurn) | **Done** — `extensions/send-message!` → the registry's pi branch logic: `:next-turn` queues for the next prompt, a streaming send queues into the run (steer/follow-up) or defers to the end of the turn (`:pending-custom`), an idle send appends and optionally starts a turn. Headless (no UI registry) still appends immediately via the sinks |
 | `setModel`, `getThinkingLevel`, `setThinkingLevel` | **Done** — via the ui registry (auth-gated setModel, validated levels) |
 | `exec` | **Done** — `extensions/exec` (babashka.process, string capture) |
 | `getActiveTools`/`getAllTools`/`setActiveTools` | **Done** — `:enabled-tools` (runtime selection, pi: setActiveTools) and `:default-tools` (pi: defaultTools) filter the agent state, applied to the wire `:tools` and the run_code sandbox surface; `get-active-tools` returns the effective active names, `get-all-tools` the array |
@@ -359,13 +355,34 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
 
 ### 7. Session context & agent-core (pi 0.87.0)
 
-Moved. The 0.87.0 session-context wave is a run-lifecycle concern and now
-lives in [`lifecycle.md`](../../lifecycle.md): the actionable `turn_end` /
-`agent_before_settle` boundaries (F/G), `finishTurn` / `prepareRequest` /
-`peekQueuedMessages` (F/I/J), the pending custom-message queue and
-`:next-turn` (H), and `context_with_system` (L) landed; append-only
-per-message context edits (K) remain. Per-model image input limits remain in
-§2.
+Landed. This wave was tracked in a separate plan file while in progress; its
+shape now:
+
+- one `:agent-start`/`:agent-end` pair per attempt, with `:agent-end
+  :messages` accumulating that attempt's messages and `:will-retry` exposed
+  to public listeners only; exactly one `:agent-settled` per prompt;
+- a message an `:agent-end` handler queues starts a fresh attempt in the same
+  prompt, drained before that attempt starts;
+- the actionable `:turn-end` / `:agent-before-settle` boundaries carrying
+  `{:entries [...] :continue bool}`, the persisted entry ids
+  (`:message-entry-id` / `:tool-result-entry-ids`) and the projection preview
+  (`:context-entries` / `:context-messages` / `:llm-messages`);
+- the post-run compaction check between `:agent-end` and the pre-settle
+  boundary, guarded per prompt against a compaction that aborted or failed in
+  the same prompt;
+- the pending custom-message queue (flushed at every turn end, at the
+  pre-settle boundary, and before a new prompt) and `:next-turn` messages
+  injected with the next prompt;
+- the per-request checkpoint (`config.prepareRequest`) wrapped by the
+  canonical session-projection install, and `peekQueuedMessages`;
+- append-only per-message context edits, durable omission of a recovered
+  attempt's message, and a compaction that cuts and counts over the
+  projection;
+- `context_with_system` running after `context` over the full transcript.
+
+Residuals are named in the Appendix rows (`ContextEditEntry` /
+`appendContextEdit`, `turn_start` / `turn_end`). Per-model image input limits
+remain in §2.
 
 ### 8. Summarization calls (compaction / branch summary)
 
@@ -400,16 +417,16 @@ pi events (`core/extensions/types.ts`) → kmet status (`app/event_bus.clj` `eve
 | `session_start` | ✅ `:session-start` | reason startup/reload/new/resume/fork; kmet lacks `reload` reason flag granularity |
 | `session_info_changed` | ✅ `:session-info-changed` | emitted by `/name` |
 | `session_before_switch` / `session_before_fork` | ✅ `:session-before-switch` / `:session-before-fork` | both emitted by `/switch` and `/fork` (reason :user/:auto), cancelable — handlers return {:cancel true} |
-| `session_before_compact` / `session_compact` / `session_compact_failed` | ✅ `:session-before-compact` / `:session-compact` / `:session-compact-failed` | the before-event is cancelable and may supply the content (`{:compaction {:summary … :first-kept-id … :tokens-before … :usage … :details …}}` — the entry then records `:from-hook`, and every event carries `:from-extension`); `:session-compact` carries the appended entry, and `:session-compact-failed` the cause behind pi's reason prefix (`Compaction failed: …` / `Auto-compaction failed: …` / `Context overflow recovery failed: …`) with `:will-retry false`; `:compaction-end` carries the pi-shaped result map. Dispatch parity landed as D — the threshold check also runs post-run, between `:agent-end` and the pre-settle boundary (pi: `_handlePostAgentRun` → `_checkCompaction`); the summarization call parity (retry policy, events, thinking level, caps, budget) is in §8 |
+| `session_before_compact` / `session_compact` / `session_compact_failed` | ✅ `:session-before-compact` / `:session-compact` / `:session-compact-failed` | the before-event is cancelable and may supply the content (`{:compaction {:summary … :first-kept-id … :tokens-before … :usage … :details …}}` — the entry then records `:from-hook`, and every event carries `:from-extension`); `:session-compact` carries the appended entry, and `:session-compact-failed` the cause behind pi's reason prefix (`Compaction failed: …` / `Auto-compaction failed: …` / `Context overflow recovery failed: …`) with `:will-retry false`; `:compaction-end` carries the pi-shaped result map. Dispatch parity: the threshold check also runs post-run, between `:agent-end` and the pre-settle boundary (pi: `_handlePostAgentRun` → `_checkCompaction`); the summarization call parity (retry policy, events, thinking level, caps, budget) is in §8 |
 | `session_before_tree` / `session_tree` | ✅ `:session-before-tree` / `:session-tree` | incl. cancel/summary/extension-summary results |
-| `ContextEditEntry` / `appendContextEdit` | ~ partial | the append-only per-message context edit landed (K): a `:context-edit` session entry omits (`:replacement nil`) or rewrites (`{:content …}`) one earlier message in the provider projection while the raw branch, usage totals, replay and the TUI keep it; committed through the actionable boundaries' `:entries` or `kmet.app.loop/append-context-edit!`, applied by `session/build-context-messages` (pi: `buildSessionProjection`) and honored by the projection-aware compaction estimate (pi: `estimateProjectedContextTokens`). Remaining: the canonical request-time install (pi: `_installAgentRequestProjection`), `_omitRecoveryAttempt` on retry/overflow, and the boundaries' `messageEntryId`/`toolResultEntryIds` + `BoundaryContextPreview`, plus the projection-aware compaction input (`compaction/prepare`) — see [`lifecycle.md`](../../lifecycle.md) K |
+| `ContextEditEntry` / `appendContextEdit` | ✅ | the append-only per-message context edit: a `:context-edit` session entry omits (`:replacement nil`) or rewrites (`{:content …}`) one earlier message in the provider projection while the raw branch, usage totals, replay and the TUI keep it; committed through the actionable boundaries' `:entries` or `kmet.app.loop/append-context-edit!`, applied by `session/build-context-messages` (pi: `buildSessionProjection`), installed as the request context before every provider request (pi: `_installAgentRequestProjection`), durably omitted for a recovered attempt (pi: `_omitRecoveryAttempt`), and followed by the compaction input and its reported count (pi: `findProjectedCutPoint` / `getMessagesFromProjectedEntryForCompaction`); the boundaries carry `:message-entry-id`/`:tool-result-entry-ids` plus the projection preview (pi: `BoundaryContextPreview`). Residuals: the preview is computed once per dispatch (pi rebuilds it per handler with the accumulated drafts), `:llm-messages` is the provider-agnostic part of pi's `convertToLlm`, and `findProjectedCutPoint`'s recovery-omission-suffix advance is not ported |
 | `session_shutdown` | ✅ `:session-shutdown` | emitted by `/reload` (reason reload) and `/new` (reason new, target-session-file) before the extension runtime is torn down (pi: teardownCurrent / session.reload) |
 | `context` | ✅ `:context` | fired before each LLM call with the conversation only — the leading system message is re-attached to a replacement (pi: `restoreSystemMessages`); handlers return `{:messages [...]}` to replace (last non-nil wins). Fires for every LLM call, the compaction summarization included — pi routes that outside `transformContext` |
-| `context_with_system` | ✅ `:context-with-system` | runs after `:context` over the full transcript and its result is sent verbatim; a result that drops the leading system message is reported and honored (pi 0.87.0 — landed as L, see [`lifecycle.md`](../../lifecycle.md)) |
+| `context_with_system` | ✅ `:context-with-system` | runs after `:context` over the full transcript and its result is sent verbatim; a result that drops the leading system message is reported and honored (pi 0.87.0 — landed; see §7) |
 | `before_agent_start` | ✅ | hook, not event |
-| `agent_start` / `agent_end` / `agent_settled` | ✅ `:agent-start` / `:agent-end` / `:agent-settled` | one `:agent-start`/`:agent-end` pair per attempt (`agent.prompt` then `agent.continue`, so auto-retry and overflow recovery each get their own); `:agent-end :messages` accumulates that attempt's messages (pi: `newMessages`) — a mid-run compaction does not shrink them, a cancelled/errored attempt is included, and `:will-retry` marks a retryable failure (added for public listeners only, as pi does — `_emitExtensionEvent` precedes the decoration); exactly one `:agent-settled` per prompt; a message an `:agent-end` handler queues starts a fresh attempt in the same prompt, with the queued messages as its prompt (pi: `hasQueuedMessages` → `agent.continue`; landed as E) |
-| `agent_before_settle` | ✅ `:agent-before-settle` | actionable; fires once before `:agent-settled` with the run's `:outcome`, commits returned entries, and `{:continue true}` runs one more attempt (landed as G — see [`lifecycle.md`](../../lifecycle.md)) |
-| `turn_start` / `turn_end` | ✅ `:turn-start` / `:turn-end` | pi 0.87.0's actionable `turn_end`: handlers return `{:entries [...] :continue bool}`, entries are committed in order, `:continue` forces one more request; also fires for an errored or aborted response, before `:agent-end` (landed as F — see [`lifecycle.md`](../../lifecycle.md)) |
+| `agent_start` / `agent_end` / `agent_settled` | ✅ `:agent-start` / `:agent-end` / `:agent-settled` | one `:agent-start`/`:agent-end` pair per attempt (`agent.prompt` then `agent.continue`, so auto-retry and overflow recovery each get their own); `:agent-end :messages` accumulates that attempt's messages (pi: `newMessages`) — a mid-run compaction does not shrink them, a cancelled/errored attempt is included, and `:will-retry` marks a retryable failure (added for public listeners only, as pi does — `_emitExtensionEvent` precedes the decoration); exactly one `:agent-settled` per prompt; a message an `:agent-end` handler queues starts a fresh attempt in the same prompt, with the queued messages as its prompt (pi: `hasQueuedMessages` → `agent.continue`) |
+| `agent_before_settle` | ✅ `:agent-before-settle` | actionable; fires once before `:agent-settled` with the run's `:outcome`, commits returned entries, and `{:continue true}` runs one more attempt (see §7); carries the boundary state `:pending-messages`/`:can-continue` and the projection preview `:context-entries`/`:context-messages`/`:llm-messages` (pi: `BoundaryContextPreview`) |
+| `turn_start` / `turn_end` | ✅ `:turn-start` / `:turn-end` | pi 0.87.0's actionable `turn_end`: handlers return `{:entries [...] :continue bool}`, entries are committed in order, `:continue` forces one more request; also fires for an errored or aborted response, before `:agent-end` (see §7); carries `:message-entry-id`/`:tool-result-entry-ids` and the projection preview |
 | `message_start` / `message_update` / `message_end` | ✅ | kmet `:message-update` carries `:delta` incl. tool-call |
 | `tool_execution_start` / `_update` / `_end` | ✅ | |
 | `tool_call` / `tool_result` | ~ (mechanism differs) | kmet does **not** emit `:tool-call`/`:tool-result` events on the event bus; the transform chain (block / arg-rewrite / result-rewrite) is wired into the agent's `:before-tool-call`/`:after-tool-call` callbacks via `register-tool-call-hook!`/`register-tool-result-hook!` instead. See §5. Event-bus execution lifecycle events are `:tool-execution-start`/`:tool-execution-update`/`:tool-execution-end` |

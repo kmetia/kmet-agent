@@ -1,16 +1,20 @@
 (ns kmet.app.compaction
   "LLM-based context compaction aligned with pi (pi: core/compaction/compaction.js).
-   Token estimation, cut-point selection, conversation serialization, and the
-   summarization prompts. Session replacement happens in kmet.app.session
-   (compact-with-summary!), orchestration in kmet.app.loop. Depends on
-   session/context-entries for the context-token estimate (pi: compaction.ts
-   imports buildSessionContext from session-manager).
+   Token estimation, cut-point selection over the session projection (so
+   append-only context edits shape both the summarized input and the reported
+   token count), conversation serialization, and the summarization prompts.
+   Session replacement happens in kmet.app.session (compact-with-summary!),
+   orchestration in kmet.app.loop. Depends on session/project-entries for the
+   projected cut point and kmet.ai.api.shared for the bash/custom wire text
+   (pi: compaction.ts imports buildSessionContext from session-manager and
+   convertToLlm from the message converters).
 
    Deviations from pi: no file-operation tracking (kmet does not record
    read/modified files); a split turn is summarized in a single call (pi uses a
    dedicated turn-prefix prompt and merges two summaries)."
   (:require [clojure.string :as str]
             [clojure.edn :as edn]
+            [kmet.ai.api.shared :as shared]
             [kmet.app.session :as session]
             [kmet.ai.usage :as usage]))
 
@@ -152,35 +156,39 @@
 
 ;; ─── Cut-point selection (pi: findCutPoint) ────────────────────────────────
 
-(defn- context-visible?
-  "True when an entry contributes to the LLM context. Tool results and
-   display-only entries are never valid cut points (pi: isCutPointMessage —
-   branch/compaction summaries count: they become user messages at the wire,
-   pi: convertToLlm)."
-  [entry]
-  (case (:role entry)
-    :user true
-    :assistant true
-    :system true
-    :compaction true
-    :branch-summary true
-    :bash (not (:exclude-from-context? entry))
+(defn- cut-point-message?
+  "True when a projected message may start the kept tail (pi:
+   isCutPointMessage): tool results and display-only entries never can."
+  [m]
+  (case (:role m)
+    (:user :assistant :compaction :branch-summary :custom) true
+    :bash (not (:exclude-from-context? m))
     false))
 
-(defn- turn-start?
-  "True when an entry begins a turn (pi: isTurnStartEntry)."
-  [entry]
-  (contains? #{:user :bash} (:role entry)))
+(defn- turn-start-message?
+  "True when a projected message begins a turn (pi: isTurnStartMessage)."
+  [m]
+  (contains? #{:user :bash :compaction :branch-summary :custom} (:role m)))
 
-(defn find-cut-point
-  "Find the entry index to start keeping from (pi: findCutPoint). Walks
-   backwards from the newest entry accumulating estimated tokens; cuts at the
-   closest valid cut point at/after the position where the budget
-   keep-recent-tokens is reached. Never cuts at a tool result.
+(defn find-projected-cut-point
+  "Find the projected entry index to start keeping from (pi:
+   findProjectedCutPoint). PROJECTED is a session projection
+   (session/project-entries): each entry carries its source entry and its
+   projected messages, so an omitted message contributes no tokens and is
+   never a cut point, while a rewritten one contributes its replacement.
+   Walks backwards from the newest entry accumulating estimated tokens; cuts
+   at the closest valid cut point at/after the position where the budget
+   keep-recent-tokens is reached, then walks the cut back over empty
+   projected entries so the kept range does not begin with invisible
+   bookkeeping. Never cuts at a tool result.
    Returns {:first-kept-index i :split-turn? bool}."
-  [entries keep-recent-tokens]
-  (let [n (count entries)
-        valid (filterv (fn [i] (context-visible? (nth entries i))) (range n))]
+  [projected keep-recent-tokens]
+  (let [n (count projected)
+        valid (filterv (fn [i]
+                         (let [pe (nth projected i)]
+                           (and (not= :compaction (:role (:source pe)))
+                                (some cut-point-message? (:messages pe)))))
+                       (range n))]
     (if (empty? valid)
       {:first-kept-index 0 :split-turn? false}
       (let [acc (volatile! 0)
@@ -188,7 +196,7 @@
             stop (volatile! false)]
         (loop [i (dec n)]
           (when (and (>= i 0) (not @stop))
-            (let [tokens (estimate-tokens (nth entries i))]
+            (let [tokens (reduce + 0 (map estimate-tokens (:messages (nth projected i))))]
               (when (pos? tokens)
                 (vswap! acc + tokens))
               (when (>= @acc keep-recent-tokens)
@@ -196,47 +204,62 @@
                   (vreset! cut c))
                 (vreset! stop true)))
             (recur (dec i))))
-        (let [cut-idx @cut]
+        (let [cut-idx (loop [i @cut]
+                        (let [prev (nth projected (dec i) nil)]
+                          (if (and (pos? i)
+                                   (empty? (:messages prev))
+                                   (not= :compaction (:role (:source prev))))
+                            (recur (dec i))
+                            i)))]
           {:first-kept-index cut-idx
-           :split-turn? (not (turn-start? (nth entries cut-idx)))})))))
+           :split-turn? (not (some turn-start-message?
+                                   (:messages (nth projected cut-idx))))})))))
 
 ;; ─── Preparation (pi: prepareCompaction) ───────────────────────────────────
 
 (defn prepare
-  "Compute what to compact (pi: prepareCompaction). The boundary starts at
-   the previous compaction's first-kept entry, so its kept tail is
-   re-summarizable (pi: boundaryStart = previous firstKeptEntryId — under
-   append-only compaction the kept tail sits before the compaction and must
-   not be skipped or it is dropped from context without being summarized).
-   Finds the cut point and collects the context-visible entries before it.
-   Returns {:first-kept-id str :messages [entries] :previous-summary
-   str-or-nil :tokens-before int} or nil when there is nothing to summarize
-   (including when the newest entry is a compaction — right after one just
-   finished, pi guards this to avoid immediate re-compaction)."
+  "Compute what to compact (pi: prepareCompaction) over the session
+   projection of ENTRIES (pi: findProjectedCutPoint /
+   getMessagesFromProjectedEntryForCompaction): an omitted message
+   contributes nothing to the summary or the token count, and a rewritten one
+   its replacement text. The boundary starts after the newest non-empty
+   compaction, so its kept tail is re-summarizable (pi: boundaryStart =
+   previous compaction + 1 — under append-only compaction the kept tail sits
+   before the compaction and must not be skipped or it is dropped from
+   context without being summarized). Finds the projected cut point and
+   collects the projected messages before it (compaction and system messages
+   excluded). Returns {:first-kept-id str :messages [messages]
+   :previous-summary str-or-nil :tokens-before int} or nil when there is
+   nothing to summarize (including when the newest entry is a compaction —
+   right after one just finished, pi guards this to avoid immediate
+   re-compaction)."
   [entries keep-recent-tokens]
   (when (and (seq entries)
              (not= :compaction (:role (last entries))))
-    (let [prev-idx (last (keep-indexed (fn [i e] (when (:summary e) i)) entries))
-          previous-summary (when prev-idx (:summary (nth entries prev-idx)))
-          boundary-start (if prev-idx
-                           (let [idx (first (keep-indexed
-                                             (fn [i e]
-                                               (when (= (:id e) (:first-kept-id (nth entries prev-idx)))
-                                                 i))
-                                             entries))]
-                             (if idx idx (inc prev-idx)))
-                           0)
-          cut (find-cut-point (subvec entries boundary-start) keep-recent-tokens)
+    (let [projected (session/project-entries (session/context-entries entries))
+          prev-idx (first (keep-indexed (fn [i pe]
+                                          (when (and (= :compaction (:role (:source pe)))
+                                                     (seq (:messages pe)))
+                                            i))
+                                        projected))
+          previous-summary (when prev-idx (:summary (:source (nth projected prev-idx))))
+          boundary-start (if prev-idx (inc prev-idx) 0)
+          cut (find-projected-cut-point (subvec projected boundary-start) keep-recent-tokens)
           cut-idx (+ boundary-start (:first-kept-index cut))
-          first-kept-id (:id (nth entries cut-idx))
-          msgs (vec (filter context-visible? (subvec entries boundary-start cut-idx)))]
+          first-kept-id (:id (:source (nth projected cut-idx)))
+          msgs (vec (mapcat (fn [pe]
+                              (if (= :compaction (:role (:source pe)))
+                                []
+                                (remove #(= :system (:role %)) (:messages pe))))
+                            (subvec projected boundary-start cut-idx)))]
       (when (and first-kept-id (seq msgs))
         {:first-kept-id first-kept-id
          :messages msgs
          :previous-summary previous-summary
-         ;; pi: tokensBefore = context tokens before compaction (the context
-         ;; excludes previously-summarized entries)
-         :tokens-before (estimated-tokens (session/context-entries entries))}))))
+         ;; pi: tokensBefore = the projected context's token count (an
+         ;; omitted message is not counted, a rewritten one counts its
+         ;; replacement)
+         :tokens-before (projected-context-tokens projected entries)}))))
 
 ;; ─── Conversation serialization (pi: serializeConversation) ────────────────
 
@@ -263,8 +286,10 @@
     (str (:name tc) "(" args-str ")")))
 
 (defn serialize-conversation
-  "Serialize context-visible entries to text for summarization (pi:
-   serializeConversation). Tool results are truncated to 2000 chars."
+  "Serialize context messages to text for summarization (pi:
+   serializeConversation over convertToLlm's messages): bash results and
+   custom messages project to user messages (pi: convertToLlm), so their text
+   survives a later compaction. Tool results are truncated to 2000 chars."
   [entries]
   (str/join "\n\n"
             (keep (fn [e]
@@ -286,6 +311,16 @@
                       :tool (let [t (content-text (:content e))]
                               (when (seq t)
                                 (str "[Tool result]: " (truncate-for-summary t))))
+                      ;; bash results and custom messages become user messages
+                      ;; at the wire (pi: convertToLlm bashExecution/custom) —
+                      ;; serialize the same text so it is not lost to a later
+                      ;; compaction
+                      :bash (when-not (:exclude-from-context? e)
+                              (let [t (str/trim (shared/bash-execution-text e))]
+                                (when (seq t) (str "[User]: " t))))
+                      (:custom :custom-message)
+                      (let [t (str/trim (content-text (:content e)))]
+                        (when (seq t) (str "[User]: " t)))
                       ;; compaction/branch_summary entries project to user
                       ;; messages in context — serialize their summary text so
                       ;; it survives a later compaction (pi: convertToLlm maps

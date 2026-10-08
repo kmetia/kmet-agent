@@ -631,28 +631,33 @@ Be precise and concise in your responses."}}]
    provenance and the captured thinking signature (pi: AssistantMessage
    carries provider/model/api plus per-block signatures — converters replay
    signatures only for same-provider-same-model messages and degrade
-   everything else to plain text). Returns the message."
+   everything else to plain text). Returns the persisted session entry —
+   its :id is the turn boundary's :message-entry-id — when the agent has a
+   session, else the message."
   [agent {:keys [text thinking tool-calls usage thinking-signature]}]
   (let [assistant-msg (cond-> (assoc (assistant-message text thinking tool-calls usage)
                                      :provider @(:provider agent)
                                      :model @(:model agent))
                         (seq thinking-signature) (assoc :thinking-signature thinking-signature))]
     (append-message! agent assistant-msg)
-    (when (:session agent)
-      (session/append-entry (:session agent) assistant-msg))
-    (emit agent {:type :message-end :message assistant-msg})
-    assistant-msg))
+    (let [entry (when (:session agent)
+                  (session/append-entry (:session agent) assistant-msg))]
+      (emit agent {:type :message-end :message assistant-msg})
+      (or entry assistant-msg))))
 
 (defn- record-abandoned-attempt!
   "Record an LLM attempt that never completed — stream error or user abort —
    in the session history without adding it to the live context, emitting
    :message-end (pi: a failed stream finalizes the partial as an
    AssistantMessage with stopReason \"error\"/\"aborted\" — message_end
-   persists it to the session file; for errors _prepareRetry then removes it
-   from agent state so the retried request never sees it; on resume it comes
-   back as a plain assistant message carrying its partial text). RESULT is
-   call-llm's delivered map with whatever partials arrived before the
-   abandonment."
+   persists it to the session file; for errors _prepareRetry then durably
+   omits it from the model projection (see omit-recovery-attempt!) so the
+   retried request never sees it, resume included; a terminal error is not
+   omitted, so a resumed session shows it as a plain assistant message
+   carrying its partial text). RESULT is call-llm's delivered map with
+   whatever partials arrived before the abandonment.
+   Returns the persisted session entry — its :id is the recovery omission's
+   target — when the agent has a session, else the bare message."
   [agent {:keys [text thinking tool-calls usage thinking-signature error]}
    stop-reason]
   (let [msg (cond-> (assoc (assistant-message text thinking tool-calls usage)
@@ -665,10 +670,10 @@ Be precise and concise in your responses."}}]
     ;; stopReason check, so agent_end reports it even though it never enters
     ;; the live context (_prepareRetry drops it from agent state).
     (record-run-message! agent msg)
-    (when (:session agent)
-      (session/append-entry (:session agent) msg))
-    (emit agent {:type :message-end :message msg})
-    msg))
+    (let [entry (when (:session agent)
+                  (session/append-entry (:session agent) msg))]
+      (emit agent {:type :message-end :message msg})
+      (or entry msg))))
 
 (defn- normalize-content
   "Normalize a message's :content to the canonical block vector: a string
@@ -1571,6 +1576,22 @@ Be precise and concise in your responses."}}]
     (reset! (:messages agent)
             (drop-incomplete-tool-calls (session/build-context-messages sess)))))
 
+(defn- omit-recovery-attempt!
+  "Durably omit a failed attempt's session entry from every future model
+   projection (pi: _omitRecoveryAttempt): a nil context edit keeps the raw
+   entry in the branch while dropping it from the projection, then the live
+   context is rebuilt from the projection (pi: _refreshFinalizedContext), so
+   a retry, the recovery compaction, or a later rebuild cannot re-send it.
+   pi also omits the attempt's terminal tool results; an errored response's
+   tool calls never execute, so there are none to target. ENTRY is the
+   errored assistant entry record-abandoned-attempt! persisted (nil without
+   a session)."
+  [agent entry]
+  (when-let [sess (:session agent)]
+    (when-let [id (:id entry)]
+      (session/append-context-edit! sess id nil))
+    (refresh-context-from-session! agent)))
+
 (defn- record-compaction!
   "Append the compaction entry for SUMMARY-RESULT (pi: appendCompaction),
    rebuild the in-memory context to mirror it, and return the result map
@@ -1899,14 +1920,19 @@ Be precise and concise in your responses."}}]
     (apply-next-turn-update! agent (dissoc update :context))))
 
 (defn- prepare-request!
-  "Run the :prepare-request hook for the request about to be sent and apply
-   its update (pi: agent-loop's config.prepareRequest, called before every
-   provider request; the session's install wraps it with the canonical
-   context). The hook receives {:context (the live messages) :model
+  "The per-request checkpoint (pi: the session's _installAgentRequestProjection
+   wrapping config.prepareRequest). The canonical session projection is
+   installed as the request context first — an append-only context edit
+   reaches the request even when no rebuild followed it — then the
+   :prepare-request hook receives that atomic view of {:context :model
    :thinking :system} and may return an update map with
-   apply-next-turn-update!'s keys; a :context replacement applies to this
-   request and the rest of the attempt without a turn boundary between."
+   apply-next-turn-update!'s keys. A hook :context replacement applies to this
+   request (and the rest of the attempt after it) without a turn boundary
+   between; the next request re-installs the projection, so a replacement is
+   not durable unless the hook re-applies it (pi re-canonicalizes the same
+   way)."
   [agent]
+  (refresh-context-from-session! agent)
   (when-let [f @(:prepare-request agent)]
     (apply-request-update!
      agent
@@ -2051,16 +2077,55 @@ Be precise and concise in your responses."}}]
   (and (apply-boundary-entries! agent (:entries boundary) event)
        (true? (:continue boundary))))
 
+(defn- boundary-context
+  "pi's BoundaryContextPreview (pi: _buildBoundaryContext): the projected
+   context entries and messages, and the provider-agnostic llm view
+   (compaction/branch-summary messages flattened to user messages). kmet's
+   remaining wire conversion — bash/custom roles, excluded bash, image
+   blocking — is provider-specific and runs inside call-llm, so
+   :llm-messages is the shared part pi's convertToLlm performs. Computed
+   once per boundary dispatch: a handler's own drafted entries are not
+   applied to it (pi rebuilds the preview per handler with the accumulated
+   drafts)."
+  [agent]
+  (when-let [sess (:session agent)]
+    (let [entries (session/project-context sess)
+          messages (vec (mapcat :messages entries))]
+      {:context-entries entries
+       :context-messages messages
+       :llm-messages (llm/convert-summary-messages messages)})))
+
+(defn- tool-result-entry-ids
+  "Session entry ids of the persisted results for TOOL-CALL-IDS, in call
+   order (pi: turn_end's toolResultEntryIds). The branch walk is
+   root→leaf, so a tool call executed twice resolves to its newest entry."
+  [agent tool-call-ids]
+  (if-let [sess (:session agent)]
+    (let [by-call (reduce (fn [m e]
+                            ;; kmet carries the id inside the :tool_result
+                            ;; block (pi: ToolResultMessage.toolCallId)
+                            (if-let [id (some #(when (= :tool_result (:type %))
+                                                 (:tool_use_id %))
+                                              (:content e))]
+                              (assoc m id (:id e))
+                              m))
+                          {}
+                          (session/get-branch sess))]
+      (into [] (keep by-call) tool-call-ids))
+    []))
+
 (defn- boundary-state
   "The accumulated state an actionable boundary hands its handlers, merged
    into the event each one sees (pi: emitBoundary's {entries, continue} over
-   the boundary context's pendingMessages/canContinue). Pending messages
-   include the deferred custom queue (pi: _getPendingBoundaryMessages)."
+   the boundary context's pendingMessages/canContinue/context preview).
+   Pending messages include the deferred custom queue (pi:
+   _getPendingBoundaryMessages)."
   [agent]
-  {:pending-messages (into (peek-queued-messages agent) @(:pending-custom agent))
-   :can-continue (boundary-can-continue? agent)
-   :entries []
-   :continue false})
+  (merge {:pending-messages (into (peek-queued-messages agent) @(:pending-custom agent))
+          :can-continue (boundary-can-continue? agent)
+          :entries []
+          :continue false}
+         (boundary-context agent)))
 
 (defn- emit-boundary
   "Route an actionable boundary event: the UI callback gets it as a plain
@@ -2087,6 +2152,10 @@ Be precise and concise in your responses."}}]
                                              :type :turn-end
                                              :turn-index turn-index
                                              :message assistant-msg
+                                             :message-entry-id (:id assistant-msg)
+                                             :tool-result-entry-ids
+                                             (tool-result-entry-ids
+                                              agent (map :id (:tool-calls assistant-msg)))
                                              :tool-results tool-results
                                              :outcome outcome))
         boundary-continues? (and (requested-continuation? agent boundary :turn-end)
@@ -2316,6 +2385,10 @@ Be precise and concise in your responses."}}]
      {:status :aborted}    — cancelled or terminal error
      {:status :retry   :error err :action action} — transient error, budget left
      {:status :overflow :error err}               — context overflow
+   :retry and :overflow carry :attempt-entry — the persisted session entry
+   of the failed assistant message record-abandoned-attempt! returned — which
+   the caller durably omits from the model projection before retrying (pi:
+   _prepareRetry / the overflow case both call _omitRecoveryAttempt).
    :agent-end is emitted here with this attempt's accumulated messages
    (RUN-TOKEN keys the accumulator) and :will-retry."
   [agent run-token {:keys [on-text on-thinking on-error]}]
@@ -2398,18 +2471,19 @@ Be precise and concise in your responses."}}]
                               ;; same retryable timeout error — never a
                               ;; silent hard abort.
                                 (let [err (str "LLM call timed out after "
-                                               (retry/llm-total-timeout-ms @(:cfg agent)) "ms")]
-                                ;; The deref sentinel (:timeout) carries no
-                                ;; partials, but the in-flight call's partials
-                                ;; snapshot does — keep whatever streamed
-                                ;; before the deadline (pi: a failed stream's
-                                ;; partial becomes the final message) so a
-                                ;; stalled attempt never loses its
-                                ;; text/thinking, while the retry classifier
-                                ;; still sees a normal error map.
-                                  (finish-turn! agent t (record-abandoned-attempt!
-                                                         agent (merge ((:partials call)) {:error err})
-                                                         :error) [])
+                                               (retry/llm-total-timeout-ms @(:cfg agent)) "ms")
+                                      ;; The deref sentinel (:timeout) carries no
+                                      ;; partials, but the in-flight call's partials
+                                      ;; snapshot does — keep whatever streamed
+                                      ;; before the deadline (pi: a failed stream's
+                                      ;; partial becomes the final message) so a
+                                      ;; stalled attempt never loses its
+                                      ;; text/thinking, while the retry classifier
+                                      ;; still sees a normal error map.
+                                      msg (record-abandoned-attempt!
+                                           agent (merge ((:partials call)) {:error err})
+                                           :error)]
+                                  (finish-turn! agent t msg [])
                                   (let [{:keys [kind] :as action}
                                         (retry/retry-decision
                                          {:err err
@@ -2421,7 +2495,8 @@ Be precise and concise in your responses."}}]
                                           :has-session (some? (:session agent))})]
                                     (if (= :backoff kind)
                                       (do (agent-end err true)
-                                          {:status :retry :error err :action action})
+                                          {:status :retry :error err :action action
+                                           :attempt-entry msg})
                                       (terminal-error! agent err on-error agent-end))))
 
                                 (:error result)
@@ -2462,14 +2537,16 @@ Be precise and concise in your responses."}}]
                                     ;; compaction territory, not auto-retry)
                                       :overflow-recover
                                       (do (agent-end err false)
-                                          {:status :overflow :error err})
+                                          {:status :overflow :error err
+                                           :attempt-entry msg})
 
                                     ;; Auto-retry with exponential backoff (pi:
                                     ;; _prepareRetry); the caller sleeps and
                                     ;; starts the next attempt
                                       :backoff
                                       (do (agent-end err true)
-                                          {:status :retry :error err :action action})
+                                          {:status :retry :error err :action action
+                                           :attempt-entry msg})
 
                                     ;; Terminal error (non-retryable or
                                     ;; retries exhausted)
@@ -2723,6 +2800,10 @@ Be precise and concise in your responses."}}]
                                    :max-attempts max-attempts
                                    :delay-ms delay-ms
                                    :error-message error})
+                      ;; pi: _prepareRetry omits the failed attempt from the
+                      ;; model projection before the backoff, so the retried
+                      ;; request (and every later rebuild) cannot re-send it
+                      (omit-recovery-attempt! agent (:attempt-entry outcome))
                       (if (retry/backoff-sleep! (:signal agent) delay-ms)
                         ;; Same context — a new low-level run with a fresh
                         ;; accumulator (pi: agent.continue, one agent_end per
@@ -2740,6 +2821,10 @@ Be precise and concise in your responses."}}]
                     :overflow
                     (let [error (:error outcome)]
                       (reset! (:overflow-recovered agent) true)
+                      ;; pi: _checkCompaction's overflow case omits the failed
+                      ;; attempt before the recovery compaction, so neither the
+                      ;; compaction input nor the retry re-sends it
+                      (omit-recovery-attempt! agent (:attempt-entry outcome))
                       (if (= true (compact-for-overflow! agent))
                         ;; The compaction shrank the context — retry the
                         ;; interrupted turn (pi: _checkCompaction → continue).

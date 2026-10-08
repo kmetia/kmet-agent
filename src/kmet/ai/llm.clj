@@ -33,12 +33,15 @@
 
 (def ^:private branch-summary-suffix "\n</summary>")
 
-(defn- convert-summary-messages
+(defn convert-summary-messages
   "pi: convertToLlm — compaction/branch-summary AgentMessages become user
    messages carrying their wrapped summary text. The conversion happens per
    request, so the agent context (and the TUI) keeps the summary roles and
    the extension context hook still sees them; only the wire payload is
-   flattened."
+   flattened. Public for the boundary context preview, which carries the
+   provider-agnostic part of the wire view (kmet's remaining conversion —
+   bash/custom roles, excluded bash, image blocking — is provider-specific
+   and runs inside call-llm)."
   [messages]
   (mapv (fn [m]
           (case (:role m)
