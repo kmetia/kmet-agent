@@ -953,12 +953,14 @@
    contexts — the SCI-incompatible Maven copies would be evaluated instead
    of bb's bundled ports. Matches the m2 layout: only the group is
    slash-munged, the artifact name keeps its dots (org.clojure/spec.alpha
-   lives at repository/org/clojure/spec.alpha/)."
+   lives at repository/org/clojure/spec.alpha/). ENTRY is a host path — its
+   separators are normalized, so Windows paths match too."
        [entry]
-       (some (fn [ga]
-               (let [[g a] (str/split ga #"/" 2)]
-                 (str/includes? entry (str "repository/" (str/replace g "." "/") "/" a "/"))))
-             bundled-artifacts))
+       (let [entry (str/replace entry "\\" "/")]
+         (some (fn [ga]
+                 (let [[g a] (str/split ga #"/" 2)]
+                   (str/includes? entry (str "repository/" (str/replace g "." "/") "/" a "/"))))
+               bundled-artifacts)))
 
      (defn- closure-jars
        "The complete transitive jar set for DEPS-MAP, computed in-process via
