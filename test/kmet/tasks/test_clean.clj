@@ -149,4 +149,5 @@
         (testing "its untracked siblings still go"
           (is (not (exists-under? root "dist")))
           (is (= ["dist"] removed))))
-      (finally (fs/delete-tree root)))))
+      ;; .git/objects files are read-only on Windows — delete-tree needs :force
+      (finally (fs/delete-tree root {:force true})))))

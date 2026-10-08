@@ -4,6 +4,7 @@
    (^:slow) spawns clj-kondo and covers the whole pipeline: both projections,
    both passes, dedupe."
   (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kmet.tasks.lint :as lint]))
 
@@ -155,7 +156,11 @@
           (is (= 1 (get messages "Unresolved symbol: undefined-shared-sym"))))
         (testing "findings carry the real path (normalized, mirror-free —
                   however the caller spelled it)"
-          (is (every? #(= (str (fs/normalize file)) (:filename %)) findings)))
+          ;; repo-relative spells findings with / on every host, fs/normalize
+          ;; with the platform's own separator
+          (is (every? #(= (str/replace (str (fs/normalize file)) "\\" "/")
+                          (:filename %))
+                      findings)))
         (testing "the summary counts every finding once"
           (is (= {:errors 3 :warnings 0 :info 0} (@summarize findings)))))
       (finally (fs/delete-tree dir)))))

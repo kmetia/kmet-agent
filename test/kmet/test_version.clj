@@ -97,4 +97,5 @@
             (git! dir "tag" "v0.2.0")
             (is (= "0.2.0" (version/artifact-version dir)))))
         (finally
-          (fs/delete-tree dir))))))
+          ;; .git/objects files are read-only on Windows — delete-tree needs :force
+          (fs/delete-tree dir {:force true}))))))

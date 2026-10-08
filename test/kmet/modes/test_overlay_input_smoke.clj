@@ -3,7 +3,8 @@
    dialog, close it with ESC, type - the editor must receive the text.
    Drives this host's real app (`jolt start` under jolt, `bb start` under
    babashka) through a pty via an inline python3 driver, so this is ^:slow
-   and skipped when python3 is unavailable (Windows).
+   and skipped when python3 is unavailable or the host cannot fork a pty
+   (Windows).
 
    The driver stages key off OUTPUT markers, not wall-clock delays, so a
    slow or fast startup cannot make the sequence racy: each stage waits for
@@ -107,8 +108,8 @@ sys.exit(status)
 (deftest ^:slow test-overlay-close-keeps-editor-alive
   (testing "the /lsp incident end to end: ESC-closing the dialog must not
            swallow subsequent typing"
-    (if-not (python3-available?)
-      (is true "skipped: python3 not available")
+    (if-not (and (python3-available?) (not (host/windows?)))
+      (is true "skipped: python3 or a POSIX pty is not available")
       ;; target/ over fs/temp-dir: /tmp does not exist everywhere
       ;; (Termux) and target is already gitignored build space
       (let [out-dir (str (fs/path (fs/cwd) "target"))
