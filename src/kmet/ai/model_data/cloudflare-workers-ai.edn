@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-03T13:19:51Z"
+ :generated-at "2026-10-09T09:05:00Z"
  :provider {:id :cloudflare-workers-ai
             :name "Cloudflare Workers AI"
             :env-vars ["CLOUDFLARE_API_KEY" "CLOUDFLARE_ACCOUNT_ID"]
@@ -134,7 +134,7 @@
     :api :openai-completions
     :base-url "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1"
     :reasoning false
-    :input [:text]
+    :input [:text :image]
     :cost {:input 0.351 :output 0.555 :cache-read 0 :cache-write 0}
     :context-window 128000
     :max-tokens 128000

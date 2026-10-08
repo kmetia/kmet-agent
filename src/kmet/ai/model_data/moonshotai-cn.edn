@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-24T07:02:29Z"
+ :generated-at "2026-10-09T09:05:00Z"
  :provider {:id :moonshotai-cn
             :name "Moonshot AI (CN)"
             :env-vars ["MOONSHOT_API_KEY"]
@@ -74,7 +74,7 @@
                          :off nil
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 0}
+    :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3}
     :context-window 1048576
     :max-tokens 1048576
     :compat {:supports-store false

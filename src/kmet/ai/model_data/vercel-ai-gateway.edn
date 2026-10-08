@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-07T06:36:59Z"
+ :generated-at "2026-10-09T09:05:00Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -23,7 +23,7 @@
     :provider :vercel-ai-gateway
     :api :anthropic-messages
     :base-url "https://ai-gateway.vercel.sh"
-    :reasoning true
+    :reasoning false
     :input [:text]
     :cost {:input 0.22 :output 0.88 :cache-read 0 :cache-write 0}
     :context-window 262144
@@ -450,6 +450,17 @@
     :cost {:input 1 :output 5 :cache-read 0.1 :cache-write 1.25}
     :context-window 200000
     :max-tokens 64000}
+   "anthropic/claude-haiku-5.5"
+   {:id "anthropic/claude-haiku-5.5"
+    :name "Claude Haiku 5.5"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.1 :output 0.5 :cache-read 0.01 :cache-write 0.125}
+    :context-window 1000000
+    :max-tokens 128000}
    "anthropic/claude-opus-4"
    {:id "anthropic/claude-opus-4"
     :name "Claude Opus 4"
@@ -633,7 +644,7 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
+    :cost {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5}
     :context-window 1000000
     :max-tokens 128000
     :compat {:force-adaptive-thinking true}}
@@ -681,6 +692,17 @@
     :cost {:input 0.5 :output 2.5 :cache-read 0.1 :cache-write 0}
     :context-window 262144
     :max-tokens 262144}
+   "callstack/apex"
+   {:id "callstack/apex"
+    :name "Apex"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.5 :output 3 :cache-read 0.2 :cache-write 0}
+    :context-window 262144
+    :max-tokens 131072}
    "cohere/command-a"
    {:id "cohere/command-a"
     :name "Command A"
@@ -714,17 +736,6 @@
     :cost {:input 0.25 :output 0.95 :cache-read 0.13 :cache-write 0}
     :context-window 163840
     :max-tokens 128000}
-   "deepseek/deepseek-v3.1-terminus"
-   {:id "deepseek/deepseek-v3.1-terminus"
-    :name "DeepSeek V3.1 Terminus"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning true
-    :input [:text]
-    :cost {:input 0.27 :output 1 :cache-read 0.135 :cache-write 0}
-    :context-window 131072
-    :max-tokens 65536}
    "deepseek/deepseek-v3.2"
    {:id "deepseek/deepseek-v3.2"
     :name "DeepSeek V3.2"
@@ -813,17 +824,6 @@
     :cost {:input 0.3 :output 1.2 :cache-read 0.007 :cache-write 0}
     :context-window 1048576
     :max-tokens 32768}
-   "deepseek/deepseek-v4.1-flash-fast"
-   {:id "deepseek/deepseek-v4.1-flash-fast"
-    :name "DeepSeek V4.1 Flash Fast"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning true
-    :input [:text :image]
-    :cost {:input 0.3 :output 1.2 :cache-read 0.006 :cache-write 0}
-    :context-window 1048576
-    :max-tokens 1000000}
    "fireworks/ember-1"
    {:id "fireworks/ember-1"
     :name "Ember-1"
@@ -1415,9 +1415,9 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning false
     :input [:text]
-    :cost {:input 0.04 :output 0.17 :cache-read 0 :cache-write 0}
-    :context-window 60288
-    :max-tokens 16000}
+    :cost {:input 0.019 :output 0.03 :cache-read 0 :cache-write 0}
+    :context-window 131072
+    :max-tokens 131072}
    "mistral/mistral-small"
    {:id "mistral/mistral-small"
     :name "Mistral Small"
@@ -1451,17 +1451,6 @@
     :cost {:input 0.57 :output 2.3 :cache-read 0 :cache-write 0}
     :context-window 131072
     :max-tokens 131072}
-   "moonshotai/kimi-k2-thinking"
-   {:id "moonshotai/kimi-k2-thinking"
-    :name "Kimi K2 Thinking"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning true
-    :input [:text]
-    :cost {:input 0.47 :output 2 :cache-read 0.141 :cache-write 0}
-    :context-window 216144
-    :max-tokens 216144}
    "moonshotai/kimi-k2.5"
    {:id "moonshotai/kimi-k2.5"
     :name "Kimi K2.5"
@@ -2558,17 +2547,17 @@
     :cost {:input 1 :output 2 :cache-read 0.2 :cache-write 0}
     :context-window 256000
     :max-tokens 256000}
-   "stepfun/step-3.5-flash"
-   {:id "stepfun/step-3.5-flash"
-    :name "StepFun 3.5 Flash"
+   "stealth/glyph-cluster"
+   {:id "stealth/glyph-cluster"
+    :name "Glyph Cluster"
     :provider :vercel-ai-gateway
     :api :anthropic-messages
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
-    :input [:text :image]
-    :cost {:input 0.09 :output 0.3 :cache-read 0.02 :cache-write 0}
-    :context-window 262114
-    :max-tokens 262114}
+    :input [:text]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 256000
+    :max-tokens 256000}
    "stepfun/step-3.7-flash"
    {:id "stepfun/step-3.7-flash"
     :name "Step 3.7 Flash"
@@ -2654,7 +2643,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.04 :output 1.28 :cache-read 0.04 :cache-write 0}
+    :cost {:input 0.14 :output 0.28 :cache-read 0.0028 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072}
    "xiaomi/mimo-v2.6-pro"

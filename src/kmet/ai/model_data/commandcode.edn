@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-07T06:36:59Z"
+ :generated-at "2026-10-09T09:05:00Z"
  :provider {:id :commandcode
             :name "Command Code"
             :env-vars ["CMD_API_KEY"]
@@ -41,6 +41,17 @@
     :cost {:input 1 :output 5 :cache-read 0.1 :cache-write 1.25}
     :context-window 200000
     :max-tokens 64000}
+   "claude-haiku-5-5"
+   {:id "claude-haiku-5-5"
+    :name "Claude Haiku 5.5"
+    :provider :commandcode
+    :api :anthropic-messages
+    :base-url "https://api.commandcode.ai/provider"
+    :reasoning false
+    :input [:text]
+    :cost {:input 0.1 :output 0.5 :cache-read 0.01 :cache-write 0.125}
+    :context-window 1000000
+    :max-tokens 32768}
    "claude-opus-4-7"
    {:id "claude-opus-4-7"
     :name "Claude Opus 4.7"
@@ -125,7 +136,7 @@
     :base-url "https://api.commandcode.ai/provider"
     :reasoning false
     :input [:text]
-    :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
+    :cost {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5}
     :context-window 1000000
     :max-tokens 32768}}
   :openai-completions
@@ -892,6 +903,17 @@
     :context-window 1000000
     :max-tokens 128000
     :compat {:thinking-format :openrouter}}
+   "stealth/glyph-cluster:free"
+   {:id "stealth/glyph-cluster:free"
+    :name "Glyph Cluster"
+    :provider :commandcode
+    :api :openai-completions
+    :base-url "https://api.commandcode.ai/provider/v1"
+    :reasoning false
+    :input [:text]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 256000
+    :max-tokens 32768}
    "stepfun/Step-3.5-Flash"
    {:id "stepfun/Step-3.5-Flash"
     :name "Step 3.5 Flash"

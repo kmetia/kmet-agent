@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-29T16:15:58Z"
+ :generated-at "2026-10-09T09:05:00Z"
  :provider {:id :anthropic
             :name "Anthropic"
             :env-vars ["ANTHROPIC_AUTH_TOKEN" "ANTHROPIC_OAUTH_TOKEN" "ANTHROPIC_API_KEY"]
@@ -54,6 +54,21 @@
     :cost {:input 1 :output 5 :cache-read 0.1 :cache-write 1.25}
     :context-window 200000
     :max-tokens 64000}
+   "claude-haiku-5-5"
+   {:id "claude-haiku-5-5"
+    :name "Claude Haiku 5.5"
+    :provider :anthropic
+    :api :anthropic-messages
+    :base-url "https://api.anthropic.com"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.1
+           :tiers [{:input 0.5 :input-tokens-above 100000 :output 2.5 :cache-read 0.05 :cache-write 0.625}]
+           :output 0.5
+           :cache-read 0.01
+           :cache-write 0.125}
+    :context-window 1000000
+    :max-tokens 128000}
    "claude-opus-4-5"
    {:id "claude-opus-4-5"
     :name "Claude Opus 4.5 (latest)"
@@ -150,7 +165,7 @@
     :reasoning true
     :input [:text :image]
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
-    :context-window 1000000
+    :context-window 200000
     :max-tokens 64000}
    "claude-sonnet-4-5-20250929"
    {:id "claude-sonnet-4-5-20250929"
@@ -161,7 +176,7 @@
     :reasoning true
     :input [:text :image]
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
-    :context-window 1000000
+    :context-window 200000
     :max-tokens 64000}
    "claude-sonnet-4-6"
    {:id "claude-sonnet-4-6"
@@ -198,7 +213,7 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
+    :cost {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5}
     :context-window 1000000
     :max-tokens 128000
     :compat {:force-adaptive-thinking true}}}}}

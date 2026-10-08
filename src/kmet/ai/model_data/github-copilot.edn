@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-02T10:35:48Z"
+ :generated-at "2026-10-09T09:05:00Z"
  :provider {:id :github-copilot
             :name "GitHub Copilot"
             :env-vars ["COPILOT_GITHUB_TOKEN"]
@@ -17,6 +17,25 @@
     :cost {:input 1 :output 5 :cache-read 0.1 :cache-write 1.25}
     :context-window 200000
     :max-tokens 64000
+    :headers {"Copilot-Integration-Id" "vscode-chat"
+              "Editor-Plugin-Version" "copilot-chat/0.35.0"
+              "Editor-Version" "vscode/1.107.0"
+              "User-Agent" "GitHubCopilotChat/0.35.0"}}
+   "claude-haiku-5.5"
+   {:id "claude-haiku-5.5"
+    :name "Claude Haiku 5.5"
+    :provider :github-copilot
+    :api :anthropic-messages
+    :base-url "https://api.individual.githubcopilot.com"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.1
+           :tiers [{:input 0.5 :input-tokens-above 100000 :output 2.5 :cache-read 0.05 :cache-write 0.625}]
+           :output 0.5
+           :cache-read 0.01
+           :cache-write 0.125}
+    :context-window 1000000
+    :max-tokens 128000
     :headers {"Copilot-Integration-Id" "vscode-chat"
               "Editor-Plugin-Version" "copilot-chat/0.35.0"
               "Editor-Version" "vscode/1.107.0"
@@ -132,7 +151,7 @@
     :reasoning true
     :thinking-level-map {:max "max" :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
+    :cost {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5}
     :context-window 1000000
     :max-tokens 128000
     :headers {"Copilot-Integration-Id" "vscode-chat"

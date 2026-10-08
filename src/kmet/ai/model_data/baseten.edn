@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-30T20:07:26Z"
+ :generated-at "2026-10-09T09:05:00Z"
  :provider {:id :baseten
             :name "Baseten"
             :env-vars ["BASETEN_API_KEY"]
@@ -108,7 +108,7 @@
              :supports-strict-mode true}}
    "deepseek-ai/DeepSeek-V4.1-Flash-Fast"
    {:id "deepseek-ai/DeepSeek-V4.1-Flash-Fast"
-    :name "deepseek-ai/DeepSeek-V4.1-Flash-Fast"
+    :name "DeepSeek V4.1 Flash Fast"
     :provider :baseten
     :api :openai-completions
     :base-url "https://inference.baseten.co/v1"
