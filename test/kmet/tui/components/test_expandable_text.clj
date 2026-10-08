@@ -52,12 +52,12 @@
 (t/deftest test-dispose-disposes-the-inner-text
   ;; the wrapper renders an inner Text that registers its own track! watches;
   ;; it is not a container child, so the wrapper's dispose must reach it
-  (let [watchers #(count @(deref #'macros/watch-registry))
+  (let [watchers macros/live-watch-count
         pre (watchers)
         c (et/make-expandable-text (fn [] "collapsed") (fn [] "expanded"))]
     (core/render c 40)
-    (t/is (= (+ 2 pre) (watchers))
-          "the wrapper and its inner Text are tracked")
+    (t/is (macros/tracked? c) "the wrapper is tracked")
+    (t/is (macros/tracked? @(:text-comp c)) "its inner Text is tracked")
     (protocols/dispose c)
-    (t/is (= pre (watchers))
+    (t/is (<= (watchers) pre)
           "disposing the wrapper disposes the inner Text")))

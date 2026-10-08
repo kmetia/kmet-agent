@@ -889,31 +889,31 @@
   ;; every suggestion update builds a fresh SelectList; a replaced or
   ;; cancelled dropdown must be disposed or its track! registry entry
   ;; outlives it
-  (let [watchers #(count @(deref #'macros/watch-registry))
+  (let [watchers macros/live-watch-count
         e (make-ac-editor)
         pre (watchers)]
     (core/handle-input e "/")
     (core/render e 80)
     (let [with-list (watchers)]
-      (t/is (= (inc pre) with-list) "the open dropdown is tracked")
+      (t/is (macros/tracked? @(:autocomplete-list e)) "the open dropdown is tracked")
       (doseq [c "the"]
         (core/handle-input e (str c))
         (core/render e 80)
-        (t/is (= with-list (watchers))
+        (t/is (<= (watchers) with-list)
               "replacing the dropdown disposes the previous list"))
       (core/handle-input e K-ESC)
       (core/render e 80)
-      (t/is (= pre (watchers)) "cancelling disposes the dropdown list"))))
+      (t/is (<= (watchers) pre) "cancelling disposes the dropdown list"))))
 
 (t/deftest test-dispose-disposes-the-open-dropdown
-  (let [watchers #(count @(deref #'macros/watch-registry))
+  (let [watchers macros/live-watch-count
         e (make-ac-editor)
         pre (watchers)]
     (core/handle-input e "/")
     (core/render e 80)
-    (t/is (= (inc pre) (watchers)))
+    (t/is (macros/tracked? @(:autocomplete-list e)))
     (protocols/dispose e)
-    (t/is (= pre (watchers)) "disposing the editor disposes the dropdown")))
+    (t/is (<= (watchers) pre) "disposing the editor disposes the dropdown")))
 
 (t/deftest test-autocomplete-at-trigger-file-completion
   (with-ac-files

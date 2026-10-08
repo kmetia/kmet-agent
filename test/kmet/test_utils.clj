@@ -25,6 +25,19 @@
   [s]
   (u/strip-ansi-codes s))
 
+(defn await-collected
+  "True when PRED becomes true within ~5 s of forced-GC attempts (~50 ms
+   apart). ^:slow tests only: it calls System/gc and sleeps between attempts,
+   so it must never appear in the fast suite."
+  [pred]
+  (loop [n 100]
+    (cond
+      (pred) true
+      (zero? n) false
+      :else (do (System/gc)
+                (Thread/sleep 50)
+                (recur (dec n))))))
+
 (t/deftest test-strip-ansi-strips-osc-hyperlinks
   ;; Both OSC terminators (BEL and ESC\) and the CSI styles around them.
   (t/is (= "read src/a.clj"

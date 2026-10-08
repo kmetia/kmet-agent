@@ -195,11 +195,11 @@
   ;; disposed — a dropped Text keeps its track! watch registered, which
   ;; would grow the registry per keypress and pin the components.
   (let [sel (selector)
-        watchers #(count @(deref #'macros/watch-registry))]
+        watchers macros/live-watch-count]
     (core/render sel 80)
     (let [baseline (watchers)]
       (dotimes [_ 6] (press sel "down") (core/render sel 80))
-      (t/is (= baseline (watchers))
+      (t/is (<= (watchers) baseline)
             "steady state: navigation does not accumulate watches"))))
 
 (t/deftest test-root-body-memoizes-idle-frames

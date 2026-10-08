@@ -83,16 +83,17 @@
     {:show-images true :image-width-cells 20}
     {:images :kitty :true-color true :hyperlinks true}
     (fn []
-      (let [watchers #(count @(deref #'macros/watch-registry))
+      (let [watchers macros/live-watch-count
             baseline (watchers)
             b (ib/make-image-block png "image/png")]
         (try
           (doseq [width [40 60 80]]
             (is (some #(str/includes? % "\u001b_G") (core/render b width)))
-            (is (= (inc baseline) (watchers))
+            (is (macros/tracked? b) "the ImageBlock is tracked")
+            (is (<= (watchers) (inc baseline))
                 "only the ImageBlock, not its temporary Image, stays tracked"))
           (finally (protocols/dispose b)))
-        (is (= baseline (watchers)))))))
+        (is (<= (watchers) baseline))))))
 
 (deftest image-reflow-reuses-the-kitty-image-id
   (with-image-env

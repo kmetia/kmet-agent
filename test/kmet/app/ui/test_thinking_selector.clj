@@ -140,11 +140,11 @@
   ;; Rows re-derive per navigation (pi updateList) — the retired rows must
   ;; be disposed or each keypress leaks a row-set of track! watches.
   (let [sel (selector)
-        watchers #(count @(deref #'macros/watch-registry))]
+        watchers macros/live-watch-count]
     (core/render sel 60)
     (let [baseline (watchers)]
       (dotimes [_ 6] (press sel "down") (core/render sel 60))
-      (t/is (= baseline (watchers))
+      (t/is (<= (watchers) baseline)
             "steady state: navigation does not accumulate watches"))))
 
 (t/deftest test-root-body-memoizes-idle-frames

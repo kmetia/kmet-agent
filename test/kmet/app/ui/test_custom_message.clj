@@ -129,25 +129,25 @@
 (deftest test-collapsible-rebuild-no-watch-leak
   (testing "expand/collapse rebuilds dispose the replaced children — watch
             registry stays flat across toggles"
-    (let [watchers #(count @(deref #'macros/watch-registry))
+    (let [watchers macros/live-watch-count
           c (cm/make-custom-message :label "ext" :content "collapsed text")]
       (cm/custom-message-set-collapsible-content! c "collapsed text" "expanded text")
       (core/render c 60)
       (let [baseline (watchers)]
         (dotimes [i 6] (cm/custom-message-set-expanded! c (odd? i)) (core/render c 60))
-        (is (= baseline (watchers))
+        (is (<= (watchers) baseline)
             "toggling expansion does not accumulate watches")))))
 
 (deftest test-theme-switch-rebuild-no-watch-leak
   (testing "a theme switch rebuilds the children once and re-caches"
-    (let [watchers #(count @(deref #'macros/watch-registry))
+    (let [watchers macros/live-watch-count
           c (cm/make-custom-message :label "ext" :content "note")]
       (core/render c 60)
       (let [baseline (watchers)]
         (reset! theme/theme-atom (theme/get-theme "light"))
         (try
           (core/render c 60)
-          (is (= baseline (watchers))
+          (is (<= (watchers) baseline)
               "the re-themed rebuild disposed the replaced children")
           (finally (reset! theme/theme-atom (theme/get-theme "dark"))))))))
 
@@ -155,7 +155,7 @@
   (testing "a pad change patches the live box — the inner container and
             its children are reused, so nothing is disposed and the watch
             registry does not move"
-    (let [watchers #(count @(deref #'macros/watch-registry))
+    (let [watchers macros/live-watch-count
           pad (atom 1)
           c (cm/make-custom-message :label "ext" :content "note"
                                     :output-pad-atom pad)
@@ -171,7 +171,7 @@
         (is (= old-children (vec @(:children old-container)))
             "the content children (and their expansion state) survived")
         (core/render c 60)
-        (is (= baseline (watchers))
+        (is (<= (watchers) baseline)
             "an in-place patch touches no watches")
         (is (some #(str/starts-with? (strip-ansi %) "   [ext]")
                   (core/render c 60))

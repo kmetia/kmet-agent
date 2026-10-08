@@ -11,7 +11,9 @@
             [kmet.tui.components.markdown :as md]
             [kmet.tui.components.select-list :as sl]
             [kmet.tui.components.settings-list :as settings]
-            [kmet.app.ui.footer :as footer]))
+            [kmet.app.ui.footer :as footer]
+            [kmet.libs.weak :as weak]
+            [kmet.test-utils :as test-utils]))
 
 (t/deftest test-set!-auto-invalidates
   ;; text-set! no longer calls invalidate — the watch must do it
@@ -101,6 +103,67 @@
     (text/text-set! c "b") ;; no watch → no invalidation
     (let [lines (core/render c 5)]
       (t/is (.contains (first lines) "b")))))
+
+;; ─── weak registry (leaks.md Pass 2, Stage B) ─────────────────────────────
+
+(t/deftest test-live-watch-count-follows-render-and-dispose
+  (t/testing "the track! registry is weak-registry backed: a live component
+            counts, dispose unregisters, both idempotently"
+    (let [pre (macros/live-watch-count)
+          c (text/make-text "a" 0 0)]
+      (t/is (not (macros/tracked? c)) "nothing is registered before the first render")
+      (core/render c 5)
+      (t/is (macros/tracked? c))
+      (protocols/dispose c)
+      (t/is (not (macros/tracked? c)) "the entry is gone")
+      (t/is (<= (macros/live-watch-count) pre))
+      (t/is (nil? (protocols/dispose c)) "dispose again is a no-op"))))
+
+(t/deftest test-dispose-before-any-render-is-a-no-op
+  (t/testing "teardown must not mint a key for a component that never ran
+            a track! body"
+    (let [pre (macros/live-watch-count)
+          c (text/make-text "a" 0 0)]
+      (t/is (not (macros/tracked? c)))
+      (t/is (nil? (protocols/dispose c)))
+      (t/is (<= (macros/live-watch-count) pre)))))
+
+(defn- make-droppable-text
+  "A rendered text component with only non-component references escaping
+   (weak ref, watch key, its tracked atom) so it can be collected."
+  []
+  (let [c (text/make-text "drop" 0 0)]
+    (core/render c 5)
+    {:wref (java.lang.ref.WeakReference. c)
+     :key (:kmet.tui.macros/watch-key (meta (:cache c)))
+     :text-atom (:text-atom c)}))
+
+(defn- live-subject?
+  "True while KEY's weak entry still holds its subject. Look the subject up
+   inside a helper: a direct (weak/subject key) (or any component value)
+   evaluated in the deftest body stays in bb/SCI's interpreter frame and
+   roots the component, defeating the collection assertion."
+  [key]
+  (some? (weak/subject key)))
+
+(t/deftest ^:slow test-dropped-component-is-reclaimed-by-gc-and-sweep
+  (t/testing "Stage B: a component dropped without dispose (the third-party
+            drop-site case) is reclaimed once collected — the sweep unwatches
+            its refs and removes the registry entry"
+    (let [pre (macros/live-watch-count)
+          {:keys [wref key text-atom]} (make-droppable-text)]
+      (t/is (live-subject? key) "live while referenced")
+      (t/is (test-utils/await-collected #(nil? (.get wref)))
+            "the component was collected")
+      (t/is (contains? (.getWatches text-atom) key)
+            "the atom watch is still installed until the sweep")
+      (macros/sweep-dead-watches!)
+      (t/is (not (contains? (.getWatches text-atom) key))
+            "the sweep removed the atom watch")
+      (t/is (not (live-subject? key)) "the registry entry is gone")
+      ;; <=, not =: the forced GC may also clear unrelated stale entries from
+      ;; earlier tests, which lowers the registry-wide live count.
+      (t/is (<= (macros/live-watch-count) pre)))))
 
 (t/deftest test-tracker-keys-are-unique-and-meta-owned
   (t/testing "finding 4: the watch key lives in the component's cache atom

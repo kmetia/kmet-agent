@@ -8,7 +8,8 @@
    invalidate call. It must be a macro because deref rewriting happens at
    compile time. Also hosts with-let — per-instance fn-component state —
    and defcomponent."
-  (:require [kmet.libs.reakt :as reakt]))
+  (:require [kmet.libs.reakt :as reakt]
+            [kmet.libs.weak :as weak]))
 
 (def ^:private deref-form?
   "Only the 1-arg (deref x) form — @x reads as (clojure.core/deref x).
@@ -68,14 +69,12 @@
   (when-let [a (component-cache-atom component)]
     (::watch-key (meta a))))
 
-;; Watch key → {:component c :atoms #{...}} for every live track! scope
-;; (the set mixes plain atoms and reactive refs — both watched per pass).
-;; track-render keeps it current per pass (dropping watches for refs a
-;; branch switch stopped reading); remove-track-watches! tears down from
-;; it on dispose. Without it, watches would outlive their component —
-;; zombie watchers pinning the component and firing invalidate-cache on
-;; every write forever.
-(defonce ^:private watch-registry (atom {}))
+(defn- unwatch-all!
+  "Remove KEY's watches from every ref in REFS (an entry payload's :atoms)."
+  [key refs]
+  (doseq [ref refs]
+    (reakt/unwatch-ref ref key))
+  nil)
 
 (declare invalidate-cache schedule-frame!)
 
@@ -118,7 +117,11 @@
    next hit check and forces a re-render.
    Requires COMPONENT to have a :cache-atom (or legacy :cache) field.
    A body that invalidates itself mid-run (a render fn calling :invalidate)
-   is not cached — the next render re-runs it with the fresh state."
+   is not cached — the next render re-runs it with the fresh state.
+   Atom handlers capture the component's watch KEY only and find the
+   component through the weak registry, so a watch never roots a component;
+   a collected component's watches are removed by the next sweep
+   (kmet.libs.weak, leaks.md Stage B)."
   [component width render-fn]
   (let [cache-atom (component-cache-atom component)
         cache @cache-atom]
@@ -138,9 +141,10 @@
              (reduce-kv atoms-unchanged? true (:atoms cache))
              (reduce-kv rx-unchanged? true (:rx cache)))
       (:result cache)
-      (let [tracked (atom {})]
+      (let [tracked (atom {})
+            watch-key (tracker-key component)]
         (binding [reakt/*tracking-scope* tracked]
-          (let [cache-watch-key (keyword (str "track!cache" (System/identityHashCode component)))
+          (let [cache-watch-key (keyword (str (name watch-key) "-cache"))
                 invalidated? (atom false)
                 ;; Watch the cache atom itself: an invalidate mid-body (a
                 ;; render fn calling :invalidate, or a tracked atom changing
@@ -166,22 +170,17 @@
                                                [(assoc atom-vals ref v) rx-vals])))
                                          [{} {}]
                                          tracked-map)
-                    watch-key (tracker-key component)
-                    handler (fn [_ _ old new]
-                              ;; Skip invalidation when the value didn't actually
-                              ;; change: renders are pure functions of tracked
-                              ;; values, so an equal value means the cached result
-                              ;; is still valid. (Clojure fires watches even on
-                              ;; equal-value reset!/swap!; reactions already gate
-                              ;; their notifications on = — the check is shared
-                              ;; anyway.) identical? is the O(1) fast path;
-                              ;; structural = catches persistent copies (fresh
-                              ;; object, equal content).
-                              (when-not (or (identical? old new)
-                                            (= old new))
-                                (invalidate-cache component)))
                     atoms (set (keys tracked-map))
-                    prev-atoms (:atoms (get @watch-registry watch-key))]
+                    prev-atoms (:atoms (weak/payload watch-key))
+                    ;; KEY only — the atom watch must not root the component.
+                    handler (let [k watch-key]
+                              (fn [_ _ old new]
+                                ;; equal-value resets are no-ops: identical?
+                                ;; fast path, structural = for persistent copies
+                                (when-not (or (identical? old new)
+                                              (= old new))
+                                  (when-let [c (weak/subject k)]
+                                    (invalidate-cache c)))))]
                 (doseq [a atoms]
                   (reakt/watch-ref a watch-key handler))
                 ;; A previous pass's refs this pass no longer reads (branch
@@ -190,8 +189,13 @@
                 (doseq [a prev-atoms]
                   (when-not (contains? atoms a)
                     (reakt/unwatch-ref a watch-key)))
-                (swap! watch-registry assoc watch-key
-                       {:component component :atoms atoms})
+                ;; The weak entry is the teardown record: remove-track-watches!
+                ;; unregisters it, and the sweep claims it when the component
+                ;; is collected without dispose, running the same unwatches.
+                ;; Refreshed per pass with the refs this pass watches.
+                (weak/register! watch-key component {:atoms atoms}
+                                (fn [k {:keys [atoms]}]
+                                  (unwatch-all! k atoms)))
                 (when-not @invalidated?
                   (reset! cache-atom {:width width
                                       :atoms atom-vals
@@ -232,18 +236,38 @@
   (schedule-frame!))
 
 (defn remove-track-watches!
-  "Remove every watch track-render installed on COMPONENT's behalf (its
-   last pass's tracked refs — plain atoms and reactive refs alike). Called
-   from the dispose defcomponent generates — without it the watches outlive
-   the component and keep firing invalidate-cache on each source write.
-   Idempotent; a no-op for components that never ran a track! body."
+  "Deterministic teardown: unregister COMPONENT's weak registry entry and
+   unwatch the refs its last pass tracked. Called from the dispose
+   defcomponent generates — without it the watches outlive the component
+   and keep firing invalidate-cache on each source write. Idempotent; a
+   no-op for components that never ran a track! body or whose entry a sweep
+   already claimed."
   [component]
   (when-some [k (existing-tracker-key component)]
-    (when-some [{:keys [atoms]} (get @watch-registry k)]
-      (doseq [a atoms]
-        (reakt/unwatch-ref a k))
-      (swap! watch-registry dissoc k)))
+    (when-some [{:keys [atoms]} (weak/unregister! k)]
+      (unwatch-all! k atoms)))
   nil)
+
+(defn sweep-dead-watches!
+  "Run the weak registry's sweep now: claim collected components and run
+   their on-dead unsubscribes. The render loop and reakt/flush! call this
+   themselves; tests and debug tools call it directly to make reclamation
+   deterministic. Returns the number of claimed entries."
+  []
+  (weak/sweep!))
+
+(defn live-watch-count
+  "Live track! registry entries (tests/guards): components whose render ran
+   with track! and are still reachable. Dead-but-unswept entries are
+   excluded; (weak/entry-count) includes them."
+  []
+  (weak/live-count))
+
+(defn tracked?
+  "True when COMPONENT owns a live weak registry entry — its render ran with
+   track! and it has not been disposed (or collected)."
+  [component]
+  (identical? component (weak/subject (existing-tracker-key component))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; ═════════════════════════════════════════════════════════════════════

@@ -233,7 +233,7 @@
   ;; rebuild-content! replaces the [skill] label / body Markdown on every
   ;; toggle; the replaced children must be disposed (their track! watches
   ;; would otherwise accumulate per toggle)
-  (let [watchers #(count @(deref #'macros/watch-registry))
+  (let [watchers macros/live-watch-count
         expand! (fn [comp expanded?]
                   (reset! (:expanded-atom comp) expanded?)
                   ((var-get #'kmet.app.ui.skill-message/rebuild-content!) comp expanded?)
@@ -244,5 +244,5 @@
     (core/render comp 60)
     (let [baseline (watchers)]
       (dotimes [i 6] (expand! comp (odd? i)))
-      (is (= baseline (watchers))
+      (is (<= (watchers) baseline)
           "toggling expansion does not accumulate watches"))))

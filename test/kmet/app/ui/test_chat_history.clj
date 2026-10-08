@@ -413,7 +413,7 @@
 (deftest test-remove-streaming-placeholder-disposes-removed-components
   ;; the placeholder and any trailing status lines dropped with it leave the
   ;; transcript — their track! registry entries must leave with them
-  (let [watchers #(count @(deref #'macros/watch-registry))
+  (let [watchers macros/live-watch-count
         ch (ch/make-chat-history)]
     (ch/chat-history-add-message! ch {:role :user :content "hi"})
     (plain-lines ch 80)
@@ -421,9 +421,12 @@
       (ch/chat-history-start-streaming! ch)
       (ch/chat-history-show-status! ch "Working...")
       (plain-lines ch 80)
-      (is (> (watchers) baseline) "the placeholder and status are tracked")
+      (is (macros/tracked? (:component (first @(:messages-atom ch))))
+          "the user message is tracked")
+      (is (macros/tracked? (:component @(:streaming-atom ch)))
+          "the streaming placeholder is tracked")
       (is (true? (ch/chat-history-remove-streaming-placeholder! ch)))
-      (is (= baseline (watchers))
+      (is (<= (watchers) baseline)
           "the placeholder and dropped trailing statuses are disposed"))))
 
 (deftest test-rebuild
@@ -913,17 +916,18 @@
 (deftest test-info-banner-replacement-disposes-previous
   (testing "replacing the info banner disposes the previous component — its
             children's track! watches must not outlive it"
-    (let [watchers #(count @(deref #'macros/watch-registry))
+    (let [watchers macros/live-watch-count
           h (ch/make-chat-history)]
       (ch/chat-history-set-info-msg! h {:label "a" :content "one"})
       (core/render h 60)
       (let [first-banner @(:info-comp-atom h)
             baseline (watchers)]
         (is (some? first-banner))
+        (is (macros/tracked? first-banner) "the banner is tracked")
         (ch/chat-history-set-info-msg! h {:label "b" :content "two"})
         (core/render h 60)
         (is (not (identical? first-banner @(:info-comp-atom h))))
-        (is (= baseline (watchers))
+        (is (<= (watchers) baseline)
             "the replaced banner's watches were torn down")))))
 
 (deftest test-dispose-cascades-into-messages-and-banner
@@ -931,20 +935,22 @@
             transcript and the banner, so a tui-clear/container cascade
             cannot leave message components (and their track! watches)
             rooted"
-    (let [watchers #(count @(deref #'macros/watch-registry))
+    (let [watchers macros/live-watch-count
           before (watchers)
           ch (ch/make-chat-history)]
       (ch/chat-history-add-message! ch {:role :user :content "hello"})
       (ch/chat-history-add-message! ch {:role :assistant :content "hi there"})
       (ch/chat-history-set-info-msg! ch {:label "banner" :content "info"})
       (core/render ch 60)
-      (is (> (watchers) before) "messages and banner are tracked")
+      (is (every? macros/tracked? (keep :component @(:messages-atom ch)))
+          "the messages are tracked")
+      (is (macros/tracked? @(:info-comp-atom ch)) "the banner is tracked")
       (protocols/dispose ch)
       (is (empty? (ch/chat-history-get-messages ch)) "messages cleared")
       (is (nil? @(:info-comp-atom ch)) "banner cleared")
-      (is (= before (watchers)) "message/banner watches torn down")
+      (is (<= (watchers) before) "message/banner watches torn down")
       (protocols/dispose ch)
-      (is (= before (watchers)) "dispose stays idempotent"))))
+      (is (<= (watchers) before) "dispose stays idempotent"))))
 
 (deftest test-info-banner-survives-rebuild-with-images
   (testing "chat-history-rebuild! preserves the banner's content images"

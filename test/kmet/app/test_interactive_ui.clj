@@ -1958,6 +1958,43 @@
         (finally
           (clear-installed-context!))))))
 
+(defn- build-extension-registry
+  "The /reload fixture both widget-reset tests drive: an extension UI
+   registry over fresh above/below widget atoms and the given components."
+  [{:keys [ui ed above below hdr sp1 header-container ch]}]
+  ((var ui-registry/build-extension-ui-registry)
+   {:tui ui
+    :cs {:tui ui
+         :dock-stack (atom [])
+         :current-editor-atom (atom ed)
+         :status-indicator (status-indicator/make-status-indicator)
+         :config cfg/default-config
+         :session-atom (atom nil)}}
+   {:ftr {:extension-statuses-atom (atom {})}
+    :ed ed
+    :ch ch
+    :fdp (fdp/make-footer-data-provider)
+    :hdr hdr
+    :sp1 sp1
+    :header-container header-container
+    :widgets-above-atom above
+    :widgets-below-atom below}
+   nil))
+
+(defn- make-cleanup-widget
+  "A widget factory whose owned subtree runs a with-let cleanup counted in
+   CLEANUPS — the shared fixture of the /reload widget tests."
+  [cleanups]
+  (fn []
+    ((var ui-registry/make-extension-widget-component)
+     nil
+     [:container {}
+      [:text {:padding-x 0 :padding-y 0} "w"]
+      [(fn [_props]
+         (macros/with-let [_ (swap! cleanups inc)]
+           [:text {:padding-x 0 :padding-y 0} "owned"]
+           (finally (swap! cleanups dec)))) {}]])))
+
 (deftest test-reset-disposes-extension-widgets-header-and-editor
   (testing "finding 1: the /reload :reset path, the header swap and the
             editor swap dispose the values they drop — records carry no
@@ -1971,34 +2008,11 @@
           hdr (expandable-text/make-expandable-text (fn [] "hdr") (fn [] "hdr"))
           sp1 (text/make-text " " 0 0)
           ch (chat-history/make-chat-history)
-          cs {:tui ui
-              :dock-stack (atom [])
-              :current-editor-atom (atom ed)
-              :status-indicator (status-indicator/make-status-indicator)
-              :config cfg/default-config
-              :session-atom (atom nil)}
-          registry ((var ui-registry/build-extension-ui-registry)
-                    {:tui ui :cs cs}
-                    {:ftr {:extension-statuses-atom (atom {})}
-                     :ed ed
-                     :ch ch
-                     :fdp (fdp/make-footer-data-provider)
-                     :hdr hdr
-                     :sp1 sp1
-                     :header-container header-container
-                     :widgets-above-atom above
-                     :widgets-below-atom below}
-                    nil)
+          registry (build-extension-registry
+                    {:ui ui :ed ed :above above :below below :hdr hdr
+                     :sp1 sp1 :header-container header-container :ch ch})
           cleanups (atom 0)
-          widget (fn []
-                   ((var ui-registry/make-extension-widget-component)
-                    nil
-                    [:container {}
-                     [:text {:padding-x 0 :padding-y 0} "w"]
-                     [(fn [_props]
-                        (macros/with-let [_ (swap! cleanups inc)]
-                          [:text {:padding-x 0 :padding-y 0} "owned"]
-                          (finally (swap! cleanups dec)))) {}]]))
+          widget (make-cleanup-widget cleanups)
           headers (atom [])
           header-factory (fn [tag]
                            (fn [_t _theme]
@@ -2046,6 +2060,40 @@
               ((:set-editor-component registry) (fn [_ _ _] ed-b))))
           (t/is (= [ed-a] @seen)
                 "the previous custom editor was disposed; the default ed was not"))
+        (finally
+          (protocols/dispose hdr)
+          (protocols/dispose sp1)
+          (clear-installed-context!))))))
+
+(deftest ^:slow test-fifty-reload-cycles-leave-no-watches-behind
+  (testing "Stage B acceptance: 50 widget set+render+reset cycles keep
+            live-watch-count flat and unwind every with-let cleanup — a
+            regression guard for the /reload drop sites Pass 1 fixed"
+    (let [baseline (macros/live-watch-count)
+          ui (tui/create-tui nil)
+          ed (editor/make-editor)
+          above (atom {})
+          below (atom {})
+          header-container (container/make-container [])
+          hdr (expandable-text/make-expandable-text (fn [] "hdr") (fn [] "hdr"))
+          sp1 (text/make-text " " 0 0)
+          ch (chat-history/make-chat-history)
+          registry (build-extension-registry
+                    {:ui ui :ed ed :above above :below below :hdr hdr
+                     :sp1 sp1 :header-container header-container :ch ch})
+          cleanups (atom 0)
+          widget (make-cleanup-widget cleanups)]
+      (try
+        (dotimes [_ 50]
+          ((:set-widget registry) :w1 (widget) {})
+          (protocols/render (get @above :w1) 40)
+          ((:reset registry)))
+        (t/is (= 0 @cleanups) "every widget subtree unwound")
+        (t/is (empty? @above))
+        ;; <=, not =: the baseline is registry-wide, and a GC during the
+        ;; cycles can clear unrelated stale entries from earlier tests.
+        (t/is (<= (macros/live-watch-count) baseline)
+              "no watch entry survived the cycles")
         (finally
           (protocols/dispose hdr)
           (protocols/dispose sp1)

@@ -9,6 +9,7 @@
             [kmet.tui.macros :as macros]
             [kmet.tui.protocols :as protocols]
             [kmet.libs.reakt :as reakt]
+            [kmet.libs.weak :as weak]
             [kmet.libs.terminal :as lib-terminal]
             [kmet.tui.terminal :as terminal]
             [kmet.tui.timers :as timers]
@@ -2299,6 +2300,10 @@
               ;; current in this same iteration. Thunks run here, on the loop
               ;; thread — the only thread allowed to touch widgets.
               (timers/pump!)
+              ;; Weak-subscription sweep (leaks.md Stage B): claim collected
+              ;; components and run their on-dead unsubscribes (queue-gated:
+              ;; one .poll when nothing died).
+              (weak/sweep!)
               ;; Frame flush: drain the reaction batch queue (kmet.libs.reakt)
               ;; on every wake — a render request, an enqueued reaction (the
               ;; reakt wake hook), a timer, or the idle heartbeat — so queued

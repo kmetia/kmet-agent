@@ -765,29 +765,19 @@
       {:show-images true :image-width-cells 60}
       {:images nil :true-color true :hyperlinks true}
       (fn []
-        (let [c (image-tool)
-              watched? (fn [comp]
-                         (boolean (some (fn [[_ e]] (identical? comp (:component e)))
-                                        @(deref #'kmet.tui.macros/watch-registry))))]
+        (let [c (image-tool)]
           (core/render c 60)
           (let [[_old-spacer old-img] @(:image-children-atom c)]
-            (is (watched? old-img) "the rendered image block is watched")
+            (is (macros/tracked? old-img) "the rendered image block is watched")
             (reset! (:expanded-atom c) true)  ;; cache miss → children rebuilt
             (core/render c 60)
             (let [[_new-spacer new-img] @(:image-children-atom c)]
               (is (not (identical? old-img new-img)))
-              (is (not (watched? old-img))
+              (is (not (macros/tracked? old-img))
                   "the previous image block's watches are torn down")
-              (is (watched? new-img) "the new image block is watched"))))))))
+              (is (macros/tracked? new-img) "the new image block is watched"))))))))
 
 ;; ─── Renderer-child lifecycle (track! zombie-watch regression) ────────────
-
-(defn- tracked?
-  "True when COMP is registered in the track! watch registry (its render ran
-   with watches)."
-  [comp]
-  (boolean (some (fn [[_ e]] (identical? comp (:component e)))
-                 @(deref #'kmet.tui.macros/watch-registry))))
 
 (deftest test-renderer-children-disposed-on-rebuild
   (testing "a cache-miss rebuild disposes the previous renderer outputs — no
@@ -801,11 +791,11 @@
                                  comp)))]
       (core/render c 40)
       (let [first-call (last @made)]
-        (is (tracked? first-call) "the first pass's call component is watched")
+        (is (macros/tracked? first-call) "the first pass's call component is watched")
         (reset! (:expanded-atom c) true)  ;; cache miss → rebuild
         (core/render c 40)
         (is (not (identical? first-call (last @made))))
-        (is (not (tracked? first-call))
+        (is (not (macros/tracked? first-call))
             "the replaced call component's watches are torn down")))))
 
 (deftest test-renderer-reused-component-survives-rebuild
@@ -826,7 +816,7 @@
         (core/render c 40)
         (is (identical? first-call (last @made)) "only one component was made")
         (is (= first-call @(:last-call-component-atom c)))
-        (is (tracked? first-call)
+        (is (macros/tracked? first-call)
             "the reused instance was not disposed (its watches survive)")))))
 
 (deftest test-nil-call-component-renders
@@ -842,13 +832,13 @@
   (testing "repeated cache-miss renders do not grow the watch registry — the
             dropped children are disposed each pass"
     (let [c (te/make-tool-execution :name "read" :args {:path "a.clj"} :content "x")
-          watchers (fn [] (count @(deref #'kmet.tui.macros/watch-registry)))]
+          watchers (fn [] (kmet.tui.macros/live-watch-count))]
       (core/render c 60)
       (let [baseline (watchers)]
         (dotimes [i 5]
           (reset! (:expanded-atom c) (odd? i))
           (core/render c 60))
-        (is (= baseline (watchers))
+        (is (<= (watchers) baseline)
             "steady state: no accumulation across rebuilds")))))
 
 (deftest test-state-component-disposed-on-rebuild
@@ -856,7 +846,7 @@
             no zombie track! watches (the 1s ticker rebuilds it every second
             while a tool runs)"
     (let [c (te/make-tool-execution :name "bash" :args {:command "echo hi"} :status true)
-          watchers (fn [] (count @(deref #'kmet.tui.macros/watch-registry)))]
+          watchers (fn [] (kmet.tui.macros/live-watch-count))]
       (te/tool-execution-mark-execution-started! c)
       (reset! (:content-atom c) "out -1")  ;; result body present → steady state
       (core/render c 60)
@@ -864,7 +854,7 @@
         (dotimes [i 5]
           (reset! (:content-atom c) (str "out " i))
           (core/render c 60))
-        (is (= baseline (watchers))
+        (is (<= (watchers) baseline)
             "steady state: the dropped state lines are disposed each pass")))))
 (deftest test-image-children-cache-hit-steady-state
   (testing "with images the render cache still HITS in steady state: the
@@ -913,7 +903,7 @@
             (is (= [] (core/render c 60)) "component hides")
             (is (empty? @(:children @(:inner-container c)))
                 "the inner container is emptied")
-            (is (not (tracked? (first img-children)))
+            (is (not (macros/tracked? (first img-children)))
                 "the dropped image children are disposed")))))))
 
 (deftest test-dispose-disposes-image-children
@@ -927,9 +917,9 @@
           (core/render c 60)
           (let [img-children @(:image-children-atom c)]
             (is (seq img-children))
-            (is (tracked? (last img-children)))
+            (is (macros/tracked? (last img-children)))
             (protocols/dispose c)
-            (is (not (tracked? (last img-children)))
+            (is (not (macros/tracked? (last img-children)))
                 "dispose tears down the image children's watches")))))))
 
 (deftest test-duck-typed-renderer-output

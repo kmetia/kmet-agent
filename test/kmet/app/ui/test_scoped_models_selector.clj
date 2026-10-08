@@ -117,11 +117,11 @@
   ;; re-derived rows must be disposed — a dropped Text keeps its track!
   ;; watch registered, which would grow the registry per keypress
   (let [sel (selector nil)
-        watchers #(count @(deref #'macros/watch-registry))]
+        watchers macros/live-watch-count]
     (protocols/render sel 120)
     (let [baseline (watchers)]
       (dotimes [_ 6] (press sel "down") (protocols/render sel 120))
-      (t/is (= baseline (watchers))
+      (t/is (<= (watchers) baseline)
             "steady state: navigation does not accumulate watches"))))
 
 (t/deftest test-root-body-memoizes-idle-frames

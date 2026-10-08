@@ -45,7 +45,8 @@
    path: reads track exactly like a cursor's, cursor-reset!/cursor-swap!
    write back through the source (=-gated, nested lenses composing), and a
    disposed lens refuses writes instead of writing back from the dead."
-  (:refer-clojure :exclude [derive]))
+  (:refer-clojure :exclude [derive])
+  (:require [kmet.libs.weak :as weak]))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Context
@@ -241,7 +242,9 @@
    Reentrant calls are no-ops; the outer drain wins. An empty queue
    short-circuits before the CAS: non-reactive derefs settle the queue on
    every read (reaction deref-fn), and the empty case is the common one —
-   the swap machinery must not be its price."
+   the swap machinery must not be its price. After a drain, a weak
+   subscription sweep runs (kmet.libs.weak, leaks.md Stage B) so headless
+   consumers that never start a TUI still reclaim collected subscribers."
   []
   (when (and (pos? (count @queue))
              (compare-and-set! flushing? false true))
@@ -269,7 +272,11 @@
                               {:rounds round})))
             (recur (inc round)))))
       (finally
-        (reset! flushing? false)))))
+        (reset! flushing? false)))
+    ;; Outside the flushing? guard (on-dead only unwatches, so no re-entry);
+    ;; keep the historical nil return.
+    (weak/sweep!)
+    nil))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Reaction

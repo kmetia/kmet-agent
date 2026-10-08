@@ -11,7 +11,7 @@
   (clojure.string/replace s #"\u001b\[[0-9;]*[a-zA-Z]" ""))
 
 (deftest test-reflow-does-not-retain-temporary-markdown
-  (let [watchers #(count @(deref #'macros/watch-registry))
+  (let [watchers macros/live-watch-count
         baseline (watchers)]
     ;; Repeated construction models resume; changing both content and width
     ;; models streaming and terminal reflow. Only the owner may stay tracked.
@@ -23,16 +23,18 @@
             (swap! (:text-atom c) str " more text")
             (swap! (:thinking-text-atom c) str " more thinking")
             (core/render c (+ 40 i))
-            (is (= (inc baseline) (watchers))
+            (is (macros/tracked? c) "the owner stays tracked")
+            (is (<= (watchers) (inc baseline))
                 "temporary text/thinking Markdown must not survive reflow"))
           (am/assistant-message-set-hide-thinking! c true)
           (core/render c 60)
           (am/assistant-message-set-hide-thinking! c false)
           (am/assistant-message-set-streaming! c false)
           (core/render c 60)
-          (is (= (inc baseline) (watchers)))
+          (is (macros/tracked? c) "the owner stays tracked")
+          (is (<= (watchers) (inc baseline)))
           (finally (protocols/dispose c))))
-      (is (= baseline (watchers))
+      (is (<= (watchers) baseline)
           "disposing the message returns the registry to its baseline"))))
 
 (deftest test-create
