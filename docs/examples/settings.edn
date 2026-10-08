@@ -15,8 +15,8 @@
  :thinking-loop-guard-enabled true
  :steering-mode :all
  :follow-up-mode :all
- :http-idle-timeout-ms 300000
- :http-total-timeout-ms nil
+ :http-idle-timeout-ms 120000
+ :http-total-timeout-ms 0       ; 0 disables total timeout; nil follows idle
  :http-transport :platform
  :shell-path nil
  :shell-command-prefix nil

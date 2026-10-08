@@ -81,9 +81,9 @@
      :idle-timeout-ms — per-byte idle timeout on the stream in ms (pi:
                      httpIdleTimeoutMs — undici bodyTimeout semantics); nil
                      or non-positive disables it
-     :total-timeout-ms — whole-request deadline in ms (pi: SDK timeoutMs ??
-                     httpIdleTimeoutMs — HttpRequest.timeout / curl
-                     --max-time semantics); nil or non-positive disables it
+     :total-timeout-ms — whole-request deadline in ms (HttpRequest.timeout /
+                     curl --max-time semantics); nil follows the idle timeout,
+                     non-positive disables the total deadline
      :cache-retention — :short (default) | :long | :none — prompt-cache
                      params for openai-responses (pi CacheRetention; :none
                      disables the cache key + affinity headers — compaction

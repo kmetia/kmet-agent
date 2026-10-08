@@ -3,7 +3,7 @@
    settings-selector.ts) — pi's rows backed by kmet machinery: thinking
    level (the current model's available levels), hide-thinking, auto-compact,
    inline images (show-images / image-width, terminal-gated, plus the
-   ungated block-images), steering/follow-up queue modes, HTTP idle timeout, cache-miss notices,
+   ungated block-images), steering/follow-up queue modes, HTTP idle/total timeouts, cache-miss notices,
    tree filter mode, editor/output padding, autocomplete max items, hardware
    cursor, the retry block (settings.edn :retry — enabled / max-retries /
    base-delay-ms, applied live to the agent), the repeat-loop guard
@@ -38,10 +38,8 @@
    {:label "5 min" :ms 300000}
    {:label "disabled" :ms 0}])
 
-;; pi: timeoutMs ?? httpIdleTimeoutMs — the whole-request total deadline.
-;; The default (nil) is "use idle" rendered as its own choice; explicit
-;; values use the same set as the idle choices; 0 means disabled (uses idle
-;; anyway via the fallback, so it renders the same as the default).
+;; The default (nil) is "use idle" rendered as its own choice; 0 is a
+;; separate choice that disables the whole-request deadline.
 (def ^:private http-total-timeout-choices
   (conj http-idle-timeout-choices {:label "use idle" :ms nil}))
 
@@ -123,10 +121,9 @@
                    (apply-lg!))
 
         ;; or-guard: an explicit nil in settings.edn must not reach quot
-        idle-ms (or (cfg/get-setting-live config :http-idle-timeout-ms 300000)
-                    300000)
+        idle-ms (or (cfg/get-setting-live config :http-idle-timeout-ms 120000) 120000)
         ;; live value: nil (absent) = use idle; explicit = override
-        total-ms (cfg/get-setting-live config :http-total-timeout-ms nil)
+        total-ms (cfg/get-setting-live config :http-total-timeout-ms 0)
         apply-retry! (fn []
                        (let [r @retry-atom]
                          (swap! (:cfg ag) assoc :max-retries (if (:enabled r) (:max-retries r) 0))
@@ -164,12 +161,12 @@
                                    :values ["one-at-a-time" "all"]}
                                   {:id :http-idle-timeout
                                    :label "HTTP idle timeout"
-                                   :description "Maximum idle gap while waiting for HTTP headers or body chunks. Disable for local models that pause longer than five minutes."
+                                   :description "Maximum idle gap while waiting for HTTP headers or body chunks. Disable for local models that pause longer than two minutes."
                                    :value (format-idle-timeout idle-ms)
                                    :values (mapv :label http-idle-timeout-choices)}
                                   {:id :http-total-timeout
                                    :label "HTTP total timeout"
-                                   :description "Whole-request deadline; 'use idle' follows the idle timeout."
+                                   :description "Whole-request deadline; 'use idle' follows the idle timeout, while 'disabled' leaves only the idle timeout."
                                    :value (format-total-timeout total-ms)
                                    :values (mapv :label http-total-timeout-choices)}
                                   {:id :http-transport

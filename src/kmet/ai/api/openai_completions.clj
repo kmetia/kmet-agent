@@ -4,7 +4,7 @@
    [kmet.libs.json :as json]
    [kmet.ai.http :as ai-http]
    [kmet.ai.api.sse :as sse]
-   [kmet.ai.api.shared :refer [copilot-dynamic-headers endpoint-url max-tokens-key openai-messages openai-messages-with-reasoning openai-thinking-params resolved-openai-compat apply-before-provider-request-hook request-headers tool->openai-schema transport-error-message usage-with-cost]]))
+   [kmet.ai.api.shared :refer [copilot-dynamic-headers endpoint-url max-tokens-key openai-messages openai-messages-with-reasoning openai-thinking-params resolved-openai-compat apply-before-provider-request-hook request-headers tool->openai-schema effective-total-timeout-ms transport-error-message usage-with-cost]]))
 
 (defn openai-payload
   "Request body for an openai-completions request (pi buildParams):
@@ -68,17 +68,9 @@
                                       {:headers (openai-request-headers model-record provider-record api-key session-id messages)
                                        :body (json/generate-string payload)
                                        :as :stream
-                                         ;; Total request deadline (pi: SDK timeoutMs ??
-                                         ;; httpIdleTimeoutMs — the whole-request wall-clock
-                                         ;; the transport enforces). Explicit total wins;
-                                         ;; fall back to the idle timeout for callers that
-                                         ;; only set that (compaction/summarization); nil
-                                         ;; when both disabled.
-                                       :timeout (when-let [t (or (when (and total-timeout-ms (pos? total-timeout-ms))
-                                                                   total-timeout-ms)
-                                                                 (when (pos? (or idle-timeout-ms 0))
-                                                                   idle-timeout-ms))]
-                                                  t)}
+                                         ;; Shared resolution keeps nil (follow idle)
+                                         ;; distinct from an explicit disabled total.
+                                       :timeout (effective-total-timeout-ms total-timeout-ms idle-timeout-ms)}
                                       signal)
             ;; The terminal :done is deferred until the whole stream is
             ;; consumed: openai-completions sends the usage-only chunk AFTER

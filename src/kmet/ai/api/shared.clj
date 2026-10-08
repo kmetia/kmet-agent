@@ -39,6 +39,14 @@
 (def http2-stream-reset-regex lib-http/http2-stream-reset-regex)
 (def transport-error-message lib-http/transport-error-message)
 
+(defn effective-total-timeout-ms
+  "Resolve the total transport timeout: an explicit non-positive value
+   disables it; only nil falls back to a positive idle timeout."
+  [total-timeout-ms idle-timeout-ms]
+  (if (some? total-timeout-ms)
+    (when (pos? total-timeout-ms) total-timeout-ms)
+    (when (pos? (or idle-timeout-ms 0)) idle-timeout-ms)))
+
 (def getenv
   "Process env lookup (System/getenv returns nil for unset vars)."
   (fn [k] (System/getenv k)))

@@ -162,6 +162,48 @@
         (is (= [[[:terminal :clear-on-shrink] true]] @saved)
             "and the setting persists")))))
 
+(deftest settings-panel-shows-default-http-timeouts
+  (let [cs (settings-cs)
+        focused (atom nil)
+        defaults {:http-idle-timeout-ms 120000 :http-total-timeout-ms 0}]
+    (with-redefs [core/tui-set-focus (fn [_ c] (reset! focused c))
+                  core/tui-request-render (fn [_] nil)
+                  cfg/get-setting-live (fn
+                                         ([_ key] (get defaults key))
+                                         ([_ key default] (get defaults key default)))]
+      (ss/show-settings cs)
+      (let [items @(:items-atom @focused)
+            idle (some #(when (= :http-idle-timeout (:id %)) %) items)
+            total (some #(when (= :http-total-timeout (:id %)) %) items)]
+        (is (= "2 min" (:value idle)))
+        (is (= "disabled" (:value total)))))))
+
+(deftest settings-panel-total-timeout-can-be-disabled
+  (let [cs (settings-cs)
+        focused (atom nil)
+        saved (atom [])]
+    (with-redefs [core/tui-set-focus (fn [_ c] (reset! focused c))
+                  core/tui-request-render (fn [_] nil)
+                  cfg/get-setting-live (fn
+                                         ([_ key] (get {} key))
+                                         ([_ key default]
+                                          (if (= key :http-total-timeout-ms)
+                                            nil
+                                            default)))
+                  cfg/save-setting! (fn [path value] (swap! saved conj [path value]))]
+      (ss/show-settings cs)
+      (let [sl @focused
+            row (settings-list/settings-list-get-item sl :http-total-timeout)]
+        (is (= "use idle" (:value row)))
+        (is (some #{"disabled"} (:values row)))
+        (settings-list/settings-list-select-item! sl :http-total-timeout)
+        (dotimes [_ 5] (core/handle-input sl "\r"))
+        (is (= "disabled"
+               (:value (settings-list/settings-list-get-item sl :http-total-timeout))))
+        (is (= 0 (:http-total-timeout-ms @(:cfg @(:agent-state cs)))))
+        (is (= [[:http-total-timeout-ms] 0] (last @saved))
+            "the disabled choice persists as zero")))))
+
 (deftest settings-panel-theme-row-opens-a-submenu
   (let [cs (assoc (settings-cs)
                   :theme-controller {:config-atom (atom {:theme "dark"})

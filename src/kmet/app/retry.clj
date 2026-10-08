@@ -9,7 +9,7 @@
    Retry classification mirrors pi's packages/ai/src/utils/retry.ts +
    overflow.ts; backoff and timeout resolution follow pi: agent-session
    auto-retry (base-delay-ms * 2^(attempt-1), capped at max-agent-delay-ms)
-   and the SDK's timeoutMs ?? httpIdleTimeoutMs deadline rule."
+   and the whole-request deadline's idle-fallback / explicit-disable rule."
   (:require [clojure.string :as str]
             [kmet.libs.concurrent :as concurrent]))
 
@@ -168,21 +168,16 @@
                 (recur))))))))
 
 (defn llm-total-timeout-ms
-  "Total request deadline for one LLM call (pi: SDK timeoutMs ??
-   httpIdleTimeoutMs — the whole-request wall-clock the transport enforces;
-   the per-byte idle timeout is separate and resets on every received byte).
-   Mirrors the transport's own resolution (call-llm → api builders): the
-   configured :http-total-timeout-ms wins when positive, else the idle
-   timeout, else no deadline (MAX_VALUE so the deref never fires early — the
-   transport gets nil and waits forever, pi: httpIdleTimeoutMs 0 →
-   effectively disabled)."
+  "Total deadline for one LLM call. A configured non-positive total timeout
+   disables the total deadline; nil follows a positive idle timeout. Returns
+   0 when no total deadline applies."
   [cfg]
   (let [total (:http-total-timeout-ms cfg)
         idle (or (:http-idle-timeout-ms cfg) 0)]
     (cond
-      (and total (pos? total)) total
+      (some? total) (if (pos? total) total 0)
       (pos? idle) idle
-      :else Integer/MAX_VALUE)))
+      :else 0)))
 
 (defn normalize-llm-result
   "Fold a provider-delivered :error stop-reason (content_filter /

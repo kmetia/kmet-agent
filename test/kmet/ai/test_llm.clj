@@ -1510,6 +1510,16 @@
 
 ;; ─── Transport total timeout follows the configured idle timeout ──────────
 
+(t/deftest test-effective-total-timeout-ms
+  (t/is (= 120000 (shared/effective-total-timeout-ms 120000 300000))
+        "a positive explicit total timeout wins")
+  (t/is (nil? (shared/effective-total-timeout-ms 0 300000))
+        "an explicit disabled total timeout does not fall back to idle")
+  (t/is (= 300000 (shared/effective-total-timeout-ms nil 300000))
+        "nil uses a positive idle timeout")
+  (t/is (nil? (shared/effective-total-timeout-ms nil 0))
+        "no total or idle timeout leaves the transport unlimited"))
+
 (t/deftest ^:slow test-llm-request-timeout-follows-idle
   (m/load-catalogs!)
   ;; A server that accepts the request but never responds: the request must

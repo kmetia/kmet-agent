@@ -5592,38 +5592,48 @@
               {:err "prompt is too long" :retry-count 0 :max-retries 3
                :base-delay-ms 2000 :overflow-recovered false :has-session false})))))
 
-;; ─── Total request deadline (pi: timeoutMs ?? httpIdleTimeoutMs) ─────────
+;; ─── Total request deadline ──────────────────────────────────────────────
 
 (t/deftest test-loop-total-timeout-ms
-  (t/testing "nil total falls back to the idle timeout (default)"
-    (let [agent (loop/make-agent-state :http-idle-timeout-ms 300000)]
-      (t/is (= 300000 (#'retry/llm-total-timeout-ms @(:cfg agent))))))
-  (t/testing "explicit total wins over the idle-derived default"
-    (let [agent (loop/make-agent-state :http-idle-timeout-ms 300000
-                                       :http-total-timeout-ms 120000)]
-      (t/is (= 120000 (#'retry/llm-total-timeout-ms @(:cfg agent))))))
-  (t/testing "0 total falls back to idle (pi: timeoutMs ?? httpIdleTimeoutMs)"
-    (let [agent (loop/make-agent-state :http-idle-timeout-ms 300000
-                                       :http-total-timeout-ms 0)]
-      (t/is (= 300000 (#'retry/llm-total-timeout-ms @(:cfg agent))))))
-  (t/testing "no idle and no explicit total → disabled (MAX_VALUE)"
-    (let [agent (loop/make-agent-state :http-idle-timeout-ms 0)]
-      (t/is (= Integer/MAX_VALUE (#'retry/llm-total-timeout-ms @(:cfg agent)))))))
+  (t/testing "agent defaults use a 120-second idle timeout and no total deadline"
+    (let [agent (loop/make-agent-state)]
+      (t/is (= 120000 (:http-idle-timeout-ms @(:cfg agent))))
+      (t/is (= 0 (#'retry/llm-total-timeout-ms @(:cfg agent)))))
+    (t/testing "explicit nil total follows the idle timeout"
+      (let [agent (loop/make-agent-state :http-idle-timeout-ms 300000
+                                         :http-total-timeout-ms nil)]
+        (t/is (= 300000 (#'retry/llm-total-timeout-ms @(:cfg agent))))))
+    (t/testing "explicit total wins over the idle-derived default"
+      (let [agent (loop/make-agent-state :http-idle-timeout-ms 300000
+                                         :http-total-timeout-ms 120000)]
+        (t/is (= 120000 (#'retry/llm-total-timeout-ms @(:cfg agent))))))
+    (t/testing "zero total disables the total deadline despite an idle timeout"
+      (let [agent (loop/make-agent-state :http-idle-timeout-ms 300000
+                                         :http-total-timeout-ms 0)]
+        (t/is (= 0 (#'retry/llm-total-timeout-ms @(:cfg agent))))))
+    (t/testing "no idle and nil total means no total deadline"
+      (let [agent (loop/make-agent-state :http-idle-timeout-ms 0
+                                         :http-total-timeout-ms nil)]
+        (t/is (= 0 (#'retry/llm-total-timeout-ms @(:cfg agent))))))))
 
 (t/deftest test-loop-set-http-total-timeout-ms!
-  (let [agent (loop/make-agent-state)]
+  (let [agent (loop/make-agent-state :http-idle-timeout-ms 120000)]
     (loop/set-http-total-timeout-ms! agent 60000)
     (t/is (= 60000 (:http-total-timeout-ms @(:cfg agent))))
     (loop/set-http-total-timeout-ms! agent nil)
     (t/is (nil? (:http-total-timeout-ms @(:cfg agent)))
-          "nil resets to the use-idle default")))
+          "nil resets to the use-idle default")
+    (loop/set-http-total-timeout-ms! agent 0)
+    (t/is (= 0 (:http-total-timeout-ms @(:cfg agent))))
+    (t/is (= 0 (#'retry/llm-total-timeout-ms @(:cfg agent)))
+          "zero disables total timeout rather than following idle")))
 
 (t/deftest test-loop-call-llm-threads-total-timeout
   ;; call-llm must pass the total deadline to llm/send-message so the
   ;; transport (HttpRequest.timeout / curl --max-time) enforces it as the
-  ;; whole-request wall-clock (pi: SDK timeoutMs ?? httpIdleTimeoutMs).
+  ;; whole-request wall-clock.
   (let [sent (atom nil)
-        agent (loop/make-agent-state :http-idle-timeout-ms 300000
+        agent (loop/make-agent-state :http-idle-timeout-ms 120000
                                      :http-total-timeout-ms 120000)]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message
@@ -5636,15 +5646,29 @@
       @(loop/run-agent-turn agent {:message "hi" :on-done (fn [_])}))
     (t/is (= 120000 (:total-timeout-ms @sent))
           "the explicit total deadline reaches the transport")
-    (t/is (= 300000 (:idle-timeout-ms @sent))
+    (t/is (= 120000 (:idle-timeout-ms @sent))
           "the idle timeout stays the separate per-byte deadline")))
 
+(t/deftest test-loop-call-llm-threads-disabled-total-timeout
+  (let [sent (atom nil)
+        agent (loop/make-agent-state :http-idle-timeout-ms 120000
+                                     :http-total-timeout-ms 0)]
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message
+                  (fn [opts]
+                    (reset! sent opts)
+                    (future
+                      (when-let [on-done (:on-done opts)]
+                        (on-done :stop)))
+                    :done)]
+      @(loop/run-agent-turn agent {:message "hi" :on-done (fn [_])}))
+    (t/is (= 0 (:total-timeout-ms @sent))
+          "explicit disable is passed through, not replaced by the idle timeout")))
+
 (t/deftest ^:slow test-loop-total-deadline-timeout-retries-then-surfaces
-  ;; pi parity: a total-deadline timeout (the deref :timeout sentinel, which
-  ;; fires when the transport deadline was disabled/didn't deliver) is a
-  ;; RETRYABLE error — never a silent hard abort. It retries with backoff,
-  ;; and after exhaustion surfaces via on-error and ends the run (status
-  ;; :error), so the user sees the timeout instead of a mid-thought hang.
+  ;; A total-deadline timeout (the deref :timeout sentinel when the transport
+  ;; fails to deliver an error) is retryable, not a silent abort. It retries
+  ;; with backoff and surfaces via on-error when exhausted.
   (let [events (atom [])
         errors (atom [])
         agent (loop/make-agent-state
@@ -5653,10 +5677,8 @@
                :base-delay-ms 1
                :http-idle-timeout-ms 0
                :http-total-timeout-ms 10)]
-    ;; A tiny explicit total deadline makes the transport's own
-    ;; HttpRequest.timeout fire quickly; but the fake send-message never
-    ;; delivers, so the loop's deref hits the :timeout sentinel (the
-    ;; fallback when the transport didn't deliver an error).
+    ;; A tiny explicit total deadline makes the loop's deref hit the
+    ;; :timeout sentinel quickly because fake send-message never delivers.
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message
                   (fn [opts]

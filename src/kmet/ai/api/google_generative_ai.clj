@@ -6,7 +6,7 @@
    [kmet.ai.api.sse :as sse]
    [clojure.string :as str]
    [kmet.ai.constrained-sampling :as cs]
-   [kmet.ai.api.shared :refer [bash-execution-text content-text endpoint-url google-supports-strict-tool-sampling? image-block? apply-before-provider-request-hook request-headers tool->google-schema transport-error-message usage-with-cost]]))
+   [kmet.ai.api.shared :refer [bash-execution-text content-text endpoint-url google-supports-strict-tool-sampling? image-block? apply-before-provider-request-hook request-headers tool->google-schema effective-total-timeout-ms transport-error-message usage-with-cost]]))
 
 (defn google-requires-tool-call-id?
   [model-id]
@@ -181,15 +181,9 @@
                                                    session-id)
                                          :body (json/generate-string payload)
                                          :as :stream
-                                           ;; Total request deadline (pi: SDK timeoutMs ??
-                                           ;; httpIdleTimeoutMs); explicit total wins, else
-                                           ;; the idle timeout (compaction/summarization), nil
-                                           ;; when both disabled.
-                                         :timeout (when-let [t (or (when (and total-timeout-ms (pos? total-timeout-ms))
-                                                                     total-timeout-ms)
-                                                                   (when (pos? (or idle-timeout-ms 0))
-                                                                     idle-timeout-ms))]
-                                                    t)}
+                                           ;; Shared resolution keeps nil (follow idle)
+                                           ;; distinct from an explicit disabled total.
+                                         :timeout (effective-total-timeout-ms total-timeout-ms idle-timeout-ms)}
                                         signal)]
           (sse/process-google-stream response
                                      (fn [event]

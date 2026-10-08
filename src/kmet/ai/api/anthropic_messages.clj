@@ -6,7 +6,7 @@
    [kmet.ai.http :as ai-http]
    [kmet.ai.api.sse :as sse]
    [clojure.string :as str]
-   [kmet.ai.api.shared :refer [anthropic-thinking bash-execution-text copilot-dynamic-headers endpoint-url image-block? apply-before-provider-request-hook request-headers tool->anthropic-schema transport-error-message usage-with-cost]]))
+   [kmet.ai.api.shared :refer [anthropic-thinking bash-execution-text copilot-dynamic-headers endpoint-url image-block? apply-before-provider-request-hook request-headers tool->anthropic-schema effective-total-timeout-ms transport-error-message usage-with-cost]]))
 
 (def default-anthropic-version "2023-06-01")
 
@@ -237,15 +237,9 @@
                                         {:headers (anthropic-request-headers model-record provider-record api-key session-id messages)
                                          :body (json/generate-string payload)
                                          :as :stream
-                                           ;; Total request deadline (pi: SDK timeoutMs ??
-                                           ;; httpIdleTimeoutMs); explicit total wins, else
-                                           ;; the idle timeout (compaction/summarization), nil
-                                           ;; when both disabled.
-                                         :timeout (when-let [t (or (when (and total-timeout-ms (pos? total-timeout-ms))
-                                                                     total-timeout-ms)
-                                                                   (when (pos? (or idle-timeout-ms 0))
-                                                                     idle-timeout-ms))]
-                                                    t)}
+                                           ;; Shared resolution keeps nil (follow idle)
+                                           ;; distinct from an explicit disabled total.
+                                         :timeout (effective-total-timeout-ms total-timeout-ms idle-timeout-ms)}
                                         signal)]
           (sse/process-anthropic-stream response
                                         (fn [event]

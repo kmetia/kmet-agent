@@ -279,7 +279,8 @@ provider request. kmet has no transport-level retry — the agent-level
 `:retry` policy re-runs the whole assistant call with the same
 classification (429/5xx/timeouts retryable, quota/billing terminal) and
 bounded backoff, and `:http-total-timeout-ms` is the per-request deadline
-pi's `timeoutMs` sets (`retry.provider.timeoutMs ?? httpIdleTimeoutMs`).
+pi's `timeoutMs` sets (`retry.provider.timeoutMs ?? httpIdleTimeoutMs`): `nil`
+follows the idle deadline, while an explicit `0` disables the total deadline.
 
 ### 5. Extension API
 

@@ -10,7 +10,7 @@
    [clojure.string :as str]
    [kmet.ai.constrained-sampling :as cs]
    [kmet.ai.api.google-generative-ai :refer [google-messages google-thinking-config]]
-   [kmet.ai.api.shared :refer [getenv google-supports-strict-tool-sampling? apply-before-provider-request-hook request-headers responses-events-handler tool->google-schema transport-error-message]]))
+   [kmet.ai.api.shared :refer [getenv google-supports-strict-tool-sampling? apply-before-provider-request-hook request-headers responses-events-handler tool->google-schema effective-total-timeout-ms transport-error-message]]))
 
 (def vertex-base-url
   "The Vertex endpoint template (pi VERTEX_BASE_URL — the SDK substitutes
@@ -81,15 +81,9 @@
                                                      model-record provider-record api-key session-id)
                                            :body (json/generate-string payload)
                                            :as :stream
-                                             ;; Total request deadline (pi: SDK timeoutMs ??
-                                             ;; httpIdleTimeoutMs); explicit total wins, else
-                                             ;; the idle timeout (compaction/summarization), nil
-                                             ;; when both disabled.
-                                           :timeout (when-let [t (or (when (and total-timeout-ms (pos? total-timeout-ms))
-                                                                       total-timeout-ms)
-                                                                     (when (pos? (or idle-timeout-ms 0))
-                                                                       idle-timeout-ms))]
-                                                      t)}
+                                             ;; Shared resolution keeps nil (follow idle)
+                                             ;; distinct from an explicit disabled total.
+                                           :timeout (effective-total-timeout-ms total-timeout-ms idle-timeout-ms)}
                                           signal)]
             (let [[dispatch finalize] (responses-events-handler opts model-record)]
               (sse/process-google-stream response

@@ -193,11 +193,9 @@
          :compact-token-threshold, :auto-compact (default true, pi:
          autoCompact), :context-window, :compact-reserve-tokens (default 16384,
          pi: reserveTokens), :keep-recent-tokens (default 20000, pi:
-         keepRecentTokens), :http-idle-timeout-ms (default 300000, pi:
-         httpIdleTimeoutMs; 0 disables), :http-total-timeout-ms (default nil
-         = the idle timeout, pi: timeoutMs ?? httpIdleTimeoutMs — an explicit
-         positive number overrides the total request deadline; 0 disables it
-         (falls back to idle); nil uses idle),
+         keepRecentTokens), :http-idle-timeout-ms (default 120000, pi:
+         httpIdleTimeoutMs; 0 disables), :http-total-timeout-ms (default 0
+         disables the total deadline; nil follows the idle timeout),
          :block-images (default false, pi: images.blockImages — strip image
          blocks from provider calls; transcript and session untouched),
          :default-tools (resolved :default-tools selection — the built-in
@@ -215,8 +213,8 @@
            scoped-models []
            compact-reserve-tokens 16384
            keep-recent-tokens 20000
-           http-idle-timeout-ms 300000
-           http-total-timeout-ms nil
+           http-idle-timeout-ms 120000
+           http-total-timeout-ms 0
            block-images false
            loop-guard-enabled true
            loop-guard-threshold 3
@@ -1074,9 +1072,8 @@ Be precise and concise in your responses."}}]
       :signal call-signal
       :idle-timeout-ms (:http-idle-timeout-ms @(:cfg agent))
       ;; Whole-request deadline enforced by the transport (HttpRequest.timeout
-      ;; / curl --max-time) — pi: timeoutMs ?? httpIdleTimeoutMs. The idle
-      ;; timeout above is the separate per-byte read deadline (undici
-      ;; bodyTimeout) that resets on every received byte.
+      ;; / curl --max-time); the idle timeout above is separate and resets
+      ;; on every received byte.
       :total-timeout-ms (retry/llm-total-timeout-ms @(:cfg agent))
       :thinking @(:thinking agent)
       :session-id (some-> (:session agent) :id)
@@ -1407,10 +1404,9 @@ Be precise and concise in your responses."}}]
   [agent messages {:keys [signals thinking max-tokens]}]
   (let [ep (resolve-endpoint agent)
         signal (apply concurrent/or-signal signals)
-        ;; Whole-request deadline, like a normal call (pi: the SDK's
-        ;; timeoutMs ?? httpIdleTimeoutMs reaches the summarization stream
-        ;; too); the deref below uses the same value as its backstop, since
-        ;; a silent stream that never reports must not hang it forever
+        ;; Whole-request deadline, like a normal call; the deref below uses
+        ;; the same value as its backstop when enabled, while an explicitly
+        ;; disabled deadline waits for completion or cancellation.
         deadline (retry/llm-total-timeout-ms @(:cfg agent))
         done (promise)
         text-buf (atom "")
@@ -1451,7 +1447,7 @@ Be precise and concise in your responses."}}]
                 :on-error (fn [msg] (deliver! (partial :error msg)))}
          thinking (assoc :thinking thinking)))
       (when @signal (deliver! (partial :aborted)))
-      (let [result (deref done deadline :timeout)]
+      (let [result (if (pos? deadline) (deref done deadline :timeout) @done)]
         (if (map? result)
           result
           (partial :error (str "Stream timed out after " deadline "ms"))))
@@ -2377,8 +2373,11 @@ Be precise and concise in your responses."}}]
                           ;; realized, so an already-arrived normal result is never overridden.
                             (when @(:signal agent)
                               (deliver promise (merge {:cancelled true} ((:partials call)))))
-                            (let [result (retry/normalize-llm-result
-                                          (deref promise (retry/llm-total-timeout-ms @(:cfg agent)) :timeout))]
+                            (let [result (let [deadline (retry/llm-total-timeout-ms @(:cfg agent))]
+                                           (retry/normalize-llm-result
+                                            (if (pos? deadline)
+                                              (deref promise deadline :timeout)
+                                              @promise)))]
                               (reset! (:active-call agent) nil)
                               (cond
                                 (:cancelled result)
@@ -2392,11 +2391,8 @@ Be precise and concise in your responses."}}]
                               ;; (HttpRequest.timeout / curl --max-time)
                               ;; normally fires first and delivers a
                               ;; retryable :error; this is the deref
-                              ;; fallback when it was disabled or didn't
-                              ;; fire. Treat it as the same retryable
-                              ;; timeout error (pi: a timeout is a
-                              ;; stopReason-error that retries, then
-                              ;; surfaces after exhaustion) — never a
+                              ;; fallback if it didn't fire. Treat it as the
+                              ;; same retryable timeout error — never a
                               ;; silent hard abort.
                                 (let [err (str "LLM call timed out after "
                                                (retry/llm-total-timeout-ms @(:cfg agent)) "ms")]
@@ -2962,9 +2958,8 @@ Be precise and concise in your responses."}}]
   (swap! (:cfg agent) assoc :http-idle-timeout-ms (long ms)))
 
 (defn set-http-total-timeout-ms!
-  "Set the whole-request total deadline live (pi: setHttpIdleTimeoutMs — the
-   transport's HttpRequest.timeout / curl --max-time); nil resets to 'use
-   idle', 0 also falls back to idle (pi: timeoutMs ?? httpIdleTimeoutMs)."
+  "Set the whole-request total deadline live; nil follows the idle timeout,
+   while zero disables the total deadline without changing the idle timeout."
   [agent ms]
   (swap! (:cfg agent) assoc :http-total-timeout-ms (some-> ms long)))
 

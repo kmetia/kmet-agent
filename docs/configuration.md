@@ -26,10 +26,10 @@ Example `~/.kmet/agent/settings.edn`:
  :theme "dark"
  :thinking :off
  :session-dir "~/.kmet/sessions"
- :http-idle-timeout-ms 300000   ; LLM stream idle + total deadline in ms; 0 disables
+ :http-idle-timeout-ms 120000   ; LLM stream idle timeout in ms; 0 disables idle timeout
  :http-transport :platform      ; :platform (default) = babashka.http-client on both hosts,
                                 ; curl for SOCKS/https-scheme proxies; :curl = everything through curl
- :http-total-timeout-ms nil     ; whole-request deadline in ms; nil = the idle timeout, 0 disables
+ :http-total-timeout-ms 0       ; whole-request deadline in ms; 0 disables, nil follows idle
  :shell-command-prefix nil      ; line prepended to every bash command, e.g. "shopt -s expand_aliases"; nil = none
  :shell-path nil                ; custom shell binary for bash execution (e.g. Cygwin/Git Bash on Windows); a leading ~ expands
  :system-prompt "You are a helpful assistant."   ; replaces the default system prompt
@@ -122,10 +122,14 @@ kmet has no CLI equivalent of pi's `--tools`/`--exclude-tools`/`--no-tools`/
 
 ## HTTP and reload
 
-`:http-idle-timeout-ms` (default 300000, pi: `httpIdleTimeoutMs`) is the LLM
-stream deadline: a stream that receives no bytes for this long errors retryably
-(undici bodyTimeout semantics), and the same value bounds the total request
-(SDK `timeoutMs`). `0` disables both.
+`:http-idle-timeout-ms` (default 120000, pi: `httpIdleTimeoutMs`) is the LLM
+stream idle deadline: a stream that receives no bytes for this long errors
+retryably (undici bodyTimeout semantics). `0` disables the idle deadline.
+
+`:http-total-timeout-ms` is the whole-request deadline. The default `0`
+disables it; `nil` tracks the idle timeout, and a positive value sets an
+independent deadline. Disabling the total deadline does not disable the
+per-byte idle timeout.
 
 `/reload` re-reads settings, reloads extensions/skills/prompts/themes, re-discovers
 context files, and rebuilds the system prompt (pi: `session.reload`). It refuses

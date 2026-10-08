@@ -36,10 +36,10 @@
    :loop-guard {:enabled true :threshold 3}
    :thinking-loop-guard-enabled true
    :models []
-   :http-idle-timeout-ms 300000
-   ;; pi: timeoutMs ?? httpIdleTimeoutMs — the whole-request deadline the
-   ;; transport enforces; nil = use the idle timeout, 0 disables (idle fallback)
-   :http-total-timeout-ms nil
+   :http-idle-timeout-ms 120000
+   ;; Whole-request deadline: nil follows the idle timeout; 0 disables the
+   ;; total deadline without affecting the separate per-byte idle timeout.
+   :http-total-timeout-ms 0
    ;; outbound HTTP transport: :platform (default — babashka.http-client
    ;; where possible, curl fallback) or :curl (everything through curl)
    :http-transport :platform

@@ -17,6 +17,8 @@
     (t/is (map? c))
     (t/is (= :opencode-go (:provider c)))
     (t/is (= "dark" (:theme c)))
+    (t/is (= 120000 (:http-idle-timeout-ms c)))
+    (t/is (= 0 (:http-total-timeout-ms c)))
     (t/is (contains? c :session-dir))
     (t/is (= "deepseek-v4-flash" (:model c)))))
 
