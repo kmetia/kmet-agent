@@ -1721,9 +1721,6 @@
   [editor theme]
   (reset! (:autocomplete-theme editor) theme))
 
-(defn editor-set-on-tab! [editor f]
-  (editor-set-autocomplete-provider! editor f))
-
 (defn editor-set-on-action!
   "Register (or replace) an app action handler on the editor
    (pi: CustomEditor.onAction). The handler is a zero-arg fn called from

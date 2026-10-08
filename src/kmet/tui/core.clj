@@ -3091,7 +3091,6 @@
     (protocols/editor-add-to-history! ed text)
     (editor/editor-push-history! ed text)))
 (def editor-set-on-action! editor/editor-set-on-action!)
-(def editor-set-on-tab! editor/editor-set-on-tab!)
 (def editor-set-autocomplete-theme! editor/editor-set-autocomplete-theme!)
 (def editor-autocomplete-active? editor/editor-autocomplete-active?)
 (def editor-push-history! editor/editor-push-history!)
