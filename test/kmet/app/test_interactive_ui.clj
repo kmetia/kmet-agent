@@ -1995,24 +1995,43 @@
            [:text {:padding-x 0 :padding-y 0} "owned"]
            (finally (swap! cleanups dec)))) {}]])))
 
+(defn- make-reload-fixture
+  "The /reload widget-test fixture: a TUI, the default editor, fresh widget
+   atoms, header chrome and a chat history, with the extension registry over
+   them and a cleanup counter the widget factory bumps."
+  []
+  (let [ui (tui/create-tui nil)
+        ed (editor/make-editor)
+        above (atom {})
+        below (atom {})
+        header-container (container/make-container [])
+        hdr (expandable-text/make-expandable-text (fn [] "hdr") (fn [] "hdr"))
+        sp1 (text/make-text " " 0 0)
+        ch (chat-history/make-chat-history)
+        cleanups (atom 0)]
+    {:above above
+     :hdr hdr
+     :sp1 sp1
+     :cleanups cleanups
+     :widget (make-cleanup-widget cleanups)
+     :registry (build-extension-registry
+                {:ui ui :ed ed :above above :below below :hdr hdr
+                 :sp1 sp1 :header-container header-container :ch ch})}))
+
+(defn- dispose-reload-fixture!
+  "Release MAKE-RELOAD-FIXTURE's header chrome and the installed extension
+   context."
+  [{:keys [hdr sp1]}]
+  (protocols/dispose hdr)
+  (protocols/dispose sp1)
+  (clear-installed-context!))
+
 (deftest test-reset-disposes-extension-widgets-header-and-editor
   (testing "finding 1: the /reload :reset path, the header swap and the
             editor swap dispose the values they drop — records carry no
             :dispose key, so the old duck-typed probes lost them with the
             swap"
-    (let [ui (tui/create-tui nil)
-          ed (editor/make-editor)
-          above (atom {})
-          below (atom {})
-          header-container (container/make-container [])
-          hdr (expandable-text/make-expandable-text (fn [] "hdr") (fn [] "hdr"))
-          sp1 (text/make-text " " 0 0)
-          ch (chat-history/make-chat-history)
-          registry (build-extension-registry
-                    {:ui ui :ed ed :above above :below below :hdr hdr
-                     :sp1 sp1 :header-container header-container :ch ch})
-          cleanups (atom 0)
-          widget (make-cleanup-widget cleanups)
+    (let [{:keys [registry above cleanups widget] :as fixture} (make-reload-fixture)
           headers (atom [])
           header-factory (fn [tag]
                            (fn [_t _theme]
@@ -2061,28 +2080,14 @@
           (t/is (= [ed-a] @seen)
                 "the previous custom editor was disposed; the default ed was not"))
         (finally
-          (protocols/dispose hdr)
-          (protocols/dispose sp1)
-          (clear-installed-context!))))))
+          (dispose-reload-fixture! fixture))))))
 
 (deftest ^:slow test-fifty-reload-cycles-leave-no-watches-behind
   (testing "Stage B acceptance: 50 widget set+render+reset cycles keep
             live-watch-count flat and unwind every with-let cleanup — a
             regression guard for the /reload drop sites Pass 1 fixed"
     (let [baseline (macros/live-watch-count)
-          ui (tui/create-tui nil)
-          ed (editor/make-editor)
-          above (atom {})
-          below (atom {})
-          header-container (container/make-container [])
-          hdr (expandable-text/make-expandable-text (fn [] "hdr") (fn [] "hdr"))
-          sp1 (text/make-text " " 0 0)
-          ch (chat-history/make-chat-history)
-          registry (build-extension-registry
-                    {:ui ui :ed ed :above above :below below :hdr hdr
-                     :sp1 sp1 :header-container header-container :ch ch})
-          cleanups (atom 0)
-          widget (make-cleanup-widget cleanups)]
+          {:keys [registry above cleanups widget] :as fixture} (make-reload-fixture)]
       (try
         (dotimes [_ 50]
           ((:set-widget registry) :w1 (widget) {})
@@ -2095,9 +2100,7 @@
         (t/is (<= (macros/live-watch-count) baseline)
               "no watch entry survived the cycles")
         (finally
-          (protocols/dispose hdr)
-          (protocols/dispose sp1)
-          (clear-installed-context!))))))
+          (dispose-reload-fixture! fixture))))))
 
 ;; ─── DSL stage 4 review: dock generation gate + widget-area reactivity ────
 

@@ -10,7 +10,7 @@
             [kmet.libs.weak :as weak]))
 
 (defn- fresh-key []
-  (keyword (str (gensym "weak-test"))))
+  (keyword (gensym "weak-test")))
 
 (defn- ref-of [key]
   (:ref (get @(deref #'weak/registry) key)))

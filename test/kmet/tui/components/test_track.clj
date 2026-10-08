@@ -15,6 +15,12 @@
             [kmet.libs.weak :as weak]
             [kmet.test-utils :as test-utils]))
 
+(defn- watch-key-of
+  "The track! watch key COMPONENT's cache allocated, or nil before its first
+   render."
+  [component]
+  (:kmet.tui.macros/watch-key (meta (:cache component))))
+
 (t/deftest test-set!-auto-invalidates
   ;; text-set! no longer calls invalidate — the watch must do it
   (let [c (text/make-text "a" 0 0)]
@@ -98,8 +104,7 @@
   ;; cache hit must catch it anyway.
   (let [c (text/make-text "a" 0 0)]
     (core/render c 5)
-    (remove-watch (:text-atom c)
-                  (:kmet.tui.macros/watch-key (meta (:cache c))))
+    (remove-watch (:text-atom c) (watch-key-of c))
     (text/text-set! c "b") ;; no watch → no invalidation
     (let [lines (core/render c 5)]
       (t/is (.contains (first lines) "b")))))
@@ -135,7 +140,7 @@
   (let [c (text/make-text "drop" 0 0)]
     (core/render c 5)
     {:wref (java.lang.ref.WeakReference. c)
-     :key (:kmet.tui.macros/watch-key (meta (:cache c)))
+     :key (watch-key-of c)
      :text-atom (:text-atom c)}))
 
 (defn- live-subject?
@@ -173,8 +178,8 @@
           b (text/make-text "b" 0 0)]
       (core/render a 5)
       (core/render b 5)
-      (let [ka (:kmet.tui.macros/watch-key (meta (:cache a)))
-            kb (:kmet.tui.macros/watch-key (meta (:cache b)))]
+      (let [ka (watch-key-of a)
+            kb (watch-key-of b)]
         (t/is (keyword? ka) "a render allocates the key once")
         (t/is (not= ka kb) "two live components never share a key"))))
   (t/testing "a cache-less component disposes without minting a key"
@@ -190,7 +195,7 @@
                   (mapv (fn [_] (future (key-fn c))))
                   (mapv deref))]
       (t/is (= 1 (count (distinct ks))) "one key for every allocator")
-      (t/is (= (first ks) (:kmet.tui.macros/watch-key (meta (:cache c))))))))
+      (t/is (= (first ks) (watch-key-of c))))))
 
 (t/deftest test-equal-value-reset-keeps-cache
   ;; equal-value reset! must not invalidate — the cached result stays valid
