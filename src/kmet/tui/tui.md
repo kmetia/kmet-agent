@@ -840,8 +840,9 @@ only extension `ui-custom` overlays float in practice.
 component argument it removes that component's entries wherever they sit
 (identity, not topmost) and returns true when one was removed. Hiding
 never disposes — the owner does (§5.1) — and the app's ordered close
-(`kmet.app.ui.dock/dispose!`) leaves the stack before disposing on both
-surfaces, so the frame can never composite a disposed component.
+(`kmet.app.ui.dock/close!`, or `close-atom!` for a panel held in an atom)
+leaves the stack before disposing on both surfaces, so the frame can never
+composite a disposed component.
 
 Floating overlays get chrome **by default** so they can never read as text
 over text (pi leaves this to the component; kmet makes it the default):
@@ -987,6 +988,7 @@ that renders — and may touch widgets and component state directly:
 (def id (timers/every! 1000 #(swap! now-atom (System/currentTimeMillis))))
 (timers/after! 1500 #(swap! flash-atom dec))     ; one-shot
 (timers/cancel! id)                              ; idempotent
+(timers/cancel-atom! timer-id-atom)              ; cancel + clear the atom
 ```
 
 - `after!` fires once, `every!` repeats until cancelled, both return an id.
@@ -1004,7 +1006,9 @@ that renders — and may touch widgets and component state directly:
 - `tui-stop` calls `cancel-all!`, so no timer outlives the session; a
   component still cancels its own id in `dispose` (that is what keeps a
   dropped component from poking a dead tree), and `cancel!` is idempotent so
-  a double stop is harmless.
+  a double stop is harmless. A component holding its single pending id in
+  an atom cancels through `cancel-atom!` — cancel then clear, so an idle
+  timer reads as absent instead of as a stale id.
 - Headless tests drive `pump!` by hand — no sleeps, no wall-clock races.
 - **Not for**: I/O timeouts (the input pipeline's sequence/negotiation
   flushes, OSC-11 query deadlines) and background pollers (the theme-file
