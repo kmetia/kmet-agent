@@ -117,6 +117,12 @@
   (let [[old _] (swap-vals! registry dissoc key)]
     (:payload (get old key))))
 
+(defn- drain-queue!
+  "Poll every enqueued reference off the queue; return how many drained."
+  []
+  (loop [n 0]
+    (if (.poll queue) (recur (inc n)) n)))
+
 (defn sweep!
   "Drain the queue; when anything was enqueued, claim the entries this swap
    removed (one `swap-vals!`, so concurrent sweeps cannot run an entry's
@@ -125,16 +131,14 @@
    sweep rather than being claimed twice. Safe from any thread; cheap when
    nothing died (one `.poll`)."
   []
-  (let [drained (loop [n 0]
-                  (if (.poll queue) (recur (inc n)) n))]
-    (if (zero? drained)
-      0
-      (let [[old new] (swap-vals! registry prune-dead)
-            ;; claim exactly what this swap removed — an entry that clears
-            ;; after the swap stays until the next sweep
-            claimed (filterv (fn [[k _]] (not (contains? new k))) old)]
-        (run-on-dead! claimed)
-        (count claimed)))))
+  (if (zero? (drain-queue!))
+    0
+    (let [[old new] (swap-vals! registry prune-dead)
+          ;; claim exactly what this swap removed — an entry that clears
+          ;; after the swap stays until the next sweep
+          claimed (filterv (fn [[k _]] (not (contains? new k))) old)]
+      (run-on-dead! claimed)
+      (count claimed))))
 
 (defn live-count
   "Entries whose subject is still alive (tests and guards). O(entries)."

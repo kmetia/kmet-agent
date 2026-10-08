@@ -16,12 +16,10 @@
    returned — a bounded read must not leave the child or its reader thread
    behind. Returns the string otherwise."
   [p]
-  (let [out (deref (future (slurp (.getInputStream p))) 2000 nil)]
-    (if (nil? out)
+  (or (deref (future (slurp (.getInputStream p))) 2000 nil)
       (do (try (.destroy p) (catch Exception _))
           (try (.destroyForcibly p) (catch Exception _))
-          nil)
-      out)))
+          nil)))
 
 (defn- run-stty
   "Run `stty` with inherited stdin so it sees the controlling terminal
