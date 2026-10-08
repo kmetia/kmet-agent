@@ -4,8 +4,9 @@ Part 1 is the audit (what leaks and why). Part 2 is the detailed, reviewed
 design for the fix: **weak subscriptions + explicit resources**. Part 2 is a
 plan; nothing in it is implemented yet.
 
-- Part 1: findings with file/line references and four reproducible probes
-  (three from the audit, one from the review).
+- Part 1: findings with file/line references and five reproducible probes
+  (three from the audit, one from the review, one from the design review of
+  Part 2).
 - Part 2: principles, the `kmet.libs.weak` helper, the `track!` and `reakt`
   integrations, the deterministic leftovers, mode exit, guards, tests,
   rollout stages, risks.
@@ -20,8 +21,9 @@ plan; nothing in it is implemented yet.
   `bb format-check-changed`; full gates only on request. New test namespaces
   register in `kmet.tasks.runner/all-namespaces`.
 - **Stage C is conditional:** run the Stage-B gate test first (drop a
-  `ComponentFn` tree, GC + sweep, read `live-reaction-count`). Record the
-  result here before writing any of 2.3.
+  `ComponentFn` tree, GC + sweep, check a `WeakReference` to its reaction —
+  `live-reaction-count` does not exist yet, see 2.8). Record the result here
+  before writing any of 2.3.
 
 ### Stage 0 — design (done)
 
@@ -31,8 +33,9 @@ plan; nothing in it is implemented yet.
 
 ### Stage A — `kmet.libs.weak`
 
-- [ ] `src/kmet/libs/weak.clj`: registry + queue, `register!`, `subject`,
-      `payload`, `unregister!`, `sweep!`, `live-count`, `entry-count` (2.1)
+- [ ] `src/kmet/libs/weak.clj`: registry + queue, `register!` (with a
+      `:kind`), `subject`, `payload`, `unregister!`, `sweep!`, `live-count`,
+      `entry-count` (kind-filtered; 2.1)
 - [ ] `test/kmet/libs/test_weak.clj`: register/refresh, identical-subject ref
       reuse, throw on a different live subject, `unregister!` payload,
       `sweep!` (concurrent + queue drain), `on-dead` isolation
@@ -43,20 +46,22 @@ plan; nothing in it is implemented yet.
 
 Weak `track!`:
 
-- [ ] unique `tracker-key` via cache-atom metadata, race-safe (2.2;
-      fixes finding 4)
+- [ ] unique `tracker-key` via cache-atom metadata (collision-free; the
+      re-read is not a strict CAS — see 2.2; fixes finding 4)
 - [ ] key-only handler + weak registry entry + `on-dead` unwatch (2.2)
 - [ ] `remove-track-watches!` meta-only lookup, nil-safe for cache-less
       components (I4)
 - [ ] `(weak/sweep!)` in `run-render-loop!` and after a non-empty
       `reakt/flush!`; `macros/sweep-dead-watches!`, `macros/live-watch-count`
+      (kind-filtered on `:track!`)
 
 Deterministic leftovers (2.4):
 
 - [ ] tolerant `protocols/dispose-component!` + `cda` delegate +
       `tui-remove-child`/`tui-clear`; reconcile/containers stay strict (I8)
 - [ ] five `ui_registry` sites with identity guards (`hdr`, default `ed`)
-- [ ] status indicator disposal (transient only — never the working one)
+- [ ] status indicator disposal in all three swap sites (show / clear /
+      activate-working; transient only — never the working one)
 - [ ] `ChatHistoryComponent.dispose` + `declare`
 - [ ] `run-config` try/finally + screen dispose
 
@@ -71,23 +76,36 @@ Mode exit (2.5):
 
 Tests:
 
-- [ ] per-site leak tests (widget reset, header/editor swap, status swap,
-      chat clear, duck-map `tui-clear`)
-- [ ] mid-session `/reload` cycle: explicit-dispose counts flat (fast);
-      dropped-anyway counts flat after GC + sweep (`^:slow`)
+- [ ] migrate the 15 test namespaces off `#'macros/watch-registry` (4 also
+      build the identity-hash key: `test_tool_execution.clj:771,790`,
+      `test_container.clj:46`, `test_track.clj:95`); add a
+      `macros/tracked?`/`component-watch-key` accessor for them
+- [ ] per-site leak tests (widget reset, header/editor swap, status swap —
+      show, clear AND activate-working; chat clear, duck-map `tui-clear`)
+- [ ] mid-session `/reload` cycle: explicit-dispose counts flat (fast)
+- [ ] dropped-anyway counts flat after GC + sweep (`^:slow`; track! entries
+      only — reactions are the Stage-C gate)
 - [ ] mode-exit test: `teardown-mode!` clears all roots, idempotent
-- [ ] existing `watch-registry` count tests still exact on dispose paths
+- [ ] existing count assertions stay exact on dispose paths (via the new
+      accessors or a kind-filtered `live-watch-count`)
 - [ ] changed-file gates green
 
 ### Stage C — weak `reakt` (conditional)
 
-- [ ] **Gate test result recorded here** (see 2.8): is C required?
+- [ ] **Gate test result recorded here** (see 2.8): is C required? The gate
+      test must use a `WeakReference` (or a marker captured by the body),
+      not `live-reaction-count` — that counter is Stage C work.
 - [ ] weak subject = reaction; payload `{:rx-watch-key :watching}` (B1, B2)
-- [ ] key-only `dep-handler`; `update-watching!` single writer; `-dispose`
-      via `weak/unregister!`; registration at the end of `make-reaction`
+- [ ] key-only `dep-handler` (`auto-run?` moves into the cell; 2.3);
+      `update-watching!` single writer (payload refresh only on a real set
+      change); `-dispose` via `weak/unregister!`; registration at the end
+      of `make-reaction`
+- [ ] `track-render` `:rx` cache entries hold the reaction
+      (`{cell [ref value]}`; 2.3) — without this a collected reaction's
+      cell keeps validating a stale cache
 - [ ] `flush!` sweep (reentrancy-safe); `live-reaction-count`
 - [ ] liveness tests per creation shape (var, `with-let`, ComponentFn,
-      cursor, dep graph, queued)
+      cursor, dep graph, queued, track!-cache)
 - [ ] `^:slow` GC tests on bb **and** Jolt (weak refs over reify reactions)
 - [ ] perf measurement: dep-change overhead + frame time, within budget
 - [ ] changed-file gates green
@@ -139,6 +157,12 @@ it ends.
   reaches the component's state, and the cached value reaches its rendered
   children. A dropped `ComponentFn` tree is therefore rooted even if its own
   `track!` subscriptions are removed.
+- **A cell does not reference its reaction (probe 5).** `track-render`'s
+  cache stores `{cell → value}` (`macros.clj:138-145`) and `rx-unchanged?`
+  accepts a settled cell, including `:disposed` (`macros.clj:71-84`). Once
+  dep watches are weak, a deref-only reaction can be collected while the
+  cache still holds its cell: the cache then hits forever and nothing is
+  left to invalidate it. Stage C must make the cache hold the reaction (2.3).
 - **Probe 1:** a `hiccup/root` tree rendered once but never disposed keeps
   `watch-registry` at 1 entry after `tui-stop`; disposing it drops to 0.
 - **Probe 2:** a chat history with 50 user + 50 assistant messages rendered →
@@ -330,6 +354,11 @@ Recorded so the fix does not re-propose them:
   passes, i.e. never owned and silently dropped on replacement. Making adopt
   real needs reconciler changes or a prop-change-aware wrapper; dropped from
   the plan.
+- **A weak `reakt` alone does not make `track-render` caches safe**: a cell
+  does not reference its reaction (probe 5), so a cell-keyed cache can keep
+  validating a collected reaction forever (a stale render, past even the
+  `on-dead` unwatch). The cache must hold the reaction; the fix is in 2.3,
+  not an alternative to the weak layer.
 - **A weak `track!` registry alone does not release leaked trees/panels**: the
   `reakt` dep-handler chain (fact 2 above) still roots them. Weak `reakt` is
   what makes "forgot dispose" non-fatal for ComponentFn-shaped leaks.
@@ -416,7 +445,9 @@ cannot act (resources, cleanup bodies).
 
 A new self-contained `kmet.libs` namespace; the **only** namespace allowed to
 touch `java.lang.ref` (the platform-dependency exception, like the terminal
-backends). Used by `kmet.tui.macros` and `kmet.libs.reakt`.
+backends). Used by `kmet.tui.macros` and `kmet.libs.reakt`. (Sibling-lib
+requires are what the enforced self-containment guard allows; the README
+sentence that appears to forbid them is wrong and fixed in 2.11.)
 
 Portability was verified before designing this:
 
@@ -435,6 +466,7 @@ Portability was verified before designing this:
 ```clojure
 (defonce ^:private registry (atom {}))
 ;; key -> {:ref    (java.lang.ref.WeakReference. subject queue)
+;;         :kind   keyword              ; :track! / :reaction (counters, report)
 ;;         :payload map                 ; unsubscribe data; NEVER the subject
 ;;         :on-dead (fn [key payload])} ; unsubscribe + cleanup
 (defonce ^:private queue (java.lang.ref.ReferenceQueue.))
@@ -444,10 +476,11 @@ Portability was verified before designing this:
 
 ```clojure
 (defn register!
-  "Create or refresh KEY's entry for SUBJECT. PAYLOAD is everything the sweep
-   needs to unsubscribe (watched refs, watch keys); it must not reference
-   SUBJECT. ON-DEAD receives (key payload) after the entry is removed and runs
-   exception-isolated, outside the registry swap.
+  "Create or refresh KEY's entry for SUBJECT. KIND tags the entry for the
+   kind-filtered counters and the exit report. PAYLOAD is everything the
+   sweep needs to unsubscribe (watched refs, watch keys); it must not
+   reference SUBJECT. ON-DEAD receives (key payload) after the entry is
+   removed and runs exception-isolated, outside the registry swap.
 
    Reuses the existing WeakReference while SUBJECT is identical (a streaming
    render pass would otherwise allocate one ref per pass). Opportunistically
@@ -457,7 +490,7 @@ Portability was verified before designing this:
    Throws when KEY is already held by a DIFFERENT live subject: that means two
    components share a cache atom (track!) or two reactions share a registry key,
    which would silently steal each other's watches. Loud beats corrupt."
-  [key subject payload on-dead] ...)
+  [key subject kind payload on-dead] ...)
 
 (defn subject  "The live subject for KEY, or nil." [key] ...)
 (defn payload  "KEY's payload, or nil (dead/unregistered)." [key] ...)
@@ -475,8 +508,10 @@ Portability was verified before designing this:
    Safe from any thread; cheap when nothing died."
   [] ...)
 
-(defn live-count  "Entries whose subject is still alive (tests/guards)." [] ...)
-(defn entry-count "All entries, including dead-until-swept." [] ...)
+(defn live-count  "Live entries (tests/guards); all kinds or KIND only."
+  ([] ...) ([kind] ...))
+(defn entry-count "All entries, including dead-until-swept (all kinds or KIND)."
+  ([] ...) ([kind] ...))
 ```
 
 ### Sweep outline
@@ -504,6 +539,10 @@ Notes:
 
 - The `.poll` drain both triggers the scan and removes queue garbage from
   entries that were unregistered while their ref was pending.
+- The outlined sweep re-checks `.get` for the claimed set in a second pass;
+  a CAS loop could collect the claimed `[k e]` pairs in one pass, but the
+  two-pass version only walks the entries when something died and is
+  simpler.
 - `swap-vals!` (used elsewhere in the codebase, e.g. `tool_execution`) keeps
   the claim pure; a concurrent `register!` for a dead key cannot happen
   (keys are never reused — see the key schemes below).
@@ -524,14 +563,23 @@ both are per-component by construction):
   "The component's stable watch key, allocated once in its cache atom's
    metadata. The cache atom is the component's one per-instance cell, so the
    key dies with the component and can never collide with another live
-   component's key. A component must own its cache atom; register! throws on
-   the second live user (shared-atom bug)."
+   component's key (finding 4). A component must own its cache atom;
+   register! throws on the second live user (shared-atom bug).
+
+   The re-read is not a strict CAS: two threads rendering the same component
+   can each allocate a key and one meta write wins. Both entries weakly
+   reference the same subject and both are swept on its death, so the loser
+   self-heals; renders of one component are single-threaded in-tree, so this
+   is theoretical. Keys themselves are unique (gensym), which is what
+   finding 4 needs. (The cache atom itself would be a race-free key, but the
+   registry would then hold the atom — and its last cached render — strongly
+   until sweep; the keyword keeps dead payloads small.)"
   [component]
   (when-let [a (component-cache-atom component)]
     (or (::watch-key (meta a))
         (let [k (keyword (str (gensym "track!")))]
           (alter-meta! a assoc ::watch-key k)
-          (::watch-key (meta a))))))   ; re-read: two threads allocate, the winner wins
+          (::watch-key (meta a))))))   ; re-read: a concurrent winner's key wins
 ```
 
 `defcomponent`-generated `dispose` calls `remove-track-watches!` on every
@@ -554,12 +602,14 @@ shape:
                       (invalidate-cache c)))))
       atoms (set (keys tracked-map))
       prev-atoms (:atoms (weak/payload watch-key))]
+  ;; register FIRST: a throw here (a shared cache atom) must not leave
+  ;; watches installed under a key remove-track-watches! cannot find
+  (weak/register! watch-key component :track! {:atoms atoms}
+                  (fn [k {:keys [atoms]}]            ; on-dead: unsubscribe
+                    (doseq [a atoms] (reakt/unwatch-ref a k))))
   (doseq [a atoms] (reakt/watch-ref a watch-key handler))
   (doseq [a prev-atoms] (when-not (contains? atoms a)
                           (reakt/unwatch-ref a watch-key)))
-  (weak/register! watch-key component {:atoms atoms}
-                  (fn [k {:keys [atoms]}]            ; on-dead: unsubscribe
-                    (doseq [a atoms] (reakt/unwatch-ref a k))))
   …)
 ```
 
@@ -593,9 +643,11 @@ Properties:
   `macros/live-watch-count`, and `hiccup`/`weak` counters as needed.
 
 Migration: the registry map's shape changes from
-`{key {:component … :atoms …}}` to the weak entry shape. Existing tests that
-count `@'macros/watch-registry` still get exact counts on explicit-dispose
-paths; use the new accessors for clarity.
+`{key {:component … :atoms …}}` to the weak entry shape, and
+`macros/watch-registry` is replaced by `kmet.libs.weak`'s registry. The 15
+test namespaces that read the private var (and the 4 identity-hash key
+builders) must migrate to `macros/tracked?`/`live-watch-count` — see the
+checklist.
 
 ## 2.3 `reakt` integration
 
@@ -604,20 +656,25 @@ The dominant risk, deliberately its own stage (2.9-C).
 ### Retention chain being broken
 
 `dep-handler` (`reakt.clj:345`) closes over `cell` and `self`; the dep atom's
-watch map holds the handler. New handler captures only the registry key; the
-subject is the **reaction** (not the cell — a live `track-render` cache can
-hold a cell in its `:rx` map, and a cell with no reaction can neither be
-invalidated usefully nor re-run; see review B1).
+watch map holds the handler. New handler captures the registry key and the
+dep key only — `auto-run?` moves into the cell, so nothing in the handler
+reaches the reaction or its subtree. The subject is the **reaction** (not the
+cell — a live `track-render` cache can hold a cell in its `:rx` map, and a
+cell with no reaction can neither be invalidated usefully nor re-run; see
+review B1).
 
 ```clojure
 ;; in make-reaction, before the reify:
-;;   rx-key    (gensym "rx")          registry key
+;;   rx-key    (gensym "rx")          registry key (the existing watch-key
+;;                                    works too — it is already unique)
 ;;   watch-key (RxKey. (gensym "rx")) dep-watch key (existing)
+;;   cell      :auto-run? (the option) — so the handler does not capture it
 dep-handler
 (fn [_key _ref old new]
   (try
     (when-let [r (weak/subject rx-key)]        ; dead reaction → no-op
-      (let [cell (-cell r)]
+      (let [cell (-cell r)
+            auto-run? (:auto-run? @cell)]
         (when (and (changed? old new)
                    (not= :dirty (:state @cell))
                    (not= :disposed (:state @cell)))
@@ -629,6 +686,12 @@ dep-handler
       (binding [*out* *err*]
         (println "kmet.libs.reakt dep-handler error:" (ex-message e))))))
 ```
+
+`auto-run?` moves into the cell so the handler truly captures only the key;
+otherwise a callback closing over the component would keep rooting it until
+the sweep. The only in-tree `:auto-run?` today is ComponentFn's bare
+`(fn [_] (macros/schedule-frame!))` (`hiccup.clj:877`), which closes over
+nothing — but the cell keeps the property true for future callers.
 
 ### Payload (the sweep's unsubscribe data)
 
@@ -650,17 +713,19 @@ watch key:
 Registration happens at the end of `make-reaction`, after `(reset! self r)`:
 
 ```clojure
-(weak/register! rx-key r {:rx-watch-key watch-key :watching []} on-dead)
+(weak/register! rx-key r :reaction {:rx-watch-key watch-key :watching []} on-dead)
 ```
 
 ### Single writer for the dep set
 
 `update-watching!` (`reakt.clj:365-383`) becomes the one writer: it computes
 `added`/`dropped` from the **payload's** `:watching`, installs/uninstalls the
-watches, and refreshes the payload in the same call. The cell's `:watching`
-stays as an introspection mirror (or is dropped and `reaction-state` reads the
-payload) — decide once, and keep a debug assertion that the two agree. Today
-`-dispose` unwatches from `(:watching @cell)` (`reakt.clj:517-522`); it becomes:
+watches, and refreshes the payload **only when `added`/`dropped` is
+non-empty** — an unconditional registry write per reaction run is a hot-path
+cost for nothing. The cell's `:watching` stays as an introspection mirror (or
+is dropped and `reaction-state` reads the payload) — decide once, and keep a
+debug assertion that the two agree. Today `-dispose` unwatches from
+`(:watching @cell)` (`reakt.clj:517-522`); it becomes:
 
 ```clojure
 (-dispose [_]
@@ -689,9 +754,18 @@ dirtied at stop are not retained by it. It must never run bodies.
   `hiccup/compute` under `with-let` (store holds it), shared `def` computes
   (var), `ComponentFn` `:rx`, cursors (hold their inner `rx`), `derive`
   callers, another reaction's `:watching` payload, and `enqueue!` until flush.
-- `track-render`'s cache `:rx` entries hold **cells**, not reactions; under the
-  invariant above, a live component always still holds the reaction it derefs
-  through its props/body/store.
+- **`track-render` must hold the reactions its cache validates.** Today `:rx`
+  maps `cell → value`, and a cell does not reference its reaction (probe 5):
+  under weak dep watches a deref-only reaction would be collected while the
+  cache still holds its cell, and `rx-unchanged?` would keep accepting the
+  settled cell — the component then serves a stale render forever with
+  nothing left to invalidate it. Change the cache to `{cell [ref value]}`
+  (keyed by cell — reaction hashing is unreliable per the Identity plumbing;
+  the value pins the reaction) and read `@(reakt/-cell ref)` in the `:rx`
+  hit check (`rx-unchanged?`, `macros.clj:71-84`). A live cache entry then
+  holds its reaction, which is exactly the liveness invariant, and the sweep
+  only ever sees reactions no derefer actually holds. This is a Stage C
+  change.
 - No public API change. `watch-ref` holders must keep a reference to the
   reaction (documented in `watch-ref`).
 - `:auto-run? false` last-watcher self-dispose is unchanged.
@@ -705,11 +779,20 @@ Resources need these; the weak layer is not a substitute.
 
 ### 2.4.1 One tolerant disposal verb
 
-New `kmet.tui.protocols/dispose-component!` (tolerant: try the value's
-`:dispose`, else the `dispose` multimethod, isolate exceptions) — the shape
-handling currently living in `kmet.app.ui.custom-dialog-adapter`
-(`cda/dispose-component!` becomes a delegating alias so app callers keep
-working). Route through it:
+New `kmet.tui.protocols/dispose-component!` — the shape handling currently
+living in `kmet.app.ui.custom-dialog-adapter` (`cda/dispose-component!`
+becomes a delegating alias so app callers keep working):
+
+- plain maps (not records): their `:dispose` key, isolated;
+- sequences: dispose each element (a widget value can be a multi-root
+  compiled tree — `hiccup/compile-tree` can return a vector);
+- everything else (records, reifies): the `dispose` multimethod — dispatch
+  works even where the SCI `satisfies?` check lies.
+
+Exceptions are isolated (a broken foreign component must not take the frame
+down) but **logged** via `kmet.debug/log-error`, so a real bug in a
+DSL-owned component is still visible; the strict call sites
+(reconcile/containers) keep throwing loudly. Route through it:
 
 - `tui-remove-child` / `tui-clear` (`core.clj:240,245`) — they can receive
   duck-typed map components via extension footer/widget paths; today
@@ -718,7 +801,7 @@ working). Route through it:
 
 **Keep reconcile and container disposal strict** (`retire-item!`,
 `container-replace-children!`): a throwing `dispose` on a DSL-owned child is a
-real bug and should stay loud. The tolerant verb is for foreign values.
+real bug. The tolerant half is for foreign values only.
 
 ### 2.4.2 `ui_registry.clj` sites
 
@@ -734,11 +817,14 @@ Validation: a leak test per site (see 2.8).
 
 ### 2.4.3 Status indicators
 
-`show-status-indicator!` (`status.clj:106-119`) and `clear-status-indicator!`
-dispose the **transient** indicator being dropped (the old `:status-current`
-value). Never touch `(:status-indicator cs)` — the working indicator is
-reused, not dropped. Add a test that `clear-status-indicator!` leaves the
-working indicator alive.
+All three `:status-current` writers — `show-status-indicator!`
+(`status.clj:106-119`), `activate-working-indicator!` (`:122-143`) and
+`clear-status-indicator!` (`:170-191`) — dispose the **transient** indicator
+being dropped (the old `:status-current` value). Put the swap in one helper
+so a fourth site cannot regress. Never touch `(:status-indicator cs)` — the
+working indicator is reused, not dropped. Add tests that
+`clear-status-indicator!` and `activate-working-indicator!` leave the working
+indicator alive.
 
 ### 2.4.4 `ChatHistoryComponent.dispose`
 
@@ -761,9 +847,14 @@ skip the size-ref watch cancel.
 ### 2.4.6 Minor hardening
 
 - `terminal_jline.clj` `run-stty`/`run-chcp`: on a nil deref result, destroy
-  the child (`babashka.process/destroy-tree`) instead of abandoning it.
-- `session_admin.clj:701-703`: add `(:running? (:tui cs))` (or a stopped
+  the child — `(.destroyForcibly p)` on the `java.lang.Process` (these use
+  ProcessBuilder, not babashka.process; destroying closes stdout, so the
+  blocked `slurp` future also returns) — instead of abandoning it.
+- `session_admin.clj:701-703`: add `@(:running? (:tui cs))` (or a stopped
   check) to the driver loop and catch `Throwable` around the deliver.
+- `resource_config.clj:728`: the rows watch key also uses
+  `System/identityHashCode` — same collision class as finding 4; use a
+  `gensym`.
 - Optional: `settings_list/open-submenu!` disposes an existing submenu before
   replacing (unreachable today; one line).
 - Optional: prune stale custom themes on `/reload` (finding 9).
@@ -793,10 +884,10 @@ Two owners: `interactive/run` and `package_manager/run-config`. Order matters.
    either way; this is the deterministic half."
   [cs]
   (try (when-let [ag @(:agent-state cs)] (reset! (:signal ag) true)) (catch Throwable _))
-  (try (reset! (:bash-signal cs) true) (catch Throwable _))
+  (try (when-let [s (:bash-signal cs)] (reset! s true)) (catch Throwable _))
   (try (extensions/ui-reset!) (catch Throwable _))          ; dialogs + extension surfaces
   (try (extensions/clear-runtime!) (catch Throwable _))     ; sinks: session/context/entry
-  (try (theme-ctrl/shutdown! (:theme-controller cs)) (catch Throwable _))
+  (try (when-let [tc (:theme-controller cs)] (theme-ctrl/shutdown! tc)) (catch Throwable _))
   (try (reakt/discard-queued!) (catch Throwable _))
   nil)
 ```
@@ -812,13 +903,16 @@ New pieces:
 
 Deliberately **not** in this pass: tree disposal (no `dock/clear!`,
 `chat-history-clear!`, `tui-clear`), quiescing the agent turn, taint for late
-appends. Rationale: with the roots cleared, the whole mode becomes
-unreachable, GC reclaims components, and the sweep removes their
-subscriptions; a late agent append lands in a still-live chat whose components
-are reclaimed when the agent future ends. Accepted consequence, documented:
-`with-let` cleanups on app-tree components do not run at exit (there are none
-in-tree; extension surfaces are disposed by `ui-reset!`, which is also what
-resolves open `ui-custom` promises so extension flows can finish).
+appends. Rationale: with the roots cleared, everything only the mode reaches
+becomes collectable — but **Stage B alone does not free the component tree**:
+a `ComponentFn`'s reaction is still rooted by process-global deps (theme
+atoms, shared computes) through the strong `dep-handler → self` chain, so the
+tree stays reachable until weak `reakt` (Stage C) lands. A late agent append
+lands in a still-live chat whose components are reclaimed when the agent
+future ends. Accepted consequence, documented: `with-let` cleanups on
+app-tree components do not run at exit (there are none in-tree; extension
+surfaces are disposed by `ui-reset!`, which is also what resolves open
+`ui-custom` promises so extension flows can finish).
 
 `run-config` has no `cs`: its exit is `(protocols/dispose screen)` inside a
 `try/finally` around `tui-start`/`tui-stop` (2.4.5).
@@ -831,15 +925,16 @@ resolves open `ui-custom` promises so extension flows can finish).
 | dropped lead record with `track!` (future drop sites) | weak `track!` + sweep |
 | dropped `ComponentFn`/panel/compute (third-party, future) | weak `reakt` + sweep (Stage C) |
 | transient status indicator (finding 3) | 2.4.3, falls back to weak |
-| mode exit (finding 2) | 2.5 root clearing + GC (embedded hosts); CLI exits anyway |
+| mode exit (finding 2) | 2.5 root clearing (Stage B) + weak `reakt` (Stage C) + GC — Stage B alone leaves the tree rooted by global dep atoms |
 | global roots (finding 10) | 2.5 explicitly; weakness cannot help while they root |
 | dropped component with an armed timer | **not reclaimed** until its `dispose` cancels the timer — deliberate; surfaced by the guard |
 | transcript / session growth (finding 9) | by design; `/new` or compaction policy |
 
 ## 2.7 Guard and observability
 
-- Counters: `weak/live-count`, `weak/entry-count`, `macros/live-watch-count`,
-  `reakt/live-reaction-count`, plus existing `timers/scheduled` and
+- Counters: kind-filtered `weak/live-count` / `weak/entry-count`,
+  `macros/live-watch-count` (`:track!` only), `reakt/live-reaction-count`
+  (`:reaction` only), plus existing `timers/scheduled` and
   `hiccup/counters`.
 - `--debug` exit report: after `teardown-mode!`, log the survivor types/counts
   when `live-watch-count` or `live-reaction-count` is non-zero (log, never
@@ -856,17 +951,21 @@ Deterministic (fast suite):
 
 - `kmet.libs.weak` unit tests: register/subject/payload; identical-subject
   reuse; unregister returns payload; `register!` throws on a different live
-  subject for the same key; `on-dead` isolation.
+  subject for the same key; `on-dead` isolation; kind filtering.
 - `track!`: explicit dispose returns `live-watch-count` to baseline; widget
-  `:reset`, header and editor swaps, status swap, chat clear; a duck-map child
-  in `tui-clear` disposes via the tolerant verb.
+  `:reset`, header and editor swaps, status swap (show, clear and
+  activate-working), chat clear; a duck-map child in `tui-clear` disposes via
+  the tolerant verb.
 - `reakt`: dispose unwatches and purges the queue; `discard-queued!` empties;
   reaction liveness per creation shape (var, `with-let`, ComponentFn, cursor,
-  dep graph, queued).
+  dep graph, queued); a `track!` cache entry pins its reaction (the `:rx`
+  value holds it), so a collected reaction can never validate a cache.
 - Mode exit: `teardown-mode!` clears the four global slots, the callback, the
   watcher and the queue; calling it twice is a no-op.
-- Existing tests: `macros/watch-registry` count assertions stay valid on
-  explicit-dispose paths; migrate any that relied on identity-hash keys.
+- Test migration: the 15 `#'macros/watch-registry` users move to
+  `macros/tracked?`/`live-watch-count`; the 4 identity-hash key builders
+  (`test_tool_execution.clj:771,790`, `test_container.clj:46`,
+  `test_track.clj:95`) move to the accessor.
 
 GC-based (`^:slow`, both hosts):
 
@@ -874,9 +973,11 @@ GC-based (`^:slow`, both hosts):
   deadline; assert a dropped subject disappears and its atom watch key is gone
   from `(.getWatches atom)`.
 - **Stage C gate test:** drop a `hiccup/root` `ComponentFn` tree with nested
-  fn components; after Stage B, measure whether `reakt/live-reaction-count`
-  returns to baseline. If yes, Stage C is purely defensive; if no (expected),
-  it is required. Record the result here.
+  fn components; after Stage B, hold a `WeakReference` to the tree's reaction
+  (`@(:rx comp)`, or to a marker atom the body captured) and check `.get`
+  after GC — `live-reaction-count` does not exist until Stage C. If the
+  reference clears, Stage C is purely defensive; if not (expected), it is
+  required. Record the result here.
 - Mid-session regression: 50 `/reload` cycles with a widget tree → counts
   flat (Stage B).
 
@@ -891,8 +992,8 @@ scope summary.
 | stage | contents | acceptance |
 |---|---|---|
 | **A** | `kmet.libs.weak` + unit tests; no behavior change | probes pass on bb and Jolt; helper tests green |
-| **B** | unique `track!` keys + weak `track!` registry; loop/flush sweep; 2.4.1-2.4.5; 2.5 root clearing; guard counters | all Part-1 audited leaks have a regression test; 50-reload mid-session test flat; full suite green |
-| **C** | weak `reakt` dep watches + `discard-queued!` | Stage-C gate test result recorded; liveness tests; GC tests on both hosts; perf within budget |
+| **B** | unique `track!` keys + weak `track!` registry; loop/flush sweep; 2.4.1-2.4.5; 2.5 root clearing; guard counters; test migration | audited track!/deterministic leaks have regression tests; 50-reload mid-session test flat; full suite green |
+| **C** | weak `reakt` dep watches + `track-render` cache holds reactions + `discard-queued!` | Stage-C gate test result recorded; liveness tests; GC tests on both hosts; perf within budget |
 | **D** | 2.4.6 minors; `--debug` exit report; docs | zero-finding lint/format; docs updated |
 
 Dropped from the design (precedents in Part 1): owning-atom framework,
@@ -903,10 +1004,11 @@ Dropped from the design (precedents in Part 1): owning-atom framework,
 
 | risk | mitigation |
 |---|---|
-| `reakt` liveness change collects a reaction that should live | per-shape liveness tests; the invariant "held by derefers"; Stage C gate + review |
+| `reakt` liveness change collects a reaction that should live | per-shape liveness tests; the invariant "held by derefers"; `track-render`'s cache pins its reactions (2.3); Stage C gate + review |
+| a collected reaction leaves a settled cell that still validates a `track!` cache | 2.3: the cache holds the reaction, so this state is unreachable |
 | GC tests flaky | deterministic tests in the fast suite; GC tests `^:slow` with bounded waits |
 | sweep cost on the frame path | queue-gated scan (empty queue = one `.poll`); measure in Stage B |
-| shared cache atom → key collision | `register!` throws on a different live subject; key allocation is race-safe |
+| shared cache atom → key collision | `register!` throws on a different live subject; keys are unique (gensym) so collisions cannot happen; the meta re-read is not a strict CAS but its loser self-heals at sweep (2.2) |
 | Jolt weak refs on reify reactions | probe first; if unsound, Stage C is bb-only behind a host check (record the divergence) |
 | double disposal | weak layer never calls `dispose`; deterministic paths are idempotent |
 | hot-path overhead | handler does one `.get` + map lookup; measure in Stage C |
@@ -919,7 +1021,11 @@ Dropped from the design (precedents in Part 1): owning-atom framework,
 - `src/kmet/extension.md` — widget/header/editor lifecycle; cleanups still
   require `dispose`; the weak backstop.
 - `src/kmet/README.md` — `kmet.libs.weak` in the libs layer (the one
-  `java.lang.ref` user).
+  `java.lang.ref` user). Also fix the layer-boundary sentence: it currently
+  forbids sibling-lib requires, while the enforced guard
+  (`test/kmet/libs/test_self_contained.clj`) allows them and the tree
+  composes libs everywhere (`http → concurrent/json/process`,
+  `oauth → crypto/http/json`). The rule is "never non-libs kmet namespaces".
 - This file — stage checkboxes and results (Stage C gate).
 
 ## 2.12 Open questions
@@ -927,6 +1033,12 @@ Dropped from the design (precedents in Part 1): owning-atom framework,
 - Stage C go/no-go: decide from the gate test, not from principle.
 - Should a later pass add deterministic surface teardown (quiesce + taint) for
   embedded hosts, after all? Deferred; the weak layer covers memory.
+- Extension unload: `unload-extension!` deregisters fns but not the UI
+  surfaces commissioned through `ui-call`, so a mounted widget keeps its
+  extension reachable until `/reload` (2.4.2 disposes on reset). Give
+  surfaces an extension owner and clear them on unload, or document the
+  `/reload` requirement? Out of scope for this pass; noted so the docstring's
+  "namespaces and jars become unreachable" is not read as "immediately".
 - Should the timer registry grow an ownership hint for the exit report?
   Minimum is the count.
 - Naming: `kmet.libs.weak` vs `kmet.libs.subscriptions` — pick at Stage A.
@@ -1013,4 +1125,26 @@ stamping alone.
 (prn :pass1 (hiccup/counters))
 (protocols/render root 40)
 (prn :pass2 (hiccup/counters))   ; :disposals 0 — foreign, never owned
+```
+
+Probe 5 (design review) — a reaction's cell does not reference its reaction, so
+without a dep watch the reaction is collected while the cell lives. This is the
+fact the Stage C `track-render` cache change handles (2.3).
+
+```clojure
+(require '[kmet.libs.reakt :as r])
+(defn gc! [] (dotimes [_ 5] (System/gc) (Thread/sleep 50)))
+(defn probe
+  []
+  (let [rx (r/make-reaction (fn [] 42))     ; no deps → no watches anywhere
+        cell (r/-cell rx)
+        wr (java.lang.ref.WeakReference. rx)]
+    @rx
+    [wr cell]))
+(let [[wr cell] (probe)]
+  (gc!)
+  (prn :reaction-alive (some? (.get wr)) :cell-state (:state @cell)))
+;; => :reaction-alive false, :cell-state :idle — the cell survives alone.
+;; With a dep watch the reaction stays alive: the dep atom's watch map holds
+;; dep-handler, which closes over `self` (Part-1 fact 2).
 ```
