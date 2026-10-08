@@ -101,6 +101,7 @@
     kmet.tui.test-autocomplete
     kmet.tui.test-core
     kmet.libs.test-reakt
+    kmet.libs.test-weak
     kmet.tui.test-reakt-integration
     kmet.tui.test-compute
     kmet.tui.test-hiccup
