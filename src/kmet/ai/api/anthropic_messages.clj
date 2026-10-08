@@ -210,59 +210,62 @@
            on-text on-thinking on-signature on-tool-call on-done on-error on-usage]
     :as opts}]
   (future
-    (let [model-id (or (:model opts) (:id model-record))
-          thinking (anthropic-thinking model-record effort)
-          system (system-prompt-text messages)
-          payload (apply-before-provider-request-hook
-                   (cond-> {:model model-id
-                            :max_tokens (:max-tokens thinking (or (:max-tokens model-record) 4096))
-                            ;; replay context: signatures echo only when message provenance matches
-                            :messages (anthropic-messages
-                                       messages
-                                       {:provider (:id provider-record)
-                                        :model model-id
-                                        :allow-empty-signature
-                                        (-> model-record :compat :allow-empty-signature)})
-                            :stream true}
-                     (seq system) (assoc :system [{:type "text" :text system}])
-                     (seq tools) (assoc :tools (mapv #(tool->anthropic-schema %
-                                                                              (:supports-strict-tools (:compat model-record)))
-                                                     tools))
-                     (:thinking thinking) (assoc :thinking (:thinking thinking))
-                    ;; adaptive thinking (pi forceAdaptiveThinking): the
-                    ;; output_config effort rides alongside the thinking block
-                     (:output_config thinking) (assoc :output_config (:output_config thinking))))]
-      (try
-        (let [response (ai-http/request (or base-url (endpoint-url :anthropic-messages (:base-url model-record) model-id))
-                                        {:headers (anthropic-request-headers model-record provider-record api-key session-id messages)
-                                         :body (json/generate-string payload)
-                                         :as :stream
-                                           ;; Shared resolution keeps nil (follow idle)
-                                           ;; distinct from an explicit disabled total.
-                                         :timeout (effective-total-timeout-ms total-timeout-ms idle-timeout-ms)}
-                                        signal)]
-          (sse/process-anthropic-stream response
-                                        (fn [event]
-                                          (case (:type event)
-                                            :text (when on-text (on-text (:content event)))
-                                            :thinking (when on-thinking (on-thinking (:content event)))
-                                            :signature (when on-signature (on-signature (:content event)))
-                                            :tool-call (when on-tool-call
-                                                         (on-tool-call {:id (:id event)
-                                                                        :name (:name event)
-                                                                        :arguments (:arguments event)
-                                                                        :index (:index event)}))
-                                            :tool-call-args (when on-tool-call
-                                                              (on-tool-call {:id (:id event)
-                                                                             :arguments (:arguments event)
-                                                                             :index (:index event)}))
-                                            :done (when on-done (on-done (:stop-reason event)))
-                                            :usage (when on-usage (on-usage (usage-with-cost model-record (:usage event))))
-                                            :error (when on-error (on-error (:message event)))
-                                            nil))
-                                        signal
-                                        idle-timeout-ms
-                                        (fn [] (ai-http/abort! response)))
-          (ai-http/close! response))
-        (catch Exception e
-          (when on-error (on-error (transport-error-message e))))))))
+    ;; the payload is built before the request — a conversion or hook error
+    ;; must report via on-error like a transport failure (pi's streamFn throws
+    ;; into its caller), never die inside the future and hang the caller
+    (try
+      (let [model-id (or (:model opts) (:id model-record))
+            thinking (anthropic-thinking model-record effort)
+            system (system-prompt-text messages)
+            payload (apply-before-provider-request-hook
+                     (cond-> {:model model-id
+                              :max_tokens (:max-tokens thinking (or (:max-tokens model-record) 4096))
+                              ;; replay context: signatures echo only when message provenance matches
+                              :messages (anthropic-messages
+                                         messages
+                                         {:provider (:id provider-record)
+                                          :model model-id
+                                          :allow-empty-signature
+                                          (-> model-record :compat :allow-empty-signature)})
+                              :stream true}
+                       (seq system) (assoc :system [{:type "text" :text system}])
+                       (seq tools) (assoc :tools (mapv #(tool->anthropic-schema %
+                                                                                (:supports-strict-tools (:compat model-record)))
+                                                       tools))
+                       (:thinking thinking) (assoc :thinking (:thinking thinking))
+                       ;; adaptive thinking (pi forceAdaptiveThinking): the
+                       ;; output_config effort rides alongside the thinking block
+                       (:output_config thinking) (assoc :output_config (:output_config thinking))))
+            response (ai-http/request (or base-url (endpoint-url :anthropic-messages (:base-url model-record) model-id))
+                                      {:headers (anthropic-request-headers model-record provider-record api-key session-id messages)
+                                       :body (json/generate-string payload)
+                                       :as :stream
+                                       ;; Shared resolution keeps nil (follow idle)
+                                       ;; distinct from an explicit disabled total.
+                                       :timeout (effective-total-timeout-ms total-timeout-ms idle-timeout-ms)}
+                                      signal)]
+        (sse/process-anthropic-stream response
+                                      (fn [event]
+                                        (case (:type event)
+                                          :text (when on-text (on-text (:content event)))
+                                          :thinking (when on-thinking (on-thinking (:content event)))
+                                          :signature (when on-signature (on-signature (:content event)))
+                                          :tool-call (when on-tool-call
+                                                       (on-tool-call {:id (:id event)
+                                                                      :name (:name event)
+                                                                      :arguments (:arguments event)
+                                                                      :index (:index event)}))
+                                          :tool-call-args (when on-tool-call
+                                                            (on-tool-call {:id (:id event)
+                                                                           :arguments (:arguments event)
+                                                                           :index (:index event)}))
+                                          :done (when on-done (on-done (:stop-reason event)))
+                                          :usage (when on-usage (on-usage (usage-with-cost model-record (:usage event))))
+                                          :error (when on-error (on-error (:message event)))
+                                          nil))
+                                      signal
+                                      idle-timeout-ms
+                                      (fn [] (ai-http/abort! response)))
+        (ai-http/close! response))
+      (catch Exception e
+        (when on-error (on-error (transport-error-message e)))))))

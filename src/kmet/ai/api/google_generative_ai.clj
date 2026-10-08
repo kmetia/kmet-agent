@@ -150,59 +150,62 @@
            on-usage]
     :as opts}]
   (future
-    (let [model-id (or (:model opts) (:id model-record))
-          [contents system] (google-messages messages model-record
-                                             {:provider (:id provider-record)})
-          thinking-config (google-thinking-config model-record effort)
-          payload (apply-before-provider-request-hook
-                   (cond-> {:contents contents
-                            :generationConfig (cond-> {}
-                                                (:max-tokens model-record)
-                                                (assoc :maxOutputTokens (:max-tokens model-record))
-                                                thinking-config
-                                                (assoc :thinkingConfig thinking-config))}
-                     system (assoc :systemInstruction {:parts [{:text system}]})
-                     (seq tools) (assoc :tools [{:functionDeclarations
-                                                 (mapv #(tool->google-schema %
-                                                                             (google-supports-strict-tool-sampling? model-id))
-                                                       tools)}])
-                     ;; pi resolveGoogleFunctionCallingMode: a strict tool
-                     ;; forces the validated function-calling mode
-                     (some #(cs/resolve-json-schema-strict-sampling %
-                                                                    (google-supports-strict-tool-sampling? model-id))
-                           tools)
-                     (assoc :toolConfig {:functionCallingConfig {:mode "VALIDATED"}})))]
-      (try
-        (let [response (ai-http/request (or base-url (endpoint-url :google-generative-ai (:base-url model-record) model-id))
-                                        {:headers (request-headers
-                                                   {"x-goog-api-key" api-key
-                                                    "Content-Type" "application/json"}
-                                                   model-record provider-record api-key
-                                                   session-id)
-                                         :body (json/generate-string payload)
-                                         :as :stream
-                                           ;; Shared resolution keeps nil (follow idle)
-                                           ;; distinct from an explicit disabled total.
-                                         :timeout (effective-total-timeout-ms total-timeout-ms idle-timeout-ms)}
-                                        signal)]
-          (sse/process-google-stream response
-                                     (fn [event]
-                                       (case (:type event)
-                                         :text (when on-text (on-text (:content event)))
-                                         :thinking (when on-thinking (on-thinking (:content event)))
-                                         :signature (when on-signature (on-signature (:content event)))
-                                         :tool-call (when on-tool-call
-                                                      (on-tool-call {:id (:id event)
-                                                                     :name (:name event)
-                                                                     :arguments (:arguments event)
-                                                                     :index (:index event)}))
-                                         :done (when on-done (on-done (:stop-reason event)))
-                                         :usage (when on-usage (on-usage (usage-with-cost model-record (:usage event))))
-                                         :error (when on-error (on-error (:message event)))
-                                         nil))
-                                     signal
-                                     idle-timeout-ms
-                                     (fn [] (ai-http/abort! response)))
-          (ai-http/close! response))
-        (catch Exception e
-          (when on-error (on-error (transport-error-message e))))))))
+    ;; the payload is built before the request — a conversion or hook error
+    ;; must report via on-error like a transport failure (pi's streamFn throws
+    ;; into its caller), never die inside the future and hang the caller
+    (try
+      (let [model-id (or (:model opts) (:id model-record))
+            [contents system] (google-messages messages model-record
+                                               {:provider (:id provider-record)})
+            thinking-config (google-thinking-config model-record effort)
+            payload (apply-before-provider-request-hook
+                     (cond-> {:contents contents
+                              :generationConfig (cond-> {}
+                                                  (:max-tokens model-record)
+                                                  (assoc :maxOutputTokens (:max-tokens model-record))
+                                                  thinking-config
+                                                  (assoc :thinkingConfig thinking-config))}
+                       system (assoc :systemInstruction {:parts [{:text system}]})
+                       (seq tools) (assoc :tools [{:functionDeclarations
+                                                   (mapv #(tool->google-schema %
+                                                                               (google-supports-strict-tool-sampling? model-id))
+                                                         tools)}])
+                       ;; pi resolveGoogleFunctionCallingMode: a strict tool
+                       ;; forces the validated function-calling mode
+                       (some #(cs/resolve-json-schema-strict-sampling %
+                                                                      (google-supports-strict-tool-sampling? model-id))
+                             tools)
+                       (assoc :toolConfig {:functionCallingConfig {:mode "VALIDATED"}})))
+            response (ai-http/request (or base-url (endpoint-url :google-generative-ai (:base-url model-record) model-id))
+                                      {:headers (request-headers
+                                                 {"x-goog-api-key" api-key
+                                                  "Content-Type" "application/json"}
+                                                 model-record provider-record api-key
+                                                 session-id)
+                                       :body (json/generate-string payload)
+                                       :as :stream
+                                       ;; Shared resolution keeps nil (follow idle)
+                                       ;; distinct from an explicit disabled total.
+                                       :timeout (effective-total-timeout-ms total-timeout-ms idle-timeout-ms)}
+                                      signal)]
+        (sse/process-google-stream response
+                                   (fn [event]
+                                     (case (:type event)
+                                       :text (when on-text (on-text (:content event)))
+                                       :thinking (when on-thinking (on-thinking (:content event)))
+                                       :signature (when on-signature (on-signature (:content event)))
+                                       :tool-call (when on-tool-call
+                                                    (on-tool-call {:id (:id event)
+                                                                   :name (:name event)
+                                                                   :arguments (:arguments event)
+                                                                   :index (:index event)}))
+                                       :done (when on-done (on-done (:stop-reason event)))
+                                       :usage (when on-usage (on-usage (usage-with-cost model-record (:usage event))))
+                                       :error (when on-error (on-error (:message event)))
+                                       nil))
+                                   signal
+                                   idle-timeout-ms
+                                   (fn [] (ai-http/abort! response)))
+        (ai-http/close! response))
+      (catch Exception e
+        (when on-error (on-error (transport-error-message e)))))))

@@ -20,6 +20,7 @@
             [kmet.ai.api.mistral-conversations :as mistral]
             [kmet.ai.api.google-vertex :as vertex]
             [kmet.ai.api.bedrock-converse-stream :as bedrock]
+            [kmet.ai.google-adc :as adc]
             [kmet.app.loop :as loop]
             [kmet.app.session :as session]
             [kmet.config :as cfg]
@@ -338,6 +339,64 @@
     (t/is (= ["Azure OpenAI base URL is required. Set AZURE_OPENAI_BASE_URL or AZURE_OPENAI_RESOURCE_NAME."]
              @errors)
           "a missing azure base config reports via on-error (never hangs the loop)")))
+
+(t/deftest test-llm-anthropic-payload-error-reports
+  ;; the payload is built inside the request future, before its try: a
+  ;; conversion error must still reach on-error (the future completes) instead
+  ;; of being swallowed and hanging the caller. The deref stays inside the
+  ;; redef scope — the future's payload build runs after send-message returns.
+  (m/load-catalogs!)
+  (let [errors (atom [])]
+    (with-redefs [anthropic/anthropic-messages
+                  (fn [& _] (throw (ex-info "bad anthropic message shape" {})))]
+      (t/is (not= ::timeout
+                  (deref (llm/send-message {:provider :anthropic
+                                            :api-key "sk"
+                                            :model "claude-opus-4-8"
+                                            :messages [{:role :user
+                                                        :content [{:type :text :text "hi"}]}]
+                                            :on-error (fn [e] (swap! errors conj e))})
+                         3000 ::timeout))
+            "the request future completes"))
+    (t/is (= ["bad anthropic message shape"] @errors)
+          "a payload-build error reports via on-error (never hangs the loop)")))
+
+(t/deftest test-llm-google-payload-error-reports
+  (m/load-catalogs!)
+  (let [errors (atom [])]
+    (with-redefs [google/google-messages
+                  (fn [& _] (throw (ex-info "bad google message shape" {})))]
+      (t/is (not= ::timeout
+                  (deref (llm/send-message {:provider :google
+                                            :api-key "sk"
+                                            :model "gemini-3.1-pro-preview"
+                                            :messages [{:role :user
+                                                        :content [{:type :text :text "hi"}]}]
+                                            :on-error (fn [e] (swap! errors conj e))})
+                         3000 ::timeout))
+            "the request future completes"))
+    (t/is (= ["bad google message shape"] @errors)
+          "a payload-build error reports via on-error (never hangs the loop)")))
+
+(t/deftest test-llm-vertex-adc-token-error-reports
+  ;; the ADC token fetch happens while the request future builds the request:
+  ;; a token-endpoint failure must reach on-error, not hang the caller
+  (m/load-catalogs!)
+  (let [errors (atom [])]
+    (with-redefs [auth/resolve-provider-auth (fn [_] {})
+                  auth/ambient-configured? (fn [_] true)
+                  auth/resolve-api-key (fn [_] nil)
+                  adc/access-token! (fn [] (throw (ex-info "ADC token request failed" {})))]
+      (t/is (not= ::timeout
+                  (deref (llm/send-message {:provider :google-vertex
+                                            :model "gemini-3.1-pro-preview"
+                                            :messages [{:role :user
+                                                        :content [{:type :text :text "hi"}]}]
+                                            :on-error (fn [e] (swap! errors conj e))})
+                         3000 ::timeout))
+            "the request future completes"))
+    (t/is (= ["ADC token request failed"] @errors)
+          "an ADC token failure reports via on-error (never hangs the loop)")))
 
 ;; ─── OpenAI Responses messages + payload ──────────────────────────────────
 

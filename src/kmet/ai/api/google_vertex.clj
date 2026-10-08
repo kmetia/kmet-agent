@@ -42,38 +42,42 @@
            idle-timeout-ms total-timeout-ms session-id on-error]
     :as opts}]
   (future
-    (let [model-id (or (:model opts) (:id model-record))
-          [contents system] (google-messages messages model-record
-                                             {:provider (:id provider-record)})
-          thinking-config (google-thinking-config model-record effort)
-          payload (apply-before-provider-request-hook
-                   (cond-> {:contents contents
-                            :generationConfig (cond-> {}
-                                                (:max-tokens model-record)
-                                                (assoc :maxOutputTokens (:max-tokens model-record))
-                                                thinking-config
-                                                (assoc :thinkingConfig thinking-config))}
-                     system (assoc :systemInstruction {:parts [{:text system}]})
-                     (seq tools) (assoc :tools [{:functionDeclarations
-                                                 (mapv #(tool->google-schema %
-                                                                             (google-supports-strict-tool-sampling? model-id))
-                                                       tools)}])
-                     ;; pi resolveGoogleFunctionCallingMode: a strict tool
-                     ;; forces the validated function-calling mode
-                     (some #(cs/resolve-json-schema-strict-sampling %
-                                                                    (google-supports-strict-tool-sampling? model-id))
-                           tools)
-                     (assoc :toolConfig {:functionCallingConfig {:mode "VALIDATED"}})))
-          ;; auth: GOOGLE_CLOUD_API_KEY (x-goog-api-key) or ADC
-          ;; (Authorization: Bearer — the token is fetched + cached here)
-          api-key (or api-key (auth/resolve-api-key :google-vertex))
-          auth-header (if api-key "x-goog-api-key" "Authorization")
-          auth-value (or api-key (google-adc/access-token!))]
-      (if-not auth-value
-        (when on-error
-          (on-error (str "No API key for google-vertex. Set GOOGLE_CLOUD_API_KEY "
-                         "or configure Application Default Credentials.")))
-        (try
+    ;; the payload and the ADC token are resolved before the request — a
+    ;; conversion, hook, or token-fetch error must report via on-error like a
+    ;; transport failure (pi's streamFn throws into its caller), never die
+    ;; inside the future and hang the caller
+    (try
+      (let [model-id (or (:model opts) (:id model-record))
+            [contents system] (google-messages messages model-record
+                                               {:provider (:id provider-record)})
+            thinking-config (google-thinking-config model-record effort)
+            payload (apply-before-provider-request-hook
+                     (cond-> {:contents contents
+                              :generationConfig (cond-> {}
+                                                  (:max-tokens model-record)
+                                                  (assoc :maxOutputTokens (:max-tokens model-record))
+                                                  thinking-config
+                                                  (assoc :thinkingConfig thinking-config))}
+                       system (assoc :systemInstruction {:parts [{:text system}]})
+                       (seq tools) (assoc :tools [{:functionDeclarations
+                                                   (mapv #(tool->google-schema %
+                                                                               (google-supports-strict-tool-sampling? model-id))
+                                                         tools)}])
+                       ;; pi resolveGoogleFunctionCallingMode: a strict tool
+                       ;; forces the validated function-calling mode
+                       (some #(cs/resolve-json-schema-strict-sampling %
+                                                                      (google-supports-strict-tool-sampling? model-id))
+                             tools)
+                       (assoc :toolConfig {:functionCallingConfig {:mode "VALIDATED"}})))
+            ;; auth: GOOGLE_CLOUD_API_KEY (x-goog-api-key) or ADC
+            ;; (Authorization: Bearer — the token is fetched + cached here)
+            api-key (or api-key (auth/resolve-api-key :google-vertex))
+            auth-header (if api-key "x-goog-api-key" "Authorization")
+            auth-value (or api-key (google-adc/access-token!))]
+        (if-not auth-value
+          (when on-error
+            (on-error (str "No API key for google-vertex. Set GOOGLE_CLOUD_API_KEY "
+                           "or configure Application Default Credentials.")))
           (let [response (ai-http/request (or base-url (vertex-endpoint-url (:base-url model-record) model-id))
                                           {:headers (request-headers
                                                      {auth-header (str (when-not api-key "Bearer ") auth-value)
@@ -94,6 +98,6 @@
               ;; the stream is fully consumed — a trailing usage chunk (if
               ;; any) is dispatched; emit the deferred terminal done now
               (finalize (some-> signal deref)))
-            (ai-http/close! response))
-          (catch Exception e
-            (when on-error (on-error (transport-error-message e)))))))))
+            (ai-http/close! response))))
+      (catch Exception e
+        (when on-error (on-error (transport-error-message e)))))))
