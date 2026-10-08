@@ -106,8 +106,6 @@
 
 ;; ─── Small helpers ────────────────────────────────────────────────────────
 
-(defn- byte-length [s] (alength (.getBytes (str s) "UTF-8")))
-
 (defn- text-lines
   ;; String.split is the fast path on purpose: this runs per reader block on
   ;; the babashka interpreter, where a per-char predicate scan costs ~2ms per
@@ -412,7 +410,7 @@
    emit loop cannot grow the buffer without bound. Returns nil."
   [{:keys [emitted emitted-bytes on-update abort capture-limit]} v]
   (let [s (format-value v)
-        total (swap! emitted-bytes + (byte-length s))]
+        total (swap! emitted-bytes + (bash-exec/byte-length s))]
     (when (and capture-limit (> total capture-limit))
       (compare-and-set! abort nil :output-limit)
       (throw (ex-info "run_code output limit exceeded"
@@ -884,7 +882,7 @@
         parts (cond-> (vec emitted)
                 error-text (conj error-text))
         body (if (seq parts) (str/join "\n" parts) "(no output)")
-        totals {:bytes (byte-length body) :lines (text-lines body)}
+        totals {:bytes (bash-exec/byte-length body) :lines (text-lines body)}
         {:keys [content truncation]} (bound-content body totals output-bytes output-lines)
         calls @trace]
     (cond-> {:content content

@@ -4,7 +4,7 @@
    [kmet.libs.json :as json]
    [kmet.ai.http :as ai-http]
    [kmet.ai.api.sse :as sse]
-   [kmet.ai.api.shared :refer [copilot-dynamic-headers endpoint-url max-tokens-key openai-messages openai-messages-with-reasoning openai-thinking-params resolved-openai-compat apply-before-provider-request-hook request-headers tool->openai-schema effective-total-timeout-ms transport-error-message usage-with-cost]]))
+   [kmet.ai.api.shared :refer [copilot-dynamic-headers endpoint-url max-tokens-key openai-messages openai-messages-with-reasoning openai-thinking-params resolved-openai-compat apply-before-provider-request-hook request-headers responses-events-handler tool->openai-schema effective-total-timeout-ms transport-error-message]]))
 
 (defn openai-payload
   "Request body for an openai-completions request (pi buildParams):
@@ -55,9 +55,7 @@
 
 (defn openai-request
   [{:keys [model-record provider-record effort api-key messages tools signal base-url
-           idle-timeout-ms total-timeout-ms session-id
-           on-text on-thinking on-tool-call on-done on-error
-           on-usage] :as opts}]
+           idle-timeout-ms total-timeout-ms session-id on-error] :as opts}]
   (future
     (try
       (let [model-id (or (:model opts) (:id model-record))
@@ -72,60 +70,20 @@
                                          ;; distinct from an explicit disabled total.
                                        :timeout (effective-total-timeout-ms total-timeout-ms idle-timeout-ms)}
                                       signal)
-            ;; The terminal :done is deferred until the whole stream is
-            ;; consumed: openai-completions sends the usage-only chunk AFTER
-            ;; the finish_reason chunk, so an on-done fired at the first
-            ;; :done would capture an empty usage buffer and drop the
-            ;; provider usage (footer token counts / cost never update — pi
-            ;; resolves its stream only after the final chunk).
-            stop-reason (atom nil)
-            stop-reason-error (atom nil) ;; pi output.errorMessage — the
-                                        ;; provider's specific finish_reason
-                                        ;; error text (content_filter /
-                                        ;; network_error / unknown), kept
-                                        ;; alongside the :error stop-reason
-            errored? (atom false)]
+            ;; The shared handler defers the terminal :done until the whole
+            ;; stream is consumed (see its docstring): openai-completions
+            ;; sends the usage-only chunk AFTER the finish_reason chunk, so
+            ;; an on-done fired at the first :done would drop the provider
+            ;; usage (footer token counts / cost never update).
+            [dispatch finalize] (responses-events-handler opts model-record)]
         (sse/process-openai-stream response
-                                   (fn [event]
-                                     (case (:type event)
-                                       :text (when on-text (on-text (:content event)))
-                                       :thinking (when on-thinking (on-thinking (:content event)))
-                                       :tool-call (when on-tool-call
-                                                    (on-tool-call {:id (:id event)
-                                                                   :name (:name event)
-                                                                   :arguments (:arguments event)
-                                                                   :index (:index event)}))
-                                       :tool-call-args (when on-tool-call
-                                                         (on-tool-call {:arguments (:arguments event)
-                                                                        :index (:index event)}))
-                                       :done (let [sr (:stop-reason event)]
-                                               (when (compare-and-set! stop-reason nil sr)
-                                                 (when (= :error sr)
-                                                   (reset! stop-reason-error (:error-message event)))))
-                                       :usage (when on-usage (on-usage (usage-with-cost model-record (:usage event))))
-                                       :error (do (reset! errored? true)
-                                                  (when on-error (on-error (:message event))))
-                                       nil))
+                                   dispatch
                                    signal
                                    idle-timeout-ms
                                    (fn [] (ai-http/abort! response)))
         ;; stream fully consumed — the trailing usage chunk (if any) was
-        ;; dispatched; emit the deferred terminal done now (unless the run
-        ;; was cancelled or an error already surfaced). An :error
-        ;; stop-reason (content_filter / network_error / unknown — pi
-        ;; mapStopReason) is NOT a normal completion: surface it via
-        ;; on-error so the loop's retry/error path engages (pi pushes
-        ;; {type: "error"} for these instead of done).
-        (let [sr @stop-reason]
-          (when (and (= :error sr) (not @errored?) on-error)
-            (on-error (or @stop-reason-error
-                          (str "Provider stopped with: " (name sr)))))
-          (when (and on-done
-                     (some? sr)
-                     (not= :error sr)
-                     (not @errored?)
-                     (not (and signal @signal)))
-            (on-done sr)))
+        ;; dispatched; emit the deferred terminal done now
+        (finalize (some-> signal deref))
         (ai-http/close! response))
       (catch Exception e
         (when on-error (on-error (transport-error-message e)))))))

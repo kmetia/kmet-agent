@@ -29,17 +29,10 @@
   [item]
   (get-in item [:metadata :display-name]))
 
-(defn- modifier?
-  "True when ENTRY is a +name/-name modifier of the :default-tools list."
-  [entry]
-  (and (string? entry)
-       (or (str/starts-with? entry "+")
-           (str/starts-with? entry "-"))))
-
 (defn- entry-target
   "The tool name ENTRY targets, modifier prefix stripped."
   [entry]
-  (if (modifier? entry) (subs (str entry) 1) (str entry)))
+  (if (registry/tool-selection-modifier? entry) (subs (str entry) 1) (str entry)))
 
 (defn builtin-tool-items
   "PackageItem-shaped rows for the built-in tools, one per registry
@@ -83,7 +76,7 @@
    entries. An empty list is plain style — it selects no built-ins."
   [entries]
   (or (nil? entries)
-      (and (seq entries) (every? modifier? entries))))
+      (and (seq entries) (every? registry/tool-selection-modifier? entries))))
 
 (defn apply-builtin-tool-toggle!
   "Global-scope toggle of builtin ITEM. A modifier-only list (or an unset

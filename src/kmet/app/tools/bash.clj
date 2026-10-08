@@ -52,11 +52,6 @@
     (some? model) (assoc "KMET_MODEL" (str model))
     (some? thinking-level) (assoc "KMET_REASONING_LEVEL" (name thinking-level))))
 
-(defn- byte-length
-  "UTF-8 byte length (pi: Buffer.byteLength)."
-  [s]
-  (alength (.getBytes ^String s "UTF-8")))
-
 (def ^:private default-description
   ;; Pi: bashToolConfig description — the shellName/truncate-defaults
   ;; interpolation of core/tools/bash.ts.
@@ -88,7 +83,7 @@
                        (when (and (> @live-bytes max-live-bytes) (seq @live-chunks))
                          (let [c (first @live-chunks)]
                            (swap! live-chunks subvec 1)
-                           (swap! live-bytes - (byte-length c))
+                           (swap! live-bytes - (bash-exec/byte-length c))
                            (recur)))))
         send-update (fn []
                       (when (and on-update (pos? @live-bytes))
@@ -113,7 +108,7 @@
                      :operations operations  ;; pi: BashOperations
                      :on-chunk (fn [chunk]
                                  (swap! live-chunks conj chunk)
-                                 (swap! live-bytes + (byte-length chunk))
+                                 (swap! live-bytes + (bash-exec/byte-length chunk))
                                  (trim-live!)
                                  (send-update))
                      :max-lines bash-exec/DEFAULT-MAX-LINES

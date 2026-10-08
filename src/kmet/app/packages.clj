@@ -1239,9 +1239,10 @@
 (defn top-level-base-dir
   "pi getTopLevelBaseDir — the scope root top-level patterns of SCOPE
    resolve against: the agent dir for user items, the .kmet project dir
-   for project items."
+   for project items. pi has two names for the same root; kmet keeps both,
+   so this delegates to the packages root (base-dir-for-scope)."
   [scope]
-  (if (= scope :project) (cfg/project-dir) (cfg/get-agent-dir)))
+  (base-dir-for-scope scope))
 
 (defn top-level-pattern
   "pi getResourcePatternForScope (same-scope case) — ITEM's path relative

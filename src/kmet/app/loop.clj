@@ -1178,6 +1178,16 @@ Be precise and concise in your responses."}}]
 
 ;; ─── Queues ────────────────────────────────────────────────────────────────
 
+(defn- enqueue!
+  "Queue TEXT on AGENT's :steering / :follow-up queue (QUEUE-KEY) and emit
+   the queue-update snapshot — both queues ride every emit. Returns nil."
+  [agent queue-key text]
+  (swap! (get agent queue-key) conj text)
+  (emit agent {:type :queue-update
+               :steering @(:steering agent)
+               :follow-up @(:follow-up agent)})
+  nil)
+
 (defn steer!
   "Queue a user message for mid-turn injection.
    The agent loop polls the steering queue between turns (after tool results,
@@ -1185,11 +1195,7 @@ Be precise and concise in your responses."}}]
    A message map is injected as a custom message (pi: the queues carry full
    messages — sendMessage queues custom ones there)."
   [agent text]
-  (swap! (:steering agent) conj text)
-  (emit agent {:type :queue-update
-               :steering @(:steering agent)
-               :follow-up @(:follow-up agent)})
-  nil)
+  (enqueue! agent :steering text))
 
 (defn follow-up!
   "Queue a user message to be processed after the current run settles.
@@ -1197,11 +1203,7 @@ Be precise and concise in your responses."}}]
    continues the run with the queued messages. A message map is injected as a
    custom message (see steer!)."
   [agent text]
-  (swap! (:follow-up agent) conj text)
-  (emit agent {:type :queue-update
-               :steering @(:steering agent)
-               :follow-up @(:follow-up agent)})
-  nil)
+  (enqueue! agent :follow-up text))
 
 (defn clear-queues!
   "Drop all pending steering and follow-up messages."

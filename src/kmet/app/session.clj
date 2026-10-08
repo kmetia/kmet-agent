@@ -81,22 +81,10 @@
   "Atomically replace the session file's contents and in-memory state (pi:
    temp-file publication). Rewrites whenever the file exists; a
    not-yet-persisted session (lazy creation — G4) is only written once the
-   branch has an assistant message. Callers must hold the session lock."
-  [session entries]
-  (let [entries (vec entries)]
-    (when (or (fs/exists? (:file session))
-              (some #(= :assistant (:role %)) entries))
-      (publish-file! session entries))
-    (reset! (:entries session) entries)
-    (reset! (:leaf-id session) (some-> entries last :id))))
-
-(defn- write-entries-verbatim!
-  "Write pre-built entries (ids/parents/timestamps already assigned) to the
-   session file and in-memory state, publishing via temp-file + rename.
-   Used by forks, which copy source entries verbatim (pi:
-   createBranchedSession/forkFrom). Lazy creation: nothing is written until
-   the branch contains an assistant message. Callers must hold the session
-   lock."
+   branch has an assistant message. Entries are taken as given — the append
+   path builds them here, while forking copies the source entries verbatim
+   (pi: createBranchedSession/forkFrom), so ids, parents and timestamps are
+   whatever the caller assembled. Callers must hold the session lock."
   [session entries]
   (let [entries (vec entries)]
     (when (or (fs/exists? (:file session))
@@ -414,8 +402,9 @@
   (some #(when (= (:id %) entry-id) %) @(:entries session)))
 
 (defn session-entry-text
-  "Plain trimmed text of an entry's content blocks (pi:
-   extractUserMessageText — used for fork/tree editor restore)."
+  "Plain trimmed text of an entry's content blocks — the fork/tree editor
+   restore (pi: extractUserMessageText), the first user message, the prompt
+   history and the per-message activity times (pi: extractTextContent)."
   [e]
   (let [content (:content e)]
     (if (string? content)
@@ -1028,7 +1017,7 @@
                                  {:cwd (get-in session [:header :cwd])
                                   :parent-session (:file session)})]
         (with-session-lock fork
-          (write-entries-verbatim! fork (into retained label-entries)))
+          (write-entries! fork (into retained label-entries)))
         fork))))
 
 (defn clone-session
@@ -1057,7 +1046,7 @@
           fork (create-session dir {:cwd (str (fs/absolutize target-cwd))
                                     :parent-session (:file source)})]
       (with-session-lock fork
-        (write-entries-verbatim! fork @(:entries source)))
+        (write-entries! fork @(:entries source)))
       fork)))
 
 ;; ─── Bash result recording ─────────────────────────────────────────────────
@@ -1097,21 +1086,13 @@
 
 ;; ─── Convenience ───────────────────────────────────────────────────────────
 
-(defn- entry-text
-  "Plain trimmed text of an entry's content blocks (pi: extractTextContent)."
-  [e]
-  (let [content (:content e)]
-    (if (string? content)
-      (str/trim content)
-      (str/trim (str/join (map :text (filter #(= :text (:type %)) content)))))))
-
 (defn get-first-message
   "First user message text of the session (pi: buildSessionInfo firstMessage
    — the first user message with text content, else \"(no messages)\")."
   [session]
   (or (some (fn [e]
               (when (= :user (:role e))
-                (let [t (entry-text e)]
+                (let [t (session-entry-text e)]
                   (when (seq t) t))))
             @(:entries session))
       "(no messages)"))
@@ -1127,7 +1108,7 @@
   [session]
   (loop [ts (->> (context-entries (get-branch session))
                  (filter #(= :user (:role %)))
-                 (keep (fn [e] (let [t (entry-text e)] (when (seq t) t)))))
+                 (keep (fn [e] (let [t (session-entry-text e)] (when (seq t) t)))))
          acc []]
     (if-let [t (first ts)]
       (recur (rest ts)
@@ -1200,7 +1181,7 @@
   [session]
   (some (fn [e]
           (when (= :assistant (:role e))
-            (let [t (entry-text e)]
+            (let [t (session-entry-text e)]
               (when (seq t) t))))
         (reverse (get-branch session))))
 
@@ -1360,7 +1341,7 @@
                      (assoc acc :name (let [n (str/trim (str (:name e "")))]
                                         (when (seq n) n)))
                      (message-entry? e)
-                     (let [text (entry-text e)
+                     (let [text (session-entry-text e)
                            ts (timestamp-ms (:timestamp e))
                            ;; pi: getMessageActivityTime — only user/assistant
                            ;; messages with content advance the activity time

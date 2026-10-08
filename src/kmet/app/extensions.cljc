@@ -179,6 +179,13 @@
 ;; ─── Input / before-agent-start hooks (pi: pi.on('input') / ──────────────
 ;; ─── 'before_agent_start'; applied by modes.interactive + app.loop) ──────
 
+(defn- register-hook!
+  "Add HOOK to the hook vector ATOM and return the deregister fn (identity
+   removal — a re-registered hook is a distinct value)."
+  [hook-atom hook]
+  (swap! hook-atom conj hook)
+  (fn [] (swap! hook-atom (fn [hs] (remove #(identical? % hook) hs)))))
+
 (defn register-input-hook!
   "Register an input hook (extension api: on-input). Fires for agent
    messages submitted from the interactive input path. Hook:
@@ -186,16 +193,14 @@
    {:action :handled} to consume, {:action :transform :text ... :images ...}
    to rewrite, or nil. Returns a deregister fn."
   [hook]
-  (swap! input-hooks conj hook)
-  (fn [] (swap! input-hooks (fn [hs] (remove #(identical? % hook) hs)))))
+  (register-hook! input-hooks hook))
 
 (defn register-before-agent-start-hook!
   "Register a before-agent-start hook (extension api: on-before-agent-start).
    Hook: (fn [{:keys [prompt system-prompt]}]) returning a map with
    :system-prompt and/or :message, or nil. Returns a deregister fn."
   [hook]
-  (swap! before-agent-start-hooks conj hook)
-  (fn [] (swap! before-agent-start-hooks (fn [hs] (remove #(identical? % hook) hs)))))
+  (register-hook! before-agent-start-hooks hook))
 
 (defn apply-input-hooks
   "Run all input hooks in registration order over text and images
@@ -277,15 +282,13 @@
   "Register a tool-call hook (extension api: on-tool-call): (fn [ctx]) →
    nil | {:block true :reason} | {:args transformed}. Returns a deregister fn."
   [hook]
-  (swap! tool-call-hooks conj hook)
-  (fn [] (swap! tool-call-hooks (fn [hs] (remove #(identical? % hook) hs)))))
+  (register-hook! tool-call-hooks hook))
 
 (defn register-tool-result-hook!
   "Register a tool-result hook (extension api: on-tool-result): (fn [ctx])
    → nil | {:content ... :is-error ...} overrides. Returns a deregister fn."
   [hook]
-  (swap! tool-result-hooks conj hook)
-  (fn [] (swap! tool-result-hooks (fn [hs] (remove #(identical? % hook) hs)))))
+  (register-hook! tool-result-hooks hook))
 
 (defn get-tool-call-hooks [] @tool-call-hooks)
 (defn get-tool-result-hooks [] @tool-result-hooks)
@@ -318,9 +321,7 @@
    transformer that throws is skipped (pi: keep the current markdown and
    continue). Returns a deregister fn."
   [transformer]
-  (swap! markdown-transformers conj transformer)
-  (fn [] (swap! markdown-transformers
-                (fn [ts] (remove #(identical? % transformer) ts)))))
+  (register-hook! markdown-transformers transformer))
 
 (defn get-markdown-transformers
   "Registered markdown transformers in registration order."

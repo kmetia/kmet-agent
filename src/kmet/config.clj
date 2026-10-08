@@ -432,12 +432,6 @@
   [config]
   (:default-tools config))
 
-(defn- read-global-settings
-  "The parsed global settings map, or nil when the file is missing,
-   unreadable, or not a map."
-  []
-  (read-settings-file (global-settings-path)))
-
 (defn get-setting-live
   "Live top-level KEY from the global settings file, falling back to the
    CONFIG value (then DEFAULT) when absent — the in-memory config is a
@@ -446,7 +440,7 @@
   ([config key] (get-setting-live config key nil))
   ([config key default]
    (let [fallback (get config key default)]
-     (if-let [settings (read-global-settings)]
+     (if-let [settings (read-global-settings-map)]
        (if (contains? settings key) (get settings key) fallback)
        fallback))))
 
@@ -497,7 +491,7 @@
    setting falls back to the CONFIG snapshot, then the
    KMET_CLEAR_ON_SHRINK=1 env default (the TUI's historical default)."
   [config]
-  (let [v (if-let [settings (read-global-settings)]
+  (let [v (if-let [settings (read-global-settings-map)]
             (if (contains? (:terminal settings) :clear-on-shrink)
               (get-in settings [:terminal :clear-on-shrink])
               (get-in config [:terminal :clear-on-shrink]))
@@ -533,7 +527,7 @@
    Falls back to the CONFIG value when the file is missing, unreadable, or
    lacks the key (project-level overrides survive)."
   [config]
-  (if-let [settings (read-global-settings)]
+  (if-let [settings (read-global-settings-map)]
     ;; the file wins only for keys it has — an absent key falls back to the
     ;; config (which may carry a project-level .kmet override); a present
     ;; nil (Ctrl+S all-enabled) reads as nil via get's stored value
@@ -573,7 +567,7 @@
    like get-enabled-models-live). Falls back to the CONFIG value when the
    file is missing, unreadable, or lacks :retry (project overrides)."
   [config]
-  (get-retry-settings (if-let [settings (read-global-settings)]
+  (get-retry-settings (if-let [settings (read-global-settings-map)]
                         ;; the file wins only for keys it has — an absent
                         ;; :retry falls back to the config (project override)
                         (assoc config :retry (get settings :retry (:retry config)))
@@ -598,7 +592,7 @@
    same-session change). Falls back to the CONFIG value when the file is
    missing, unreadable, or lacks :branch-summary (project overrides)."
   [config]
-  (get-branch-summary-settings (if-let [settings (read-global-settings)]
+  (get-branch-summary-settings (if-let [settings (read-global-settings-map)]
                                  (assoc config :branch-summary
                                         (get settings :branch-summary (:branch-summary config)))
                                  config)))
@@ -623,7 +617,7 @@
    when the file is missing, unreadable, or lacks :loop-guard (project
    overrides)."
   [config]
-  (get-loop-guard-settings (if-let [settings (read-global-settings)]
+  (get-loop-guard-settings (if-let [settings (read-global-settings-map)]
                              ;; the file wins only for keys it has — an absent
                              ;; :loop-guard falls back to the config
                              (assoc config :loop-guard (get settings :loop-guard (:loop-guard config)))
