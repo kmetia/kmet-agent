@@ -1,7 +1,12 @@
 # Windows host — open issues
 
-Only open Windows-specific issues are recorded here; non-Windows upstream
-bugs live in `jolt-bugs.md`. The fast suites (`bb test`, `jolt test`) were
-last green on both hosts on 2026-10-01 (`jolt v0.8.15-46-g005d134b`).
+Only open kmet-side Windows issues are recorded here. Jolt upstream issues —
+Windows-specific ones included — are tracked in `jolt-bugs.md`.
 
-No open Windows-specific issues.
+No open kmet-side Windows issues.
+
+Open Windows-specific Jolt issue: [jolt#1281](https://github.com/jolt-lang/jolt/issues/1281).
+
+The fast suites (`bb test`, `jolt test`) are green on both hosts on 2026-10-08
+(`jolt v0.8.19-5-g8753e115`); `bb test-ext` is green and `jolt test-ext` is red
+only on jolt#1281 and jolt#1282.
