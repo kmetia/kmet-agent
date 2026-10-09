@@ -12,7 +12,7 @@
 (ns kmet-render-bench
   (:require [clojure.string :as str]
             [kmet.app.session :as session]
-            [kmet.app.ui :as ui]
+            [kmet.app.ui.chat-history :as chat-history]
             [kmet.modes.interactive :as inter]
             [kmet.tui.core :as core]
             [kmet.tui.protocols :as protocols]
@@ -20,6 +20,11 @@
 
 (defn- now [] (System/nanoTime))
 (defn- ms [n] (double (/ n 1e6)))
+
+(def ^:private replay-branch!
+  "The private session-admin replay entry (resume populates the chat
+   history through it; the harness only needs the same populated history)."
+  (var-get (ns-resolve 'kmet.modes.interactive.session-admin 'replay-branch!)))
 
 (defn- timed
   "Run F, print `LABEL: <ms> ms[, <lines> lines]`, return F's value."
@@ -50,10 +55,10 @@
                         (update-in [:roles (:role m) :chars] (fnil + 0) chars)
                         (cond->
                           (= :tool (:role m))
-                          (-> (update-in [:tools (:name m) :ms] (fnil + 0.0) d)
-                              (update-in [:tools (:name m) :n] (fnil inc 0))
-                              (update-in [:tools (:name m) :lines] (fnil + 0) (count ls))
-                              (update-in [:tools (:name m) :chars] (fnil + 0) chars))))))
+                          (-> (update-in [:tools (or (:tool-name m) (:name m)) :ms] (fnil + 0.0) d)
+                              (update-in [:tools (or (:tool-name m) (:name m)) :n] (fnil inc 0))
+                              (update-in [:tools (or (:tool-name m) (:name m)) :lines] (fnil + 0) (count ls))
+                              (update-in [:tools (or (:tool-name m) (:name m)) :chars] (fnil + 0) chars))))))
                 {:roles {} :tools {}}
                 @(:messages-atom ch))]
     (doseq [[role s] (sort-by (comp - :ms val) roles)]
@@ -79,19 +84,19 @@
                   "  width: " width
                   "  mode: " mode))
     (let [sess (session/load-session session-file)
-          ch (ui/make-chat-history :tool-display-mode :expanded)
+          ch (chat-history/make-chat-history :tool-display-mode :expanded)
           cs (inter/map->CoreState {:chat-history ch})]
-      (timed "replay" (fn [] ((var inter/replay-branch!) cs sess) nil))
+      (timed "replay" (fn [] (replay-branch! cs sess) nil))
       (if (= mode "roles")
         (roles-profile ch width)
         (do
           (timed "render #1 (cold)" #(render-all ch width))
           (timed "render #2 (warm)" #(render-all ch width))
           (timed "Ctrl+O -> collapsed"
-                 (fn [] (ui/chat-history-set-tool-display-mode! ch :collapsed)
+                 (fn [] (chat-history/chat-history-set-tool-display-mode! ch :collapsed)
                         (render-all ch width)))
           (timed "Ctrl+O -> expanded"
-                 (fn [] (ui/chat-history-set-tool-display-mode! ch :expanded)
+                 (fn [] (chat-history/chat-history-set-tool-display-mode! ch :expanded)
                         (render-all ch width)))
           ;; Theme switch: a modified copy of the live theme, so the swap is
           ;; a real change whatever theme is configured.

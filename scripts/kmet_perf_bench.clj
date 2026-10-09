@@ -155,8 +155,8 @@
 ;; ─── Fresh-process cold regex ───────────────────────────────────────────────
 
 (defn cold-regex [grouped?]
-  (require 'kmet.app.loop)
-  (let [rre (var-get (ns-resolve 'kmet.app.loop 'retryable-error-regex))
+  (require 'kmet.app.retry)
+  (let [rre (var-get (ns-resolve 'kmet.app.retry 'retryable-error-regex))
         rx (if grouped?
              (re-pattern (str "(" (.pattern rre) ")"))
              rre)
@@ -200,12 +200,13 @@
 ;; ─── Kitty-image whole-document scan cost (the diff hot path) ───────────────
 
 (defn kitty-scan [file]
-  (require 'kmet.app.session 'kmet.app.ui 'kmet.modes.interactive 'kmet.tui.core
+  (require 'kmet.app.session 'kmet.app.ui.chat-history 'kmet.modes.interactive 'kmet.tui.core
            'kmet.libs.terminal-image)
   (let [session ((resolve 'kmet.app.session/load-session) file)
-        ch ((resolve 'kmet.app.ui/make-chat-history) :tool-display-mode :expanded)
+        ch ((resolve 'kmet.app.ui.chat-history/make-chat-history) :tool-display-mode :expanded)
         cs ((resolve 'kmet.modes.interactive/map->CoreState) {:chat-history ch})
-        _ ((resolve 'kmet.modes.interactive/replay-branch!) cs session)
+        replay (var-get (ns-resolve 'kmet.modes.interactive.session-admin 'replay-branch!))
+        _ (replay cs session)
         lines ((resolve 'kmet.tui.core/render) ch 100)
         avg (/ (double (reduce + 0 (map count lines))) (max 1 (count lines)))
         ek (resolve 'kmet.libs.terminal-image/extract-kitty-image-ids)
