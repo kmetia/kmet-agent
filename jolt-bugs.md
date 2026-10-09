@@ -15,6 +15,21 @@ loader are not blocked. `jolt/deps.edn` pins the SCI revision from
 [babashka/sci#1093](https://github.com/babashka/sci/pull/1093) for the `:sci`
 fallback. Keep the pin until the change is released by Jolt.
 
+### [jolt#1292](https://github.com/jolt-lang/jolt/issues/1292) — make the GC stall report opt-in
+
+Still open. The stall report — stderr, once per collection that waits two
+seconds for a thread parked in a foreign call that is not `:blocking`
+(`host/chez/rt.ss`, installed by `sa-gc-install-stall-watch!`) — interleaves
+with a full-screen TUI's frames, and a program cannot intercept it: the
+reporting thread is the rendezvous waiter, so a thread-level
+`(parameterize ((current-error-port …)))` does not reach it, and on Windows
+the console error port is a console HANDLE rather than the CRT stderr fd.
+The issue asks for silent-by-default with a `JOLT_GC_STALL` opt-in (the repro
+is in the ticket). No kmet-side workaround: the `target/jolt-test-ext.log`
+sighting predates the pinned `v0.8.20` and was the Windows pipe-close shape
+fixed there (#1283), and kmet's own Windows terminal FFI already marks every
+parking call `:blocking`.
+
 ## Resolved in the pinned releases
 
 These issues no longer need kmet-side workarounds:
