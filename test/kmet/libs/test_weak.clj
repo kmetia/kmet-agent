@@ -145,3 +145,20 @@
             "the failure was reported on stderr")
         (is (nil? (weak/subject k1)))
         (is (nil? (weak/subject k2)))))))
+
+(deftest live-count-filters-by-payload
+  (testing "consumers sharing the registry derive their own kind's count from
+            the payload (track! components vs reactions, leaks.md Stage C)"
+    (let [ka (fresh-key)
+          kb (fresh-key)]
+      (weak/register! ka (Object.) {:t/kind :a} identity)
+      (weak/register! kb (Object.) {:t/kind :b} identity)
+      (is (= 1 (weak/live-count (fn [p] (= :a (:t/kind p))))))
+      (is (= 1 (weak/live-count (fn [p] (= :b (:t/kind p))))))
+      (is (zero? (weak/live-count (fn [_] false))) "a rejecting pred counts none")
+      (collect! ka)
+      (is (zero? (weak/live-count (fn [p] (= :a (:t/kind p)))))
+          "a collected subject is not counted")
+      (weak/unregister! kb)
+      (is (zero? (weak/live-count (fn [p] (= :b (:t/kind p)))))
+          "an unregistered entry is not counted"))))

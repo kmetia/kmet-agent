@@ -18,9 +18,8 @@ Pass 2 stages A and B are implemented; the Stage C gate says C is required
   reasoning are recorded under "Review corrections" (Part 1); do not
   re-propose them without re-checking that section.
 - **Implementation:** Pass 1 complete (all findings 1-8 and 10; 9 excluded —
-  see the result note below). Pass 2 Stages A and B complete; the Stage C
-  gate says Stage C is required. Stage D not started. This file is the plan
-  of record.
+  see the result note below). Pass 2 Stages A-C complete; Stage D not
+  started. This file is the plan of record.
 - **Order — findings first.** Pass 1 fixes the audited findings 1-8 and 10
   deterministically (2.4, 2.5, and the key fix in 2.2). Finding 9 is
   unbounded-by-design and excluded as a non-issue. Pass 2 (Stages A-D) adds
@@ -169,15 +168,60 @@ because `reakt/live-reaction-count` arrives with Stage C.
 
 - [x] **Gate test result recorded here** (see 2.8): **C is required** — the
 tree survives GC + sweep on bb and Jolt.
-- [ ] weak subject = reaction; payload `{:rx-watch-key :watching}` (B1, B2)
-- [ ] key-only `dep-handler`; `update-watching!` single writer; `-dispose`
+- [x] weak subject = reaction; payload `{:rx-watch-key :watching}` (B1, B2)
+- [x] key-only `dep-handler`; `update-watching!` single writer; `-dispose`
       via `weak/unregister!`; registration at the end of `make-reaction`
-- [ ] `flush!` sweep (reentrancy-safe); `live-reaction-count`
-- [ ] liveness tests per creation shape (var, `with-let`, ComponentFn,
+- [x] `flush!` sweep (drain-gated, landed in Stage B); `live-reaction-count`
+- [x] liveness tests per creation shape (var, `with-let`, ComponentFn,
       cursor, dep graph, queued)
-- [ ] `^:slow` GC tests on bb **and** Jolt (weak refs over reify reactions)
-- [ ] perf measurement: dep-change overhead + frame time, within budget
-- [ ] changed-file gates green
+- [x] `^:slow` GC tests on bb **and** Jolt (weak refs over reify reactions)
+- [x] perf measurement: dep-change overhead + frame time, within budget
+- [x] changed-file gates green
+
+**Stage C result.** Dep watches are weak. `make-reaction` registers the
+reaction in `kmet.libs.weak` (`weak/register! rx-key r {:rx-watch-key watch-key
+:watching []}`) once, after `(reset! self r)`; the dep handler captures the
+registry key only and resolves the live reaction with `weak/subject` when a
+dep fires (a collected subject no-ops); `update-watching!` is the single
+writer for the dep set — it reads the payload, watches/unwatches the diff,
+keeps the cell's `:watching` as an introspection mirror, and refreshes the
+payload only when the set actually changed; `-dispose` unregisters through
+`weak/unregister!` (returning the payload) and unwatches from it. `auto-run?`
+moved into the cell so the handler closes over nothing but the key.
+`reakt/live-reaction-count` is the per-kind count: `weak/live-count` gained an
+optional payload predicate, and `macros/live-watch-count` filters to
+`{:watched …}` payloads so the two counters stay distinct. The track! entry
+payload's watch-set key is `:watched` (renamed from `:atoms` in this stage —
+it holds every tracked ref, reactions included, so teardown and the sweep can
+unwatch them; the cache map's `:atoms` remains the plain-ref half).
+`macros/track-render`'s `:rx` cache entries are `[reaction value]` — a live
+cache pins the reactions it validates, so a collected reaction can never keep
+validating a stale cache (review B1); the hit check reads the cell through the
+pinned reaction.
+
+**Gate re-run (post-C).** `target/gate_stage_c.clj`, bb and Jolt: after the
+tree is dropped and a bounded GC loop + `weak/sweep!` runs, the marker, the
+root record and the reaction are all collected; `live-reaction-count` and the
+live weak-entry count return to 0. Pre-C the same probe left the marker and
+the compiled Text components alive (2.8).
+
+**Perf (bb, headless; before = pre-C HEAD; min-of-3 means).** Frame bench:
+selection change on the strings frame 0.031 → 0.032 ms, on the elements frame
+0.288 → 0.281 ms. Transcript bench: 2400 messages, streaming 2.9 → 2.7 ms
+(record tree) and 2.8 → 3.0 ms (DSL container), idle 3.3 → 2.7 and 2.7 → 2.6
+ms; the content-rebuilt worst case 108 → 111 ms. Every delta is within run
+noise (≤ ~5% either way); the handler's registry lookup adds no measurable
+dep-change overhead at frame scale.
+
+**Tests.** Fast: registration lifecycle (a dep write enqueues through the
+registry, dispose unwatches), held-shape sweep liveness (var, cursor, derive
+parent), cache-pin structure, per-kind counters, `weak/live-count` predicate.
+`^:slow`, bb + Jolt: a dropped reaction is collected and the sweep unsubscribes
+its dep watch; a queued reaction is held until `flush!`; a cache-pinned
+reaction survives GC until the cache is cleared. Each GC scenario runs wholly
+inside one helper on purpose: a deftest body that evaluates any intermediate
+(the reaction, the flush) roots it through the bb/SCI frame — see
+`test-utils/await-collected`.
 
 #### Stage D — hardening & docs
 
@@ -1077,7 +1121,8 @@ GC-based (`^:slow`, both hosts):
   **Result (Stage B): required — measured with a `WeakReference` marker on
   both hosts (`target/gate_stage_c.clj`), because the reaction counter
   arrives with Stage C: the dropped tree's marker and its compiled Text
-  components survive GC + sweep.**
+  components survive GC + sweep.** Post-C re-run: reclaimed — marker, root
+  and reaction all collected on both hosts (see the Stage C result).
 - Mid-session regression: 50 `/reload` cycles with a widget tree → counts
   flat (Stage B).
 
@@ -1133,7 +1178,8 @@ Dropped from the design (precedents in Part 1): owning-atom framework,
 ## 2.12 Open questions
 
 - Stage C go/no-go: **decided — required** (the Stage-B gate result in 2.8:
-  the dropped tree's reaction survives GC + sweep on both hosts).
+  the dropped tree's reaction survives GC + sweep on both hosts). Implemented
+  in Stage C; the post-C gate re-run reclaims the tree on both hosts.
 - Extension unload: `unload-extension!` deregisters fns but not the UI
   surfaces commissioned through `ui-call`, so a mounted widget keeps its
   extension reachable until `/reload` (2.4.2 disposes on reset). Give

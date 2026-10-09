@@ -18,6 +18,15 @@
    watch-ref/unwatch-ref (core add-watch cannot take them — they are not
    IRefs).
 
+   A reaction is kept alive by its derefers, never by its dependencies: dep
+   watches are registered through kmet.libs.weak against the reaction (the
+   handler captures the registry key only, never the reaction), so an
+   unreachable reaction is collected and the next sweep unsubscribes its dep
+   watches (leaks.md Stage C). Owned liveness is the flip side — a reaction
+   nothing derefs could never be invalidated usefully — so holders that are
+   themselves weak (kmet.tui.macros/track-render's per-width cache) pin the
+   reactions they validate.
+
    Coverage contract: tracked reads are explicit tracked-deref calls and
    nested reaction/cursor derefs (automatic); component render bodies get
    the same via track!'s lexical rewrite. A bare @plain-atom inside a
@@ -141,7 +150,10 @@
 (defn watch-ref
   "add-watch for any reactive ref: plain atoms go through
    clojure.core/add-watch, library refs (reactions, cursors) through their
-   internal registry. F receives (key ref old-val new-val) either way."
+   internal registry. F receives (key ref old-val new-val) either way.
+   A watch does not keep a library ref alive: hold the reaction yourself (a
+   var, a store, a cache entry) or it is collected and the next sweep drops
+   both its weak-registry entry and its dep watches."
   [ref key f]
   (if (reaction? ref)
     (-add-watch ref key f)
@@ -221,6 +233,14 @@
   "Number of reactions waiting in the batch queue (tests, debug counters)."
   []
   (count @queue))
+
+(defn live-reaction-count
+  "Live reactions in the weak registry (tests and guards): reactions whose
+   subject is still reachable. Dead-but-unswept entries are excluded.
+   track! components share the registry with a different payload shape and
+   are counted by kmet.tui.macros/live-watch-count instead."
+  []
+  (weak/live-count (fn [payload] (contains? payload :rx-watch-key))))
 
 (defn discard-queued!
   "Teardown-only: drop every queued reaction without running it, so a mode
@@ -351,6 +371,7 @@
    ;; they read the finished value through this holder.
    (let [cell (atom {:f f :state :unrun :value nil :watching []
                      :watches {} :caught nil
+                     :auto-run? auto-run?
                      :on-dispose (if-some [od (:on-dispose _opts)]
                                    [od]
                                    [])})
@@ -358,6 +379,16 @@
          exempt? (set implicit-deps)
          self (atom nil)
          watch-key (RxKey. (gensym "rx"))
+         ;; Weak-registry key (leaks.md Stage C): the dep watches and the
+         ;; unsubscribe payload hang off the REACTION, but nothing on the dep
+         ;; side may capture it — the handler below closes over this key
+         ;; only and finds the live reaction through the registry.
+         rx-key (gensym "rx")
+         on-dead
+         (fn [_k {:keys [rx-watch-key watching]}]
+           ;; The reaction was collected: unsubscribe its dep watches. The
+           ;; entry is already removed; the dead subject is never touched.
+           (doseq [dep watching] (unwatch-ref dep rx-watch-key)))
          dep-handler
          (fn [_key _ref old new]
            ;; Reagent's _handle-change gate: identical fast path, structural
@@ -367,14 +398,20 @@
            ;; isolated — it runs on the MUTATOR's thread (any background
            ;; thread swapping app state), so a failure here must never
            ;; propagate into whoever wrote the dep.
+           ;;
+           ;; Key-only by construction (Stage C): the reaction is resolved in
+           ;; the weak registry when the watch fires, never captured.
            (try
-             (when (and (changed? old new)
-                        (not= :dirty (:state @cell))
-                        (not= :disposed (:state @cell)))
-               (swap! cell assoc :state :dirty :caught nil)
-               (if (fn? auto-run?)
-                 (auto-run? @self)
-                 (enqueue! @self)))
+             (when-let [r (weak/subject rx-key)]
+               (let [c (-cell r)
+                     {:keys [state auto-run?]} @c]
+                 (when (and (changed? old new)
+                            (not= :dirty state)
+                            (not= :disposed state))
+                   (swap! c assoc :state :dirty :caught nil)
+                   (if (fn? auto-run?)
+                     (auto-run? r)
+                     (enqueue! r)))))
              (catch Throwable e
                (binding [*out* *err*]
                  (println "kmet.libs.reakt dep-handler error:" (.getMessage e))))))
@@ -386,7 +423,15 @@
            ;; Returns the newly watched refs: the caller compares their
            ;; current values against the ones captured as-read to close the
            ;; write-between-read-and-watch gap.
-           (let [{:keys [watching]} @cell
+           ;;
+           ;; Single writer for the dep set (Stage C): the registry payload
+           ;; is the record; the cell's :watching is its introspection
+           ;; mirror. The payload is refreshed only when a dep was actually
+           ;; added or dropped — an unconditional registry write per run is a
+           ;; hot-path cost for nothing.
+           (let [collected (vec collected)
+                 {:keys [watching]} (weak/payload rx-key)
+                 watching (or watching (:watching @cell))
                  added (vec (remove #(identical-member? watching %) collected))
                  dropped (filter #(and (identical-member? watching %)
                                        (not (identical-member? collected %)))
@@ -395,7 +440,12 @@
                (watch-ref dep watch-key dep-handler))
              (doseq [dep dropped]
                (unwatch-ref dep watch-key))
-             (swap! cell assoc :watching (vec collected))
+             (swap! cell assoc :watching collected)
+             (when (or (seq added) (seq dropped))
+               (weak/register! rx-key @self
+                               {:rx-watch-key watch-key
+                                :watching collected}
+                               on-dead))
              added))
          run-sync!
          (fn []
@@ -531,8 +581,13 @@
                _)
              (-cell [_] cell)
              (-dispose [_]
-               (doseq [dep (:watching @cell)]
-                 (unwatch-ref dep watch-key))
+               ;; Deterministic unsubscribe: the registry payload holds the
+               ;; dep set (the cell mirror is the fallback when the entry is
+               ;; already gone). unregister! removes the entry and returns
+               ;; the payload; on-dead does not run on this path.
+               (let [payload (weak/unregister! rx-key)]
+                 (doseq [dep (or (:watching payload) (:watching @cell))]
+                   (unwatch-ref dep watch-key)))
                ;; Purge from the batch queue too: a disposed reaction must be
                ;; fully inert immediately, not skipped-later (watch-fire order
                ;; relative to dispose is arbitrary — without the purge its own
@@ -562,6 +617,10 @@
                  (record-dep! @self v)
                  v)))]
      (reset! self r)
+     ;; Register LAST: the dep watches resolve the reaction through this
+     ;; entry, so none may be installed before it exists — and the payload
+     ;; must never reference the reaction, or the entry would root it.
+     (weak/register! rx-key r {:rx-watch-key watch-key :watching []} on-dead)
      r)))
 
 (defn reaction-state

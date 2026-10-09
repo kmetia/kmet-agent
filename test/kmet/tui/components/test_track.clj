@@ -12,6 +12,7 @@
             [kmet.tui.components.select-list :as sl]
             [kmet.tui.components.settings-list :as settings]
             [kmet.app.ui.footer :as footer]
+            [kmet.libs.reakt :as reakt]
             [kmet.libs.weak :as weak]
             [kmet.test-utils :as test-utils]))
 
@@ -238,3 +239,71 @@
     (footer/footer-set-extension-status! f "ext" "● active")
     (let [lines (core/render f 40)]
       (t/is (some #(.contains % "● active") lines)))))
+
+;; ─── cache pins its reactions (leaks.md Pass 2, Stage C) ─────────────────
+
+(t/deftest test-cache-pins-its-reactions
+  (t/testing "a track! cache entry is [reaction value], so a collected
+            reaction can never validate a stale cache"
+    (let [a (atom 1)
+          rx (reakt/make-reaction (fn [] (reakt/tracked-deref a)))
+          c {:cache (atom nil)}]
+      (t/is (= 1 (macros/track-render c 10 (fn [] (reakt/tracked-deref rx)))))
+      (let [entry (get (:rx @(:cache c)) (reakt/-cell rx))]
+        (t/is (vector? entry) "the entry holds [reaction value]")
+        (t/is (identical? rx (first entry)) "the reaction is pinned")
+        (t/is (= 1 (second entry)) "with the value as read"))
+      (t/is (= 1 (macros/track-render c 10 (fn [] :not-run)))
+            "the cache still hits through the pinned reaction")
+      (macros/remove-track-watches! c)
+      (reakt/dispose! rx))))
+
+(t/deftest test-counts-are-per-kind
+  (t/testing "components and reactions share the weak registry but count
+            separately"
+    (let [watches (macros/live-watch-count)
+          rx (reakt/make-reaction (fn [] 1))]
+      @rx
+      (t/is (<= (macros/live-watch-count) watches)
+            "a reaction does not inflate the track! component count")
+      (reakt/dispose! rx))
+    (let [reactions (reakt/live-reaction-count)
+          c (text/make-text "a" 0 0)]
+      (core/render c 5)
+      (t/is (<= (reakt/live-reaction-count) reactions)
+            "a component does not inflate the reaction count")
+      (protocols/dispose c))))
+
+(defn- cache-pinned-reaction-lifecycle
+  "One helper on purpose: a deftest body that evaluates any intermediate
+   (the reaction, its handles) roots it through the bb/SCI frame — see
+   test-utils/await-collected. The WRef is built in its own fn so no local
+   here holds the reaction. Returns booleans only: the cache pins the
+   reaction through GC, and clearing the cache releases it."
+  []
+  (let [a (atom 0)
+        c {:cache (atom nil)}]
+    (macros/track-render c 5
+                         (fn [] (reakt/tracked-deref
+                                 (reakt/make-reaction
+                                  (fn [] (reakt/tracked-deref a))))))
+    (let [wref ((fn [] (java.lang.ref.WeakReference.
+                        (first (val (first (:rx @(:cache c))))))))
+          cache (:cache c)]
+      ;; Unregister the component's weak entry: only the cache pins the
+      ;; reaction now.
+      (macros/remove-track-watches! c)
+      (dotimes [_ 5]
+        (System/gc)
+        (Thread/sleep 20))
+      (let [pinned? (some? (.get wref))]
+        (reset! cache nil)
+        {:pinned? pinned?
+         :collected? (test-utils/await-collected #(nil? (.get wref)))}))))
+
+(t/deftest ^:slow test-cache-pinned-reaction-survives-until-the-cache-is-cleared
+  (t/testing "Stage C: GC cannot collect a reaction the track! cache
+            validates; clearing the cache releases it"
+    (let [{:keys [pinned? collected?]} (cache-pinned-reaction-lifecycle)]
+      (t/is pinned? "the cache entry holds the reaction")
+      (t/is collected? "with the cache cleared the reaction is collected"))))

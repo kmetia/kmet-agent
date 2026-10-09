@@ -5,7 +5,9 @@
    integration with component render bodies is covered in
    kmet.tui.test-reakt-integration / test-compute / test-track.)"
   (:require [clojure.test :as t :refer [deftest is testing]]
-            [kmet.libs.reakt :as r]))
+            [kmet.libs.reakt :as r]
+            [kmet.libs.weak :as weak]
+            [kmet.test-utils :as test-utils]))
 
 (deftest test-changed-gate
   (testing "identical? fast path + structural = fallback"
@@ -264,3 +266,105 @@
       (is (= 1 @parent) "parent sees the child's mid-run change")
       (r/dispose! parent)
       (r/dispose! child))))
+
+;; ─── weak dep watches (leaks.md Pass 2, Stage C) ──────────────────────────
+
+(deftest test-registration-lifecycle-and-dep-unwatch
+  (testing "a reaction is registered at construction: its dep watch resolves
+            it through the weak registry, and dispose unregisters + unwatches"
+    (let [a (atom 1)
+          rx (r/make-reaction (fn [] (r/tracked-deref a)))]
+      (is (= 1 @rx) "the first run installed the dep watch")
+      (is (= 1 (count (.getWatches a))))
+      (r/flush!)
+      (swap! a inc)
+      (is (pos? (r/queued-count))
+          "the watch resolved the reaction and enqueued it")
+      (r/flush!)
+      (is (= 2 @rx) "the queued run settled")
+      (r/dispose! rx)
+      (is (empty? (.getWatches a)) "dispose unwatched the dep")
+      (is (zero? (r/queued-count)))
+      (swap! a inc)
+      (is (zero? (r/queued-count)) "a disposed reaction is never enqueued")
+      (is (nil? @rx) "disposed derefs answer nil")
+      (r/dispose! rx)
+      (is (empty? (.getWatches a)) "dispose is idempotent"))))
+
+(deftest test-held-shapes-survive-a-sweep
+  (testing "a sweep never collects a held subject: cursor, derive parent
+            (its body and dep list hold the child), and a var-held reaction"
+    (let [a (atom 1)
+          cur (r/cursor a [])
+          doubled (r/derive [cur] (fn [v] (* 2 v)))
+          shape-ns (create-ns 'kmet.libs.test-reakt.held-shape)
+          v (intern shape-ns 'var-held
+                    (r/make-reaction (fn [] (r/tracked-deref a))))]
+      (is (= 2 @doubled))
+      (is (= 1 @(deref v)))
+      (weak/sweep!)
+      (swap! a inc)
+      (is (= 4 @doubled) "the derive chain is live after a sweep")
+      (is (= 2 @(deref v)) "the var-held reaction is live after a sweep")
+      (r/dispose! (deref v))
+      (ns-unmap shape-ns 'var-held)
+      (r/dispose! doubled)
+      (r/dispose! cur))))
+
+(defn- make-droppable-reaction
+  "A deref'd reaction over a fresh dep; only a WeakReference to the reaction
+   escapes. Never evaluate the reaction in a deftest body — the bb/SCI frame
+   would root it (see test-utils/await-collected's note)."
+  []
+  (let [a (atom 0)
+        rx (r/make-reaction (fn [] (inc (r/tracked-deref a))))]
+    @rx
+    {:wref (java.lang.ref.WeakReference. rx)
+     :dep a}))
+
+(deftest ^:slow test-dropped-reaction-is-collected-and-unwatched
+  (testing "Stage C: dep watches no longer root the reaction — a dropped
+            reaction is collected and the sweep unsubscribes its dep watch"
+    (let [pre (r/live-reaction-count)
+          {:keys [wref dep]} (make-droppable-reaction)]
+      (is (= 1 (count (.getWatches dep))) "the dep watch is installed")
+      (is (test-utils/await-collected #(nil? (.get wref)))
+          "the reaction was collected")
+      (is (= 1 (count (.getWatches dep)))
+          "the watch is still installed until the sweep")
+      (weak/sweep!)
+      (is (empty? (.getWatches dep)) "the sweep unwatched the dep")
+      (is (<= (r/live-reaction-count) pre)))))
+
+(defn- make-queued-reaction
+  "A reaction left in the batch queue by a dep change; only a WeakReference
+   to it escapes."
+  []
+  (let [a (atom 0)
+        rx (r/make-reaction (fn [] (r/tracked-deref a)))]
+    @rx
+    (swap! a inc)
+    {:wref (java.lang.ref.WeakReference. rx)}))
+
+(defn- queued-lifecycle
+  "One helper on purpose: a deftest body that evaluates any intermediate
+   (the reaction, the flush) roots it through the bb/SCI frame — see
+   test-utils/await-collected. Returns booleans only."
+  []
+  (let [{:keys [wref]} (make-queued-reaction)
+        queued? (pos? (r/queued-count))
+        held? (do (dotimes [_ 5]
+                    (System/gc)
+                    (Thread/sleep 20))
+                  (some? (.get wref)))]
+    (r/flush!)
+    {:queued? queued?
+     :held? held?
+     :collected? (test-utils/await-collected #(nil? (.get wref)))}))
+
+(deftest ^:slow test-queued-reaction-is-held-until-flush
+  (testing "the batch queue keeps a queued reaction alive until it runs"
+    (let [{:keys [queued? held? collected?]} (queued-lifecycle)]
+      (is queued? "the dep change enqueued the reaction")
+      (is held? "no GC can reclaim a queued reaction")
+      (is collected? "once flushed, nothing holds it and it is collected"))))

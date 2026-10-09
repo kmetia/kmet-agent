@@ -141,9 +141,16 @@
       (count claimed))))
 
 (defn live-count
-  "Entries whose subject is still alive (tests and guards). O(entries)."
-  []
-  (count (remove (fn [[_ entry]] (collected? entry)) @registry)))
+  "Entries whose subject is still alive (tests and guards). With PRED,
+   only live entries whose payload satisfies it — consumers share this
+   registry, so each derives its own kind's count from the payload it
+   owns (track! components vs reactions). O(entries)."
+  ([] (live-count (constantly true)))
+  ([pred]
+   (count (filter (fn [[_ entry]]
+                    (and (not (collected? entry))
+                         (pred (:payload entry))))
+                  @registry))))
 
 (defn entry-count
   "All entries, including dead-until-swept (tests and guards)."

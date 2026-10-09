@@ -70,7 +70,8 @@
     (::watch-key (meta a))))
 
 (defn- unwatch-all!
-  "Remove KEY's watches from every ref in REFS (an entry payload's :atoms)."
+  "Remove KEY's watches from every ref in REFS (an entry payload's
+   :watched — plain atoms and library refs)."
   [key refs]
   (doseq [ref refs]
     (reakt/unwatch-ref ref key))
@@ -90,15 +91,18 @@
       (reduced false))))
 
 (defn- rx-unchanged?
-  "reduce-kv hit check over a cache's reactive cells (CELL is a reaction's
-   state atom — see track-render). True while the reaction is settled
+  "reduce-kv hit check over a cache's reactive entries, keyed by cell (a
+   reaction's state atom — see track-render). The entry value is
+   [REACTION value]: holding the reaction pins it, so this cache can never
+   keep validating a collected reaction — the key alone would not
+   (leaks.md Stage C). True while the reaction is settled
    (:idle/:busy/:disposed) and still holds the recorded value. :unrun and
    :dirty must run — the re-render's deref settles them — and :failed must
-   rethrow there, so those miss. Reads the cell directly: derefing the
-   reaction would settle the batch queue on every cache hit, and this check
-   runs once per component per frame."
-  [_acc cell v]
-  (let [{:keys [state value]} @cell]
+   rethrow there, so those miss. The cell is read through the pinned
+   reaction, never by derefing it: a deref would settle the batch queue on
+   every cache hit, and this check runs once per component per frame."
+  [_acc _cell [ref v]]
+  (let [{:keys [state value]} @(reakt/-cell ref)]
     (if (and (case state (:idle :busy :disposed) true false)
              (or (identical? value v) (= value v)))
       true
@@ -121,7 +125,9 @@
    Atom handlers capture the component's watch KEY only and find the
    component through the weak registry, so a watch never roots a component;
    a collected component's watches are removed by the next sweep
-   (kmet.libs.weak, leaks.md Stage B)."
+   (kmet.libs.weak, leaks.md Stage B). A reaction entry is
+   [REACTION value]: the entry pins the reaction, so the cache can never
+   keep validating a reaction the GC already collected (leaks.md Stage C)."
   [component width render-fn]
   (let [cache-atom (component-cache-atom component)
         cache @cache-atom]
@@ -166,12 +172,17 @@
                                            (let [[atom-vals rx-vals] acc]
                                              (if (reakt/reaction? ref)
                                                [atom-vals (assoc rx-vals
-                                                                 (reakt/-cell ref) v)]
+                                                                 (reakt/-cell ref)
+                                                                 [ref v])]
                                                [(assoc atom-vals ref v) rx-vals])))
                                          [{} {}]
                                          tracked-map)
-                    atoms (set (keys tracked-map))
-                    prev-atoms (:atoms (weak/payload watch-key))
+                    ;; Everything the pass tracked, reactions included:
+                    ;; the payload's :watched is what teardown and the sweep
+                    ;; must unwatch later. (The cache splits the same refs:
+                    ;; :atoms plain, :rx reactions.)
+                    watched (set (keys tracked-map))
+                    prev-watched (:watched (weak/payload watch-key))
                     ;; KEY only — the atom watch must not root the component.
                     handler (let [k watch-key]
                               (fn [_ _ old new]
@@ -184,17 +195,17 @@
                 ;; Register FIRST: a throw here (a shared cache atom) must
                 ;; not leave watches installed under a key
                 ;; remove-track-watches! cannot find.
-                (weak/register! watch-key component {:atoms atoms}
-                                (fn [k {:keys [atoms]}]
-                                  (unwatch-all! k atoms)))
-                (doseq [a atoms]
-                  (reakt/watch-ref a watch-key handler))
+                (weak/register! watch-key component {:watched watched}
+                                (fn [k {:keys [watched]}]
+                                  (unwatch-all! k watched)))
+                (doseq [r watched]
+                  (reakt/watch-ref r watch-key handler))
                 ;; A previous pass's refs this pass no longer reads (branch
                 ;; switch) lose their watches here — otherwise they fire
                 ;; invalidate-cache forever on writes nobody consumes.
-                (doseq [a prev-atoms]
-                  (when-not (contains? atoms a)
-                    (reakt/unwatch-ref a watch-key)))
+                (doseq [r prev-watched]
+                  (when-not (contains? watched r)
+                    (reakt/unwatch-ref r watch-key)))
                 (when-not @invalidated?
                   (reset! cache-atom {:width width
                                       :atoms atom-vals
@@ -243,8 +254,8 @@
    already claimed."
   [component]
   (when-some [k (existing-tracker-key component)]
-    (when-some [{:keys [atoms]} (weak/unregister! k)]
-      (unwatch-all! k atoms)))
+    (when-some [{:keys [watched]} (weak/unregister! k)]
+      (unwatch-all! k watched)))
   nil)
 
 (defn sweep-dead-watches!
@@ -257,10 +268,12 @@
 
 (defn live-watch-count
   "Live track! registry entries (tests/guards): components whose render ran
-   with track! and are still reachable. Dead-but-unswept entries are
-   excluded; (weak/entry-count) includes them."
+   with track! and are still reachable. Reactions share the weak registry
+   (their payload carries :rx-watch-key, the components' :watched) and are
+   counted by kmet.libs.reakt/live-reaction-count instead. Dead-but-unswept
+   entries are excluded; (weak/entry-count) includes them."
   []
-  (weak/live-count))
+  (weak/live-count (fn [payload] (contains? payload :watched))))
 
 (defn tracked?
   "True when COMPONENT owns a live weak registry entry — its render ran with

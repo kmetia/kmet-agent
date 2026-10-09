@@ -11,7 +11,8 @@
             [kmet.tui.hiccup :as h]
             [kmet.tui.macros :as macros :refer [with-let defcomponent track!]]
             [kmet.tui.protocols :as protocols]
-            [kmet.libs.reakt :as rag]))
+            [kmet.libs.reakt :as rag]
+            [kmet.libs.weak :as weak]))
 
 (defcomponent Probe nil [cache-atom render-count-atom body]
   (render [this width]
@@ -98,6 +99,9 @@
     (core/render r 20)
     (core/render r 20)
     (t/is (= 1 @calls) "idle: body memoized")
+    (weak/sweep!)
+    (core/render r 20)
+    (t/is (= 1 @calls) "a sweep does not reclaim a compute the store holds")
     (reset! a 3)
     (core/render r 20)
     (t/is (= 2 @calls) "source change re-ran the body")
