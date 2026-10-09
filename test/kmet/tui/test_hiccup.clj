@@ -996,6 +996,107 @@
             "the reorder took effect")
       (t/is (= 2 (count @inits)) "reorder reused the fn instances — no re-init"))))
 
+;; ═══════════════════════════════════════════════════════════════════════
+;; The unchanged-subtree skip (tui.md §2.3)
+;; ═══════════════════════════════════════════════════════════════════════
+
+(t/deftest unchanged-tree-takes-the-skip
+  ;; an uncached body re-derives per pass (§2.5); an =-equal tree keeps the
+  ;; reconciled children instead of re-parsing and re-diffing the subtree
+  (let [r (h/root (fn [_]
+                    [:v-stack {:gap 0}
+                     [:text {:padding-x 0 :padding-y 0} "static"]
+                     [:box {:padding-x 0 :padding-y 0}
+                      [:container {}
+                       [:text {:padding-x 0 :padding-y 0} "deep"]]]]))]
+    (core/render r 30)
+    (h/reset-counters!)
+    (core/render r 30)
+    (t/is (= 1 (:skips (h/counters))) "one skip per unchanged component root")
+    (t/is (zero? (:reuses (h/counters))) "the subtree was never walked")
+    (t/is (zero? (:constructs (h/counters))))
+    (t/is (zero? (:disposals (h/counters))))
+    (t/is (= 1 (:bodies-run (h/counters))) "the body still re-derived")))
+
+(t/deftest changed-child-diffs-unchanged-siblings-skip
+  ;; a change inside one branch still walks the tree; an unchanged sibling
+  ;; container takes the skip at its own level and keeps its instances
+  (let [stable (h/ref)
+        label (atom "a")
+        r (h/root (fn [_]
+                    [:v-stack {:gap 0}
+                     [:container {}
+                      [:text {:padding-x 0 :padding-y 0 :ref stable} "stable"]]
+                     [:text {:padding-x 0 :padding-y 0}
+                      (rag/tracked-deref label)]]))]
+    (t/is (= "stablea" (apply str (mapv str/trimr (core/render r 20)))))
+    (let [s1 (deref stable)]
+      (h/reset-counters!)
+      (reset! label "b")
+      (t/is (= "stableb" (apply str (mapv str/trimr (core/render r 20)))))
+      (t/is (identical? s1 (deref stable))
+            "the skipped container kept its child")
+      (t/is (= 1 (:skips (h/counters))) "the unchanged container skipped")
+      (t/is (pos? (:constructs (h/counters))) "the changed leaf rebuilt")
+      (t/is (pos? (:disposals (h/counters)))))))
+
+(t/deftest metadata-key-change-defeats-the-skip
+  ;; ^{:key k} is identity; =-equal content with a changed key must remount,
+  ;; not ride the skip (clojure.core/= ignores metadata)
+  (let [k (atom 0)
+        r (h/root (fn [_]
+                    ^{:key (rag/tracked-deref k)}
+                    [:text {:padding-x 0 :padding-y 0} "same"]))]
+    (core/render r 20)
+    (let [t1 (:c (first @(:kids r)))]
+      (h/reset-counters!)
+      (swap! k inc)
+      (core/render r 20)
+      (t/is (not (identical? t1 (:c (first @(:kids r)))))
+            "a metadata key change must not keep the old instance")
+      (t/is (pos? (:disposals (h/counters)))))))
+
+(t/deftest equal-children-still-apply-container-props
+  ;; the skip covers children only: a changed STRUCTURAL prop still patches
+  ;; the live container in the same pass
+  (let [pad (atom 1)
+        r (h/root (fn [_]
+                    [:box {:padding-x (rag/tracked-deref pad) :padding-y 0}
+                     [:text {:padding-x 0 :padding-y 0} "hi"]]))
+        before (core/render r 30)]
+    (h/reset-counters!)
+    (reset! pad 2)
+    (let [after (core/render r 30)]
+      (t/is (not= before after) "the padding change is visible")
+      (t/is (= 1 (:skips (h/counters))) "children unchanged → skip")
+      (t/is (= 1 (:applies (h/counters))) "the prop still patched")
+      (t/is (zero? (:constructs (h/counters))) "nothing rebuilt"))))
+
+(t/deftest skip-still-rerenders-at-a-new-width
+  ;; the skip is a diff skip, never a render cache: items re-render at the
+  ;; pass's width even when the tree is unchanged
+  (let [r (h/root (fn [_]
+                    [:text {:padding-x 0 :padding-y 0}
+                     (apply str (repeat 30 "x"))]))
+        narrow (core/render r 10)]
+    (h/reset-counters!)
+    (let [wide (core/render r 40)]
+      (t/is (= 1 (:skips (h/counters))) "the equal tree skipped the diff")
+      (t/is (not= narrow wide) "lines still reflowed at the new width"))))
+
+(t/deftest skipped-subtree-still-updates-tracked-fn-children
+  ;; the skip is not a render freeze: a fn child's own dep change still
+  ;; re-derives through its reaction while the parent tree skips its diff
+  (let [s (atom "a")
+        kid (fn [_] [:text {:padding-x 0 :padding-y 0}
+                     (rag/tracked-deref s)])
+        r (h/root (fn [_] [:container {} [kid {}]]))]
+    (t/is (= "a" (apply str (mapv str/trimr (core/render r 20)))))
+    (h/reset-counters!)
+    (reset! s "b")
+    (t/is (= "b" (apply str (mapv str/trimr (core/render r 20)))))
+    (t/is (= 1 (:skips (h/counters))) "the unchanged parent skipped its diff")))
+
 (t/deftest removed-keyed-children-are-disposed-root-teardown-cascades
   (let [log (atom [])
         ids (atom [1 2])

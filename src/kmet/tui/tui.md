@@ -339,6 +339,22 @@ its structural props as constructed (the pre-migration behavior).
 One mechanism fills everything: containers are constructed empty and
 filled by the same keyed diff through per-tag children lenses.
 
+**An =-equal subtree is never re-parsed or re-diffed.** Both levels keep
+the raw input from the pass that produced the live instances — a
+`ComponentFn` remembers the tree its body returned (in `last-tree`), a
+container its raw child nodes (on the stamp) — and when the next pass's
+input is `unchanged-tree?` (=-equal, with matching `^{:key}` metadata:
+clojure.core/= ignores metadata and a key is identity) the diff is
+skipped and the instances are kept. The body still runs (an uncached one
+re-derives every pass, §2.5); only the parse, diff and item allocation
+are saved — a static 4000-node tree re-derived 200 times costs ~6.7
+ms/pass instead of ~35 ms, while a tree that genuinely changed pays one
+extra `=` walk (worst case ~5% at 4000 nodes when only the last node
+changed; usually the walk fails early). Items still render at the pass's
+width: this is a diff skip, never a render cache. A fresh fn literal in
+props defeats the comparison — the same hoisting rule as prop
+memoization. `bump! :skips` counts the fast path (§11).
+
 **Duplicate `:key`s throw at reconcile** — two spliced siblings sharing a
 key makes reuse undefined; throwing beats a silently vanishing subtree.
 
@@ -448,6 +464,9 @@ Bodies collecting **no tracked dependency** (only untracked reads or static
 trees) re-run on every pass — batched semantics, uncached, never stale.
 Mixed bodies must read reactive inputs through component-body derefs,
 `tracked-deref`, computes or cursors (the coverage contract, §3.1).
+Their =-equal output is not re-diffed either: the wrapper keeps the tree
+the body last returned and an equal re-derivation takes the
+unchanged-subtree skip (§2.3) — the body runs, the diff doesn't.
 
 **Choosing the form** — the uncached (bare `@`/untracked) form is the safe
 default for cheap, hot bodies: it re-reads per pass, so it cannot cache
@@ -1385,13 +1404,16 @@ time (tests assert on them):
 ```clojure
 (hiccup/counters)
 ;; {:bodies-run 2 :bodies-skipped 37 :constructs 0 :reuses 5
-;;  :applies 1 :disposals 0 :computes 4}
+;;  :applies 1 :disposals 0 :computes 4 :skips 2}
 (hiccup/reset-counters!)   ;; back to zero (tests)
 ```
 
 Reading them: `bodies-run` climbing on frames where nothing the body derefs
 changed means either an inline-callback trap (fresh fn literals in props,
-§2.5) or broken equality; `computes` climbing frame over frame means a
+§2.5) or broken equality; `skips` (the unchanged-subtree fast path, §2.3)
+climbing while `constructs` stays flat is a healthy pass — bodies
+re-derived to equal trees, which is what makes large uncached bodies
+affordable; `computes` climbing frame over frame means a
 compute created bare inside a render body instead of under `with-let`
 (§3.3); `applies` (the apply-path count, §2.3) climbing every frame on a
 stateful tag whose props never settle means fresh fn literals in its props

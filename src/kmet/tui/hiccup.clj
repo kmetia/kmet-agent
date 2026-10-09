@@ -20,7 +20,9 @@
    unmatched previous children are disposed (children-first contract),
    matched ones are reused — identity survives reorders by key, so stateful
    subtrees (editors, fn components with with-let state) live across
-   passes. Ownership rides the :dsl/meta stamp: everything the DSL
+   passes. =-equal input to a re-run body (or to a container) takes the
+   unchanged-subtree skip instead of a re-parse/re-diff. Ownership rides
+   the :dsl/meta stamp: everything the DSL
    constructs carries it; foreign records never do and are never disposed.
 
    Props: display leaves (text/markdown/spacer/string) are rebuilt when
@@ -125,13 +127,13 @@
 ;; bodies-run climbing while bodies-skipped stays flat.
 (def ^:private zero-counters
   {:bodies-run 0 :bodies-skipped 0 :constructs 0 :reuses 0 :applies 0
-   :disposals 0 :computes 0})
+   :disposals 0 :computes 0 :skips 0})
 
 (defonce ^:private counters-atom (atom zero-counters))
 
 (defn counters
   "Per-frame fn-invocation/reconcile counters ({:bodies-run :bodies-skipped
-   :constructs :reuses :applies :disposals :computes}). Process-wide;
+   :constructs :reuses :applies :disposals :computes :skips}). Process-wide;
    reset-counters! in tests."
   [] @counters-atom)
 
@@ -850,11 +852,48 @@
 
 (declare reconcile!)
 
+;; The unchanged-subtree skip (tui.md §2.3): a body that re-ran and derived
+;; the SAME tree, or a container whose children are unchanged, must not be
+;; re-parsed and re-diffed. clojure.core/= ignores metadata, and an element's
+;; ^{:key k} metadata IS identity — a key change on =-equal content must not
+;; take the skip, or a stateful child would keep the instance its key said
+;; goodbye to. Keys written as props (:key) are part of the content already.
+
+(def ^:private no-tree
+  "Initial last-tree: never =-equal to a valid tree (keywords are not tree
+   nodes), so the first pass always reconciles."
+  ::no-tree)
+
+(defn- keys-same?
+  "Do =-equal values A and B carry the same :key element metadata? Only
+   entry vectors carry keys, but the walk descends any sequential pair, so a
+   key on a vector spliced via a seq is compared too. Maps (props, stack
+   entries) are not descended — keys cannot live in them."
+  [a b]
+  (if-not (and (sequential? a) (sequential? b))
+    true
+    (and (or (and (not (vector? a)) (not (vector? b)))
+             (= (:key (meta a)) (:key (meta b))))
+         (loop [xs (seq a)
+                ys (seq b)]
+           (cond
+             (nil? xs) true
+             (keys-same? (first xs) (first ys)) (recur (next xs) (next ys))
+             :else false)))))
+
+(defn- unchanged-tree?
+  "True when NEW can take PREV's reconciled subtree as-is: =-equal and with
+   matching element keys (clojure.core/= ignores metadata; see the section
+   comment for why a key change must defeat the skip)."
+  [new prev]
+  (and (= new prev)
+       (keys-same? new prev)))
+
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; ComponentFn — the fn-component wrapper (tui.md §2.5)
 ;; ═══════════════════════════════════════════════════════════════════════════
 
-(defcomponent ComponentFn nil [f props kids store rx ctree last-width]
+(defcomponent ComponentFn nil [f props kids store rx ctree last-width last-tree]
   (render [_this width]
     (binding [*width* width *comp* _this]
       ;; Uncached by design (transparent-parent allowlist): the memoization
@@ -873,7 +912,14 @@
                                        ;; with equal props — must still re-derive
                                        ct (r/tracked-deref ctree)
                                        tree (if ct (f p ct) (f p))]
-                                   (reconcile! kids tree))))
+                                   ;; =-equal output keeps KIDS — the
+                                   ;; unchanged-subtree skip. The items
+                                   ;; still render at this pass's width.
+                                   (if (unchanged-tree? tree @last-tree)
+                                     (do (bump! :skips) @kids)
+                                     (let [kept (reconcile! kids tree)]
+                                       (reset! last-tree tree)
+                                       kept)))))
                              {:auto-run? (fn [_] (macros/schedule-frame!))
                               ;; Bodies reading only untracked values (bare
                               ;; @app-atom closures, static trees) must never
@@ -918,6 +964,9 @@
       (protocols/dispose (:c it)))
     (when-some [r @rx]
       (r/dispose! r))
+    ;; Release the retained previous tree even if something still holds
+    ;; the record (the children are disposed above).
+    (reset! last-tree nil)
     (macros/destroy-store! store)))
 
 (defn make-component-fn
@@ -931,7 +980,8 @@
                       :store (macros/new-store)
                       :rx (atom nil)
                       :ctree (atom ctree)
-                      :last-width (atom nil)})))
+                      :last-width (atom nil)
+                      :last-tree (atom no-tree)})))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 (declare stamped-meta remember-ref! reconcile-into)
@@ -977,29 +1027,32 @@
               {:child raw})))))
 
 (defn- retire-item!
-  "Dispose an owned previous item (clearing its ref first — dispose owns
-   the ref lifecycle, on the handle AND in the stamp). Foreign items are
-   left alone: they are owned elsewhere and merely leave the child list."
+  "Dispose an owned previous item: release its ref handle and drop the
+   reconciler bookkeeping (`:ref`, and `:nodes` — the retained previous
+   tree), then dispose. Foreign items are left alone: owned elsewhere,
+   merely leaving the child list."
   [{:keys [c ref owned]}]
   (when owned
     (bump! :disposals)
     (when ref
-      (-fill-ref! ref nil)
-      (when-some [m (:dsl/meta c)]
-        (swap! m assoc :ref nil)))
+      (-fill-ref! ref nil))
+    (when-some [m (:dsl/meta c)]
+      (swap! m assoc :ref nil :nodes nil))
     (protocols/dispose c)))
 
 (defn- stamp!
   "Mark a freshly-constructed component as DSL-owned. The stamp is an ATOM
    (record identity must never change, yet reconciliation must remember
-   per-instance facts across passes): :tag kinds the component, :props is
-   the leaf reuse fast-path comparison, :key the explicit key (match-kind
-   must survive into the next pass), :ref the last ref handle pointed at
-   this instance — cleared when the instance leaves its tree. Records
-   tolerate the extra key."
+   per-instance facts across passes): :tag kinds the component, :props the
+   leaf reuse fast-path comparison, :key the explicit key (match-kind must
+   survive into the next pass), :ref the last ref handle pointed at this
+   instance, :nodes a container's last raw children (the unchanged-subtree
+   skip's comparison base). All are released when the instance leaves its
+   tree. Records tolerate the extra key."
   ([c tag props] (stamp! c tag props nil))
   ([c tag props key]
-   (assoc c :dsl/meta (atom {:tag tag :props props :key key :ref nil}))))
+   (assoc c :dsl/meta (atom {:tag tag :props props :key key :ref nil
+                             :nodes nil}))))
 
 (defn- stamped-meta
   "The deref'd DSL stamp of C (callers guarantee presence)."
@@ -1023,6 +1076,10 @@
       (bump! :constructs)
       (when (and (:lens spec) (seq nodes))
         (reconcile-into (:lens spec) comp nodes (boolean (:entries? spec))))
+      (when (:lens spec)
+        ;; Remember the raw children the reconcile just installed: the next
+        ;; pass's =-equal nodes take the unchanged-subtree skip (§2.3).
+        (swap! (:dsl/meta comp) assoc :nodes nodes))
       (when-some [r (:ref d)]
         (-fill-ref! r comp)
         (remember-ref! comp r))
@@ -1078,7 +1135,8 @@
       ::host
       (let [container? (some? (:lens (:spec d)))
             apply-fn (:apply (:spec d))
-            prev-props (:props (stamped-meta (:c prev)))
+            prev-meta (stamped-meta (:c prev))
+            prev-props (:props prev-meta)
             props-same? (= (:props d) prev-props)]
         (cond
           ;; Containers always keep their instance and reconcile their
@@ -1087,17 +1145,24 @@
           ;; padding, gap), staying as constructed otherwise. A container
           ;; must never take the rebuild branch: a fresh construct starts
           ;; with an empty child pool, so the whole subtree (and all
-          ;; descendant state) would be lost.
+          ;; descendant state) would be lost. =-equal children take the
+          ;; unchanged-subtree skip instead of re-parsing/re-diffing them;
+          ;; a changed prop still applies below.
           container?
-          (do (bump! :reuses)
-              (reconcile-into (:lens (:spec d)) (:c prev) (:nodes d)
-                              (boolean (:entries? (:spec d))))
-              (when (and apply-fn (not props-same?)
-                         (apply-fn (:c prev) prev-props (:props d)))
-                (bump! :applies)
-                (swap! (:dsl/meta (:c prev)) assoc :props (:props d)))
-              (fill-ref! (:c prev))
-              (keep (:c prev)))
+          (let [c (:c prev)
+                nodes (:nodes d)]
+            (bump! :reuses)
+            (if (unchanged-tree? nodes (:nodes prev-meta))
+              (bump! :skips)
+              (do (reconcile-into (:lens (:spec d)) c nodes
+                                  (boolean (:entries? (:spec d))))
+                  (swap! (:dsl/meta c) assoc :nodes nodes)))
+            (when (and apply-fn (not props-same?)
+                       (apply-fn c prev-props (:props d)))
+              (bump! :applies)
+              (swap! (:dsl/meta c) assoc :props (:props d)))
+            (fill-ref! c)
+            (keep c))
 
           props-same?
           (do (bump! :reuses)
