@@ -306,6 +306,30 @@
     (protocols/dispose s)
     (t/is (true? @disposed) "disposing the list disposes an open submenu")))
 
+(t/deftest test-settings-list-submenu-replace-disposes-the-old
+  ;; no keymap path reaches open-submenu! while a submenu is open; a
+  ;; programmatic open must still not orphan the live submenu's watches
+  ;; (leaks.md Stage D)
+  (let [disposed (atom [])
+        opened (atom 0)
+        item {:id :theme :label "Theme" :value "dark"
+              :submenu (fn [_current _done]
+                         (let [tag (swap! opened inc)]
+                           (reify protocols/IComponent
+                             (render [_ _width] [(str "sub" tag)])
+                             (handle-input [_ _data] nil)
+                             (invalidate [_] nil)
+                             (dispose [_] (swap! disposed conj tag)))))}
+        s (sl/make-settings-list [item])
+        open #'sl/open-submenu!]
+    (open s item 0)
+    (t/is (empty? @disposed) "the first submenu is live")
+    (open s item 0)
+    (t/is (= [1] @disposed) "replacing it disposed the first")
+    (t/is (some #(str/includes? % "sub2") (core/render s 80))
+          "the replacement is mounted")
+    (protocols/dispose s)))
+
 (t/deftest test-settings-list-submenu-row-cycles-nothing
   (t/testing "left/right are a no-op on a submenu row — :values is ignored
               for it even when both are present (pi: activateItem has no

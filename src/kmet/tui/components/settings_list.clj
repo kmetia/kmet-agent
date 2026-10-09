@@ -103,7 +103,8 @@
    called with the item's current value and a DONE callback. DONE with a
    value updates the row and fires :on-change; either way it closes the
    submenu and restores the selection to the row that opened it (pi:
-   closeSubmenu)."
+   closeSubmenu). An already-open submenu is disposed before the new one
+   opens (no keymap path reaches that today; programmatic opens included)."
   [this item idx]
   (when-let [open (:submenu item)]
     (let [id (:id item)
@@ -119,6 +120,13 @@
                    (when sub (protocols/dispose sub)))
                  (reset! (:selected-idx-atom this) idx)
                  (schedule-frame!))]
+      ;; A submenu can already be open (no keymap path reaches this today,
+      ;; but a programmatic open must not orphan the live one): clear, then
+      ;; dispose, then open — a throwing OPEN leaves no submenu rather than
+      ;; a disposed one.
+      (when-some [old (deref (:submenu-atom this))]
+        (reset! (:submenu-atom this) nil)
+        (protocols/dispose old))
       (reset! (:submenu-atom this) (open (:value item) done))
       (schedule-frame!))))
 

@@ -2,8 +2,8 @@
 
 Part 1 is the audit (what leaks and why). Part 2 is the detailed, reviewed
 design for the fix: **weak subscriptions + explicit resources**. Pass 1 and
-Pass 2 stages A and B are implemented; the Stage C gate says C is required
-(2.8); Stage D is not started.
+Pass 2 (Stages A-D) are implemented; the Stage C gate said C was required
+(2.8) and the post-C re-run reclaims the dropped tree.
 
 - Part 1: findings with file/line references and five reproducible probes
   (three from the audit, one from the review, one from the design review of
@@ -18,8 +18,8 @@ Pass 2 stages A and B are implemented; the Stage C gate says C is required
   reasoning are recorded under "Review corrections" (Part 1); do not
   re-propose them without re-checking that section.
 - **Implementation:** Pass 1 complete (all findings 1-8 and 10; 9 excluded —
-  see the result note below). Pass 2 Stages A-C complete; Stage D not
-  started. This file is the plan of record.
+  see the result note below). Pass 2 Stages A-D complete. This file is the
+  plan of record.
 - **Order — findings first.** Pass 1 fixes the audited findings 1-8 and 10
   deterministically (2.4, 2.5, and the key fix in 2.2). Finding 9 is
   unbounded-by-design and excluded as a non-issue. Pass 2 (Stages A-D) adds
@@ -27,9 +27,9 @@ Pass 2 stages A and B are implemented; the Stage C gate says C is required
 - **Gates:** iterate with `bb changed`, `bb test-changed`, `bb lint-changed`,
   `bb format-check-changed`; full gates only on request. New test namespaces
   register in `kmet.tasks.runner/all-namespaces`.
-- **Stage C is conditional:** run the Stage-B (Pass 2) gate test first (drop
-  a `ComponentFn` tree, GC + sweep, read `live-reaction-count`). Record the
-  result here before writing any of 2.3.
+- **Stage C gate:** recorded as required (2.8); Stage C is implemented (see
+  the Stage C result) and the post-C gate re-run reclaims the tree on both
+  hosts.
 
 ### Stage 0 — design (done)
 
@@ -225,12 +225,36 @@ inside one helper on purpose: a deftest body that evaluates any intermediate
 
 #### Stage D — hardening & docs
 
-- [ ] optional hardening: `settings_list/open-submenu!` disposes an
-      existing submenu before replacing (unreachable today; one line)
-- [ ] `--debug` exit report including `timers/scheduled` (I7)
-- [ ] `src/kmet/tui/tui.md` §5.1 + §3.1/§12; `src/kmet/extension.md`;
+- [x] optional hardening: `settings_list/open-submenu!` disposes an
+      existing submenu before replacing (unreachable today)
+- [x] `--debug` exit report including `timers/scheduled` (I7)
+- [x] `src/kmet/tui/tui.md` §5.1 + §3.1/§12; `src/kmet/extension.md`;
       `src/kmet/README.md` (`kmet.libs.weak` in the libs layer)
-- [ ] check off Pass 1 and Stages A-C here; record the Stage C decision
+- [x] check off Pass 1 and Stages A-C here; record the Stage C decision
+
+**Stage D result.** `settings_list/open-submenu!` disposes a submenu it
+replaces (no keymap path reaches it today; a programmatic open cannot orphan
+a live submenu's track! watches). The `--debug` exit path, after
+`teardown-mode!`, logs one `leaks:` line naming live track! components, live
+reactions and armed timers (`kmet.modes.interactive/survivor-report`); it
+fires on any survivor of the three — a timer-only leak never trips either
+counter — and the logged line is exception-isolated, so the exit path never
+throws. Docs:
+tui.md §5.1 states the two-layer ownership rule — deterministic dispose plus
+the weak backstop, and what the backstop cannot release — and the
+temp-component bullet no longer claims the registry strongly retains; §3.1
+documents reaction liveness and the counters; §11 lists the weak-registry
+counters and the exit report; §12 records the `^:slow` GC-test discipline
+(helper-scoped scenarios, the bb/SCI frame caveat). extension.md tells
+authors the backstop exists but does not replace `dispose`;
+`src/kmet/README.md` places `kmet.libs.weak` in the libs layer (the
+`java.lang.ref` exception) and corrects the libs rule — sibling-lib
+composition is allowed and enforced by name (never non-libs `kmet.*`).
+
+Not taken from 2.7: the optional `KMET_DEBUG_LEAKS=1` periodic render-loop
+line, and the suggested `with-leak-check` test helper (tests snapshot the
+same counters with explicit baselines). They remain available if a
+long-session diagnosis asks for them.
 
 ---
 

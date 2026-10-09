@@ -69,7 +69,13 @@ What is available: the core protocol records (`container`, `box`, `text`,
 (`track!`/`track-deps` reactive caching), `kmet.tui.keybindings`, `kmet.tui.keys`,
 `kmet.tui.fuzzy` and `kmet.tui.autocomplete`. Extension components must follow
 the duck-typed `{:render :handle-input :invalidate}` contract accepted by
-`ui/custom` (returning a real record is also fine). A `kmet.tui.*` require that
+`ui/custom` (returning a real record is also fine). Extension components are
+weakly watched: the `track!` and reaction registries hold them weakly, so a
+component nothing references is reclaimed by the render loop's sweep even
+when a drop site forgets `dispose`. That backstop is not a contract —
+`ui-set-widget` replacement, dialog close and `/reload` dispose
+deterministically, and anything GC cannot release (timers, subprocesses,
+listeners, `with-let` cleanups) still requires `dispose`. A `kmet.tui.*` require that
 is not part of the shared set (or a `kmet.app.*`/`kmet.modes.*`/`kmet.libs.*`
 require) fails the load with an explicit error. The loader
 (`kmet.loader*`) is host machinery — never part of the shared set, so

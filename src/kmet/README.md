@@ -98,8 +98,13 @@ listed in the root `AGENTS.md` topic map.
 
 - `kmet.loader.*` is an extraction candidate: it may use third-party deps and
   `kmet.loader.*`, but no other `kmet.*` namespace.
-- `kmet.libs.*` is generic and self-contained; it may not require app, TUI,
-  mode, AI, or sibling-lib namespaces.
+- `kmet.libs.*` is generic and self-contained; it may not require non-libs
+  `kmet.*` namespaces (app, TUI, mode, AI). Sibling-lib composition is fine
+  and expected (`http → concurrent/json/process`,
+  `oauth → concurrent/crypto/http/json`, `reakt → weak`);
+  `test/kmet/libs/test_self_contained.clj` enforces exactly this.
+  `kmet.libs.weak` is the one namespace allowed to touch `java.lang.ref` —
+  a platform exception like the terminal backends.
 - `kmet.ai.*` is a standalone provider/auth library and depends only on
   `kmet.libs.*` plus standard/third-party code.
 - `kmet.tui.*` is the generic UI layer. It may depend on `kmet.libs.*`, never

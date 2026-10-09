@@ -652,6 +652,18 @@ queue first and always answers the CURRENT value. Watchers fire only on
 real output changes; sticky errors rethrow without re-execution until the
 next dep change clears them.
 
+**Liveness — a reaction is kept alive by its derefers, not its deps**
+(leaks.md Stage C). Dep watches are registered weakly: the handler captures
+only the registry key and resolves the live reaction when a dep fires, so an
+unreachable reaction is collected and the next sweep (`reakt/flush!`, the
+render loop's wake) unsubscribes its dep watches. Keep a reaction for as
+long as it should live — a var, a `with-let` store, a parent's dep list, the
+batch queue; `track!`'s per-width cache pins the reactions it validates.
+`watch-ref` watchers do not keep a reaction alive. Counters:
+`reakt/live-reaction-count` (live reactions), `macros/live-watch-count` (live
+track! components), `weak/live-count` (live) / `entry-count` (all entries,
+dead-until-swept included).
+
 Coverage contract — tracked reads are exactly:
 (a) component render bodies via `track!` (automatic),
 (b) explicit `reakt/tracked-deref` calls in hand-written bodies,
@@ -790,6 +802,16 @@ record) — but not a required migration.
 overlay close, reconcile removal, shutdown; implementations must be
 **idempotent**.
 
+- **Two layers: deterministic `dispose` plus a weak backstop.** `dispose`
+  is the contract for everything GC cannot release (timers, subprocesses,
+  ad-hoc `add-watch` subscriptions, `with-let` finalizers, foreign records).
+  On top, the `track!`
+  registry and reaction dep subscriptions are weak (`kmet.libs.weak`): a
+  component or reaction that becomes unreachable without dispose is
+  reclaimed by the sweep, which unwatches its refs. The backstop runs no
+  user cleanups and never fires while an owner still holds the record — an
+  atom, a dock entry or a test holding a dead record keeps its tree, caches
+  and timers alive.
 - **Order is contractual**: containers dispose children first, then run
   their own cleanups — a child cleanup may still read intact parent state.
 - Child lists are replaced through `container-replace-children!` when the
@@ -805,12 +827,15 @@ overlay close, reconcile removal, shutdown; implementations must be
   must never outlive the component ("zombie watchers").
 - Temporary components rendered only to obtain lines must also be disposed,
   via `kmet.tui.core/render-and-dispose` (`try`/`finally` around the render
-  is the manual form). The global `track!` registry strongly retains
-  rendered components even when their atoms are private. Assistant
-  text/thinking reflow and inline image rendering follow this rule: keeping
-  only the returned lines does not release the temporary Markdown/Image.
-  Missing cleanup on streaming reflows retains every prefix, not just the
-  final message; replay, resize and visibility changes leak too.
+  is the manual form). The `track!` registry is weak, so an abandoned
+  GC-reachable record no longer anchors its watchers — the next sweep
+  unwatches it — but reclamation by backstop is not deterministic, and a
+  record the owner still references is never reclaimed. Assistant
+  text/thinking reflow and inline image rendering follow this rule: a
+  streaming reflow that keeps only the returned lines leaves every prefix
+  to the backstop (bounded by GC + sweep) instead of releasing the
+  temporary Markdown/Image now; replay, resize and visibility changes
+  behave the same.
 - Timers/intervals belong in `dispose` — a dropped component must not keep
   a ticker invalidating forever.
 - Trees compiled outside a mount are disposed by their holder via
@@ -1423,6 +1448,15 @@ compute created bare inside a render body instead of under `with-let`
 stateful tag whose props never settle means fresh fn literals in its props
 — the tag is patching rather than reusing.
 
+Weak-registry counters (leaks.md Pass 2): `macros/live-watch-count` (live
+track! components), `reakt/live-reaction-count` (live reactions),
+`weak/live-count` / `weak/entry-count` (all entries — the latter includes
+dead-until-swept) and `reakt/queued-count`. `macros/sweep-dead-watches!`
+(or `weak/sweep!`) runs the weak sweep by hand; the render loop and
+`reakt/flush!` already sweep. With `--debug`, the exit report prints the
+live component and reaction counts plus armed timers after teardown, once
+per run.
+
 ### Frame dumps & full-redraw reasons (env flags)
 
 - `KMET_TUI_DEBUG=1 bb start` — every frame dumps `newLines` vs
@@ -1441,7 +1475,7 @@ stateful tag whose props never settle means fresh fn literals in its props
 |---|---|
 | `kmet-crash.log` | a rendered line exceeds the terminal width — dumps all rendered lines with visible widths + the offending index; the frame truncates the line and keeps running |
 | `render-crash.log` | a render body threw — full stack trace, then the TUI stops (loud-crash contract, §2.5) |
-| `debug.log` | opt-in via `--debug`: lifecycle events (submit, cancel, agent turns) |
+| `debug.log` | opt-in via `--debug`: lifecycle events (submit, cancel, agent turns) and the exit survivor report (live components/reactions/armed timers, §5.1) |
 | `kmet.error.log` | unhandled top-level exceptions |
 
 ### Output + input traces (env flags)
@@ -1500,6 +1534,14 @@ The repository capture helpers are:
   `timers/pump!` by hand instead of waiting for a real interval, so timer
   assertions are deterministic. Clean up with `timers/cancel-all!` in a
   fixture when a case arms timers directly.
+- **Weak-registry GC tests are `^:slow` and helper-scoped.** A dropped
+  component or reaction is reclaimed only after `System/gc` plus a sweep
+  (`macros/sweep-dead-watches!` / `weak/sweep!`; the render loop and
+  `reakt/flush!` sweep in the app). Use `kmet.test-utils/await-collected`
+  for the positive wait. Run the whole scenario inside one helper fn and
+  return booleans: a bb/SCI deftest body that evaluates the subject — or any
+  intermediate, including the `flush!` — keeps it in the interpreter frame
+  and defeats the collection assertion.
 - New test namespaces register in `kmet.tasks.runner/all-namespaces`.
 
 ---

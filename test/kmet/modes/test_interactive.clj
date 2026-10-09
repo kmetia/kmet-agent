@@ -49,6 +49,7 @@
             [kmet.tui.theme :as theme]
             [kmet.tui.core :as tui]
             [kmet.tui.keybindings :as tui-kb]
+            [kmet.tui.timers :as timers]
             [babashka.fs :as fs]
             [babashka.process :as proc]
             [kmet.app.session-export :as session-export]
@@ -1330,3 +1331,21 @@
                               :content [{:type :text :text "done"}]}})
           (is (= before (count @(:messages-atom ch)))
               "no error line for a successful message"))))))
+
+(deftest survivor-report-lists-live-kinds
+  ;; leaks.md 2.7: the --debug exit line names what teardown could not
+  ;; release — live components, live reactions and armed timers; an armed
+  ;; timer alone can root a mode after both counters read zero
+  (let [report #'inter/survivor-report
+        rx (reakt/make-reaction (fn [] 1))
+        timer-id (timers/after! 60000 (fn []))]
+    (try
+      @rx
+      (let [line (str (report))]
+        (is (str/includes? line "leaks: track! components="))
+        (is (str/includes? line " reactions="))
+        (is (str/includes? line " armed timers="))
+        (is (str/includes? line (str timer-id)) "the armed timer is named"))
+      (finally
+        (reakt/dispose! rx)
+        (timers/cancel! timer-id)))))

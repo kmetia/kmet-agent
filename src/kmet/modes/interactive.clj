@@ -3,9 +3,11 @@
    starts the render loop, and emits the session-start event.
    pi: modes/interactive/interactive-mode.ts."
   (:require [kmet.tui.core :as tui]
+            [kmet.tui.macros :as macros]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.terminal :as term]
             [kmet.tui.theme :as th]
+            [kmet.tui.timers :as timers]
             [kmet.config :as cfg]
             [kmet.debug :as debug]
             [kmet.app.event-bus :as event-bus]
@@ -66,6 +68,29 @@
   (try (theme-ctrl/shutdown! (:theme-controller cs)) (catch Throwable _))
   (try (reakt/discard-queued!) (catch Throwable _))
   nil)
+
+(defn- survivor-report
+  "One line naming what teardown could not release (leaks.md 2.7): live
+   track! components, live reactions, armed timers. Timers are included
+   because an armed timer roots a mode on its own — both counters can read
+   zero while a ticker still holds it. nil when everything released."
+  []
+  (let [components (macros/live-watch-count)
+        reactions (reakt/live-reaction-count)
+        timer-ids (vec (keys (timers/scheduled)))]
+    (when (or (pos? components) (pos? reactions) (seq timer-ids))
+      (str "leaks: track! components=" components
+           " reactions=" reactions
+           " armed timers=" timer-ids))))
+
+(defn- log-survivors!
+  "Best-effort survivor report on the --debug exit path. It must never
+   throw (or mask) on teardown's finally."
+  []
+  (try
+    (when-some [line (survivor-report)]
+      (debug/log line))
+    (catch Throwable _)))
 
 ;; ─── Run ───────────────────────────────────────────────────────────────────
 
@@ -205,5 +230,7 @@
         ;; registry, which closes over the whole mode. The CLI exits right
         ;; after this, but embedded hosts and tests keep going.
         (when-let [cs @cs-ref]
-          (teardown-mode! cs))
+          (teardown-mode! cs)
+          (when (:debug opts)
+            (log-survivors!)))
         (extensions/clear-ui-registry!)))))

@@ -27,43 +27,39 @@ diffing, paid even though not one node changed.
 ## Interaction with `leaks.md` (the memory plan)
 
 `leaks.md` fixes reachability (weak `track!`/`reakt`, mode-exit teardown,
-deterministic disposal): Pass 1 + Stages A/B implemented, Stage C (weak
-`reakt` dep watches) required but not started, Stage D (exit report, docs)
-open. **None of the three items below obsoletes any `leaks.md` topic** —
+deterministic disposal): Pass 1 + Stages A-D are implemented (see its
+Stage C/D results). **None of the three items below obsoleted any
+`leaks.md` topic** —
 this plan fixes re-diffing cost, `leaks.md` fixes retention — but each item
 couples in exactly one place, and item 2 adds one requirement to that plan:
 
 | item | coupling |
 |---|---|
-| 1 — skip | Adds strong self-retention (`ComponentFn.last-tree`, container `:nodes`): fields of the component itself, so no new GC root and no new leak class. But it *enlarges the interim leak weight* of any tree still rooted by a stale reakt watch (pre-Stage-C) by roughly one tree copy. Stage C stays required; the skip must never be used to argue the weak work is unnecessary. |
+| 1 — skip | Adds strong self-retention (`ComponentFn.last-tree`, container `:nodes`): fields of the component itself, so no new GC root and no new leak class. It *enlarged the interim leak weight* of any tree still rooted by a stale reakt watch by roughly one tree copy until Stage C landed; the skip was never allowed to argue the weak work was unnecessary. |
 | 2 — aliases | A new process-global root — a new entry in finding 10's "global roots" class. Extension aliases must register through the existing deregistration path (`extensions.cljc` load/unload) so `/reload`/unload removes them, or stale alias fns keep old extension state and old code alive (`leaks.md` review correction: a weak registry alone does not release what a strong root holds). Register top-level fns, not closures. |
 | 3 — hooks/memory | A third cleanup-declaration site. If it ever lands: every resource acquired in `on-mount` must be released on *every* removal path (unmount hook, dispose, display-leaf rebuild); node memory is a strong stamp field and therefore not GC-managed — release is the node's disposal; and it must satisfy `leaks.md`'s Layer-2 rule (one owner, explicit dispose). The bar set by the dropped `hiccup/adopt` and `container-clear` alternatives applies. |
 
-Cross-updates to record when the respective work happens:
+Cross-updates (recorded as the work landed):
 
-- `leaks.md` Stage D's `--debug` exit report prints `hiccup/counters`;
-  item 1 adds `:skips` to that map (no format change).
-- `leaks.md` §2.11's doc list (tui.md ownership/counters) gains one line:
-  reconcile retains the previous tree per component and container.
+- `leaks.md` Stage D's `--debug` exit report prints the weak-registry
+  survivor counts (live track! components, live reactions, armed timers),
+  not `hiccup/counters`; item 1's `:skips` rides `hiccup/counters` for
+  tests and debug inspection.
+- The retain-previous-input rule is documented in tui.md §2.3/§2.5
+  (`last-tree`, the stamp's `:nodes`), together with the skip.
 - `leaks.md` §2.12's open extension-unload question gains its first
-  concrete client under item 2.
+  concrete client under item 2 (not started).
 
 ### Recommended execution order (these two plans combined)
 
-`leaks.md` has one hard dependency left: Stage D's exit report reads
-`live-reaction-count`, which Stage C adds (C before D). The replicant
-items are functionally independent of both; the order below finishes the
-required memory work before adding new surfaces, and measures every
-change against its immediate parent:
+`leaks.md`'s dependency chain is satisfied and the memory plan is closed:
+Stages C and D and replicant item 1 are implemented (see their result
+sections). What remains is the aliases item, which merges only after one
+real consumer validates the API, and the item-3 review gate:
 
-1. **`leaks.md` Stage C** — weak `reakt`. Required, delicate (liveness
-   semantics, GC tests on bb + Jolt, frame-time budget): give it the
-   isolated window.
-2. **`leaks.md` Stage D** — hardening, `--debug` exit report, docs.
-   Closes the memory plan; the report is the tool for watching C in real
-   sessions.
-3. **Item 1** — skip. Bench before/after, `:skips`, tui.md §2.3/§2.5/§11
-   on the settled ownership model.
+1. **`leaks.md` Stage C** — done (weak `reakt`).
+2. **`leaks.md` Stage D** — done (exit report, hardening, docs).
+3. **Item 1** — done (the skip; see its result).
 4. **Item 2** — aliases, with extension deregistration from the start;
    merge after one real consumer validates the API.
 5. **Item 3** — only if the review gate passes; not scheduled.
@@ -72,8 +68,8 @@ Escape hatch: item 1 has no functional dependency on C and may go first
 if the perf win is wanted early — the only cost is that trees already
 rooted before Stage C provisionally retain one more copy. Never
 interleave C and item 1 in one change; each carries its own measurements
-and gates. **Taken:** item 1 landed first (see its result section); the
-remaining order is C → D → item 2.
+and gates. **Taken:** item 1 landed first (see its result section), then
+C and D closed the memory plan in order.
 
 ---
 
@@ -184,8 +180,8 @@ Rules and edge cases to pin:
   the UI tree (message content stays in records); acceptable, but worth
   a note if a transcript-scale tree ever keeps two full copies. Not a
   new GC root — the fields belong to the component being collected, so
-  `leaks.md`'s weak-layer work is unaffected; only the interim footprint
-  before Stage C grows (see the interaction section).
+  `leaks.md`'s weak-layer work was unaffected; the interim footprint that
+  grew before Stage C is reclaimed now (see the interaction section).
 - **`=` on huge equal trees is O(n)**, ~0.5 ms per 4000 nodes — paid to
   save ~33 ms. Bounded loss on changed trees; no pathological case.
 - The skip can hide a *non-idempotent tree builder*: a body that mutates
