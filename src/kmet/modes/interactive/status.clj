@@ -5,6 +5,7 @@
    updatePendingMessagesDisplay)."
   (:require [clojure.string :as str]
             [kmet.tui.core :as tui]
+            [kmet.tui.components.spinner :as spinner]
             [kmet.tui.protocols :as protocols]
             [kmet.app.loop :as agent]
             [kmet.app.ui.pending-messages :as pending-messages]
@@ -19,16 +20,19 @@
 ;; StatusIndicator (Pi-style) between chat and editor animates smoothly.
 
 (defn start-anim-timer!
-  "Start requesting renders every 80ms while the agent turn runs.
-   Powers the StatusIndicator spinner animation (Pi-style: separate layer
-   between chat and editor)."
+  "Start requesting renders every 100ms while the agent turn runs — the
+   spinner's animation bucket (spinner/default-interval-ms). Sampling at
+   the bucket shows every braille frame exactly once; an 80ms beat
+   oversampled it (12.5 requests/s for 10 distinct frames, one of them
+   held 160ms). Powers the StatusIndicator spinner animation (Pi-style:
+   separate layer between chat and editor)."
   [cs]
   (let [t (future
             (try
               (loop []
                 (when (and @(:running? (:tui cs))
                            @(:running-turn? cs))
-                  (Thread/sleep 80)
+                  (Thread/sleep spinner/default-interval-ms)
                   (tui/tui-request-render (:tui cs))
                   (recur)))
               ;; The timer is stopped via future-cancel — the interrupt it
@@ -39,7 +43,9 @@
     (reset! (:anim-timer cs) t)))
 
 (defn- start-indicator-driver!
-  "Request renders every 80ms while a TRANSIENT status indicator is up.
+  "Request renders every 100ms while a TRANSIENT status indicator is up —
+   the elapsed-frame bucket (spinner/default-interval-ms; frame-at), so
+   each wake is a distinct frame.
    Covers indicators shown outside agent turns (manual /compact, /share)
    — the elapsed-time/countdown indicators render from wall-clock time per
    pass and otherwise sit on a single static frame when no anim timer is
@@ -53,7 +59,7 @@
   (future
     (try
       (loop []
-        (Thread/sleep 80)
+        (Thread/sleep spinner/default-interval-ms)
         (when (and (some-> (:tui cs) :running? deref)
                    (identical? indicator (:indicator @(:status-current cs))))
           (tui/tui-request-render (:tui cs))
@@ -121,7 +127,7 @@
    for kind-gated clears. No manual render request for the SWAP itself —
    the tracked :status-current read schedules that frame (§3.4) — but the
    transient indicators animate from wall-clock time, so the entry carries
-   an 80ms frame driver (start-indicator-driver!; during turns the anim
+   a 100ms frame driver (start-indicator-driver!; during turns the anim
    timer already drives frames)."
   [cs kind indicator]
   (cancel-indicator-driver! cs)

@@ -26,9 +26,14 @@
 
 (defn- frame-at
   "Braille frame for the given elapsed millis — self-animating on re-render
-   (no timer needed; the interactive mode's anim timer drives renders)."
+   (no timer needed; the interactive mode's anim timer drives renders).
+   The frame is a pure function of the elapsed millis and the animation
+   bucket, so a driver sampling at that bucket shows every frame exactly
+   once."
   [elapsed]
-  (nth SPINNER-FRAMES (mod (quot (max 0 elapsed) 100) (count SPINNER-FRAMES))))
+  (nth SPINNER-FRAMES
+       (mod (quot (max 0 elapsed) spinner/default-interval-ms)
+            (count SPINNER-FRAMES))))
 
 (defcomponent StatusIndicator nil [spinner active-atom border-color-fn]
   (render [this width]
@@ -81,7 +86,7 @@
             :active false
             :prefix ""
             :frames SPINNER-FRAMES
-            :interval-ms 100)
+            :interval-ms spinner/default-interval-ms)
         indicator (map->StatusIndicator {:spinner sp
                                          :active-atom (atom false)
                                          :border-color-fn border-color-fn})]

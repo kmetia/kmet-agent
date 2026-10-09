@@ -1343,6 +1343,10 @@ this sweep burned **~21 % of a core** while a turn waited on a tool —
 1.7 ticks/frame ≈ 17 ms/frame, consistent with the typing/calm frames above.
 A no-change frame is not free (whole-tree re-walk plus the document-wide
 cursor/normalize/diff scans), and it is paid continuously during a turn.
+The 80 ms beat also oversamples the spinner's 100 ms frame bucket
+(`spinner/default-interval-ms`): 12.5 requests/s for 10 distinct frames,
+and because the beats drift against the bucket one frame every 400 ms is
+held 160 ms. §13.4 samples at the bucket period instead.
 
 ### 13.3 Applied: cursor-marker memo
 
@@ -1375,7 +1379,18 @@ landing in normalize instead) and jolt 17.3 → 2.8. Tests:
 `test-extract-cursor-position-reuses-unchanged-lines` plus the existing
 strip tests, green on both hosts.
 
-### 13.4 Next steps
+### 13.4 Applied: animation pacing
+
+Both turn-time frame drivers (`start-anim-timer!` and
+`start-indicator-driver!`, status.clj) now sleep `spinner/default-interval-ms`
+instead of a hardcoded 80 ms, matching the 100 ms bucket the braille frame
+and the transient indicators' elapsed frame derive from. Each wake is a
+distinct frame: even 100 ms on-screen durations and **20 % fewer frames**
+during a turn (12 vs 15 per 1.25 s at the driver, measured on bb and jolt),
+each of which would otherwise pay a §13.1 typing/calm frame. The Bash tool
+progress spinner keeps its own 80 ms pi beat (`bash_execution.clj`).
+
+### 13.5 Next steps
 
 - Incremental markdown (§6.3) still stands for cold and streaming: cold is
   ~98 % render-stack and the stream frame's render-stack grows with the

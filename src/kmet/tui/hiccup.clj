@@ -245,7 +245,7 @@
                                                 :active (boolean active)
                                                 :prefix (or prefix "  ")
                                                 :frames (or frames spinner/default-frames)
-                                                :interval-ms (or interval-ms 100)
+                                                :interval-ms (or interval-ms spinner/default-interval-ms)
                                                 :spinner-color-fn spinner-color-fn
                                                 :message-color-fn message-color-fn))
                   :primary :text
@@ -259,8 +259,8 @@
                            ;; the animation on every text tick).
                            (if (or (not= (or (:frames prev) spinner/default-frames)
                                          (or (:frames props) spinner/default-frames))
-                                   (not= (or (:interval-ms prev) 100)
-                                         (or (:interval-ms props) 100)))
+                                   (not= (or (:interval-ms prev) spinner/default-interval-ms)
+                                         (or (:interval-ms props) spinner/default-interval-ms)))
                              false
                              (do
                                (when (not= (boolean (:active props))

@@ -17,6 +17,13 @@
    explicitly (an explicit nil prop bypasses make-spinner's :or)."
   DEFAULT-FRAMES)
 
+(def default-interval-ms
+  "The default animation bucket: one braille frame per 100 ms. The
+   interactive mode's status drivers sample at this period
+   (kmet.modes.interactive.status), and the transient indicators' elapsed
+   frames use it too — keep them from drifting apart."
+  100)
+
 (def ^:private CYN "\u001b[36m")
 (def ^:private RST "\u001b[0m")
 
@@ -76,7 +83,8 @@
      :spinner-color-fn — (fn [frame-str] colored-frame-str) (default cyan)
      :message-color-fn — (fn [message-str] colored-message-str) (default identity)"
   [& {:keys [text active prefix frames interval-ms spinner-color-fn message-color-fn]
-      :or {text "" active false prefix "  " frames DEFAULT-FRAMES interval-ms 100}}]
+      :or {text "" active false prefix "  "
+           frames DEFAULT-FRAMES interval-ms default-interval-ms}}]
   (map->Spinner {:active-atom (atom active)
                  :text-atom (atom text)
                  :start-atom (atom (System/nanoTime))
