@@ -1210,6 +1210,13 @@ Dropped from the design (precedents in Part 1): owning-atom framework,
   surfaces an extension owner and clear them on unload, or document the
   `/reload` requirement? Out of scope for this pass; noted so the docstring's
   "namespaces and jars become unreachable" is not read as "immediately".
+  First concrete client landed with replicant item 2: tag aliases register
+  through the extension api (`ext/register-alias!`) and their deregister fn
+  rides the existing `track-deregister!` list, so unload removes stale
+  aliases — the registry is not a standing strong root for unloaded code.
+  (An extension that used `kmet.tui.alias/defalias` directly would bypass
+  that path; the docs rule it out.) The mounted-surface half of this
+  question is unchanged.
 - Should a later pass add turn quiescing + taint for late appends? Deferred;
   Pass 1 disposes the tree and the weak layer covers memory.
 - Should the timer registry grow an ownership hint for the exit report?

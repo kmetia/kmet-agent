@@ -129,6 +129,7 @@ atom change → reaction dirty → queued → frame flush runs it →
 | `kmet.tui.macros` | `defcomponent`, `track!`, `with-let`, `invalidate-cache`, deref-capture runtime |
 | `kmet.libs.reakt` | reactions/track/cursor/batching over plain atoms |
 | `kmet.tui.hiccup` | tag table, compile/reconcile, `root`, `ref`, `compute`, `render-lines` |
+| `kmet.tui.alias` | qualified-keyword tag aliases: registry, `register!`/`defalias` (§2.9) |
 | `kmet.tui.components.*` | host elements (see §10) |
 | `kmet.tui.theme` | color/styling API, active theme atom, theme files |
 | `kmet.tui.keys` / `keybindings` | key names, Kitty protocol decoding, keybinding manager |
@@ -184,9 +185,12 @@ Children rules:
 | seq | spliced (each element treated as a child) |
 | stack-entry map (VStack/HStack) | passed through as-is |
 
-Tags are keywords from the closed tag table (§2.2) or function heads:
-`[status-area {:mode :normal}]` is valid Reagent-style usage. Two more
-normalizer rules keep call sites terse:
+Tags are keywords from the closed tag table (§2.2), function heads
+(`[status-area {:mode :normal}]` is valid Reagent-style usage), or
+**aliases**: a qualified keyword resolves through the `kmet.tui.alias`
+registry (§2.9) to a named tag-level component — the one way to add a
+reusable tag without touching the host table. A qualified keyword is
+never a host tag. Two more normalizer rules keep call sites terse:
 
 - **Props map optional** — `[:v-stack child…]` compiles with `{}`; the map
   slot is needed only when props exist (`:key`, `:ref`, options).
@@ -207,15 +211,17 @@ non-vector child (a record, a string, a stack entry) is ignored — those
 match by identity or kind.
 
 Validation fails loudly: unknown tags throw with a did-you-mean suggestion
-(`:tst` → did-you-mean `:text`), children on a leaf tag throw, duplicate
-`:key`s throw, stack-entry maps outside a stack tag throw, keyword children
+(`:txt` → did-you-mean `:text`), unregistered aliases throw listing the
+registered ones (§2.9), children on a leaf tag throw, duplicate `:key`s
+throw, stack-entry maps outside a stack tag throw, keyword children
 throw.
 
 ### 2.2 Host elements — the tag table
 
 Host elements are a **closed set** — `hiccup.clj` hardcodes the tag → ctor
-table (no registry). Custom composition uses fn heads `[my-fn props]`;
-extensions never add host elements. Tags and props:
+table (no registry). Custom composition uses fn heads `[my-fn props]` or
+qualified-keyword aliases (§2.9 — a separate namespace: an alias never
+adds to this table); extensions never add host elements. Tags and props:
 
 | tag | props | children |
 |---|---|---|
@@ -600,6 +606,55 @@ Rules:
   session status in the editor's first line
   (`kmet.app.ui.status-indicator/editor-top-border`), which is why no
   separate status row sits above the editor for the default editor.
+
+### 2.9 Aliases — named tag-level components
+
+A hiccup element whose head is a **qualified keyword** resolves through
+the process-global registry in `kmet.tui.alias`:
+
+```clojure
+(defalias chip                       ; registers :my.ns/chip; defs chip = the keyword
+  "A one-line status chip."
+  [{:keys [label]} _children]
+  [:text {:padding-x 0 :padding-y 0} label])
+
+[:container {} [chip {:label "ready"}]]         ; the var evaluates to the keyword
+[:container {} [:my.ns/chip {:label "ready"}]]  ; same tree, literal keyword
+```
+
+- The alias fn is `(fn [attrs children] tree)`: `attrs` is the element's
+  props map without `:key`/`:ref`; `children` is a flat vector of the raw
+  child nodes, `[]` when the element has none. Returning a seq splices the
+  roots (§2.5 — a vector would count as one element).
+- `register!` / `unregister!` are the programmatic surface. Registration is
+  last-wins; the deregister fn `register!` returns removes the alias only
+  while it still maps to the fn that registered it. Resolution happens at
+  **call time** (only the keyword is captured), so a mounted alias can
+  never pin the old fn — but a re-registration takes effect on the
+  component's next body run, not at that instant: an uncached body
+  re-derives every pass (§2.5), a body with tracked deps waits for its
+  next dep change. A body run with the alias unregistered throws loudly.
+  `registered` is the registry snapshot for tests and tooling;
+  `reset-registry!` is test isolation only.
+- Unqualified keywords stay host tags — the tag table remains closed. A
+  qualified keyword never falls back to it: an unregistered alias throws,
+  naming the registered aliases and suggesting the nearest one.
+- Underneath, an alias element is an ordinary fn component (ComponentFn):
+  reactions, `with-let` state, refs on children, keyed reuse and the
+  unchanged-tree skip all apply. Its match kind is the alias keyword (the
+  `:key` prop when keyed), so a keyed alias survives a reorder like a host
+  tag.
+- `defalias` defs the var to the **keyword**, not the fn — the var is not
+  callable; use `register!` for a programmatic hook.
+- The registry is global and mutable. Extension aliases must be registered
+  through the extension api (`kmet.extension/register-alias!`) so unload
+  removes them — a `defalias` in an extension registers directly and would
+  survive unload. Register top-level fns, never closures over extension
+  state (the registration keeps the closure, and what it closes over,
+  reachable for as long as it lives).
+- Deliberately not in v1: Replicant's `.class`/`#id` tag suffixes, attr
+  merging with the alias's root element, and per-render alias scopes
+  (the registry is one global map).
 
 ## 3. Reactivity
 

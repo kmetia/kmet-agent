@@ -38,13 +38,17 @@
 
    Validation is loud per the v1 error contract: unknown tags throw with a
    did-you-mean suggestion, children on a leaf tag throw, duplicate :keys
-   throw, stack-entry maps outside a stack tag throw.
+   throw, stack-entry maps outside a stack tag throw. QUALIFIED keywords
+   are not host tags: they resolve through the alias registry
+   (kmet.tui.alias, tui.md §2.9) to reusable named tag-level components —
+   an unregistered one throws with the registered aliases listed.
 
    Mounting goes through hiccup/root — the one public constructor from a
    tree to a mounted, disposable IComponent (a ComponentFn). render-lines
    gives the headless surface: pure data in, lines out, no terminal."
   (:refer-clojure :exclude [ref])
   (:require
+   [kmet.tui.alias :as alias]
    [kmet.tui.components.alt-screen-flash :as alt-screen-flash]
    [kmet.tui.components.box :as box]
    [kmet.tui.components.cancellable-loader :as cancellable-loader]
@@ -617,30 +621,35 @@
 
 (defn- known-tags [] (vec (sort (keys tags))))
 
-(defn- nearest-tag
-  "Best fuzzy match for TAG among the known tags, for did-you-mean
+(defn- nearest-of
+  "Best fuzzy match for NAME among keyword CANDIDATES, for did-you-mean
    (lower score is a better match)."
-  [tag]
-  (let [name (subs (str tag) 1)]
-    (->> (keys tags)
-         (keep (fn [t]
-                 (let [{:keys [matches score]}
-                       (fuzzy/fuzzy-match name (subs (str t) 1))]
-                   (when matches [score t]))))
-         (sort-by first)
-         first
-         second)))
+  [name candidates]
+  (->> candidates
+       (keep (fn [t]
+               (let [{:keys [matches score]}
+                     (fuzzy/fuzzy-match name (subs (str t) 1))]
+                 (when matches [score t]))))
+       (sort-by first)
+       first
+       second))
+
+(defn- did-you-mean
+  "The did-you-mean suffix for NAME among keyword CANDIDATES (empty when
+   nothing is close enough)."
+  [name candidates]
+  (if-some [near (nearest-of name candidates)]
+    (str " Did you mean " near "?")
+    ""))
 
 (defn- unknown-tag!
   "Throw the unknown-tag error: names the tag, lists the closed set, and
    suggests the nearest known tag (did-you-mean via the fuzzy matcher)."
   [tag]
-  (let [hint (when-some [near (nearest-tag tag)]
-               (str " Did you mean :" (name near) "?"))]
-    (throw (ex-info (str "kmet.tui.hiccup: unknown tag " tag
-                         ". Known tags: " (pr-str (known-tags)) "."
-                         hint)
-                    {:tag tag :known-tags (known-tags)}))))
+  (throw (ex-info (str "kmet.tui.hiccup: unknown tag " tag
+                       ". Known tags: " (pr-str (known-tags)) "."
+                       (did-you-mean (subs (str tag) 1) (keys tags)))
+                  {:tag tag :known-tags (known-tags)})))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Parsing — tree nodes → desired items (validation happens HERE, loudly)
@@ -661,7 +670,15 @@
 ;;   ::host    :tag :spec :props :nodes
 ;;   ::fncomp  :f :props :ctree
 
-(declare check-ref!)
+(declare check-ref! flatten-nodes)
+
+(defn- match-kind
+  "The reconciliation match kind for a desired/previous item: an explicit
+   :key wins, scoped by KIND so a keyed element never matches across kinds
+   (keyed host ↔ fn ↔ alias remounts); without a key the head's own
+   FALLBACK identity is the match kind (tag / fn value / alias keyword)."
+  [kind fallback key]
+  (if-some [k key] {::user-key k ::kind kind} fallback))
 
 (defn- mounted-component?
   "A non-record object that plausibly dispatches as an IComponent — a
@@ -739,7 +756,7 @@
                    " — leaves take only props")
               {:tag tag :children children})))
     (check-ref! tag (:ref meta))
-    {:kind ::host :mkey (if-some [k key] {::user-key k ::kind ::host} tag)
+    {:kind ::host :mkey (match-kind ::host tag key)
      :key key :ref (:ref meta)
      :tag tag :spec spec :props props :nodes children}))
 
@@ -752,6 +769,49 @@
             (str "kmet.tui.hiccup: :ref must be a (hiccup/ref) handle, got "
                  (pr-str r) (when (keyword? where) (str " on tag " where)))
             {:ref r}))))
+
+(defn- unknown-alias!
+  "Throw the unknown-alias error: names the alias, lists the registered
+   aliases, and suggests the nearest one (did-you-mean, mirroring
+   unknown-tag!). Qualified keywords never fall back to the host table."
+  [tag]
+  (let [known (vec (sort (keys (alias/registered))))]
+    (throw (ex-info (str "kmet.tui.hiccup: unknown alias " tag
+                         ". Registered aliases: " (pr-str known) "."
+                         (did-you-mean (subs (str tag) 1) known))
+                    {:alias tag :registered-aliases known}))))
+
+(defn- parse-alias
+  "[:my.ns/chip {attrs} children…] → desired ::fncomp item dispatching
+   through the alias registry (kmet.tui.alias, tui.md §2.9). The attrs map
+   is optional; :key/:ref are reconciliation pseudo-props exactly like
+   other heads, and children ride :ctree — never a closure — so reuse can
+   refresh them (a captured vector would freeze on reuse). The alias body
+   is called (f attrs children) with [] when the element has none."
+  [tag content meta-key]
+  (when-not (alias/lookup tag)
+    (unknown-alias! tag))
+  (let [first-content (first content)
+        props-map? (and (map? first-content)
+                        (not (record? first-content))
+                        ;; {:component c} is always a stack-entry child —
+                        ;; consuming it as attrs silently drops the element
+                        (not (contains? first-content :component)))
+        base-props (if props-map? first-content {})
+        ;; flat children (seqs spliced, nils dropped — the shape the DSL's
+        ;; own child normalization produces), so an alias inspecting them
+        ;; sees nodes, not one lazy seq
+        raw-children (flatten-nodes (if props-map? (rest content) content) [])
+        children (into [] (remove nil?) raw-children)
+        key (or (:key base-props) meta-key)
+        ref (:ref base-props)]
+    (check-ref! tag ref)
+    {:kind ::fncomp
+     :mkey (match-kind ::alias tag key)
+     :key key :ref ref
+     :alias tag :f (alias/head tag)
+     :props (dissoc base-props :key :ref)
+     :ctree (when (seq children) children)}))
 
 (defn- parse-node
   "One tree node → desired item, or nil to skip (nil nodes — the
@@ -767,25 +827,28 @@
     {:kind ::string :mkey ::string :props {:text node}}
     (vector? node)
     (let [tag (first node)
+          content (vec (rest node))
           meta-key (:key (meta node))]
       (cond
-        (keyword? tag) (parse-host tag (vec (rest node)) meta-key)
+        (keyword? tag) (if (namespace tag)
+                         (parse-alias tag content meta-key)
+                         (parse-host tag content meta-key))
         (fn? tag)
-        (let [content (rest node)
-              props-map? (and (map? (first content))
+        (let [props-map? (and (map? (first content))
                               (not (record? (first content))))
               base-props (if props-map? (first content) {})
               children (vec (if props-map? (rest content) content))
               key (or (:key base-props) meta-key)
               ref (:ref base-props)]
           (check-ref! tag ref)
-          {:kind ::fncomp :mkey (if-some [k key] {::user-key k ::kind ::fncomp} tag) :key key :ref ref
+          {:kind ::fncomp :mkey (match-kind ::fncomp tag key) :key key :ref ref
            :f tag :props (dissoc base-props :key :ref)
            :ctree (when (seq children) children)})
         :else (throw
                (ex-info
                 (str "kmet.tui.hiccup: invalid element head " (pr-str tag)
-                     " — expected a keyword tag or a function component")
+                     " — expected a keyword tag (host or alias) or a "
+                     "function component")
                 {:head tag}))))
     (record? node)
     {:kind ::record :mkey node :c node :item node :owned false}
@@ -1000,35 +1063,38 @@
    hosts, ComponentFn instances are always ours, foreign records/entries
    are never owned (and so never disposed by reconcile)."
   [raw]
-  (letfn [(mk [fallback kind key]
-            (if-some [k key] {::user-key k ::kind kind} fallback))]
-    (cond
-      (and (map? raw) (contains? raw :component))
-      {:kind ::entry :mkey (stack/entry-component raw)
-       :c (stack/entry-component raw) :item raw :owned false}
-      ;; our stamps come FIRST: an explicit :key must override the
-      ;; tag/fn fallback on the previous side too, or keyed matching dies
-      ;; at the second pass (::fncomponent marks fn wrappers)
-      (and (record? raw) (some? (:dsl/meta raw)))
-      (let [{:keys [tag key ref]} (stamped-meta raw)]
-        (if (= tag ::fncomponent)
-          {:kind ::fncomp :mkey (mk (:f raw) ::fncomp key) :key key :ref ref
+  (cond
+    (and (map? raw) (contains? raw :component))
+    {:kind ::entry :mkey (stack/entry-component raw)
+     :c (stack/entry-component raw) :item raw :owned false}
+    ;; our stamps come FIRST: an explicit :key must override the
+    ;; tag/fn fallback on the previous side too, or keyed matching dies
+    ;; at the second pass (::fncomponent marks fn wrappers, :alias marks
+    ;; the ones built from an alias element — mkey is the alias keyword,
+    ;; which the desired-side parse produces too)
+    (and (record? raw) (some? (:dsl/meta raw)))
+    (let [{:keys [tag key ref] alias-kw :alias} (stamped-meta raw)]
+      (if (= tag ::fncomponent)
+        (if-some [a alias-kw]
+          {:kind ::fncomp :mkey (match-kind ::alias a key) :key key :ref ref
            :c raw :item raw :owned true}
-          {:kind ::host :mkey (mk tag ::host key) :key key :ref ref
-           :c raw :item raw :owned true}))
-      (instance? ComponentFn raw)
-      {:kind ::fncomp :mkey (:f raw) :c raw :item raw :owned true}
-      (record? raw)
-      {:kind ::record :mkey raw :c raw :item raw :owned false}
-      (mounted-component? raw)
-      ;; reified/deftype'd IComponent stored by a previous pass — foreign,
-      ;; like the record splice it mirrors
-      {:kind ::record :mkey raw :c raw :item raw :owned false}
-      :else
-      (throw (ex-info
-              (str "kmet.tui.hiccup: unexpected child in container storage: "
-                   (pr-str raw))
-              {:child raw})))))
+          {:kind ::fncomp :mkey (match-kind ::fncomp (:f raw) key) :key key :ref ref
+           :c raw :item raw :owned true})
+        {:kind ::host :mkey (match-kind ::host tag key) :key key :ref ref
+         :c raw :item raw :owned true}))
+    (instance? ComponentFn raw)
+    {:kind ::fncomp :mkey (:f raw) :c raw :item raw :owned true}
+    (record? raw)
+    {:kind ::record :mkey raw :c raw :item raw :owned false}
+    (mounted-component? raw)
+    ;; reified/deftype'd IComponent stored by a previous pass — foreign,
+    ;; like the record splice it mirrors
+    {:kind ::record :mkey raw :c raw :item raw :owned false}
+    :else
+    (throw (ex-info
+            (str "kmet.tui.hiccup: unexpected child in container storage: "
+                 (pr-str raw))
+            {:child raw}))))
 
 (defn- release-ref!
   "Clear HANDLE only while it still points at C. `diff-items` constructs a
@@ -1099,8 +1165,9 @@
        :c comp :item comp :owned true})
     ::fncomp
     (let [wrapper (assoc (make-component-fn f ctree)
-                         :dsl/meta (atom {:tag ::fncomponent
-                                          :key (:key d) :ref nil}))]
+                         :dsl/meta (atom (cond-> {:tag ::fncomponent
+                                                  :key (:key d) :ref nil}
+                                           (:alias d) (assoc :alias (:alias d)))))]
       (reset! (:props wrapper) props)
       (bump! :constructs)
       (when-some [r (:ref d)]

@@ -66,6 +66,7 @@
             [kmet.app.tools.bash :as bash-tool]
             [kmet.config :as cfg]
             [kmet.debug :as debug]
+            [kmet.tui.alias :as alias]
             [kmet.tui.theme :as theme]
             [kmet.libs.host :as host]
             [kmet.loader.core :as loader]
@@ -817,6 +818,13 @@
      :register-message-renderer! (fn [custom-type renderer]
                                    (register-message-renderer! custom-type renderer)
                                    (track (fn [] (swap! message-renderers dissoc custom-type))))
+     ;; tag aliases (kmet.tui.alias): the registry is process-global, so the
+     ;; registration MUST be tracked — unload removes exactly this fn's
+     ;; registration (a later re-registration by another owner survives)
+     :register-alias! (fn [alias-kw f]
+                        (let [dereg (alias/register! alias-kw f)]
+                          (track dereg)
+                          dereg))
      :register-skill! (fn [raw-content & [opts]]
                         ;; The extension reads its own bundled SKILL.md via
                         ;; io/resource and hands the content over, so jarred

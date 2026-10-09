@@ -6,7 +6,8 @@ lifecycle, alias registry). Study artifacts and benchmarks live in
 `target/replicant-study/` — disposable, not tracked.
 
 This file is a plan, not a decision record: item 1 is **implemented**
-(result in its section), item 2 is an accepted direction, item 3 is
+(result in its section), item 2 is **implemented** (result there; one real
+consumer validates the API — see the execution order), item 3 is
 **TO REVIEW** and must not be implemented before an explicit decision.
 
 Measured headless via `target/replicant-study/bench.bb` (bb, this checkout):
@@ -48,20 +49,26 @@ Cross-updates (recorded as the work landed):
 - The retain-previous-input rule is documented in tui.md §2.3/§2.5
   (`last-tree`, the stamp's `:nodes`), together with the skip.
 - `leaks.md` §2.12's open extension-unload question gains its first
-  concrete client under item 2 (not started).
+  concrete client under item 2 — **landed**: extension aliases take the
+  tracked deregistration path (`ext/register-alias!` → `alias/register!`
+  dereg recorded on the extension), so unload removes stale aliases and
+  the registry never becomes a standing strong root for unloaded code.
+  The rest of the §2.12 question (mounted UI surfaces `ui-call`
+  commissioned) is unchanged.
 
 ### Recommended execution order (these two plans combined)
 
 `leaks.md`'s dependency chain is satisfied and the memory plan is closed:
 Stages C and D and replicant item 1 are implemented (see their result
-sections). What remains is the aliases item, which merges only after one
-real consumer validates the API, and the item-3 review gate:
+sections), and item 2 (aliases) is implemented with the extension
+registration path and one real app consumer. What remains is the item-3
+review gate:
 
 1. **`leaks.md` Stage C** — done (weak `reakt`).
 2. **`leaks.md` Stage D** — done (exit report, hardening, docs).
 3. **Item 1** — done (the skip; see its result).
-4. **Item 2** — aliases, with extension deregistration from the start;
-   merge after one real consumer validates the API.
+4. **Item 2** — done (aliases + extension deregistration + the
+   `kmet.app.ui.settings-submenu/panel-header` consumer; see its result).
 5. **Item 3** — only if the review gate passes; not scheduled.
 
 Escape hatch: item 1 has no functional dependency on C and may go first
@@ -231,8 +238,9 @@ new `:skips` counter exercised; measured gain on the bench.
 
 ## 2. Aliases — qualified-keyword tags resolved through a registry
 
-**Priority: second.** Clear design seam, needs one concrete extension use
-case validated before merge.
+**Priority: second. Implemented** (see the result below). Clear design
+seam; one concrete consumer validated the API before merge (the submenu
+panel header).
 
 ### Motivation
 
@@ -333,6 +341,60 @@ extension aliases ship and a broken one can take down a long session).
   (`leaks.md` finding 10).
 - Registering the same keyword twice: `register!` should overwrite
   deliberately (last wins) and be documented; no silent merging.
+
+### Result (implemented)
+
+- `src/kmet/tui/alias.clj`: registry (`register!`/`unregister!`/
+  `lookup`/`registered`, `reset-registry!` for test isolation), the
+  `(fn [attrs children])` head wrapper, and the `defalias` macro
+  (defn-shaped, var value = the alias keyword).
+  Registration is validated (qualified keyword + fn) and last-wins; the
+  deregister fn `register!` returns removes the alias only while it still
+  maps to the registering fn, so an older owner's unload cannot wipe a
+  newer registration.
+- `hiccup.clj`: qualified keywords in `parse-node` go through
+  `parse-alias` (before `parse-host`); the desired item is an ordinary
+  `::fncomp` with `:mkey` = the alias keyword (`{::user-key k ::kind
+  ::alias}` when keyed), so reactions, `with-let`, refs, keyed reuse and
+  the item-1 skip all apply. The wrapper resolves the registry at CALL
+  time and captures only the keyword: a re-registered alias renders the
+  new fn on the component's next body run (never stranding the old fn —
+  an idle reaction keeps its last output until its next dep change,
+  pinned by `cached-body-picks-up-a-reregistration-on-its-next-run`),
+  and a body run with the alias unregistered throws loudly rather than
+  invoking stale code. Children ride `:ctree` (the
+  captured-closure trap is covered by
+  `changed-children-are-not-frozen-by-reuse`); the alias keyword is
+  stamped (`:alias` on the `::fncomponent` stamp) so the previous side of
+  the diff restores the same match kind. Unknown aliases throw with the
+  registry listed + did-you-mean (`nearest-of`, shared with the tag
+  table); `{:component c}` in the attrs slot is a child, not props.
+- Extension lifecycle: `kmet.extension/register-alias!` (capability
+  `:register-alias!` in `kmet.app.extensions`) routes the deregister fn
+  through the existing `track-deregister!`, so `unload-extension!`
+  removes extension aliases. `create-nullable-api` captures them under
+  `:aliases` for extension tests; the `hello-ext` fixture registers one
+  through the api and `test-load-single-file-extension` asserts it is
+  gone after unload. `defalias` in an extension registers directly and
+  survives unload by design — documented as the host/app path only.
+- Consumer (the validation gate): the submenu panel header is now the
+  `:kmet.app.ui.settings-submenu/panel-header` alias (`defalias`, returns
+  a fragment seq, subscribes to the live theme in its body).
+  `make-select-submenu` uses `[panel-header …]` and `theme-submenu`'s
+  automatic menu uses `[submenu/panel-header …]` with a seq of
+  descriptions — the var trick across namespaces, with the
+  construction-time theme bindings removed. `test-theme-submenu` /
+  `test-settings-selector` green.
+- Tests: `test/kmet/tui/test_alias.clj` (registered in
+  `kmet.tasks.runner/all-namespaces`) — resolution, attrs/children
+  delivery, key/ref pseudo-props, keyed reuse/remount/with-let state,
+  child refresh on reuse, tracked dep re-derive, nested aliases, refs
+  through alias children, dispose cascade, last-wins + call-time
+  re-resolution, identity-guarded deregistration, mounted-unregistered
+  loud failure, registration validation, unknown-alias message,
+  `defalias`. Extension-side tests in `kmet.app.test-extensions`.
+- Docs: `tui.md` §1/§2.1/§2.2 + the new §2.9; `extension.md`'s new
+  "Tag aliases" subsection; `kmet.extension`'s api-key docs.
 
 ---
 

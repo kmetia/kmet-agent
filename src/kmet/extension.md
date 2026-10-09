@@ -1118,6 +1118,46 @@ from the api.
 Headless/print mode has no layout: check `(:mode ctx)` in command/event
 handlers (`:interactive` vs headless) and fall back to `ui-notify`.
 
+#### Tag aliases — named tag-level components
+
+`ext/register-alias!` registers a **qualified-keyword tag** for any hiccup
+tree the host or another extension parses (`kmet.tui.alias`, tui.md §2.9).
+Use it to contribute UI by name: a tree site embeds
+`[:my-ext/chip {:label "ready"}]` without requiring the provider.
+
+```clojure
+;; the var trick: the var holds the KEYWORD, so your own tree sites can
+;; write [chip …] and go-to-definition still works
+(def chip :my-ext/chip)
+
+(defn chip-view
+  "The alias fn: (fn [attrs children] tree)."
+  [{:keys [label]} _children]
+  [:text {:padding-x 0 :padding-y 0} label])
+
+(defn init [api]
+  (ext/register-alias! api chip chip-view)
+  (ext/ui-set-widget api "chip" [:container {} [chip {:label "ready"}]]))
+```
+
+- `attrs` is the element's props map without `:key`/`:ref`; `children` is a
+  flat vector of the raw child nodes (`[]` when the element has none). An
+  alias is an ordinary fn component underneath — reactions, `with-let`,
+  refs, keyed reuse and the unchanged-tree skip all apply.
+- Register **top-level fns, never closures over extension state**: the
+  registration keeps the fn (and what it closes over) reachable until
+  unload. Re-registration replaces it (last wins); rendering resolves the
+  current registration at call time, so reload never strands the old fn —
+  the new fn takes effect on the component's next body run.
+- The registration is removed automatically when the extension unloads
+  (the returned deregister fn is tracked like every other registration).
+  Do **not** use `kmet.tui.alias/defalias` in an extension — it registers
+  directly and would survive the unload.
+- Names must be qualified keywords; unqualified keywords are host tags,
+  and there is no `.class`/`#id` tag-suffix syntax. A body run after the
+  registration is gone (unload) throws loudly; a cached body keeps its
+  last output until its next run.
+
 ### Models
 
 ```clojure
@@ -1264,7 +1304,7 @@ registered:
 ```
 
 State shape: `:commands` `:tools` `:handlers` `:flags` `:shortcuts`
-`:markdown-transformers` `:entry-renderers` `:message-renderers`
+`:markdown-transformers` `:entry-renderers` `:message-renderers` `:aliases`
 `:tool-call-hooks` `:tool-result-hooks` `:input-hooks`
 `:before-agent-start-hooks` `:ui-calls` `:emitted` `:model-calls`. Every
 registration function returns a deregister fn; the nullable api's deregister

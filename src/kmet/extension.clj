@@ -68,6 +68,9 @@
 ;;   :register-flag! :get-flag
 ;;   :register-shortcut! :register-markdown-transformer! :send-message!
 ;;   :register-entry-renderer! :register-message-renderer!
+;;   :register-alias!                                   — tag aliases
+;;     (kmet.tui.alias): register a qualified-keyword tag into the hiccup
+;;     tree; removed automatically on unload
 ;;   :register-skill! :register-prompt!                 — bundled resources
 ;;   :set-model :get-thinking-level :set-thinking-level :send-user-message
 ;;   :exec
@@ -175,6 +178,19 @@
   ((:register-entry-renderer! api) custom-type renderer))
 (defn register-message-renderer! [api custom-type renderer]
   ((:register-message-renderer! api) custom-type renderer))
+
+(defn register-alias!
+  "Register a tag alias (kmet.tui.alias): a qualified keyword usable as a
+   hiccup element head, resolving to F — (fn [attrs children] tree); attrs
+   is the element's props map without :key/:ref, children a flat vector of
+   raw child nodes ([] when none). Trees elsewhere then embed
+   [:my.ns/chip {:model m} child] without requiring this namespace.
+   Register top-level fns, never closures over extension state — the
+   registration keeps the fn reachable until unload. Re-registering the
+   same keyword replaces it (last wins). Returns the deregister fn; the
+   registration is also removed automatically when the extension unloads."
+  [api alias-kw f]
+  ((:register-alias! api) alias-kw f))
 
 (defn register-skill!
   "Register a skill from the extension's bundled SKILL.md content string.
@@ -298,6 +314,7 @@
      {:commands {name cmd} :tools {name tool} :tool-sources {id fn}
       :handlers {event-type [handler ...]} :flags {name opts}
       :entry-renderers {custom-type renderer} :message-renderers {custom-type renderer}
+      :aliases {alias-kw fn}
       :skills [{:content opts}] :prompts [prompt]
       :tool-call-hooks [...] :tool-result-hooks [...]
       :input-hooks [...] :before-agent-start-hooks [...]
@@ -310,6 +327,7 @@
   ([{:keys [agent-dir]}]
    (let [state (atom {:commands {} :tools {} :tool-sources {} :handlers {}
                       :flags {} :entry-renderers {} :message-renderers {}
+                      :aliases {}
                       :skills [] :prompts []
                       :tool-call-hooks [] :tool-result-hooks []
                       :input-hooks [] :before-agent-start-hooks []
@@ -386,6 +404,9 @@
               :register-message-renderer! (fn [custom-type renderer]
                                             (swap! state assoc-in [:message-renderers custom-type] renderer)
                                             (fn [] (swap! state update :message-renderers dissoc custom-type)))
+              :register-alias! (fn [alias-kw f]
+                                 (swap! state assoc-in [:aliases alias-kw] f)
+                                 (fn [] (swap! state update :aliases dissoc alias-kw)))
               :register-skill! (fn [raw-content & [opts]]
                                  (swap! state update :skills conj {:content raw-content :opts opts})
                                  (fn [] (swap! state update :skills

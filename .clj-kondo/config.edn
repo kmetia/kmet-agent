@@ -21,7 +21,12 @@
  ;; run each scenario under every HTTP transport mode — analyze them as
  ;; plain deftests so the defined test vars resolve.
  :lint-as {kmet.libs.test-http/deftest-transports clojure.test/deftest
-           kmet.libs.test-http/deftest-curl clojure.test/deftest}
+           kmet.libs.test-http/deftest-curl clojure.test/deftest
+           ;; defalias is defn-shaped (name, docstring?, [attrs children],
+           ;; body) but binds the var to the alias KEYWORD, not a fn —
+           ;; linting it as defn resolves the var and its params, and tree
+           ;; usages like [panel-header {…}] stay plain var references.
+           kmet.tui.alias/defalias clojure.core/defn}
  ;; extensions/*.clj declare kmet.extensions.* namespaces that can never match
  ;; their extensions/... paths (clj-kondo derives the expected ns from the file
  ;; path), so the namespace-name-mismatch linter is off repo-wide; all other

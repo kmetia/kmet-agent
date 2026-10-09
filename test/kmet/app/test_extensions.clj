@@ -24,6 +24,7 @@
             [kmet.app.skills :as skills]
             [kmet.app.tools.core :as tools]
             [kmet.ai.hooks :as ai-hooks]
+            [kmet.tui.alias :as alias]
             [kmet.tui.theme :as theme]))
 
 ;; ─── Extension exec (extension api: exec) ────────────────────────────────
@@ -85,6 +86,35 @@
     (t/is (not (contains? (:commands @state) "dc")))
     (t/is (empty? (get-in @state [:handlers :agent-end])))))
 
+(t/deftest test-nullable-api-alias-registration
+  ;; register-alias!/deregister replay for extensions that contribute tag
+  ;; aliases (kmet.tui.alias)
+  (let [{:keys [api state]} (ext/create-nullable-api)
+        f (fn [_attrs _children] [:text {:padding-x 0 :padding-y 0} "x"])
+        dereg (ext/register-alias! api :test/nullable-chip f)]
+    (t/is (identical? f (get-in @state [:aliases :test/nullable-chip])))
+    (t/is (fn? dereg))
+    (dereg)
+    (t/is (not (contains? (:aliases @state) :test/nullable-chip)))))
+
+(t/deftest test-extension-api-register-alias-is-tracked
+  ;; the alias registry is process-global: unload must remove exactly the
+  ;; aliases this extension registered
+  (let [dereg-fns (atom [])
+        api ((var extensions/create-extension-api)
+             {:name "alias-test" :path "target/test-ext-alias.clj"
+              :deregister-fns dereg-fns})
+        f (fn [_attrs _children] [:text {:padding-x 0 :padding-y 0} "x"])]
+    (try
+      (let [dereg (ext/register-alias! api :kmet.test/alias-chip f)]
+        (t/is (identical? f (alias/lookup :kmet.test/alias-chip)))
+        (t/is (fn? dereg))
+        (t/is (= 1 (count @dereg-fns)) "the dereg fn is tracked for unload"))
+      (finally
+        (doseq [f @dereg-fns] (f))))
+    (t/is (nil? (alias/lookup :kmet.test/alias-chip))
+          "running the tracked fns (unload-extension!) removed the alias")))
+
 (t/deftest test-nullable-api-p2-capabilities
   (let [{:keys [api state]} (ext/create-nullable-api)]
     (testing "ui-custom opts pass through untouched (pi: ctx.ui.custom options)"
@@ -130,6 +160,7 @@
         (t/is (contains? (:commands @state) "hello-ext"))
         (t/is (contains? (:tools @state) "hello-ext-tool"))
         (t/is (contains? (:flags @state) "ext-hello"))
+        (t/is (fn? (get-in @state [:aliases :hello-ext/chip])))
         (t/is (= 1 (count (get-in @state [:handlers :session-start]))))
         (t/is (some #(= [:set-status "hello-ext" "loaded"] %) (:ui-calls @state))
               "ui calls captured"))
@@ -212,13 +243,17 @@
     (testing "registrations live in the real registries"
       (t/is (some? (commands/find-command "hello-ext")))
       (t/is (some? (tools/get-tool "hello-ext-tool")))
-      (t/is (some? (extensions/get-flag "ext-hello"))))
+      (t/is (some? (extensions/get-flag "ext-hello")))
+      (t/is (fn? (alias/lookup :hello-ext/chip))
+            "the extension's tag alias registered through the api"))
     (testing "unload removes everything"
       (extensions/unload-all-extensions!)
       (t/is (empty? (extensions/get-loaded-extensions)))
       (t/is (nil? (commands/find-command "hello-ext")))
       (t/is (nil? (tools/get-tool "hello-ext-tool")))
-      (t/is (nil? (extensions/get-flag "ext-hello"))))))
+      (t/is (nil? (extensions/get-flag "ext-hello")))
+      (t/is (nil? (alias/lookup :hello-ext/chip))
+            "the alias was deregistered with the extension"))))
 
 (t/deftest test-load-manifest-extension
   (extensions/clear-extensions!)

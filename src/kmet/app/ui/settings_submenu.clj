@@ -6,11 +6,35 @@
    to it through the child's ref."
   (:require [kmet.app.ui.subs :as s]
             [kmet.libs.reakt :as r]
+            [kmet.tui.alias :refer [defalias]]
             [kmet.tui.components.select-list :as select-list]
             [kmet.tui.hiccup :as h]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.theme :as theme]))
+
+;; ─── Panel header alias ──────────────────────────────────────────────────
+
+(defalias panel-header
+  "A submenu panel's heading: the bold accent TITLE plus optional muted
+   :description line(s) — one string or a seq of lines — spaced below it.
+   The alias body reads the LIVE theme (the tracked read re-derives every
+   mounted header on a theme switch, tui.md §9), so callers pass no theme.
+   Used by this package's submenus and by theme-submenu (the var evaluates
+   to the :kmet.app.ui.settings-submenu/panel-header keyword)."
+  [{:keys [title description]} _children]
+  (let [th (r/tracked-deref s/theme-sub)
+        description (if (string? description) [description] description)]
+    ;; a fn component returns a SEQ of roots to splice (a vector would be
+    ;; read as ONE element whose head is its first item)
+    (concat [[:text {:padding-x 0 :padding-y 0}
+              (theme/fg th :accent (theme/bold title))]]
+            (when (seq description)
+              [[:spacer {:lines 1}]])
+            (map (fn [line]
+                   [:text {:padding-x 0 :padding-y 0}
+                    (theme/fg th :muted line)])
+                 description))))
 
 ;; ─── SubmenuPanel ──────────────────────────────────────────────────────────
 
@@ -64,25 +88,18 @@
                                    (cb (:value item))))
         root (h/root
               (fn [_props]
-                (let [th (r/tracked-deref s/theme-sub)]
-                  [:container {}
-                   [:text {:padding-x 0 :padding-y 0}
-                    (theme/fg th :accent (theme/bold title))]
-                   (when (seq description)
-                     [:spacer {:lines 1}])
-                   (when (seq description)
-                     [:text {:padding-x 0 :padding-y 0}
-                      (theme/fg th :muted description)])
-                   [:spacer {:lines 1}]
-                   [:select-list {:ref list-ref
-                                  :items items
-                                  :height (min (count items) 10)
-                                  :on-select on-select-fn
-                                  :on-escape on-cancel
-                                  :on-selection-change on-selection-change-fn}]
-                   [:spacer {:lines 1}]
-                   [:text {:padding-x 0 :padding-y 0}
-                    (theme/dim "  Enter to select · Esc to go back")]])))
+                [:container {}
+                 [panel-header {:title title :description description}]
+                 [:spacer {:lines 1}]
+                 [:select-list {:ref list-ref
+                                :items items
+                                :height (min (count items) 10)
+                                :on-select on-select-fn
+                                :on-escape on-cancel
+                                :on-selection-change on-selection-change-fn}]
+                 [:spacer {:lines 1}]
+                 [:text {:padding-x 0 :padding-y 0}
+                  (theme/dim "  Enter to select · Esc to go back")]]))
         ;; the ref fills on the body's first pass; the host mounts the panel
         ;; later, so materialize now to land the initial selection
         sl (h/materialize-ref! root list-ref)]

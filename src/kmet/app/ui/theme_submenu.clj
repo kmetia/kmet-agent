@@ -6,8 +6,6 @@
    automatic setting."
   (:require [clojure.string :as str]
             [kmet.app.ui.settings-submenu :as submenu]
-            [kmet.app.ui.subs :as s]
-            [kmet.libs.reakt :as r]
             [kmet.tui.hiccup :as h]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
@@ -198,27 +196,23 @@
         on-escape (fn []
                     (preview! ctx (:original @st))
                     (close! ctx))
-        ;; reactive body: the tracked theme-sub read re-derives the
-        ;; title/description on a theme switch (tui.md §9) — a compiled tree
-        ;; would keep the construction-time palette
+        ;; reactive body: the panel-header alias tracks the theme-sub read
+        ;; itself (tui.md §9) — a compiled tree would keep the
+        ;; construction-time palette
         root (h/root
               (fn [_props]
-                (let [th (r/tracked-deref s/theme-sub)]
-                  [:container {}
-                   [:text {:padding-x 0 :padding-y 0}
-                    (theme/fg th :accent (theme/bold "Automatic Theme"))]
-                   [:spacer {:lines 1}]
-                   [:text {:padding-x 0 :padding-y 0}
-                    (theme/fg th :muted "Choose themes for terminal light and dark appearance.")]
-                   [:text {:padding-x 0 :padding-y 0}
-                    (theme/fg th :muted "Light/dark detection requires terminal support.")]
-                   [:spacer {:lines 1}]
-                   [:settings-list
-                    {:ref sl-ref
-                     :items items
-                     :max-visible (min (count items) 10)
-                     :on-change on-change
-                     :on-escape on-escape}]])))]
+                [:container {}
+                 [submenu/panel-header
+                  {:title "Automatic Theme"
+                   :description ["Choose themes for terminal light and dark appearance."
+                                 "Light/dark detection requires terminal support."]}]
+                 [:spacer {:lines 1}]
+                 [:settings-list
+                  {:ref sl-ref
+                   :items items
+                   :max-visible (min (count items) 10)
+                   :on-change on-change
+                   :on-escape on-escape}]]))]
     (submenu/panel root sl-ref)))
 
 ;; ─── ThemeSubmenu component ────────────────────────────────────────────────

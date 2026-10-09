@@ -105,6 +105,7 @@
     kmet.tui.test-reakt-integration
     kmet.tui.test-compute
     kmet.tui.test-hiccup
+    kmet.tui.test-alias
     kmet.tui.test-dispose
     kmet.tui.components.test-text
     kmet.tui.components.test-spacer
