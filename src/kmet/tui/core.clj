@@ -4,6 +4,7 @@
    from this namespace for convenience."
   (:require [clojure.string :as str]
             [clojure.java.io :as io]
+            [kmet.libs.host :as host]
             [kmet.tui.border :as border]
             [kmet.tui.theme :as theme]
             [kmet.tui.macros :as macros]
@@ -78,7 +79,8 @@
 
 (defn- extract-cursor-position
   "Find CURSOR-MARKER in rendered lines (viewport only), strip every marker
-   from the output, and return {:lines cleared-lines :cursor {:row r :col c}}.
+   from the output, and return
+   {:lines cleared-lines :cursor {:row r :col c} :marks {line-idx marker-idx}}.
    The cursor position comes from the marker in the visible viewport (a
    bottom-up scan); a marker OUTSIDE the viewport is still stripped, it just
    yields no cursor. Stripping must be unconditional: a marker is an internal
@@ -87,21 +89,73 @@
    Termux then swallows every following byte and the display freezes at the
    last painted frame while the app keeps rendering. The scan window is the
    bottom HEIGHT lines, so a document that grows past the panel height (a
-   short terminal) can push the focused field's line just above it."
-  [lines height]
-  (let [viewport-top (max 0 (- (count lines) height))
-        any-marker? (boolean (some #(clojure.string/includes? % utils/CURSOR-MARKER) lines))
-        cursor (loop [i (dec (count lines))]
-                 (if (>= i viewport-top)
-                   (let [line (nth lines i)]
-                     (if-let [marker-idx (clojure.string/index-of line utils/CURSOR-MARKER)]
-                       {:row i :col (utils/visible-width (subs line 0 marker-idx))}
-                       (recur (dec i))))
-                   nil))]
-    {:lines (if any-marker?
-              (mapv #(clojure.string/replace % utils/CURSOR-MARKER "") lines)
-              lines)
-     :cursor cursor}))
+   short terminal) can push the focused field's line just above it.
+
+   The 5-arity reuses PREV-IN/PREV-OUT/PREV-MARKS for lines `identical?` to
+   their PREV-IN entry — the same identity fast path normalize-reusing uses:
+   an unchanged line keeps its stripped output (a pure function of the line
+   object) and its marker index, so a frame that changed k lines scans and
+   strips only those k instead of scanning the whole document and
+   reallocating every line (perf.md §13: 9.7 ms/frame of per-line
+   `str/includes?` on jolt at 14.9k lines, and the reallocation defeated
+   normalize-reusing's identity path whenever a marker was present).
+
+   The hosts want opposite implementations of the same walk (the §5.4
+   pattern). Jolt's per-line scan is the expensive primitive and its loop is
+   natively compiled, so it always walks the identity-reusing loop; bb/sci
+   interprets that loop and its plain scan is cheaper there, so bb
+   short-circuits a frame with no marker at all (the common unfocused case)
+   to the plain scan — and only when the previous frame was unmarked too, so
+   a marked frame goes straight to the loop instead of paying the scan
+   first. The host choice is `kmet.libs.host/jolt?`, not a reader
+   conditional: core.clj is not a .cljc file."
+  ([lines height]
+   (extract-cursor-position [] [] {} lines height))
+  ([prev-in prev-out prev-marks lines height]
+   (let [no-marker? (and (not (host/jolt?))
+                         (empty? prev-marks)
+                         (not (some #(clojure.string/includes? % utils/CURSOR-MARKER)
+                                    lines)))]
+     (if no-marker?
+       {:lines lines :cursor nil :marks {}}
+       (let [prev-count (count prev-in)
+             n (count lines)
+             viewport-top (max 0 (- n height))
+             [out marks] (loop [i 0
+                                acc (transient [])
+                                marks {}]
+                           (if (< i n)
+                             (let [line (nth lines i)]
+                               (if (and (< i prev-count)
+                                        (identical? (nth prev-in i) line))
+                                 (recur (inc i) (conj! acc (nth prev-out i)) marks)
+                                 (let [idx (clojure.string/index-of line utils/CURSOR-MARKER)]
+                                   (if idx
+                                     (recur (inc i)
+                                            (conj! acc (clojure.string/replace
+                                                        line utils/CURSOR-MARKER ""))
+                                            (assoc marks i idx))
+                                     (recur (inc i) (conj! acc line) marks)))))
+                             [(persistent! acc) marks]))
+             ;; A previous marker stays valid exactly while its line is still
+             ;; the same object; a rescanned line's new status (in MARKS) wins.
+             marks (reduce-kv (fn [m i idx]
+                                (if (and (< i prev-count)
+                                         (< i n)
+                                         (identical? (nth prev-in i) (nth lines i)))
+                                  (assoc m i idx)
+                                  m))
+                              marks
+                              prev-marks)
+             cursor-i (reduce-kv (fn [best i _]
+                                   (if (and (>= i viewport-top) (> i best)) i best))
+                                 -1
+                                 marks)
+             cursor (when (>= cursor-i 0)
+                      {:row cursor-i
+                       :col (utils/visible-width
+                             (subs (nth lines cursor-i) 0 (get marks cursor-i)))})]
+         {:lines out :cursor cursor :marks marks})))))
 
 (defn- normalize-reusing
   "NORMALIZE every line, reusing PREV-OUT's value for lines that are
@@ -135,6 +189,7 @@
 (defrecord TUI [terminal components focused-component
                 input-listeners previous-lines
                 previous-normalized-in previous-normalized-out
+                previous-cursor-in previous-cursor-marks
                 previous-width render-requested? force-redraw? waker
                 running? stopped? overlays
                 render-loop input-reader current-reader
@@ -165,6 +220,8 @@
                        :previous-lines (atom [])
                        :previous-normalized-in (atom [])
                        :previous-normalized-out (atom [])
+                       :previous-cursor-in (atom [])
+                       :previous-cursor-marks (atom {})
                        :previous-width (atom 0)
                        :terminal-size (atom nil)
                        :render-requested? (atom false)
@@ -2344,7 +2401,10 @@
                   (reset! (:previous-width tui) -1)
                   (reset! (:previous-height tui) -1)
                   (reset! (:max-lines-rendered tui) 0)
-                  (reset! (:previous-kitty-image-ids tui) #{}))
+                  (reset! (:previous-kitty-image-ids tui) #{})
+                  ;; cursor-marker memo: its inputs are gone with the frame
+                  (reset! (:previous-cursor-in tui) [])
+                  (reset! (:previous-cursor-marks tui) {}))
                 ;; Base content: the whole UI is one flat document — the stack
                 ;; layout renders every component at natural height, so the total
                 ;; may exceed the screen and the render loop scrolls the overflow
@@ -2352,7 +2412,14 @@
                 ;; Visible overlays are then composited on top (pi: compositeOverlays).
                 (let [base-lines (stack/render-stack @(:components tui) w)
                       raw-lines (composite-overlays tui base-lines w h)
-                      cursor-result (extract-cursor-position raw-lines h)
+                      ;; the stripped previous frame (previous-normalized-in)
+                      ;; is extract's PREV-OUT: same objects, purely a
+                      ;; function of the raw line, written together below
+                      cursor-result (extract-cursor-position
+                                     @(:previous-cursor-in tui)
+                                     @(:previous-normalized-in tui)
+                                     @(:previous-cursor-marks tui)
+                                     raw-lines h)
                       cursor (:cursor cursor-result)
                       cursor-lines (:lines cursor-result)
                       ;; pi: normalizeTerminalOutput — Thai/Lao AM decomposition +
@@ -2797,6 +2864,8 @@
                   ;; what the next frame's extract-cursor-position returns)
                   (reset! (:previous-normalized-in tui) cursor-lines)
                   (reset! (:previous-normalized-out tui) normalized)
+                  (reset! (:previous-cursor-in tui) raw-lines)
+                  (reset! (:previous-cursor-marks tui) (:marks cursor-result))
                   (reset! (:previous-width tui) w)
                   (reset! (:previous-height tui) h)
                   ;; Image lines only exist when the terminal supports

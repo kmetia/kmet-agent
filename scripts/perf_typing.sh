@@ -6,6 +6,10 @@
 #
 #   scripts/perf_typing.sh <label> <command-string> [nkeys] [interval-s] [settle-s]
 #
+# Pass the app commands: `bb start` / `jolt start`. The bb `run` task was
+# renamed to `start` in 00b3e373 (2026-09-29); `bb run` now opens a babashka
+# REPL, not kmet, so perf.md's older `bb run` recipe measured the wrong thing.
+#
 # Notes: the answer is the median of several runs, a fresh session each time;
 # never run anything else while measuring (§6.2b). Settle 30 s by default:
 # jolt can burn a full core for ~20 s at startup with the current extension

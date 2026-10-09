@@ -12,6 +12,12 @@ render).** §9 (v0.8.6-86, x86_64 WSL2) and §10
 inverted the host comparison: jolt's primitives are no longer 2–5x slower on
 the frame path (§11.1).
 
+**§13 re-checks the live frame path on the phone at `jolt v0.8.20`, `bb`
+1.13.225 (2026-10-09): steady frames ~14 ms bb / ~12.5 ms jolt on a 2.6 MB
+transcript after the §13.3 cursor-marker memo (20.3 ms before it), redraw
+~3.2 s / ~5.0 s, idle 4.2 % / 2.6 % of a core; the `bb run` recipe is fixed
+to `bb start`.**
+
 **TL;DR** — it is not a busy loop and not the terminal backend. Idle CPU is
 *lower* on jolt than on bb. The frame gap was (a) every keystroke/frame
 re-renders the whole component tree + re-normalizes every line + diffs/emits,
@@ -41,8 +47,10 @@ Reproduce with:
 
 ```sh
 # app-level: same tree, same config, tmux pty 100x30
-tmux new-session -d -s pj -x 100 -y 30 'jolt run -m kmet.core'
-tmux new-session -d -s pb -x 100 -y 30 'bb run'
+# (`bb run` was the task name until 00b3e373 renamed it to `start`; `bb run`
+# now opens a babashka REPL — see §13.2)
+tmux new-session -d -s pj -x 100 -y 30 'jolt start'
+tmux new-session -d -s pb -x 100 -y 30 'bb start'
 # per-thread CPU from /proc/<pid>/stat fields 14+15 (user+sys ticks, 100 Hz)
 # per-key CPU: u0=$(awk '{print $14}' /proc/PID/stat); <send N keys>; u1=...
 ```
@@ -1247,4 +1255,131 @@ A second pass landed the kitty-walk gate and the `ansi-code-at` scanner:
   1.374 → **0.378 µs** on jolt, bb unchanged at 0.830. The two are pinned
   against each other at every index of a corpus on both hosts
   (`kmet.test-utils/test-ansi-code-at-host-equivalence`).
+
+---
+
+## 13. Re-check at `jolt v0.8.20` (phone, 2026-10-09)
+
+Fresh sweep on the Termux/aarch64 phone (`bb` 1.13.225, **`jolt v0.8.20`**),
+after the 2026-10-09 TUI work (reconcile skip for `=`-equal subtrees, tag
+aliases, weak reakt watches) and with the now-committed live-frame harness
+`scripts/kmet_frame_bench.clj` (101241d5) in place of §11.3's manual
+instrumentation. The fixture is the largest local session,
+`2026-10-04T15-34-09-418Z_1a1078d1709-55a72c05.ednl`: **14,881 rendered
+lines / 2.63 MB** at width 100x30. §12's fixture `19fdb60dc61-b305.ednl` is
+no longer on the device, so §12's absolutes are not directly comparable.
+
+Two harness fixes were needed and are applied: settle the loop before each
+scenario's event window (a trailing frame from cold/reflow was being
+attributed to the next scenario), and warm up before the measured window
+(the first frames after the cold render still settle caches). The tables are
+medians over 4 bb / 3 jolt runs; the phone still swings **~2x run to run** on
+the no-change scenario even with identical rendered bytes and identity-hit
+counts (§6.2b's warning holds), so read medians and same-run host ratios,
+not single runs.
+
+### 13.1 Hot path, streaming, redraw (per-frame medians)
+
+| scenario | bb | jolt | jolt/bb |
+|---|---|---|---|
+| cold (first frame) | **3.06 s** | **4.69 s** | 1.53 |
+| typing (editor tick) | **14.2 ms** | **20.3 ms** | 1.43 |
+| stream (append/frame) | **19.4 ms** | **30.4 ms** | 1.57 |
+| redraw (one resize → clearing) | **3.17 s** | **5.05 s** | 1.59 |
+| calm (no change; unstable) | 16.6–34.7 ms | 29.4–44.5 ms | — |
+
+Phase split (per-frame medians, ms):
+
+| phase | bb cold | jolt cold | bb typing | jolt typing | bb stream | jolt stream | bb redraw | jolt redraw |
+|---|---|---|---|---|---|---|---|---|
+| render-stack | 3010 | 4579 | 2.9 | 3.1 | 7.2 | 12.6 | 3108 | 4831 |
+| cursor | 2.5 | 9.3 | 2.5 | 9.7 | 2.5 | 9.1 | 2.8 | 9.1 |
+| normalize | 6.6 | 27.6 | 5.0 | 5.8 | 5.0 | 5.6 | 8.3 | 28.0 |
+| diff+emit | 41.4 | 69.6 | 3.8 | 1.6 | 4.1 | 1.5 | 49.8 | 74.8 |
+
+Reading:
+
+- **No regression on the stable paths.** Typing/streaming frames have the
+  same shape as §11.3 after cb763f6 + §12.5; typing is ~1.4x, streaming
+  ~1.6x on jolt. bb's frame is render-stack-bound; jolt's is **cursor-bound**:
+  `extract-cursor-position` is 9.7 ms of the 20.3 ms typing frame (48%; bb
+  2.5 ms) — the per-line `some str/includes?` scan at ~0.6 µs/line vs bb's
+  0.17 (no marker is present in the harness; a focused editor adds the
+  strip). §12.5's identity-memo candidate is now the top per-frame lever on
+  jolt, ahead of incremental markdown for steady frames.
+- **Streaming is render-stack growth**: 12.6 ms jolt / 7.2 bb and rising with
+  the message — the whole-message markdown re-parse of §6.3, unchanged, and
+  ~1.5x a typing frame.
+- **Redraw = the cold render again**: ~3.2 s bb / ~5.0 s jolt per resize on
+  this transcript, 96-98 % render-stack; normalize stays ~4x on jolt (28 vs
+  8 ms) and diff+emit pays the full 2.6 MB re-emit (~50 / 75 ms). Cold's
+  normalize is the §11.1 jolt per-line loss on 177-char average lines.
+- The **calm** scenario is the one unstable measurement: with the same
+  identity hits (14,878/14,881) and 6-byte write, whole runs land at either
+  ~typing cost or ~2x it. Treat 14-20 ms as the settled no-change frame and
+  the 2x tail as the phone's clock/scheduling state.
+
+### 13.2 Idle and typing CPU — recipe fix
+
+The app task was renamed **`bb run` → `bb start`** in 00b3e373 (2026-09-29;
+`bb run` now opens a babashka REPL, not kmet), so §1's recipe is stale and
+`scripts/perf_typing.sh` now documents `bb start` / `jolt start`. Corrected
+fresh-app measurement (300 keys @ 20 ms, 30 s bb / 40 s jolt settle, net of an
+equal idle window):
+
+| host | idle (ticks / 6 s) | typing net (ticks / 300 keys) | ticks/key |
+|---|---|---|---|
+| bb | 25 (4.2 % of a core) | 208 / 241 | ~0.75 |
+| jolt | 15 / 17 (2.6 %) | 234 / 234 | 0.78 |
+
+jolt parks cheaper than bb and typing CPU is at parity (~0.75 ticks/key ≈
+7.5 ms CPU/key). These absolutes are ~5x §12.3's 41 net ticks — that pass
+predates the task rename and this tree, so compare methods and hosts, not the
+drift.
+
+**Turn-time idle**: while a turn runs, `status.clj`'s anim timer requests a
+frame every **80 ms** (12.5 fps) for the spinner. The live session hosting
+this sweep burned **~21 % of a core** while a turn waited on a tool —
+1.7 ticks/frame ≈ 17 ms/frame, consistent with the typing/calm frames above.
+A no-change frame is not free (whole-tree re-walk plus the document-wide
+cursor/normalize/diff scans), and it is paid continuously during a turn.
+
+### 13.3 Applied: cursor-marker memo
+
+§13.1's cursor cost is now fixed. `extract-cursor-position` keeps the
+previous frame's raw lines, stripped lines and `{line-index marker-index}`
+map and reuses them for lines `identical?` to their previous entry — the
+`normalize-reusing` pattern. Unchanged lines are neither scanned nor
+reallocated, so the marker strip also stops defeating the normalize memo
+when the focused editor's marker is present. The hosts want opposite walks
+(§5.4): jolt always runs the reuse loop; bb/sci's plain scan is cheaper, so
+bb short-circuits a frame with no marker when the previous frame was
+unmarked too, and otherwise shares the loop.
+
+Per-frame medians on the §13.1 fixture (same tree, before → after):
+
+| scenario | bb | jolt |
+|---|---|---|
+| cursor, typing | 2.5 → 2.5 ms | 9.7 → **2.8 ms** |
+| typing total | 14.2 → 15.0 ms | 20.3 → **12.5 ms** |
+| stream total | 19.4 → 19.4 ms | 30.4 → **22.2 ms** |
+| calm (unstable) | 33.1 → 25.4 ms | 41.1 → **22.9 ms** |
+
+bb is unchanged within the phone's run-to-run noise (its scan was already
+~2.5-3 ms; the shortcut keeps the old cost when unfocused and the loop's
+identity preservation when marked). On the live app (focused editor,
+`scripts/perf_typing.sh`, 300 keys @ 20 ms): **bb ~225 → ~191 net ticks
+(−15 %), jolt 234 → ~138 (−41 %)**. In isolation on 177-char lines, the
+marked-frame cursor phase is bb 5.2 (old) → 6.0 (loop, with the identity win
+landing in normalize instead) and jolt 17.3 → 2.8. Tests:
+`test-extract-cursor-position-reuses-unchanged-lines` plus the existing
+strip tests, green on both hosts.
+
+### 13.4 Next steps
+
+- Incremental markdown (§6.3) still stands for cold and streaming: cold is
+  ~98 % render-stack and the stream frame's render-stack grows with the
+  message.
+- Redraw/global reflow still re-pays the full render (~3-5 s on 2.6 MB);
+  nothing in this pass changes §10.6's framing of it.
 

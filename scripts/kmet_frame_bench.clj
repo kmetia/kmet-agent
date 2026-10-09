@@ -116,6 +116,15 @@
                                       (not @(:render-requested? tui)))
                                (inc stable) 0))))))))
 
+(defn- begin-scenario!
+  "Settle the loop — nothing requested, frame count stable — then open a
+   fresh event window. Without this, a trailing frame from the previous
+   scenario (the cold render's follow-up full pass, a reflow's second
+   frame) is recorded into this scenario and skews its means."
+  [tui]
+  (settle! tui)
+  (reset! events []))
+
 (defn- next-frame!
   "Request one render and wait for it: the loop's frame counter for the
    start, and (unless QUIET?) the frame write for the end — a no-change
@@ -216,30 +225,48 @@
   (when (zero? (frame-writes writes)) (reset! events []))
   (wait-until #(>= @(:frame-count tui) 1) 60000 "first frame")
   (wait-until #(pos? (frame-writes writes)) 60000 "first write")
-  (report "cold (first frame)" @events (count @(:previous-lines tui))))
+  (report "cold (first frame)" @events (count @(:previous-lines tui)))
+  ;; the first frame can be followed by a settling full re-render; absorb it
+  ;; here so it is not attributed to the next scenario's window
+  (settle! tui))
 
 (defn- run-typing! [tui writes ed n]
-  (reset! events [])
+  ;; settle the preceding scenario's caches, then warm this one before the
+  ;; measured window
+  (dotimes [i 3]
+    (core/editor-set-text! ed (str "warm " i " typing"))
+    (next-frame! tui writes))
+  (begin-scenario! tui)
   (dotimes [i n]
     (core/editor-set-text! ed (str "calm " i " typing"))
     (next-frame! tui writes))
   (report "typing (editor tick)" @events (count @(:previous-lines tui))))
 
 (defn- run-calm! [tui writes n]
-  (reset! events [])
+  ;; The frames right after the cold render still settle caches (content-
+  ;; equal but not identical lines, a trailing full pass), so warm up before
+  ;; the measured window: the scenario reports the settled state.
+  (dotimes [_ 12] (next-frame! tui writes :quiet? true))
+  (begin-scenario! tui)
   (dotimes [_ n] (next-frame! tui writes :quiet? true))
   (report "calm (no change)" @events (count @(:previous-lines tui))))
 
 (defn- run-stream! [tui writes ch n]
+  (begin-scenario! tui)
   (chat-history/chat-history-start-streaming! ch)
-  (reset! events [])
+  ;; the first appends mount the assistant component and grow its caches;
+  ;; warm those, then measure the steady append frame
+  (dotimes [_ 3]
+    (chat-history/chat-history-append-streaming-text! ch chunk)
+    (next-frame! tui writes))
+  (begin-scenario! tui)
   (dotimes [_ n]
     (chat-history/chat-history-append-streaming-text! ch chunk)
     (next-frame! tui writes))
   (report "stream (append/frame)" @events (count @(:previous-lines tui))))
 
 (defn- run-redraw! [tui writes vt n]
-  (reset! events [])
+  (begin-scenario! tui)
   (dotimes [i n]
     (let [w (frame-writes writes)]
       (swap! (:size vt) assoc :cols (if (even? i) 90 100))
@@ -252,7 +279,7 @@
   (report "redraw (resize -> clearing)" @events (count @(:previous-lines tui))))
 
 (defn- run-reflow! [tui writes n]
-  (reset! events [])
+  (begin-scenario! tui)
   (let [cur (theme/get-current-theme)
         other (assoc cur :name "probe-theme" :text "#ff0000")]
     (dotimes [i n]

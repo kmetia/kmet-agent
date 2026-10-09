@@ -71,6 +71,59 @@
           (t/is (= ["a!" "b!"] (normalize in out [a (subs "xb" 1 2)])))
           (t/is (= 1 @calls) "the fresh object is normalized"))))))
 
+(t/deftest test-extract-cursor-position-reuses-unchanged-lines
+  (let [marker utils/CURSOR-MARKER
+        extract (var core/extract-cursor-position)
+        scans (atom 0)
+        index-of clojure.string/index-of]
+    (with-redefs [clojure.string/index-of
+                  (fn [s sub] (swap! scans inc) (index-of s sub))]
+      (let [a "aaaa"
+            b (str "bb" marker "cc")
+            in [a b]
+            out (extract [] [] {} in 10)
+            lines (:lines out)
+            marks (:marks out)]
+        (testing "the first pass scans every line, strips, and records the marker"
+          (t/is (= 2 @scans))
+          (t/is (= ["aaaa" "bbcc"] lines))
+          (t/is (= {:row 1 :col 2} (:cursor out)))
+          (t/is (= {1 2} marks)))
+        (testing "an unchanged frame scans nothing and keeps line identity"
+          (reset! scans 0)
+          (let [out2 (extract in lines marks in 10)]
+            (t/is (zero? @scans))
+            (t/is (identical? (nth lines 0) (nth (:lines out2) 0)))
+            (t/is (identical? (nth lines 1) (nth (:lines out2) 1)))
+            (t/is (= {:row 1 :col 2} (:cursor out2)))
+            (t/is (= {1 2} (:marks out2)))))
+        (testing "only changed lines are scanned"
+          (reset! scans 0)
+          (let [out2 (extract in lines marks [a (str "bb" marker "cc")] 10)]
+            (t/is (= 1 @scans) "the two unchanged lines are not scanned")
+            (t/is (= {:row 1 :col 2} (:cursor out2)))
+            (t/is (= {1 2} (:marks out2)))))
+        (testing "a changed marker-free line drops its marker and the cursor"
+          (reset! scans 0)
+          (let [out2 (extract in lines marks [a "bbcc"] 10)]
+            ;; prev-marks is non-empty here, so bb does not take its unmarked
+            ;; short-circuit; the loop scans the one changed line
+            (t/is (= 1 @scans))
+            (t/is (nil? (:cursor out2)))
+            (t/is (= {} (:marks out2)))))
+        (testing "a marker above the viewport is stripped but not positioned"
+          (let [out2 (extract in lines marks [b a a] 2)]
+            (t/is (= ["bbcc" "aaaa" "aaaa"] (:lines out2)))
+            (t/is (nil? (:cursor out2)) "row 0 is above the 2-line viewport")
+            (t/is (= {0 2} (:marks out2)))))
+        (testing "a content-equal but fresh string is not reused"
+          (reset! scans 0)
+          (let [a2 (subs "xaaaa" 1)
+                out2 (extract in lines marks [a2 b] 10)]
+            (t/is (= 1 @scans) "the fresh object is rescanned, the identical one is not")
+            (t/is (identical? a2 (nth (:lines out2) 0)))
+            (t/is (= ["aaaa" "bbcc"] (:lines out2)))))))))
+
 (t/deftest test-kitty-expand-gate-skips-the-walks
   (let [expand (var core/expand-changed-range-for-kitty-images)
         image-line (str "\u001b_Ga=T,f=100,i=7;AAAA" "\u001b\\")
