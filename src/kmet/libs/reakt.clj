@@ -22,7 +22,7 @@
    watches are registered through kmet.libs.weak against the reaction (the
    handler captures the registry key only, never the reaction), so an
    unreachable reaction is collected and the next sweep unsubscribes its dep
-   watches (leaks.md Stage C). Owned liveness is the flip side — a reaction
+   watches. Owned liveness is the flip side — a reaction
    nothing derefs could never be invalidated usefully — so holders that are
    themselves weak (kmet.tui.macros/track-render's per-width cache) pin the
    reactions they validate.
@@ -263,7 +263,7 @@
    short-circuits before the CAS: non-reactive derefs settle the queue on
    every read (reaction deref-fn), and the empty case is the common one —
    the swap machinery must not be its price. After a drain, a weak
-   subscription sweep runs (kmet.libs.weak, leaks.md Stage B) so headless
+   subscription sweep runs (kmet.libs.weak) so headless
    consumers that never start a TUI still reclaim collected subscribers."
   []
   (when (and (pos? (count @queue))
@@ -379,7 +379,7 @@
          exempt? (set implicit-deps)
          self (atom nil)
          watch-key (RxKey. (gensym "rx"))
-         ;; Weak-registry key (leaks.md Stage C): the dep watches and the
+         ;; Weak-registry key: the dep watches and the
          ;; unsubscribe payload hang off the REACTION, but nothing on the dep
          ;; side may capture it — the handler below closes over this key
          ;; only and finds the live reaction through the registry.
@@ -399,7 +399,7 @@
            ;; thread swapping app state), so a failure here must never
            ;; propagate into whoever wrote the dep.
            ;;
-           ;; Key-only by construction (Stage C): the reaction is resolved in
+           ;; Key-only by construction: the reaction is resolved in
            ;; the weak registry when the watch fires, never captured.
            (try
              (when-let [r (weak/subject rx-key)]
@@ -424,7 +424,7 @@
            ;; current values against the ones captured as-read to close the
            ;; write-between-read-and-watch gap.
            ;;
-           ;; Single writer for the dep set (Stage C): the registry payload
+           ;; Single writer for the dep set: the registry payload
            ;; is the record; the cell's :watching is its introspection
            ;; mirror. The payload is refreshed only when a dep was actually
            ;; added or dropped — an unconditional registry write per run is a

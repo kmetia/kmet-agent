@@ -110,7 +110,7 @@
     (let [lines (core/render c 5)]
       (t/is (.contains (first lines) "b")))))
 
-;; ─── weak registry (leaks.md Pass 2, Stage B) ─────────────────────────────
+;; ─── weak registry ─────────────────────────────
 
 (t/deftest test-live-watch-count-follows-render-and-dispose
   (t/testing "the track! registry is weak-registry backed: a live component
@@ -153,7 +153,7 @@
   (some? (weak/subject key)))
 
 (t/deftest ^:slow test-dropped-component-is-reclaimed-by-gc-and-sweep
-  (t/testing "Stage B: a component dropped without dispose (the third-party
+  (t/testing "a component dropped without dispose (the third-party
             drop-site case) is reclaimed once collected — the sweep unwatches
             its refs and removes the registry entry"
     (let [pre (macros/live-watch-count)
@@ -240,7 +240,7 @@
     (let [lines (core/render f 40)]
       (t/is (some #(.contains % "● active") lines)))))
 
-;; ─── cache pins its reactions (leaks.md Pass 2, Stage C) ─────────────────
+;; ─── cache pins its reactions ─────────────────
 
 (t/deftest test-cache-pins-its-reactions
   (t/testing "a track! cache entry is [reaction value], so a collected
@@ -302,7 +302,7 @@
          :collected? (test-utils/await-collected #(nil? (.get wref)))}))))
 
 (t/deftest ^:slow test-cache-pinned-reaction-survives-until-the-cache-is-cleared
-  (t/testing "Stage C: GC cannot collect a reaction the track! cache
+  (t/testing "GC cannot collect a reaction the track! cache
             validates; clearing the cache releases it"
     (let [{:keys [pinned? collected?]} (cache-pinned-reaction-lifecycle)]
       (t/is pinned? "the cache entry holds the reaction")

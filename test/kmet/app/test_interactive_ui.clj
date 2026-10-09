@@ -2083,9 +2083,9 @@
           (dispose-reload-fixture! fixture))))))
 
 (deftest ^:slow test-fifty-reload-cycles-leave-no-watches-behind
-  (testing "Stage B acceptance: 50 widget set+render+reset cycles keep
+  (testing "50 widget set+render+reset cycles keep
             live-watch-count flat and unwind every with-let cleanup — a
-            regression guard for the /reload drop sites Pass 1 fixed"
+            regression guard for the /reload drop sites"
     (let [baseline (macros/live-watch-count)
           {:keys [registry above cleanups widget] :as fixture} (make-reload-fixture)]
       (try

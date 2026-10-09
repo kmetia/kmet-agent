@@ -707,8 +707,8 @@ queue first and always answers the CURRENT value. Watchers fire only on
 real output changes; sticky errors rethrow without re-execution until the
 next dep change clears them.
 
-**Liveness — a reaction is kept alive by its derefers, not its deps**
-(leaks.md Stage C). Dep watches are registered weakly: the handler captures
+**Liveness — a reaction is kept alive by its derefers, not its deps.**
+Dep watches are registered weakly: the handler captures
 only the registry key and resolves the live reaction when a dep fires, so an
 unreachable reaction is collected and the next sweep (`reakt/flush!`, the
 render loop's wake) unsubscribes its dep watches. Keep a reaction for as
@@ -867,6 +867,18 @@ overlay close, reconcile removal, shutdown; implementations must be
   user cleanups and never fires while an owner still holds the record — an
   atom, a dock entry or a test holding a dead record keeps its tree, caches
   and timers alive.
+- **Mode exit is the deterministic cleanup of last resort.** Both mode
+  owners (`kmet.modes.interactive/run`, `package_manager/run-config`)
+  release the layout in a `finally`; `teardown-mode!` runs abort signals →
+  extension surfaces (`ui-reset!`) → the mode tree (pending bash,
+  overlays, dock, TUI children) → global runtime sinks → the theme watcher
+  → the reaction queue, each step exception-isolated and idempotent. Root
+  clearing is required because disposal alone cannot release process-global
+  slots, and tree disposal runs `with-let` cleanups — ordinary app cleanups
+  happen here; the weak backstop is not the mode-exit answer. Teardown
+  aborts best-effort: it does not quiesce an agent turn already in flight —
+  a late append lands in the disposed chat history, and only the weak layer
+  backstops what the abandoned work still reaches.
 - **Order is contractual**: containers dispose children first, then run
   their own cleanups — a child cleanup may still read intact parent state.
 - Child lists are replaced through `container-replace-children!` when the
@@ -1503,7 +1515,7 @@ compute created bare inside a render body instead of under `with-let`
 stateful tag whose props never settle means fresh fn literals in its props
 — the tag is patching rather than reusing.
 
-Weak-registry counters (leaks.md Pass 2): `macros/live-watch-count` (live
+Weak-registry counters: `macros/live-watch-count` (live
 track! components), `reakt/live-reaction-count` (live reactions),
 `weak/live-count` / `weak/entry-count` (all entries — the latter includes
 dead-until-swept) and `reakt/queued-count`. `macros/sweep-dead-watches!`
@@ -1668,7 +1680,12 @@ which is why the prompt fields in `login_dialog` and `session_selector`
 are tags now, not splices.
 
 The reconciler only disposes DSL-owned children; foreign records pass
-through untouched (§2.1 children rules).
+through untouched (§2.1 children rules). Dispose a foreign value of any
+shape through `protocols/dispose-component!` — it tries the value's
+`:dispose`, then the protocol's `dispose`, isolates exceptions and accepts
+a sequence (widget strips can hold multi-root trees). Reconcile and
+container disposal stay **strict**: a throwing `dispose` on a DSL-owned
+child is a real bug and should stay loud.
 
 ---
 
@@ -1855,6 +1872,45 @@ individually:
   cancel); pi is imperative (`showOverlay`), so a declarative path would
   fork every future dialog port, and extension overlays must stay
   imperative anyway.
+
+### 15.3 Evaluated from Replicant — deferred and not borrowed
+
+Recorded from the Replicant study (its working plan is in git history), so
+the analysis is not redone:
+
+- **Node lifecycle hooks + per-node memory** (`:replicant/on-mount`,
+  `:replicant/on-unmount`, `:replicant/on-render`) **— deferred, not
+  adopted.** `with-let` init/finally, a record's `dispose` and an alias
+  body already own what hooks would, and the open questions change the
+  lifecycle contract (inline hook closures break props equality; memory
+  across a display-leaf rebuild; hook ordering vs ref filling; whether
+  headless `render-lines` fires hooks; hook error policy; post-dispose
+  record semantics). Revisit only for a concrete case those paths cannot
+  express — candidates seen: per-node ticker start/stop, scroll-into-view
+  after mount, clearing a widget-owned cache on leave, extension
+  integration with an external resource.
+- **Data-driven event handlers / global dispatch** — §7 keeps input
+  imperative (focus + widgets); no declarative input props, ever.
+- **`:replicant/mounting` / `:unmounting` and async transition unmount** —
+  no CSS transitions, and async unmount would fight deterministic dispose
+  and the dock's ordered close (§5.4).
+- **Dropping components / no local state** — Replicant substitutes hooks +
+  memory for them; `with-let`, record state, refs and the apply path stay
+  (§2.4/§2.5/§5.2).
+- **The hiccup/headers/vdom tuple machinery** — the transferable part was
+  the unchanged-tree isolation (§2.3), not the encoding.
+- **`extend-via-metadata` protocol dispatch** — foreign components are
+  handled by stamps, duck typing and the `ui-custom` adapter (§2.1)
+  without the SCI risk.
+- **`hiccup/adopt`** (stamping a spliced foreign record so reconcile owns
+  it) **— rejected**: `parse-node` classifies every record as `::record`
+  regardless of `:dsl/meta`, so a body-spliced stamped record never matches
+  its previous item and is never owned; making it real needs reconciler
+  changes (§13.1 keeps the manual lifecycle instead).
+- **`tui-start` auto-teardown — rejected**: its joins are bounded derefs,
+  the incomplete-flush timer is not cleared on stop, and disposing inside
+  the primitive would forbid restart; teardown belongs to the mode owners
+  (§5.1).
 
 ## 16. Jolt backends — FFI and concurrency notes
 

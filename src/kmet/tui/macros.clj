@@ -94,8 +94,8 @@
   "reduce-kv hit check over a cache's reactive entries, keyed by cell (a
    reaction's state atom — see track-render). The entry value is
    [REACTION value]: holding the reaction pins it, so this cache can never
-   keep validating a collected reaction — the key alone would not
-   (leaks.md Stage C). True while the reaction is settled
+   keep validating a collected reaction — the key alone would not.
+   True while the reaction is settled
    (:idle/:busy/:disposed) and still holds the recorded value. :unrun and
    :dirty must run — the re-render's deref settles them — and :failed must
    rethrow there, so those miss. The cell is read through the pinned
@@ -125,9 +125,9 @@
    Atom handlers capture the component's watch KEY only and find the
    component through the weak registry, so a watch never roots a component;
    a collected component's watches are removed by the next sweep
-   (kmet.libs.weak, leaks.md Stage B). A reaction entry is
+   (kmet.libs.weak). A reaction entry is
    [REACTION value]: the entry pins the reaction, so the cache can never
-   keep validating a reaction the GC already collected (leaks.md Stage C)."
+   keep validating a reaction the GC already collected."
   [component width render-fn]
   (let [cache-atom (component-cache-atom component)
         cache @cache-atom]

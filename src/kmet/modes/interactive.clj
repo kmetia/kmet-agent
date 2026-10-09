@@ -70,7 +70,7 @@
   nil)
 
 (defn- survivor-report
-  "One line naming what teardown could not release (leaks.md 2.7): live
+  "One line naming what teardown could not release: live
    track! components, live reactions, armed timers. Timers are included
    because an armed timer roots a mode on its own — both counters can read
    zero while a ticker still holds it. nil when everything released."

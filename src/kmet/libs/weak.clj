@@ -3,7 +3,7 @@
    subject alive. Entries hold their subject through a `WeakReference`; once
    the subject is collected the reference lands on a `ReferenceQueue`, the
    next `sweep!` claims every entry whose reference cleared, and the entry's
-   `on-dead` fn unsubscribes (leaks.md 2.1).
+   `on-dead` fn unsubscribes.
 
    Consumers never close a watch handler over the subject: the handler
    captures the entry's key only, and the subject is looked up when the

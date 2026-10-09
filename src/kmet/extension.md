@@ -469,6 +469,15 @@ A failing `init` is rolled back: the loader unloads whatever was registered
 before the error and reports `{:extension nil :error msg}` — no partial state
 lingers.
 
+Unload is registration-complete, not screen-complete. `unload-extension!`
+runs `shutdown`, deregisters every registration and drops the extension's
+namespaces, but a UI surface the extension commissioned through `ui/call`
+(a still-mounted widget or dialog) keeps its component tree — and the
+extension state its closures captured — reachable until that surface is
+replaced or closed, or until `/reload` disposes it. Release what such a
+surface holds in `shutdown` or when it closes; unload alone does not reach
+it.
+
 Implementation note: the entry points above live in `kmet.app.extensions`,
 together with the registries they wire the API into. The isolation machinery
 they drive — artifact/jar discovery, class seeding, the shared SCI base,

@@ -1333,7 +1333,7 @@
               "no error line for a successful message"))))))
 
 (deftest survivor-report-lists-live-kinds
-  ;; leaks.md 2.7: the --debug exit line names what teardown could not
+  ;; the --debug exit line names what teardown could not
   ;; release — live components, live reactions and armed timers; an armed
   ;; timer alone can root a mode after both counters read zero
   (let [report #'inter/survivor-report

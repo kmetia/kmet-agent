@@ -1,5 +1,5 @@
 (ns kmet.libs.test-weak
-  "Stage A unit tests for kmet.libs.weak (leaks.md 2.1/2.8): registration and
+  "Unit tests for kmet.libs.weak: registration and
    refresh, key conflicts, unregister payloads, queue-gated sweeps and
    on-dead isolation. Collection is simulated deterministically (`.clear` +
    `.enqueue` on the entry's WeakReference, exactly what the GC does) so the
@@ -148,7 +148,7 @@
 
 (deftest live-count-filters-by-payload
   (testing "consumers sharing the registry derive their own kind's count from
-            the payload (track! components vs reactions, leaks.md Stage C)"
+            the payload (track! components vs reactions)"
     (let [ka (fresh-key)
           kb (fresh-key)]
       (weak/register! ka (Object.) {:t/kind :a} identity)

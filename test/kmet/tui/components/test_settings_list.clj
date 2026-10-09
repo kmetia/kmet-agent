@@ -309,7 +309,6 @@
 (t/deftest test-settings-list-submenu-replace-disposes-the-old
   ;; no keymap path reaches open-submenu! while a submenu is open; a
   ;; programmatic open must still not orphan the live submenu's watches
-  ;; (leaks.md Stage D)
   (let [disposed (atom [])
         opened (atom 0)
         item {:id :theme :label "Theme" :value "dark"

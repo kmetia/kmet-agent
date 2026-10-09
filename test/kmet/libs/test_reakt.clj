@@ -267,7 +267,7 @@
       (r/dispose! parent)
       (r/dispose! child))))
 
-;; ─── weak dep watches (leaks.md Pass 2, Stage C) ──────────────────────────
+;; ─── weak dep watches ──────────────────────────
 
 (deftest test-registration-lifecycle-and-dep-unwatch
   (testing "a reaction is registered at construction: its dep watch resolves
@@ -323,7 +323,7 @@
      :dep a}))
 
 (deftest ^:slow test-dropped-reaction-is-collected-and-unwatched
-  (testing "Stage C: dep watches no longer root the reaction — a dropped
+  (testing "dep watches no longer root the reaction — a dropped
             reaction is collected and the sweep unsubscribes its dep watch"
     (let [pre (r/live-reaction-count)
           {:keys [wref dep]} (make-droppable-reaction)]
