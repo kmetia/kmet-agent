@@ -1603,7 +1603,7 @@
         errors (atom [])
         fut (llm/send-message {:provider :opencode-go
                                :api-key "sk-test"
-                               :base-url (str "http://localhost:" port "/v1/chat/completions")
+                               :base-url (str "http://127.0.0.1:" port "/v1/chat/completions")
                                :model "deepseek-v4-flash"
                                :messages [{:role "user" :content "hi"}]
                                :idle-timeout-ms 1500
@@ -1649,7 +1649,7 @@
         errors (atom [])
         fut (llm/send-message {:provider :opencode-go
                                :api-key "sk-test"
-                               :base-url (str "http://localhost:" port "/v1/chat/completions")
+                               :base-url (str "http://127.0.0.1:" port "/v1/chat/completions")
                                :model "deepseek-v4-flash"
                                :messages [{:role "user" :content [{:type :text :text "hi"}]}]
                                :idle-timeout-ms 1000

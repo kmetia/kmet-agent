@@ -80,7 +80,7 @@
 (deftest deps-declare-static-archives-and-runtime-candidates
   (let [config (edn/read-string (slurp "deps.edn"))
         by-name (into {} (map (juxt :name identity) (:jolt/native config)))]
-    (is (= "0.8.16" (:jolt/min-version config)))
+    (is (= "0.8.20" (:jolt/min-version config)))
     (is (= ["crypto" "ssl"] (mapv :name (:jolt/native config))))
     (doseq [[lib-name filename] [["crypto" "libcrypto.a"] ["ssl" "libssl.a"]]
             [key prefix] [[:linux "target/jolt-native/linux/"]

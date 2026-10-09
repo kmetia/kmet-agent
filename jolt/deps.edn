@@ -25,7 +25,7 @@
  ;; The floor tracks the root deps.edn's: the latest tagged Jolt release
  ;; (jolt/README.md § Bundled-extension loader floor) — one Jolt version
  ;; story for the repo, even while the lib provides nothing.
- :jolt/min-version "0.8.16"
+ :jolt/min-version "0.8.20"
 
  :paths ["src"]
 
@@ -38,7 +38,7 @@
  ;; sci/copy-var*). The git pin is yogthos/sci @ babashka/sci#1093, the fix
  ;; for exactly that (released SCI 0.13.53 has no model for a protocol whose
  ;; methods aren't its own multimethods); move back to a Maven version once
- ;; #1093 merges and a release carries it. Verified against the floor release
+ ;; #1093 merges and a release carries it. Verified against the v0.8.20 floor
  ;; (where clojure.core/Inst exists). babashka bundles SCI, so only jolt/JVM
  ;; resolve this.
  :deps {org.babashka/sci {:git/url "https://github.com/yogthos/sci.git"

@@ -8,7 +8,7 @@ classpath ever requires a `jolt.kmet.*` namespace, and the class
 registrations below are jolt-only hooks.
 
 **EMPTY BY DESIGN.** Every JDK gap this lib was created for is runtime
-surface now (all closed upstream; `jolt-bugs.md` lists only live workarounds):
+surface now; `jolt-bugs.md` tracks the separate runtime issues:
 `HttpTimeoutException`'s
 ctor, the multi-arg `java.net.URI` ctors, `ProcessBuilder`'s `File`
 redirects, `SocketOutputStream.write(byte[])`, `LinkedBlockingQueue` and the
@@ -26,7 +26,7 @@ claimed at all; that needs the guarded-require convention instead
 member — `java.lang.Object`'s `wait`/`notify` pair (a gap until v0.8.8-53,
 now runtime surface — `kmet.tui.wake` parks on the object monitor).
 
-**Re-verified 2026-09-11 on `v0.8.6-98-g23296732`:** all six shims the lib
+**Re-verified 2026-10-09 on `v0.8.20`:** all six shims the lib
 used to carry are live in a bare Jolt — `(java.net.http.HttpTimeoutException. "x")`,
 `(java.net.URI. …7 args…)`, `redirectInput(File)`, `.write` a `byte[]` to a
 socket, `(LinkedBlockingQueue.)`, and both `URI` arities — so the lib holds
@@ -37,7 +37,7 @@ no provisions.
 kmet targets the **latest tagged Jolt release**: the root `deps.edn`
 `:jolt/min-version` and this lib's floor move to each new release tag (the
 host is young and fast-changing). `jolt.loader/embedded-root?` arrived in
-v0.8.12, below the current v0.8.16 floor, so bundled **directory**
+v0.8.12, below the current v0.8.20 floor, so bundled **directory**
 extensions always use the native loader over `embed:<prefix>` roots and
 bundled single-file resources map their namespace directly to the exact
 embedded key — no capability probe. A manifest declaring `:sci` still loads

@@ -6,6 +6,7 @@
             [babashka.process :as proc]
             [kmet.libs.concurrent :as concurrent]
             [kmet.libs.process :as process]
+            [kmet.libs.host :as host]
             [kmet.debug :as debug]))
 
 (def DEFAULT-MAX-LINES 2000)
@@ -398,19 +399,18 @@
                                 (when f
                                   (try (deref f (max 0 (- deadline (concurrent/monotonic-ms))) nil)
                                        (catch Exception _ nil)))))
-                            ;; Closing the streams releases the pipes, but the
-                            ;; JDK's process-pipe close DRAINS the pipe on the
-                            ;; calling thread: on Windows a stuck reader's
-                            ;; stream blocks there until the descendant exits —
-                            ;; exactly what this bounded drain exists to avoid.
-                            ;; A stuck reader's stream is therefore closed from
-                            ;; a background thread (pi's destroy is async);
-                            ;; the descendant's exit is what really unblocks
-                            ;; the read, and the thread ends with it. A reader
-                            ;; that already EOF'd closes on the spot.
+                            ;; Windows JVM process-pipe close drains on the
+                            ;; calling thread, so close a stuck reader from a
+                            ;; background future to preserve the bounded return.
+                            ;; Jolt 0.8.20's Windows pipe close is nonblocking
+                            ;; and defers releasing an in-flight read's buffer,
+                            ;; so close it here. A reader that already EOF'd
+                            ;; closes on the spot.
                             (doseq [[f stream] [[out-future (:out p)] [err-future (:err p)]]
                                     :when stream]
-                              (if (and f (not (future-done? f)))
+                              (if (and f
+                                       (not (future-done? f))
+                                       (not (and (host/jolt?) process/windows-os?)))
                                 (try (future (try (.close stream) (catch Exception _ nil)))
                                      (catch Exception _ nil))
                                 (try (.close stream) (catch Exception _ nil))))

@@ -1,12 +1,12 @@
-{:jolt/min-version "0.8.16"
+{:jolt/min-version "0.8.20"
  ;; Jolt's floor is the LATEST tagged release — the host is young and moves
  ;; fast, so kmet targets the newest release rather than the oldest one a
- ;; feature needs (jolt/README.md § Bundled-extension loader floor). The
- ;; line's old 0.8.11 floor was the first fixed one for :jolt/native :static
- ;; archives; 0.8.12 already carried jolt.loader/embedded-root?, the
- ;; bundled-extension native loader's floor. Static dist builds additionally
- ;; verify Jolt emitted process-symbol loads for every file-backed native, so
- ;; an older compiler cannot silently produce a dynamic-dependent artifact.
+ ;; feature needs (jolt/README.md § Bundled-extension loader floor).
+ ;; v0.8.11 was the first release with :jolt/native :static archives; v0.8.12
+ ;; added jolt.loader/embedded-root?, the bundled-extension native loader's
+ ;; floor. Static dist builds additionally verify Jolt emitted process-symbol
+ ;; loads for every file-backed native, so an older compiler cannot silently
+ ;; produce a dynamic-dependent artifact.
 
  :paths ["src" "tasks"]
  ;; tasks/ (the bb-task implementations) is a source root but deliberately NOT
@@ -105,16 +105,18 @@
         ;; connection fails. Pin the merge so the default :platform transport
         ;; works on Windows too. OpenSSL comes from jolt-crypto;
         ;; java.util.zip is runtime surface from Jolt 0.8.9.
-        ;; v0.1.0 (d99af98, PR #34's merge): PR #34 drops the stale
-        ;; java.util.concurrent.CompletableFuture claim and floors the
-        ;; library at Jolt 0.8.16 (now the floor here), and PR #33 exits its
-        ;; test runners via jolt's wait and bumps its crypto dep to v0.0.10 —
-        ;; the revision kmet's digest/HMAC classes ride on, no root pin.
-        ;; v0.0.17 and earlier printed the
-        ;; dropped-claim warning on every Jolt run (jolt-lang/http-client#32).
+        ;; v0.1.2 (00455b8, PR #36) maps request-deadline failures to
+        ;; HttpTimeoutException, fixing jolt#1282. Request deadlines have
+        ;; stopped at response headers since v0.0.14 (PR #27), preserving SSE
+        ;; idle-timeout handling. v0.1.0 (d99af98, PR #34) removed the stale
+        ;; CompletableFuture claim and set http-client's own Jolt floor to
+        ;; 0.8.16; PR #33 also exits its test runners via jolt's wait and bumps
+        ;; crypto to v0.0.10 — the
+        ;; revision kmet's digest/HMAC classes ride on, no root pin. v0.0.17
+        ;; and earlier printed the dropped-claim warning on every Jolt run.
         io.github.jolt-lang/http-client {:git/url "https://github.com/jolt-lang/http-client.git"
-                                         :git/tag "v0.1.0"
-                                         :git/sha "d99af98cc97dcb2e4afc3eee142166585a26b859"}
+                                         :git/tag "v0.1.2"
+                                         :git/sha "00455b8135861b2fd2ddbe3e7887a94e7aba5760"}
         ;; cljfmt / spec.alpha / rewrite-clj serve the format tasks
         ;; (kmet.tasks.format — one code path on both hosts) AND the fixed
         ;; bundled extension set (kmet.app.extension-libs, src/kmet/extension.md §
@@ -142,7 +144,7 @@
         parinferish/parinferish {:mvn/version "0.8.0"}
         borkdude/edamame {:mvn/version "1.6.44"}
         ;; kmet's own RFC 0014 provider lib (jolt/ dir): the JDK classes the
-        ;; jolt ecosystem lacks. Empty by design — v0.8.6-98 supplies every
+        ;; jolt ecosystem lacks. Empty by design — v0.8.20 supplies every
         ;; gap it was built for, so :jolt/provides is {} and install! is a
         ;; no-op; the scaffolding stays for the next gap. Inert on bb/JVM.
         jolt.kmet/providers {:local/root "jolt"}}
