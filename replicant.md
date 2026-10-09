@@ -219,6 +219,17 @@ new `:skips` counter exercised; measured gain on the bench.
   rule), §2.5 (the uncached-body path), §11 (`:skips`).
 - Known consequence recorded in the interaction section: pre-Stage-C
   (`leaks.md`) a stale-watch-rooted tree now retains one more tree copy.
+- Review pass: fixed a pre-existing ref race found while testing the skip.
+  `diff-items` constructs a keyed remount (filling the element's `:ref`)
+  before retiring the leftover, so the unguarded clear wiped the fresh
+  fill — the remount's ref stayed nil forever; the same wipe hit handles
+  handed between elements in one pass. Clears now go through
+  `release-ref!`, which clears only while the handle still targets the
+  component letting it go (`DslRef/-ref-target`). Tests:
+  `ref-survives-a-key-change-remount`,
+  `ref-handles-swapped-between-elements`,
+  `abandoned-ref-handle-still-clears` (all three fail on the unguarded
+  code).
 
 ---
 

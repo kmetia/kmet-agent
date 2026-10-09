@@ -378,7 +378,11 @@ Rules:
 - refs are created with `(hiccup/ref)`; reconcile fills them on construct
   and clears them when the element is disposed — or when the element stops
   declaring that handle (a replaced or dropped `:ref` prop), so an
-  abandoned handle never derefs a live component; treat as read-only;
+  abandoned handle never derefs a live component; treat as read-only.
+  Clearing is guarded: a handle is cleared only while it still points at
+  the element letting it go, so a keyed remount (the fresh instance is
+  constructed before the old one is retired) or a handle handed to another
+  element survives the old holder's exit.
 - deref only outside render bodies (handlers, effects): nil until first
   reconcile constructs the element;
 - one ref per element instance — sharing across two elements means

@@ -77,7 +77,10 @@
 (defprotocol DslRef
   "Internal surface of hiccup refs. Not for external use — reconcile
    fills and clears refs; consumers only deref."
-  (-fill-ref! [this c] "Point the ref at C (nil clears it)."))
+  (-fill-ref! [this c] "Point the ref at C (nil clears it).")
+  (-ref-target [this] "The component the ref currently points at (nil
+   when empty). Reconcile-side only — clearing a handle is correct only
+   when it still targets the component being retired/abandoned."))
 
 (defn ref
   "Create a ref handle: deref it (outside render bodies — handlers,
@@ -92,6 +95,7 @@
     (reify
       DslRef
       (-fill-ref! [_ c] (reset! cell c) nil)
+      (-ref-target [_] @cell)
       clojure.lang.IDeref
       (deref [_] @cell))))
 
@@ -1026,16 +1030,24 @@
                    (pr-str raw))
               {:child raw})))))
 
+(defn- release-ref!
+  "Clear HANDLE only while it still points at C. `diff-items` constructs a
+   keyed remount (filling the new instance's ref) before retiring the
+   leftover, and a handle can be handed to another element in one walk — an
+   old holder's exit must not wipe a handle that is no longer its own."
+  [c handle]
+  (when (and (some? handle) (identical? c (-ref-target handle)))
+    (-fill-ref! handle nil)))
+
 (defn- retire-item!
-  "Dispose an owned previous item: release its ref handle and drop the
+  "Dispose an owned previous item: release its ref handle, drop the
    reconciler bookkeeping (`:ref`, and `:nodes` — the retained previous
    tree), then dispose. Foreign items are left alone: owned elsewhere,
    merely leaving the child list."
   [{:keys [c ref owned]}]
   (when owned
     (bump! :disposals)
-    (when ref
-      (-fill-ref! ref nil))
+    (release-ref! c ref)
     (when-some [m (:dsl/meta c)]
       (swap! m assoc :ref nil :nodes nil))
     (protocols/dispose c)))
@@ -1119,18 +1131,17 @@
              :retire nil})
           (fill-ref! [c]
             ;; The element's PREVIOUS handle is stale once the element
-            ;; declares a different one (or none): clear it, or an
-            ;; abandoned handle derefs a live component forever. The
-            ;; stamp remembers the handle that must be cleared when the
-            ;; element later leaves (retire-item!).
+            ;; declares a different one (or none): release it — guarded, it
+            ;; may already point at another element. The stamp remembers the
+            ;; handle the element currently owns so removal can release it
+            ;; later (retire-item!).
             (let [prev-ref (:ref (stamped-meta c))
                   new-ref (:ref d)]
-              (when (and (some? prev-ref) (not (identical? prev-ref new-ref)))
-                (-fill-ref! prev-ref nil))
-              (when-some [r new-ref]
-                (-fill-ref! r c))
               (when-not (identical? prev-ref new-ref)
-                (remember-ref! c new-ref))))]
+                (release-ref! c prev-ref)
+                (remember-ref! c new-ref))
+              (when-some [r new-ref]
+                (-fill-ref! r c))))]
     (case (:kind d)
       ::host
       (let [container? (some? (:lens (:spec d)))

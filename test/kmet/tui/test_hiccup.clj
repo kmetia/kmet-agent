@@ -1056,6 +1056,64 @@
             "a metadata key change must not keep the old instance")
       (t/is (pos? (:disposals (h/counters)))))))
 
+(t/deftest ref-survives-a-key-change-remount
+  ;; diff-items constructs the keyed remount (filling the ref) before
+  ;; retiring the leftover; the retire must not clear a handle that now
+  ;; points at the fresh instance
+  (let [r (h/ref)
+        k (atom 0)
+        root (h/root (fn [_] [:text {:key (rag/tracked-deref k) :ref r
+                                     :padding-x 0 :padding-y 0} "same"]))]
+    (core/render root 20)
+    (let [t1 (deref r)]
+      (t/is (some? t1))
+      (swap! k inc)
+      (core/render root 20)
+      (let [t2 (deref r)]
+        (t/is (some? t2) "the remount's ref stayed filled")
+        (t/is (not (identical? t1 t2)) "and points at the new instance")
+        (core/render root 20)
+        (t/is (identical? t2 (deref r)) "and stays filled on later passes")))))
+
+(t/deftest ref-handles-swapped-between-elements
+  ;; two live elements trading handles: the first element's stale-handle
+  ;; clear must not wipe the handle it just handed to the second
+  (let [r1 (h/ref)
+        r2 (h/ref)
+        swapped (atom false)
+        root (h/root (fn [_]
+                       (let [swap? (rag/tracked-deref swapped)]
+                         [:container {}
+                          [:text {:key :a :ref (if swap? r2 r1)
+                                  :padding-x 0 :padding-y 0} "A"]
+                          [:text {:key :b :ref (if swap? r1 r2)
+                                  :padding-x 0 :padding-y 0} "B"]])))]
+    (core/render root 20)
+    (let [a1 (deref r1)
+          b1 (deref r2)]
+      (t/is (and (some? a1) (some? b1)) "both handles filled on mount")
+      (reset! swapped true)
+      (core/render root 20)
+      (t/is (identical? (deref r1) b1) "r1 followed the swap to B")
+      (t/is (identical? (deref r2) a1) "r2 followed the swap to A")
+      (core/render root 20)
+      (t/is (identical? (deref r1) b1) "and both stay filled")
+      (t/is (identical? (deref r2) a1)))))
+
+(t/deftest abandoned-ref-handle-still-clears
+  ;; the guard must not disable clearing: an element that drops its :ref
+  ;; while staying mounted releases the handle it owned
+  (let [r (h/ref)
+        show? (atom true)
+        root (h/root (fn [_] [:text {:key :x
+                                     :ref (when (rag/tracked-deref show?) r)
+                                     :padding-x 0 :padding-y 0} "x"]))]
+    (core/render root 20)
+    (t/is (some? (deref r)))
+    (reset! show? false)
+    (core/render root 20)
+    (t/is (nil? (deref r)) "the element dropping its handle clears it")))
+
 (t/deftest equal-children-still-apply-container-props
   ;; the skip covers children only: a changed STRUCTURAL prop still patches
   ;; the live container in the same pass
