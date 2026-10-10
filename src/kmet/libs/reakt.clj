@@ -103,7 +103,9 @@
   "True when REF can be a tracked dependency: IRef instances (plain atoms,
    vars — core add-watch works) or library reactive refs (reactions,
    cursors — watched through RXRef). Volatiles and delays can't take
-   watches and are never tracked."
+   watches and are never tracked. IRef stays first on both hosts: an atom
+   short-circuits on one class check, while RXRef-first pays the class
+   check after its protocol miss — and on jolt that check is 1.8 µs."
   [ref]
   (or (instance? clojure.lang.IRef ref) (satisfies? RXRef ref)))
 
@@ -130,13 +132,23 @@
    dependencies; volatiles and delays can't take watches and are skipped
    (read but never registered, here or in a running reaction). This is the
    entry point for reactive reads outside component render bodies (which
-   route through the track! rewrite)."
+   route through the track! rewrite).
+
+   Classified once per call: with a tracking scope bound the scope write
+   and record-dep! share one classification (the old shape ran one per
+   capture frame), which matters most on jolt, where each classification is
+   a 1-2 µs `instance?` against the modeled class graph."
   [ref]
   (let [v (deref ref)]
-    (when (and *tracking-scope* (trackable-ref? ref))
-      (swap! *tracking-scope* assoc ref v))
-    (when (trackable-ref? ref)
-      (record-dep! ref v))
+    (if-some [scope *tracking-scope*]
+      ;; Scope bound (the render-body frame): classify once for both
+      ;; capture frames — the scope write plus record-dep!, which adds the
+      ;; running reaction when there is one.
+      (when (trackable-ref? ref)
+        (swap! scope assoc ref v)
+        (record-dep! ref v))
+      (when (trackable-ref? ref)
+        (record-dep! ref v)))
     v))
 
 (defn add-on-dispose!
