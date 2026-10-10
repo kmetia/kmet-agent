@@ -1,6 +1,6 @@
 ;; Live render-loop frame phases: the hot path the app actually runs —
-;; render-stack → overlays → cursor → normalize → flashes → diff+emit →
-;; write — measured per frame on a real session in a virtual terminal.
+;; render-stack → overlays → lines → flashes → diff+emit → write —
+;; measured per frame on a real session in a virtual terminal.
 ;;
 ;; Usage:
 ;;   bb   scripts/kmet_frame_bench.clj <session-file> [width] [height] [scenario]
