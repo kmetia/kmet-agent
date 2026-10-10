@@ -1594,12 +1594,12 @@ cycle per measurement):
 
 ### 14.4 Applied fixes
 
-The five candidates below are applied (commits `6b286af7`, `72a63d3b`,
-`b5b82a56`, `29fc2ecf`, `23a4af82`); the §14.2/§14.3 tables are the
-as-found profile, and the after numbers here are interleaved same-machine
-A/Bs against the previous commit (`target/watching-ab.clj`,
+The six candidates below are applied (commits `6b286af7`, `72a63d3b`,
+`b5b82a56`, `29fc2ecf`, `23a4af82`, `c7066d14`); the §14.2/§14.3 tables
+are the as-found profile, and the after numbers here are interleaved
+same-machine A/Bs against the previous commit (`target/watching-ab.clj`,
 `target/storm-ab.clj`, `target/tracked-ab.clj`, `target/hit-ab.clj`,
-`target/miss-ab.clj`).
+`target/miss-ab.clj`, `target/missbuckets-ab.clj`).
 
 1. **`update-watching!`'s set-diff was O(deps²) per run.** Applied: a
    same-order identity fast path, which also skips the no-op `:watching`
@@ -1635,6 +1635,23 @@ A/Bs against the previous commit (`target/watching-ab.clj`,
    `host/jolt?` flag — `.clj` source cannot carry reader conditionals.
    Forced-miss renders: bb 5 atoms 43 → 37 µs and 20 atoms 130 → 109
    (-12%/-16%); jolt unchanged within its noise.
+6. **`track-render`'s miss path classified every tracked ref a second
+   time** (`c7066d14`, the §14.6 candidate — with its premise corrected:
+   the applied `plain-ref?` pass was ~7.1 µs per 10 refs on bb, not the
+   ~18 µs/10 of the rejected `reaction?`-based variant). Applied:
+   `*tracking-scope*` is now the two capture buckets `[atoms rx]`;
+   `tracked-deref` — which already classifies via `ref-kind` to gate
+   `record-dep!` — files each read into its bucket, `track-render` reads
+   them straight into the cache, and only the rx bucket is transformed
+   once per body run (ref → cell key for the cell-keyed hit check), empty
+   for atom-only bodies. `plain-ref?` and its `host/jolt?` flag are gone.
+   Forced-miss renders, bb 20 atoms 108.1 → 100.2 µs (-7.3%), 10 atoms +
+   10 reactions 152.9 → 145.3 (-5.0%), 20 reactions 182.8 → 179.0
+   (-2.1%), 5-ref bodies ±1%; jolt 20 atoms 608 → 483 (-21%), mixed 593 →
+   458 (-23%), 20 reactions inside the round spread (baseline 520-790,
+   after 495-599). A scope-bound deref pays ~+0.3 µs bb for the `case`
+   and bucket assoc — repaid per ref by the pass the body no longer runs
+   at its end.
 
 ### 14.5 Checked, not applied
 
@@ -1654,16 +1671,5 @@ A/Bs against the previous commit (`target/watching-ab.clj`,
   common one) already short-circuits before the CAS.
 - **`make-reaction` costs ~20 µs to construct** — relevant at
   replay/cold-render scale, hard to shrink.
-
-### 14.6 Next candidate
-
-- **Fold the ref kind into `*tracking-scope*` and delete `track-render`'s
-  classification pass.** It is the largest single miss-path chunk measured:
-  ~18 µs per 10 refs on bb and ~44 µs per 10 on jolt (scratch replica in
-  `target/small-ab.clj`; the two-map accumulator's `assoc`s dominate).
-  `tracked-deref` already evaluates the same two checks to gate the read,
-  so it can store the kind next to the value in the same swap, and only
-  `track-render` reads the scope — the shape change is local to the two
-  call sites. Worth trying before the `make-reaction` note above.
 
 
