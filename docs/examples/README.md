@@ -46,6 +46,7 @@ global agent directory can be changed with `KMET_CODING_AGENT_DIR`.
 | `:auto-compact` | Enables proactive context compaction. |
 | `:compact-token-threshold` | Optional fixed estimated-token threshold; `nil` uses the model's context window and `:compact-reserve-tokens`. |
 | `:compact-reserve-tokens`, `:keep-recent-tokens` | Context reserved for the response and recent context retained after compaction. |
+| `:compact-model-overrides` | Per-model compaction budgets keyed by the exact `"provider/modelId"`; entries take `:reserve-tokens`/`:keep-recent-tokens`, each falling back to the ordinary keys. |
 | `:retry` | Agent-level transient-error retry policy. |
 | `:steering-mode`, `:follow-up-mode` | Queue drain behavior. Defaults: steering `:all`, follow-up `:one-at-a-time`. |
 | `:loop-guard`, `:thinking-loop-guard-enabled` | Circuit breakers for repeated tool calls and repeated thinking output. |

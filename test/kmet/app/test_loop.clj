@@ -4950,8 +4950,10 @@
         (t/is (= 1 (count @seen)) "one summarization call")
         (t/is (= :xhigh (:thinking (first @seen)))
               "the compaction summary reasons at the session level (pi)")
-        (t/is (= 800 (:max-tokens (first @seen)))
-              "floor(0.8 * the reserve) caps the compaction summary (pi)")
+        (t/is (= 17184 (:max-tokens (first @seen)))
+              (str "floor(0.8 * the reserve) plus the :max-effort thinking budget "
+                   "(16384) caps the compaction summary (pi: "
+                   "adjustMaxTokensForThinking)"))
         (t/is (empty? (:tools (first @seen))) "summarization carries no tools")
         (reset! seen [])
         (with-redefs [cfg/get-api-key (fn [_] "test-key")
@@ -4972,6 +4974,85 @@
             (t/is (= 4096 (:max-tokens (first @seen)))
                   "a flat 4096-token cap (pi)")))
         (finally (fs/delete-tree dir))))))
+
+(t/deftest test-loop-compaction-model-overrides
+  ;; pi: compaction.modelOverrides — per-model reserveTokens/keepRecentTokens;
+  ;; the exact "provider/modelId" entry resolves before the ordinary settings
+  ;; and the resolved map rides the preparation (pi: preparation.settings)
+  ;; into the summarization cap.
+  (models/load-catalogs!)
+  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})]
+    (try
+      (t/testing "a matching entry drives the prep and the summarization cap"
+        (let [events (atom [])
+              seen (atom [])
+              sess (session/create-session (str dir))
+              agent (loop/make-agent-state
+                     :session sess
+                     :provider :opencode-go
+                     :model "deepseek-v4-flash"
+                     :on-event (fn [e] (swap! events conj e))
+                     :context-window 10000
+                     :compact-reserve-tokens 1000
+                     :keep-recent-tokens 40
+                     :compact-model-overrides
+                     {"opencode-go/deepseek-v4-flash"
+                      {:reserve-tokens 8000 :keep-recent-tokens 40}})]
+          (seed-context! sess 6)
+          (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                        llm/send-message
+                        (fn [opts]
+                          (swap! seen conj (select-keys opts [:max-tokens :thinking]))
+                          (future
+                            (when-let [on-text (:on-text opts)] (on-text "summary"))
+                            (when-let [on-done (:on-done opts)] (on-done :stop))
+                            :done))]
+            (binding [*err* (java.io.StringWriter.)]
+              (t/is (true? (loop/compact-context! agent nil :manual)))))
+          (t/is (= {:enabled true :reserve-tokens 8000 :keep-recent-tokens 40}
+                   (get-in (event-of events :session-before-compact)
+                           [:preparation :settings]))
+                "preparation.settings carries the resolved entry (pi)")
+          (t/is (= 6400 (:max-tokens (first @seen)))
+                "the summary cap uses the override reserve (0.8 * 8000)")))
+      (t/testing "a matching entry drives the window threshold"
+        (let [sess (session/create-session (str dir))
+              agent (loop/make-agent-state
+                     :session sess
+                     :provider :opencode-go
+                     :model "deepseek-v4-flash"
+                     :context-window 10000
+                     :compact-reserve-tokens 1000
+                     :keep-recent-tokens 40
+                     :compact-model-overrides
+                     {"opencode-go/deepseek-v4-flash" {:reserve-tokens 8000}})]
+          (dotimes [i 50]
+            (session/append-entry sess
+                                  {:role :user :content [{:type :text :text (str "msg " i)}]}))
+          (session/append-entry sess {:role :assistant :content [{:type :text :text "ok"}]
+                                      :usage {:prompt_tokens 2000 :completion_tokens 50}})
+          (t/is (true? (binding [*err* (java.io.StringWriter.)]
+                         (with-summarization-stub #(loop/maybe-compact! agent))))
+                "measured 2050 >= window-reserve 2000 — the override triggers earlier")))
+      (t/testing "a non-matching entry leaves the ordinary settings"
+        (let [sess (session/create-session (str dir))
+              agent (loop/make-agent-state
+                     :session sess
+                     :provider :opencode-go
+                     :model "deepseek-v4-flash"
+                     :context-window 10000
+                     :compact-reserve-tokens 1000
+                     :keep-recent-tokens 40
+                     :compact-model-overrides
+                     {"other-provider/m" {:reserve-tokens 8000}})]
+          (dotimes [i 50]
+            (session/append-entry sess
+                                  {:role :user :content [{:type :text :text (str "msg " i)}]}))
+          (session/append-entry sess {:role :assistant :content [{:type :text :text "ok"}]
+                                      :usage {:prompt_tokens 2000 :completion_tokens 50}})
+          (t/is (false? (loop/maybe-compact! agent))
+                "measured 2050 vs window-reserve 9000 — another model's entry must not apply")))
+      (finally (fs/delete-tree dir)))))
 
 (t/deftest test-loop-compaction-result-and-session-compact-event
   (t/testing "a successful compaction reports the pi-shaped result map on

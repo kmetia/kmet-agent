@@ -147,6 +147,23 @@ estimate of newer entries) comes within `:compact-reserve-tokens` (default
 retry. The pre-cut conversation is summarized via the LLM (structured
 Goal/Progress/Next-Steps checkpoint, updated on subsequent compactions) and
 replaced with a summary entry; `:keep-recent-tokens` (default 20000) sets how
-many recent tokens to keep. `/compact [instructions]` triggers it manually.
+many recent tokens to keep. The summary's own output is capped at
+`0.8 ×` the effective reserve, plus the session level's thinking budget
+when the model reasons, bounded by the model's maximum output tokens (pi:
+`adjustMaxTokensForThinking`). The token budgets can be tuned per model
+with `:compact-model-overrides`, a map keyed by the exact
+`"provider/modelId"` (e.g. `"opencode-go/deepseek-v4-flash"`; internal
+slashes are part of the key). Each entry takes `:reserve-tokens` and/or
+`:keep-recent-tokens` and falls back per field to the ordinary setting and
+then the built-in default (pi: `compaction.modelOverrides`) — a 1M-window
+model can reserve room for its responses without changing every other
+model:
+
+```edn
+{:compact-model-overrides
+ {"commandcode/deepseek/deepseek-v4.1-flash" {:reserve-tokens 400000}}}
+```
+
+`/compact [instructions]` triggers it manually.
 Escape aborts an in-progress compaction without cancelling the running turn
 (the turn continues on the pre-compaction context, pi: `abortCompaction`).

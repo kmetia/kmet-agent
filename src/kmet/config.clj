@@ -26,6 +26,9 @@
    ;; pi: reserveTokens — tokens reserved for prompt + response
    :compact-reserve-tokens 16384
    :keep-recent-tokens 20000
+   ;; pi: compaction.modelOverrides — per-model token budgets keyed by the
+   ;; exact "provider/modelId"; each field falls back to the keys above
+   :compact-model-overrides {}
    ;; pi: branchSummary — the summarized branch entries are budgeted to the
    ;; context window minus :reserve-tokens; :skip-prompt skips the
    ;; "Summarize branch?" question (default: no summary)
@@ -572,6 +575,70 @@
                         ;; :retry falls back to the config (project override)
                         (assoc config :retry (get settings :retry (:retry config)))
                         config)))
+
+;; ─── Compaction token settings (pi: getCompactionSettings) ───────────────
+
+(def ^:private compaction-token-defaults
+  "pi: DEFAULT_COMPACTION_TOKEN_SETTINGS."
+  {:reserve-tokens 16384 :keep-recent-tokens 20000})
+
+(defn- valid-compaction-token?
+  "pi: a non-negative safe integer (kmet values are integers, so the
+   non-negative check suffices)."
+  [v]
+  (and (integer? v) (not (neg? v))))
+
+(defn- invalid-compaction-setting!
+  [label value expected]
+  (throw (ex-info (str "Invalid " label " setting: " (pr-str value)
+                       ". Expected " expected ".")
+                  {:type :invalid-compaction-setting
+                   :setting label
+                   :value value})))
+
+(defn- compaction-token-setting
+  "One compaction token field for MODEL-KEY (pi:
+   SettingsManager.getCompactionTokenSetting): the matching
+   :compact-model-overrides entry's OVERRIDE-KEY, else the ordinary
+   ORDINARY-KEY, else the built-in default. Non-nil invalid values error
+   like pi — the ordinary field is validated even when the model entry
+   provides a value, and the matching entry must be a map."
+  [config model-key ordinary-key override-key]
+  (let [ordinary (get config ordinary-key)
+        entry (get (:compact-model-overrides config) model-key)
+        override (get entry override-key)]
+    (when (and (some? ordinary) (not (valid-compaction-token? ordinary)))
+      (invalid-compaction-setting! (pr-str ordinary-key) ordinary
+                                   "a non-negative integer"))
+    (when (and (some? entry) (not (map? entry)))
+      (invalid-compaction-setting! (str ":compact-model-overrides["
+                                        (pr-str model-key) "]")
+                                   entry "an object"))
+    (when (and (some? override) (not (valid-compaction-token? override)))
+      (invalid-compaction-setting! (str ":compact-model-overrides["
+                                        (pr-str model-key) "]."
+                                        (name override-key))
+                                   override "a non-negative integer"))
+    (cond
+      (some? override) override
+      (some? ordinary) ordinary
+      :else (get compaction-token-defaults override-key))))
+
+(defn get-compaction-settings
+  "Effective compaction settings for PROVIDER/MODEL-ID (pi:
+   settings-manager getCompactionSettings): :enabled mirrors :auto-compact
+   (default true), and each token field resolves through the exact
+   \"provider/modelId\" :compact-model-overrides entry, then the ordinary
+   :compact-reserve-tokens / :keep-recent-tokens, then the built-in
+   default. Returns {:enabled bool :reserve-tokens n :keep-recent-tokens
+   n}."
+  [config provider model-id]
+  (let [model-key (str (name provider) "/" model-id)]
+    {:enabled (boolean (get config :auto-compact true))
+     :reserve-tokens (compaction-token-setting config model-key
+                                               :compact-reserve-tokens :reserve-tokens)
+     :keep-recent-tokens (compaction-token-setting config model-key
+                                                   :keep-recent-tokens :keep-recent-tokens)}))
 
 (defn get-branch-summary-settings
   "Branch-summary settings (pi: settings-manager branchSummary block —

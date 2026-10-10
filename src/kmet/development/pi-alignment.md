@@ -227,7 +227,9 @@ http-idle-timeout-ms/system-prompt/append-system-prompt/retry
 auto-compact/show-cache-miss-notices/
 tree-filter-mode/output-pad/editor-padding-x/autocomplete-max-visible/
 show-hardware-cursor/enable-skill-commands/extensions/skills/prompts/themes dirs,
-compaction thresholds, branch summarization (`:branch-summary` —
+compaction thresholds + per-model token overrides (`:compact-model-overrides`
+— pi `compaction.modelOverrides`, exact `"provider/modelId"` keys), branch
+summarization (`:branch-summary` —
 `:reserve-tokens`/`:skip-prompt`), terminal display (`:terminal` — show-images /
 image-width-cells / clear-on-shrink), terminal progress
 (`:show-terminal-progress`), provider image blocking (`:images` — block-images),
@@ -397,7 +399,7 @@ Full pi parity in `loop/summarize!` and `loop/generate-branch-summary` (pi
 | `getSummarizationFailure` — `<label> failed: <errorMessage or Unknown error>`, `<label> failed: generation hit the token cap and the summary is incomplete` | ✅ `compaction/summarization-failure` (labels `Summarization` / `Branch summarization`), plus pi's tool-call guard (`… attempted to call a tool`) |
 | call-site failure text: `Compaction failed: …` (manual), `Auto-compaction failed: …` (threshold), `Context overflow recovery failed: …` (overflow) | ✅ `compaction/compaction-failure-message` — the cause rides `:compaction-end`, `:session-compact-failed`, and `/compact`'s error path (kmet previously emitted a fixed string with no cause) |
 | `createSummarizationOptions` — `reasoning = thinkingLevel` unless `off` (compaction); branch summaries pass no reasoning | ✅ `summarize!` passes the session thinking level, the branch summary none |
-| output cap `min(floor(0.8 * reserveTokens), model.maxTokens)` (compaction); a flat `4096` (branch) | ✅ same |
+| output cap `min(floor(0.8 * reserveTokens), model.maxTokens)` (compaction); a flat `4096` (branch) | ✅ same, and the compaction cap adds the session level's thinking budget when the model reasons (`loop/summarization-max-tokens` via `shared/thinking-budget-for` + `clamp-reasoning` — pi `adjustMaxTokensForThinking`). pi adds it inside the anthropic/Bedrock builders; kmet adds it in the compaction cap, so openai-completions — where reasoning and the summary share one ceiling — keeps the summary's allowance too (deviation: pi sends only the text cap there, which a deep-thinking model can exhaust, stopping the summary `length`) |
 | branch entries budgeted to `contextWindow - branchSummary.reserveTokens`, newest whole entries first, a summary entry still joining under 90% (`prepareBranchEntries`); nothing fits → `"No content to summarize"` with no call | ✅ `compaction/prepare-branch-entries` (kmet collects no file lists) |
 | an empty response is appended (compaction) / yields the preamble alone (branch) | ✅ same, with a debug log |
 | a manual compaction of an already-compacted session fails with `Already compacted`; the automatic paths stay silent | ✅ same |
@@ -405,11 +407,12 @@ Full pi parity in `loop/summarize!` and `loop/generate-branch-summary` (pi
 | `compact()` / `_runAutoCompaction` catch any error and still emit `compaction_end` + `session_compact_failed` (no error message when the abort signal fired), rethrowing only to the caller | ✅ an escaping exception is caught the same way (`:failed`, or `:aborted` when a cancel signal had fired), logged via `debug/log-error`, and reported through the same events |
 | a summarization call that *throws* (auth resolution, the context hook, request setup) propagates out of `retryAssistantCall` unretried into that catch | deviation: `summarization-call` normalizes the throw to an `:error` result, so the retry classifier applies — the call re-resolves auth per attempt, so a transient throw (a token refresh over a dead proxy) is worth retrying |
 
-One deviation is kept in this area (the synchronous-throw normalization
-above); otherwise the summarization auth decision is delegated
-to the LLM layer (`No API key for …` surfaces as the cause) rather than a
-pre-call guard, matching pi's thrown auth error while also covering an
-oauth-bearer credential.
+Two deviations are kept in this area: the synchronous-throw normalization
+above, and the thinking headroom added to the compaction output cap for
+every API (pi adds it only in its anthropic/Bedrock builders). Otherwise
+the summarization auth decision is delegated to the LLM layer (`No API key
+for …` surfaces as the cause) rather than a pre-call guard, matching pi's
+thrown auth error while also covering an oauth-bearer credential.
 
 ## Appendix: Event type vocabulary
 
@@ -420,7 +423,7 @@ pi events (`core/extensions/types.ts`) → kmet status (`app/event_bus.clj` `eve
 | `session_start` | ✅ `:session-start` | reason startup/reload/new/resume/fork; kmet lacks `reload` reason flag granularity |
 | `session_info_changed` | ✅ `:session-info-changed` | emitted by `/name` |
 | `session_before_switch` / `session_before_fork` | ✅ `:session-before-switch` / `:session-before-fork` | both emitted by `/switch` and `/fork` (reason :user/:auto), cancelable — handlers return {:cancel true} |
-| `session_before_compact` / `session_compact` / `session_compact_failed` | ✅ `:session-before-compact` / `:session-compact` / `:session-compact-failed` | the before-event is cancelable and may supply the content (`{:compaction {:summary … :first-kept-id … :tokens-before … :usage … :details …}}` — the entry then records `:from-hook`, and every event carries `:from-extension`); `:session-compact` carries the appended entry, and `:session-compact-failed` the cause behind pi's reason prefix (`Compaction failed: …` / `Auto-compaction failed: …` / `Context overflow recovery failed: …`) with `:will-retry false`; `:compaction-end` carries the pi-shaped result map. Dispatch parity: the threshold check also runs post-run, between `:agent-end` and the pre-settle boundary (pi: `_handlePostAgentRun` → `_checkCompaction`); the summarization call parity (retry policy, events, thinking level, caps, budget) is in §8 |
+| `session_before_compact` / `session_compact` / `session_compact_failed` | ✅ `:session-before-compact` / `:session-compact` / `:session-compact-failed` | the before-event is cancelable and may supply the content (`{:compaction {:summary … :first-kept-id … :tokens-before … :usage … :details …}}` — the entry then records `:from-hook`, and every event carries `:from-extension`; the preparation's `:settings` is the resolved CompactionSettings (`:enabled` + the per-model token budget) — pi: `preparation.settings`); `:session-compact` carries the appended entry, and `:session-compact-failed` the cause behind pi's reason prefix (`Compaction failed: …` / `Auto-compaction failed: …` / `Context overflow recovery failed: …`) with `:will-retry false`; `:compaction-end` carries the pi-shaped result map. Dispatch parity: the threshold check also runs post-run, between `:agent-end` and the pre-settle boundary (pi: `_handlePostAgentRun` → `_checkCompaction`); the summarization call parity (retry policy, events, thinking level, caps, budget) is in §8 |
 | `session_before_tree` / `session_tree` | ✅ `:session-before-tree` / `:session-tree` | incl. cancel/summary/extension-summary results |
 | `ContextEditEntry` / `appendContextEdit` | ✅ | the append-only per-message context edit: a `:context-edit` session entry omits (`:replacement nil`) or rewrites (`{:content …}`) one earlier message in the provider projection while the raw branch, usage totals, replay and the TUI keep it; committed through the actionable boundaries' `:entries` or `kmet.app.loop/append-context-edit!`, applied by `session/build-context-messages` (pi: `buildSessionProjection`), installed as the request context before every provider request (pi: `_installAgentRequestProjection`), durably omitted for a recovered attempt (pi: `_omitRecoveryAttempt`), and followed by the compaction input and its reported count (pi: `findProjectedCutPoint` / `getMessagesFromProjectedEntryForCompaction`); the boundaries carry `:message-entry-id`/`:tool-result-entry-ids` plus the projection preview (pi: `BoundaryContextPreview`). Residuals: the preview is computed once per dispatch (pi rebuilds it per handler with the accumulated drafts), `:llm-messages` is the provider-agnostic part of pi's `convertToLlm`, and `findProjectedCutPoint`'s recovery-omission-suffix advance is not ported |
 | `session_shutdown` | ✅ `:session-shutdown` | emitted by `/reload` (reason reload) and `/new` (reason new, target-session-file) before the extension runtime is torn down (pi: teardownCurrent / session.reload) |

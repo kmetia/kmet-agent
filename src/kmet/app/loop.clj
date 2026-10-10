@@ -196,7 +196,9 @@
          :compact-token-threshold, :auto-compact (default true, pi:
          autoCompact), :context-window, :compact-reserve-tokens (default 16384,
          pi: reserveTokens), :keep-recent-tokens (default 20000, pi:
-         keepRecentTokens), :http-idle-timeout-ms (default 120000, pi:
+         keepRecentTokens), :compact-model-overrides (default {} — pi
+         compaction.modelOverrides, exact \"provider/modelId\" keys),
+         :http-idle-timeout-ms (default 120000, pi:
          httpIdleTimeoutMs; 0 disables), :http-total-timeout-ms (default 0
          disables the total deadline; nil follows the idle timeout),
          :block-images (default false, pi: images.blockImages — strip image
@@ -204,7 +206,7 @@
          :default-tools (resolved :default-tools selection — the built-in
          tools active at startup, pi: defaultTools; nil = every built-in
          active, see kmet.app.tools.registry/resolve-default-tools)"
-  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms max-agent-delay-ms branch-summary-reserve-tokens before-tool-call after-tool-call system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools]
+  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms max-agent-delay-ms branch-summary-reserve-tokens before-tool-call after-tool-call system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens compact-model-overrides http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools]
       :or {provider :opencode-go
            thinking :off
            steering-mode :all
@@ -216,6 +218,7 @@
            scoped-models []
            compact-reserve-tokens 16384
            keep-recent-tokens 20000
+           compact-model-overrides {}
            http-idle-timeout-ms 120000
            http-total-timeout-ms 0
            block-images false
@@ -271,6 +274,7 @@ Be precise and concise in your responses."}}]
                     :compact-token-threshold compact-token-threshold
                     :compact-reserve-tokens compact-reserve-tokens
                     :keep-recent-tokens keep-recent-tokens
+                    :compact-model-overrides compact-model-overrides
                     :branch-summary-reserve-tokens branch-summary-reserve-tokens
                     :compacting? (atom false)
                     :compaction-signal (atom false)
@@ -1478,6 +1482,36 @@ Be precise and concise in your responses."}}]
         (doseq [s signals]
           (when s (remove-watch s watch-key)))))))
 
+(defn- compaction-settings
+  "Effective compaction settings for the agent's current model (pi:
+   settings-manager getCompactionSettings — the exact \"provider/modelId\"
+   :compact-model-overrides entry beats the ordinary
+   :compact-reserve-tokens / :keep-recent-tokens, each field
+   independently). Resolved per call, so a model switch takes effect on the
+   next check or compaction; :enabled mirrors the live :auto-compact
+   toggle."
+  [agent]
+  (cfg/get-compaction-settings
+   (assoc (select-keys agent [:compact-reserve-tokens :keep-recent-tokens
+                              :compact-model-overrides])
+          :auto-compact (boolean (:auto-compact @(:cfg agent))))
+   @(:provider agent)
+   @(:model agent)))
+
+(defn- summarization-max-tokens
+  "The summarization call's output cap (pi: generateSummaryWithUsage's
+   maxTokens plus adjustMaxTokensForThinking): floor(0.8 * SETTINGS'
+   :reserve-tokens) for the summary text, plus the session's thinking
+   budget when MODEL reasons (shared/thinking-budget-for), bounded by
+   MODEL's own maximum output. Reasoning tokens count against the same
+   ceiling, so without the allowance a deep-thinking session spends the
+   summary's budget on reasoning and generation stops `length` — an
+   incomplete summary the caller rejects."
+  [settings model thinking]
+  (let [base (long (Math/floor (* 0.8 (:reserve-tokens settings))))
+        cap (+ base (shared/thinking-budget-for model thinking))]
+    (min cap (or (:max-tokens model) cap))))
+
 (defn- summarize!
   "LLM summarization of the pre-cut entries (pi: generateSummaryWithUsage via
    completeSummarization, retried with the configured retry policy). Returns
@@ -1489,13 +1523,8 @@ Be precise and concise in your responses."}}]
    is left untouched)."
   [agent prep & [custom-instructions reason]]
   (let [provider @(:provider agent)
-        ;; pi: the summarization call caps its output at
-        ;; min(floor(0.8 * reserveTokens), model.maxTokens) — the summary
-        ;; must never consume the context budget or overflow the window
-        max-tokens (let [reserve (or (:compact-reserve-tokens agent) 16384)]
-                     (when-let [mrec (models/get-model provider @(:model agent))]
-                       (min (long (Math/floor (* 0.8 reserve)))
-                            (or (:max-tokens mrec) (long (Math/floor (* 0.8 reserve)))))))
+        max-tokens (when-let [mrec (models/get-model provider @(:model agent))]
+                     (summarization-max-tokens (:settings prep) mrec @(:thinking agent)))
         signals [(:signal agent) (:compaction-signal agent)]
         msgs (compaction/summarization-messages
               (:messages prep) (:previous-summary prep) custom-instructions)
@@ -1724,7 +1753,9 @@ Be precise and concise in your responses."}}]
                   (if (compaction-aborted? agent)
                     :aborted
                     (let [entries (session/get-branch sess)
-                          prep (compaction/prepare entries (or (:keep-recent-tokens agent) 20000))]
+                          settings (compaction-settings agent)
+                          prep (some-> (compaction/prepare entries (:keep-recent-tokens settings))
+                                       (assoc :settings settings))]
                       (if (or (nil? prep) (empty? (:messages prep)))
                         ;; pi: compact() separates an already-compacted session
                         ;; from one with nothing to summarize
@@ -1865,7 +1896,7 @@ Be precise and concise in your responses."}}]
           projected-msgs (vec (mapcat :messages projected))
           token-threshold (:compact-token-threshold agent)
           window (:context-window @(:cfg agent))
-          reserve (:compact-reserve-tokens agent)
+          reserve (:reserve-tokens (compaction-settings agent))
           window-reserve (when window (- window reserve))
           ;; Measure the context that would be sent, not the whole file:
           ;; compaction is append-only, so the full branch never shrinks —

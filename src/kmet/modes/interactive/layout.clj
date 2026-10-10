@@ -534,6 +534,7 @@
             :default-tools default-tools
             :context-window ctx-window
             :compact-reserve-tokens (or (:compact-reserve-tokens config) 16384)
+            :compact-model-overrides (:compact-model-overrides config)
             :branch-summary-reserve-tokens (or (:reserve-tokens
                                                 (cfg/get-branch-summary-settings config))
                                                16384)

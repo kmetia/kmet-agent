@@ -482,6 +482,74 @@
               "user :http-transport :curl is applied")))
     (finally (http/set-transport! :platform))))
 
+(t/deftest test-get-compaction-settings
+  (t/testing "built-in defaults when both ordinary settings are absent"
+    (t/is (= {:enabled true :reserve-tokens 16384 :keep-recent-tokens 20000}
+             (cfg/get-compaction-settings {} :opencode-go "m"))))
+  (t/testing ":enabled mirrors :auto-compact (pi: getCompactionEnabled)"
+    (t/is (false? (:enabled (cfg/get-compaction-settings
+                             {:auto-compact false} :opencode-go "m")))))
+  (t/testing "ordinary settings"
+    (t/is (= {:enabled true :reserve-tokens 8192 :keep-recent-tokens 5000}
+             (cfg/get-compaction-settings {:compact-reserve-tokens 8192
+                                           :keep-recent-tokens 5000}
+                                          :opencode-go "m"))))
+  (t/testing "the matching entry wins field by field (pi: compaction.modelOverrides)"
+    (t/is (= {:enabled true :reserve-tokens 400000 :keep-recent-tokens 5000}
+             (cfg/get-compaction-settings
+              {:compact-reserve-tokens 8192
+               :keep-recent-tokens 5000
+               :compact-model-overrides {"opencode-go/m" {:reserve-tokens 400000}}}
+              :opencode-go "m")))
+    (t/is (= {:enabled true :reserve-tokens 16384 :keep-recent-tokens 4000}
+             (cfg/get-compaction-settings
+              {:compact-model-overrides {"opencode-go/m" {:keep-recent-tokens 4000}}}
+              :opencode-go "m"))
+          "an entry field alone overrides; the other falls back independently"))
+  (t/testing "zero is a valid token value (pi: reserveTokens 0)"
+    (t/is (= {:enabled true :reserve-tokens 0 :keep-recent-tokens 0}
+             (cfg/get-compaction-settings
+              {:compact-model-overrides {"opencode-go/m" {:reserve-tokens 0
+                                                          :keep-recent-tokens 0}}}
+              :opencode-go "m"))))
+  (t/testing "keys are exact \"provider/modelId\" strings, slashes included"
+    (t/is (= {:enabled true :reserve-tokens 8192 :keep-recent-tokens 20000}
+             (cfg/get-compaction-settings
+              {:compact-reserve-tokens 8192
+               :compact-model-overrides {"opencode-go/m" {:reserve-tokens 400000}}}
+              :other "m"))
+          "a provider mismatch leaves the ordinary setting")
+    (t/is (= {:enabled true :reserve-tokens 400000 :keep-recent-tokens 20000}
+             (cfg/get-compaction-settings
+              {:compact-model-overrides {"commandcode/deepseek/v4.1-flash"
+                                         {:reserve-tokens 400000}}}
+              :commandcode "deepseek/v4.1-flash"))
+          "slashes inside the model id are part of the key"))
+  (t/testing "invalid values error when read (pi)"
+    (t/is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Invalid :compact-reserve-tokens setting"
+                            (cfg/get-compaction-settings
+                             {:compact-reserve-tokens -1} :opencode-go "m")))
+    (t/is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Invalid :keep-recent-tokens setting"
+                            (cfg/get-compaction-settings
+                             {:keep-recent-tokens "big"
+                              :compact-model-overrides
+                              {"opencode-go/m" {:keep-recent-tokens 1}}}
+                             :opencode-go "m"))
+          "the ordinary field is validated even when the entry supplies a value")
+    (t/is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Invalid :compact-model-overrides\[\"opencode-go/m\"\]"
+                            (cfg/get-compaction-settings
+                             {:compact-model-overrides
+                              {"opencode-go/m" {:reserve-tokens 1.5}}}
+                             :opencode-go "m")))
+    (t/is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Invalid :compact-model-overrides\[\"opencode-go/m\"\]"
+                            (cfg/get-compaction-settings
+                             {:compact-model-overrides {"opencode-go/m" 5}}
+                             :opencode-go "m")))))
+
 (t/deftest test-get-retry-settings
   (t/testing "defaults when :retry is absent"
     (t/is (= {:enabled true :max-retries 3 :base-delay-ms 2000

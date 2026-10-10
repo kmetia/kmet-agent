@@ -7,6 +7,10 @@
  :compact-token-threshold nil
  :compact-reserve-tokens 16384
  :keep-recent-tokens 20000
+ ;; per-model compaction budgets, keyed by the exact "provider/modelId";
+ ;; each field falls back to the ordinary keys above
+ ;; (pi: compaction.modelOverrides)
+ :compact-model-overrides {}
  :retry {:enabled true
          :max-retries 3
          :base-delay-ms 2000}

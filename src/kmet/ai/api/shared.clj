@@ -671,6 +671,20 @@
 
 (def min-answer-tokens 1024)
 
+(defn clamp-reasoning
+  "pi clampReasoning: xhigh/max collapse to high, the levels a budget-based
+   thinking config knows; every other level (and nil) passes through."
+  [effort]
+  (if (contains? #{:xhigh :max} effort) :high effort))
+
+(defn thinking-budget-for
+  "Thinking-token budget of session LEVEL on MODEL (pi
+   thinkingBudgetForLevel): 0 when thinking is off or the model does not
+   reason; an unsupported level clamps to the model's highest, and
+   xhigh/max use the high budget (pi clampReasoning)."
+  [model level]
+  (get thinking-budgets (clamp-reasoning (effective-effort model level)) 0))
+
 (defn anthropic-adaptive-effort
   "pi mapThinkingLevelToEffort: the adaptive output_config effort — the
    model's thinking-level-map value when mapped, else the level collapsed to
@@ -697,7 +711,7 @@
       {:thinking {:type "adaptive" :display "summarized"}
        :output_config {:effort (anthropic-adaptive-effort model effort)}
        :max-tokens (or (:max-tokens model) 4096)}
-      (let [level (if (contains? #{:xhigh :max} effort) :high effort)
+      (let [level (clamp-reasoning effort)
             budget (get thinking-budgets level 0)
             max-tokens (or (:max-tokens model) 4096)
             budget (min budget (max 0 (- max-tokens min-answer-tokens)))]

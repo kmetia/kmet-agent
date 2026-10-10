@@ -860,8 +860,10 @@ Three events fire **before** session mutations; handlers may return
                        ; the preparation is the projection-aware pi
                        ; CompactionPreparation: :messages are the projected
                        ; messages to summarize (an omitted message is absent,
-                       ; a rewritten one carries its replacement) and
-                       ; :tokens-before counts the projection
+                       ; a rewritten one carries its replacement),
+                       ; :tokens-before counts the projection, and :settings
+                       ; is the resolved CompactionSettings
+                       ; ({:enabled :reserve-tokens :keep-recent-tokens})
 
 ;; after a successful compaction — the appended rollup entry
 (ext/on-event api :session-compact

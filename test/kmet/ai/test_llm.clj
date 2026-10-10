@@ -1095,6 +1095,32 @@
              (@#'shared/anthropic-thinking (tmodel :max-tokens nil) :low))
           "legacy anthropic (no max-tokens) falls back to 4096")))
 
+(t/deftest test-thinking-budget-for
+  (let [model (tmodel)
+        extended (tmodel :tlm {:xhigh "xhigh" :max "max"})]
+    (t/is (= 1024 (@#'shared/thinking-budget-for model :minimal)))
+    (t/is (= 2048 (@#'shared/thinking-budget-for model :low)))
+    (t/is (= 8192 (@#'shared/thinking-budget-for model :medium)))
+    (t/is (= 16384 (@#'shared/thinking-budget-for model :high)))
+    (t/is (= 16384 (@#'shared/thinking-budget-for extended :xhigh))
+          "xhigh collapses to the high budget (pi clampReasoning)")
+    (t/is (= 16384 (@#'shared/thinking-budget-for extended :max))
+          "max collapses to the high budget (pi clampReasoning)")
+    (t/is (= 16384 (@#'shared/thinking-budget-for model :xhigh))
+          "an unsupported level first clamps to the highest supported one")
+    (t/is (= 0 (@#'shared/thinking-budget-for model :off)))
+    (t/is (= 0 (@#'shared/thinking-budget-for model nil)))
+    (t/is (= 0 (@#'shared/thinking-budget-for (tmodel :reasoning false) :high))
+          "a non-reasoning model has no thinking budget")))
+
+(t/deftest test-clamp-reasoning
+  (t/is (= :high (@#'shared/clamp-reasoning :xhigh)))
+  (t/is (= :high (@#'shared/clamp-reasoning :max)))
+  (t/is (= :medium (@#'shared/clamp-reasoning :medium)))
+  (t/is (= :off (@#'shared/clamp-reasoning :off)))
+  (t/is (nil? (@#'shared/clamp-reasoning nil))
+        "nil passes through (pi clampReasoning)"))
+
 (t/deftest test-google-thinking-config
   (let [gemini-pro (tmodel :id "gemini-3.1-pro"
                            :tlm {:off nil :minimal nil :low "LOW" :medium nil :high "HIGH"})]

@@ -7,7 +7,7 @@
    [clojure.string :as str]
    [kmet.libs.aws-sigv4 :as aws-sigv4]
    [kmet.ai.constrained-sampling :as cs]
-   [kmet.ai.api.shared :refer [anthropic-adaptive-effort bash-execution-text content-text getenv image-block? min-answer-tokens apply-before-provider-request-hook request-headers responses-events-handler thinking-budgets effective-total-timeout-ms transport-error-message]]))
+   [kmet.ai.api.shared :refer [anthropic-adaptive-effort bash-execution-text clamp-reasoning content-text getenv image-block? min-answer-tokens apply-before-provider-request-hook request-headers responses-events-handler thinking-budgets effective-total-timeout-ms transport-error-message]]))
 
 (defn bedrock-is-claude?
   "pi isAnthropicClaudeModel: id/name mention Anthropic Claude (also matches
@@ -224,7 +224,7 @@
       (if (bedrock-supports-adaptive-thinking? model)
         {:thinking {:type "adaptive" :display display}
          :output_config {:effort (anthropic-adaptive-effort model effort)}}
-        (let [level (if (contains? #{:xhigh :max} effort) :high effort)
+        (let [level (clamp-reasoning effort)
               budget (min (get thinking-budgets level 0)
                           (max 0 (- (or (:max-tokens model) 4096) min-answer-tokens)))]
           {:thinking {:type "enabled" :budget_tokens budget :display display}
