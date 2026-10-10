@@ -134,21 +134,17 @@
    entry point for reactive reads outside component render bodies (which
    route through the track! rewrite).
 
-   Classified once per call: with a tracking scope bound the scope write
-   and record-dep! share one classification (the old shape ran one per
-   capture frame), which matters most on jolt, where each classification is
-   a 1-2 µs `instance?` against the modeled class graph."
+   Classified once per call and shared by both capture frames, which
+   matters most on jolt, where each classification is a 1-2 µs `instance?`
+   against the modeled class graph."
   [ref]
   (let [v (deref ref)]
-    (if-some [scope *tracking-scope*]
-      ;; Scope bound (the render-body frame): classify once for both
-      ;; capture frames — the scope write plus record-dep!, which adds the
-      ;; running reaction when there is one.
-      (when (trackable-ref? ref)
-        (swap! scope assoc ref v)
-        (record-dep! ref v))
-      (when (trackable-ref? ref)
-        (record-dep! ref v)))
+    (when (trackable-ref? ref)
+      ;; Record the read in the tracking scope when one is bound, then in
+      ;; the running reaction (record-dep! no-ops without one).
+      (when-some [scope *tracking-scope*]
+        (swap! scope assoc ref v))
+      (record-dep! ref v))
     v))
 
 (defn add-on-dispose!
@@ -297,9 +293,10 @@
                 (try
                   ;; A settled entry still carries :queued?; clear it (the
                   ;; run path clears its own) so a later change can re-enqueue.
-                  (if (#{:idle :failed} (:state @(-cell r)))
-                    (swap! (-cell r) dissoc :queued?)
-                    (-force-run r))
+                  (let [c (-cell r)]
+                    (if (#{:idle :failed} (:state @c))
+                      (swap! c dissoc :queued?)
+                      (-force-run r)))
                   (catch Throwable e
                     (when-not @error
                       (vreset! error e)))))
@@ -457,14 +454,12 @@
            ;; current values against the ones captured as-read to close the
            ;; write-between-read-and-watch gap.
            ;;
-           ;; Single writer for the dep set: the registry payload
-           ;; is the record; the cell's :watching is its introspection
-           ;; mirror. The payload is refreshed only when a dep was actually
-           ;; added or dropped — an unconditional registry write per run is a
-           ;; hot-path cost for nothing. The same-order fast path (the
-           ;; common re-run) skips the diff, the cell write and the registry
-           ;; write alike: the watch set already matches what was read, so
-           ;; there is nothing to watch, unwatch or check.
+           ;; Single writer for the dep set: the registry payload is the
+           ;; record; the cell's :watching is its introspection mirror. The
+           ;; payload is refreshed only when a dep was actually added or
+           ;; dropped — an unconditional registry write per run is a
+           ;; hot-path cost for nothing. The same-order fast path skips the
+           ;; diff, the cell write and the registry write alike.
            (let [collected (vec collected)
                  {:keys [watching]} (weak/payload rx-key)
                  watching (or watching (:watching @cell))]
