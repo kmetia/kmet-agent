@@ -189,21 +189,20 @@
                                            (if (neg? fc) i fc)
                                            i))))
                               [acc marks fc lc])))
-             [out marks prefix-first prefix-last]
-             (let [[acc marks fc lc]
-                   (if (and (vector? lines) (vector? prev-raw) (>= n prev-count))
-                     ;; The shared prefix in native chunks, then the appended
-                     ;; tail (the chunk is empty at and past PREV-COUNT).
-                     (loop [a 0, acc (transient []), marks {}, fc -1, lc -1]
-                       (let [b (min prev-count (+ a chunk-lines))]
-                         (if (< a b)
-                           (if (= (subvec prev-raw a b) (subvec lines a b))
-                             (recur b (reduce conj! acc (subvec prev-out a b)) marks fc lc)
-                             (let [[acc marks fc lc] (scan-range a b acc marks fc lc)]
-                               (recur b acc marks fc lc)))
-                           (scan-range prev-count n acc marks fc lc))))
-                     (scan-range 0 n (transient []) {} -1 -1))]
-               [(persistent! acc) marks fc lc])
+             [acc marks prefix-first prefix-last]
+             (if (and (vector? lines) (vector? prev-raw) (>= n prev-count))
+               ;; The shared prefix in native chunks, then the appended
+               ;; tail (the chunk is empty at and past PREV-COUNT).
+               (loop [a 0, acc (transient []), marks {}, fc -1, lc -1]
+                 (let [b (min prev-count (+ a chunk-lines))]
+                   (if (< a b)
+                     (if (= (subvec prev-raw a b) (subvec lines a b))
+                       (recur b (reduce conj! acc (subvec prev-out a b)) marks fc lc)
+                       (let [[acc marks fc lc] (scan-range a b acc marks fc lc)]
+                         (recur b acc marks fc lc)))
+                     (scan-range prev-count n acc marks fc lc))))
+               (scan-range 0 n (transient []) {} -1 -1))
+             out (persistent! acc)
              ;; A previous marker stays valid exactly while its line's
              ;; content is unchanged; a rescanned line's new status (in
              ;; MARKS) wins.
