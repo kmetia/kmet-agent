@@ -41,6 +41,32 @@
       (swap! b inc)
       (is (= 102 @d) "discovered dep re-derives"))))
 
+(deftest test-tracking-scope-buckets-classify-once
+  (testing "tracked-deref files each read into the scope bucket its kind
+            selects: :atoms for plain IRefs, :rx for library reactions"
+    (let [atoms (atom {})
+          rx (atom {})
+          a (atom 1)
+          r (r/make-reaction (fn [] (r/tracked-deref a)))
+          v (volatile! 1)]
+      @r
+      (binding [r/*tracking-scope* [atoms rx]]
+        (r/tracked-deref a)
+        (r/tracked-deref r)
+        (r/tracked-deref v))
+      (is (= {a 1} @atoms) "the plain atom landed in :atoms")
+      (is (= {r 1} @rx) "the reaction landed in :rx keyed by ref")
+      (is (not (contains? @atoms v)) "the volatile landed nowhere")
+      (r/dispose! r)))
+  (testing "trackable-ref? is the union of the two kinds"
+    (let [a (atom 1)
+          r (r/make-reaction (fn [] 1))]
+      @r
+      (is (r/trackable-ref? a))
+      (is (r/trackable-ref? r))
+      (is (not (r/trackable-ref? (volatile! 1))))
+      (r/dispose! r))))
+
 (deftest test-cursor
   (testing "cursor tracks its source path"
     (let [src (atom {:a {:b 1}})

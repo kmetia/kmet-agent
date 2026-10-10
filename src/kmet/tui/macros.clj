@@ -147,9 +147,10 @@
              (reduce-kv atoms-unchanged? true (:atoms cache))
              (reduce-kv rx-unchanged? true (:rx cache)))
       (:result cache)
-      (let [tracked (atom {})
+      (let [atoms (atom {})
+            rx (atom {})
             watch-key (tracker-key component)]
-        (binding [reakt/*tracking-scope* tracked]
+        (binding [reakt/*tracking-scope* [atoms rx]]
           (let [cache-watch-key (keyword (str (name watch-key) "-cache"))
                 invalidated? (atom false)
                 ;; Watch the cache atom itself: an invalidate mid-body (a
@@ -161,28 +162,22 @@
                              (fn [_ _ _ _] (reset! invalidated? true)))]
             (try
               (let [result (render-fn)
-                    tracked-map @tracked
-                    ;; Classify the tracked refs ONCE per body run (the miss
-                    ;; path): plain IRefs into :atoms (verify by deref),
-                    ;; library reactions into :rx keyed by their cell
-                    ;; (verify by cell read). plain-ref? is the host-ordered
-                    ;; cheap check and exact here — these refs already
-                    ;; cleared tracked-deref's trackable-ref? gate.
-                    [atom-vals rx-vals] (reduce-kv
-                                         (fn [acc ref v]
-                                           (let [[atom-vals rx-vals] acc]
-                                             (if (reakt/plain-ref? ref)
-                                               [(assoc atom-vals ref v) rx-vals]
-                                               [atom-vals (assoc rx-vals
-                                                                 (reakt/-cell ref)
-                                                                 [ref v])])))
-                                         [{} {}]
-                                         tracked-map)
-                    ;; Everything the pass tracked, reactions included:
+                    atom-vals @atoms
+                    rx-refs @rx
+                    ;; The cache verifies a reaction through its state cell
+                    ;; (rx-unchanged?), so key :rx by cell — once per body
+                    ;; run, not per read. Empty for atom-only bodies, the
+                    ;; common case, which then pays no pass at all.
+                    rx-vals (reduce-kv (fn [m ref v]
+                                         (assoc m (reakt/-cell ref) [ref v]))
+                                       {}
+                                       rx-refs)
+                    ;; Everything the body tracked, reactions included:
                     ;; the payload's :watched is what teardown and the sweep
                     ;; must unwatch later. (The cache splits the same refs:
-                    ;; :atoms plain, :rx reactions.)
-                    watched (set (keys tracked-map))
+                    ;; :atoms plain keyed by ref, :rx reactions keyed by
+                    ;; their state cell.)
+                    watched (into (set (keys atom-vals)) (keys rx-refs))
                     prev-watched (:watched (weak/payload watch-key))
                     ;; KEY only — the atom watch must not root the component.
                     handler (let [k watch-key]

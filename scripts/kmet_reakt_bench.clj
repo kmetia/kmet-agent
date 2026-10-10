@@ -40,7 +40,9 @@
 (per "-cell (reaction)" 200000 #(r/-cell rx))
 
 ;; ── Tracked derefs ────────────────────────────────────────────────────────
-(def sc (atom {}))
+;; The scope is the two capture buckets tracked-deref writes and track-render
+;; reads: [(atom {}) (atom {})] — plain refs, then library refs.
+(def sc [(atom {}) (atom {})])
 (per "tracked-deref atom, no scope" 200000 #(r/tracked-deref a))
 (binding [r/*tracking-scope* sc]
   (per "tracked-deref atom, scope bound" 200000 #(r/tracked-deref a))

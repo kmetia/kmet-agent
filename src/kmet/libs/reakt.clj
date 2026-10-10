@@ -55,17 +55,20 @@
    write back through the source (=-gated, nested lenses composing), and a
    disposed lens refuses writes instead of writing back from the dead."
   (:refer-clojure :exclude [derive])
-  (:require [kmet.libs.host :as host]
-            [kmet.libs.weak :as weak]))
+  (:require [kmet.libs.weak :as weak]))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Context
 ;; ═══════════════════════════════════════════════════════════════════════════
 
 (def ^:dynamic *tracking-scope*
-  "During a tracking scope, a map of the refs deref'd so far, keyed by
-   ref → value as read. Bound by kmet.tui.macros/track-render around render
-   bodies; nil outside one."
+  "During a tracking scope, [ATOMS RX]: the two capture buckets track-render
+   builds its cache from, each an atom of a map — ATOMS is {ref value} for
+   plain IRefs (verified by deref), RX is {ref value} for library refs.
+   tracked-deref classifies each read once and assocs it into the bucket
+   ref-kind selects; the reaction's state cell is looked up once per body
+   run in track-render's cell-keyed cache transform, not per read. Bound by
+   kmet.tui.macros/track-render around render bodies; nil outside one."
   nil)
 
 (def ^:dynamic *reaction-frame*
@@ -100,35 +103,28 @@
   [ref]
   (satisfies? RXRef ref))
 
-(def ^:private jolt-host?
-  "Resolved once: reader conditionals are not allowed in `.clj` source, and
-   plain-ref?'s check order is host-dependent (perf.md §14.2)."
-  (host/jolt?))
+(defn- ref-kind
+  "Classify REF for dependency capture: :plain (IRef instances — plain
+   atoms, vars; core add-watch works), :rx (library reactive refs —
+   reactions, cursors; watched through RXRef), or nil (volatiles and delays
+   can't take watches and are never tracked). The kind names the
+   *tracking-scope* bucket the read lands in, so one classification here
+   serves every capture frame — track-render consumes the buckets as-is.
 
-(defn plain-ref?
-  "True when REF is a plain IRef (atom, var) rather than a library reactive
-   ref (reaction, cursor) — the classification track-render splits its cache
-   with. Only valid for refs that already cleared trackable-ref?: outside
-   that domain the hosts disagree (a volatile classifies plain on jolt but
-   not on bb, where it would land in the :rx bucket), so a new caller must
-   keep the gate. Host-ordered because the checks cost differently: bb's
-   `instance?` is flat while its `satisfies?` walks the protocol; jolt is
-   the reverse (perf.md §14.2) — either way the common atom short-circuits
-   on the cheaper check."
+   IRef stays first on both hosts: an atom short-circuits on one class
+   check, while RXRef-first pays the class check after its protocol miss —
+   and on jolt that check is 1.8 µs (perf.md §14.2)."
   [ref]
-  (if jolt-host?
-    (not (satisfies? RXRef ref))
-    (instance? clojure.lang.IRef ref)))
+  (cond
+    (instance? clojure.lang.IRef ref) :plain
+    (satisfies? RXRef ref) :rx
+    :else nil))
 
 (defn trackable-ref?
-  "True when REF can be a tracked dependency: IRef instances (plain atoms,
-   vars — core add-watch works) or library reactive refs (reactions,
-   cursors — watched through RXRef). Volatiles and delays can't take
-   watches and are never tracked. IRef stays first on both hosts: an atom
-   short-circuits on one class check, while RXRef-first pays the class
-   check after its protocol miss — and on jolt that check is 1.8 µs."
+  "True when REF can be a tracked dependency: an IRef (plain atom, var) or
+   a library reactive ref (reaction, cursor) — see ref-kind."
   [ref]
-  (or (instance? clojure.lang.IRef ref) (satisfies? RXRef ref)))
+  (some? (ref-kind ref)))
 
 (defn record-dep!
   "Record REF — with the VALUE the body read — in the active reaction's
@@ -147,24 +143,27 @@
 
 (defn tracked-deref
   "Deref wrapper recording REF in every active capture frame: the tracking
-   scope (*tracking-scope*, when one is bound — with the value just read) and the
-   running reaction (*reaction-frame*). Trackable refs (plain atoms/vars and
-   library reactions/cursors, see trackable-ref?) are registered as
-   dependencies; volatiles and delays can't take watches and are skipped
-   (read but never registered, here or in a running reaction). This is the
-   entry point for reactive reads outside component render bodies (which
-   route through the track! rewrite).
+   scope (*tracking-scope*, when one is bound — the read lands in the bucket
+   ref-kind selects) and the running reaction (*reaction-frame*). Trackable
+   refs (plain atoms/vars and library reactions/cursors, see ref-kind) are
+   registered as dependencies; volatiles and delays can't take watches and
+   are skipped (read but never registered, here or in a running reaction).
+   This is the entry point for reactive reads outside component render
+   bodies (which route through the track! rewrite).
 
    Classified once per call and shared by both capture frames, which
    matters most on jolt, where each classification is a 1-2 µs `instance?`
    against the modeled class graph."
   [ref]
-  (let [v (deref ref)]
-    (when (trackable-ref? ref)
+  (let [v (deref ref)
+        kind (ref-kind ref)]
+    (when kind
       ;; Record the read in the tracking scope when one is bound, then in
       ;; the running reaction (record-dep! no-ops without one).
-      (when-some [scope *tracking-scope*]
-        (swap! scope assoc ref v))
+      (when-some [[atoms rx] *tracking-scope*]
+        (case kind
+          :plain (swap! atoms assoc ref v)
+          :rx (swap! rx assoc ref v)))
       (record-dep! ref v))
     v))
 
