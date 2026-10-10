@@ -1390,7 +1390,41 @@ during a turn (12 vs 15 per 1.25 s at the driver, measured on bb and jolt),
 each of which would otherwise pay a §13.1 typing/calm frame. The Bash tool
 progress spinner keeps its own 80 ms pi beat (`bash_execution.clj`).
 
-### 13.5 Next steps
+### 13.5 Applied: one document pass
+
+`extract-cursor-position` and `normalize-reusing` were two identity walks
+over the same 14.9k lines, and `main-diff` then walked them a third time to
+find the changed range. `build-frame-lines` now does all three in one pass:
+strip the marker, normalize, reuse the previous output for lines
+`identical?` to their previous raw entry, and return the changed range.
+`main-diff` consumes that range instead of re-scanning (refining its edges
+with the diff's own `=` compare, so a line rebuilt to the same text — the
+editor's border string — still paints nothing) and falls back to its own
+walk when flash compositing changed the lines, since the range describes
+the pre-flash document.
+
+Per-frame medians on the same fixture:
+
+| scenario | bb pre-fusion | bb fused | jolt pre-fusion | jolt fused |
+|---|---|---|---|---|
+| typing | 14.2 ms | **9.5 ms** | 12.5 ms | **6.2 ms** |
+| stream | 19.4 ms | **14.8 ms** | 22.2 ms | **15.7 ms** |
+| calm (unstable) | 25.4 ms | 27.6 ms | 22.9 ms | **11.9 ms** |
+| cold | 3.03 s | 3.05 s | 4.56 s | 4.56 s |
+| redraw | 3.27 s | 3.32 s | 4.59 s | 4.98 s |
+
+The typing frame's one changed line now costs one walk: the split
+cursor+normalize phases (7.5 ms bb / 8.2 jolt) become a single 6.2 / 3.0 ms
+`lines` phase, and diff+emit collapses to 0.2-0.4 ms (from 4.1 / 1.5) since
+the diff no longer scans. Cold and redraw stay render-stack-bound; their one
+full walk is slightly more expensive than the old split there (jolt cold:
+39 ms of strip+normalize versus 9+28) and invisible beside a 4.5 s render.
+bb's calm full-walk frames are the exception — sci's interpreted pass costs
+more than the old `some`-based scan — but that scenario is the unstable one
+and the common frames (typing, streaming) win. The phone's run-to-run state
+swung ±20 % across these sweeps; the table is the clean runs.
+
+### 13.6 Next steps
 
 - Incremental markdown (§6.3) still stands for cold and streaming: cold is
   ~98 % render-stack and the stream frame's render-stack grows with the

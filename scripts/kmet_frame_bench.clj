@@ -25,8 +25,8 @@
 ;;
 ;; Phase attribution wraps the loop's own functions with timers
 ;; (alter-var-root): kmet.tui.components.stack/render-stack,
-;; kmet.tui.core/{composite-overlays,extract-cursor-position,
-;; normalize-reusing,composite-flashes} and the virtual terminal's
+;; kmet.tui.core/{composite-overlays,build-frame-lines,
+;; composite-flashes} and the virtual terminal's
 ;; write-output. diff+emit is the residual between the last wrapped phase
 ;; and the write (a no-change frame writes nothing, so its tail is not
 ;; attributed). Numbers are wall-clock, single-process, means of the
@@ -79,8 +79,7 @@
 (defn- instrument! []
   (timed-var! :render-stack #'stack/render-stack)
   (timed-var! :overlays #'core/composite-overlays)
-  (timed-var! :cursor #'core/extract-cursor-position)
-  (timed-var! :normalize #'core/normalize-reusing)
+  (timed-var! :lines #'core/build-frame-lines)
   (timed-var! :flashes #'core/composite-flashes))
 
 (def ^:private replay-branch!
@@ -194,7 +193,7 @@
 (defn- mean [xs] (if (seq xs) (/ (double (reduce + xs)) (count xs)) 0.0))
 (defn- median [xs] (when (seq xs) (let [v (vec (sort xs))] (nth v (quot (count v) 2)))))
 
-(def ^:private phases [:render-stack :overlays :cursor :normalize :flashes :diff+emit])
+(def ^:private phases [:render-stack :overlays :lines :flashes :diff+emit])
 
 (defn- report [label evs lines]
   (let [fs (analyze evs)

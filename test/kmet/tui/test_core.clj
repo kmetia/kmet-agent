@@ -25,11 +25,11 @@
              (set-focused! [_ v] (reset! focused? v)))
      :focused? focused?}))
 
-(t/deftest test-extract-cursor-position-strips-every-marker
+(t/deftest test-build-frame-lines-strips-every-marker
   (let [marker utils/CURSOR-MARKER
-        extract (var core/extract-cursor-position)]
+        build (var core/build-frame-lines)]
     (testing "a marker inside the viewport positions the cursor and is stripped"
-      (let [{:keys [lines cursor]} (extract ["aaaa" (str "bb" marker "cc")] 10)]
+      (let [{:keys [lines cursor]} (build ["aaaa" (str "bb" marker "cc")] 10)]
         (t/is (= {:row 1 :col 2} cursor) "the marker's position is reported")
         (t/is (not-any? #(str/includes? % marker) lines) "and stripped from the lines")))
     (testing "a marker ABOVE the viewport is stripped without a cursor"
@@ -40,40 +40,40 @@
       ;; frame — the display froze while the app kept rendering.
       (let [lines (into [(str "top" marker "line")]
                         (map #(str "line-" %) (range 26)))
-            {:keys [lines cursor]} (extract lines 26)]
+            {:keys [lines cursor]} (build lines 26)]
         (t/is (nil? cursor) "no cursor outside the viewport")
         (t/is (not-any? #(str/includes? % marker) lines)
               "but every marker is stripped from the emitted lines")))))
 
-(t/deftest test-normalize-reusing-reuses-unchanged-lines
-  (let [normalize (var core/normalize-reusing)
+(t/deftest test-build-frame-lines-normalizes-unchanged-lines
+  (let [build (var core/build-frame-lines)
         calls (atom 0)
         norm (fn [s] (swap! calls inc) (str s "!"))]
     (with-redefs [utils/normalize-terminal-output norm]
       (let [a "a" b "b" c "c"
             in [a b]
-            out (normalize [] [] in)]
+            out (:lines (build [] [] {} in 100))]
         (testing "the first pass normalizes every line"
           (t/is (= ["a!" "b!"] out))
           (t/is (= 2 @calls) "one call per line"))
         (testing "an unchanged frame reuses the previous outputs"
           (reset! calls 0)
-          (t/is (= out (normalize in out in)))
+          (t/is (= out (:lines (build in out {} in 100))))
           (t/is (zero? @calls) "no normalization calls at all"))
         (testing "only changed or appended lines are normalized"
           (reset! calls 0)
-          (t/is (= ["a!" "B!" "c!"] (normalize in out [a "B" c])))
+          (t/is (= ["a!" "B!" "c!"] (:lines (build in out {} [a "B" c] 100))))
           (t/is (= 2 @calls) "one changed line + one append"))
         (testing "a content-equal but fresh string is not reused"
           ;; identity, not equality: a new object goes through normalize even
           ;; when its text matches the previous frame's line
           (reset! calls 0)
-          (t/is (= ["a!" "b!"] (normalize in out [a (subs "xb" 1 2)])))
+          (t/is (= ["a!" "b!"] (:lines (build in out {} [a (subs "xb" 1 2)] 100))))
           (t/is (= 1 @calls) "the fresh object is normalized"))))))
 
-(t/deftest test-extract-cursor-position-reuses-unchanged-lines
+(t/deftest test-build-frame-lines-reuses-unchanged-lines
   (let [marker utils/CURSOR-MARKER
-        extract (var core/extract-cursor-position)
+        build (var core/build-frame-lines)
         scans (atom 0)
         index-of clojure.string/index-of]
     (with-redefs [clojure.string/index-of
@@ -81,7 +81,7 @@
       (let [a "aaaa"
             b (str "bb" marker "cc")
             in [a b]
-            out (extract [] [] {} in 10)
+            out (build [] [] {} in 10)
             lines (:lines out)
             marks (:marks out)]
         (testing "the first pass scans every line, strips, and records the marker"
@@ -91,38 +91,58 @@
           (t/is (= {1 2} marks)))
         (testing "an unchanged frame scans nothing and keeps line identity"
           (reset! scans 0)
-          (let [out2 (extract in lines marks in 10)]
+          (let [out2 (build in lines marks in 10)]
             (t/is (zero? @scans))
             (t/is (identical? (nth lines 0) (nth (:lines out2) 0)))
             (t/is (identical? (nth lines 1) (nth (:lines out2) 1)))
             (t/is (= {:row 1 :col 2} (:cursor out2)))
-            (t/is (= {1 2} (:marks out2)))))
+            (t/is (= {1 2} (:marks out2)))
+            (t/is (nil? (:changed out2)) "no repaint")))
         (testing "only changed lines are scanned"
           (reset! scans 0)
-          (let [out2 (extract in lines marks [a (str "bb" marker "cc")] 10)]
-            (t/is (= 1 @scans) "the two unchanged lines are not scanned")
+          (let [out2 (build in lines marks [a (str "bb" marker "cc")] 10)]
+            (t/is (= 1 @scans) "the unchanged line is not scanned")
             (t/is (= {:row 1 :col 2} (:cursor out2)))
-            (t/is (= {1 2} (:marks out2)))))
+            (t/is (= {1 2} (:marks out2)))
+            (t/is (= [1 1] (:changed out2)) "the rescan is the repaint range")))
         (testing "a changed marker-free line drops its marker and the cursor"
           (reset! scans 0)
-          (let [out2 (extract in lines marks [a "bbcc"] 10)]
-            ;; prev-marks is non-empty here, so bb does not take its unmarked
-            ;; short-circuit; the loop scans the one changed line
+          (let [out2 (build in lines marks [a "bbcc"] 10)]
             (t/is (= 1 @scans))
             (t/is (nil? (:cursor out2)))
-            (t/is (= {} (:marks out2)))))
+            (t/is (= {} (:marks out2)))
+            ;; raw identity over-approximates the diff's = compare: the
+            ;; marker's removal changed the raw object even though the
+            ;; normalized text matches the previous line
+            (t/is (= [1 1] (:changed out2)))))
         (testing "a marker above the viewport is stripped but not positioned"
-          (let [out2 (extract in lines marks [b a a] 2)]
+          (let [out2 (build in lines marks [b a a] 2)]
             (t/is (= ["bbcc" "aaaa" "aaaa"] (:lines out2)))
             (t/is (nil? (:cursor out2)) "row 0 is above the 2-line viewport")
             (t/is (= {0 2} (:marks out2)))))
         (testing "a content-equal but fresh string is not reused"
           (reset! scans 0)
           (let [a2 (subs "xaaaa" 1)
-                out2 (extract in lines marks [a2 b] 10)]
+                out2 (build in lines marks [a2 b] 10)]
             (t/is (= 1 @scans) "the fresh object is rescanned, the identical one is not")
             (t/is (identical? a2 (nth (:lines out2) 0)))
             (t/is (= ["aaaa" "bbcc"] (:lines out2)))))))))
+
+(t/deftest test-build-frame-lines-changed-range
+  (let [build (var core/build-frame-lines)
+        a "aaaa" b "bbbb" c "cccc"]
+    (testing "an appended line is part of the range"
+      (let [{:keys [changed]} (build [a b] [a b] {} [a b c] 10)]
+        (t/is (= [2 2] changed) "the new index through the last line")))
+    (testing "a removed non-empty line is part of the range"
+      (let [{:keys [changed]} (build [a b c] [a b c] {} [a b] 10)]
+        (t/is (= [2 2] changed))))
+    (testing "removing only empty lines is not a change"
+      (let [{:keys [changed]} (build [a "" ""] [a "" ""] {} [a] 10)]
+        (t/is (nil? changed))))
+    (testing "a changed line is the range even when its text is equal"
+      (let [{:keys [changed]} (build [a b] [a b] {} [a (subs "xb" 1 2)] 10)]
+        (t/is (= [1 1] changed))))))
 
 (t/deftest test-kitty-expand-gate-skips-the-walks
   (let [expand (var core/expand-changed-range-for-kitty-images)
