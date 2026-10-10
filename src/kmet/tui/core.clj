@@ -90,6 +90,21 @@
         (recur (inc i) (or f i) i))
       [f l])))
 
+(defn- line-cursor
+  "The cursor {:row :col} for the bottom-most marker among the bottom HEIGHT
+   lines of an N-line document, or nil when no marker is visible. The row is
+   the marker's absolute document line (the caller subtracts the viewport);
+   the column is the visible width of the line's prefix before the marker."
+  [marks lines n height]
+  (let [viewport-top (max 0 (- n height))
+        cursor-i (reduce-kv (fn [best i _]
+                              (if (and (>= i viewport-top) (> i best)) i best))
+                            -1
+                            marks)]
+    (when (>= cursor-i 0)
+      {:row cursor-i
+       :col (utils/visible-width (subs (nth lines cursor-i) 0 (get marks cursor-i)))})))
+
 (defn- build-frame-lines
   "Build one frame's document in a single pass over LINES: strip every
    CURSOR-MARKER, normalize each line, reuse PREV-OUT for lines
@@ -117,6 +132,14 @@
    over-approximates the diff's `=` compare (a fresh-but-equal line counts
    as changed), which is safe: a spurious line is rewritten, never skipped.
 
+   QUICK? is the caller's hint that the previous frame repainted nothing.
+   It buys one step before the per-line walk: a document content-equal to
+   PREV-RAW reuses the whole previous result (strip/normalize/marks are
+   pure functions of the line content, so only the cursor is recomputed for
+   the height). `=` is a host-native vector compare — far cheaper than the
+   interpreted loop on bb — but it scans the whole vector when it fails, so
+   it is only worth trying after an unchanged frame.
+
    :changed covers the shared prefix and any appended or removed tail
    (main-diff re-applies its appended? adjustment, which agrees). It
    describes the pre-flash document, so it must not be used for a frame
@@ -125,60 +148,61 @@
   ([lines height]
    (build-frame-lines [] [] {} lines height))
   ([prev-raw prev-out prev-marks lines height]
+   (build-frame-lines prev-raw prev-out prev-marks lines height false))
+  ([prev-raw prev-out prev-marks lines height quick?]
    (let [prev-count (count prev-raw)
-         n (count lines)
-         marker utils/CURSOR-MARKER
-         [out marks prefix-first prefix-last]
-         (loop [i 0
-                acc (transient [])
-                marks {}
-                fc -1
-                lc -1]
-           (if (< i n)
-             (let [line (nth lines i)]
-               (if (and (< i prev-count)
-                        (identical? (nth prev-raw i) line))
-                 (recur (inc i) (conj! acc (nth prev-out i)) marks fc lc)
-                 (let [idx (clojure.string/index-of line marker)
-                       stripped (if idx
-                                  (clojure.string/replace line marker "")
-                                  line)]
-                   (recur (inc i)
-                          (conj! acc (utils/normalize-terminal-output stripped))
-                          (if idx (assoc marks i idx) marks)
-                          (if (neg? fc) i fc)
-                          i))))
-             [(persistent! acc) marks fc lc]))
-         ;; A previous marker stays valid exactly while its line is still the
-         ;; same object; a rescanned line's new status (in MARKS) wins.
-         marks (reduce-kv (fn [m i idx]
-                            (if (and (< i prev-count)
-                                     (< i n)
-                                     (identical? (nth prev-raw i) (nth lines i)))
-                              (assoc m i idx)
-                              m))
-                          marks
-                          prev-marks)
-         ;; A removed line repaints only when it held content — the diff's
-         ;; missing side is "" (an appended tail is main-diff's appended?).
-         [first-changed last-changed]
-         (let [[rf rl] (when (< n prev-count)
-                         (removed-range prev-out n prev-count))]
-           [(if (and rf (neg? prefix-first)) rf prefix-first)
-            (or rl prefix-last)])
-         viewport-top (max 0 (- n height))
-         cursor-i (reduce-kv (fn [best i _]
-                               (if (and (>= i viewport-top) (> i best)) i best))
-                             -1
-                             marks)
-         cursor (when (>= cursor-i 0)
-                  {:row cursor-i
-                   :col (utils/visible-width
-                         (subs (nth lines cursor-i) 0 (get marks cursor-i)))})]
-     {:lines out
-      :cursor cursor
-      :marks marks
-      :changed (when (>= first-changed 0) [first-changed last-changed])})))
+         n (count lines)]
+     (if (and quick?
+              (= n prev-count)
+              (= lines prev-raw))
+       {:lines prev-out
+        :cursor (line-cursor prev-marks lines n height)
+        :marks prev-marks
+        :changed nil}
+       (let [marker utils/CURSOR-MARKER
+             [out marks prefix-first prefix-last]
+             (loop [i 0
+                    acc (transient [])
+                    marks {}
+                    fc -1
+                    lc -1]
+               (if (< i n)
+                 (let [line (nth lines i)]
+                   (if (and (< i prev-count)
+                            (identical? (nth prev-raw i) line))
+                     (recur (inc i) (conj! acc (nth prev-out i)) marks fc lc)
+                     (let [idx (clojure.string/index-of line marker)
+                           stripped (if idx
+                                      (clojure.string/replace line marker "")
+                                      line)]
+                       (recur (inc i)
+                              (conj! acc (utils/normalize-terminal-output stripped))
+                              (if idx (assoc marks i idx) marks)
+                              (if (neg? fc) i fc)
+                              i))))
+                 [(persistent! acc) marks fc lc]))
+             ;; A previous marker stays valid exactly while its line is still the
+             ;; same object; a rescanned line's new status (in MARKS) wins.
+             marks (reduce-kv (fn [m i idx]
+                                (if (and (< i prev-count)
+                                         (< i n)
+                                         (identical? (nth prev-raw i) (nth lines i)))
+                                  (assoc m i idx)
+                                  m))
+                              marks
+                              prev-marks)
+             ;; A removed line repaints only when it held content — the diff's
+             ;; missing side is "" (an appended tail is main-diff's appended?).
+             [first-changed last-changed]
+             (let [[rf rl] (when (< n prev-count)
+                             (removed-range prev-out n prev-count))]
+               [(if (and rf (neg? prefix-first)) rf prefix-first)
+                (or rl prefix-last)])
+             cursor (line-cursor marks lines n height)]
+         {:lines out
+          :cursor cursor
+          :marks marks
+          :changed (when (>= first-changed 0) [first-changed last-changed])})))))
 
 (defn- refine-changed-range
   "Narrow HINT — build-frame-lines' raw-identity [first last] range — to
@@ -212,6 +236,7 @@
                 input-listeners previous-lines
                 previous-normalized-lines
                 previous-raw-lines previous-marks previous-flashed?
+                previous-repainted?
                 previous-width render-requested? force-redraw? waker
                 running? stopped? overlays
                 render-loop input-reader current-reader
@@ -244,6 +269,7 @@
                        :previous-raw-lines (atom [])
                        :previous-marks (atom {})
                        :previous-flashed? (atom false)
+                       :previous-repainted? (atom true)
                        :previous-width (atom 0)
                        :terminal-size (atom nil)
                        :render-requested? (atom false)
@@ -2426,7 +2452,8 @@
                   (reset! (:previous-kitty-image-ids tui) #{})
                   ;; line memo: its inputs are gone with the frame
                   (reset! (:previous-raw-lines tui) [])
-                  (reset! (:previous-marks tui) {}))
+                  (reset! (:previous-marks tui) {})
+                  (reset! (:previous-repainted? tui) true))
                 ;; Base content: the whole UI is one flat document — the stack
                 ;; layout renders every component at natural height, so the total
                 ;; may exceed the screen and the render loop scrolls the overflow
@@ -2435,12 +2462,16 @@
                 (let [base-lines (stack/render-stack @(:components tui) w)
                       raw-lines (composite-overlays tui base-lines w h)
                       ;; one document pass: strip the cursor markers,
-                      ;; normalize, and report the frame's repaint range
+                      ;; normalize, and report the frame's repaint range. The
+                      ;; QUICK? hint may reuse the whole previous result when
+                      ;; the previous frame repainted nothing — a content-
+                      ;; equal document is then likely.
                       frame (build-frame-lines
                              @(:previous-raw-lines tui)
                              @(:previous-normalized-lines tui)
                              @(:previous-marks tui)
-                             raw-lines h)
+                             raw-lines h
+                             (not @(:previous-repainted? tui)))
                       cursor (:cursor frame)
                       ;; pi: normalizeTerminalOutput — Thai/Lao AM decomposition +
                       ;; tab expansion — runs before applyLineResets (pi
@@ -2583,34 +2614,37 @@
                       ;; HINT is build-frame-lines' repaint range, refined
                       ;; against the final lines so fresh-but-equal objects
                       ;; (the editor's border) do not force a repaint. nil
-                      ;; (a flash frame) falls back to the walks below.
+                      ;; means the pass proved the document unchanged (no
+                      ;; scan needed); ::scan forces the walks below (a flash
+                      ;; frame: the pass's range describes pre-flash lines).
                       main-diff (fn main-diff [hint]
                                   (let [max-lines (max new-count prev-count)
                                         shared (min new-count prev-count)
                                         [first-changed last-changed]
-                                        (if hint
-                                          (refine-changed-range prev lines hint)
-                                          (let [;; The shared prefix (both vectors present) takes
+                                        (cond
+                                          (nil? hint) [-1 -1]
+                                          (= ::scan hint) (let [;; The shared prefix (both vectors present) takes
                                                 ;; no per-line bounds branches — only the appended
                                                 ;; or removed tail needs the missing-line defaults.
-                                                [prefix-first prefix-last]
-                                                (loop [i 0, fc -1, lc -1]
-                                                  (if (< i shared)
-                                                    (let [p (nth prev i)
-                                                          l (nth lines i)]
-                                                      (if (or (identical? p l) (= p l))
-                                                        (recur (inc i) fc lc)
-                                                        (recur (inc i) (if (neg? fc) i fc) i)))
-                                                    [fc lc]))]
-                                            (loop [i shared, fc prefix-first, lc prefix-last]
-                                              (if (< i max-lines)
-                                                (let [old-line (if (< i prev-count) (nth prev i) "")
-                                                      new-line (if (< i new-count) (nth lines i) "")]
-                                                  (if (or (identical? old-line new-line)
-                                                          (= old-line new-line))
-                                                    (recur (inc i) fc lc)
-                                                    (recur (inc i) (if (neg? fc) i fc) i)))
-                                                [fc lc]))))
+                                                                [prefix-first prefix-last]
+                                                                (loop [i 0, fc -1, lc -1]
+                                                                  (if (< i shared)
+                                                                    (let [p (nth prev i)
+                                                                          l (nth lines i)]
+                                                                      (if (or (identical? p l) (= p l))
+                                                                        (recur (inc i) fc lc)
+                                                                        (recur (inc i) (if (neg? fc) i fc) i)))
+                                                                    [fc lc]))]
+                                                            (loop [i shared, fc prefix-first, lc prefix-last]
+                                                              (if (< i max-lines)
+                                                                (let [old-line (if (< i prev-count) (nth prev i) "")
+                                                                      new-line (if (< i new-count) (nth lines i) "")]
+                                                                  (if (or (identical? old-line new-line)
+                                                                          (= old-line new-line))
+                                                                    (recur (inc i) fc lc)
+                                                                    (recur (inc i) (if (neg? fc) i fc) i)))
+                                                                [fc lc])))
+                                          :else (refine-changed-range prev lines hint))
                                         appended? (> new-count prev-count)
                                         [first-changed last-changed]
                                         (if appended?
@@ -2873,9 +2907,10 @@
                                           @(:max-lines-rendered tui) ")"))
                         (do-full-redraw true))
                     :else
-                    (main-diff (when (and (not flashed?)
-                                          (not @(:previous-flashed? tui)))
-                                 (:changed frame))))
+                    (main-diff (if (and (not flashed?)
+                                        (not @(:previous-flashed? tui)))
+                                 (:changed frame)
+                                 ::scan)))
                   (reset! previous-viewport-top @viewport-top)
                   (when @(:tui-debug? tui)
                     (tui-debug-dump! prev lines (str @sb) w h @viewport-top @hardware-cursor-row))
@@ -2890,6 +2925,11 @@
                   (reset! (:previous-raw-lines tui) raw-lines)
                   (reset! (:previous-marks tui) (:marks frame))
                   (reset! (:previous-flashed? tui) flashed?)
+                  ;; the diff's own verdict (kitty-frame-lines: ::unchanged
+                  ;; when it ran and found nothing, nil when a full redraw
+                  ;; skipped it) feeds the next frame's QUICK? hint
+                  (reset! (:previous-repainted? tui)
+                          (not= ::unchanged @kitty-frame-lines))
                   (reset! (:previous-width tui) w)
                   (reset! (:previous-height tui) h)
                   ;; Image lines only exist when the terminal supports

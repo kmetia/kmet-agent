@@ -116,12 +116,16 @@
                                (inc stable) 0))))))))
 
 (defn- begin-scenario!
-  "Settle the loop — nothing requested, frame count stable — then open a
-   fresh event window. Without this, a trailing frame from the previous
-   scenario (the cold render's follow-up full pass, a reflow's second
-   frame) is recorded into this scenario and skews its means."
+  "Settle the loop — nothing requested, frame count stable — drop garbage
+   from the previous scenario, then open a fresh event window. Without the
+   collection, the frames right after the cold full render (megabytes of
+   frame vectors and write buffers) measured 2-3x slower than the same
+   no-change frames later in the run; the per-scenario medians must
+   describe the steady state."
   [tui]
   (settle! tui)
+  (System/gc)
+  (Thread/sleep 100)
   (reset! events []))
 
 (defn- next-frame!

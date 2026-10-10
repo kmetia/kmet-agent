@@ -144,6 +144,31 @@
       (let [{:keys [changed]} (build [a b] [a b] {} [a (subs "xb" 1 2)] 10)]
         (t/is (= [1 1] changed))))))
 
+(t/deftest test-build-frame-lines-quick-reuse
+  (let [build (var core/build-frame-lines)
+        a (subs "xaaaa" 1)
+        b (subs "xbbbb" 1)
+        prev-raw [a b]
+        prev-out ["AAAA" "BBBB"]
+        prev-marks {1 2}]
+    (testing "a content-equal document with the quick hint reuses the whole previous result"
+      (let [{:keys [lines marks changed cursor]}
+            (build prev-raw prev-out prev-marks [(subs "xaaaa" 1) (subs "xbbbb" 1)] 10 true)]
+        (t/is (identical? prev-out lines) "the previous output vector is returned as-is")
+        (t/is (identical? prev-marks marks) "and the previous marker map")
+        (t/is (nil? changed) "content-equal lines report no change")
+        (t/is (= {:row 1 :col 2} cursor) "the cursor is recomputed from the markers")))
+    (testing "a differing document still walks"
+      (let [{:keys [lines changed]}
+            (build prev-raw prev-out prev-marks [a (subs "xbXbb" 1)] 10 true)]
+        (t/is (not (identical? prev-out lines)))
+        (t/is (= [1 1] changed))))
+    (testing "without the quick hint the walk always runs"
+      (let [{:keys [lines changed]}
+            (build prev-raw prev-out prev-marks [(subs "xaaaa" 1) (subs "xbbbb" 1)] 10)]
+        (t/is (not (identical? prev-out lines)) "fresh-but-equal lines rebuild the vector")
+        (t/is (= [0 1] changed) "and count as raw changes")))))
+
 (t/deftest test-refine-changed-range
   (let [refine (var core/refine-changed-range)
         prev ["a0" "b0" "c0" "d0" "e0"]
