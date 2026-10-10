@@ -108,11 +108,13 @@
 (defn plain-ref?
   "True when REF is a plain IRef (atom, var) rather than a library reactive
    ref (reaction, cursor) — the classification track-render splits its cache
-   with. Only valid for refs that already cleared trackable-ref? (volatiles
-   and delays are neither). Host-ordered because the checks cost
-   differently: bb's `instance?` is flat while its `satisfies?` walks the
-   protocol; jolt is the reverse (perf.md §14.2) — either way the common
-   atom short-circuits on the cheaper check."
+   with. Only valid for refs that already cleared trackable-ref?: outside
+   that domain the hosts disagree (a volatile classifies plain on jolt but
+   not on bb, where it would land in the :rx bucket), so a new caller must
+   keep the gate. Host-ordered because the checks cost differently: bb's
+   `instance?` is flat while its `satisfies?` walks the protocol; jolt is
+   the reverse (perf.md §14.2) — either way the common atom short-circuits
+   on the cheaper check."
   [ref]
   (if jolt-host?
     (not (satisfies? RXRef ref))

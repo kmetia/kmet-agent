@@ -1653,4 +1653,15 @@ A/Bs against the previous commit (`target/watching-ab.clj`,
 - **`make-reaction` costs ~20 µs to construct** — relevant at
   replay/cold-render scale, hard to shrink.
 
+### 14.6 Next candidate
+
+- **Fold the ref kind into `*tracking-scope*` and delete `track-render`'s
+  classification pass.** It is the largest single miss-path chunk measured:
+  ~18 µs per 10 refs on bb and ~44 µs per 10 on jolt (scratch replica in
+  `target/small-ab.clj`; the two-map accumulator's `assoc`s dominate).
+  `tracked-deref` already evaluates the same two checks to gate the read,
+  so it can store the kind next to the value in the same swap, and only
+  `track-render` reads the scope — the shape change is local to the two
+  call sites. Worth trying before the `make-reaction` note above.
+
 
