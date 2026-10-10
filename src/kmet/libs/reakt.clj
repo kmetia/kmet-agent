@@ -328,6 +328,21 @@
   [coll ref]
   (boolean (some #(identical? % ref) coll)))
 
+(defn- same-refs?
+  "True when A and B hold the same refs in the same order, by identity —
+   the unchanged-dependency fast path. A re-run that read the same refs in
+   the same order pays one linear scan instead of the diff's O(n·m)
+   membership scans and can skip the watch-set write entirely; the order is
+   the deref order, which is stable while the body's read path is."
+  [a b]
+  (let [n (count a)]
+    (and (= n (count b))
+         (loop [i 0]
+           (if (= i n)
+             true
+             (and (identical? (nth a i) (nth b i))
+                  (recur (inc i))))))))
+
 (defn changed?
   "Reagent-style change gate: identical? fast path, structural = otherwise.
    Public because tests and engine extensions need the same gate."
@@ -428,25 +443,30 @@
            ;; is the record; the cell's :watching is its introspection
            ;; mirror. The payload is refreshed only when a dep was actually
            ;; added or dropped — an unconditional registry write per run is a
-           ;; hot-path cost for nothing.
+           ;; hot-path cost for nothing. The same-order fast path (the
+           ;; common re-run) skips the diff, the cell write and the registry
+           ;; write alike: the watch set already matches what was read, so
+           ;; there is nothing to watch, unwatch or check.
            (let [collected (vec collected)
                  {:keys [watching]} (weak/payload rx-key)
-                 watching (or watching (:watching @cell))
-                 added (vec (remove #(identical-member? watching %) collected))
-                 dropped (filter #(and (identical-member? watching %)
-                                       (not (identical-member? collected %)))
-                                 watching)]
-             (doseq [dep added]
-               (watch-ref dep watch-key dep-handler))
-             (doseq [dep dropped]
-               (unwatch-ref dep watch-key))
-             (swap! cell assoc :watching collected)
-             (when (or (seq added) (seq dropped))
-               (weak/register! rx-key @self
-                               {:rx-watch-key watch-key
-                                :watching collected}
-                               on-dead))
-             added))
+                 watching (or watching (:watching @cell))]
+             (if (same-refs? watching collected)
+               []
+               (let [added (vec (remove #(identical-member? watching %) collected))
+                     dropped (filter #(and (identical-member? watching %)
+                                           (not (identical-member? collected %)))
+                                     watching)]
+                 (doseq [dep added]
+                   (watch-ref dep watch-key dep-handler))
+                 (doseq [dep dropped]
+                   (unwatch-ref dep watch-key))
+                 (swap! cell assoc :watching collected)
+                 (when (or (seq added) (seq dropped))
+                   (weak/register! rx-key @self
+                                   {:rx-watch-key watch-key
+                                    :watching collected}
+                                   on-dead))
+                 added))))
          run-sync!
          (fn []
            (loop [guard 0]
