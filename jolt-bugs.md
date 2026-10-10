@@ -1,7 +1,8 @@
 # jolt-bugs — reported upstream issues
 
 A ticket remains live here until its fix reaches a tagged release. Status
-checked on 2026-10-09 against Jolt `v0.8.20` (`143c371`) and
+checked on 2026-10-10 against Jolt `v0.8.20` (`143c371`, still the latest tag;
+the #1292 and #1294 fixes merged into `main` after it) and
 `jolt-lang/http-client` `v0.1.2` (`00455b8`), the versions now pinned by the
 project.
 
@@ -17,18 +18,33 @@ fallback. Keep the pin until the change is released by Jolt.
 
 ### [jolt#1292](https://github.com/jolt-lang/jolt/issues/1292) — make the GC stall report opt-in
 
-Still open. The stall report — stderr, once per collection that waits two
-seconds for a thread parked in a foreign call that is not `:blocking`
-(`host/chez/rt.ss`, installed by `sa-gc-install-stall-watch!`) — interleaves
-with a full-screen TUI's frames, and a program cannot intercept it: the
-reporting thread is the rendezvous waiter, so a thread-level
-`(parameterize ((current-error-port …)))` does not reach it, and on Windows
-the console error port is a console HANDLE rather than the CRT stderr fd.
-The issue asks for silent-by-default with a `JOLT_GC_STALL` opt-in (the repro
-is in the ticket). No kmet-side workaround: the `target/jolt-test-ext.log`
-sighting predates the pinned `v0.8.20` and was the Windows pipe-close shape
-fixed there (#1283), and kmet's own Windows terminal FFI already marks every
-parking call `:blocking`.
+Closed 2026-10-09 by [PR #1293](https://github.com/jolt-lang/jolt/pull/1293)
+(merge `123157fd`, on `main` after the pinned `v0.8.20`), which keeps the
+entry live until a tag carries it. The report — stderr, once per collection
+that waits two seconds for a thread parked in a foreign call that is not
+`:blocking` (`host/chez/rt.ss`, installed by `sa-gc-install-stall-watch!`) —
+interleaved with a full-screen TUI's frames, and a program could not
+intercept it: the reporting thread is the rendezvous waiter, so a
+thread-level `(parameterize ((current-error-port …)))` did not reach it, and
+on Windows the console error port is a console HANDLE rather than the CRT
+stderr fd. The watch still installs and the collection still stalls; only
+the report needs `JOLT_GC_STALL=1` for the two-second threshold, or
+`JOLT_GC_STALL=<seconds>` for another. The runtime's other warnings (provider
+claim, duplicate native symbol, data-reader load failure, AOT worker) need
+`JOLT_WARNINGS=1`; the entropy fallback still warns unconditionally.
+`jolt.ffi/on-gc-stall` hands the report to a callback instead, for a host
+whose stderr is not jolt's — it runs with every other thread stopped, so it
+may write to a file but must not wait. The companion
+[PR #1294](https://github.com/jolt-lang/jolt/pull/1294) (merge `83db9530`,
+also `main`-only) patches Chez so a collect-safe `:blocking` call no longer
+takes the tc mutex — the cost behind the stall itself.
+
+No kmet-side workaround to remove: the `target/jolt-test-ext.log` sighting
+predates the pinned `v0.8.20` and was the Windows pipe-close shape fixed
+there (#1283), and kmet's own Windows terminal FFI already marks every
+parking call `:blocking`. Bump the floor when the next tag lands — the TUI
+then stays quiet by default, and `on-gc-stall` is the seam if a stall should
+still reach `kmet.debug`.
 
 ## Resolved in the pinned releases
 
