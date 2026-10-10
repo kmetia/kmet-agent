@@ -1554,6 +1554,9 @@ Reading:
 - `tracked-deref` on a plain atom costs ~4x a raw deref on bb and ~65x on
   jolt (0.03 µs deref + the classification).
 
+These are the as-found numbers; §14.4 records what the applied fixes
+changed.
+
 ### 14.3 Scaling
 
 `force-run!` (a full reaction re-run; the body is a trivial sum) vs dep
@@ -1587,38 +1590,56 @@ cycle per measurement):
 | dirty 500 + settle | 26081 | 12506 |
 | `some identical?` over a 500 vector | 44.8 | 37.0 |
 
-### 14.4 Candidates (not yet applied)
+### 14.4 Applied fixes
 
-1. **`update-watching!`'s set-diff is O(deps²) per run.** Measured in the
-   dep-scaling table and the replica; a same-order identity fast path
-   (fill the added/dropped sets only on mismatch) is 5–12x cheaper at
-   n=20–50, and lets the run skip its unconditional `:watching` cell swap
-   when the set is unchanged. Affects every dep-heavy `ComponentFn`
-   reaction.
-2. **`enqueue!`'s dedup is O(queue) per enqueue** (`some identical?` — the
-   queue is a vector because reify equality/hash is unreliable on bb). An
-   O(1) `:queued?` flag in the cell, cleared by `take-batch!`, removes the
-   scan; the 500-atom storm cycle is then bounded by the per-run cost.
-   `-dispose`'s `filterv` over the queue is the same shape for dispose
-   storms.
-3. **`tracked-deref` classifies twice and jolt wants the opposite order.**
-   Hoisting one `trackable-ref?` per read plus a `#?(:jolt …)` ordering
-   (RXRef first) measures 4.06 → 2.83 µs on jolt atoms and 2.09 → 1.58 on
-   jolt reactions (scratch replica); bb gains the dedup only (~0.2 µs).
-4. **`run-sync!`'s per-run floor** is 12.8 µs bb / 3.5 µs jolt for a
-   zero-dep body (idle deref 1.9 / 0.6): two cell swaps, a `pending` atom,
-   the `*reaction-frame*` binding, and `update-watching!`'s registry
-   lookup + no-op cell write. Paid per frame by `:rerun-without-deps?`
-   components and per dep change; merging the value/state/watching writes
-   is the highest-leverage bb item.
-5. **Smaller items.** `track-render` re-classifies every tracked ref with
-   `reakt/reaction?` (`satisfies?` 1.07 µs bb / 0.46 jolt) per miss, though
-   `tracked-deref` already knows the kind — fold a typed bucket into
-   `*tracking-scope*` (only `macros.clj:152` reads it). `rx-unchanged?`
-   calls `-cell` per rx entry per hit; the cache entry could carry the cell
-   (`[ref cell v]`). An idle reaction deref reads its cell twice; the
-   re-read after `flush!` could be skipped when the queue was empty. The
-   non-empty `flush!` machinery is 4–10 µs/call (skeleton 4.0 bb / 1.1
-   jolt), once per frame. `make-reaction` costs ~20 µs to construct —
-   relevant at replay/cold-render scale, hard to shrink.
+The three algorithmic candidates below are applied (commits `6b286af7`,
+`72a63d3b`, `b5b82a56`); the §14.2/§14.3 tables are the as-found profile,
+and the after numbers here are interleaved same-machine A/Bs against the
+previous commit (`target/watching-ab.clj`, `target/storm-ab.clj`,
+`target/tracked-ab.clj`).
+
+1. **`update-watching!`'s set-diff was O(deps²) per run.** Applied: a
+   same-order identity fast path, which also skips the no-op `:watching`
+   cell write and the registry write. `force-run!` over N deps, bb
+   20 deps 126 → 44 µs and 50 deps 514 → 95 µs; jolt 20 deps ~205 → 178
+   and 50 deps ~800 → 695 (jolt's row is dominated by per-dep
+   `tracked-deref`; its diff was only ~7 µs at n=20).
+2. **`enqueue!`'s dedup was O(queue) per enqueue.** Applied: a `:queued?`
+   flag in the cell, set atomically with `:dirty` and cleared when the
+   run's final cell write lands, when a flush skips a settled entry, and
+   on the failure/dispose paths. One write with 500 watchers + settle:
+   bb 23.5 → 11.6 ms, jolt ~12.2 → ~9.5 ms; dirty-500-atoms cycles bb
+   22.2 → 11.2 ms. `test-failed-reaction-requeues-on-the-next-dep-change`
+   pins the failure-path clear (fails without it).
+3. **`tracked-deref` classified twice whenever a tracking scope was
+   bound.** Applied: one classification shared by the scope write and
+   `record-dep!`. Jolt: tracked-deref on a plain atom in a scope 4.1-4.9 →
+   2.3 µs, reaction 2.1 → 1.8; bb 1.36 → 1.15 and 3.4 → 3.1;
+   reaction-frame-only reads unchanged. The jolt RXRef-first reorder
+   originally floated here was dropped: `or` evaluates both checks on a
+   miss, so IRef-first already wins for the common atom (measured 1.8 vs
+   2.5 µs RXRef-first).
+
+### 14.5 Still open
+
+- **`run-sync!`'s per-run floor** is now the two state swaps, the pending
+  holder, and the `*reaction-frame*` binding; item 1 removed the third
+  (no-op watching) write. The remaining cheap idea — `pending` as
+  `(atom nil)` so a no-dep body skips the map allocation — measured
+  neutral (0-dep `force-run!` 10.2 → 10.2 µs; `:rerun-without-deps?`
+  deref 12.2 → 11.9-12.2) and was not kept.
+- **`track-render` re-classifies every tracked ref** with
+  `reakt/reaction?` (`satisfies?` 1.07 µs bb / 0.46 jolt) per miss, though
+  `tracked-deref` already knows the kind — a host-ordered kind check would
+  cut the common atom to 0.16 µs on bb (neutral on jolt, whose protocol
+  check is already cheap). Folding a typed bucket into `*tracking-scope*`
+  (only `macros.clj` reads it) would delete the pass entirely.
+- **`rx-unchanged?` calls `-cell` per rx entry per hit** (0.60 µs bb /
+  0.10 jolt); the cache entry could carry the cell (`[ref cell v]`).
+- **An idle reaction deref reads its cell twice** (1.9 µs bb / 0.6 jolt);
+  the re-read after `flush!` could be skipped when the queue was empty.
+- **The non-empty `flush!` machinery** is 4-10 µs/call (skeleton 4.0 bb /
+  1.1 jolt), once per frame; low priority.
+- **`make-reaction` costs ~20 µs to construct** — relevant at
+  replay/cold-render scale, hard to shrink.
 

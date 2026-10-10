@@ -62,9 +62,11 @@ kmet hit this on the reakt hot path: `trackable-ref?` is
 `(or (instance? clojure.lang.IRef ref) (satisfies? RXRef ref))`, and
 `tracked-deref` calls it twice per tracked read inside a tracking scope, so
 a plain-atom read costs 4.06 µs on jolt against 1.36 on bb (perf.md §14.2).
-No upstream ticket yet. The kmet-side workaround (a single classification
-with `satisfies?` first on jolt) is planned in the §14.4 pass; an upstream
-fast path for the core-type arms would fix it for every library.
+No upstream ticket yet. The kmet-side workaround has landed — classify
+once per deref and keep IRef first (both checks run on a miss, so
+RXRef-first is actually slower for the common atom; perf.md §14.4 item 3),
+bringing a plain-atom read in a tracking scope from 4.9 to 2.3 µs. An
+upstream fast path for the core-type arms would fix it for every library.
 
 Repro: `jolt scripts/kmet_reakt_bench.clj` — the four `instance?` rows at
 the top of the sweep.
