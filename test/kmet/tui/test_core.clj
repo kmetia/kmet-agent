@@ -64,12 +64,15 @@
           (reset! calls 0)
           (t/is (= ["a!" "B!" "c!"] (:lines (build in out {} [a "B" c] 100))))
           (t/is (= 2 @calls) "one changed line + one append"))
-        (testing "a content-equal but fresh string is not reused"
-          ;; identity, not equality: a new object goes through normalize even
-          ;; when its text matches the previous frame's line
+        (testing "a content-equal chunk is copied without normalizing"
+          ;; the chunk compare is content equality: fresh-but-equal objects
+          ;; never reach normalize
           (reset! calls 0)
-          (t/is (= ["a!" "b!"] (:lines (build in out {} [a (subs "xb" 1 2)] 100))))
-          (t/is (= 1 @calls) "the fresh object is normalized"))))))
+          (let [out2 (:lines (build in out {} [(subs "xa" 1) (subs "xb" 1)] 100))]
+            (t/is (= ["a!" "b!"] out2))
+            (t/is (zero? @calls) "no normalization calls at all")
+            (t/is (identical? (nth out 0) (nth out2 0))
+                  "the previous objects are copied")))))))
 
 (t/deftest test-build-frame-lines-reuses-unchanged-lines
   (let [marker utils/CURSOR-MARKER
@@ -100,7 +103,7 @@
             (t/is (nil? (:changed out2)) "no repaint")))
         (testing "only changed lines are scanned"
           (reset! scans 0)
-          (let [out2 (build in lines marks [a (str "bb" marker "cc")] 10)]
+          (let [out2 (build in lines marks [a (str "bb" marker "cX")] 10)]
             (t/is (= 1 @scans) "the unchanged line is not scanned")
             (t/is (= {:row 1 :col 2} (:cursor out2)))
             (t/is (= {1 2} (:marks out2)))
@@ -120,12 +123,13 @@
             (t/is (= ["bbcc" "aaaa" "aaaa"] (:lines out2)))
             (t/is (nil? (:cursor out2)) "row 0 is above the 2-line viewport")
             (t/is (= {0 2} (:marks out2)))))
-        (testing "a content-equal but fresh string is not reused"
+        (testing "a content-equal chunk reuses the previous objects"
           (reset! scans 0)
           (let [a2 (subs "xaaaa" 1)
                 out2 (build in lines marks [a2 b] 10)]
-            (t/is (= 1 @scans) "the fresh object is rescanned, the identical one is not")
-            (t/is (identical? a2 (nth (:lines out2) 0)))
+            (t/is (zero? @scans) "the chunk compare proved the text equal")
+            (t/is (identical? (nth lines 0) (nth (:lines out2) 0))
+                  "the previous line object is copied, not the fresh one")
             (t/is (= ["aaaa" "bbcc"] (:lines out2)))))))))
 
 (t/deftest test-build-frame-lines-changed-range
@@ -140,9 +144,15 @@
     (testing "removing only empty lines is not a change"
       (let [{:keys [changed]} (build [a "" ""] [a "" ""] {} [a] 10)]
         (t/is (nil? changed))))
-    (testing "a changed line is the range even when its text is equal"
-      (let [{:keys [changed]} (build [a b] [a b] {} [a (subs "xb" 1 2)] 10)]
-        (t/is (= [1 1] changed))))))
+    (testing "a content-equal chunk is no change at all"
+      (let [{:keys [changed]} (build [a b] [a b] {} [a (subs "xbbbb" 1)] 10)]
+        (t/is (nil? changed))))
+    (testing "a walked chunk still over-approximates with fresh equal lines"
+      ;; the chunk differs (line 1), so the walk sees line 0's fresh object
+      ;; and counts it as changed too
+      (let [{:keys [changed]} (build [a b] [a b] {}
+                                     [(subs "xaaaa" 1) (subs "xbXbb" 1)] 10)]
+        (t/is (= [0 1] changed))))))
 
 (t/deftest test-build-frame-lines-quick-reuse
   (let [build (var core/build-frame-lines)
@@ -163,11 +173,24 @@
             (build prev-raw prev-out prev-marks [a (subs "xbXbb" 1)] 10 true)]
         (t/is (not (identical? prev-out lines)))
         (t/is (= [1 1] changed))))
-    (testing "without the quick hint the walk always runs"
+    (testing "without the quick hint the chunk pass still proves content-equality"
       (let [{:keys [lines changed]}
             (build prev-raw prev-out prev-marks [(subs "xaaaa" 1) (subs "xbbbb" 1)] 10)]
-        (t/is (not (identical? prev-out lines)) "fresh-but-equal lines rebuild the vector")
-        (t/is (= [0 1] changed) "and count as raw changes")))))
+        (t/is (not (identical? prev-out lines)) "a fresh vector")
+        (t/is (nil? changed) "the chunk compare is content equality")))))
+
+(t/deftest test-build-frame-lines-walks-only-differing-chunks
+  (let [build (var core/build-frame-lines)
+        base (mapv #(str "line-" %) (range 2500))]
+    (testing "only the chunk holding the change is walked; equal chunks are copied"
+      (let [{:keys [lines changed]} (build base base {} (assoc base 1500 "CHANGED") 100)]
+        (t/is (= [1500 1500] changed))
+        (t/is (identical? (nth base 0) (nth lines 0)) "chunk 0 copied")
+        (t/is (identical? (nth base 2499) (nth lines 2499)) "the last chunk copied")
+        (t/is (= "CHANGED" (nth lines 1500)))))
+    (testing "a document equal in every chunk reports no change"
+      (let [{:keys [changed]} (build base base {} (mapv identity base) 100)]
+        (t/is (nil? changed))))))
 
 (t/deftest test-refine-changed-range
   (let [refine (var core/refine-changed-range)

@@ -105,11 +105,19 @@
       {:row cursor-i
        :col (utils/visible-width (subs (nth lines cursor-i) 0 (get marks cursor-i)))})))
 
+(def ^:private chunk-lines
+  "Frame-pass chunk size. The pass compares the previous and current raw
+   lines in chunks of this size with a host-native `=`: an equal chunk is
+   copied whole from the previous output without entering the interpreted
+   per-line loop, so a one-line change costs the walk over one chunk instead
+   of the whole document (the interpreted loop is the pass's dominant cost
+   on bb)."
+  1024)
+
 (defn- build-frame-lines
-  "Build one frame's document in a single pass over LINES: strip every
-   CURSOR-MARKER, normalize each line, reuse PREV-OUT for lines
-   `identical?` to their PREV-RAW entry, and report the range the frame's
-   diff must repaint.
+  "Build one frame's document: strip every CURSOR-MARKER, normalize each
+   line, reuse PREV-OUT for lines unchanged since PREV-RAW, and report the
+   range the frame's diff must repaint.
 
    Returns
    {:lines stripped-and-normalized lines
@@ -125,18 +133,22 @@
    lines; a marker above the viewport is still stripped, it just yields no
    cursor.
 
-   The memo is the frame's change detector too: a raw-identical line copies
-   its previous output (a pure function of the line object) and its marker
-   index, while a raw-different line is part of :changed — the range
-   main-diff consumes instead of walking the document again. Raw identity
-   over-approximates the diff's `=` compare (a fresh-but-equal line counts
-   as changed), which is safe: a spurious line is rewritten, never skipped.
+   The shared prefix is walked in CHUNK-LINES-sized chunks compared with a
+   host-native `=`: an equal chunk is copied from PREV-OUT whole (content
+   equality is enough — strip/normalize/marks are pure functions of the
+   line content), and only a differing chunk enters the interpreted walk.
+   Inside a walked chunk, a raw-identical line copies its previous output
+   and marker index. The walked lines are the frame's change detector: they
+   are the range main-diff consumes instead of walking the document again,
+   and an appended tail is always walked. The walked range over-approximates
+   the diff's `=` compare (a fresh-but-equal line counts as changed), which
+   is safe: a spurious line is rewritten, never skipped; an equal chunk is
+   never in the range, so the range is exact for whole chunks.
 
    QUICK? is the caller's hint that the previous frame repainted nothing.
-   It buys one step before the per-line walk: a document content-equal to
-   PREV-RAW reuses the whole previous result (strip/normalize/marks are
-   pure functions of the line content, so only the cursor is recomputed for
-   the height). `=` is a host-native vector compare — far cheaper than the
+   It buys one step before the chunk walk: a document content-equal to
+   PREV-RAW reuses the whole previous result, with only the cursor
+   recomputed for the height. `=` is host-native — far cheaper than the
    interpreted loop on bb — but it scans the whole vector when it fails, so
    it is only worth trying after an unchanged frame.
 
@@ -160,33 +172,45 @@
         :marks prev-marks
         :changed nil}
        (let [marker utils/CURSOR-MARKER
+             ;; strip/normalize/reuse/mark the lines in [a b)
+             scan-range (fn scan-range [a b acc marks fc lc]
+                          (loop [i a, acc acc, marks marks, fc fc, lc lc]
+                            (if (< i b)
+                              (let [line (nth lines i)]
+                                (if (and (< i prev-count)
+                                         (identical? (nth prev-raw i) line))
+                                  (recur (inc i) (conj! acc (nth prev-out i)) marks fc lc)
+                                  (let [idx (clojure.string/index-of line marker)
+                                        stripped (if idx
+                                                   (clojure.string/replace line marker "")
+                                                   line)]
+                                    (recur (inc i)
+                                           (conj! acc (utils/normalize-terminal-output stripped))
+                                           (if idx (assoc marks i idx) marks)
+                                           (if (neg? fc) i fc)
+                                           i))))
+                              [acc marks fc lc])))
              [out marks prefix-first prefix-last]
-             (loop [i 0
-                    acc (transient [])
-                    marks {}
-                    fc -1
-                    lc -1]
-               (if (< i n)
-                 (let [line (nth lines i)]
-                   (if (and (< i prev-count)
-                            (identical? (nth prev-raw i) line))
-                     (recur (inc i) (conj! acc (nth prev-out i)) marks fc lc)
-                     (let [idx (clojure.string/index-of line marker)
-                           stripped (if idx
-                                      (clojure.string/replace line marker "")
-                                      line)]
-                       (recur (inc i)
-                              (conj! acc (utils/normalize-terminal-output stripped))
-                              (if idx (assoc marks i idx) marks)
-                              (if (neg? fc) i fc)
-                              i))))
+             (if (and (vector? lines) (vector? prev-raw) (>= n prev-count))
+               ;; The shared prefix in native chunks, then the appended tail.
+               (loop [a 0, acc (transient []), marks {}, fc -1, lc -1]
+                 (if (< a prev-count)
+                   (let [b (min prev-count (+ a chunk-lines))]
+                     (if (= (subvec prev-raw a b) (subvec lines a b))
+                       (recur b (reduce conj! acc (subvec prev-out a b)) marks fc lc)
+                       (let [[acc marks fc lc] (scan-range a b acc marks fc lc)]
+                         (recur b acc marks fc lc))))
+                   (let [[acc marks fc lc] (scan-range prev-count n acc marks fc lc)]
+                     [(persistent! acc) marks fc lc])))
+               (let [[acc marks fc lc] (scan-range 0 n (transient []) {} -1 -1)]
                  [(persistent! acc) marks fc lc]))
-             ;; A previous marker stays valid exactly while its line is still the
-             ;; same object; a rescanned line's new status (in MARKS) wins.
+             ;; A previous marker stays valid exactly while its line's
+             ;; content is unchanged; a rescanned line's new status (in
+             ;; MARKS) wins.
              marks (reduce-kv (fn [m i idx]
                                 (if (and (< i prev-count)
                                          (< i n)
-                                         (identical? (nth prev-raw i) (nth lines i)))
+                                         (= (nth prev-raw i) (nth lines i)))
                                   (assoc m i idx)
                                   m))
                               marks

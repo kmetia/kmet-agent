@@ -1428,11 +1428,47 @@ more than the old `some`-based scan — but that scenario is the unstable one
 and the common frames (typing, streaming) win. The phone's run-to-run state
 swung ±20 % across these sweeps; the table is the clean runs.
 
-### 13.6 Next steps
+### 13.6 Applied: a cheap walk for a changed frame
+
+Two `build-frame-lines` changes, both host-neutral:
+
+- **QUICK? fast path**: after a frame that repainted nothing, a document
+  content-equal to the previous raw lines is detected with one host-native
+  `=` (~0.5 ms for 14.9k lines) and the whole previous result is reused —
+  strip/normalize/marks are pure functions of the line content — with only
+  the cursor recomputed for the height. The gate is the diff's own verdict
+  (`kitty-frame-lines ::unchanged`), because raw identity never settles:
+  the editor re-renders a few fresh-but-equal lines every frame. With the
+  pass able to prove "no change", `main-diff` treats a nil range as proof
+  and skips its own walk (flash frames pass `::scan`).
+- **Chunked prefix**: the shared prefix is compared in 1024-line chunks
+  with the same native `=`; an equal chunk is copied whole from the
+  previous output and only a differing chunk enters the interpreted
+  per-line walk, then the appended tail is walked. A removal still takes
+  the whole-range walk.
+
+| scenario | phase | before | after (bb / jolt) |
+|---|---|---|---|
+| typing | lines | 6.0 / 2.9 ms | 1.9 / 2.2 ms |
+| typing | frame | 9.0 / 6.8 ms | 6.2 / 5.4 ms |
+| stream | lines | 6.0 / 2.9 ms | 1.4 / 2.4 ms |
+| stream | frame | 14.0 / 14.6 ms | 9.0 / 13.8 ms |
+| calm | lines | 16.5 / 7.7-16 ms | 1.6 / 1.8 ms |
+| calm | frame | 25 / 15-28 ms | 9.7 / 7.5 ms |
+| cold | frame | render-stack-bound | 3.3 / 4.8 s (unchanged) |
+| redraw | frame | render-stack-bound | 3.4 / 5.0 s (unchanged) |
+
+The bench now collects garbage before opening each scenario window (the
+calm frames right after the 3 s cold render measured 2-3x slower than the
+same frames later in the run), and its `lines` phase is the one fused
+pass.
+
+### 13.7 Next steps
 
 - Incremental markdown (§6.3) still stands for cold and streaming: cold is
   ~98 % render-stack and the stream frame's render-stack grows with the
-  message.
+  message (measured: per-append render 3 -> 16 ms on bb, 4 -> 28 ms on jolt
+  as the streamed text grows 3 -> 96 chunks).
 - Redraw/global reflow still re-pays the full render (~3-5 s on 2.6 MB);
   nothing in this pass changes §10.6's framing of it.
 
