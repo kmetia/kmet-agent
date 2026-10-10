@@ -76,6 +76,20 @@
 ;; Cursor
 ;; ═══════════════════════════════════════════════════════════════════════════
 
+(defn- removed-range
+  "The [first last] indices of the non-empty lines that PREV-OUT lost
+   between N and PREV-COUNT, or [nil nil] when every removed line was
+   empty. The diff's missing side is \"\", so an empty removal repaints
+   nothing; a non-empty one must stay in the frame's changed range, since
+   that range replaces the diff's own scan."
+  [prev-out n prev-count]
+  (loop [i n, f nil, l nil]
+    (if (< i prev-count)
+      (if (= "" (nth prev-out i))
+        (recur (inc i) f l)
+        (recur (inc i) (or f i) i))
+      [f l])))
+
 (defn- build-frame-lines
   "Build one frame's document in a single pass over LINES: strip every
    CURSOR-MARKER, normalize each line, reuse PREV-OUT for lines
@@ -88,33 +102,26 @@
     :marks {line-idx marker-idx}        ; carry into the next frame
     :changed [first last] or nil}.      ; nil = no change
 
-   Stripping must be unconditional: a marker is an internal signal, and one
-   that leaks into the terminal stream is an APC sequence (ESC _ ... BEL)
-   whose parser runs to ST (ESC \\) on strict terminals — Termux then
-   swallows every following byte and the display freezes at the last painted
-   frame while the app keeps rendering. The cursor position comes from the
-   bottom-most marker in the visible viewport (the bottom HEIGHT lines); a
-   marker OUTSIDE the viewport is still stripped, it just yields no cursor,
-   so a document that grows past the panel height (a short terminal) can
-   push the focused field's line just above it.
+   Stripping must be unconditional: a marker that leaks into the terminal
+   stream is an APC sequence (ESC _ ... BEL) whose parser runs to ST
+   (ESC \\) on strict terminals — Termux then swallows every following byte
+   and the display freezes at the last painted frame while the app keeps
+   rendering. The cursor is the bottom-most marker in the bottom HEIGHT
+   lines; a marker above the viewport is still stripped, it just yields no
+   cursor.
 
-   PREV-RAW/PREV-OUT/PREV-MARKS reuse the previous frame's work: an
-   unchanged line is the same string object the component caches returned,
-   so it copies its stripped+normalized output (a pure function of the raw
-   line) and its marker index instead of scanning
-   and normalizing the whole document (the separate strip, normalize and
-   diff walks cost ~11 ms/frame on bb and ~9 ms on jolt at 14.9k lines;
-   perf.md §13). The identity check is also the frame's change detector —
-   the changed raw lines are the repaint range, which main-diff consumes
-   instead of walking the document again. Raw identity over-approximates
-   main-diff's `=` compare (a fresh-but-equal line counts as changed), which
-   is safe: a spurious line is rewritten, never skipped.
+   The memo is the frame's change detector too: a raw-identical line copies
+   its previous output (a pure function of the line object) and its marker
+   index, while a raw-different line is part of :changed — the range
+   main-diff consumes instead of walking the document again. Raw identity
+   over-approximates the diff's `=` compare (a fresh-but-equal line counts
+   as changed), which is safe: a spurious line is rewritten, never skipped.
 
    :changed covers the shared prefix and any appended or removed tail
-   (main-diff re-applies its appended? adjustment, which agrees with this
-   range). It is a raw-identity range and must not be used for a frame whose
-   final lines flash compositing changed (the caller gates on the flash
-   state)."
+   (main-diff re-applies its appended? adjustment, which agrees). It
+   describes the pre-flash document, so it must not be used for a frame
+   whose final lines flash compositing changed (the caller gates on the
+   flash state)."
   ([lines height]
    (build-frame-lines [] [] {} lines height))
   ([prev-raw prev-out prev-marks lines height]
@@ -155,19 +162,11 @@
          ;; A removed line repaints only when it held content — the diff's
          ;; missing side is "" (an appended tail is main-diff's appended?).
          [first-changed last-changed]
-         (if (< n prev-count)
-           (let [[first-removed last-removed]
-                 (loop [i n, f nil, l nil]
-                   (if (< i prev-count)
-                     (if (= "" (nth prev-out i))
-                       (recur (inc i) f l)
-                       (recur (inc i) (or f i) i))
-                     [f l]))]
-             (if first-removed
-               [(if (neg? prefix-first) first-removed prefix-first)
-                (or last-removed prefix-last)]
-               [prefix-first prefix-last]))
-           [prefix-first prefix-last])
+         (let [[rf rl] (if (< n prev-count)
+                         (removed-range prev-out n prev-count)
+                         [nil nil])]
+           [(if (and rf (neg? prefix-first)) rf prefix-first)
+            (or rl prefix-last)])
          viewport-top (max 0 (- n height))
          cursor-i (reduce-kv (fn [best i _]
                                (if (and (>= i viewport-top) (> i best)) i best))
@@ -181,6 +180,23 @@
       :cursor cursor
       :marks marks
       :changed (when (>= first-changed 0) [first-changed last-changed])})))
+
+(defn- refine-changed-range
+  "Narrow HINT — build-frame-lines' raw-identity [first last] range — to
+   what the diff's own content compare finds, so a line rebuilt to the same
+   text (the editor's border) does not force a repaint. Returns [-1 -1] when
+   every line in the range is content-equal."
+  [prev lines [f l]]
+  (let [equal? (fn [i]
+                 (let [a (nth prev i nil)
+                       b (nth lines i nil)]
+                   (or (identical? a b) (= a b))))]
+    (loop [f f, l l]
+      (cond
+        (> f l) [-1 -1]
+        (equal? f) (recur (inc f) l)
+        (equal? l) (recur f (dec l))
+        :else [f l]))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; CSI 2026 sync
@@ -2565,31 +2581,16 @@
                       ;; post-frame id update reads it instead of scanning the
                       ;; whole document every frame.
                       kitty-frame-lines (volatile! nil)
-                      ;; HINT is build-frame-lines' raw-identity repaint range: an
-                      ;; upper bound on the changed lines, so the diff can consume it
-                      ;; instead of walking the document again. Its edges are refined
-                      ;; below with the diff's own content compare — a line rebuilt
-                      ;; to the same text (the editor's border) must not force a
-                      ;; repaint. nil (a flash frame) falls back to the walks below.
+                      ;; HINT is build-frame-lines' repaint range, refined
+                      ;; against the final lines so fresh-but-equal objects
+                      ;; (the editor's border) do not force a repaint. nil
+                      ;; (a flash frame) falls back to the walks below.
                       main-diff (fn main-diff [hint]
                                   (let [max-lines (max new-count prev-count)
                                         shared (min new-count prev-count)
                                         [first-changed last-changed]
                                         (if hint
-                                          (let [[f0 l0] hint]
-                                            (loop [f f0, l l0]
-                                              (cond
-                                                (> f l) [-1 -1]
-                                                :else
-                                                (let [p (nth prev f nil)
-                                                      c (nth lines f nil)]
-                                                  (if (or (identical? p c) (= p c))
-                                                    (recur (inc f) l)
-                                                    (let [p (nth prev l nil)
-                                                          c (nth lines l nil)]
-                                                      (if (or (identical? p c) (= p c))
-                                                        (recur f (dec l))
-                                                        [f l])))))))
+                                          (refine-changed-range prev lines hint)
                                           (let [;; The shared prefix (both vectors present) takes
                                                 ;; no per-line bounds branches — only the appended
                                                 ;; or removed tail needs the missing-line defaults.

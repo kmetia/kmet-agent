@@ -144,6 +144,19 @@
       (let [{:keys [changed]} (build [a b] [a b] {} [a (subs "xb" 1 2)] 10)]
         (t/is (= [1 1] changed))))))
 
+(t/deftest test-refine-changed-range
+  (let [refine (var core/refine-changed-range)
+        prev ["a0" "b0" "c0" "d0" "e0"]
+        lines ["a0" "b0" "c1" "d0" "e0"]]
+    (testing "the range shrinks to the lines whose content differs"
+      (t/is (= [2 2] (refine prev lines [0 4]))))
+    (testing "a fresh-but-equal edge line shrinks away"
+      (t/is (= [2 2] (refine prev (assoc lines 4 (subs "xe0" 1)) [0 4]))))
+    (testing "all-equal content refines to no change"
+      (t/is (= [-1 -1] (refine prev prev [0 4]))))
+    (testing "an appended line keeps its range"
+      (t/is (= [3 3] (refine ["a" "b" "c"] ["a" "b" "c" "d"] [3 3]))))))
+
 (t/deftest test-kitty-expand-gate-skips-the-walks
   (let [expand (var core/expand-changed-range-for-kitty-images)
         image-line (str "\u001b_Ga=T,f=100,i=7;AAAA" "\u001b\\")
