@@ -64,10 +64,8 @@
 (def ^:dynamic *tracking-scope*
   "During a tracking scope, [ATOMS RX]: the two capture buckets track-render
    builds its cache from, each an atom of a map — ATOMS is {ref value} for
-   plain IRefs (verified by deref), RX is {ref value} for library refs.
-   tracked-deref classifies each read once and assocs it into the bucket
-   ref-kind selects; the reaction's state cell is looked up once per body
-   run in track-render's cell-keyed cache transform, not per read. Bound by
+   plain IRefs, RX is {ref value} for library refs. tracked-deref files
+   each read into the bucket ref-kind selects. Bound by
    kmet.tui.macros/track-render around render bodies; nil outside one."
   nil)
 
@@ -107,7 +105,7 @@
   "Classify REF for dependency capture: :plain (IRef instances — plain
    atoms, vars; core add-watch works), :rx (library reactive refs —
    reactions, cursors; watched through RXRef), or nil (volatiles and delays
-   can't take watches and are never tracked). The kind names the
+   can't take watches and are never tracked). The kind selects the
    *tracking-scope* bucket the read lands in, so one classification here
    serves every capture frame — track-render consumes the buckets as-is.
 

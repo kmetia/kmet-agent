@@ -108,6 +108,15 @@
       true
       (reduced false))))
 
+(defn- cell-keyed-rx
+  "The :rx cache half for RX-REFS — reactive reads captured as
+   {ref value}: keyed by each reaction's state cell, entries [ref value],
+   the shape rx-unchanged? reads back on a hit. Written once per miss body
+   over the reactive reads only, so an atom-only render (the common case)
+   pays nothing here."
+  [rx-refs]
+  (reduce-kv (fn [m ref v] (assoc m (reakt/-cell ref) [ref v])) {} rx-refs))
+
 (defn track-render
   "Runtime implementation of track!. Runs RENDER-FN within a tracking scope
    and caches the result under WIDTH. Returns the cached result while every
@@ -164,14 +173,7 @@
               (let [result (render-fn)
                     atom-vals @atoms
                     rx-refs @rx
-                    ;; The cache verifies a reaction through its state cell
-                    ;; (rx-unchanged?), so key :rx by cell — once per body
-                    ;; run, not per read. Empty for atom-only bodies, the
-                    ;; common case, which then pays no pass at all.
-                    rx-vals (reduce-kv (fn [m ref v]
-                                         (assoc m (reakt/-cell ref) [ref v]))
-                                       {}
-                                       rx-refs)
+                    rx-vals (cell-keyed-rx rx-refs)
                     ;; Everything the body tracked, reactions included:
                     ;; the payload's :watched is what teardown and the sweep
                     ;; must unwatch later. (The cache splits the same refs:
