@@ -165,16 +165,17 @@
                     ;; Classify the tracked refs ONCE per body run (the miss
                     ;; path): plain IRefs into :atoms (verify by deref),
                     ;; library reactions into :rx keyed by their cell
-                    ;; (verify by cell read). The classification is the
-                    ;; expensive satisfies? call — it must not run per hit.
+                    ;; (verify by cell read). plain-ref? is the host-ordered
+                    ;; cheap check and exact here — these refs already
+                    ;; cleared tracked-deref's trackable-ref? gate.
                     [atom-vals rx-vals] (reduce-kv
                                          (fn [acc ref v]
                                            (let [[atom-vals rx-vals] acc]
-                                             (if (reakt/reaction? ref)
+                                             (if (reakt/plain-ref? ref)
+                                               [(assoc atom-vals ref v) rx-vals]
                                                [atom-vals (assoc rx-vals
                                                                  (reakt/-cell ref)
-                                                                 [ref v])]
-                                               [(assoc atom-vals ref v) rx-vals])))
+                                                                 [ref v])])))
                                          [{} {}]
                                          tracked-map)
                     ;; Everything the pass tracked, reactions included:

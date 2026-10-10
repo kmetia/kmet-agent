@@ -55,7 +55,8 @@
    write back through the source (=-gated, nested lenses composing), and a
    disposed lens refuses writes instead of writing back from the dead."
   (:refer-clojure :exclude [derive])
-  (:require [kmet.libs.weak :as weak]))
+  (:require [kmet.libs.host :as host]
+            [kmet.libs.weak :as weak]))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Context
@@ -98,6 +99,24 @@
   "True for the library's own refs (reactions, cursors)."
   [ref]
   (satisfies? RXRef ref))
+
+(def ^:private jolt-host?
+  "Resolved once: reader conditionals are not allowed in `.clj` source, and
+   plain-ref?'s check order is host-dependent (perf.md §14.2)."
+  (host/jolt?))
+
+(defn plain-ref?
+  "True when REF is a plain IRef (atom, var) rather than a library reactive
+   ref (reaction, cursor) — the classification track-render splits its cache
+   with. Only valid for refs that already cleared trackable-ref? (volatiles
+   and delays are neither). Host-ordered because the checks cost
+   differently: bb's `instance?` is flat while its `satisfies?` walks the
+   protocol; jolt is the reverse (perf.md §14.2) — either way the common
+   atom short-circuits on the cheaper check."
+  [ref]
+  (if jolt-host?
+    (not (satisfies? RXRef ref))
+    (instance? clojure.lang.IRef ref)))
 
 (defn trackable-ref?
   "True when REF can be a tracked dependency: IRef instances (plain atoms,
