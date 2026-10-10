@@ -18,6 +18,25 @@
                    defcomponent) MUST include this method — there is no
                    universal default under SCI."))
 
+(defn render-all
+  "Render each component in COMPONENTS and concatenate the lines into one
+   vector. The transient reduce is the frame path's shared form: this
+   concatenates a whole document (tens of thousands of lines) per pass,
+   where the old (vec (mapcat …)) spent real allocation/GC on lazy seqs.
+   ELEM, when given, names the key holding the component in item maps (the
+   reconciler's {:c …} shape) — a direct get, so the caller need not
+   allocate a mapped-components seq."
+  ([components width]
+   (persistent!
+    (reduce (fn [acc c] (reduce conj! acc (render c width)))
+            (transient [])
+            components)))
+  ([items width elem]
+   (persistent!
+    (reduce (fn [acc it] (reduce conj! acc (render (get it elem) width)))
+            (transient [])
+            items))))
+
 (defn dispose-component!
   "Dispose a value of any shape: a defcomponent record, a reify, a
    duck-typed {:render … :dispose …} map, or a sequence of any of these
