@@ -179,6 +179,27 @@
       (r/force-run! rx)
       (is (= :ok @rx) "run! retries through sticky failure"))))
 
+(deftest test-failed-reaction-requeues-on-the-next-dep-change
+  ;; the failure path throws before run-sync!'s final cell write, so the
+  ;; waiting flag must clear in the catch: otherwise the next change marks
+  ;; the reaction dirty but never enqueues it (no flush, no hook wake)
+  (let [a (atom 0)
+        fail? (atom false)
+        d (r/make-reaction (fn []
+                             (when @fail? (throw (ex-info "boom" {})))
+                             (r/tracked-deref a)))]
+    (is (= 0 @d))
+    (reset! fail? true)
+    (swap! a inc)
+    (is (pos? (r/queued-count)) "the change queued the reaction")
+    (is (thrown? Exception (r/flush!)) "the queued run fails")
+    (is (= :failed (:state (r/reaction-state d))))
+    (reset! fail? false)
+    (swap! a inc)
+    (is (pos? (r/queued-count)) "a recovered reaction re-enqueues")
+    (r/flush!)
+    (is (= 2 @d))))
+
 (deftest test-discard-queued-drops-without-running
   (testing "teardown drops queued reactions without running them"
     (let [a (atom 0)

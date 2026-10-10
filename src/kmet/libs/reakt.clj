@@ -204,18 +204,21 @@
   nil)
 
 (defn- enqueue!
-  "Add R to the batch queue unless already present (N invalidations between
-   frames collapse into one run) and wake the host once per newly queued
-   reaction — a reaction already waiting needs no second wake."
+  "Add R to the batch queue unless it is already waiting — N invalidations
+   between frames collapse into one run — and wake the host once per newly
+   queued reaction. The waiting flag lives in R's cell (:queued?), set
+   atomically with the dirty state and cleared when the reaction runs or a
+   flush skips it, so the dedup is O(1) instead of a scan of the queue."
   [r]
-  (let [added? (volatile! false)
-        add (fn [q]
-              (if (some (fn [x] (identical? x r)) q)
-                q
-                (do (vreset! added? true)
-                    (conj q r))))]
-    (swap! queue add)
+  (let [c (-cell r)
+        added? (volatile! false)]
+    (swap! c (fn [m]
+               (if (:queued? m)
+                 (assoc m :state :dirty :caught nil)
+                 (do (vreset! added? true)
+                     (assoc m :state :dirty :caught nil :queued? true)))))
     (when @added?
+      (swap! queue conj r)
       (notify-enqueued!)))
   nil)
 
@@ -280,7 +283,10 @@
             (let [error (volatile! nil)]
               (doseq [r batch]
                 (try
-                  (when-not (#{:idle :failed} (:state @(-cell r)))
+                  ;; A settled entry still carries :queued?; clear it (the
+                  ;; run path clears its own) so a later change can re-enqueue.
+                  (if (#{:idle :failed} (:state @(-cell r)))
+                    (swap! (-cell r) dissoc :queued?)
                     (-force-run r))
                   (catch Throwable e
                     (when-not @error
@@ -385,7 +391,7 @@
    ;; every closure runs strictly later (watch callbacks, body runs), so
    ;; they read the finished value through this holder.
    (let [cell (atom {:f f :state :unrun :value nil :watching []
-                     :watches {} :caught nil
+                     :watches {} :caught nil :queued? false
                      :auto-run? auto-run?
                      :on-dispose (if-some [od (:on-dispose _opts)]
                                    [od]
@@ -423,9 +429,9 @@
                  (when (and (changed? old new)
                             (not= :dirty state)
                             (not= :disposed state))
-                   (swap! c assoc :state :dirty :caught nil)
                    (if (fn? auto-run?)
-                     (auto-run? r)
+                     (do (swap! c assoc :state :dirty :caught nil)
+                         (auto-run? r))
                      (enqueue! r)))))
              (catch Throwable e
                (binding [*out* *err*]
@@ -498,8 +504,12 @@
                                     ;; caught) — derefs rethrow it without
                                     ;; re-executing the body; an explicit
                                     ;; force-run! retries; the next dep change
-                                    ;; clears it.
-                                    (swap! cell assoc :state :failed :caught e)
+                                    ;; clears it. The waiting flag clears here
+                                    ;; too: the throw skipped the final cell
+                                    ;; write, so a stranded :queued? true would
+                                    ;; suppress the next change's enqueue.
+                                    (swap! cell assoc :state :failed :caught e
+                                           :queued? false)
                                     (throw e)))
                          collected @pending]
                      ;; Disposed while the body ran: keep it dead — no watch
@@ -508,6 +518,7 @@
                        nil
                        (let [added (update-watching! (keys collected))]
                          (swap! cell assoc :value result :caught nil
+                                :queued? false
                                 ;; A dep written while the body ran left :dirty
                                 ;; behind — loop to re-run against fresh state.
                                 :state (cond
@@ -615,7 +626,7 @@
                (swap! queue (fn [q]
                               (filterv (fn [x] (not (identical? x @self))) q)))
                (swap! cell assoc :state :disposed :watching #{}
-                      :watches {} :value nil :caught nil)
+                      :watches {} :value nil :caught nil :queued? false)
                ;; Disposers fire last, once the reaction is fully inert;
                ;; each receives the reaction (Reagent contract).
                (doseq [f (:on-dispose @cell)]
