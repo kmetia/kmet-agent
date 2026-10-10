@@ -140,6 +140,23 @@
             (t/is (= {1 2} (:marks out2)))
             (t/is (= {:row 1 :col 2} (:cursor out2)))))))))
 
+(t/deftest test-build-frame-lines-shrink-keeps-a-carried-marker
+  (let [build (var core/build-frame-lines)
+        marker utils/CURSOR-MARKER
+        b (str "bb" marker "cc")]
+    (testing "a shrink that removes only a blank line keeps the marker by content"
+      ;; the remaining line is reused by identity and never rescanned, so only
+      ;; the carry can restore its mark on the removal path
+      (let [{:keys [lines marks cursor changed]} (build [b ""] ["bbcc" ""] {0 2} [b] 10)]
+        (t/is (= ["bbcc"] lines))
+        (t/is (= {0 2} marks))
+        (t/is (= {:row 0 :col 2} cursor))
+        (t/is (nil? changed) "the removed line was empty")))
+    (testing "a shrink that drops the marker line clears it"
+      (let [{:keys [marks cursor]} (build ["aa" b] ["aa" "bbcc"] {1 2} ["aa"] 10)]
+        (t/is (= {} marks))
+        (t/is (nil? cursor))))))
+
 (t/deftest test-build-frame-lines-changed-range
   (let [build (var core/build-frame-lines)
         a "aaaa" b "bbbb" c "cccc"]
