@@ -1018,10 +1018,15 @@
         (deref rx)
         (let [items @kids]
           (if (seq items)
-            (->> items
-                 (mapv #(protocols/render (:c %) width))
-                 (apply concat)
-                 vec)
+            ;; Transient concat, like render-stack/Container: this is the
+            ;; per-frame render of every fn component, cached tree included;
+            ;; mapv + apply concat + vec allocated a lazy seq per nesting
+            ;; level (measured 1.8x bb / 2.4x jolt on a 60x30 tree).
+            (persistent!
+             (reduce (fn [acc it]
+                       (reduce conj! acc (protocols/render (:c it) width)))
+                     (transient [])
+                     items))
             [])))))
   (dispose [_this]
     ;; Contractual order (tui.md §5.1): children first — their cleanups
@@ -1392,10 +1397,14 @@
 (defn- render-compiled [compiled width]
   (cond
     (nil? compiled) []
-    (sequential? compiled) (->> compiled
-                                (mapv #(protocols/render % width))
-                                (apply concat)
-                                vec)
+    (sequential? compiled)
+    ;; Same transient concat as the ComponentFn render body — headless
+    ;; render-lines only, but keep the two paths identical.
+    (persistent!
+     (reduce (fn [acc c]
+               (reduce conj! acc (protocols/render c width)))
+             (transient [])
+             compiled))
     :else (vec (protocols/render compiled width))))
 
 (defn- owned?
