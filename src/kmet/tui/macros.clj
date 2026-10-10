@@ -91,18 +91,18 @@
       (reduced false))))
 
 (defn- rx-unchanged?
-  "reduce-kv hit check over a cache's reactive entries, keyed by cell (a
-   reaction's state atom — see track-render). The entry value is
+  "reduce-kv hit check over a cache's reactive entries, keyed by the
+   reaction's cell (a reaction's state atom — see track-render); the key IS
+   the cell, so it is read directly — never through a reaction deref, which
+   would settle the batch queue on every cache hit. The entry value is
    [REACTION value]: holding the reaction pins it, so this cache can never
-   keep validating a collected reaction — the key alone would not.
-   True while the reaction is settled
-   (:idle/:busy/:disposed) and still holds the recorded value. :unrun and
-   :dirty must run — the re-render's deref settles them — and :failed must
-   rethrow there, so those miss. The cell is read through the pinned
-   reaction, never by derefing it: a deref would settle the batch queue on
-   every cache hit, and this check runs once per component per frame."
-  [_acc _cell [ref v]]
-  (let [{:keys [state value]} @(reakt/-cell ref)]
+   keep validating a collected reaction — the cell key alone would not.
+   True while the reaction is settled (:idle/:busy/:disposed) and still
+   holds the recorded value. :unrun and :dirty must run — the re-render's
+   deref settles them — and :failed must rethrow there, so those miss. Runs
+   once per component per frame."
+  [_acc cell [_ v]]
+  (let [{:keys [state value]} @cell]
     (if (and (case state (:idle :busy :disposed) true false)
              (or (identical? value v) (= value v)))
       true
