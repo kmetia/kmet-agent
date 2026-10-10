@@ -1403,15 +1403,19 @@ editor's border string — still paints nothing) and falls back to its own
 walk when flash compositing changed the lines, since the range describes
 the pre-flash document.
 
-Per-frame medians on the same fixture:
+Per-frame medians on the same fixture (pre-fusion = the §13.3 state, after
+the cursor memo):
 
-| scenario | bb pre-fusion | bb fused | jolt pre-fusion | jolt fused |
+| scenario | bb pre | bb fused | jolt pre | jolt fused |
 |---|---|---|---|---|
 | typing | 14.2 ms | **9.5 ms** | 12.5 ms | **6.2 ms** |
 | stream | 19.4 ms | **14.8 ms** | 22.2 ms | **15.7 ms** |
 | calm (unstable) | 25.4 ms | 27.6 ms | 22.9 ms | **11.9 ms** |
-| cold | 3.03 s | 3.05 s | 4.56 s | 4.56 s |
-| redraw | 3.27 s | 3.32 s | 4.59 s | 4.98 s |
+
+Cold and redraw are render-stack-bound and unchanged within the phone's
+variance (bb cold ~3.0-3.1 s, redraw ~3.2-3.3 s; jolt cold ~4.5-5.8 s,
+redraw ~4.6-5.0 s across the three states); the fused pass's one full walk
+is invisible beside them.
 
 The typing frame's one changed line now costs one walk: the split
 cursor+normalize phases (7.5 ms bb / 8.2 jolt) become a single 6.2 / 3.0 ms

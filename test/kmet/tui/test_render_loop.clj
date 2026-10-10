@@ -640,6 +640,36 @@
         (finally
           (stop-loop tui))))))
 
+(deftest ^:slow flash-expiry-with-another-change-repaints-the-flash-row
+  (testing "a flash row must be repainted when the flash goes away even though its raw line is
+            unchanged: the hint describes the pre-flash lines, so the frame after a flash frame
+            falls back to the diff's own scan (a hint would cover only the other changed line)"
+    (let [lines (atom ["alpha" "beta" "gamma"])
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child tui (test-component lines))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 5000)
+        (core/tui-flash! tui "Copied!" :duration-ms 60000)
+        (core/tui-request-render tui)
+        (wait-for-frames (:writes vt) 2 5000)
+        (t/is (str/includes? (second (frame-writes (:writes vt))) "Copied!")
+              "the flash is painted over the first row")
+        ;; dispose the flash and change a DIFFERENT row in the same frame: the
+        ;; flash row's raw line is identical across the two frames, so a
+        ;; raw-identity hint would not cover it
+        (core/tui-flash-dispose! tui)
+        (swap! lines assoc 2 "gamma changed")
+        (core/tui-request-render tui)
+        (wait-for-frames (:writes vt) 3 5000)
+        (let [after (nth (frame-writes (:writes vt)) 2)]
+          (t/is (str/includes? after "gamma changed") "the changed row is painted")
+          (t/is (str/includes? after "alpha") "the flash row is restored")
+          (t/is (not (str/includes? after "Copied!")) "and the flash is gone"))
+        (finally
+          (stop-loop tui))))))
+
 (deftest ^:slow ordinary-diff-does-not-clear
   (testing "an in-viewport change takes the diff path — no clear, no scrollback wipe"
     (let [lines (atom ["alpha" "beta"])

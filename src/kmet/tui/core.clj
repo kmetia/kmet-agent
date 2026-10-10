@@ -86,7 +86,7 @@
    {:lines stripped-and-normalized lines
     :cursor {:row r :col c} or nil
     :marks {line-idx marker-idx}        ; carry into the next frame
-    :changed [first last] or nil}.      ; nil = no prefix change
+    :changed [first last] or nil}.      ; nil = no change
 
    Stripping must be unconditional: a marker is an internal signal, and one
    that leaks into the terminal stream is an APC sequence (ESC _ ... BEL)
@@ -98,10 +98,10 @@
    so a document that grows past the panel height (a short terminal) can
    push the focused field's line just above it.
 
-   PREV-RAW/PREV-OUT/PREV-MARKS reuse the previous frame the way
-   normalize-reusing did: an unchanged line is the same string object the
-   component caches returned, so it copies its stripped+normalized output (a
-   pure function of the raw line) and its marker index instead of scanning
+   PREV-RAW/PREV-OUT/PREV-MARKS reuse the previous frame's work: an
+   unchanged line is the same string object the component caches returned,
+   so it copies its stripped+normalized output (a pure function of the raw
+   line) and its marker index instead of scanning
    and normalizing the whole document (the separate strip, normalize and
    diff walks cost ~11 ms/frame on bb and ~9 ms on jolt at 14.9k lines;
    perf.md §13). The identity check is also the frame's change detector —
