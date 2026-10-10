@@ -162,9 +162,8 @@
          ;; A removed line repaints only when it held content — the diff's
          ;; missing side is "" (an appended tail is main-diff's appended?).
          [first-changed last-changed]
-         (let [[rf rl] (if (< n prev-count)
-                         (removed-range prev-out n prev-count)
-                         [nil nil])]
+         (let [[rf rl] (when (< n prev-count)
+                         (removed-range prev-out n prev-count))]
            [(if (and rf (neg? prefix-first)) rf prefix-first)
             (or rl prefix-last)])
          viewport-top (max 0 (- n height))
@@ -211,8 +210,8 @@
 
 (defrecord TUI [terminal components focused-component
                 input-listeners previous-lines
-                previous-normalized-out
-                previous-cursor-in previous-cursor-marks previous-flashed?
+                previous-normalized-lines
+                previous-raw-lines previous-marks previous-flashed?
                 previous-width render-requested? force-redraw? waker
                 running? stopped? overlays
                 render-loop input-reader current-reader
@@ -241,9 +240,9 @@
                        :focused-component (atom nil)
                        :input-listeners (atom [])
                        :previous-lines (atom [])
-                       :previous-normalized-out (atom [])
-                       :previous-cursor-in (atom [])
-                       :previous-cursor-marks (atom {})
+                       :previous-normalized-lines (atom [])
+                       :previous-raw-lines (atom [])
+                       :previous-marks (atom {})
                        :previous-flashed? (atom false)
                        :previous-width (atom 0)
                        :terminal-size (atom nil)
@@ -2425,9 +2424,9 @@
                   (reset! (:previous-height tui) -1)
                   (reset! (:max-lines-rendered tui) 0)
                   (reset! (:previous-kitty-image-ids tui) #{})
-                  ;; cursor-marker memo: its inputs are gone with the frame
-                  (reset! (:previous-cursor-in tui) [])
-                  (reset! (:previous-cursor-marks tui) {}))
+                  ;; line memo: its inputs are gone with the frame
+                  (reset! (:previous-raw-lines tui) [])
+                  (reset! (:previous-marks tui) {}))
                 ;; Base content: the whole UI is one flat document — the stack
                 ;; layout renders every component at natural height, so the total
                 ;; may exceed the screen and the render loop scrolls the overflow
@@ -2438,9 +2437,9 @@
                       ;; one document pass: strip the cursor markers,
                       ;; normalize, and report the frame's repaint range
                       frame (build-frame-lines
-                             @(:previous-cursor-in tui)
-                             @(:previous-normalized-out tui)
-                             @(:previous-cursor-marks tui)
+                             @(:previous-raw-lines tui)
+                             @(:previous-normalized-lines tui)
+                             @(:previous-marks tui)
                              raw-lines h)
                       cursor (:cursor frame)
                       ;; pi: normalizeTerminalOutput — Thai/Lao AM decomposition +
@@ -2887,9 +2886,9 @@
                     (reset! pending-write @sb))
                   (reset! (:previous-lines tui) lines)
                   ;; line memo: raw in / normalized out (pre-flash) + markers
-                  (reset! (:previous-normalized-out tui) normalized)
-                  (reset! (:previous-cursor-in tui) raw-lines)
-                  (reset! (:previous-cursor-marks tui) (:marks frame))
+                  (reset! (:previous-normalized-lines tui) normalized)
+                  (reset! (:previous-raw-lines tui) raw-lines)
+                  (reset! (:previous-marks tui) (:marks frame))
                   (reset! (:previous-flashed? tui) flashed?)
                   (reset! (:previous-width tui) w)
                   (reset! (:previous-height tui) h)

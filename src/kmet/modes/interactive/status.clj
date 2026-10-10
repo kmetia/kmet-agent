@@ -19,6 +19,23 @@
 ;; Drives re-renders while the agent turn is running, so the separate
 ;; StatusIndicator (Pi-style) between chat and editor animates smoothly.
 
+(defn- frame-driver!
+  "A future requesting a render every spinner/default-interval-ms — the
+   animation bucket — while (ACTIVE? TUI) holds, then exiting. TAG labels
+   unexpected failures. Stop the driver with future-cancel: the interrupt
+   it raises on Thread/sleep is expected, not an error."
+  [tui active? tag]
+  (future
+    (try
+      (loop []
+        (when (active? tui)
+          (Thread/sleep spinner/default-interval-ms)
+          (tui/tui-request-render tui)
+          (recur)))
+      (catch InterruptedException _)
+      (catch Exception e
+        (debug/log tag e)))))
+
 (defn start-anim-timer!
   "Start requesting renders every 100ms while the agent turn runs — the
    spinner's animation bucket (spinner/default-interval-ms). Sampling at
@@ -27,20 +44,10 @@
    held 160ms). Powers the StatusIndicator spinner animation (Pi-style:
    separate layer between chat and editor)."
   [cs]
-  (let [t (future
-            (try
-              (loop []
-                (when (and @(:running? (:tui cs))
-                           @(:running-turn? cs))
-                  (Thread/sleep spinner/default-interval-ms)
-                  (tui/tui-request-render (:tui cs))
-                  (recur)))
-              ;; The timer is stopped via future-cancel — the interrupt it
-              ;; raises on Thread/sleep is expected, not an error.
-              (catch InterruptedException _)
-              (catch Exception e
-                (debug/log "anim timer: " e))))]
-    (reset! (:anim-timer cs) t)))
+  (reset! (:anim-timer cs)
+          (frame-driver! (:tui cs)
+                         (fn [tui] (and @(:running? tui) @(:running-turn? cs)))
+                         "anim timer: ")))
 
 (defn- start-indicator-driver!
   "Request renders every 100ms while a TRANSIENT status indicator is up —
@@ -56,19 +63,10 @@
    when the TUI stops or the indicator it was started for is no longer
    current; cancel-indicator-driver! stops it eagerly on a clear/swap."
   [cs indicator]
-  (future
-    (try
-      (loop []
-        (Thread/sleep spinner/default-interval-ms)
-        (when (and (some-> (:tui cs) :running? deref)
-                   (identical? indicator (:indicator @(:status-current cs))))
-          (tui/tui-request-render (:tui cs))
-          (recur)))
-      ;; cancelled via future-cancel — the interrupt raised on Thread/sleep
-      ;; is expected, not an error
-      (catch InterruptedException _)
-      (catch Exception e
-        (debug/log "indicator driver: " e)))))
+  (frame-driver! (:tui cs)
+                 (fn [tui] (and @(:running? tui)
+                                (identical? indicator (:indicator @(:status-current cs)))))
+                 "indicator driver: "))
 
 (defn- cancel-indicator-driver!
   "Cancel the current status entry's frame driver (idempotent; read the
