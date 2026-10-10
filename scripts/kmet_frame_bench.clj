@@ -40,8 +40,7 @@
             [kmet.tui.components.editor :as editor]
             [kmet.tui.components.stack :as stack]
             [kmet.tui.core :as core]
-            [kmet.tui.terminal :as term]
-            [kmet.tui.theme :as theme]))
+            [kmet.tui.terminal :as term]))
 
 ;; ─── Virtual terminal (writes recorded; size mutable) ──────────────────────
 
@@ -281,22 +280,6 @@
       (settle! tui)))
   (report "redraw (resize -> clearing)" @events (count @(:previous-lines tui))))
 
-(defn- run-reflow! [tui writes n]
-  (begin-scenario! tui)
-  (let [cur (theme/get-current-theme)
-        other (assoc cur :name "probe-theme" :text "#ff0000")]
-    (dotimes [i n]
-      (let [w (frame-writes writes)]
-        (theme/set-theme-instance! (if (even? i) other cur))
-        (core/tui-request-render tui)
-        ;; the switched-in palette changes every styled line, so a reflow
-        ;; frame always writes; waiting on the write is race-proof (the
-        ;; theme watch may have scheduled a frame of its own)
-        (wait-until #(> (frame-writes writes) w) 20000 "reflow write")
-        (settle! tui)))
-    (theme/set-theme-instance! cur))
-  (report "reflow (theme switch)" @events (count @(:previous-lines tui))))
-
 ;; ─── Main ──────────────────────────────────────────────────────────────────
 
 (defn -main [& args]
@@ -333,7 +316,6 @@
         (when (or (scenarios "all") (scenarios "typing")) (run-typing! tui writes ed 20))
         (when (or (scenarios "all") (scenarios "stream")) (run-stream! tui writes ch 40))
         (when (or (scenarios "all") (scenarios "redraw")) (run-redraw! tui writes vt 4))
-        (when (scenarios "reflow") (run-reflow! tui writes 2))
         (finally
           (core/tui-stop tui)
           (when-let [f @(:render-loop tui)]

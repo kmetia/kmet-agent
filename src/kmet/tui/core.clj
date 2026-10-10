@@ -229,10 +229,10 @@
           :changed (when (>= first-changed 0) [first-changed last-changed])})))))
 
 (defn- refine-changed-range
-  "Narrow HINT — build-frame-lines' raw-identity [first last] range — to
-   what the diff's own content compare finds, so a line rebuilt to the same
-   text (the editor's border) does not force a repaint. Returns [-1 -1] when
-   every line in the range is content-equal."
+  "Narrow HINT — the pass's [first last] repaint range — to what the diff's
+   own content compare finds, so a line rebuilt to the same text (the
+   editor's border) does not force a repaint. Returns [-1 -1] when every
+   line in the range is content-equal."
   [prev lines [f l]]
   (let [equal? (fn [i]
                  (let [a (nth prev i nil)

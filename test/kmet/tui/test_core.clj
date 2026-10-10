@@ -130,7 +130,15 @@
             (t/is (zero? @scans) "the chunk compare proved the text equal")
             (t/is (identical? (nth lines 0) (nth (:lines out2) 0))
                   "the previous line object is copied, not the fresh one")
-            (t/is (= ["aaaa" "bbcc"] (:lines out2)))))))))
+            (t/is (= ["aaaa" "bbcc"] (:lines out2)))))
+        (testing "an equal chunk still carries its markers by content"
+          ;; the fresh marker line is not `identical?` to the previous one:
+          ;; the carry must be content-based or the cursor would vanish
+          (reset! scans 0)
+          (let [out2 (build in lines marks [a (subs (str "xbb" marker "cc") 1)] 10)]
+            (t/is (zero? @scans) "no per-line walk")
+            (t/is (= {1 2} (:marks out2)))
+            (t/is (= {:row 1 :col 2} (:cursor out2)))))))))
 
 (t/deftest test-build-frame-lines-changed-range
   (let [build (var core/build-frame-lines)
