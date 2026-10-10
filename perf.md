@@ -18,6 +18,15 @@ transcript after the §13.3 cursor-marker memo (20.3 ms before it), redraw
 ~3.2 s / ~5.0 s, idle 4.2 % / 2.6 % of a core; the `bb run` recipe is fixed
 to `bb start`.**
 
+**§14 profiles the reakt layer (2026-10-10): per-op costs of the reactive
+engine and the algorithmic candidates it points at — the watch-set diff is
+O(deps²) per reaction run, the enqueue dedup is O(queue) (O(N²) across a
+storm), and jolt's `instance?` against the modeled class hierarchy costs
+1–1.8 µs per call (a perf finding tracked in [`jolt-bugs.md`](jolt-bugs.md)).
+The frame bench cannot see any of it: its harness mounts no fn components
+(a call-counted probe reports zero `ComponentFn` renders on a replayed
+session, §14.1).**
+
 **TL;DR** — it is not a busy loop and not the terminal backend. Idle CPU is
 *lower* on jolt than on bb. The frame gap was (a) every keystroke/frame
 re-renders the whole component tree + re-normalizes every line + diffs/emits,
@@ -1471,4 +1480,145 @@ pass.
   as the streamed text grows 3 -> 96 chunks).
 - Redraw/global reflow still re-pays the full render (~3-5 s on 2.6 MB);
   nothing in this pass changes §10.6's framing of it.
+
+---
+
+## 14. reakt layer (2026-10-10, phone, `jolt v0.8.20-13-gb0b3355b`, bb 1.13.225)
+
+The reactive engine under the TUI (`kmet.libs.reakt` + `kmet.libs.weak`) had
+no profile yet. Reproduce with:
+
+```sh
+bb   scripts/kmet_reakt_bench.clj     # full sweep
+jolt scripts/kmet_reakt_bench.clj
+```
+
+Steady-state per-op medians (§6.2b: 2 warming rounds, median of 5), same
+phone as §13; read same-run host ratios, not absolutes. The proposed-shape
+numbers are scratch replicas (kept in `target/` during the pass) of the
+replacement code, measured the same way.
+
+### 14.1 Where the layer sits in the app
+
+- `tracked-deref` runs for every tracked read on a `track!` cache miss
+  (`kmet.tui.macros` rewrites `@atom` to it) and inside every reaction body.
+- Every `ComponentFn` owns a reaction (`hiccup.clj:971`); its deps are every
+  ref its body tracked. `:rerun-without-deps? true` bodies (no tracked refs
+  beyond the implicit props/ctree) re-run on **every** deref — every frame,
+  per fn component.
+- A write to an atom with N reaction watchers runs N dep-handlers; each
+  enqueues in O(queue) — an invalidation storm is O(N²) before any body runs.
+- The frame bench cannot see any of this: its harness mounts chat-history +
+  editor only and a replayed transcript renders through record components; a
+  call-counted probe on the baseline tree reported zero `ComponentFn` render
+  calls in the cold/typing/stream frames (the same blindness the §13.x
+  hiccup-layer change hit).
+
+### 14.2 Primitives (µs, bb / jolt)
+
+| op | bb | jolt |
+|---|---:|---:|
+| `instance?` String | 0.162 | 0.042 |
+| `instance?` Object | 0.162 | 0.140 |
+| `instance?` clojure.lang.Atom | 0.162 | **1.060** |
+| `instance?` clojure.lang.IRef | 0.162 | **1.838** |
+| `instance?` clojure.lang.IDeref | 0.490 | **1.815** |
+| `satisfies? RXRef` (atom) | 1.071 | 0.458 |
+| `satisfies? RXRef` (reaction) | 0.218 | 0.101 |
+| `trackable-ref?` (atom / reaction) | 0.225 / 0.336 | 1.798 / 0.321 |
+| `reaction?` / `-cell` (reaction) | 0.274 / 0.600 | 0.125 / 0.098 |
+| `tracked-deref` atom, no scope | 0.659 | 1.967 |
+| `tracked-deref` atom, scope bound | 1.362 | **4.061** |
+| `tracked-deref` reaction, scope bound | 3.407 | 2.071 |
+| `deref` idle reaction | 1.942 | 0.642 |
+| `flush!` empty queue | 0.266 | 0.058 |
+| `force-run!` 0-dep body | 12.807 | 3.483 |
+| `deref` `:rerun-without-deps?` body | 14.018 | 4.188 |
+| `make-reaction` (never run) | 20.347 | 16.637 |
+| `weak/register!` refresh / `sweep!` empty | 2.398 / 0.623 | 1.723 / 0.517 |
+| `weak/subject` | 0.578 | 0.562 |
+
+Reading:
+
+- **jolt's `instance?` against the modeled class hierarchy is 1.1–1.8 µs**
+  (`Atom` 1.06, `IRef` 1.84, `IDeref` 1.82) against 0.04 µs for a native
+  class (`String`): the class graph is walked as string comparisons per
+  call (`host/chez/java/records-interop.ss`, `instance-check-base` /
+  `case-string`). bb's SCI checks are flat ~0.16 µs. This lands twice per
+  tracked read inside a scope, so `tracked-deref` on a plain atom is
+  1.36 µs bb but **4.06 µs jolt** — and jolt's atom path is the slow one
+  because `trackable-ref?` checks `IRef` first (a reaction's protocol check
+  is cheap: 2.07 µs).
+- `-cell` is a protocol dispatch (0.60 bb / 0.10 jolt) paid per rx entry in
+  every `track!` cache hit check and per flush entry.
+- `tracked-deref` on a plain atom costs ~4x a raw deref on bb and ~65x on
+  jolt (0.03 µs deref + the classification).
+
+### 14.3 Scaling
+
+`force-run!` (a full reaction re-run; the body is a trivial sum) vs dep
+count — superlinear, because `update-watching!` diffs the watch set with
+O(n·m) identity scans:
+
+| deps | bb | jolt |
+|---:|---:|---:|
+| 1 | 20.6 | 15.0 |
+| 5 | 34.9 | 39.8 |
+| 20 | 129.8 | 204.0 |
+| 50 | 523.5 | 781.8 |
+
+The scratch replica of the current diff vs a same-order identity fast path
+(`target/refdiff-bench.clj`):
+
+| deps | current diff bb / jolt | fast path bb / jolt |
+|---:|---:|---:|
+| 1 | 1.20 / 0.70 | 0.81 / 0.07 |
+| 5 | 3.47 / 1.63 | 1.59 / 0.21 |
+| 20 | 24.59 / 7.06 | 4.45 / 0.67 |
+| 50 | 137.0 / 29.1 | 10.7 / 2.6 |
+
+Invalidation storms (N reactions watching N atoms, dirty then settle, one
+cycle per measurement):
+
+| cycle | bb | jolt |
+|---|---:|---:|
+| dirty 1 watched atom + settle | 37.1 | 26.3 |
+| dirty 50 + settle | 1467 | 1021 |
+| dirty 500 + settle | 26081 | 12506 |
+| `some identical?` over a 500 vector | 44.8 | 37.0 |
+
+### 14.4 Candidates (not yet applied)
+
+1. **`update-watching!`'s set-diff is O(deps²) per run.** Measured in the
+   dep-scaling table and the replica; a same-order identity fast path
+   (fill the added/dropped sets only on mismatch) is 5–12x cheaper at
+   n=20–50, and lets the run skip its unconditional `:watching` cell swap
+   when the set is unchanged. Affects every dep-heavy `ComponentFn`
+   reaction.
+2. **`enqueue!`'s dedup is O(queue) per enqueue** (`some identical?` — the
+   queue is a vector because reify equality/hash is unreliable on bb). An
+   O(1) `:queued?` flag in the cell, cleared by `take-batch!`, removes the
+   scan; the 500-atom storm cycle is then bounded by the per-run cost.
+   `-dispose`'s `filterv` over the queue is the same shape for dispose
+   storms.
+3. **`tracked-deref` classifies twice and jolt wants the opposite order.**
+   Hoisting one `trackable-ref?` per read plus a `#?(:jolt …)` ordering
+   (RXRef first) measures 4.06 → 2.83 µs on jolt atoms and 2.09 → 1.58 on
+   jolt reactions (scratch replica); bb gains the dedup only (~0.2 µs).
+4. **`run-sync!`'s per-run floor** is 12.8 µs bb / 3.5 µs jolt for a
+   zero-dep body (idle deref 1.9 / 0.6): two cell swaps, a `pending` atom,
+   the `*reaction-frame*` binding, and `update-watching!`'s registry
+   lookup + no-op cell write. Paid per frame by `:rerun-without-deps?`
+   components and per dep change; merging the value/state/watching writes
+   is the highest-leverage bb item.
+5. **Smaller items.** `track-render` re-classifies every tracked ref with
+   `reakt/reaction?` (`satisfies?` 1.07 µs bb / 0.46 jolt) per miss, though
+   `tracked-deref` already knows the kind — fold a typed bucket into
+   `*tracking-scope*` (only `macros.clj:152` reads it). `rx-unchanged?`
+   calls `-cell` per rx entry per hit; the cache entry could carry the cell
+   (`[ref cell v]`). An idle reaction deref reads its cell twice; the
+   re-read after `flush!` could be skipped when the queue was empty. The
+   non-empty `flush!` machinery is 4–10 µs/call (skeleton 4.0 bb / 1.1
+   jolt), once per frame. `make-reaction` costs ~20 µs to construct —
+   relevant at replay/cold-render scale, hard to shrink.
 
