@@ -1544,7 +1544,9 @@ Reading:
   (`Atom` 1.06, `IRef` 1.84, `IDeref` 1.82) against 0.04 µs for a native
   class (`String`): the class graph is walked as string comparisons per
   call (`host/chez/java/records-interop.ss`, `instance-check-base` /
-  `case-string`). bb's SCI checks are flat ~0.16 µs. This lands twice per
+  `case-string`; filed as
+  [jolt#1299](https://github.com/jolt-lang/jolt/issues/1299)). bb's SCI
+  checks are flat ~0.16 µs. This lands twice per
   tracked read inside a scope, so `tracked-deref` on a plain atom is
   1.36 µs bb but **4.06 µs jolt** — and jolt's atom path is the slow one
   because `trackable-ref?` checks `IRef` first (a reaction's protocol check

@@ -46,14 +46,14 @@ parking call `:blocking`. Bump the floor when the next tag lands — the TUI
 then stays quiet by default, and `on-gc-stall` is the seam if a stall should
 still reach `kmet.debug`.
 
-### `instance?` against modeled classes costs 1–2 µs (perf, not filed)
+### [jolt#1299](https://github.com/jolt-lang/jolt/issues/1299) — `instance?` against modeled ref types costs 1–2 µs
 
 Measured 2026-10-10 on Jolt `v0.8.20-13-gb0b3355b` (Termux/aarch64). A type
 check against a native class is fast — `(instance? String "x")` 0.04 µs,
 `(instance? Object x)` 0.14 — but the modeled Clojure core types go through
 the synthesized class graph and cost ~30–45x more: `clojure.lang.Atom`
-**1.06 µs**, `clojure.lang.IRef` **1.84**, `clojure.lang.IDeref` **1.82**.
-bb's SCI answers all of these in ~0.16 µs. The work happens in
+**1.06 µs**, `clojure.lang.IRef` **1.84**, `clojure.lang.IDeref` **1.82**
+(bb's SCI: `IRef` ~0.16 µs, `IDeref` ~0.49). The work happens in
 `instance-check`'s registry arms → `instance-check-base` / `case-string`
 (`host/chez/java/records-interop.ss`), which walks the hierarchy as string
 comparisons per call; the `Atom`/`IRef` arm order is part of the cost.
@@ -62,11 +62,16 @@ kmet hit this on the reakt hot path: `trackable-ref?` is
 `(or (instance? clojure.lang.IRef ref) (satisfies? RXRef ref))`, and
 `tracked-deref` calls it twice per tracked read inside a tracking scope, so
 a plain-atom read costs 4.06 µs on jolt against 1.36 on bb (perf.md §14.2).
-No upstream ticket yet. The kmet-side workaround has landed — classify
-once per deref and keep IRef first (both checks run on a miss, so
-RXRef-first is actually slower for the common atom; perf.md §14.4 item 3),
-bringing a plain-atom read in a tracking scope from 4.9 to 2.3 µs. An
-upstream fast path for the core-type arms would fix it for every library.
+Filed 2026-10-10 with the reduced repro, the kind-key control group
+(vector/seq/map answers 0.25–0.29 µs against the atom's 1.06) and a
+suggested fix: `class-fast-name` returns `#f` for atom/var/ref/delay, so
+`instance-kind-key` has no key — every check re-walks the arm chain and
+the per-site inline cache is skipped. The kmet-side workaround has landed
+(classify once per deref and keep IRef first: both checks run on a miss,
+so RXRef-first is actually slower for the common atom; perf.md §14.4
+item 3), bringing a plain-atom read in a tracking scope from 4.9 to
+2.3 µs. An upstream fast path for the core-type arms would fix it for
+every library.
 
 Repro: `jolt scripts/kmet_reakt_bench.clj` — the four `instance?` rows at
 the top of the sweep.
