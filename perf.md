@@ -1592,11 +1592,12 @@ cycle per measurement):
 
 ### 14.4 Applied fixes
 
-The three algorithmic candidates below are applied (commits `6b286af7`,
-`72a63d3b`, `b5b82a56`); the §14.2/§14.3 tables are the as-found profile,
-and the after numbers here are interleaved same-machine A/Bs against the
-previous commit (`target/watching-ab.clj`, `target/storm-ab.clj`,
-`target/tracked-ab.clj`).
+The five candidates below are applied (commits `6b286af7`, `72a63d3b`,
+`b5b82a56`, `29fc2ecf`, `23a4af82`); the §14.2/§14.3 tables are the
+as-found profile, and the after numbers here are interleaved same-machine
+A/Bs against the previous commit (`target/watching-ab.clj`,
+`target/storm-ab.clj`, `target/tracked-ab.clj`, `target/hit-ab.clj`,
+`target/miss-ab.clj`).
 
 1. **`update-watching!`'s set-diff was O(deps²) per run.** Applied: a
    same-order identity fast path, which also skips the no-op `:watching`
@@ -1619,27 +1620,37 @@ previous commit (`target/watching-ab.clj`, `target/storm-ab.clj`,
    originally floated here was dropped: `or` evaluates both checks on a
    miss, so IRef-first already wins for the common atom (measured 1.8 vs
    2.5 µs RXRef-first).
+4. **`rx-unchanged?` read each hit's rx cell through a `-cell` protocol
+   dispatch** (`29fc2ecf`), once per reactive entry per cache hit, even
+   though the cache is keyed by the cell — the key is read directly now.
+   Cache hits: bb 5 rx entries 7.7-8.4 → 4.4 µs and 20 entries 28 → 15;
+   jolt ~1.7 → ~1.0 and ~5.9 → ~2.9; mixed 5 atoms + 5 rx bb 8.6 → 5.3.
+5. **The miss path classified every tracked ref with `satisfies?`**
+   (`23a4af82`): `reakt/plain-ref?` is the complement over refs that
+   already cleared `trackable-ref?`, host-ordered so the common atom
+   short-circuits on the cheaper check (bb `instance?` 0.16 µs vs
+   `satisfies?` 1.07; jolt the reverse). The order comes from a load-time
+   `host/jolt?` flag — `.clj` source cannot carry reader conditionals.
+   Forced-miss renders: bb 5 atoms 43 → 37 µs and 20 atoms 130 → 109
+   (-12%/-16%); jolt unchanged within its noise.
 
-### 14.5 Still open
+### 14.5 Checked, not applied
 
+- **The idle deref's second cell read.** Making the re-read conditional on
+  `flush!` having drained (and returning a drained flag) measured neutral:
+  out-of-frame 2.09 → 2.09 µs bb / 0.65 → 0.64 jolt, in-frame 2.55 →
+  2.55 µs bb (jolt 0.76 → 0.74). The extra `@cell` is ~0.03 µs bb / 0.06
+  jolt — the idle read's cost is the destructure, the cond and
+  `record-dep!`, not the re-read, so the contract change was reverted.
 - **`run-sync!`'s per-run floor** is now the two state swaps, the pending
   holder, and the `*reaction-frame*` binding; item 1 removed the third
-  (no-op watching) write. The remaining cheap idea — `pending` as
-  `(atom nil)` so a no-dep body skips the map allocation — measured
-  neutral (0-dep `force-run!` 10.2 → 10.2 µs; `:rerun-without-deps?`
-  deref 12.2 → 11.9-12.2) and was not kept.
-- **`track-render` re-classifies every tracked ref** with
-  `reakt/reaction?` (`satisfies?` 1.07 µs bb / 0.46 jolt) per miss, though
-  `tracked-deref` already knows the kind — a host-ordered kind check would
-  cut the common atom to 0.16 µs on bb (neutral on jolt, whose protocol
-  check is already cheap). Folding a typed bucket into `*tracking-scope*`
-  (only `macros.clj` reads it) would delete the pass entirely.
-- **`rx-unchanged?` calls `-cell` per rx entry per hit** (0.60 µs bb /
-  0.10 jolt); the cache entry could carry the cell (`[ref cell v]`).
-- **An idle reaction deref reads its cell twice** (1.9 µs bb / 0.6 jolt);
-  the re-read after `flush!` could be skipped when the queue was empty.
+  (no-op watching) write. `pending` as `(atom nil)` so a no-dep body
+  skips the map allocation measured neutral (0-dep `force-run!` 10.2 →
+  10.2 µs) and was not kept.
 - **The non-empty `flush!` machinery** is 4-10 µs/call (skeleton 4.0 bb /
-  1.1 jolt), once per frame; low priority.
+  1.1 jolt), once per frame; low priority — the empty-queue path (the
+  common one) already short-circuits before the CAS.
 - **`make-reaction` costs ~20 µs to construct** — relevant at
   replay/cold-render scale, hard to shrink.
+
 
