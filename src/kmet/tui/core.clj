@@ -90,30 +90,31 @@
         (recur (inc i) (or f i) i))
       [f l])))
 
+(defn- line-mark
+  "The {:row :col} of the bottom-most marker at or below document row FROM,
+   or nil. The row is the marker's absolute document line (the caller
+   subtracts the viewport); the column is the visible width of the line's
+   prefix before the marker."
+  [marks lines from]
+  (let [i (reduce-kv (fn [best i _] (if (and (>= i from) (> i best)) i best))
+                     -1
+                     marks)]
+    (when (>= i 0)
+      {:row i
+       :col (utils/visible-width (subs (nth lines i) 0 (get marks i)))})))
+
 (defn- line-cursor
   "The cursor {:row :col} for the bottom-most marker among the bottom HEIGHT
-   lines of an N-line document, or nil when no marker is visible. The row is
-   the marker's absolute document line (the caller subtracts the viewport);
-   the column is the visible width of the line's prefix before the marker."
+   lines of an N-line document, or nil when no marker is visible."
   [marks lines n height]
-  (let [viewport-top (max 0 (- n height))
-        cursor-i (reduce-kv (fn [best i _]
-                              (if (and (>= i viewport-top) (> i best)) i best))
-                            -1
-                            marks)]
-    (when (>= cursor-i 0)
-      {:row cursor-i
-       :col (utils/visible-width (subs (nth lines cursor-i) 0 (get marks cursor-i)))})))
+  (line-mark marks lines (max 0 (- n height))))
 
 (defn- line-status
   "The live status line's {:row :col} for the bottom-most STATUS-MARKER, or
    nil when none. Unlike line-cursor the row is not restricted to the
    viewport: the render loop checks visibility before patching it."
   [status-marks lines]
-  (let [i (reduce-kv (fn [best i _] (if (> i best) i best)) -1 status-marks)]
-    (when (>= i 0)
-      {:row i
-       :col (utils/visible-width (subs (nth lines i) 0 (get status-marks i)))})))
+  (line-mark status-marks lines 0))
 
 (def ^:private chunk-lines
   "Frame-pass chunk size. The pass compares the previous and current raw
@@ -123,6 +124,22 @@
    of the whole document (the interpreted loop is the pass's dominant cost
    on bb)."
   1024)
+
+(defn- carry-marks
+  "MARKS with PREV-MARKS entries carried over for lines whose raw content is
+   unchanged — a previous marker stays valid exactly while its line's text
+   is — with a rescanned line's new entry (already in MARKS) winning."
+  [marks prev-marks prev-raw lines]
+  (let [prev-count (count prev-raw)
+        n (count lines)]
+    (reduce-kv (fn [m i idx]
+                 (if (and (< i prev-count)
+                          (< i n)
+                          (= (nth prev-raw i) (nth lines i)))
+                   (assoc m i idx)
+                   m))
+               marks
+               prev-marks)))
 
 (defn- build-frame-lines
   "Build one frame's document: strip every CURSOR-MARKER and STATUS-MARKER,
@@ -229,25 +246,8 @@
                      (scan-range prev-count n acc marks smarks fc lc))))
                (scan-range 0 n (transient []) {} {} -1 -1))
              out (persistent! acc)
-             ;; A previous marker stays valid exactly while its line's
-             ;; content is unchanged; a rescanned line's new status (in
-             ;; MARKS) wins.
-             marks (reduce-kv (fn [m i idx]
-                                (if (and (< i prev-count)
-                                         (< i n)
-                                         (= (nth prev-raw i) (nth lines i)))
-                                  (assoc m i idx)
-                                  m))
-                              marks
-                              prev-marks)
-             smarks (reduce-kv (fn [m i idx]
-                                 (if (and (< i prev-count)
-                                          (< i n)
-                                          (= (nth prev-raw i) (nth lines i)))
-                                   (assoc m i idx)
-                                   m))
-                               smarks
-                               prev-status-marks)
+             marks (carry-marks marks prev-marks prev-raw lines)
+             smarks (carry-marks smarks prev-status-marks prev-raw lines)
              ;; A removed line repaints only when it held content — the diff's
              ;; missing side is "" (an appended tail is main-diff's appended?).
              [first-changed last-changed]
@@ -1493,13 +1493,13 @@
 
 (defmacro ^:private with-render-lock
   "Run BODY under dispatch-lock when it can be acquired
-   (acquire-dispatch-lock!); returns true when BODY ran — false when the TUI
+   (acquire-dispatch-lock!); returns BODY's value, or ::stopped when the TUI
    stopped/suspended while the lock was held by the reader joining this
    loop."
   [tui & body]
   `(if (acquire-dispatch-lock! ~tui)
-     (try ~@body true (finally (.unlock dispatch-lock)))
-     false))
+     (try ~@body (finally (.unlock dispatch-lock)))
+     ::stopped))
 
 (defn- clear-incomplete-flush!
   "Cancel a pending incomplete-buffer flush timer."
@@ -2203,15 +2203,11 @@
    component drivers call this instead of tui-request-render; the loop
    falls back to a full frame whenever the line cannot be patched (no
    provider/anchor, an overlay or flash on screen, a resize, a missing
-   cursor). Set before the wake, like tui-request-render. A hand-built TUI
-   without the status flag (tests, embedders) falls back to a normal render
-   request."
+   cursor). Set before the wake, like tui-request-render."
   [tui]
-  (if-some [flag (:status-render-requested? tui)]
-    (do (reset! flag true)
-        (when-let [w (:waker tui)]
-          (wake/wake! w)))
-    (tui-request-render tui)))
+  (reset! (:status-render-requested? tui) true)
+  (when-let [w (:waker tui)]
+    (wake/wake! w)))
 
 (defn tui-set-status-line-fn!
   "Install F as the live-status-line provider: called with the frame width,
@@ -3165,17 +3161,13 @@
           (when (and @(:status-render-requested? tui)
                      (not @(:render-requested? tui)))
             (reset! (:status-render-requested? tui) false)
-            ;; with-render-lock returns true for running the body, not the
-            ;; body's value — capture the patch verdict in a volatile
-            (let [patched? (volatile! false)]
-              (with-render-lock tui
-                (let [{:keys [cols rows]} @(:terminal-size tui)]
-                  (vreset! patched?
-                           (boolean (status-patch! tui cols rows
-                                                   @previous-viewport-top
-                                                   @hardware-cursor-row @hardware-cursor-col
-                                                   pending-write)))))
-              (when-not @patched?
+            (let [patched? (with-render-lock tui
+                             (let [{:keys [cols rows]} @(:terminal-size tui)]
+                               (status-patch! tui cols rows
+                                              @previous-viewport-top
+                                              @hardware-cursor-row @hardware-cursor-col
+                                              pending-write)))]
+              (when-not patched?
                 (reset! (:render-requested? tui) true))))
 
           ;; The frame's buffer leaves the lock with it: the write is the

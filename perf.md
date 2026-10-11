@@ -1917,12 +1917,12 @@ one glyph. The status line is now self-identifying and repainted in place.
 Mechanism:
 
 - `kmet.tui.utils/STATUS-MARKER` — a zero-width APC like the cursor marker.
-  The editor wraps its installed top-border line with it
-  (`editor.clj`/`editor-status-line`); the standalone indicators
-  (`StatusIndicator`, Retry/Compaction/BranchSummary) mark their content
-  line; `border-status-text` strips the component marker and re-marks the
-  composed line, so exactly one marker sits at the live line's start
-  wherever the status is rendered;
+  The layout's top-border hook marks the line it returns (`layout.clj`);
+  the standalone indicators (`StatusIndicator`, Retry/Compaction/
+  BranchSummary) mark their content line; `border-status-text` strips the
+  component marker before the border path re-marks the composed line, so
+  exactly one marker sits at the live line's start wherever the status is
+  rendered;
 - `build-frame-lines` strips both marker kinds in its one document pass and
   returns `:status {:row :col}` / `:status-marks` with the same
   carry-forward rules as the cursor's marks (equal chunks, quick reuse,
@@ -1946,9 +1946,7 @@ Mechanism:
   both markers at every index on both hosts;
 - fallbacks reach the old path with the normal render flag: no
   provider/anchor, a custom or unfocused editor, a visible overlay or flash,
-  a resize, or a status line outside the viewport;
-  `tui-request-status-render!` on a hand-built TUI without the flag
-  delegates to `tui-request-render`.
+  a resize, or a status line outside the viewport.
 
 Measured in the app (`jolt start`, 100x30 tmux pty; the probe server stalls
 40 s so the spinner is the only animation; `/proc` ticks, 6 s windows, the

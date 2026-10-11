@@ -18,15 +18,11 @@
   (str/replace s #"\u001b\[[0-9;]*[a-zA-Z]" ""))
 
 (defn- plain
-  "Stripped text with the live-status marker removed and every braille
-   animation frame normalized to F — the frame advances with the clock, so
-   exact-frame assertions would be timing-dependent (they are the same
-   component's spinner)."
+  "Stripped text with every braille animation frame normalized to F — the
+   frame advances with the clock, so exact-frame assertions would be
+   timing-dependent (they are the same component's spinner)."
   [s]
-  (-> s
-      (str/replace u/STATUS-MARKER "")
-      strip-ansi
-      (str/replace #"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]" "F")))
+  (str/replace (strip-ansi s) #"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]" "F"))
 
 (defn- border-line [indicator width hidden]
   (si/editor-top-border {:indicator indicator

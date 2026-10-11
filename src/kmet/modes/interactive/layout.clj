@@ -11,6 +11,7 @@
             [kmet.tui.hiccup :as hiccup]
             [kmet.tui.theme :as th]
             [kmet.tui.terminal :as term]
+            [kmet.tui.utils :as u]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.tui.autocomplete :as ac]
             [kmet.tui.components.spacer :as spacer]
@@ -778,12 +779,16 @@
           _ (editor/editor-set-top-border-fn!
              ed
              (fn [{:keys [width hidden-line-count rule border-fn]}]
-               (status-indicator/editor-top-border
-                {:indicator (status/current-status-indicator cs)
-                 :width width
-                 :hidden-line-count hidden-line-count
-                 :rule rule
-                 :border-fn border-fn})))
+               ;; The live-status marker travels with this line: the frame
+               ;; pass records its row for the status fast path
+               ;; (kmet.tui.core/status-patch!, perf.md §17).
+               (when-some [line (status-indicator/editor-top-border
+                                 {:indicator (status/current-status-indicator cs)
+                                  :width width
+                                  :hidden-line-count hidden-line-count
+                                  :rule rule
+                                  :border-fn border-fn})]
+                 (str u/STATUS-MARKER line))))
           ;; The line provider behind the status-only frames: the active
           ;; editor's border or the standalone status area, whichever owns
           ;; the status; its output carries the STATUS-MARKER the frame pass

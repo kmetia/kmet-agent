@@ -570,19 +570,20 @@
             the driver the compaction spinner sits on one frame)"
     (let [cs (assoc (test-status-cs)
                     :tui {:running? (atom true)
-                          :render-requested? (atom false)})
+                          :render-requested? (atom false)
+                          :status-render-requested? (atom false)})
           tui (:tui cs)]
       ((var status/show-status-indicator!) cs :compaction
                                            (status-indicator/make-compaction-status-indicator))
       (let [first-driver (:driver @(:status-current cs))]
         (t/is (some? first-driver) "the driver is recorded on the status entry")
-        (reset! (:render-requested? tui) false)
+        (reset! (:status-render-requested? tui) false)
         (t/is (loop [deadline (+ (System/currentTimeMillis) 2000)]
                 (cond
-                  @(:render-requested? tui) true
+                  @(:status-render-requested? tui) true
                   (< (System/currentTimeMillis) deadline) (do (Thread/sleep 5) (recur deadline))
                   :else false))
-              "frames are requested while it is up")
+              "status frames are requested while it is up")
         (testing "swapping in the next indicator retires the previous driver"
           ((var status/show-status-indicator!) cs :retry
                                                (status-indicator/make-retry-status-indicator 1 3 2000))

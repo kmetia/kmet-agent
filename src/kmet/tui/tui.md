@@ -1085,8 +1085,8 @@ the line's document row in `build-frame-lines`' `:status`/`:status-marks`.
 On a status tick the loop's `status-patch!` re-derives the line from the
 registered provider (`tui-set-status-line-fn!`, wired by the interactive
 layout to the active editor's border or the standalone status area — the
-marker travels with whichever component renders it, so dock/editor swaps
-need no position math), writes it at `status-row - viewport-top` with one
+line is marked by its producer, so dock/editor swaps need no position
+math), writes it at `status-row - viewport-top` with one
 clear+write, and restores the hardware-cursor position. Frame state is
 untouched: the document, viewport and diff stay as the last full frame left
 them, and the next real frame repaints the row normally. Any condition the

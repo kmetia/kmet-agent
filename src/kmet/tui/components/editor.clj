@@ -1259,8 +1259,7 @@
           (reset! (:top-border-args-atom this) top-args)
           (vswap! result conj
                   (or (when-some [top-fn @top-border-fn-atom]
-                        (when-some [line (top-fn top-args)]
-                          (str u/STATUS-MARKER line)))
+                        (top-fn top-args))
                       (default-top-border rule style scroll-offset width))))
         ;; Render visible lines
         (doseq [[vi vl] (map-indexed vector visible)]
@@ -1696,18 +1695,17 @@
     (reset! args nil)))
 
 (defn editor-status-line
-  "The editor's marked top-border line at WIDTH, re-derived from the last
-   render's border args without re-rendering the editor — the status fast
-   path's line provider (kmet.tui.core/status-patch!). The installed
-   top-border fn reads the live status, so the returned line carries the
-   current spinner frame. nil when no top-border fn is installed or the
-   editor has not rendered yet."
+  "The editor's top-border line at WIDTH, re-derived from the last render's
+   border args without re-rendering the editor — the status fast path's line
+   provider (kmet.tui.core/status-patch!). The installed top-border fn reads
+   the live status, so the returned line carries the current spinner frame.
+   nil when no top-border fn is installed or the editor has not rendered
+   yet."
   [editor width]
   (when-some [top-fn @(:top-border-fn-atom editor)]
     (when-some [args-cell (:top-border-args-atom editor)]
       (when-some [args @args-cell]
-        (when-some [line (top-fn (assoc args :width width))]
-          (str u/STATUS-MARKER line))))))
+        (top-fn (assoc args :width width))))))
 
 (defn editor-insert-text-at-cursor!
   "Insert text at the current cursor position (pi:
