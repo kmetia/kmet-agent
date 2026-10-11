@@ -2725,6 +2725,12 @@
               (when (and (pos? @(:previous-width tui)) (not= @(:previous-width tui) w))
                 (tui-request-render tui))
               (when (and (pos? @(:previous-height tui)) (not= @(:previous-height tui) h))
+                ;; A size change moves the terminal's cursor itself, so an
+                ;; outstanding self-check probe's expected row is no longer
+                ;; meaningful — the frame below re-arms one. Not cleared, a
+                ;; resize report would read as a divergence and force a
+                ;; spurious clearing redraw.
+                (clear-cursor-probe! tui)
                 (tui-request-render tui))
               (when @(:render-requested? tui)
                 (reset! (:render-requested? tui) false)
@@ -3380,10 +3386,18 @@
             (swap! (:write-seq tui) inc)
             (when @(:probe-cursor-next-write? tui)
               (reset! (:probe-cursor-next-write? tui) false)
-              (arm-cursor-probe! tui
-                                 (inc (- @hardware-cursor-row @previous-viewport-top))
-                                 (inc @hardware-cursor-col)
-                                 @previous-viewport-top)))
+              ;; Only a frame whose cursor the model placed inside the
+              ;; viewport can be probed: anything else (a cursor row above
+              ;; the viewport, a height that changed mid-frame) would
+              ;; compare nonsense and heal spuriously.
+              (let [row @hardware-cursor-row
+                    top @previous-viewport-top
+                    h (max 1 @(:previous-height tui))]
+                (when (and (>= row top) (< row (+ top h)))
+                  (arm-cursor-probe! tui
+                                     (inc (- row top))
+                                     (inc @hardware-cursor-col)
+                                     top)))))
 
           ;; Tickless park: after a rendered frame, sleep the 16ms frame
           ;; pace so a streaming producer cannot outrun the terminal; with
