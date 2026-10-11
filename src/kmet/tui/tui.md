@@ -1087,7 +1087,9 @@ registered provider (`tui-set-status-line-fn!`, wired by the interactive
 layout to the active editor's border or the standalone status area — the
 line is marked by its producer, so dock/editor swaps need no position
 math), writes it at `status-row - viewport-top` with one
-clear+write, and restores the hardware-cursor position. Frame state is
+clear+write (truncated to the frame width like the diff renderer, so an
+over-wide line can never wrap), and restores the hardware-cursor position.
+Frame state is
 untouched: the document, viewport and diff stay as the last full frame left
 them, and the next real frame repaints the row normally. Any condition the
 patch cannot satisfy — no provider or anchor, a custom or unfocused editor,

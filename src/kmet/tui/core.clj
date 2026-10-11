@@ -2468,7 +2468,18 @@
                                    ;; emitting, so do the same
                                    (clojure.string/replace utils/STATUS-MARKER "")
                                    utils/normalize-terminal-output)]
-            (let [delta (- cursor-row screen-row)
+            (let [;; The provider builds to WIDTH, but normalize can widen
+                  ;; the line (tab expansion, Thai/Lao decomposition) and a
+                  ;; custom provider can overshoot outright; a line past the
+                  ;; terminal width wraps and desyncs every row below it, so
+                  ;; truncate exactly like the frame diff does (it also
+                  ;; crash-logs; a persistent offender is reported there on
+                  ;; the next full frame).
+                  line (if (and (not (img/is-image-line line))
+                                (> (utils/visible-width line) width))
+                         (:text (utils/slice-with-width line 0 width :strict? true))
+                         line)
+                  delta (- cursor-row screen-row)
                   sb (StringBuilder.)]
               (.append sb CSI-2026-H)
               (when (pos? delta) (.append sb (str "\u001b[" delta "A")))

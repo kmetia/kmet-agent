@@ -1025,3 +1025,19 @@
                 "the tick took the full-frame path and re-rendered the tree"))
         (finally
           (stop-loop tui))))))
+
+(deftest ^:slow status-request-truncates-an-over-wide-line
+  (testing "an over-wide provider line is truncated instead of wrapping the screen"
+    (let [{:keys [tui writes status-line]} (start-status-test-loop)]
+      (try
+        (let [base-writes (count @writes)]
+          (reset! status-line (str utils/STATUS-MARKER (apply str (repeat 200 "y"))))
+          (core/tui-request-status-render! tui)
+          (t/is (wait-until #(> (count @writes) base-writes) 3000)
+                "the status patch was written")
+          (let [patch (str/join "" (subvec @writes base-writes))]
+            (t/is (str/includes? patch "yyy") "the line painted")
+            (t/is (not (str/includes? patch (apply str (repeat 81 "y"))))
+                  "no run longer than the 80-column terminal can appear — a wrap would desync the frame")))
+        (finally
+          (stop-loop tui))))))
