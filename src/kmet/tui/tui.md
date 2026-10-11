@@ -1096,19 +1096,27 @@ layout to the active editor's border or the standalone status area — the
 line is marked by its producer, so dock/editor swaps need no position
 math), writes it at `status-row - viewport-top` with one
 clear+write (truncated to the frame width like the diff renderer, so an
-over-wide line can never wrap), and restores the hardware-cursor position.
-Frame state is
+over-wide line can never wrap), and restores the hardware-cursor position
+with **absolute** CUP on both sides: the line is exactly WIDTH wide, and a
+terminal that wraps it (a width-model difference, an immediate-wrap
+emulator) would leave the cursor a row below — a relative restore would
+carry that drift into every later frame, invisible to the diff, whose model
+stays self-consistent. Frame state is
 untouched: the document, viewport and diff stay as the last full frame left
 them, and the next real frame repaints the row normally. Any condition the
 patch cannot satisfy — no provider or anchor, a provider that no longer
 returns the marked line, a custom or unfocused editor, a visible overlay or
 flash, a resize — sets the normal render flag and takes
 the full-frame path, so the optimization is invisible when it cannot apply.
-`KMET_TUI_SELFCHECK=1` verifies the patch's one unverifiable assumption —
-that the terminal keeps its cursor where the model left it: a throttled
-full frame rides a DSR query (`\u001b[6n`), the 1-based report is compared
-with the model, a divergence is logged to `kmet-cursor-selfcheck.log`
-beside the frame/patch traces and healed with a clearing redraw. The report
+`KMET_TUI_SELFCHECK=0` disables the cursor self-check; it is on by default
+(one throttled DSR probe per second), because it verifies the patch's one
+unverifiable assumption — that the terminal keeps its cursor where the
+model left it. The 1-based report is compared with the model; a divergence
+is logged to `kmet-cursor-selfcheck.log` beside the frame/patch traces and
+healed with a clearing redraw (three divergences within five seconds
+disable the heal — a terminal that cannot match the model would redraw
+forever; `KMET_TUI_SELFCHECK=1` also logs the first successful probe). The
+report
 shape (`CSI row;col R`) is also a modified F3 (`CSI 1;2R`), so it is
 consumed only while a probe is outstanding and never held as a fragment.
 perf.md §17 measures the turn-time effect.

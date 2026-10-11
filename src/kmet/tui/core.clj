@@ -389,12 +389,19 @@
                        :debug-redraw? (atom (= (System/getenv "KMET_DEBUG_REDRAW") "1"))
                        :tui-debug? (atom (= (System/getenv "KMET_TUI_DEBUG") "1"))
                        :tui-trace? (atom (= (System/getenv "KMET_TUI_TRACE") "1"))
-                       ;; KMET_TUI_SELFCHECK=1: ask the terminal where its
-                       ;; cursor is after each full frame (DSR 6) and compare
-                       ;; the report with the model — a divergence means the
-                       ;; terminal no longer matches the model and a
-                       ;; clearing redraw is forced (see arm-cursor-probe!).
-                       :cursor-selfcheck? (atom (= (System/getenv "KMET_TUI_SELFCHECK") "1"))
+                       ;; Cursor self-check: ON by default, throttled to one
+                       ;; DSR probe per second. The renderer trusts the
+                       ;; terminal to keep its cursor where the model left
+                       ;; it; a terminal that does not (a wrap, a clamp, a
+                       ;; width-model difference) corrupts the screen
+                       ;; invisibly — the model stays self-consistent, so no
+                       ;; diff can repair it. A divergence is logged to
+                       ;; kmet-cursor-selfcheck.log and healed with a clearing
+                       ;; redraw. KMET_TUI_SELFCHECK=0 disables the check, =1
+                       ;; additionally logs the first successful probe.
+                       :cursor-selfcheck? (atom (not= "0" (System/getenv "KMET_TUI_SELFCHECK")))
+                       :cursor-probe-log-ok? (atom (= "1" (System/getenv "KMET_TUI_SELFCHECK")))
+                       :cursor-heal (atom {:last-ns 0 :recent 0 :disabled? false})
                        :probe-cursor-next-write? (atom false)
                        :cursor-probe (atom nil)
                        :cursor-probe-ok-logged? (atom false)
@@ -1333,9 +1340,12 @@
 
 (defn- settle-cursor-probe!
   "Compare a cursor position report with the model of the frame that asked
-   for it. On a divergence, log the geometry and force a clearing redraw:
-   the terminal is out of sync with the model, which no diff or patch can
-   repair."
+   for it. A divergence means the terminal is no longer where the model
+   says — no diff or patch can repair it (the model stays self-consistent),
+   so heal with a clearing redraw and record the geometry in
+   kmet-cursor-selfcheck.log. A terminal that keeps diverging would
+   otherwise redraw in a loop: after three divergences within five seconds
+   the heal disables itself and only logs."
   [tui {:keys [row col]}]
   (when-some [probe-atom @(:cursor-probe tui)]
     (let [probe @probe-atom]
@@ -1345,15 +1355,33 @@
         (clear-cursor-probe! tui)
         (let [{:keys [model-row model-col viewport-top]} probe]
           (if (or (not= row model-row) (not= col model-col))
-            (do
+            (let [now (System/nanoTime)
+                  {:keys [last-ns recent disabled?]} @(:cursor-heal tui)
+                  recent' (if (> (- now last-ns) 5000000000) 1 (inc recent))]
               (append-log! (log-path "kmet-cursor-selfcheck.log")
                            (str "[" (java.time.LocalDateTime/now) "] cursor divergence"
                                 " model=" model-row "," model-col
                                 " terminal=" row "," col
                                 " vt=" viewport-top
-                                " frame=" (:frame probe) "\n"))
-              (tui-request-render tui true))
-            (when (compare-and-set! (:cursor-probe-ok-logged? tui) false true)
+                                " frame=" (:frame probe)
+                                (when disabled? " (self-heal disabled)") "\n"))
+              (cond
+                disabled?
+                (reset! (:cursor-heal tui) {:last-ns now :recent recent' :disabled? true})
+
+                (> recent' 3)
+                (do (reset! (:cursor-heal tui) {:last-ns now :recent recent' :disabled? true})
+                    (append-log! (log-path "kmet-cursor-selfcheck.log")
+                                 (str "[" (java.time.LocalDateTime/now)
+                                      "] cursor keeps diverging; self-heal disabled"
+                                      " (a terminal that cannot match the model would redraw"
+                                      " forever)\n")))
+
+                :else
+                (do (reset! (:cursor-heal tui) {:last-ns now :recent recent' :disabled? false})
+                    (tui-request-render tui true))))
+            (when (and @(:cursor-probe-log-ok? tui)
+                       (compare-and-set! (:cursor-probe-ok-logged? tui) false true))
               (append-log! (log-path "kmet-cursor-selfcheck.log")
                            (str "[" (java.time.LocalDateTime/now) "] cursor probe ok"
                                 " model=" model-row "," model-col
@@ -2595,7 +2623,17 @@
                     ;; top cancels and the delta is cursor-row - status-row.
                     ;; (Using cursor-row - screen-row here moved the write
                     ;; viewport-top rows too far once the document scrolled.)
-                    delta (- cursor-row status-row)
+                    ;; SCREEN-row difference only for the trace below; the
+                    ;; write and the restore are ABSOLUTE (CUP), never
+                    ;; relative. The line is exactly WIDTH wide, and a
+                    ;; terminal that wraps it (a width-model difference, an
+                    ;; immediate-wrap emulator) leaves the cursor a row
+                    ;; below; the old relative restore carried that one-row
+                    ;; drift into every later frame, and no diff could see
+                    ;; it because the model stayed self-consistent. CUP is
+                    ;; screen-absolute, so a patch can no longer desync the
+                    ;; cursor whatever the terminal does with the write.
+                    cursor-screen-row (max 0 (min (dec height) (- cursor-row viewport-top)))
                     sb (StringBuilder.)]
                 ;; KMET_TUI_DEBUG=1: record every patch's geometry next to the
                 ;; frame dumps, so a corrupted screen can be reconstructed from
@@ -2608,15 +2646,16 @@
                                     " h=" height " w=" width
                                     " line-w=" (utils/visible-width line) "\n")))
                 (.append sb CSI-2026-H)
-                (when (pos? delta) (.append sb (str "\u001b[" delta "A")))
-                (when (neg? delta) (.append sb (str "\u001b[" (- delta) "B")))
-                (.append sb "\r\u001b[2K")
+                (.append sb (str "\u001b[" (inc screen-row) ";1H"))
+                (.append sb "\u001b[2K")
                 (.append sb (if (img/is-image-line line)
                               line
                               (str line utils/SEGMENT-RESET)))
-                (when (pos? delta) (.append sb (str "\u001b[" delta "B")))
-                (when (neg? delta) (.append sb (str "\u001b[" (- delta) "A")))
-                (.append sb (str "\u001b[" (inc (max 0 cursor-col)) "G"))
+                ;; A full-width write leaves a pending wrap; CR clears it
+                ;; before the absolute restore.
+                (.append sb "\r")
+                (.append sb (str "\u001b[" (inc cursor-screen-row) ";"
+                                 (inc (max 0 cursor-col)) "H"))
                 (.append sb CSI-2026-L)
                 (reset! pending-write (str sb))
                 true)))
@@ -3277,7 +3316,7 @@
                   ;; diagnostic value.
                   (when (and @(:cursor-selfcheck? tui) cursor)
                     (let [now (System/nanoTime)]
-                      (when (> (- now @(:last-probe-ns tui)) 200000000)
+                      (when (> (- now @(:last-probe-ns tui)) 1000000000)
                         (reset! (:last-probe-ns tui) now)
                         (.append @sb terminal/CURSOR-POSITION-QUERY)
                         (reset! (:probe-cursor-next-write? tui) true))))

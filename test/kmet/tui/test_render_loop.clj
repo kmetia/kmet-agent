@@ -1144,27 +1144,37 @@
           (let [patch (str/join "" (subvec @(:writes vt) base-writes))]
             (t/is (str/includes? patch "status two"))
             (t/is (not (str/includes? patch "input")) "only the status row is written")
-            (t/is (str/includes? patch "\u001b[1B") "moves down to the status row")
-            (t/is (str/includes? patch "\u001b[1A") "moves back up to the cursor row")
+            ;; Absolute CUP both ways: a full-width write that the terminal
+            ;; wraps must not be able to carry a one-row drift into later
+            ;; frames (the old relative move + restore did).
+            (t/is (str/includes? patch "\u001b[2;1H") "positions absolutely at the status row")
+            (t/is (str/includes? patch "\u001b[1;6H") "restores the cursor absolutely")
+            (t/is (not (str/includes? patch "\u001b[1B")) "no relative down-move")
+            (t/is (not (str/includes? patch "\u001b[1A")) "no relative up-move")
             (t/is (not (str/includes? patch "\u001b[?25")) "cursor visibility is untouched")))
         (finally
           (stop-loop tui))))))
 
 (deftest ^:slow status-request-walks-the-right-rows-in-a-scrolled-viewport
-  (testing "with the document taller than the window the patch moves cursor-row - status-row, not the screen row"
+  (testing "with the document taller than the window the patch addresses SCREEN rows (row - viewport-top)"
     (let [{:keys [tui writes status-line]} (start-scrolled-status-test-loop 38)]
       (try
         (let [base-writes (count @writes)]
-          ;; 39 document lines + content: status at row 38, cursor at 39,
-          ;; viewport-top 16 -> the move to the status row is 1, not 17
+          ;; 38 content lines + status (doc row 38) + cursor (doc row 39),
+          ;; viewport-top 16 -> the status screen row is 22 and the cursor's
+          ;; is 23, not the document rows 38/39.
           (reset! status-line (str utils/STATUS-MARKER "status two"))
           (core/tui-request-status-render! tui)
           (t/is (wait-until #(> (count @writes) base-writes) 3000)
                 "the status patch was written")
           (let [patch (str/join "" (subvec @writes base-writes))]
             (t/is (str/includes? patch "status two"))
-            (t/is (str/includes? patch "\u001b[1A\r\u001b[2K")
-                  "the write follows an up-move of cursor-row - status-row (1)")
+            (t/is (str/includes? patch "\u001b[23;1H")
+                  "the write targets status-row - viewport-top")
+            (t/is (str/includes? patch "\u001b[24;6H")
+                  "the restore targets cursor-row - viewport-top")
+            (t/is (not (str/includes? patch "\u001b[39;"))
+                  "document rows are never used as screen rows")
             (t/is (not (str/includes? patch "\u001b[17A"))
                   "not cursor-row - (status-row - viewport-top), which would paint viewport-top rows too far up")))
         (finally
