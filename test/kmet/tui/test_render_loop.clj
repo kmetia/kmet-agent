@@ -1166,3 +1166,37 @@
                   "not cursor-row - (status-row - viewport-top), which would paint viewport-top rows too far up")))
         (finally
           (stop-loop tui))))))
+
+(deftest ^:slow status-request-consumes-an-offscreen-status-line
+  (testing "a status line above the window consumes the tick without a write or a full frame"
+    (let [renders (atom 0)
+          status-line (atom (str utils/STATUS-MARKER "status one"))
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child
+         tui
+         (reify core/IComponent
+           (render [_ _] (swap! renders inc)
+             (vec (concat (map #(str "above " %) (range 40))
+                          [@status-line]
+                          (map #(str "below " %) (range 40))
+                          [(str "input" utils/CURSOR-MARKER "x")])))
+           (handle-input [_ _] nil)
+           (invalidate [_] nil)))
+        (core/tui-set-status-line-fn! tui (fn [_] @status-line))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 5000)
+        (let [base-writes (count @(:writes vt))
+              base-renders @renders]
+          ;; 82-line document, cursor at 81 -> viewport-top 58; the status at
+          ;; row 40 is off-screen, so the tick is consumed as documented
+          (reset! status-line (str utils/STATUS-MARKER "status two"))
+          (core/tui-request-status-render! tui)
+          (Thread/sleep 300)
+          (t/is (= base-writes (count @(:writes vt)))
+                "nothing is written for an off-screen status line")
+          (t/is (= base-renders @renders)
+                "and the tick is not turned into a full frame either"))
+        (finally
+          (stop-loop tui))))))
