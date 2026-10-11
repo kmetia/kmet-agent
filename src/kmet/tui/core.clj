@@ -2484,7 +2484,13 @@
                                   (> (utils/visible-width line) width))
                            (:text (utils/slice-with-width line 0 width :strict? true))
                            line)
-                    delta (- cursor-row screen-row)
+                    ;; The move is a SCREEN-row difference: the cursor sits
+                    ;; at screen row cursor-row - viewport-top and the write
+                    ;; target at status-row - viewport-top, so the viewport
+                    ;; top cancels and the delta is cursor-row - status-row.
+                    ;; (Using cursor-row - screen-row here moved the write
+                    ;; viewport-top rows too far once the document scrolled.)
+                    delta (- cursor-row status-row)
                     sb (StringBuilder.)]
                 (.append sb CSI-2026-H)
                 (when (pos? delta) (.append sb (str "\u001b[" delta "A")))

@@ -209,6 +209,30 @@
     {:tui tui :writes (:writes vt) :renders renders
      :content content :status-line status-line}))
 
+(defn- start-scrolled-status-test-loop
+  "Like start-status-test-loop, but CONTENT-LINES fixed lines precede the
+   marked status line so the document is taller than the 24-row window and
+   the frame pins VIEWPORT-TOP above 0. Returns
+   {:tui :writes :renders :status-line}."
+  [content-lines]
+  (let [renders (atom 0)
+        status-line (atom (str utils/STATUS-MARKER "status one"))
+        vt (make-virtual-terminal)
+        tui (core/create-tui (:terminal vt))]
+    (core/tui-add-child
+     tui
+     (reify core/IComponent
+       (render [_ _] (swap! renders inc)
+         (conj (mapv #(str "line " %) (range content-lines))
+               @status-line
+               (str "input" utils/CURSOR-MARKER "x")))
+       (handle-input [_ _] nil)
+       (invalidate [_] nil)))
+    (core/tui-set-status-line-fn! tui (fn [_] @status-line))
+    (start-loop tui)
+    (wait-for-frames (:writes vt) 1 5000)
+    {:tui tui :writes (:writes vt) :renders renders :status-line status-line}))
+
 ;; ─── Tests ─────────────────────────────────────────────────────────────────
 
 (deftest ^:slow first-render-preserves-terminal-output
@@ -1120,5 +1144,25 @@
             (t/is (str/includes? patch "\u001b[1B") "moves down to the status row")
             (t/is (str/includes? patch "\u001b[1A") "moves back up to the cursor row")
             (t/is (not (str/includes? patch "\u001b[?25")) "cursor visibility is untouched")))
+        (finally
+          (stop-loop tui))))))
+
+(deftest ^:slow status-request-walks-the-right-rows-in-a-scrolled-viewport
+  (testing "with the document taller than the window the patch moves cursor-row - status-row, not the screen row"
+    (let [{:keys [tui writes status-line]} (start-scrolled-status-test-loop 38)]
+      (try
+        (let [base-writes (count @writes)]
+          ;; 39 document lines + content: status at row 38, cursor at 39,
+          ;; viewport-top 16 -> the move to the status row is 1, not 17
+          (reset! status-line (str utils/STATUS-MARKER "status two"))
+          (core/tui-request-status-render! tui)
+          (t/is (wait-until #(> (count @writes) base-writes) 3000)
+                "the status patch was written")
+          (let [patch (str/join "" (subvec @writes base-writes))]
+            (t/is (str/includes? patch "status two"))
+            (t/is (str/includes? patch "\u001b[1A\r\u001b[2K")
+                  "the write follows an up-move of cursor-row - status-row (1)")
+            (t/is (not (str/includes? patch "\u001b[17A"))
+                  "not cursor-row - (status-row - viewport-top), which would paint viewport-top rows too far up")))
         (finally
           (stop-loop tui))))))
