@@ -406,7 +406,6 @@
                        :cursor-probe (atom nil)
                        :cursor-probe-ok-logged? (atom false)
                        :last-probe-ns (atom 0)
-                       :write-seq (atom 0)
                        :input-generation (atom 0)
                        :incomplete-flush-timer (atom nil)
                        ;; unbracketed-paste burst state (see paste-burst-step)
@@ -1320,15 +1319,16 @@
   (reset! (:cursor-probe tui) nil))
 
 (defn- arm-cursor-probe!
-  "Record the screen position (1-based, like the DSR report) a just-written
-   frame leaves the hardware cursor at, and arm the reply timeout. A report
-   that arrives after any later write is ignored by settle-cursor-probe!."
+  "Record the screen position (1-based, like the DSR report) this frame
+   leaves the hardware cursor at, and arm the reply timeout. Recorded with
+   the frame counter: a later PATCH does not invalidate the probe (patches
+   are cursor-neutral — absolute CUP in, absolute CUP out), but a later
+   FRAME does (it moves the cursor itself)."
   [tui model-row model-col viewport-top]
   (clear-cursor-probe! tui)
   (let [probe (atom {:model-row model-row :model-col model-col
                      :viewport-top viewport-top
-                     :write-seq @(:write-seq tui)
-                     :frame @(:frame-count tui)
+                     :frames @(:frame-count tui)
                      :timer nil})
         timer (future
                 (try (Thread/sleep cursor-probe-timeout-ms)
@@ -1349,9 +1349,10 @@
   [tui {:keys [row col]}]
   (when-some [probe-atom @(:cursor-probe tui)]
     (let [probe @probe-atom]
-      ;; Only the newest probe is valid: a write since then already moved
-      ;; the terminal and carries its own probe (armed at its write).
-      (when (= (:write-seq probe) @(:write-seq tui))
+      ;; Only the newest frame's probe is valid: a later frame moved the
+      ;; cursor itself. Patches in between are cursor-neutral (absolute CUP
+      ;; both ways), so a run of patches never silences the check.
+      (when (= (:frames probe) @(:frame-count tui))
         (clear-cursor-probe! tui)
         (let [{:keys [model-row model-col viewport-top]} probe]
           (if (or (not= row model-row) (not= col model-col))
@@ -1363,7 +1364,7 @@
                                 " model=" model-row "," model-col
                                 " terminal=" row "," col
                                 " vt=" viewport-top
-                                " frame=" (:frame probe)
+                                " frame=" (:frames probe)
                                 (when disabled? " (self-heal disabled)") "\n"))
               (cond
                 disabled?
@@ -3422,7 +3423,6 @@
           (when-let [out @pending-write]
             (reset! pending-write nil)
             (terminal/write-output started (str out))
-            (swap! (:write-seq tui) inc)
             (when @(:probe-cursor-next-write? tui)
               (reset! (:probe-cursor-next-write? tui) false)
               ;; Only a frame whose cursor the model placed inside the

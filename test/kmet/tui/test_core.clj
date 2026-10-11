@@ -1397,24 +1397,24 @@
   (let [arm (var kmet.tui.core/arm-cursor-probe!)]
     (testing "a matching report leaves the model and the render flag alone"
       (let [tui (core/create-tui nil)]
-        (reset! (:write-seq tui) 3)
+        (reset! (:frame-count tui) 3)
         (arm tui 10 5 0)
         (reader-feed! tui [["\u001b[10;5R" 0]])
         (t/is (nil? @(:cursor-probe tui)) "the probe is settled")
         (t/is (false? @(:render-requested? tui)))))
     (testing "a divergent report forces a clearing full redraw"
       (let [tui (core/create-tui nil)]
-        (reset! (:write-seq tui) 3)
+        (reset! (:frame-count tui) 3)
         (arm tui 10 5 0)
         (reader-feed! tui [["\u001b[11;5R" 0]])
         (t/is (nil? @(:cursor-probe tui)) "the probe is settled")
         (t/is (true? @(:render-requested? tui)) "a frame is requested")
         (t/is (true? @(:force-redraw? tui)) "and it is a clearing one")))
-    (testing "a report for a superseded write never flags a false desync"
+    (testing "a report superseded by a later frame never flags a false desync"
       (let [tui (core/create-tui nil)]
-        (reset! (:write-seq tui) 3)
+        (reset! (:frame-count tui) 3)
         (arm tui 10 5 0)
-        (swap! (:write-seq tui) inc)
+        (swap! (:frame-count tui) inc)
         (reader-feed! tui [["\u001b[11;5R" 0]])
         (t/is (some? @(:cursor-probe tui)) "still waiting for its own report")
         (t/is (false? @(:render-requested? tui)))
