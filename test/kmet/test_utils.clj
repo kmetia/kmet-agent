@@ -17,7 +17,7 @@
     :else (str/replace (str x) "\\" "/")))
 
 (defn strip-ansi
-  "Remove ANSI CSI/OSC escape sequences from a string (the production
+  "Remove ANSI CSI/OSC/APC escape sequences from a string (the production
    host-optimal stripper). OSC 8 hyperlinks are path metadata emitted only
    when the detected terminal supports them, so plain-text assertions go
    through this to stay independent of capability detection. Test helpers
@@ -56,7 +56,8 @@
 
 (def ^:private ansi-corpus
   "Strings the scanner/regex equivalence tests walk at every index: matched
-   CSI/OSC, private-parameter CSI, unterminated OSC, a lone ESC, CJK, tabs."
+   CSI/OSC/APC, private-parameter CSI, unterminated OSC/APC, a lone ESC, CJK,
+   tabs."
   ["" "plain" "a\tb" "中文"
    "\u001b[31mred\u001b[0m"
    "\u001b[38;5;196mx\u001b[39m"
@@ -64,6 +65,10 @@
    "\u001b]8;;https://x.example/\u0007link\u001b]8;;\u0007"
    "\u001b]0;title\u001b\\after"
    "\u001b]0;unterminated"
+   (str "ab" u/CURSOR-MARKER "cd")     ;; APC, BEL-terminated (the markers)
+   (str "ab" u/STATUS-MARKER "cd")
+   "\u001b_private\u001b\\tail"           ;; APC terminated by ST
+   "\u001b_unterminated"                  ;; APC without a terminator: literal
    "\u001b["
    "\u001b"
    "\u001bX"
@@ -80,9 +85,11 @@
   ;; (private-parameter CSI, unterminated OSC, a lone ESC), which must stay
   ;; in the output as literal text. Both implementations run on both hosts,
   ;; so this test pins them against each other wherever the suite runs.
+  ;; The scanner's OSC/APC branch is one shape (the introducer differs);
+  ;; the regex mirrors that with a combined branch.
   (let [regex-strip (fn [s]
                       (str/replace s
-                                   #"\u001b\[[0-9;]*[a-zA-Z]|\u001b\][^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)"
+                                   #"\u001b\[[0-9;]*[a-zA-Z]|\u001b[\]_][^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)"
                                    ""))
         native-strip (var-get #'u/strip-ansi-native)
         corpus ansi-corpus]
@@ -99,7 +106,7 @@
   ;; (ansi-code-at-native); bb/JVM keep the anchored regex matcher (match-at +
   ;; ANSI-CODE-RE). Both must agree at every index of every corpus string —
   ;; including the indices where neither matches.
-  (let [ansi-re #"\u001b\[[0-9;]*[a-zA-Z]|\u001b\][^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)"
+  (let [ansi-re #"\u001b\[[0-9;]*[a-zA-Z]|\u001b[\]_][^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)"
         regex-code (fn [s i]
                      (when (and (< i (count s)) (= \u001b (nth s i)))
                        (let [m (re-matcher ansi-re s)]
@@ -110,6 +117,24 @@
             i (range (inc (count s)))]
       (t/is (= (regex-code s i) (native-code s i))
             (str (pr-str s) " @" i)))))
+
+(t/deftest test-ansi-markers-are-zero-width
+  ;; the cursor/status markers are APC sequences: the width primitives and
+  ;; overlay compositing must treat them as zero-width codes, or a composite
+  ;; over a marked line shifts and leaks the marker text (kmet.tui.core's
+  ;; status fast path relies on this; perf.md §17)
+  (doseq [m [u/CURSOR-MARKER u/STATUS-MARKER]]
+    (let [marked (str "ab" m "cd")]
+      (t/is (= 4 (u/visible-width marked)) "the marker measures 0 columns")
+      (t/is (= "abcd" (u/strip-ansi-codes marked)) "and strips out")
+      (t/is (= {:text marked :width 4} (u/slice-with-width marked 0 4))
+            "the slice keeps the code and its width")))
+  (let [marked (str u/STATUS-MARKER "abcd")
+        out (u/composite-line marked "XX" 2 2 6)]
+    (t/is (= 6 (u/visible-width out)) "the composite keeps the total width")
+    (t/is (str/includes? out "XX"))
+    (t/is (str/includes? out u/STATUS-MARKER)
+          "the marker survives compositing for the frame pass")))
 
 (t/deftest test-visible-width-narrow-dingbats
   ;; Regression: the coarse emoji block ranges (0x2600-0x27BF etc.) counted

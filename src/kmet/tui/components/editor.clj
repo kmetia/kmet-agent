@@ -1688,7 +1688,12 @@
    that puts the session status in the editor's first line; the app's
    kmet.app.ui.status-indicator/editor-embeds-status? reads it back)."
   [editor f]
-  (reset! (:top-border-fn-atom editor) f))
+  (reset! (:top-border-fn-atom editor) f)
+  ;; a subsequent status tick must not re-derive a line through the new fn
+  ;; with the previous fn's render args (tolerant: an extension editor may
+  ;; carry the fn atom without the args field)
+  (when-some [args (:top-border-args-atom editor)]
+    (reset! args nil)))
 
 (defn editor-status-line
   "The editor's marked top-border line at WIDTH, re-derived from the last
@@ -1699,9 +1704,10 @@
    editor has not rendered yet."
   [editor width]
   (when-some [top-fn @(:top-border-fn-atom editor)]
-    (when-some [args @(:top-border-args-atom editor)]
-      (when-some [line (top-fn (assoc args :width width))]
-        (str u/STATUS-MARKER line)))))
+    (when-some [args-cell (:top-border-args-atom editor)]
+      (when-some [args @args-cell]
+        (when-some [line (top-fn (assoc args :width width))]
+          (str u/STATUS-MARKER line))))))
 
 (defn editor-insert-text-at-cursor!
   "Insert text at the current cursor position (pi:

@@ -2436,10 +2436,11 @@
    and the provider re-derives the line at WIDTH; the patch moves the
    terminal cursor to the line's screen row, rewrites it, and restores the
    hardware-cursor position the last frame left behind. Stages the output
-   into PENDING-WRITE and returns true, or nil when a full frame is
-   required: no provider/anchor, no cursor to restore, a screen overlay or
-   flash, or a size change. A status line outside the viewport consumes the
-   tick with nothing to paint (it is not a reason for a full frame).
+   into PENDING-WRITE and returns true when the tick is handled, or nil when
+   a full frame is required: no provider/anchor, no cursor to restore, a
+   screen overlay or flash, or a size change. A status line outside the
+   viewport consumes the tick with nothing to paint (it is not a reason for
+   a full frame; ditto a provider with nothing to show).
 
    CURSOR-ROW/CURSOR-COL are the physical hardware-cursor position after
    the last frame; VIEWPORT-TOP is that frame's viewport origin. The patch
@@ -2458,8 +2459,6 @@
                (not (tui-has-overlay? tui))
                (not (alt-screen-flash/alt-screen-flash-active? @(:flashes tui))))
       (let [screen-row (- (:row status) viewport-top)]
-        ;; A line outside the viewport is consumed with nothing to paint —
-        ;; the tick is not a reason for a full frame.
         (when (and (>= screen-row 0) (< screen-row height))
           (when-some [line (some-> (provider width)
                                    ;; the provider returns the marked line;
@@ -3158,16 +3157,25 @@
 
           ;; Status-only frames: the status drivers' spinner ticks repaint
           ;; the marked status line in place instead of re-walking the
-          ;; component tree. A missing provider/anchor (custom editor,
-          ;; overlay, resize, unfocused) falls back to a full frame on the
-          ;; next iteration.
+          ;; component tree. The patch runs under the dispatch lock — the
+          ;; provider may render an extension indicator, and component work
+          ;; must not interleave with input dispatch. A missing
+          ;; provider/anchor (custom editor, overlay, resize, unfocused)
+          ;; falls back to a full frame on the next iteration.
           (when (and @(:status-render-requested? tui)
                      (not @(:render-requested? tui)))
             (reset! (:status-render-requested? tui) false)
-            (let [{:keys [cols rows]} @(:terminal-size tui)]
-              (when-not (status-patch! tui cols rows @previous-viewport-top
-                                       @hardware-cursor-row @hardware-cursor-col
-                                       pending-write)
+            ;; with-render-lock returns true for running the body, not the
+            ;; body's value — capture the patch verdict in a volatile
+            (let [patched? (volatile! false)]
+              (with-render-lock tui
+                (let [{:keys [cols rows]} @(:terminal-size tui)]
+                  (vreset! patched?
+                           (boolean (status-patch! tui cols rows
+                                                   @previous-viewport-top
+                                                   @hardware-cursor-row @hardware-cursor-col
+                                                   pending-write)))))
+              (when-not @patched?
                 (reset! (:render-requested? tui) true))))
 
           ;; The frame's buffer leaves the lock with it: the write is the

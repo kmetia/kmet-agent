@@ -994,3 +994,39 @@
             (t/is (= base-renders @renders) "no component render ran for the patch")))
         (finally
           (stop-loop tui))))))
+
+(deftest ^:slow status-request-falls-back-when-an-overlay-is-up
+  (testing "a visible overlay disables the status fast path — the tick takes
+            the normal full-frame path instead of writing under the overlay"
+    (let [renders (atom 0)
+          status-line (atom (str utils/STATUS-MARKER "status one"))
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child
+         tui
+         (reify core/IComponent
+           (render [_ _] (swap! renders inc)
+             ["alpha" @status-line (str "input" utils/CURSOR-MARKER "x")])
+           (handle-input [_ _] nil)
+           (invalidate [_] nil)))
+        (core/tui-set-status-line-fn! tui (fn [_] @status-line))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 5000)
+        (core/tui-show-overlay tui
+                               (reify core/IComponent
+                                 (render [_ _] ["OVL"])
+                                 (handle-input [_ _] nil)
+                                 (invalidate [_] nil))
+                               :anchor :top-left :width 4)
+        (wait-for-frames (:writes vt) 2 5000)
+        (let [base-renders @renders]
+          (reset! status-line (str utils/STATUS-MARKER "status two"))
+          (core/tui-request-status-render! tui)
+          ;; the fallback path re-renders the tree; the composited output may
+          ;; not change (the overlay hides the status row), so no write is
+          ;; asserted — the render count is the observable
+          (t/is (wait-until #(> @renders base-renders) 3000)
+                "the tick took the full-frame path and re-rendered the tree"))
+        (finally
+          (stop-loop tui))))))

@@ -1935,6 +1935,15 @@ Mechanism:
   `status-row - viewport-top` with `\x1b[2K` + `SEGMENT-RESET`; the hardware
   cursor's row/col are restored. Document, viewport and diff state are
   untouched — the next real frame repaints the row as usual;
+- the width primitives treat the markers as ANSI codes: `ANSI-CODE-RE`
+  and the Jolt scanner accept APC (`ESC _ … BEL/ST/0x9C`) in the same branch
+  as OSC, so `visible-width` / `slice-with-width` / `composite-line` keep
+  overlay compositing over a marked line aligned (the cursor marker had the
+  same latent gap; without it a composite over a marked line shifted and
+  leaked `_km:` text). The combined branch measures within noise of the old
+  regex on the styled-line strip (≈4.7 vs ≈4.5 µs on bb; a separate APC
+  alternative measured ≈5.9 µs and was rejected). The utils corpus now pins
+  both markers at every index on both hosts;
 - fallbacks reach the old path with the normal render flag: no
   provider/anchor, a custom or unfocused editor, a visible overlay or flash,
   a resize, or a status line outside the viewport;
@@ -1955,6 +1964,7 @@ idle window subtracted):
 pins "one write, no component render"; the frame-pass tests pin the
 marker's strip, carry-forward and quick-reuse; the editor test pins
 `editor-status-line` equal to the rendered border line. `bb test-changed`
-13,260 passed, `bb test-ext-changed` 347 passed, lint 0/0, format clean.
+all green (13,331 assertions), `bb test-ext-changed` 350 passed, lint 0/0,
+format clean.
 
 

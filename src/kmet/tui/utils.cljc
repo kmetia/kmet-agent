@@ -16,21 +16,24 @@
 (def ^:const STATUS-MARKER "\u001b_km:s\u0007")
 
 ;; ─── ANSI escape sequences ────────────────────────────────────────────────
-;; CSI (ESC [...) and OSC (ESC ] ... ST) sequences. OSC 8 hyperlinks
+;; CSI (ESC [...), and the string-like sequences OSC (ESC ] ...) and APC
+;; (ESC _ ...) — the kmet cursor/status markers are APC. OSC 8 hyperlinks
 ;; (ESC ]8;;url ESC\) are zero-width metadata but must be recognized so they
-;; don't count toward visible width. OSC is terminated by BEL, ESC\ or 0x9C
-;; (pi: ansi-regex).
+;; don't count toward visible width; the same holds for the APC markers.
+;; OSC/APC share one branch because they differ only in the introducer
+;; (both end at BEL, ESC\ or 0x9C).
 (def ^:private ANSI-CODE-RE
-  #"\u001b\[[0-9;]*[a-zA-Z]|\u001b\][^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)")
+  #"\u001b\[[0-9;]*[a-zA-Z]|\u001b[\]_][^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)")
 
 (defn- ansi-sequence-end
   "End index (exclusive) of the ANSI escape sequence starting at index I of
    S when one starts there, nil otherwise. Hand-rolled equivalent of
-   ANSI-CODE-RE anchored at I (same accepted CSI/OSC language, including
+   ANSI-CODE-RE anchored at I (same accepted CSI/OSC/APC language, including
    what the regex does NOT match: private-parameter CSI like \"ESC[?25l\"
-   has no regex match and must stay literal text). Used on Jolt only, where
-   the regex engine is the slowest primitive; the utils test suite pins
-   this scanner and the regex against each other on a corpus."
+   has no regex match and must stay literal text, and an unterminated OSC/APC
+   is not a sequence either). Used on Jolt only, where the regex engine is
+   the slowest primitive; the utils test suite pins this scanner and the
+   regex against each other on a corpus."
   [s i]
   (let [n (count s)]
     (when (and (< i n) (= \u001b (nth s i)) (< (inc i) n))
@@ -46,8 +49,8 @@
                   (or (= ch 0x3b) (<= 0x30 ch 0x39)) (recur (inc j))
                   (or (<= 0x41 ch 0x5a) (<= 0x61 ch 0x7a)) (inc j)
                   :else nil))))
-          ;; OSC: ESC ] … BEL | ST | 0x9c
-          (= c \])
+          ;; OSC: ESC ] … BEL | ST | 0x9c / APC: ESC _ … BEL | ST | 0x9c
+          (or (= c \]) (= c \_))
           (loop [j (+ i 2)]
             (if (>= j n)
               nil
@@ -77,7 +80,7 @@
               (recur (inc idx) (str (or out "") (subs s pos (inc idx)))))))))))
 
 (defn- strip-ansi
-  "Remove ANSI CSI/OSC sequences from S — the one implementation behind
+  "Remove ANSI CSI/OSC/APC sequences from S — the one implementation behind
    strip-ansi-codes and visible-width. Jolt takes the scanner (its regex
    engine is irregex: 17 µs vs 3.4 µs on a styled 100-char line); babashka
    and the JVM stay on the regex strip, where java.util.regex is the faster
