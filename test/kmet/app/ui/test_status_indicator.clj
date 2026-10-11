@@ -18,11 +18,15 @@
   (str/replace s #"\u001b\[[0-9;]*[a-zA-Z]" ""))
 
 (defn- plain
-  "Stripped text with every braille animation frame normalized to F — the
-   frame advances with the clock, so exact-frame assertions would be
-   timing-dependent (they are the same component's spinner)."
+  "Stripped text with the live-status marker removed and every braille
+   animation frame normalized to F — the frame advances with the clock, so
+   exact-frame assertions would be timing-dependent (they are the same
+   component's spinner)."
   [s]
-  (str/replace (strip-ansi s) #"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]" "F"))
+  (-> s
+      (str/replace u/STATUS-MARKER "")
+      strip-ansi
+      (str/replace #"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]" "F")))
 
 (defn- border-line [indicator width hidden]
   (si/editor-top-border {:indicator indicator
@@ -181,3 +185,16 @@
     (testing "swapping back to a plain editor restores the layer"
       (reset! ed (editor/make-editor))
       (is (= 2 (count (protocols/render root 60)))))))
+
+(deftest test-standalone-status-line-carries-the-live-marker
+  ;; the status fast path's provider takes the standalone indicator's content
+  ;; line, and the frame pass records it via the marker (perf.md §17)
+  (let [working (si/make-status-indicator :text "Working")]
+    (si/status-indicator-start! working)
+    (let [line (second (protocols/render working 40))]
+      (is (str/starts-with? line u/STATUS-MARKER) "the content line is marked")
+      (is (str/includes? line "Working")))
+    (si/status-indicator-stop! working))
+  (let [retry (si/make-retry-status-indicator 1 3 2000)]
+    (is (str/starts-with? (second (protocols/render retry 40)) u/STATUS-MARKER)
+        "a transient indicator's line is marked too")))

@@ -105,6 +105,16 @@
       {:row cursor-i
        :col (utils/visible-width (subs (nth lines cursor-i) 0 (get marks cursor-i)))})))
 
+(defn- line-status
+  "The live status line's {:row :col} for the bottom-most STATUS-MARKER, or
+   nil when none. Unlike line-cursor the row is not restricted to the
+   viewport: the render loop checks visibility before patching it."
+  [status-marks lines]
+  (let [i (reduce-kv (fn [best i _] (if (> i best) i best)) -1 status-marks)]
+    (when (>= i 0)
+      {:row i
+       :col (utils/visible-width (subs (nth lines i) 0 (get status-marks i)))})))
+
 (def ^:private chunk-lines
   "Frame-pass chunk size. The pass compares the previous and current raw
    lines in chunks of this size with a host-native `=`: an equal chunk is
@@ -115,15 +125,17 @@
   1024)
 
 (defn- build-frame-lines
-  "Build one frame's document: strip every CURSOR-MARKER, normalize each
-   line, reuse PREV-OUT for lines unchanged since PREV-RAW, and report the
-   range the frame's diff must repaint.
+  "Build one frame's document: strip every CURSOR-MARKER and STATUS-MARKER,
+   normalize each line, reuse PREV-OUT for lines unchanged since PREV-RAW,
+   and report the range the frame's diff must repaint.
 
    Returns
    {:lines stripped-and-normalized lines
-    :cursor {:row r :col c} or nil
-    :marks {line-idx marker-idx}        ; carry into the next frame
-    :changed [first last] or nil}.      ; nil = no change
+    :cursor {:row r :col c} or nil     ; bottom-most cursor marker
+    :marks {line-idx marker-idx}       ; carry into the next frame
+    :status {:row r :col c} or nil     ; live status line (STATUS-MARKER)
+    :status-marks {line-idx marker-idx}
+    :changed [first last] or nil}.     ; nil = no change
 
    Stripping must be unconditional: a marker that leaks into the terminal
    stream is an APC sequence (ESC _ ... BEL) whose parser runs to ST
@@ -131,19 +143,21 @@
    and the display freezes at the last painted frame while the app keeps
    rendering. The cursor is the bottom-most marker in the bottom HEIGHT
    lines; a marker above the viewport is still stripped, it just yields no
-   cursor.
+   cursor. The status row is reported for any viewport (the render loop
+   checks visibility before patching it).
 
    The shared prefix is walked in CHUNK-LINES-sized chunks compared with a
    host-native `=`: an equal chunk is copied from PREV-OUT whole (content
    equality is enough — strip/normalize/marks are pure functions of the
    line content), and only a differing chunk enters the interpreted walk.
    Inside a walked chunk, a raw-identical line copies its previous output
-   and marker index. The walked lines are the frame's change detector: they
-   are the range main-diff consumes instead of walking the document again,
-   and an appended tail is always walked. The walked range over-approximates
-   the diff's `=` compare (a fresh-but-equal line counts as changed), which
-   is safe: a spurious line is rewritten, never skipped; an equal chunk is
-   never in the range, so the range is exact for whole chunks.
+   and marker indexes. The walked lines are the frame's change detector:
+   they are the range main-diff consumes instead of walking the document
+   again, and an appended tail is always walked. The walked range
+   over-approximates the diff's `=` compare (a fresh-but-equal line counts
+   as changed), which is safe: a spurious line is rewritten, never skipped;
+   an equal chunk is never in the range, so the range is exact for whole
+   chunks.
 
    QUICK? is the caller's hint that the previous frame repainted nothing.
    It buys one step before the chunk walk: a document content-equal to
@@ -158,10 +172,12 @@
    whose final lines flash compositing changed (the caller gates on the
    flash state)."
   ([lines height]
-   (build-frame-lines [] [] {} lines height))
+   (build-frame-lines [] [] {} {} lines height false))
   ([prev-raw prev-out prev-marks lines height]
-   (build-frame-lines prev-raw prev-out prev-marks lines height false))
+   (build-frame-lines prev-raw prev-out prev-marks {} lines height false))
   ([prev-raw prev-out prev-marks lines height quick?]
+   (build-frame-lines prev-raw prev-out prev-marks {} lines height quick?))
+  ([prev-raw prev-out prev-marks prev-status-marks lines height quick?]
    (let [prev-count (count prev-raw)
          n (count lines)]
      (if (and quick?
@@ -169,39 +185,49 @@
        {:lines prev-out
         :cursor (line-cursor prev-marks lines n height)
         :marks prev-marks
+        :status (line-status prev-status-marks lines)
+        :status-marks prev-status-marks
         :changed nil}
-       (let [marker utils/CURSOR-MARKER
+       (let [cursor-marker utils/CURSOR-MARKER
+             status-marker utils/STATUS-MARKER
              ;; strip/normalize/reuse/mark the lines in [a b)
-             scan-range (fn scan-range [a b acc marks fc lc]
-                          (loop [i a, acc acc, marks marks, fc fc, lc lc]
+             scan-range (fn scan-range [a b acc marks smarks fc lc]
+                          (loop [i a, acc acc, marks marks, smarks smarks, fc fc, lc lc]
                             (if (< i b)
                               (let [line (nth lines i)]
                                 (if (and (< i prev-count)
                                          (identical? (nth prev-raw i) line))
-                                  (recur (inc i) (conj! acc (nth prev-out i)) marks fc lc)
-                                  (let [idx (clojure.string/index-of line marker)
-                                        stripped (if idx
-                                                   (clojure.string/replace line marker "")
-                                                   line)]
+                                  (recur (inc i) (conj! acc (nth prev-out i))
+                                         marks smarks fc lc)
+                                  (let [cidx (clojure.string/index-of line cursor-marker)
+                                        sidx (clojure.string/index-of line status-marker)
+                                        stripped (cond-> line
+                                                   (some? cidx)
+                                                   (clojure.string/replace cursor-marker "")
+
+                                                   (some? sidx)
+                                                   (clojure.string/replace status-marker ""))]
                                     (recur (inc i)
                                            (conj! acc (utils/normalize-terminal-output stripped))
-                                           (if idx (assoc marks i idx) marks)
+                                           (if cidx (assoc marks i cidx) marks)
+                                           (if sidx (assoc smarks i sidx) smarks)
                                            (if (neg? fc) i fc)
                                            i))))
-                              [acc marks fc lc])))
-             [acc marks prefix-first prefix-last]
+                              [acc marks smarks fc lc])))
+             [acc marks smarks prefix-first prefix-last]
              (if (and (vector? lines) (vector? prev-raw) (>= n prev-count))
                ;; The shared prefix in native chunks, then the appended
                ;; tail (the chunk is empty at and past PREV-COUNT).
-               (loop [a 0, acc (transient []), marks {}, fc -1, lc -1]
+               (loop [a 0, acc (transient []), marks {}, smarks {}, fc -1, lc -1]
                  (let [b (min prev-count (+ a chunk-lines))]
                    (if (< a b)
                      (if (= (subvec prev-raw a b) (subvec lines a b))
-                       (recur b (reduce conj! acc (subvec prev-out a b)) marks fc lc)
-                       (let [[acc marks fc lc] (scan-range a b acc marks fc lc)]
-                         (recur b acc marks fc lc)))
-                     (scan-range prev-count n acc marks fc lc))))
-               (scan-range 0 n (transient []) {} -1 -1))
+                       (recur b (reduce conj! acc (subvec prev-out a b))
+                              marks smarks fc lc)
+                       (let [[acc marks smarks fc lc] (scan-range a b acc marks smarks fc lc)]
+                         (recur b acc marks smarks fc lc)))
+                     (scan-range prev-count n acc marks smarks fc lc))))
+               (scan-range 0 n (transient []) {} {} -1 -1))
              out (persistent! acc)
              ;; A previous marker stays valid exactly while its line's
              ;; content is unchanged; a rescanned line's new status (in
@@ -214,6 +240,14 @@
                                   m))
                               marks
                               prev-marks)
+             smarks (reduce-kv (fn [m i idx]
+                                 (if (and (< i prev-count)
+                                          (< i n)
+                                          (= (nth prev-raw i) (nth lines i)))
+                                   (assoc m i idx)
+                                   m))
+                               smarks
+                               prev-status-marks)
              ;; A removed line repaints only when it held content — the diff's
              ;; missing side is "" (an appended tail is main-diff's appended?).
              [first-changed last-changed]
@@ -225,6 +259,8 @@
          {:lines out
           :cursor cursor
           :marks marks
+          :status (line-status smarks lines)
+          :status-marks smarks
           :changed (when (>= first-changed 0) [first-changed last-changed])})))))
 
 (defn- refine-changed-range
@@ -258,9 +294,12 @@
 (defrecord TUI [terminal components focused-component
                 input-listeners previous-lines
                 previous-normalized-lines
-                previous-raw-lines previous-marks previous-flashed?
+                previous-raw-lines previous-marks previous-status-marks
+                previous-flashed?
                 previous-repainted?
-                previous-width render-requested? force-redraw? waker
+                previous-width render-requested? status-render-requested?
+                status-line-fn previous-status previous-cursor
+                force-redraw? waker
                 running? stopped? overlays
                 render-loop input-reader current-reader
                 flashes focus-order-counter
@@ -291,11 +330,16 @@
                        :previous-normalized-lines (atom [])
                        :previous-raw-lines (atom [])
                        :previous-marks (atom {})
+                       :previous-status-marks (atom {})
                        :previous-flashed? (atom false)
                        :previous-repainted? (atom true)
                        :previous-width (atom 0)
                        :terminal-size (atom nil)
                        :render-requested? (atom false)
+                       :status-render-requested? (atom false)
+                       :status-line-fn (atom nil)
+                       :previous-status (atom nil)
+                       :previous-cursor (atom nil)
                        :force-redraw? (atom false)
                        :waker (wake/make-waker)
                        :running? (atom false)
@@ -2153,6 +2197,32 @@
   (when-let [w (:waker tui)]
     (wake/wake! w)))
 
+(defn tui-request-status-render!
+  "Request a status-only frame: the live status line is repainted without
+   re-rendering the component tree (kmet.tui.core/status-patch!). The
+   component drivers call this instead of tui-request-render; the loop
+   falls back to a full frame whenever the line cannot be patched (no
+   provider/anchor, an overlay or flash on screen, a resize, a missing
+   cursor). Set before the wake, like tui-request-render. A hand-built TUI
+   without the status flag (tests, embedders) falls back to a normal render
+   request."
+  [tui]
+  (if-some [flag (:status-render-requested? tui)]
+    (do (reset! flag true)
+        (when-let [w (:waker tui)]
+          (wake/wake! w)))
+    (tui-request-render tui)))
+
+(defn tui-set-status-line-fn!
+  "Install F as the live-status-line provider: called with the frame width,
+   it returns the marked status line (kmet.tui.utils/STATUS-MARKER) or nil.
+   The interactive layout registers it for the active editor/indicator; nil
+   disables status-only frames (the loop then re-renders for every status
+   tick)."
+  [tui f]
+  (reset! (:status-line-fn tui) f)
+  nil)
+
 (defn tui-stop [tui]
   (reset! (:stopped? tui) true)
   (reset! (:running? tui) false)
@@ -2348,15 +2418,74 @@
   (min IDLE-HEARTBEAT-MS (max 1 (or (timers/next-due-ms) IDLE-HEARTBEAT-MS))))
 
 (defn- work-pending?
-  "True when the loop must not park: a render is requested, or a reaction is
-   waiting in the reakt batch queue. The queue is part of the recheck because
-   a reaction can be enqueued in the window between the loop's flush and its
-   wait — on the monitor host that wakeup finds nobody waiting and is dropped,
-   so the queue itself has to keep the loop awake (the jolt queue wake is
-   remembered; the recheck just makes both hosts one contract)."
+  "True when the loop must not park: a render (or status-only repaint) is
+   requested, or a reaction is waiting in the reakt batch queue. The queue
+   is part of the recheck because a reaction can be enqueued in the window
+   between the loop's flush and its wait — on the monitor host that wakeup
+   finds nobody waiting and is dropped, so the queue itself has to keep the
+   loop awake (the jolt queue wake is remembered; the recheck just makes
+   both hosts one contract)."
   [tui]
   (or (boolean @(:render-requested? tui))
+      (boolean @(:status-render-requested? tui))
       (pos? (reakt/queued-count))))
+
+(defn- status-patch!
+  "Repaint the live status line without re-rendering the component tree.
+   The frame pass recorded the line's document row from its STATUS-MARKER,
+   and the provider re-derives the line at WIDTH; the patch moves the
+   terminal cursor to the line's screen row, rewrites it, and restores the
+   hardware-cursor position the last frame left behind. Stages the output
+   into PENDING-WRITE and returns true, or nil when a full frame is
+   required: no provider/anchor, no cursor to restore, a screen overlay or
+   flash, or a size change. A status line outside the viewport consumes the
+   tick with nothing to paint (it is not a reason for a full frame).
+
+   CURSOR-ROW/CURSOR-COL are the physical hardware-cursor position after
+   the last frame; VIEWPORT-TOP is that frame's viewport origin. The patch
+   writes text only — the document, viewport and frame state stay as the
+   last full frame left them (the next full frame repaints the row anyway),
+   so it never touches the diff machinery."
+  [tui width height viewport-top cursor-row cursor-col pending-write]
+  (let [provider @(:status-line-fn tui)
+        status @(:previous-status tui)
+        cursor @(:previous-cursor tui)]
+    (when (and provider
+               status
+               cursor
+               (= width @(:previous-width tui))
+               (= height @(:previous-height tui))
+               (not (tui-has-overlay? tui))
+               (not (alt-screen-flash/alt-screen-flash-active? @(:flashes tui))))
+      (let [screen-row (- (:row status) viewport-top)]
+        ;; A line outside the viewport is consumed with nothing to paint —
+        ;; the tick is not a reason for a full frame.
+        (when (and (>= screen-row 0) (< screen-row height))
+          (when-some [line (some-> (provider width)
+                                   ;; the provider returns the marked line;
+                                   ;; the marker is a zero-width APC that must
+                                   ;; never reach the terminal (a leaked one
+                                   ;; freezes strict terminals — see
+                                   ;; build-frame-lines), and the frame pass
+                                   ;; normalizes (Thai/Lao, tabs) before
+                                   ;; emitting, so do the same
+                                   (clojure.string/replace utils/STATUS-MARKER "")
+                                   utils/normalize-terminal-output)]
+            (let [delta (- cursor-row screen-row)
+                  sb (StringBuilder.)]
+              (.append sb CSI-2026-H)
+              (when (pos? delta) (.append sb (str "\u001b[" delta "A")))
+              (when (neg? delta) (.append sb (str "\u001b[" (- delta) "B")))
+              (.append sb "\r\u001b[2K")
+              (.append sb (if (img/is-image-line line)
+                            line
+                            (str line utils/SEGMENT-RESET)))
+              (when (pos? delta) (.append sb (str "\u001b[" delta "B")))
+              (when (neg? delta) (.append sb (str "\u001b[" (- delta) "A")))
+              (.append sb (str "\u001b[" (inc (max 0 cursor-col)) "G"))
+              (.append sb CSI-2026-L)
+              (reset! pending-write (str sb)))))
+        true))))
 
 (defn- run-render-loop!
   "Start the terminal (raw mode) and run the render loop until the TUI is
@@ -2375,6 +2504,7 @@
                                  (fn [_] nil)
                                  (fn [] (tui-request-render tui)))
         hardware-cursor-row (atom 0)
+        hardware-cursor-col (atom 0)
         previous-viewport-top (atom 0)
         ;; A rendered frame's output buffer is staged here under the lock
         ;; and written after it is released — a blocked tty must not hold up
@@ -2461,6 +2591,8 @@
                 (tui-request-render tui))
               (when @(:render-requested? tui)
                 (reset! (:render-requested? tui) false)
+                ;; A full frame paints the status line with everything else.
+                (reset! (:status-render-requested? tui) false)
                 ;; Frame counter: a latched scrollback heal (see
                 ;; tui-heal-scrollback!) qualifies on the first frame that
                 ;; starts after the request, never on one already in flight.
@@ -2495,6 +2627,7 @@
                              @(:previous-raw-lines tui)
                              @(:previous-normalized-lines tui)
                              @(:previous-marks tui)
+                             @(:previous-status-marks tui)
                              raw-lines h
                              (not @(:previous-repainted? tui)))
                       cursor (:cursor frame)
@@ -2598,6 +2731,7 @@
                                                                   "\u001b[" (inc target-col) "G")]
                                                      (when (seq buf) (emit! buf))
                                                      (reset! hardware-cursor-row target-row)
+                                                     (reset! hardware-cursor-col target-col)
                                                      (if @(:show-hardware-cursor? tui)
                                                        (emit! "\u001b[?25h")
                                                        (emit! "\u001b[?25l")))))
@@ -2961,6 +3095,9 @@
                   (reset! (:previous-normalized-lines tui) normalized)
                   (reset! (:previous-raw-lines tui) raw-lines)
                   (reset! (:previous-marks tui) (:marks frame))
+                  (reset! (:previous-status-marks tui) (:status-marks frame))
+                  (reset! (:previous-status tui) (:status frame))
+                  (reset! (:previous-cursor tui) cursor)
                   (reset! (:previous-flashed? tui) flashed?)
                   ;; the diff's own verdict (kitty-frame-lines: ::unchanged
                   ;; when it ran and found nothing, nil when a full redraw
@@ -3018,6 +3155,20 @@
 
                           :else
                           (log-heal! (str "clean target frame, latch dropped (target=" target ")"))))))))))
+
+          ;; Status-only frames: the status drivers' spinner ticks repaint
+          ;; the marked status line in place instead of re-walking the
+          ;; component tree. A missing provider/anchor (custom editor,
+          ;; overlay, resize, unfocused) falls back to a full frame on the
+          ;; next iteration.
+          (when (and @(:status-render-requested? tui)
+                     (not @(:render-requested? tui)))
+            (reset! (:status-render-requested? tui) false)
+            (let [{:keys [cols rows]} @(:terminal-size tui)]
+              (when-not (status-patch! tui cols rows @previous-viewport-top
+                                       @hardware-cursor-row @hardware-cursor-col
+                                       pending-write)
+                (reset! (:render-requested? tui) true))))
 
           ;; The frame's buffer leaves the lock with it: the write is the
           ;; only blocking tty I/O in the iteration (even the string

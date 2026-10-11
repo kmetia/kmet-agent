@@ -1211,7 +1211,8 @@
                           autocomplete-list autocomplete-prefix
                           autocomplete-max-visible autocomplete-theme
                           action-handlers keybindings
-                          priority-action-handlers top-border-fn-atom]
+                          priority-action-handlers top-border-fn-atom
+                          top-border-args-atom]
 
   (render [this width]
     (let [state @state-atom
@@ -1248,14 +1249,19 @@
             result (volatile! [])]
         ;; Top border — an installed top-border fn renders it (the app's
         ;; status-in-border hook); when absent or declining, the default
-        ;; rule (with the scroll label when scrolled).
-        (vswap! result conj
-                (or (when-some [top-fn @top-border-fn-atom]
-                      (top-fn {:width width
-                               :hidden-line-count scroll-offset
-                               :rule rule
-                               :border-fn @border-fn}))
-                    (default-top-border rule style scroll-offset width)))
+        ;; rule (with the scroll label when scrolled). The args are kept so
+        ;; the status fast path (core/status-patch!) can re-derive the line
+        ;; without the full render — see editor-status-line.
+        (let [top-args {:width width
+                        :hidden-line-count scroll-offset
+                        :rule rule
+                        :border-fn @border-fn}]
+          (reset! (:top-border-args-atom this) top-args)
+          (vswap! result conj
+                  (or (when-some [top-fn @top-border-fn-atom]
+                        (when-some [line (top-fn top-args)]
+                          (str u/STATUS-MARKER line)))
+                      (default-top-border rule style scroll-offset width))))
         ;; Render visible lines
         (doseq [[vi vl] (map-indexed vector visible)]
           (let [vl-has-cursor (= (+ vi scroll-offset) cursor-visual-idx)
@@ -1634,6 +1640,7 @@
                 :action-handlers (atom {})
                 :priority-action-handlers (atom {})
                 :top-border-fn-atom (atom nil)
+                :top-border-args-atom (atom nil)
                 :keybindings (atom keybindings)}))
 
 (defn editor-set-text!
@@ -1682,6 +1689,19 @@
    kmet.app.ui.status-indicator/editor-embeds-status? reads it back)."
   [editor f]
   (reset! (:top-border-fn-atom editor) f))
+
+(defn editor-status-line
+  "The editor's marked top-border line at WIDTH, re-derived from the last
+   render's border args without re-rendering the editor — the status fast
+   path's line provider (kmet.tui.core/status-patch!). The installed
+   top-border fn reads the live status, so the returned line carries the
+   current spinner frame. nil when no top-border fn is installed or the
+   editor has not rendered yet."
+  [editor width]
+  (when-some [top-fn @(:top-border-fn-atom editor)]
+    (when-some [args @(:top-border-args-atom editor)]
+      (when-some [line (top-fn (assoc args :width width))]
+        (str u/STATUS-MARKER line)))))
 
 (defn editor-insert-text-at-cursor!
   "Insert text at the current cursor position (pi:

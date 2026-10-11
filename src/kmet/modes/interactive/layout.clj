@@ -772,8 +772,9 @@
           cs (assoc cs :status-indicator si :theme-controller tc)
           ;; The default editor renders the session status in its first
           ;; line — its top border (pi: CustomEditor renderTopBorder). The
-          ;; hook reads the live status per render, so swaps and spinner
-          ;; ticks repaint with the normal frame.
+          ;; hook reads the live status per render, so swaps repaint with
+          ;; the normal frame, while spinner ticks take the status-only
+          ;; fast path (kmet.tui.core/status-patch!, perf.md §17).
           _ (editor/editor-set-top-border-fn!
              ed
              (fn [{:keys [width hidden-line-count rule border-fn]}]
@@ -783,6 +784,11 @@
                  :hidden-line-count hidden-line-count
                  :rule rule
                  :border-fn border-fn})))
+          ;; The line provider behind the status-only frames: the active
+          ;; editor's border or the standalone status area, whichever owns
+          ;; the status; its output carries the STATUS-MARKER the frame pass
+          ;; records (kmet.modes.interactive.status/status-line-fn).
+          _ (tui/tui-set-status-line-fn! t (status/status-line-fn cs))
           ;; Pi layout (interactive-mode.ts setupUiLayout): the TUI root is a
           ;; single flat document — the transcript (header, loaded resources,
           ;; chat) followed top-to-bottom by pending messages, status, widgets

@@ -419,7 +419,10 @@
      (fn [props]
        (reset! seen props)
        (str "STATUS " (apply str (repeat (- (:width props) 7) (:rule props))))))
-    (t/is (= "STATUS ─────" (first (core/render e 12))))
+    (t/is (= "STATUS ─────" (str/replace (first (core/render e 12)) u/STATUS-MARKER ""))
+          "the hook's line carries the live-status marker")
+    (t/is (= (first (core/render e 12)) (editor/editor-status-line e 12))
+          "the fast-path provider re-derives the exact marked line")
     (t/is (= 12 (:width @seen)))
     (t/is (= 0 (:hidden-line-count @seen)))
     (t/is (= "─" (:rule @seen)))
@@ -440,7 +443,8 @@
         (t/is (pos? (:hidden-line-count @props)) "the hook learns about hidden lines")
         (editor/editor-set-top-border-fn! e
                                           (fn [p] (str "H" (:hidden-line-count p) " " (:width p))))
-        (t/is (= (str "H" (:hidden-line-count @props) " 40") (first (core/render e 40))))))))
+        (t/is (= (str "H" (:hidden-line-count @props) " 40")
+                 (str/replace (first (core/render e 40)) u/STATUS-MARKER "")))))))
 
 (t/deftest test-editor-scroll-border-centered
   ;; pi: createScrollBorder — the ` ↑ N more ` label is centered on the line
@@ -452,7 +456,7 @@
     (core/render e 46)
     (let [hidden (:hidden-line-count @props)
           label (str " ↑ " hidden " more ")
-          top (first (core/render e 46))]
+          top (str/replace (first (core/render e 46)) u/STATUS-MARKER "")]
       (t/is (pos? hidden) "the view is scrolled")
       (t/is (= (quot (- 46 (count label)) 2) (str/index-of top label))
             "the scroll label is centered")

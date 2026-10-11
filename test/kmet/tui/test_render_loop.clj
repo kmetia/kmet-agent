@@ -658,9 +658,11 @@
               "the flash is painted over the first row")
         ;; dispose the flash and change a DIFFERENT row in the same frame: the
         ;; flash row's raw line is identical across the two frames, so a
-        ;; raw-identity hint would not cover it
-        (core/tui-flash-dispose! tui)
+        ;; raw-identity hint would not cover it. Swap the row first: dispose
+        ;; requests a frame, and an immediate render must already see both
+        ;; changes (a dispose-first ordering races the loop).
         (swap! lines assoc 2 "gamma changed")
+        (core/tui-flash-dispose! tui)
         (core/tui-request-render tui)
         (wait-for-frames (:writes vt) 3 5000)
         (let [after (nth (frame-writes (:writes vt)) 2)]
@@ -959,5 +961,36 @@
                   "the diff does not write the over-wide line verbatim")
             (t/is (str/includes? frame (apply str (repeat 80 "y")))
                   "the diff writes it clamped to the window width")))
+(deftest ^:slow status-request-patches-the-line-without-a-tree-walk
+  (testing "a status-only request rewrites the marked status row and runs no component render"
+    (let [renders (atom 0)
+          status-line (atom (str utils/STATUS-MARKER "status one"))
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child
+         tui
+         (reify core/IComponent
+           (render [_ _] (swap! renders inc)
+             ["alpha" @status-line (str "input" utils/CURSOR-MARKER "x")])
+           (handle-input [_ _] nil)
+           (invalidate [_] nil)))
+        (core/tui-set-status-line-fn! tui (fn [_] @status-line))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 5000)
+        (let [base-renders @renders
+              base-writes (count @(:writes vt))]
+          (t/is (pos? base-renders) "the first frame rendered the component")
+          (reset! status-line (str utils/STATUS-MARKER "status two"))
+          (core/tui-request-status-render! tui)
+          (t/is (wait-until #(> (count @(:writes vt)) base-writes) 3000)
+                "the status patch was written")
+          (let [patch (str/join "" (subvec @(:writes vt) base-writes))]
+            (t/is (str/includes? patch "status two") "the new status line is painted")
+            (t/is (not (str/includes? patch "alpha")) "only the status row is written")
+            (t/is (str/includes? patch "\u001b[2K") "the row is cleared before the write")
+            (t/is (not (str/includes? patch utils/STATUS-MARKER))
+                  "the marker never reaches the terminal")
+            (t/is (= base-renders @renders) "no component render ran for the patch")))
         (finally
           (stop-loop tui))))))

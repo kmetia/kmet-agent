@@ -76,3 +76,10 @@
   (reset! (:entries-atom this) [])
   (request-render! this)
   nil)
+
+(defn alt-screen-flash-active?
+  "True while at least one flash entry is pending (the container renders one
+   line per entry). A nil container (before the render loop installs it)
+   has nothing to composite."
+  [this]
+  (boolean (seq (some-> this :entries-atom deref))))

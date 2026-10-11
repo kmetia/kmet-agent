@@ -37,6 +37,11 @@ cost-neutral). The one surviving reakt deficit is a many-dep `force-run!`
 (5.5x at 50 deps), traced to Jolt's constant `hash` for objects (§16.2,
 filed as [jolt#1313](https://github.com/jolt-lang/jolt/issues/1313)).**
 
+**§17 applies the localized status repaint §16 pointed at (2026-10-11):
+the live status line carries a zero-width marker, so the 100 ms status
+drivers rewrite that one row instead of re-walking the tree — turn-idle CPU
+during a stalled stream halved (30 vs 49 ticks/6 s, idle 14).**
+
 **TL;DR** — it is not a busy loop and not the terminal backend. Idle CPU is
 *lower* on jolt than on bb. The frame gap was (a) every keystroke/frame
 re-renders the whole component tree + re-normalizes every line + diffs/emits,
@@ -1897,5 +1902,59 @@ work (the reader accommodation removal measured neutral, §16.3).
 - The §16.2 finding is filed upstream as
   [jolt#1313](https://github.com/jolt-lang/jolt/issues/1313) (constant object
   `hash`); drop this note's caveat once a tagged Jolt release carries the fix.
+
+---
+
+## 17. Applied: status-only frames — the spinner no longer walks the tree
+(phone, 2026-10-11)
+
+§16's frame phase split showed the turn-time spinner cost precisely:
+render-stack is 77-83 % of a calm frame (4.1 ms bb / 7.5 ms jolt of 5.0 /
+9.6 ms), and the 100 ms status drivers (`start-anim-timer!` /
+`start-indicator-driver!`) requested a *full* frame every tick just to move
+one glyph. The status line is now self-identifying and repainted in place.
+
+Mechanism:
+
+- `kmet.tui.utils/STATUS-MARKER` — a zero-width APC like the cursor marker.
+  The editor wraps its installed top-border line with it
+  (`editor.clj`/`editor-status-line`); the standalone indicators
+  (`StatusIndicator`, Retry/Compaction/BranchSummary) mark their content
+  line; `border-status-text` strips the component marker and re-marks the
+  composed line, so exactly one marker sits at the live line's start
+  wherever the status is rendered;
+- `build-frame-lines` strips both marker kinds in its one document pass and
+  returns `:status {:row :col}` / `:status-marks` with the same
+  carry-forward rules as the cursor's marks (equal chunks, quick reuse,
+  shrinks);
+- the drivers call `tui-request-status-render!`. When no full frame is due,
+  the loop calls `status-patch!`: the provider (`status/status-line-fn` →
+  the active editor's border via `editor-status-line`, or the standalone
+  indicator's render) re-derives the marked line, the patch strips the
+  marker, normalizes the line and writes the row at
+  `status-row - viewport-top` with `\x1b[2K` + `SEGMENT-RESET`; the hardware
+  cursor's row/col are restored. Document, viewport and diff state are
+  untouched — the next real frame repaints the row as usual;
+- fallbacks reach the old path with the normal render flag: no
+  provider/anchor, a custom or unfocused editor, a visible overlay or flash,
+  a resize, or a status line outside the viewport;
+  `tui-request-status-render!` on a hand-built TUI without the flag
+  delegates to `tui-request-render`.
+
+Measured in the app (`jolt start`, 100x30 tmux pty; the probe server stalls
+40 s so the spinner is the only animation; `/proc` ticks, 6 s windows, the
+idle window subtracted):
+
+| driver | idle | turn window | net |
+|---|---:|---:|---:|
+| status-only frames | 14 | **30** | 16 ticks/6 s ≈ 2.7/s |
+| full frames (pre-change) | 14 | 49 | 35 ticks/6 s ≈ 5.8/s |
+
+~54 % less turn-idle CPU, and the spinner still advances every 100 ms bucket
+(captured glyphs ⠋ → ⠼ → ⠏ with no stream frames). The new render-loop test
+pins "one write, no component render"; the frame-pass tests pin the
+marker's strip, carry-forward and quick-reuse; the editor test pins
+`editor-status-line` equal to the rendered border line. `bb test-changed`
+13,260 passed, `bb test-ext-changed` 347 passed, lint 0/0, format clean.
 
 

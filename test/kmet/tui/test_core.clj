@@ -46,6 +46,39 @@
         (t/is (not-any? #(str/includes? % marker) lines)
               "but every marker is stripped from the emitted lines")))))
 
+(t/deftest test-build-frame-lines-status-marker
+  (let [build (var core/build-frame-lines)
+        sm utils/STATUS-MARKER]
+    (testing "the status marker is stripped and reported"
+      (let [{:keys [lines status status-marks]}
+            (build [] [] {} {} ["aa" (str sm "status") "cc"] 10 false)]
+        (t/is (= ["aa" "status" "cc"] lines))
+        (t/is (= {:row 1 :col 0} status))
+        (t/is (= {1 0} status-marks))))
+    (testing "the status row is reported even above the viewport (the loop checks visibility)"
+      (let [{:keys [status cursor]} (build [] [] {} {} [(str sm "s") "a" "b"] 2 false)]
+        (t/is (= {:row 0 :col 0} status))
+        (t/is (nil? cursor))))
+    (testing "an unchanged frame carries the status position"
+      (let [raw [(str sm "one") "x"]
+            out (build [] [] {} {} raw 10 false)
+            out2 (build raw (:lines out) {} (:status-marks out) raw 10 true)]
+        (t/is (= {:row 0 :col 0} (:status out2)))
+        (t/is (= (:status-marks out) (:status-marks out2)))))
+    (testing "a rescanned line that loses the marker clears the status"
+      (let [raw [(str sm "one") "x"]
+            out (build [] [] {} {} raw 10 false)
+            out2 (build raw (:lines out) {} (:status-marks out) ["one" "x"] 10 false)]
+        (t/is (nil? (:status out2)))
+        (t/is (= {} (:status-marks out2)))))
+    (testing "an equal chunk carries the status marker by content"
+      (let [raw [(str sm "one") "x"]
+            out (build [] [] {} {} raw 10 false)
+            out2 (build raw (:lines out) {} (:status-marks out)
+                        [(subs (str "z" sm "one") 1) "x"] 10 false)]
+        (t/is (= "one" (nth (:lines out2) 0)))
+        (t/is (= {:row 0 :col 0} (:status out2)))))))
+
 (t/deftest test-build-frame-lines-normalizes-unchanged-lines
   (let [build (var core/build-frame-lines)
         calls (atom 0)
@@ -89,7 +122,7 @@
             lines (:lines out)
             marks (:marks out)]
         (testing "the first pass scans every line, strips, and records the marker"
-          (t/is (= 2 @scans))
+          (t/is (= 4 @scans) "two marker kinds scanned per line")
           (t/is (= ["aaaa" "bbcc"] lines))
           (t/is (= {:row 1 :col 2} (:cursor out)))
           (t/is (= {1 2} marks)))
@@ -105,14 +138,14 @@
         (testing "only changed lines are scanned"
           (reset! scans 0)
           (let [out2 (build in lines marks [a (str "bb" marker "cX")] 10)]
-            (t/is (= 1 @scans) "the unchanged line is not scanned")
+            (t/is (= 2 @scans) "the unchanged line is not scanned; the changed one is scanned twice")
             (t/is (= {:row 1 :col 2} (:cursor out2)))
             (t/is (= {1 2} (:marks out2)))
             (t/is (= [1 1] (:changed out2)) "the rescan is the repaint range")))
         (testing "a changed marker-free line drops its marker and the cursor"
           (reset! scans 0)
           (let [out2 (build in lines marks [a "bbcc"] 10)]
-            (t/is (= 1 @scans))
+            (t/is (= 2 @scans))
             (t/is (nil? (:cursor out2)))
             (t/is (= {} (:marks out2)))
             ;; raw identity over-approximates the diff's = compare: the

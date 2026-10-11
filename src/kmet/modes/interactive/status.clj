@@ -5,6 +5,7 @@
    updatePendingMessagesDisplay)."
   (:require [clojure.string :as str]
             [kmet.tui.core :as tui]
+            [kmet.tui.components.editor :as editor]
             [kmet.tui.components.spinner :as spinner]
             [kmet.tui.protocols :as protocols]
             [kmet.app.loop :as agent]
@@ -30,7 +31,7 @@
       (loop []
         (when (active? tui)
           (Thread/sleep spinner/default-interval-ms)
-          (tui/tui-request-render tui)
+          (tui/tui-request-status-render! tui)
           (recur)))
       (catch InterruptedException _)
       (catch Exception e
@@ -118,6 +119,21 @@
   (or (:indicator @(:status-current cs))
       (when (status-indicator/status-indicator-active? (:status-indicator cs))
         (:status-indicator cs))))
+
+(defn status-line-fn
+  "The live-status-line provider for the render loop's status-only frames
+   (kmet.tui.core/status-patch!): returns the marked status line at WIDTH —
+   the editor top border while the active editor embeds the status, else
+   the standalone indicator's content line; both carry
+   kmet.tui.utils/STATUS-MARKER. nil when there is nothing to show (the loop
+   then falls back to a full frame, or no frame at all)."
+  [cs]
+  (fn [width]
+    (let [ed @(:current-editor-atom cs)]
+      (if (status-indicator/editor-embeds-status? ed)
+        (editor/editor-status-line ed width)
+        (when-some [indicator (current-status-indicator cs)]
+          (second (protocols/render indicator width)))))))
 
 (defn show-status-indicator!
   "Record INDICATOR as the active status (pi: showStatusIndicator —

@@ -8,6 +8,13 @@
 ;; TUI finds this marker and positions the hardware cursor there.
 (def ^:const CURSOR-MARKER "\u001b_km:c\u0007")
 
+;; ─── Status marker ────────────────────────────────────────────────────────
+;; Zero-width APC sequence emitted at the start of the live status line (the
+;; editor top border or the standalone status area). The frame pass records
+;; the marked line's document row so the render loop can repaint that line
+;; without walking the component tree (kmet.tui.core/status-patch!).
+(def ^:const STATUS-MARKER "\u001b_km:s\u0007")
+
 ;; ─── ANSI escape sequences ────────────────────────────────────────────────
 ;; CSI (ESC [...) and OSC (ESC ] ... ST) sequences. OSC 8 hyperlinks
 ;; (ESC ]8;;url ESC\) are zero-width metadata but must be recognized so they

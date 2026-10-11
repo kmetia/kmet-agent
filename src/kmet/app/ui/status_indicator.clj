@@ -41,7 +41,7 @@
       ;; The Spinner renders the pi Loader shape itself (leading blank +
       ;; animated line); indent only the content line for chat alignment.
       (let [lines (protocols/render (:spinner this) width)]
-        (into [(first lines)] (mapv #(str " " %) (rest lines))))
+        (into [(first lines)] (mapv #(str u/STATUS-MARKER " " %) (rest lines))))
       ;; Pi: IdleStatus — always occupy the same two rows so the editor and
       ;; footer below don't jump when the indicator appears/disappears.
       ["" ""]))
@@ -169,7 +169,7 @@
           message (str "Retrying (" @attempt-atom "/" @max-attempts-atom ") in "
                        remaining "s... (" @cancel-hint-atom " to cancel)")
           line (str (theme/fg th :warning frame) " " (theme/fg th :muted message))]
-      ["" (u/truncate-to-width line width)]))
+      ["" (str u/STATUS-MARKER (u/truncate-to-width line width))]))
   (invalidate [this] (reset! (:cache-atom this) nil)))
 
 (defn make-retry-status-indicator
@@ -191,7 +191,7 @@
           th (theme/get-current-theme)
           frame (frame-at elapsed)
           line (str (theme/fg th :accent frame) " " (theme/fg th :muted @message-atom))]
-      ["" (u/truncate-to-width line width)]))
+      ["" (str u/STATUS-MARKER (u/truncate-to-width line width))]))
   (invalidate [this] (reset! (:cache-atom this) nil)))
 
 (defn make-compaction-status-indicator
@@ -211,7 +211,7 @@
           frame (frame-at elapsed)
           message (str @message-atom " (" @cancel-hint-atom " to cancel)")
           line (str (theme/fg th :accent frame) " " (theme/fg th :muted message))]
-      ["" (u/truncate-to-width line width)]))
+      ["" (str u/STATUS-MARKER (u/truncate-to-width line width))]))
   (invalidate [this] (reset! (:cache-atom this) nil)))
 
 (defn make-branch-summary-status-indicator
@@ -246,7 +246,8 @@
    (pi: StatusIndicator.renderInBorder — render two columns wider, drop
    the leading indent, trim, cut to WIDTH with no ellipsis)."
   [indicator width]
-  (let [line (or (second (protocols/render indicator (+ width 2))) "")
+  (let [line (str/replace (or (second (protocols/render indicator (+ width 2))) "")
+                          u/STATUS-MARKER "")
         line (if (str/starts-with? line " ") (subs line 1) line)]
     (u/truncate-to-width (str/trimr line) width "")))
 

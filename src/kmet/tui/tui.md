@@ -1075,6 +1075,26 @@ reaction flush) so a component that tracks it reflows in the same frame.
 re-checks the flag inside the park: a request is consumed, never lost to
 the park.
 
+**Status-only frames.** The 100 ms status drivers (the turn spinner and the
+transient indicators, `kmet.modes.interactive.status`) animate one line, so
+they do not request a full frame: `tui-request-status-render!` sets a
+separate flag that the loop handles without re-walking the tree. The live
+status line carries a zero-width `STATUS-MARKER` (`kmet.tui.utils`); the
+frame pass strips it (unconditionally, like the cursor marker) and records
+the line's document row in `build-frame-lines`' `:status`/`:status-marks`.
+On a status tick the loop's `status-patch!` re-derives the line from the
+registered provider (`tui-set-status-line-fn!`, wired by the interactive
+layout to the active editor's border or the standalone status area — the
+marker travels with whichever component renders it, so dock/editor swaps
+need no position math), writes it at `status-row - viewport-top` with one
+clear+write, and restores the hardware-cursor position. Frame state is
+untouched: the document, viewport and diff stay as the last full frame left
+them, and the next real frame repaints the row normally. Any condition the
+patch cannot satisfy — no provider or anchor, a custom or unfocused editor,
+a visible overlay or flash, a resize — sets the normal render flag and takes
+the full-frame path, so the optimization is invisible when it cannot apply.
+perf.md §17 measures the turn-time effect.
+
 **Render and input never overlap.** The input reader, the flush timers and
 the render loop are separate threads, but component state is not
 thread-safe by contract: they run under one mutex (`dispatch-lock`,
