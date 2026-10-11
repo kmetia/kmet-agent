@@ -52,7 +52,15 @@ The **transcript lives in the terminal's own scrollback** — this is an
 inline ("main screen") TUI, not an alt-screen one. Output is never confined
 to an owned viewport: the stack renders every component at natural height
 and whatever exceeds the screen scrolls into the native scrollback, which
-the user can browse while streaming continues below. A *full redraw*
+the user can browse while streaming continues below. The row model is
+screen-relative and begins at screen row 0, so the first frame clears the
+visible screen and homes before writing the document
+(`\u001b[2J\u001b[H`, never `3J` — the shell's scrollback survives); starting
+from the shell's leftover cursor row put every later write off by that
+offset. A height change moves the terminal's cursor where no model can
+predict (the row change is the soft keyboard, not content), so the Termux
+no-redraw resize path emits one absolute `\u001b[H` and resyncs the model to
+the viewport top before any relative diff move. A *full redraw*
 (a resize, an explicit rebuild — `tui-request-render` with force, i.e.
 `tui-resume!` or the scrollback heal — or a shrink that starts above the
 window *and* changes what is visible) re-emits the whole transcript, so it
@@ -1096,6 +1104,13 @@ patch cannot satisfy — no provider or anchor, a provider that no longer
 returns the marked line, a custom or unfocused editor, a visible overlay or
 flash, a resize — sets the normal render flag and takes
 the full-frame path, so the optimization is invisible when it cannot apply.
+`KMET_TUI_SELFCHECK=1` verifies the patch's one unverifiable assumption —
+that the terminal keeps its cursor where the model left it: a throttled
+full frame rides a DSR query (`\u001b[6n`), the 1-based report is compared
+with the model, a divergence is logged to `kmet-cursor-selfcheck.log`
+beside the frame/patch traces and healed with a clearing redraw. The report
+shape (`CSI row;col R`) is also a modified F3 (`CSI 1;2R`), so it is
+consumed only while a probe is outstanding and never held as a fragment.
 perf.md §17 measures the turn-time effect.
 
 **Render and input never overlap.** The input reader, the flush timers and

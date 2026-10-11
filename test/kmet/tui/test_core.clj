@@ -1392,3 +1392,44 @@
       (t/is (= "one\ntwo\n" (slurp path)))
       (finally
         (fs/delete-if-exists f)))))
+
+(t/deftest test-cursor-selfcheck-detects-divergence
+  (let [arm (var kmet.tui.core/arm-cursor-probe!)]
+    (testing "a matching report leaves the model and the render flag alone"
+      (let [tui (core/create-tui nil)]
+        (reset! (:write-seq tui) 3)
+        (arm tui 10 5 0)
+        (reader-feed! tui [["\u001b[10;5R" 0]])
+        (t/is (nil? @(:cursor-probe tui)) "the probe is settled")
+        (t/is (false? @(:render-requested? tui)))))
+    (testing "a divergent report forces a clearing full redraw"
+      (let [tui (core/create-tui nil)]
+        (reset! (:write-seq tui) 3)
+        (arm tui 10 5 0)
+        (reader-feed! tui [["\u001b[11;5R" 0]])
+        (t/is (nil? @(:cursor-probe tui)) "the probe is settled")
+        (t/is (true? @(:render-requested? tui)) "a frame is requested")
+        (t/is (true? @(:force-redraw? tui)) "and it is a clearing one")))
+    (testing "a report for a superseded write never flags a false desync"
+      (let [tui (core/create-tui nil)]
+        (reset! (:write-seq tui) 3)
+        (arm tui 10 5 0)
+        (swap! (:write-seq tui) inc)
+        (reader-feed! tui [["\u001b[11;5R" 0]])
+        (t/is (some? @(:cursor-probe tui)) "still waiting for its own report")
+        (t/is (false? @(:render-requested? tui)))
+        (t/is (false? @(:force-redraw? tui)))))))
+
+(t/deftest test-modified-f3-is-not-a-cursor-report
+  (testing "CSI 1;2R (Shift-F3) is not consumed when no probe is armed"
+    (let [tui (core/create-tui nil)]
+      (t/is (nil? ((var kmet.tui.core/intercept-terminal-response!)
+                   tui (fn [_] -2) (atom "\u001b[1;2R")))
+            "the response interceptor passes it through to the key path")))
+  (testing "the same sequence is consumed while a probe is awaited"
+    (let [tui (core/create-tui nil)]
+      ((var kmet.tui.core/arm-cursor-probe!) tui 1 2 0)
+      (t/is (= :consumed ((var kmet.tui.core/intercept-terminal-response!)
+                          tui (fn [_] -2) (atom "\u001b[1;2R")))
+            "a report is consumed, never dispatched as input")
+      (t/is (nil? @(:cursor-probe tui)) "and it settles the probe"))))

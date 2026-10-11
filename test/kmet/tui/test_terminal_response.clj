@@ -96,13 +96,25 @@
           "a color scheme report first splits too")
     (t/is (= {:kind :osc-11 :value {:r 0x1a :g 0x2b :b 0x3c} :rest ""}
              (lib/split-terminal-response "\u001b]11;rgb:1a1a/2b2b/3c3c\u001b\\"))
-          "ST-terminated OSC 11 splits too"))
+          "ST-terminated OSC 11 splits too")
+    (t/is (= {:kind :cursor-position :value {:row 12 :col 5} :rest ""}
+             (lib/split-terminal-response "\u001b[12;5R"))
+          "a cursor position report splits")
+    (t/is (= {:kind :cursor-position :value {:row 3 :col 100} :rest "\u001b[A"}
+             (lib/split-terminal-response "\u001b[3;100R\u001b[A"))
+          "a key sharing the cursor position report's batch stays in the remainder"))
   (testing "non-responses and rejected values stay untouched"
     (t/is (nil? (lib/split-terminal-response "a")))
     (t/is (nil? (lib/split-terminal-response "\u001b[6~")) "PageDown is not a cell size response")
     (t/is (nil? (lib/split-terminal-response "\u001b[6;")) "an incomplete fragment is not a response")
     (t/is (nil? (lib/split-terminal-response "\u001b[6;0;100t"))
-          "a zero cell size is rejected, never split")))
+          "a zero cell size is rejected, never split")
+    (t/is (nil? (lib/split-terminal-response "\u001b[12;5"))
+          "an incomplete cursor position report is not a response"))
+  (testing "cursor position parsing"
+    (t/is (= {:row 1 :col 80} (lib/parse-cursor-position-response "\u001b[1;80R")))
+    (t/is (nil? (lib/parse-cursor-position-response "\u001b[1;80")))
+    (t/is (nil? (lib/parse-cursor-position-response "junk")))))
 
 (deftest test-response-prefixes
   (testing "fragments that could still become responses"

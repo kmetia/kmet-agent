@@ -235,8 +235,10 @@
 
 ;; ─── Tests ─────────────────────────────────────────────────────────────────
 
-(deftest ^:slow first-render-preserves-terminal-output
-  (testing "the first frame writes without clearing (prior terminal output above the TUI survives)"
+(deftest ^:slow first-render-homes-into-a-known-screen
+  (testing "the first frame clears the visible screen and homes before writing
+            (the row model starts at screen row 0; the scrollback keeps the
+            shell's prior output, and 3J is never used on a first render)"
     (let [vt (make-virtual-terminal)
           tui (core/create-tui (:terminal vt))]
       (try
@@ -245,7 +247,8 @@
         (wait-for-frames (:writes vt) 1 5000)
         (let [frame (first (frame-writes (:writes vt)))]
           (t/is (some? frame) "a frame was rendered")
-          (t/is (not (str/includes? frame "\u001b[2J")) "no screen clear on first render")
+          (t/is (str/includes? frame "\u001b[2J") "the visible screen is cleared")
+          (t/is (str/includes? frame "\u001b[H") "the document starts at home")
           (t/is (not (str/includes? frame "\u001b[3J")) "no scrollback clear on first render")
           (t/is (str/includes? frame "alpha") "transcript written")
           (t/is (str/includes? frame "beta") "transcript written"))
@@ -1198,5 +1201,30 @@
                 "nothing is written for an off-screen status line")
           (t/is (= base-renders @renders)
                 "and the tick is not turned into a full frame either"))
+        (finally
+          (stop-loop tui))))))
+
+(deftest ^:slow height-change-resyncs-the-cursor-absolutely
+  (testing "the Termux height path homes the cursor before diffing
+            (the terminal re-anchors its own cursor on a row change, so a
+            relative move from the model's row lands on stale rows)"
+    (let [vt (make-virtual-terminal)
+          lines (atom (mapv #(str "line " %) (range 10)))
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child tui (test-component lines))
+        (with-redefs [core/termux-host? (constantly true)]
+          (start-loop tui)
+          (wait-for-frames (:writes vt) 1 5000)
+          ;; The height change alone may emit nothing (unchanged content on
+          ;; the diff path); add a line so the resized frame writes.
+          (swap! (:size vt) assoc :rows 20)
+          (swap! lines conj "after resize")
+          (wait-for-frames (:writes vt) 2 5000)
+          (let [frame (second (frame-writes (:writes vt)))]
+            (t/is (some? frame) "a frame was written after the resize")
+            (t/is (str/includes? frame "\u001b[H") "the cursor is homed")
+            (t/is (not (str/includes? frame "\u001b[2J"))
+                  "the Termux path does not clear the screen")))
         (finally
           (stop-loop tui))))))

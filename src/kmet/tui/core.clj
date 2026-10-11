@@ -323,6 +323,14 @@
          normalize-input-unit! trace-negotiation! trace-terminal-response!
          overlay-restore-target ghost-restore! tui-release-focus!)
 
+(defn- termux-host?
+  "True on Termux. The marker is inherited from the Termux shell even
+   inside tmux, and it selects the no-redraw height-change path (the soft
+   keyboard's row change must not repaint the whole screen). Kept as a fn
+   so tests can drive both resize paths."
+  []
+  (boolean (System/getenv "TERMUX_VERSION")))
+
 (defn create-tui [terminal]
   (let [tui (map->TUI {:terminal (atom terminal)
                        :components (atom [])
@@ -381,6 +389,17 @@
                        :debug-redraw? (atom (= (System/getenv "KMET_DEBUG_REDRAW") "1"))
                        :tui-debug? (atom (= (System/getenv "KMET_TUI_DEBUG") "1"))
                        :tui-trace? (atom (= (System/getenv "KMET_TUI_TRACE") "1"))
+                       ;; KMET_TUI_SELFCHECK=1: ask the terminal where its
+                       ;; cursor is after each full frame (DSR 6) and compare
+                       ;; the report with the model — a divergence means the
+                       ;; terminal no longer matches the model and a
+                       ;; clearing redraw is forced (see arm-cursor-probe!).
+                       :cursor-selfcheck? (atom (= (System/getenv "KMET_TUI_SELFCHECK") "1"))
+                       :probe-cursor-next-write? (atom false)
+                       :cursor-probe (atom nil)
+                       :cursor-probe-ok-logged? (atom false)
+                       :last-probe-ns (atom 0)
+                       :write-seq (atom 0)
                        :input-generation (atom 0)
                        :incomplete-flush-timer (atom nil)
                        ;; unbracketed-paste burst state (see paste-burst-step)
@@ -1274,11 +1293,77 @@
     (when (and q @settled?)
       (deliver (:promise q) color))))
 
+(def ^:private cursor-probe-timeout-ms 1000)
+
+;; ─── Cursor-position self-check (KMET_TUI_SELFCHECK=1) ───────────────────
+;; The status fast path trusts the terminal to keep the hardware cursor
+;; where each frame left it. A terminal that wraps a full-width line or
+;; clamps a cursor move diverges from the model silently, and every later
+;; write lands one or more rows off — the corruption survives alt-r because
+;; the model re-issues the same writes. The self-check asks the terminal
+;; where the cursor actually is after each full frame (DSR 6) and compares
+;; the report with the model; a divergence is logged beside the frame/patch
+;; traces and healed with a clearing full redraw.
+
+(defn- clear-cursor-probe!
+  "Cancel a pending cursor probe and its reply timer."
+  [tui]
+  (when-let [probe @(:cursor-probe tui)]
+    (when-let [t (:timer probe)] (future-cancel t)))
+  (reset! (:cursor-probe tui) nil))
+
+(defn- arm-cursor-probe!
+  "Record the screen position (1-based, like the DSR report) a just-written
+   frame leaves the hardware cursor at, and arm the reply timeout. A report
+   that arrives after any later write is ignored by settle-cursor-probe!."
+  [tui model-row model-col viewport-top]
+  (clear-cursor-probe! tui)
+  (let [probe (atom {:model-row model-row :model-col model-col
+                     :viewport-top viewport-top
+                     :write-seq @(:write-seq tui)
+                     :frame @(:frame-count tui)
+                     :timer nil})
+        timer (future
+                (try (Thread/sleep cursor-probe-timeout-ms)
+                     (catch Exception _))
+                (when (identical? probe @(:cursor-probe tui))
+                  (reset! (:cursor-probe tui) nil)))]
+    (swap! probe assoc :timer timer)
+    (reset! (:cursor-probe tui) probe)))
+
+(defn- settle-cursor-probe!
+  "Compare a cursor position report with the model of the frame that asked
+   for it. On a divergence, log the geometry and force a clearing redraw:
+   the terminal is out of sync with the model, which no diff or patch can
+   repair."
+  [tui {:keys [row col]}]
+  (when-some [probe-atom @(:cursor-probe tui)]
+    (let [probe @probe-atom]
+      ;; Only the newest probe is valid: a write since then already moved
+      ;; the terminal and carries its own probe (armed at its write).
+      (when (= (:write-seq probe) @(:write-seq tui))
+        (clear-cursor-probe! tui)
+        (let [{:keys [model-row model-col viewport-top]} probe]
+          (if (or (not= row model-row) (not= col model-col))
+            (do
+              (append-log! (log-path "kmet-cursor-selfcheck.log")
+                           (str "[" (java.time.LocalDateTime/now) "] cursor divergence"
+                                " model=" model-row "," model-col
+                                " terminal=" row "," col
+                                " vt=" viewport-top
+                                " frame=" (:frame probe) "\n"))
+              (tui-request-render tui true))
+            (when (compare-and-set! (:cursor-probe-ok-logged? tui) false true)
+              (append-log! (log-path "kmet-cursor-selfcheck.log")
+                           (str "[" (java.time.LocalDateTime/now) "] cursor probe ok"
+                                " model=" model-row "," model-col
+                                " terminal=" row "," col "\n")))))))))
+
 (defn- deliver-terminal-response!
   "Act on a parsed terminal response (KIND is :cell-size / :osc-11 /
-   :color-scheme, VALUE its parsed value), consume it from the response hold
-   and the input buffer, and re-process any rest of the batch in the same
-   pass."
+   :color-scheme / :cursor-position, VALUE its parsed value), consume it
+   from the response hold and the input buffer, and re-process any rest of
+   the batch in the same pass."
   [tui read-fn buf kind value rest]
   (clear-terminal-response-timer! tui)
   (reset! (:terminal-response-buffer tui) "")
@@ -1300,7 +1385,10 @@
       (try (l value)
            (catch Exception e
              (binding [*out* *err*]
-               (println "color scheme listener:" (ex-message e)))))))
+               (println "color scheme listener:" (ex-message e))))))
+
+    :cursor-position
+    (settle-cursor-probe! tui value))
   ;; One read batch can carry several responses (an OSC 11 reply and a color
   ;; scheme report arrive back-to-back after the startup queries and the tty
   ;; coalesces them): re-process the remainder so the next one is handled in
@@ -1322,10 +1410,26 @@
   [tui read-fn buf]
   (let [held @(:terminal-response-buffer tui)
         combined (str held @buf)
-        {:keys [kind value rest]} (terminal/split-terminal-response combined)]
+        {:keys [kind value rest]} (terminal/split-terminal-response combined)
+        ;; A cursor position report is a response ONLY while a probe is
+        ;; outstanding: CSI digits;digits R is also a modified F3
+        ;; (CSI 1;2R = Shift-F3) and that key must reach the key parser.
+        ;; It is never held either — a fragment of the same shape is a
+        ;; modifyOtherKeys key (CSI 27;mods;code~) and a dropped hold
+        ;; garbles the keypress.
+        live? (or (not= kind :cursor-position)
+                  (some? @(:cursor-probe tui)))]
     (cond
-      kind
+      (and kind live?)
       (deliver-terminal-response! tui read-fn buf kind value rest)
+
+      kind
+      ;; Not a response we asked for: drop any dead hold and leave the new
+      ;; input untouched for normal processing (same rule as :else).
+      (do (when (seq held)
+            (clear-terminal-response-timer! tui)
+            (reset! (:terminal-response-buffer tui) ""))
+          nil)
 
       ;; Prefix hold — only when the fragment is UNAMBIGUOUSLY a response
       ;; head. A bare "\u001b[" or a lone "\u001b" is also an arrow-key /
@@ -2691,7 +2795,7 @@
                       prev-count (count prev)
                       width-changed (and (not (zero? prev-w)) (not= prev-w w))
                       height-changed (and (not (zero? prev-h)) (not= prev-h h))
-                      termux? (boolean (System/getenv "TERMUX_VERSION"))
+                      termux? (termux-host?)
                       first-render? (and (empty? prev)
                                          (not width-changed)
                                          (not height-changed))
@@ -3094,9 +3198,35 @@
                                                   (max @prev-viewport-top
                                                        (- @final-cursor-row h -1)))
                                           (position-hardware-cursor cursor new-count))))))]
+                  ;; A height change re-anchors the terminal's viewport and
+                  ;; puts its cursor somewhere no model can predict (the
+                  ;; soft keyboard's row change is not content). The Termux
+                  ;; path deliberately skips the clearing redraw — resize
+                  ;; flicker at every keyboard toggle — so before any
+                  ;; relative diff move, resync the cursor absolutely: CUP
+                  ;; is unambiguous, and screen row 0 is document row
+                  ;; @prev-viewport-top (the viewport is bottom-anchored).
+                  ;; Without this the diff's relative moves land on stale
+                  ;; rows and the model keeps re-issuing them (the terminal
+                  ;; does not heal), which is the corruption the status
+                  ;; fast path's in-place patches then paint at the wrong
+                  ;; row.
+                  (when height-changed
+                    (emit! "\u001b[H")
+                    (reset! hardware-cursor-row @prev-viewport-top)
+                    (reset! hardware-cursor-col 0))
                   (cond
                     first-render?
                     (do (log-redraw! "first render")
+                        ;; The row model starts at screen row 0, but the
+                        ;; terminal's cursor is wherever the shell left it:
+                        ;; without this every first-frame row is off by the
+                        ;; shell's leftover rows (and the patches below keep
+                        ;; writing at the wrong rows). Clear the screen and
+                        ;; home — 2J only, never 3J: the scrollback keeps the
+                        ;; shell's history, and the document is written from
+                        ;; row 0 into a known-empty screen.
+                        (emit! "\u001b[2J\u001b[H")
                         (do-full-redraw false))
                     width-changed
                     (do (log-redraw! (str "terminal width changed (" prev-w " -> " w ")"))
@@ -3131,6 +3261,20 @@
                                       " status=" (:status-row frame) " cursor=" (pr-str cursor)
                                       " changed=" (pr-str (:changed frame))
                                       " flashed=" flashed? "\n")))
+                  ;; KMET_TUI_SELFCHECK=1: the query rides with the frame's
+                  ;; write; the write step below arms the probe with this
+                  ;; frame's final cursor position (skip it when the frame
+                  ;; left no cursor — position-hardware-cursor emits nothing
+                  ;; then, so the terminal is not where the model says).
+                  ;; Throttled: every reply travels the input path, so a
+                  ;; probe per frame would crowd out typing for no extra
+                  ;; diagnostic value.
+                  (when (and @(:cursor-selfcheck? tui) cursor)
+                    (let [now (System/nanoTime)]
+                      (when (> (- now @(:last-probe-ns tui)) 200000000)
+                        (reset! (:last-probe-ns tui) now)
+                        (.append @sb terminal/CURSOR-POSITION-QUERY)
+                        (reset! (:probe-cursor-next-write? tui) true))))
                   (when (pos? (.length @sb))
                     ;; staged, not written: the buffer is written after this
                     ;; frame's lock is released (below); nothing appends to
@@ -3232,7 +3376,14 @@
           ;; stall input dispatch.
           (when-let [out @pending-write]
             (reset! pending-write nil)
-            (terminal/write-output started (str out)))
+            (terminal/write-output started (str out))
+            (swap! (:write-seq tui) inc)
+            (when @(:probe-cursor-next-write? tui)
+              (reset! (:probe-cursor-next-write? tui) false)
+              (arm-cursor-probe! tui
+                                 (inc (- @hardware-cursor-row @previous-viewport-top))
+                                 (inc @hardware-cursor-col)
+                                 @previous-viewport-top)))
 
           ;; Tickless park: after a rendered frame, sleep the 16ms frame
           ;; pace so a streaming producer cannot outrun the terminal; with

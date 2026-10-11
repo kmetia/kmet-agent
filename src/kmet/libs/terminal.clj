@@ -165,9 +165,27 @@
    {:width-px w :height-px h} or nil (pi: consumeCellSizeResponse)."
   [s]
   (when-let [[_ h w] (re-matches cell-size-response-re s)]
-    (let [h (Long/parseLong h) w (Long/parseLong w)]
+    (let [h (parse-long h) w (parse-long w)]
       (when (and (pos? h) (pos? w))
         {:width-px w :height-px h}))))
+
+(def ^:const CURSOR-POSITION-QUERY
+  "Ask the terminal where its cursor is (DSR 6). The reply is
+   \u001b[row;colR, both 1-based and screen-relative; terminals that do
+   not answer leave the reply to time out (kmet.tui.core's self-check)."
+  "\u001b[6n")
+
+(def ^:private cursor-position-pattern "\\u001b\\[(\\d+);(\\d+)R")
+(def ^:private cursor-position-re (re-pattern cursor-position-pattern))
+
+(defn parse-cursor-position-response
+  "Parse a cursor position report (\u001b[row;colR) into {:row r :col c},
+   both 1-based and screen-relative, or nil. The report shape is shared by
+   a modified F3 (\u001b[1;2R), so callers must only treat it as a
+   response while a query of their own is outstanding."
+  [s]
+  (when-let [[_ r c] (re-matches cursor-position-re s)]
+    {:row (parse-long r) :col (parse-long c)}))
 
 ;; Flags 1 (disambiguate escape codes) + 4 (report alternate keys).
 ;; Flag 2 (report event types) is DELIBERATELY not requested: kmet has no
@@ -249,6 +267,7 @@
 (def ^:private cell-size-leading-re (re-pattern (str "^" cell-size-response-pattern)))
 (def ^:private osc-11-leading-re (re-pattern (str "^" osc-11-response-pattern)))
 (def ^:private color-scheme-leading-re (re-pattern (str "^" color-scheme-report-pattern)))
+(def ^:private cursor-position-leading-re (re-pattern (str "^" cursor-position-pattern)))
 
 (defn split-terminal-response
   "Split a LEADING terminal query response off S. Returns
@@ -268,7 +287,10 @@
        {:kind :osc-11 :value value :rest (subs s (count m))}))
    (when-let [m (leading-match color-scheme-leading-re s)]
      (when-let [value (parse-terminal-color-scheme-report m)]
-       {:kind :color-scheme :value value :rest (subs s (count m))}))))
+       {:kind :color-scheme :value value :rest (subs s (count m))}))
+   (when-let [m (leading-match cursor-position-leading-re s)]
+     (when-let [value (parse-cursor-position-response m)]
+       {:kind :cursor-position :value value :rest (subs s (count m))}))))
 
 (defn negotiation-prefix?
   "True when s could still become a negotiation response (pi:
