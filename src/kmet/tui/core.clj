@@ -2204,8 +2204,9 @@
    re-rendering the component tree (kmet.tui.core/status-patch!). The
    component drivers call this instead of tui-request-render; the loop
    falls back to a full frame whenever the line cannot be patched (no
-   provider/anchor, an overlay or flash on screen, a resize, a missing
-   cursor). Set before the wake, like tui-request-render."
+   provider/anchor, a provider that stopped returning the marked line, an
+   overlay or flash on screen, a resize, a missing cursor). Set before the
+   wake, like tui-request-render."
   [tui]
   (reset! (:status-render-requested? tui) true)
   (when-let [w (:waker tui)]
@@ -2431,14 +2432,15 @@
 (defn- status-patch!
   "Repaint the live status line without re-rendering the component tree.
    The frame pass recorded the line's document row from its STATUS-MARKER,
-   and the provider re-derives the line at WIDTH; the patch moves the
+   and the provider re-derives the marked line at WIDTH; the patch moves the
    terminal cursor to the line's screen row, rewrites it, and restores the
    hardware-cursor position the last frame left behind. Stages the output
    into PENDING-WRITE and returns true when the tick is handled, or nil when
    a full frame is required: no provider/anchor, no cursor to restore, a
-   screen overlay or flash, or a size change. A status line outside the
-   viewport consumes the tick with nothing to paint (it is not a reason for
-   a full frame; ditto a provider with nothing to show).
+   screen overlay or flash, a size change, or a provider that no longer
+   returns the marked line (the status cleared, the editor swapped). A
+   status line outside the viewport consumes the tick with nothing to paint
+   — it is not a reason for a full frame.
 
    CURSOR-ROW/CURSOR-COL are the physical hardware-cursor position after
    the last frame; VIEWPORT-TOP is that frame's viewport origin. The patch
@@ -2457,43 +2459,49 @@
                (not (tui-has-overlay? tui))
                (not (alt-screen-flash/alt-screen-flash-active? @(:flashes tui))))
       (let [screen-row (- status-row viewport-top)]
-        (when (and (>= screen-row 0) (< screen-row height))
-          (when-some [line (some-> (provider width)
-                                   ;; the provider returns the marked line;
-                                   ;; the marker is a zero-width APC that must
-                                   ;; never reach the terminal (a leaked one
-                                   ;; freezes strict terminals — see
-                                   ;; build-frame-lines), and the frame pass
-                                   ;; normalizes (Thai/Lao, tabs) before
-                                   ;; emitting, so do the same
-                                   (clojure.string/replace utils/STATUS-MARKER "")
-                                   utils/normalize-terminal-output)]
-            (let [;; The provider builds to WIDTH, but normalize can widen
-                  ;; the line (tab expansion, Thai/Lao decomposition) and a
-                  ;; custom provider can overshoot outright; a line past the
-                  ;; terminal width wraps and desyncs every row below it, so
-                  ;; truncate exactly like the frame diff does (it also
-                  ;; crash-logs; a persistent offender is reported there on
-                  ;; the next full frame).
-                  line (if (and (not (img/is-image-line line))
-                                (> (utils/visible-width line) width))
-                         (:text (utils/slice-with-width line 0 width :strict? true))
-                         line)
-                  delta (- cursor-row screen-row)
-                  sb (StringBuilder.)]
-              (.append sb CSI-2026-H)
-              (when (pos? delta) (.append sb (str "\u001b[" delta "A")))
-              (when (neg? delta) (.append sb (str "\u001b[" (- delta) "B")))
-              (.append sb "\r\u001b[2K")
-              (.append sb (if (img/is-image-line line)
-                            line
-                            (str line utils/SEGMENT-RESET)))
-              (when (pos? delta) (.append sb (str "\u001b[" delta "B")))
-              (when (neg? delta) (.append sb (str "\u001b[" (- delta) "A")))
-              (.append sb (str "\u001b[" (inc (max 0 cursor-col)) "G"))
-              (.append sb CSI-2026-L)
-              (reset! pending-write (str sb)))))
-        true))))
+        (if (and (>= screen-row 0) (< screen-row height))
+          (when-some [marked (provider width)]
+            ;; The contract is the marked line; a provider that stopped
+            ;; showing it must not paint over the recorded anchor — fall
+            ;; back so a full frame repaints the row from scratch.
+            (when (clojure.string/includes? marked utils/STATUS-MARKER)
+              (let [;; The marker is a zero-width APC that must never reach
+                    ;; the terminal (a leaked one freezes strict terminals —
+                    ;; see build-frame-lines), and the frame pass normalizes
+                    ;; (Thai/Lao, tabs) before emitting, so strip and
+                    ;; normalize here too.
+                    line (-> marked
+                             (clojure.string/replace utils/STATUS-MARKER "")
+                             utils/normalize-terminal-output)
+                    ;; The provider builds to WIDTH, but normalize can widen
+                    ;; the line (tab expansion, Thai/Lao decomposition) and a
+                    ;; custom provider can overshoot outright; a line past
+                    ;; the terminal width wraps and desyncs every row below
+                    ;; it, so truncate exactly like the frame diff does (it
+                    ;; also crash-logs; a persistent offender is reported
+                    ;; there on the next full frame).
+                    line (if (and (not (img/is-image-line line))
+                                  (> (utils/visible-width line) width))
+                           (:text (utils/slice-with-width line 0 width :strict? true))
+                           line)
+                    delta (- cursor-row screen-row)
+                    sb (StringBuilder.)]
+                (.append sb CSI-2026-H)
+                (when (pos? delta) (.append sb (str "\u001b[" delta "A")))
+                (when (neg? delta) (.append sb (str "\u001b[" (- delta) "B")))
+                (.append sb "\r\u001b[2K")
+                (.append sb (if (img/is-image-line line)
+                              line
+                              (str line utils/SEGMENT-RESET)))
+                (when (pos? delta) (.append sb (str "\u001b[" delta "B")))
+                (when (neg? delta) (.append sb (str "\u001b[" (- delta) "A")))
+                (.append sb (str "\u001b[" (inc (max 0 cursor-col)) "G"))
+                (.append sb CSI-2026-L)
+                (reset! pending-write (str sb))
+                true)))
+          ;; Scrolled out of the window: nothing to paint, and it is not a
+          ;; reason for a full frame.
+          true)))))
 
 (defn- run-render-loop!
   "Start the terminal (raw mode) and run the render loop until the TUI is
@@ -3175,11 +3183,16 @@
                      (not @(:render-requested? tui)))
             (reset! (:status-render-requested? tui) false)
             (let [patched? (with-render-lock tui
-                             (let [{:keys [cols rows]} @(:terminal-size tui)]
-                               (status-patch! tui cols rows
-                                              @previous-viewport-top
-                                              @hardware-cursor-row @hardware-cursor-col
-                                              pending-write)))]
+                             ;; A dispatch that landed between the check
+                             ;; above and the lock requested a full frame for
+                             ;; the new state: that frame owns the repaint
+                             ;; (the patch's anchor may already be stale).
+                             (when-not @(:render-requested? tui)
+                               (let [{:keys [cols rows]} @(:terminal-size tui)]
+                                 (status-patch! tui cols rows
+                                                @previous-viewport-top
+                                                @hardware-cursor-row @hardware-cursor-col
+                                                pending-write))))]
               (when-not patched?
                 (reset! (:render-requested? tui) true))))
 

@@ -39,7 +39,10 @@
   (render [this width]
     (if @active-atom
       ;; The Spinner renders the pi Loader shape itself (leading blank +
-      ;; animated line); indent only the content line for chat alignment.
+      ;; animated line — pinned to two lines, test_spinner); indent only the
+      ;; content line for chat alignment. The marker sits on that content
+      ;; line: status-line-fn returns (second lines) and the frame pass
+      ;; records the bottom-most marker.
       (let [lines (protocols/render (:spinner this) width)]
         (into [(first lines)] (mapv #(str u/STATUS-MARKER " " %) (rest lines))))
       ;; Pi: IdleStatus — always occupy the same two rows so the editor and

@@ -186,11 +186,13 @@
         :else false))))
 
 (defn- start-status-test-loop
-  "Start a loop with one component rendering a fixed line, the marked status
-   line and a cursor line, plus a provider returning @STATUS-LINE. Returns
-   {:tui :writes :renders :status-line}; the caller stops the loop."
+  "Start a loop with one component rendering a content line, the marked
+   status line and a cursor line, plus a provider returning @STATUS-LINE.
+   Returns {:tui :writes :renders :content :status-line}; the caller stops
+   the loop."
   []
   (let [renders (atom 0)
+        content (atom "alpha")
         status-line (atom (str utils/STATUS-MARKER "status one"))
         vt (make-virtual-terminal)
         tui (core/create-tui (:terminal vt))]
@@ -198,13 +200,14 @@
      tui
      (reify core/IComponent
        (render [_ _] (swap! renders inc)
-         ["alpha" @status-line (str "input" utils/CURSOR-MARKER "x")])
+         [@content @status-line (str "input" utils/CURSOR-MARKER "x")])
        (handle-input [_ _] nil)
        (invalidate [_] nil)))
     (core/tui-set-status-line-fn! tui (fn [_] @status-line))
     (start-loop tui)
     (wait-for-frames (:writes vt) 1 5000)
-    {:tui tui :writes (:writes vt) :renders renders :status-line status-line}))
+    {:tui tui :writes (:writes vt) :renders renders
+     :content content :status-line status-line}))
 
 ;; ─── Tests ─────────────────────────────────────────────────────────────────
 
@@ -1039,5 +1042,83 @@
             (t/is (str/includes? patch "yyy") "the line painted")
             (t/is (not (str/includes? patch (apply str (repeat 81 "y"))))
                   "no run longer than the 80-column terminal can appear — a wrap would desync the frame")))
+        (finally
+          (stop-loop tui))))))
+
+(deftest ^:slow status-tick-racing-a-full-frame-leaves-the-frame-intact
+  (testing "both requests in one iteration: the full frame wins and its write is not replaced"
+    (let [{:keys [tui writes content status-line]} (start-status-test-loop)]
+      (try
+        (let [base-writes (count @writes)]
+          (reset! content "beta")
+          (reset! status-line (str utils/STATUS-MARKER "status two"))
+          (reset! (:render-requested? tui) true)
+          (reset! (:status-render-requested? tui) true)
+          (core/tui-request-render tui)
+          (t/is (wait-until #(> (count @writes) base-writes) 3000)
+                "the frame was written")
+          (let [out (str/join "" (subvec @writes base-writes))]
+            (t/is (str/includes? out "beta")
+                  "the frame's content was written; a status patch must not replace it")))
+        (finally
+          (stop-loop tui))))))
+
+(deftest ^:slow status-request-falls-back-when-a-flash-is-up
+  (testing "a visible flash disables the status fast path"
+    (let [{:keys [tui writes renders status-line]} (start-status-test-loop)]
+      (try
+        (let [flash-base (count @writes)]
+          (core/tui-flash! tui "boom" :duration-ms 60000)
+          (t/is (wait-until #(> (count @writes) flash-base) 3000)
+                "the flash frame was painted")
+          (let [render-base @renders]
+            (reset! status-line (str utils/STATUS-MARKER "status two"))
+            (core/tui-request-status-render! tui)
+            (t/is (wait-until #(> @renders render-base) 3000)
+                  "the tick took the full-frame path (the flash guard)")))
+        (finally
+          (core/tui-flash-dispose! tui)
+          (stop-loop tui))))))
+
+(deftest ^:slow status-request-falls-back-when-the-provider-stops-marking
+  (testing "a provider that no longer returns the marked line takes the full-frame path"
+    (let [{:keys [tui renders status-line]} (start-status-test-loop)]
+      (try
+        (let [render-base @renders]
+          (reset! status-line "unmarked status")
+          (core/tui-request-status-render! tui)
+          (t/is (wait-until #(> @renders render-base) 3000)
+                "the tick took the full-frame path instead of painting over the anchor"))
+        (finally
+          (stop-loop tui))))))
+
+(deftest ^:slow status-request-patches-a-status-line-below-the-cursor
+  (testing "the patch walks down to the status row and back to the cursor"
+    (let [renders (atom 0)
+          status-line (atom (str utils/STATUS-MARKER "status one"))
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child
+         tui
+         (reify core/IComponent
+           (render [_ _] (swap! renders inc)
+             [(str "input" utils/CURSOR-MARKER "x") @status-line])
+           (handle-input [_ _] nil)
+           (invalidate [_] nil)))
+        (core/tui-set-status-line-fn! tui (fn [_] @status-line))
+        (start-loop tui)
+        (wait-for-frames (:writes vt) 1 5000)
+        (let [base-writes (count @(:writes vt))]
+          (reset! status-line (str utils/STATUS-MARKER "status two"))
+          (core/tui-request-status-render! tui)
+          (t/is (wait-until #(> (count @(:writes vt)) base-writes) 3000)
+                "the status patch was written")
+          (let [patch (str/join "" (subvec @(:writes vt) base-writes))]
+            (t/is (str/includes? patch "status two"))
+            (t/is (not (str/includes? patch "input")) "only the status row is written")
+            (t/is (str/includes? patch "\u001b[1B") "moves down to the status row")
+            (t/is (str/includes? patch "\u001b[1A") "moves back up to the cursor row")
+            (t/is (not (str/includes? patch "\u001b[?25")) "cursor visibility is untouched")))
         (finally
           (stop-loop tui))))))

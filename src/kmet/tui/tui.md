@@ -1092,8 +1092,9 @@ over-wide line can never wrap), and restores the hardware-cursor position.
 Frame state is
 untouched: the document, viewport and diff stay as the last full frame left
 them, and the next real frame repaints the row normally. Any condition the
-patch cannot satisfy — no provider or anchor, a custom or unfocused editor,
-a visible overlay or flash, a resize — sets the normal render flag and takes
+patch cannot satisfy — no provider or anchor, a provider that no longer
+returns the marked line, a custom or unfocused editor, a visible overlay or
+flash, a resize — sets the normal render flag and takes
 the full-frame path, so the optimization is invisible when it cannot apply.
 perf.md §17 measures the turn-time effect.
 

@@ -1931,7 +1931,7 @@ Mechanism:
   the loop calls `status-patch!`: the provider (`status/status-line-fn` →
   the active editor's border via `editor-status-line`, or the standalone
   indicator's render) re-derives the marked line, the patch strips the
-  marker, normalizes the line and writes the row at
+  marker, normalizes and width-clamps the line, and writes the row at
   `status-row - viewport-top` with `\x1b[2K` + `SEGMENT-RESET`; the hardware
   cursor's row/col are restored. Document, viewport and diff state are
   untouched — the next real frame repaints the row as usual;
@@ -1945,8 +1945,9 @@ Mechanism:
   alternative measured ≈5.9 µs and was rejected). The utils corpus now pins
   both markers at every index on both hosts;
 - fallbacks reach the old path with the normal render flag: no
-  provider/anchor, a custom or unfocused editor, a visible overlay or flash,
-  a resize, or a status line outside the viewport.
+  provider/anchor, a provider that stopped returning the marked line, a
+  custom or unfocused editor, a visible overlay or flash, or a resize; a
+  status line outside the viewport consumes the tick with nothing to paint.
 
 Measured in the app (`jolt start`, 100x30 tmux pty; the probe server stalls
 40 s so the spinner is the only animation; `/proc` ticks, 6 s windows, the
