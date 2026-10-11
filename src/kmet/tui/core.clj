@@ -313,7 +313,7 @@
                 pending-osc-11? osc-11-queries
                 color-scheme-listeners terminal-response-buffer
                 terminal-response-timer color-scheme-notifications-enabled?
-                debug-redraw? tui-debug?
+                debug-redraw? tui-debug? tui-trace?
                 input-generation incomplete-flush-timer
                 paste-burst kitty-printable
                 focus-home])
@@ -380,6 +380,7 @@
                        :color-scheme-notifications-enabled? (atom false)
                        :debug-redraw? (atom (= (System/getenv "KMET_DEBUG_REDRAW") "1"))
                        :tui-debug? (atom (= (System/getenv "KMET_TUI_DEBUG") "1"))
+                       :tui-trace? (atom (= (System/getenv "KMET_TUI_TRACE") "1"))
                        :input-generation (atom 0)
                        :incomplete-flush-timer (atom nil)
                        ;; unbracketed-paste burst state (see paste-burst-step)
@@ -2492,6 +2493,16 @@
                     ;; viewport-top rows too far once the document scrolled.)
                     delta (- cursor-row status-row)
                     sb (StringBuilder.)]
+                ;; KMET_TUI_DEBUG=1: record every patch's geometry next to the
+                ;; frame dumps, so a corrupted screen can be reconstructed from
+                ;; (frame viewportTop/hardwareCursorRow) + (patch target row).
+                (when (or @(:tui-debug? tui) @(:tui-trace? tui))
+                  (append-log! (log-path "kmet-status-patch.log")
+                               (str "[" (java.time.LocalDateTime/now) "] patch"
+                                    " sr=" status-row " vt=" viewport-top
+                                    " screen=" screen-row " cur=" cursor-row "," cursor-col
+                                    " h=" height " w=" width
+                                    " line-w=" (utils/visible-width line) "\n")))
                 (.append sb CSI-2026-H)
                 (when (pos? delta) (.append sb (str "\u001b[" delta "A")))
                 (when (neg? delta) (.append sb (str "\u001b[" (- delta) "B")))
@@ -3107,6 +3118,19 @@
                   (reset! previous-viewport-top @viewport-top)
                   (when @(:tui-debug? tui)
                     (tui-debug-dump! prev lines (str @sb) w h @viewport-top @hardware-cursor-row))
+                  ;; KMET_TUI_TRACE=1: one compact line per frame (no line
+                  ;; dumps) — correlated with kmet-status-patch.log this
+                  ;; reconstructs a corrupted screen's geometry cheaply.
+                  (when @(:tui-trace? tui)
+                    (append-log! (log-path "kmet-frame-trace.log")
+                                 (str "[" (java.time.LocalDateTime/now) "] frame"
+                                      " n=" (count lines) " prev=" (count prev)
+                                      " vt=" @viewport-top " prev-vt=" @previous-viewport-top
+                                      " hw=" @hardware-cursor-row "," @hardware-cursor-col
+                                      " h=" h " w=" w
+                                      " status=" (:status-row frame) " cursor=" (pr-str cursor)
+                                      " changed=" (pr-str (:changed frame))
+                                      " flashed=" flashed? "\n")))
                   (when (pos? (.length @sb))
                     ;; staged, not written: the buffer is written after this
                     ;; frame's lock is released (below); nothing appends to
