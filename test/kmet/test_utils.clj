@@ -82,20 +82,34 @@
    "\u001b[?2026h\u001b[1;1H\u001b[?2026l"
    (str "你好" "\u001b[31m" "你好")])
 
+(def ^:private ansi-re
+  "The ANSI language (CSI | OSC/APC) as an independent regex spec: the
+   scanner is pinned against it (strips and per-index matches) so the two
+   implementations cannot drift."
+  #"\u001b\[[0-9;]*[a-zA-Z]|\u001b[\]_][^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)")
+
+(defn- regex-strip
+  "The regex side of the strip equivalence (bb/JVM's production path)."
+  [s]
+  (str/replace s ansi-re ""))
+
+(defn- regex-code
+  "The regex side of the ansi-code-at equivalence: ANSI-CODE-RE anchored at I
+   as [code length], nil when nothing starts there."
+  [s i]
+  (when (and (< i (count s)) (= \u001b (nth s i)))
+    (let [m (re-matcher ansi-re s)]
+      (when (and (.find m i) (= i (.start m)))
+        [(.group m) (- (.end m) i)]))))
+
 (t/deftest test-strip-ansi-host-equivalence
   ;; The Jolt path strips ANSI with a hand-rolled scanner (strip-ansi-native)
   ;; while bb/JVM keep the regex strip. The scanner must accept exactly the
-  ;; regex's language — including the sequences the regex does NOT match
+  ;; ANSI language — including the sequences the regex does NOT match
   ;; (private-parameter CSI, unterminated OSC, a lone ESC), which must stay
   ;; in the output as literal text. Both implementations run on both hosts,
   ;; so this test pins them against each other wherever the suite runs.
-  ;; The scanner's OSC/APC branch is one shape (the introducer differs);
-  ;; the regex mirrors that with a combined branch.
-  (let [regex-strip (fn [s]
-                      (str/replace s
-                                   #"\u001b\[[0-9;]*[a-zA-Z]|\u001b[\]_][^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)"
-                                   ""))
-        native-strip (var-get #'u/strip-ansi-native)
+  (let [native-strip (var-get #'u/strip-ansi-native)
         corpus ansi-corpus]
     (doseq [s corpus]
       (t/is (= (regex-strip s) (native-strip s)) (pr-str s))))
@@ -110,13 +124,7 @@
   ;; (ansi-code-at-native); bb/JVM keep the anchored regex matcher (match-at +
   ;; ANSI-CODE-RE). Both must agree at every index of every corpus string —
   ;; including the indices where neither matches.
-  (let [ansi-re #"\u001b\[[0-9;]*[a-zA-Z]|\u001b[\]_][^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)"
-        regex-code (fn [s i]
-                     (when (and (< i (count s)) (= \u001b (nth s i)))
-                       (let [m (re-matcher ansi-re s)]
-                         (when (and (.find m i) (= i (.start m)))
-                           [(.group m) (- (.end m) i)]))))
-        native-code (var-get #'u/ansi-code-at-native)]
+  (let [native-code (var-get #'u/ansi-code-at-native)]
     (doseq [s ansi-corpus
             i (range (inc (count s)))]
       (t/is (= (regex-code s i) (native-code s i))
@@ -128,13 +136,6 @@
   ;; is not a sequence — the scanner once consumed past it and stripped the
   ;; following marker/sequence where the regex did not)
   (let [pool (mapv int [27 91 93 95 59 48 57 65 122 92 7 156 120 32])
-        ansi-re #"\u001b\[[0-9;]*[a-zA-Z]|\u001b[\]_][^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)"
-        regex-strip (fn [s] (str/replace s ansi-re ""))
-        regex-code (fn [s i]
-                     (when (and (< i (count s)) (= \u001b (nth s i)))
-                       (let [m (re-matcher ansi-re s)]
-                         (when (and (.find m i) (= i (.start m)))
-                           [(.group m) (- (.end m) i)]))))
         native-strip (var-get #'u/strip-ansi-native)
         native-code (var-get #'u/ansi-code-at-native)
         rnd-str (fn [] (apply str (repeatedly (+ 1 (rand-int 10))

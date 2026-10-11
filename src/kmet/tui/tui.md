@@ -1081,7 +1081,7 @@ they do not request a full frame: `tui-request-status-render!` sets a
 separate flag that the loop handles without re-walking the tree. The live
 status line carries a zero-width `STATUS-MARKER` (`kmet.tui.utils`); the
 frame pass strips it (unconditionally, like the cursor marker) and records
-the line's document row in `build-frame-lines`' `:status`/`:status-marks`.
+the line's document row in `build-frame-lines`' `:status-row`/`:status-marks`.
 On a status tick the loop's `status-patch!` re-derives the line from the
 registered provider (`tui-set-status-line-fn!`, wired by the interactive
 layout to the active editor's border or the standalone status area — the

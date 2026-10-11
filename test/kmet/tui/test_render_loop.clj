@@ -185,6 +185,27 @@
         (< (System/currentTimeMillis) deadline) (do (Thread/sleep 10) (recur))
         :else false))))
 
+(defn- start-status-test-loop
+  "Start a loop with one component rendering a fixed line, the marked status
+   line and a cursor line, plus a provider returning @STATUS-LINE. Returns
+   {:tui :writes :renders :status-line}; the caller stops the loop."
+  []
+  (let [renders (atom 0)
+        status-line (atom (str utils/STATUS-MARKER "status one"))
+        vt (make-virtual-terminal)
+        tui (core/create-tui (:terminal vt))]
+    (core/tui-add-child
+     tui
+     (reify core/IComponent
+       (render [_ _] (swap! renders inc)
+         ["alpha" @status-line (str "input" utils/CURSOR-MARKER "x")])
+       (handle-input [_ _] nil)
+       (invalidate [_] nil)))
+    (core/tui-set-status-line-fn! tui (fn [_] @status-line))
+    (start-loop tui)
+    (wait-for-frames (:writes vt) 1 5000)
+    {:tui tui :writes (:writes vt) :renders renders :status-line status-line}))
+
 ;; ─── Tests ─────────────────────────────────────────────────────────────────
 
 (deftest ^:slow first-render-preserves-terminal-output
@@ -963,29 +984,16 @@
                   "the diff writes it clamped to the window width")))
 (deftest ^:slow status-request-patches-the-line-without-a-tree-walk
   (testing "a status-only request rewrites the marked status row and runs no component render"
-    (let [renders (atom 0)
-          status-line (atom (str utils/STATUS-MARKER "status one"))
-          vt (make-virtual-terminal)
-          tui (core/create-tui (:terminal vt))]
+    (let [{:keys [tui writes renders status-line]} (start-status-test-loop)]
       (try
-        (core/tui-add-child
-         tui
-         (reify core/IComponent
-           (render [_ _] (swap! renders inc)
-             ["alpha" @status-line (str "input" utils/CURSOR-MARKER "x")])
-           (handle-input [_ _] nil)
-           (invalidate [_] nil)))
-        (core/tui-set-status-line-fn! tui (fn [_] @status-line))
-        (start-loop tui)
-        (wait-for-frames (:writes vt) 1 5000)
         (let [base-renders @renders
-              base-writes (count @(:writes vt))]
+              base-writes (count @writes)]
           (t/is (pos? base-renders) "the first frame rendered the component")
           (reset! status-line (str utils/STATUS-MARKER "status two"))
           (core/tui-request-status-render! tui)
-          (t/is (wait-until #(> (count @(:writes vt)) base-writes) 3000)
+          (t/is (wait-until #(> (count @writes) base-writes) 3000)
                 "the status patch was written")
-          (let [patch (str/join "" (subvec @(:writes vt) base-writes))]
+          (let [patch (str/join "" (subvec @writes base-writes))]
             (t/is (str/includes? patch "status two") "the new status line is painted")
             (t/is (not (str/includes? patch "alpha")) "only the status row is written")
             (t/is (str/includes? patch "\u001b[2K") "the row is cleared before the write")
@@ -998,28 +1006,15 @@
 (deftest ^:slow status-request-falls-back-when-an-overlay-is-up
   (testing "a visible overlay disables the status fast path — the tick takes
             the normal full-frame path instead of writing under the overlay"
-    (let [renders (atom 0)
-          status-line (atom (str utils/STATUS-MARKER "status one"))
-          vt (make-virtual-terminal)
-          tui (core/create-tui (:terminal vt))]
+    (let [{:keys [tui writes renders status-line]} (start-status-test-loop)]
       (try
-        (core/tui-add-child
-         tui
-         (reify core/IComponent
-           (render [_ _] (swap! renders inc)
-             ["alpha" @status-line (str "input" utils/CURSOR-MARKER "x")])
-           (handle-input [_ _] nil)
-           (invalidate [_] nil)))
-        (core/tui-set-status-line-fn! tui (fn [_] @status-line))
-        (start-loop tui)
-        (wait-for-frames (:writes vt) 1 5000)
         (core/tui-show-overlay tui
                                (reify core/IComponent
                                  (render [_ _] ["OVL"])
                                  (handle-input [_ _] nil)
                                  (invalidate [_] nil))
                                :anchor :top-left :width 4)
-        (wait-for-frames (:writes vt) 2 5000)
+        (wait-for-frames writes 2 5000)
         (let [base-renders @renders]
           (reset! status-line (str utils/STATUS-MARKER "status two"))
           (core/tui-request-status-render! tui)

@@ -50,26 +50,26 @@
   (let [build (var core/build-frame-lines)
         sm utils/STATUS-MARKER]
     (testing "the status marker is stripped and reported"
-      (let [{:keys [lines status status-marks]}
+      (let [{:keys [lines status-row status-marks]}
             (build [] [] {} {} ["aa" (str sm "status") "cc"] 10 false)]
         (t/is (= ["aa" "status" "cc"] lines))
-        (t/is (= {:row 1 :col 0} status))
+        (t/is (= 1 status-row))
         (t/is (= {1 0} status-marks))))
     (testing "the status row is reported even above the viewport (the loop checks visibility)"
-      (let [{:keys [status cursor]} (build [] [] {} {} [(str sm "s") "a" "b"] 2 false)]
-        (t/is (= {:row 0 :col 0} status))
+      (let [{:keys [status-row cursor]} (build [] [] {} {} [(str sm "s") "a" "b"] 2 false)]
+        (t/is (= 0 status-row))
         (t/is (nil? cursor))))
     (testing "an unchanged frame carries the status position"
       (let [raw [(str sm "one") "x"]
             out (build [] [] {} {} raw 10 false)
             out2 (build raw (:lines out) {} (:status-marks out) raw 10 true)]
-        (t/is (= {:row 0 :col 0} (:status out2)))
+        (t/is (= 0 (:status-row out2)))
         (t/is (= (:status-marks out) (:status-marks out2)))))
     (testing "a rescanned line that loses the marker clears the status"
       (let [raw [(str sm "one") "x"]
             out (build [] [] {} {} raw 10 false)
             out2 (build raw (:lines out) {} (:status-marks out) ["one" "x"] 10 false)]
-        (t/is (nil? (:status out2)))
+        (t/is (nil? (:status-row out2)))
         (t/is (= {} (:status-marks out2)))))
     (testing "an equal chunk carries the status marker by content"
       (let [raw [(str sm "one") "x"]
@@ -77,7 +77,7 @@
             out2 (build raw (:lines out) {} (:status-marks out)
                         [(subs (str "z" sm "one") 1) "x"] 10 false)]
         (t/is (= "one" (nth (:lines out2) 0)))
-        (t/is (= {:row 0 :col 0} (:status out2)))))))
+        (t/is (= 0 (:status-row out2)))))))
 
 (t/deftest test-build-frame-lines-normalizes-unchanged-lines
   (let [build (var core/build-frame-lines)

@@ -110,11 +110,13 @@
   (line-mark marks lines (max 0 (- n height))))
 
 (defn- line-status
-  "The live status line's {:row :col} for the bottom-most STATUS-MARKER, or
-   nil when none. Unlike line-cursor the row is not restricted to the
-   viewport: the render loop checks visibility before patching it."
-  [status-marks lines]
-  (line-mark status-marks lines 0))
+  "The bottom-most STATUS-MARKER's document row, or nil when none. The row
+   is all the status patch needs (it rewrites the whole line), and unlike
+   line-cursor it is not restricted to the viewport: the render loop checks
+   visibility before patching it."
+  [status-marks]
+  (let [i (reduce-kv (fn [best i _] (if (> i best) i best)) -1 status-marks)]
+    (when (>= i 0) i)))
 
 (def ^:private chunk-lines
   "Frame-pass chunk size. The pass compares the previous and current raw
@@ -150,7 +152,7 @@
    {:lines stripped-and-normalized lines
     :cursor {:row r :col c} or nil     ; bottom-most cursor marker
     :marks {line-idx marker-idx}       ; carry into the next frame
-    :status {:row r :col c} or nil     ; live status line (STATUS-MARKER)
+    :status-row row or nil             ; live status line (STATUS-MARKER)
     :status-marks {line-idx marker-idx}
     :changed [first last] or nil}.     ; nil = no change
 
@@ -202,7 +204,7 @@
        {:lines prev-out
         :cursor (line-cursor prev-marks lines n height)
         :marks prev-marks
-        :status (line-status prev-status-marks lines)
+        :status-row (line-status prev-status-marks)
         :status-marks prev-status-marks
         :changed nil}
        (let [cursor-marker utils/CURSOR-MARKER
@@ -259,7 +261,7 @@
          {:lines out
           :cursor cursor
           :marks marks
-          :status (line-status smarks lines)
+          :status-row (line-status smarks)
           :status-marks smarks
           :changed (when (>= first-changed 0) [first-changed last-changed])})))))
 
@@ -298,7 +300,7 @@
                 previous-flashed?
                 previous-repainted?
                 previous-width render-requested? status-render-requested?
-                status-line-fn previous-status previous-cursor
+                status-line-fn previous-status-row previous-cursor
                 force-redraw? waker
                 running? stopped? overlays
                 render-loop input-reader current-reader
@@ -338,7 +340,7 @@
                        :render-requested? (atom false)
                        :status-render-requested? (atom false)
                        :status-line-fn (atom nil)
-                       :previous-status (atom nil)
+                       :previous-status-row (atom nil)
                        :previous-cursor (atom nil)
                        :force-redraw? (atom false)
                        :waker (wake/make-waker)
@@ -2445,16 +2447,16 @@
    so it never touches the diff machinery."
   [tui width height viewport-top cursor-row cursor-col pending-write]
   (let [provider @(:status-line-fn tui)
-        status @(:previous-status tui)
+        status-row @(:previous-status-row tui)
         cursor @(:previous-cursor tui)]
     (when (and provider
-               status
+               (some? status-row)
                cursor
                (= width @(:previous-width tui))
                (= height @(:previous-height tui))
                (not (tui-has-overlay? tui))
                (not (alt-screen-flash/alt-screen-flash-active? @(:flashes tui))))
-      (let [screen-row (- (:row status) viewport-top)]
+      (let [screen-row (- status-row viewport-top)]
         (when (and (>= screen-row 0) (< screen-row height))
           (when-some [line (some-> (provider width)
                                    ;; the provider returns the marked line;
@@ -3091,7 +3093,7 @@
                   (reset! (:previous-raw-lines tui) raw-lines)
                   (reset! (:previous-marks tui) (:marks frame))
                   (reset! (:previous-status-marks tui) (:status-marks frame))
-                  (reset! (:previous-status tui) (:status frame))
+                  (reset! (:previous-status-row tui) (:status-row frame))
                   (reset! (:previous-cursor tui) cursor)
                   (reset! (:previous-flashed? tui) flashed?)
                   ;; the diff's own verdict (kitty-frame-lines: ::unchanged

@@ -1924,9 +1924,9 @@ Mechanism:
   exactly one marker sits at the live line's start wherever the status is
   rendered;
 - `build-frame-lines` strips both marker kinds in its one document pass and
-  returns `:status {:row :col}` / `:status-marks` with the same
-  carry-forward rules as the cursor's marks (equal chunks, quick reuse,
-  shrinks);
+  returns `:status-row` (the live line's document row) / `:status-marks`
+  with the same carry-forward rules as the cursor's marks (equal chunks,
+  quick reuse, shrinks);
 - the drivers call `tui-request-status-render!`. When no full frame is due,
   the loop calls `status-patch!`: the provider (`status/status-line-fn` →
   the active editor's border via `editor-status-line`, or the standalone

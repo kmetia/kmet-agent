@@ -142,9 +142,10 @@
       (when term (str "\u001b]8;;" term)))))
 
 ;; ANSI sequences (CSI, OSC, APC) recognized while expanding tabs (pi:
-;; extractAnsiCode). The cursor marker is an APC (ESC _ ... BEL).
+;; extractAnsiCode). Derived from ANSI-CODE-RE so the two regexes cannot
+;; drift; the cursor/status markers are APC (ESC _ ... BEL).
 (def ^:private ANSI-OR-TAB-RE
-  #"\u001b\[[0-9;]*[a-zA-Z]|\u001b\][^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)|\u001b_[^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)|\t")
+  (re-pattern (str ANSI-CODE-RE "|\\t")))
 
 (defn normalize-terminal-output
   "Port of pi's normalizeTerminalOutput: decompose the Thai/Lao AM vowel
