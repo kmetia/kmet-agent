@@ -49,7 +49,11 @@
                   (or (= ch 0x3b) (<= 0x30 ch 0x39)) (recur (inc j))
                   (or (<= 0x41 ch 0x5a) (<= 0x61 ch 0x7a)) (inc j)
                   :else nil))))
-          ;; OSC: ESC ] … BEL | ST | 0x9c / APC: ESC _ … BEL | ST | 0x9c
+          ;; OSC: ESC ] … BEL | ST | 0x9c / APC: ESC _ … BEL | ST | 0x9c.
+          ;; The body excludes ESC/BEL/0x9c (ANSI-CODE-RE's class), so a bare
+          ;; ESC aborts the sequence instead of being consumed — swallowing
+          ;; past it would strip across a following escape (a marker, another
+          ;; sequence) where the regex does not.
           (or (= c \]) (= c \_))
           (loop [j (+ i 2)]
             (if (>= j n)
@@ -57,7 +61,9 @@
               (let [ch (int (nth s j))]
                 (cond
                   (or (= ch 0x07) (= ch 0x9c)) (inc j)
-                  (and (= ch 0x1b) (< (inc j) n) (= 0x5c (int (nth s (inc j))))) (+ j 2)
+                  (= ch 0x1b) (if (and (< (inc j) n) (= 0x5c (int (nth s (inc j)))))
+                                (+ j 2)
+                                nil)
                   :else (recur (inc j))))))
           :else nil)))))
 

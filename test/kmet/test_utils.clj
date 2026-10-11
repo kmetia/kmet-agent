@@ -69,6 +69,10 @@
    (str "ab" u/STATUS-MARKER "cd")
    "\u001b_private\u001b\\tail"           ;; APC terminated by ST
    "\u001b_unterminated"                  ;; APC without a terminator: literal
+   "a\u001b_\u001b\u009cb"                 ;; bare ESC aborts the APC (regex class)
+   "a\u001b]\u001bb\u0007c"                 ;; bare ESC aborts the OSC
+   "a\u001b]\u001b\\b"                     ;; ST-terminated OSC
+   "a\u001b_\u001b\\b"                     ;; ST-terminated APC
    "\u001b["
    "\u001b"
    "\u001bX"
@@ -117,6 +121,30 @@
             i (range (inc (count s)))]
       (t/is (= (regex-code s i) (native-code s i))
             (str (pr-str s) " @" i)))))
+
+(t/deftest test-ansi-implementations-agree-on-random-escapes
+  ;; fuzz over ESC-shaped mixtures: the scanner and the regex must accept
+  ;; exactly the same language, including aborts (a bare ESC inside OSC/APC
+  ;; is not a sequence — the scanner once consumed past it and stripped the
+  ;; following marker/sequence where the regex did not)
+  (let [pool (mapv int [27 91 93 95 59 48 57 65 122 92 7 156 120 32])
+        ansi-re #"\u001b\[[0-9;]*[a-zA-Z]|\u001b[\]_][^\u0007\u001b\u009c]*(?:\u001b\\|\u0007|\u009c)"
+        regex-strip (fn [s] (str/replace s ansi-re ""))
+        regex-code (fn [s i]
+                     (when (and (< i (count s)) (= \u001b (nth s i)))
+                       (let [m (re-matcher ansi-re s)]
+                         (when (and (.find m i) (= i (.start m)))
+                           [(.group m) (- (.end m) i)]))))
+        native-strip (var-get #'u/strip-ansi-native)
+        native-code (var-get #'u/ansi-code-at-native)
+        rnd-str (fn [] (apply str (repeatedly (+ 1 (rand-int 10))
+                                              #(nth pool (rand-int (count pool))))))]
+    (dotimes [_ 1500]
+      (let [s (rnd-str)]
+        (t/is (= (regex-strip s) (native-strip s)) (pr-str (mapv int s)))
+        (doseq [i (range (inc (count s)))]
+          (t/is (= (regex-code s i) (native-code s i))
+                (str (pr-str (mapv int s)) " @" i)))))))
 
 (t/deftest test-ansi-markers-are-zero-width
   ;; the cursor/status markers are APC sequences: the width primitives and
