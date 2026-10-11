@@ -396,28 +396,29 @@
     (let [lines (atom (vec (map #(str "line " %) (range 30))))
           vt (make-virtual-terminal)
           tui (core/create-tui (:terminal vt))]
-      (try
-        (core/tui-add-child tui (test-component lines))
-        (start-loop tui)
-        (wait-for-frames (:writes vt) 1 5000)
-        (t/is (false? (core/tui-scrollback-dirty? tui)) "clean after the first render")
+      (with-redefs [core/termux-host? (constantly false)]
+        (try
+          (core/tui-add-child tui (test-component lines))
+          (start-loop tui)
+          (wait-for-frames (:writes vt) 1 5000)
+          (t/is (false? (core/tui-scrollback-dirty? tui)) "clean after the first render")
         ;; dirty it with a scrollback-only change
-        (swap! lines assoc 2 "line 2 CHANGED")
-        (core/tui-request-render tui)
-        (t/is (wait-until #(core/tui-scrollback-dirty? tui) 5000)
-              "the above-window change marks the scrollback dirty")
-        (let [frames-before (count (frame-writes (:writes vt)))]
-          (core/tui-heal-scrollback! tui)
-          (wait-for-frames (:writes vt) (inc frames-before) 5000)
-          (let [redraw (last (frame-writes (:writes vt)))]
-            (t/is (str/includes? redraw clear-seq)
-                  "the heal emits the clearing full redraw (2J H 3J)")
-            (t/is (str/includes? redraw "line 2 CHANGED")
-                  "the healed scrollback re-emits the current content")
-            (t/is (str/includes? redraw "line 29") "the whole transcript is re-emitted")))
-        (t/is (false? (core/tui-scrollback-dirty? tui)) "clean again after the heal")
-        (finally
-          (stop-loop tui))))))
+          (swap! lines assoc 2 "line 2 CHANGED")
+          (core/tui-request-render tui)
+          (t/is (wait-until #(core/tui-scrollback-dirty? tui) 5000)
+                "the above-window change marks the scrollback dirty")
+          (let [frames-before (count (frame-writes (:writes vt)))]
+            (core/tui-heal-scrollback! tui)
+            (wait-for-frames (:writes vt) (inc frames-before) 5000)
+            (let [redraw (last (frame-writes (:writes vt)))]
+              (t/is (str/includes? redraw clear-seq)
+                    "the heal emits the clearing full redraw (2J H 3J)")
+              (t/is (str/includes? redraw "line 2 CHANGED")
+                    "the healed scrollback re-emits the current content")
+              (t/is (str/includes? redraw "line 29") "the whole transcript is re-emitted")))
+          (t/is (false? (core/tui-scrollback-dirty? tui)) "clean again after the heal")
+          (finally
+            (stop-loop tui)))))))
 
 (deftest ^:slow scrollback-heal-before-dirty-frame-still-heals
   (testing "tui-heal-scrollback! called in the same instant as the change — before the
@@ -427,37 +428,38 @@
     (let [lines (atom (vec (map #(str "line " %) (range 30))))
           vt (make-virtual-terminal)
           tui (core/create-tui (:terminal vt))]
-      (try
-        (core/tui-add-child tui (test-component lines))
-        (start-loop tui)
-        (wait-for-frames (:writes vt) 1 5000)
-        (let [frames-before (count (frame-writes (:writes vt)))
-              lock @(var core/dispatch-lock)]
+      (with-redefs [core/termux-host? (constantly false)]
+        (try
+          (core/tui-add-child tui (test-component lines))
+          (start-loop tui)
+          (wait-for-frames (:writes vt) 1 5000)
+          (let [frames-before (count (frame-writes (:writes vt)))
+                lock @(var core/dispatch-lock)]
           ;; hold the frame pass off between the change and the latch check so
           ;; the pending assertion is deterministic, not a race with the loop
-          (.lock lock)
-          (try
+            (.lock lock)
+            (try
             ;; the boundary's change and its heal land together: the heal must
             ;; not rely on the dirty flag, which no frame has set yet
-            (swap! lines assoc 2 "line 2 CHANGED")
-            (core/tui-heal-scrollback! tui)
-            (t/is (true? (core/tui-scrollback-heal-pending? tui))
-                  "the heal is latched, not dropped by the not-yet-dirty flag")
-            (finally (.unlock lock)))
-          (t/is (wait-until #(some (fn [w] (str/includes? w clear-seq))
-                                   (drop frames-before (frame-writes (:writes vt))))
-                            5000)
-                "the clearing rebuild fires after the frame that records the dirt")
-          (t/is (false? (core/tui-scrollback-dirty? tui))
-                "the stale scrollback is healed, not left for the next trigger")
-          (t/is (false? (core/tui-scrollback-heal-pending? tui))
-                "the latch cleared")
-          (let [redraw (last (filterv #(str/includes? % clear-seq)
-                                      (drop frames-before (frame-writes (:writes vt)))))]
-            (t/is (str/includes? redraw "line 2 CHANGED")
-                  "the healed rebuild re-emits the current content")))
-        (finally
-          (stop-loop tui))))))
+              (swap! lines assoc 2 "line 2 CHANGED")
+              (core/tui-heal-scrollback! tui)
+              (t/is (true? (core/tui-scrollback-heal-pending? tui))
+                    "the heal is latched, not dropped by the not-yet-dirty flag")
+              (finally (.unlock lock)))
+            (t/is (wait-until #(some (fn [w] (str/includes? w clear-seq))
+                                     (drop frames-before (frame-writes (:writes vt))))
+                              5000)
+                  "the clearing rebuild fires after the frame that records the dirt")
+            (t/is (false? (core/tui-scrollback-dirty? tui))
+                  "the stale scrollback is healed, not left for the next trigger")
+            (t/is (false? (core/tui-scrollback-heal-pending? tui))
+                  "the latch cleared")
+            (let [redraw (last (filterv #(str/includes? % clear-seq)
+                                        (drop frames-before (frame-writes (:writes vt)))))]
+              (t/is (str/includes? redraw "line 2 CHANGED")
+                    "the healed rebuild re-emits the current content")))
+          (finally
+            (stop-loop tui)))))))
 
 (deftest ^:slow scrollback-heal-latch-survives-an-in-flight-frame
   (testing "a heal requested while a frame is in flight — after that frame had already
@@ -507,27 +509,28 @@
           arm (atom false)
           vt (make-virtual-terminal)
           tui (core/create-tui (:terminal vt))]
-      (try
-        (core/tui-add-child tui (settling-test-component lines arm tui))
-        (start-loop tui)
-        (wait-for-frames (:writes vt) 1 5000)
-        (let [frames-before (count (frame-writes (:writes vt)))]
-          (reset! arm true)
-          (core/tui-heal-scrollback! tui)
+      (with-redefs [core/termux-host? (constantly false)]
+        (try
+          (core/tui-add-child tui (settling-test-component lines arm tui))
+          (start-loop tui)
+          (wait-for-frames (:writes vt) 1 5000)
+          (let [frames-before (count (frame-writes (:writes vt)))]
+            (reset! arm true)
+            (core/tui-heal-scrollback! tui)
           ;; the qualifying frame renders the OLD snapshot and schedules its own
           ;; settle frame; the latch must survive that clean qualifying frame
-          (t/is (wait-until #(some (fn [w] (str/includes? w clear-seq))
-                                   (drop frames-before (frame-writes (:writes vt))))
-                            5000)
-                "the settle frame's above-window dirt forces the clearing rebuild")
-          (t/is (false? (core/tui-scrollback-dirty? tui))
-                "the settled scrollback is healed, not left for the next trigger")
-          (let [redraw (last (filterv #(str/includes? % clear-seq)
-                                      (drop frames-before (frame-writes (:writes vt)))))]
-            (t/is (str/includes? redraw "line 2 CHANGED")
-                  "the rebuilt scrollback re-emits the settled content")))
-        (finally
-          (stop-loop tui))))))
+            (t/is (wait-until #(some (fn [w] (str/includes? w clear-seq))
+                                     (drop frames-before (frame-writes (:writes vt))))
+                              5000)
+                  "the settle frame's above-window dirt forces the clearing rebuild")
+            (t/is (false? (core/tui-scrollback-dirty? tui))
+                  "the settled scrollback is healed, not left for the next trigger")
+            (let [redraw (last (filterv #(str/includes? % clear-seq)
+                                        (drop frames-before (frame-writes (:writes vt)))))]
+              (t/is (str/includes? redraw "line 2 CHANGED")
+                    "the rebuilt scrollback re-emits the settled content")))
+          (finally
+            (stop-loop tui)))))))
 
 (deftest ^:slow scrollback-heal-clean-is-a-no-op
   (testing "a heal on a clean scrollback latches but emits no clearing rebuild — the
@@ -1012,6 +1015,9 @@
                   "the diff does not write the over-wide line verbatim")
             (t/is (str/includes? frame (apply str (repeat 80 "y")))
                   "the diff writes it clamped to the window width")))
+        (finally
+          (stop-loop tui))))))
+
 (deftest ^:slow status-request-patches-the-line-without-a-tree-walk
   (testing "a status-only request rewrites the marked status row and runs no component render"
     (let [{:keys [tui writes renders status-line]} (start-status-test-loop)]
@@ -1236,5 +1242,28 @@
             (t/is (str/includes? frame "\u001b[H") "the cursor is homed")
             (t/is (not (str/includes? frame "\u001b[2J"))
                   "the Termux path does not clear the screen")))
+        (finally
+          (stop-loop tui))))))
+
+(deftest ^:slow termux-redraw-rewrites-only-the-visible-window
+  (testing "on a plain Termux terminal (3J ignored) a clearing redraw rewrites
+            the visible window in place; re-emitting the transcript would push
+            a duplicate copy of it into the scrollback"
+    (let [vt (make-virtual-terminal)
+          lines (atom (mapv #(str "line " %) (range 60)))
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (core/tui-add-child tui (test-component lines))
+        (with-redefs [core/termux-host? (constantly true)
+                      core/tmux-host? (constantly false)]
+          (start-loop tui)
+          (wait-for-frames (:writes vt) 1 5000)
+          (core/tui-request-render tui true)
+          (wait-for-frames (:writes vt) 2 5000)
+          (let [frame (last (frame-writes (:writes vt)))]
+            (t/is (str/includes? frame "line 59") "the window tail is rewritten")
+            (t/is (str/includes? frame "\u001b[2J") "the visible screen is cleared")
+            (t/is (not (str/includes? frame "line 0"))
+                  "the transcript is not re-emitted into the scrollback")))
         (finally
           (stop-loop tui))))))

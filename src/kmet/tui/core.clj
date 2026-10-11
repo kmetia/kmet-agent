@@ -331,6 +331,13 @@
   []
   (boolean (System/getenv "TERMUX_VERSION")))
 
+(defn- tmux-host?
+  "True inside tmux (or screen via the same env convention is NOT assumed).
+   tmux implements 3J, unlike Termux's own emulator, so it keeps the
+   clear-scrollback redraw path."
+  []
+  (some? (System/getenv "TMUX")))
+
 (defn create-tui [terminal]
   (let [tui (map->TUI {:terminal (atom terminal)
                        :components (atom [])
@@ -2842,6 +2849,14 @@
                       width-changed (and (not (zero? prev-w)) (not= prev-w w))
                       height-changed (and (not (zero? prev-h)) (not= prev-h h))
                       termux? (termux-host?)
+                      ;; Termux's emulator implements ED 0/1/2 only — 3J (clear
+                      ;; scrollback) is ignored. A clearing redraw that
+                      ;; re-emits the whole transcript therefore pushes a
+                      ;; DUPLICATE copy of it into the scrollback (the code
+                      ;; below relies on 3J for exactly that), so on a plain
+                      ;; Termux terminal a clear rewrites only the visible
+                      ;; window in place: no scrolling, no history change.
+                      tmux? (tmux-host?)
                       first-render? (and (empty? prev)
                                          (not width-changed)
                                          (not height-changed))
@@ -2936,21 +2951,30 @@
                                          ;; to the top on 3J (microsoft/terminal
                                          ;; #20370, being fixed upstream) — pi
                                          ;; accepts that over duplicated output.
+                                         ;; A terminal that IGNORES 3J (Termux)
+                                         ;; gets the opposite trade: rewrite the
+                                         ;; visible window in place below, never
+                                         ;; scroll, so the history is not filled
+                                         ;; with copies.
                                          (emit! "\u001b[2J\u001b[H\u001b[3J"))
-                                       (loop [i 0]
-                                         (when (< i new-count)
-                                           (when (pos? i) (emit! "\r\n"))
-                                           (let [rows (if (img/is-image-line (nth lines i))
-                                                        (kitty-image-reserved-rows lines i)
-                                                        1)]
-                                             (if (and (> rows 1) (<= rows h))
-                                               (do (dotimes [_ (dec rows)] (emit! "\r\n"))
-                                                   (emit! (str "\u001b[" (dec rows) "A"))
-                                                   (emit-line! (nth lines i))
-                                                   (emit! (str "\u001b[" (dec rows) "B"))
-                                                   (recur (+ i rows)))
-                                               (do (emit-line! (nth lines i))
-                                                   (recur (inc i)))))))
+                                       (let [window-only? (and clear? termux? (not tmux?))
+                                             first-i (if window-only?
+                                                       (max 0 (- new-count h))
+                                                       0)]
+                                         (loop [i first-i]
+                                           (when (< i new-count)
+                                             (when (> i first-i) (emit! "\r\n"))
+                                             (let [rows (if (img/is-image-line (nth lines i))
+                                                          (kitty-image-reserved-rows lines i)
+                                                          1)]
+                                               (if (and (> rows 1) (<= rows h))
+                                                 (do (dotimes [_ (dec rows)] (emit! "\r\n"))
+                                                     (emit! (str "\u001b[" (dec rows) "A"))
+                                                     (emit-line! (nth lines i))
+                                                     (emit! (str "\u001b[" (dec rows) "B"))
+                                                     (recur (+ i rows)))
+                                                 (do (emit-line! (nth lines i))
+                                                     (recur (inc i))))))))
                                        (emit! CSI-2026-L)
                                        (reset! hardware-cursor-row (max 0 (dec new-count)))
                                        (reset! viewport-top (max 0 (- (max h new-count) h)))
