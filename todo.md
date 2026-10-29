@@ -36,12 +36,20 @@ EROSION 0.344   313 of 8784 functions CC>10   max CC 69
 VERBOSITY 0.013
 ```
 
+After the bash executor (landed below):
+
+```
+EROSION 0.339   310 of 8801 functions CC>10   max CC 69
+                mass 34651.9 of 102324.7
+VERBOSITY 0.012
+```
+
 Two facts drive the ordering. CC is a cliff — a function at CC 11 contributes
 100% of its mass, at CC 10 none — so crossing the line beats shrinking it;
 and SLOC is `sqrt`-weighted, so splitting beats trimming. The three open
-targets carry 2,751 of 102,683 mass (2.7%). Both large ones are blocked by
+targets carry 2,751 of 102,324 mass (2.7%). Both large ones are blocked by
 criterion 2 (see their entries); landing the TUI pair under CC 10 anyway
-would move erosion to ~0.323, and `parse-inline` to ~0.317.
+would move erosion to ~0.321, and `parse-inline` to ~0.315.
 
 ## Criteria (every landing)
 
@@ -167,6 +175,42 @@ byte. Their numbers are in § Adjacent.
       chunk like the non-`@` path. That is a parser change, not an extraction,
       and it needs its own benchmark and tests.
 
+- [x] **`fn@123` + `execute-bash`** (bash executor) —
+      `modules/app/src/kmet/app/tools/bash_executor.clj:123` (CC 37 / 79 SLOC /
+      mass 328.9, the spawn closure inside `create-default-ops`) and `:271`
+      (CC 19 / 201 SLOC / mass 269.4). Shape: a spawn with two watchers, and a
+      stream walk with a duplicated finalize.
+      Landed as thirteen fns, each with one job: `stdin-transport?` /
+      `shell-argv` / `write-command-to-stdin!` / `track-spawned-pid!` on the
+      argv side; `watch-timeout!` and `watch-signal!` for the two tree kills;
+      `pump-stream!`, `await-readers!`, `close-reader!`, `drain-streams!` for
+      the pipes; `finish-spawn` for the abort/timeout classification; and
+      `new-run-state` (the call's atoms and decoders), `collect-text!`,
+      `make-decoder`, `spill-chunk!`, `handle-raw-bytes!`, `clean-tail`,
+      `truncate-and-persist!`, `finalize-output`, `settle-grace!` and
+      `failure-result` on the stream side. `execute-bash` is the call sequence.
+      The duplicated finalize (success path and catch path both cleaned,
+      truncated and persisted the tail) collapsed into the helpers, which is
+      why the file's flagged lines fell from 13 to 4.
+      The file now has **0 of 37 functions over CC 10** (max CC 10, erosion
+      0.000 from 0.292): both targets gone in one landing, 598.3 mass.
+      Perf (criterion 2): the per-chunk streaming path (decode → sanitize →
+      rolling tail, 2000 × 1 KiB chunks per call) went 111.98 → 113.53 µs per
+      chunk, **+1.4%** by min-of-five rounds — inside the 2% budget; a whole
+      `execute-bash` call was within run-to-run noise, because it pays a process
+      spawn and the 100 ms grace poll that dwarf the streaming work.
+      Verified: a new `kmet.app.tools.test-bash-executor` (11 ^:slow tests, real
+      subprocesses: exit code, stdout+stderr, truncation and its spill file,
+      timeout tree kill, cancel signal, missing cwd, spawn hook + env merge,
+      command prefix, the `shell-args` argv transport, and the up-front
+      shell-path check) plus `test-shell`, `test-bash-output`, `test-read`,
+      `test-mutation`, `test-tool-tables`, `test-util` and the TUI turn test —
+      69 tests / 249 assertions, all green. `bb lint-changed` 0/0,
+      `bb format-check-changed`. The tests were written against the pre-change
+      code first, which is how the one real slip showed up: a decoder's
+      `:finish` was read instead of called, appending two fn objects to the
+      output.
+
 - [x] **`parse-args`** — `modules/app/src/kmet/app/core.clj:176`,
       CC 31 / 88 SLOC / mass 290.8. Shape: argument/clause ladder.
       Landed as a parse table: nine `read-*` readers (each one argument class,
@@ -269,10 +313,18 @@ byte. Their numbers are in § Adjacent.
 Remaining outliers whose fixes are the treatments above:
 `process-input-buffer!` (CC 45 / 480.5, `kmet.tui.core` — the largest mass
 left in the tree, and the input reader's hot path: the `parse-inline`
-per-element argument applies), `agent-handle` (CC 20 / 221,
-`kmet.app.loop.driver`), `execute-bash` and its inner `fn` (CC 19 / 201 and
-CC 37 / 79, `kmet.app.tools.bash-executor` — the nested fn is the cliff case),
-`run-bash` (CC 26 / 92, `kmet.app.tools.bash`).
+per-element argument applies to its inner byte walk, while the chunk-level
+ladder around it is landable), `agent-handle` (CC 20 / 297.3,
+`kmet.app.loop.driver` — once per agent turn), `run-bash` (CC 26 / 249.4,
+`kmet.app.tools.bash` — once per tool call), `score-tool-match` (CC 26 /
+245.3, mcp search), `load-extension*` (CC 23 / 237.9, once per load),
+`parse-kitty-sequence` (CC 34 / 235.6, per escape sequence),
+`interactive/run` (CC 37 / 395.1, once per process start), `myers-ops`
+(CC 26 / 206.4, per edit), and the five AI stream parsers
+(`parse-responses-event` 235.4, `bedrock-messages` 234.5,
+`detect-openai-completions-compat` 234.3, `parse-mistral-event` 233.8,
+`bedrock-frame-event` 219.2 — once per stream event, and one shared row
+shape).
 
 The once-per-event outliers, which are the cheap landings now that both large
 targets are blocked: `build-frame-lines` (`kmet.tui.core:143`, CC 13 /
