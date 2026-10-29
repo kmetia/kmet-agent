@@ -20,12 +20,12 @@
   {:name "loader" :src "modules/loader/src" :test "modules/loader/test" :rank 0}
   {:name "srce" :src "modules/srce/src" :test "modules/srce/test" :rank 1}
   ;; The kmet2 application: shared services, the session layer, the extension
-  ;; host (new-app.md), and the front end. The TUI's widgets, selectors and
-  ;; mode row are `kmet.ui.*` under `modules/app/src/kmet/ui` — the module that
-  ;; was `ui` until it merged here; the layer guard rules on that subtree by
-  ;; path. Every other namespace is kmet.app.* (landing 11 renamed the ones
-  ;; whose lifts had kept kmet1's names); kmet.extension is the ABI and keeps
-  ;; its name.
+  ;; host (architecture.md § Composition), and the front end. The TUI's widgets,
+  ;; selectors and mode row are `kmet.ui.*` under `modules/app/src/kmet/ui` —
+  ;; the module that was `ui` until it merged here; the layer guard rules on
+  ;; that subtree by path. Every other namespace is kmet.app.* (landing 11
+  ;; renamed the ones whose lifts had kept kmet1's names); kmet.extension is
+  ;; the ABI and keeps its name.
   {:name "app" :src "modules/app/src" :test "modules/app/test" :rank 3}
   ;; tk is the Tk backend plus its kmet.gui-sample.* widget skeleton (one
   ;; `:ui/transcript` composite over the backend's extra-tag seam). No module

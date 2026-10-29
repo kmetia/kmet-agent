@@ -1,6 +1,7 @@
 (ns kmet.extensions.mcp-adapter.tool-source
-  "The MCP catalog as a run_code sandbox tool source (run_code.md T2): the
-   adapter contributes its cached MCP tools to kmet's builtin `run_code` tool
+  "The MCP catalog as a run_code sandbox tool source (architecture.md
+   § Tools and the script sandbox): the adapter contributes its cached MCP
+   tools to kmet's builtin `run_code` tool
    instead of shipping a runtime of its own (the retired mcpScript tool and
    its bb-subprocess JSON-lines engine).
 
@@ -12,8 +13,8 @@
    calls go through proxy/call-mcp-tool, so lazy connect, failure backoff,
    auth and the output guard apply unchanged.
 
-   Scripting consequence (run_code.md T2): scripted MCP code now runs in the
-   shared in-process SCI sandbox like every other script — report results
+   Scripting consequence: scripted MCP code now runs in the shared in-process
+   SCI sandbox like every other script — report results
    with `(emit value)`, deref tools/call explicitly
    (`@(tools/call \"server_tool\" args)`), and branch on the kmet result
    map (:is-error/:content), not on mcpScript's {:ok :data} envelope."

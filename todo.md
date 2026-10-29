@@ -4,7 +4,7 @@ Actionable items from the architecture review. Baseline at review time:
 `bb lint` 0 errors / 0 warnings, `bb format-check` clean, `bb check-catalog`
 current, targeted runtime/kernel/guard suites green.
 
-## Done — P0
+## Done
 
 ### P0.1 — Bound and relocate diagnostics logs — **landed**
 
@@ -71,6 +71,24 @@ Verification: `bb test` 4,348 tests / 26,453 assertions, `bb test-ext` 139 /
 709, `bb lint` 0/0, `bb format-check` clean, `bb check` compiles all source
 namespaces.
 
+### P1.3 — Split the design record — **landed**
+
+Not the `docs/design/` move this item proposed, and no content rewrite:
+`new-app.md` is now the design record only — the open seams, the limits that
+shipped, the decisions that still constrain a change, § Prior art: DSH, the
+"not doing" list — 252 lines instead of 5,225. The landed ledger (every landing,
+its gates and the drift found while planning) is deleted; git history holds it.
+`run_code.md` (1,029 lines) followed it: the shipped tool design is
+`docs/architecture.md` § Tools and the script sandbox, and the evaluator /
+process-isolation decision it left open is § Open at HEAD 6 of `new-app.md`.
+The current architecture moved into `docs/architecture.md`: composition
+(profiles, bundles, rows, patches, layers, presets, extension rows), the service
+catalog, the multi-agent server, the event bus, permissions and approvals, the
+`:ui` contract, modes, the reload/turn boundary, inspection, and the guard
+table. Links were repointed — the AGENTS topic map, `README.md`, `srce.md` and
+its README, `docs/profiles.md`, `modules.edn`, and every source docstring that
+cited a removed section.
+
 ## Open — P1
 
 ### P1.1 — Put the shipped adapters under a gate
@@ -96,15 +114,6 @@ only, but `kmet.ai` holds 15 `defonce` cells (`models.clj:116,120,463,464`,
 Add the `kmet.ai` tree (and optionally `tui`/`tk`) to the ledger, each cell
 with a written reason and a note on how a test resets it. Follow-up: give the
 registries explicit reset APIs so tests can stop using `with-redefs`.
-
-### P1.3 — Split the design record
-
-`new-app.md` is 5,225 lines / 374 KB; `perf.md` is 2,667 lines and
-`run_code.md` 1,028 — roughly 10k lines of root notes against 3,654 lines of
-user docs. Move to `docs/design/`: a short `index.md` for current decisions and
-`history/landings.md` for the append-only ledger; keep `docs/architecture.md`
-the current map and update the AGENTS topic map and cross-links. Mechanical
-move (`git mv`) plus link fixes — no content rewrite.
 
 ## Open — P2
 

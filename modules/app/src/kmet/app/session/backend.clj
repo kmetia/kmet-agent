@@ -10,13 +10,13 @@
    app never looks inside it.
 
    The file moved into `app` with the session layer it names — the module
-   changed, the namespace did not (`new-app.md` § Two axes) — so the row that
+   changed, the namespace did not — so the row that
    mounts it and the service that reads it are now both here.
 
    The row is `:sessionPersistence`: it provides a backend into the mount
    site's scope, where the `:sessions` row next to it injects it. A second
    backend is a second row providing the same key, never a change to `:sessions`
-   (`new-app.md` § Service catalog)."
+   (`docs/architecture.md` § Service catalog)."
   (:require [kmet.app.session.listing :as listing]
             [kmet.app.session.store :as store]
             [kmet.srce.core :as srce]))

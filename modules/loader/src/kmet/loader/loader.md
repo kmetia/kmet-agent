@@ -991,8 +991,9 @@ a top-level `eval` under `with-loader*` is **not** gated — a `require` of a
 namespace the loader cannot serve falls through to the runtime's global
 source roots. Only source *loaded through* a context carries the require
 rewrite, so code that must respect a context's policies has to enter as a
-namespace source — `run_code.md`, "Scripts on kmet.loader", records what that
-means for a native script evaluator.
+namespace source. That is why the `run_code` sandbox evaluates on its own SCI
+context instead of a native loader context (`docs/architecture.md` § Tools and
+the script sandbox): a native evaluator would leave the require gate advisory.
 
 **Hardened since (cases 22–26).** The rewrite grew from four ops to nine, with
 the semantics Clojure gives them: `require`/`use`/`refer` load through the

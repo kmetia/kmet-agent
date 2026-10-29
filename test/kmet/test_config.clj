@@ -108,7 +108,7 @@
 (t/deftest test-load-config-carries-shell-settings
   (t/testing "the shell settings ride the loaded config; the agents factory
             turns them into each agent's :shell value, so load-config has no
-            process cell to write (new-app.md, landing 9a)"
+            process cell to write (docs/architecture.md § Service catalog)"
     (let [tmp (str (fs/create-temp-dir {:dir "target" :prefix "shell-settings-test-"}))]
       (try
         (spit (str (fs/path tmp "settings.edn"))

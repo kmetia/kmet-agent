@@ -16,13 +16,14 @@ modes, and **everything is a plugin**: the loop, tools, sessions, model access
 and modes are replaceable rows — model access is the `:llm` service
 (`kmet.app.llm`, with the request as `kmet.ai.llm` behind the row) — and an
 extension mounts beside them instead of patching a privileged core. The module
-map, the open seams (a composition edit still has no `applied` /
-`restart-required` vocabulary) and the landings that closed the rest are in
-[`new-app.md`](new-app.md) § Everything is a plugin. The kernel's deliberate differences from Cordis are in
-[`srce.md`](modules/srce/src/kmet/srce/srce.md) §5/§10. The architectural
-consequence for changes: new behavior attaches to a documented seam — a plugin
-row, a service, an event, or the extension contract — not to a branch in the
-entry or a new global.
+map, the composition and the service catalog are in
+[`docs/architecture.md`](docs/architecture.md); the open seams — a composition
+edit still has no `applied` / `restart-required` vocabulary among them — are in
+[`new-app.md`](new-app.md) § Open at HEAD. The kernel's deliberate differences
+from Cordis are in [`srce.md`](modules/srce/src/kmet/srce/srce.md) §5/§10. The
+architectural consequence for changes: new behavior attaches to a documented
+seam — a plugin row, a service, an event, or the extension contract — not to a
+branch in the entry or a new global.
 
 ## Topic map
 
@@ -30,7 +31,7 @@ entry or a new global.
 |------|-------------------------|
 | Application layout and contributor workflow | [`docs/architecture.md`](docs/architecture.md) |
 | Kernel: ctx tree, services, inject, fibers, effects, events | usage: [`modules/srce/README.md`](modules/srce/README.md); contracts: [`modules/srce/src/kmet/srce/srce.md`](modules/srce/src/kmet/srce/srce.md) |
-| kmet2 application: services, agents, sessions, profiles, landings | [`docs/architecture.md`](docs/architecture.md); design record and migration ledger in [`new-app.md`](new-app.md) |
+| kmet2 application: composition, services, agents, sessions, tools and the script sandbox | [`docs/architecture.md`](docs/architecture.md); open seams and declined options in [`new-app.md`](new-app.md) |
 | TUI, components, Hiccup, reactivity, input, and rendering | [`modules/tui/src/kmet/tui/tui.md`](modules/tui/src/kmet/tui/tui.md) |
 | Tk backend and its widget sample (`kmet.tk.*`, `kmet.gui-sample.*`) | [`modules/tk/src/kmet/tk/README.md`](modules/tk/src/kmet/tk/README.md) |
 | Extension contract (`kmet.extension` API, allowed namespaces, lifecycle) | [`modules/app/src/kmet/extension.md`](modules/app/src/kmet/extension.md) |
@@ -43,10 +44,10 @@ entry or a new global.
 | Building and distribution | [`docs/building.md`](docs/building.md) |
 
 User-facing documentation belongs in `docs/`. Implementation notes belong next
-to their source package. The temporary notes `run_code.md`, `perf.md`,
-`jolt-bugs.md`, `tcl.md`, and `new-app.md` (the kmet2 design record and
-landing ledger, recovered and reconciled to HEAD) intentionally remain at the
-project root. (`engine.md` was folded/retired once the session-runtime split’s
+to their source package. The temporary notes `perf.md`,
+`jolt-bugs.md`, `tcl.md`, and `new-app.md` (the kmet2 design record: the open
+seams, the limits that shipped and the declined options) intentionally remain at
+the project root. (`engine.md` was folded/retired once the session-runtime split’s
 GUI-independent steps landed.)
 
 ## Basic development flow
@@ -54,7 +55,8 @@ GUI-independent steps landed.)
 - `bb start` starts `kmet.app.core/-main`, the process entry; `jolt start` is
   the native-host equivalent. There is one app: kmet1 was retired with the
   module that carried it, so the `--app` flag is gone and every host runs the
-  same composition. The migration that got there is [`new-app.md`](new-app.md).
+  same composition. The composition and landings that got there are in
+  [`docs/architecture.md`](docs/architecture.md).
 - `bb clean` removes build output and caches; `bb clean --dry-run` lists what
   it would remove. `jolt clean` is the native-host equivalent.
 - `bb nrepl` starts the development server on port 7801, blocks, and writes

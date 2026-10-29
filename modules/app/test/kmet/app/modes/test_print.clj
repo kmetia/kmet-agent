@@ -114,7 +114,7 @@
             "the text is not printed twice: edn mode prints events, not the answer")))))
 
 (deftest the-invocations-text-is-expanded-before-the-agent-sees-it
-  ;; new-app.md 5n's gate: `/skill:` and prompt templates are the front end's
+  ;; the invocation surface's gate: `/skill:` and prompt templates are the front end's
   ;; chain, not the model's prompt. The expansion itself is
   ;; `packages/expand-input`'s (tested where it lives); this pins that the mode
   ;; calls it, on the invocation's text, before sending.
@@ -183,7 +183,7 @@
                 "and the failure names the model that was asked for")))))))
 
 (deftest the-invocations-prompt-and-thinking-flags-reach-the-request
-  ;; new-app.md 5n's gate for these flags: read them back from the provider
+  ;; the invocation surface's gate for these flags: read them back from the provider
   ;; request, not from a map a test threaded. `--thinking` is the agent's
   ;; state; the two prompt flags are what the system message is built from.
   (let [request (atom nil)]
@@ -227,7 +227,7 @@
               "and not in the settings' directory"))))))
 
 (deftest an-at-file-is-the-message
-  ;; new-app.md 5n's gate: `-p @tasks.md` sends the file's contents, where the
+  ;; the invocation surface's gate: `-p @tasks.md` sends the file's contents, where the
   ;; argument was, so every mode sees text rather than a filename.
   (let [path (str "target/test-at-file-" (System/nanoTime) ".md")
         request (atom nil)]

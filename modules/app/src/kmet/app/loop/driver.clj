@@ -270,7 +270,8 @@
   (let [;; The shell settings are this agent's, on this agent's ctx: a per-agent
         ;; value has to be the only provider on its chain (the kernel forbids a
         ;; child shadowing an ancestor's service), which is why this is not a
-        ;; root row — the same reason :permissions is not one (new-app.md 9a).
+        ;; root row — the same reason :permissions is not one
+        ;; (docs/architecture.md § Service catalog).
         _ (srce/provide! child :shell (atom (shell/value config)))
         ;; The script boundary is this agent's too (9c), and the same rule
         ;; applies: a root row could never be narrowed for one agent. A

@@ -3,7 +3,7 @@
 
    A **bundle** is a reusable row list — the analog of dsh's `dsh.bundle` —
    and a **profile** is the app entry: it stacks bundles in order, then adds
-   its own rows and patches (`new-app.md` § Profiles and presets). A row names
+   its own rows and patches (`docs/architecture.md` § Composition). A row names
    a plugin **source** (`:plugin`) — a var, or an `:ext/<id>` for an installed
    extension (resolved before composition by `kmet.app.extensions.rows`) —
    never a keyword registry entry:
@@ -20,7 +20,7 @@
    Four row keys are not composition data:
 
    - `:mode true` marks the row `kmet.app.core` runs as the profile's mode,
-     handing it the command line (`new-app.md` § Landing 5a). It travels with
+     handing it the command line (`docs/architecture.md` § Composition). It travels with
      the row rather than with the profile so a patch that *replaces* the mode's
      plugin — an extension's own print mode — replaces what runs and not that it
      runs.

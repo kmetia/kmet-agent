@@ -2,7 +2,7 @@
   "Guard: the shipped modules never reach for a process-global store.
 
    A session, a UI provider or a mode is a child context in the ctx tree
-   (`new-app.md`), not a registration on one process node. The store that did
+   (`docs/architecture.md`), not a registration on one process node. The store that did
    that (`kmet.libs.scope`) and the shim that resolved *the* root
    (`kmet.agent.app-runtime`) are deleted, so their names are tripwires here:
    a name that no longer exists is exactly what a reintroduction has to type.

@@ -2,7 +2,7 @@
   "The `:agents` registry: live agent handles, the creation factory seam, and
    the send surface a front end drives.
 
-   **An agent is a child context plus a handle** (`new-app.md` § Multi-session
+   **An agent is a child context plus a handle** (`docs/architecture.md` § Multi-session
    server mode). The child context is the registry's: it extends the ctx
    `create!` was called with, inherits the services the root provides, and is
    the tree line `--dump-state` prints (`[:app :agent/5f3a2b1c]`). That ctx is
@@ -119,7 +119,7 @@
    `run-ops` are the run's; `setting-ops` and `session-ops` are the rest — each
    writes that agent's state or moves its session, so two agents of one process
    can differ — measured from the interactive TUI's own call sites
-   (new-app.md, landing 8)."
+   (docs/architecture.md § Multi-session server mode)."
   (into run-ops (concat setting-ops session-ops)))
 
 (defn- validate-handle!

@@ -41,7 +41,7 @@
 
    "modules/app/src/kmet/app/extensions/core.cljc"
    {'extensions
-    "The loaded extension records. An extension installs into the process's host and unloads from it; the host is process-level by decision (new-app.md § The extension host)."
+    "The loaded extension records. An extension installs into the process's host and unloads from it; the host is process-level by decision (docs/architecture.md § Service catalog)."
     'cli-flag-values
     "Extension `--flag value` values parsed once from the process argv (`get-flag` reads them). There is one command line per process."
     'extension-binding
@@ -97,7 +97,7 @@
 
    "modules/app/src/kmet/app/root.clj"
    {'app-root
-    "The one place a process names its root (new-app.md's decision: root.clj's process-root atom stays). A second root is a second app; a test that publishes its own puts the previous one back."}
+    "The one place a process names its root (docs/architecture.md: root.clj's process-root atom stays). A second root is a second app; a test that publishes its own puts the previous one back."}
 
    "modules/app/src/kmet/ui/tui/interactive.clj"
    {'live-mode

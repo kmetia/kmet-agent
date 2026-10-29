@@ -9,12 +9,11 @@
    log with no storage layer is not a second thing, it is a bug.
 
    The **handle is the backend's** and the app never looks inside it. That is
-   what lets the EDNL store (today `kmet.app.session.*`, rank 4, so the row
-   that mounts it ships from `agent`) and the in-process `memory-backend` here
-   answer one contract; `kmet.app.session.backend` is the EDNL one and
+   what lets the EDNL store (`kmet.app.session.*`) and the in-process
+   `memory-backend` here answer one contract; `kmet.app.session.backend` is the EDNL one and
    `kmet.app.session.test-contract` runs one set of assertions against both.
-   The ops are values, not a protocol, for the reason `new-app.md` gives for
-   `:sessions`: a backend is a plugin that provides this key.
+   The ops are values, not a protocol: a backend is a plugin that provides this
+   key, which is why `:sessions` needs no interface.
 
    Two rules the ops carry, stated once here because a backend that gets them
    wrong is indistinguishable from a working one for a while:

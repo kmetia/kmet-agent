@@ -52,7 +52,7 @@
    and by the interactive ! flow, so a bash tool built once at load time (the
    built-in registry entry) runs with the settings of the agent that runs it:
    two agents in one process can run two shells, which the process atom this
-   replaced could not say (new-app.md, landing 9a)."
+   replaced could not say (docs/architecture.md § Service catalog)."
   nil)
 
 (defn session-env

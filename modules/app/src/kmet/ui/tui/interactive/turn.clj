@@ -179,7 +179,7 @@
             ;; with). Passed to the executor explicitly because the command
             ;; runs in a future, which conveys no dynamic bindings, and bound
             ;; around the user-bash emit so an extension handler's bash sees
-            ;; the same shell (new-app.md, landing 9a).
+            ;; the same shell (docs/architecture.md § Service catalog).
             shell (runtime/shell (:engine cs))
 
             ;; ── Build session env (pi: resolveSpawnContext) ─────────────

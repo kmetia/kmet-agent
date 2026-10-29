@@ -1,13 +1,13 @@
 (ns kmet.app.presets
   "A preset is a bundle mounted under one ctx.
 
-   `new-app.md` § Profiles and presets: a **bundle** is reusable rows plus
+   `docs/architecture.md` § Composition: a **bundle** is reusable rows plus
    patches, a **profile** stacks bundles at the root, and a **preset** mounts
    one under an agent's child ctx. The machinery is the same on purpose — one
    composition language, two mount points — so a preset is named like a bundle
    and composed by `kmet.app.profile`, never re-declared here.
 
-   What a preset is *for*: per-agent composition (`new-app.md` § Multi-session
+   What a preset is *for*: per-agent composition (`docs/architecture.md` § Multi-session
    server mode). The agent's child ctx inherits root services through the
    chain, so the difference a preset makes is a row the child provides itself —
    a `:permissions` policy for one agent, a service nothing above it provides, a

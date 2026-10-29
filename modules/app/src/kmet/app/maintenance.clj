@@ -5,8 +5,8 @@
    `generate-models!` writes the user-level caches a run reads, so it runs
    **before** the process world loads; `list-models` prints the table a run
    would choose from, so it runs **after** the load — extension providers are
-   catalog entries only then (new-app.md, 5n). Moved here from kmet1's `cli` at
-   5n so both entries answer the same flags with one implementation."
+   catalog entries only then (docs/architecture.md § Composition). Both entries
+   answer the same flags with one implementation."
   (:require [clojure.string :as str]
             [kmet.ai.image-model-gen :as image-gen]
             [kmet.ai.image-models :as image-models]

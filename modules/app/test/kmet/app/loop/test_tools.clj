@@ -295,7 +295,7 @@
 
 (t/deftest test-a-tool-dropped-after-the-request-still-runs
   ;; the request's tool map is captured once and threaded through the turn
-  ;; (new-app.md, "Reload and the turn boundary"): the wire list, the declared
+  ;; (docs/architecture.md, "Reload and the turn boundary"): the wire list, the declared
   ;; set and the dispatch all resolve against that capture, so a tool unloaded
   ;; between the model's tool_use and its execution still runs — the race the
   ;; one-read discipline claims closed

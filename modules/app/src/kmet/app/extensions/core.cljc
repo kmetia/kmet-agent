@@ -1206,7 +1206,8 @@
                                                   tool-name
                                                   (extension-owner name)))
       ;; sandbox-only tools: contributed into the run_code tool's surface, never
-      ;; the model's tool set (mcp-adapter's MCP catalog — run_code.md T2)
+      ;; the model's tool set (mcp-adapter's MCP catalog —
+      ;; docs/architecture.md § Tools and the script sandbox)
       :register-tool-source! (fn [id tools-fn]
                                (tools/register-tool-source!
                                 (handle) id tools-fn

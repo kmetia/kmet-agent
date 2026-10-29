@@ -72,7 +72,7 @@
   ;; and the loop's drain is what makes the change live. The mount is invisible
   ;; to the turn that submitted it and present when `:agent-settled` fires,
   ;; because that event means both "no turn in flight" and "no pending
-  ;; refresh" (`new-app.md`, § Reload and the turn boundary).
+  ;; refresh" (`docs/architecture.md`, § Reload and the turn boundary).
   (fs/create-dirs sessions-dir)
   (let [boot (runtime/boot (core/compose-config {:profile :tui}) {})
         ctx (:ctx boot)]

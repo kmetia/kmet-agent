@@ -443,7 +443,7 @@ in §11 records the rest.
 | Document | What it covers |
 |---|---|
 | [`src/kmet/srce/srce.md`](src/kmet/srce/srce.md) | the implementation note: contracts, thread rule, parity matrix, deferred list |
-| [`new-app.md`](../../new-app.md) | how the app composes on the kernel: services, agents, sessions, profiles, landings |
+| [`new-app.md`](../../new-app.md) | the app's design record: open seams, shipped limits, declined options |
 | [`docs/architecture.md`](../../docs/architecture.md) | module map, ranks and the contributor workflow |
 | [`modules/app/src/kmet/extension.md`](../app/src/kmet/extension.md) | the extension contract, which mounts on this kernel |
 | [`docs/extensions.md`](../../docs/extensions.md) | authoring extensions |

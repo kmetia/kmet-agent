@@ -82,9 +82,9 @@ being ignored.
 The application order is **built-in table, global, project, then each
 `--patch` flag in the order given**, so a project layer overrides a global one
 and a `--patch` flag overrides both. This is kmet's usual scope order (project
-over user), applied to composition; [`new-app.md`](../new-app.md) records the
-difference from dsh, whose home-level patch is applied after the profile's own
-and no project layer exists.
+over user), applied to composition; [`architecture.md`](architecture.md) § Composition
+records the difference from dsh, whose home-level patch is applied after the
+profile's own and no project layer exists.
 
 A project layer is project code: a row names a plugin var or an installed
 `:ext/<id>`, so a `.kmet/patch.edn` in a cloned repository can mount code at

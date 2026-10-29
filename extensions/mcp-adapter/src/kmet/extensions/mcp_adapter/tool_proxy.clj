@@ -182,7 +182,8 @@
 
 (defn script-tool-records
   "The cached MCP catalog as run_code sandbox tool maps, keyed by the
-   prefixed name (run_code.md T2 — replaces the retired mcpScript tool):
+   prefixed name (architecture.md § Tools and the script sandbox — replaces
+   the retired mcpScript tool):
    {name → {:name :label :description :parameters :streams? :execute}}.
    Every enabled, configured server's cached tools are listed (no spawn —
    the call connects lazily), so the sandbox sees the catalog the `mcp`

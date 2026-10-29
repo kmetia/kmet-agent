@@ -1,4 +1,4 @@
-;; kmet2's built-in composition data (new-app.md § Profiles and presets).
+;; kmet2's built-in composition data (docs/architecture.md § Composition).
 ;;
 ;; A bundle is reusable rows plus patches; a profile stacks bundles in order
 ;; (`[:bundle/name extra-layer?]`) and then adds its own rows and patches.

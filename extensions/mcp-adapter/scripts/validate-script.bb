@@ -1,6 +1,7 @@
 #!/usr/bin/env bb
-;; Scripted-MCP end-to-end validation (§12.6 Phase 2, run_code.md T2): load the
-;; extension against create-nullable-api with a config pointing at the fake
+;; Scripted-MCP end-to-end validation (§12.6 Phase 2, the shared script
+;; engine): load the extension against create-nullable-api with a config
+;; pointing at the fake
 ;; stdio server, bridge the contributed MCP tool source into the real
 ;; registry, then drive kmet's builtin `run_code` tool: discovery, calls,
 ;; error results, the gate, timeout, streaming, and the call trace.

@@ -685,7 +685,7 @@
 (t/deftest test-loop-summarization-honors-the-ctx-retry-policy
   ;; The summarization retries spend the ctx's retry policy too: the stage
   ;; config's budget wins over the run's option — here the option would
-  ;; suppress every retry and the ctx allows one (new-app.md, "Reload and the
+  ;; suppress every retry and the ctx allows one (docs/architecture.md, "Reload and the
   ;; turn boundary").
   (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
         sess (session/create-session (str dir))

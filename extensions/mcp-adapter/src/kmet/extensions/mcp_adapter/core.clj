@@ -610,7 +610,8 @@
    Resource read_* tools execute via proxy/read-mcp-resource; tools via
    proxy/call-mcp-tool. All declare :streams? — progress notifications
    stream as partial content while a call runs. Also syncs the script
-   sandbox's MCP tool source (run_code.md T2) — same trigger, same catalog."
+   sandbox's MCP tool source (architecture.md § Tools and the script
+   sandbox) — same trigger, same catalog."
   [state]
   (let [config (:config @state)
         mode-for (fn [server]
@@ -1300,7 +1301,7 @@
     (register-proxy-tool! state)
     ;; 2b. the MCP catalog joins the run_code sandbox as a tool source —
     ;; registered by sync-direct-tools! below (settings :script-mode
-    ;; gates it; run_code.md T2 retired the separate mcpScript tool)
+    ;; gates it; the shared engine retired the separate mcpScript tool)
     ;; 3. direct tools from cache (§10.5)
     (sync-direct-tools! state)
     ;; 3b. prompt commands from cache (pi resolveCachedPrompts)

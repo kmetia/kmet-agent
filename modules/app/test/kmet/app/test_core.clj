@@ -363,7 +363,7 @@
 
 (deftest session-flags-need-a-mode-that-opens-a-session
   ;; Print, rpc and the server create their agent through `:agents`, whose
-  ;; factory takes no session option yet (new-app.md, 10a). Accepting the flag
+  ;; factory takes no session option yet. Accepting the flag
   ;; there would start the fresh session it exists to prevent, so it is refused
   ;; by name, before anything boots.
   (doseq [[args flag profile] [[["-p" "hi" "-c"] "--continue" "print"]

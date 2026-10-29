@@ -2,7 +2,7 @@
   "The `:ui` capability service: what a UI provider must answer, and the ABI
    port a run binds from it.
 
-   A provider is a value, not a widget set (new-app.md § Pluggable UI).
+   A provider is a value, not a widget set (docs/architecture.md § Pluggable UI).
    `:kind`, `:render-tree`, `:request!` and `:capabilities` are required;
    whatever else a provider offers (`:widget-set`, `:notify`, `:input!`, a
    toolkit's own hooks) is optional and must be named in `:capabilities`, so a

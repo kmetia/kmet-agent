@@ -7,7 +7,7 @@
    (`srce/isolate`), so a tool a script calls cannot read the composition's
    `:tools`, `:shell` or `:workspace` from the ctx it was handed. The seam is
    the ctx under the realm boundary, and the value is what the boundary is
-   (new-app.md, landing 9c).
+   (docs/architecture.md § Service catalog).
 
    Per agent, like `:shell` and `:permissions`, and for the kernel's reason: a
    child may not shadow a service its ancestor provides, so a per-agent value

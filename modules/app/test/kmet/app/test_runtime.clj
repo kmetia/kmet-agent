@@ -4,7 +4,7 @@
    The boot's contract is that a composed row list becomes a live ctx or a
    `:kmet.app/boot-failed` naming each row that did not mount; the submission
    point's contract is that a change from another thread is *not applied* until
-   the boundary runs (`new-app.md`, landing 2), and that the boundary drains to
+   the boundary runs (`docs/architecture.md` § Reload and the turn boundary), and that the boundary drains to
    a fixpoint including the kernel's own pass."
   (:require [clojure.test :refer [deftest is testing]]
             [kmet.app.events :as events]

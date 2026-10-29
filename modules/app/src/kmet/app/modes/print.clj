@@ -4,7 +4,7 @@
 
    pi: modes/print-mode.ts. It is the first client of the `:agents` factory
    rather than kmet1's engine — create a handle, send the message, and listen
-   on the agent's own ctx (new-app.md, 7b-i and landing 8) for the streaming
+   on the agent's own ctx (docs/architecture.md § The event bus) for the streaming
    deltas and for the settle that ends the run. The scope is per agent: two
    print runs in one process settle their own promises, because the kernel
    routes a listener on an agent's ctx only its own agent's events.

@@ -1,17 +1,19 @@
 # kmet developer guide
 
-This file is the contributor's map: the package layout, the layering rules and
-the workflow. Implementation-specific references live beside their namespaces
-rather than in the user-facing `docs/` directory: see
+This file is the contributor's map: the package layout, the composition data,
+the service catalog, the layering rules and the workflow.
+Implementation-specific references live beside their namespaces rather than in
+the user-facing `docs/` directory: see
 [`modules/tui/src/kmet/tui/tui.md`](../modules/tui/src/kmet/tui/tui.md),
 [`modules/loader/src/kmet/loader/loader.md`](../modules/loader/src/kmet/loader/loader.md),
 [`modules/srce/src/kmet/srce/srce.md`](../modules/srce/src/kmet/srce/srce.md),
 [`modules/app/src/kmet/extension.md`](../modules/app/src/kmet/extension.md), and
-[`pi-alignment.md`](pi-alignment.md). The app's design record and migration
-ledger — reconciled to HEAD, and the only place that records what did *not*
-ship — is [`new-app.md`](../new-app.md); this file is the current map.
-Temporary analysis notes (`run_code.md`, `perf.md`, `jolt-bugs.md`, `tcl.md`)
-remain at the repository root by convention.
+[`pi-alignment.md`](pi-alignment.md). The generated composition catalog is
+[`composition.md`](composition.md); the app's design record — the open seams,
+the limits that shipped and the options declined — is
+[`new-app.md`](../new-app.md); this file is the current map. Temporary analysis
+notes (`perf.md`, `jolt-bugs.md`, `tcl.md`) remain at the
+repository root by convention.
 
 ## Project structure
 
@@ -80,50 +82,61 @@ kmet/app/
 │                         order matters), --version's printing
 ├── invocation.clj      — the invocation surface: patterns resolved against the
 │                         catalog, the run flags applied to the loaded config
-├── profile.clj         — profile → rows composition, layer patches, rendering
-├── registries.clj      — the registry router (one handle per tag;
-│                         `process-handle` is the published one)
+├── profile.clj         — profile → row layers, patches, rendering (data only)
+├── profiles.edn        — the built-in bundle + profile table
+├── catalog.clj         — rows as cards (`--dump-config`)
+├── composition_gen.clj — `docs/composition.md`'s generator
+├── presets.clj         — a bundle mounted under one agent's child ctx
+├── registries.clj      — the registry row plugins and the router (one handle
+│                         per tag; `process-handle` is the published one)
+├── registry.clj        — the handle itself (tag + name over an atom)
 ├── agents.clj          — the `:agents` service: the handle factory + ops
 ├── extensions/         — the extension host: core (the bound services, the
 │                         api, the registry tags), context (per-extension SCI),
 │                         libs (the bundled set), bundled.clj (artifact
-│                         discovery), and the UI request/respond pair
+│                         discovery), rows.clj (an `:ext/<id>` source),
+│                         layers.clj (the ambient patch.edn layers), and the UI
+│                         request/respond pair
 ├── session/            — the log (core, store, listing, context, stats, tree,
 │                         schema, export, backend), the runtime
 │                         (`runtime.clj`: state, lifecycle, submission chain,
-│                         queues, compaction, subscribers), and the shared
-│                         lifecycle (the bare engine is gone; tests drive
-│                         handles)
+│                         queues, compaction, subscribers), the compaction
+│                         queue and summary, and the shared lifecycle
+├── sessions.clj        — the `:sessions` row (the log over its backend)
 ├── loop/               — the agent loop: message, state, completion,
 │                         tool_exec, the stages, and `driver.clj`/`stages.clj`
-├── compaction/         — the compaction subsystem (`core`, `stage`)
+├── compaction/         — the compaction row and stage
 ├── tools/              — tool, util, invoke, registry, bash (+executor,
-│                         output), read, write, edit, run_code, config
-├── modes/              — the mode rows: print, rpc, server, out
-├── packages.clj, packages_cli.clj — package/resource resolution and the
-│                         install/remove/update/list/config CLI
+│                         output), read, write, edit, run_code, config, shell
+├── modes/              — the mode rows: print, rpc, server (+ server_unix), out
+├── packages.clj, packages_cli.clj, git_packages.clj — package/resource
+│                         resolution and the install/remove/update/list/config CLI
 ├── commands/           — the slash-command registry + the portable builtins
 ├── prompts.clj, skills.clj, skill_block.clj, system_prompt.clj — the resource
 │                         registries and the prompt builder
-├── event_bus.clj, events.clj, projections.clj — the event stream
-├── config.clj, config_schema.clj — settings and their schema
+├── events.clj, wire.clj, projections.clj — the event vocabulary, its wire
+│                         projection, and the derived session state
+├── permissions.clj     — the `:permissions` policy and `:approvals` seam
+├── sandbox.clj         — the `:sandbox` realm a script's tool calls run in
+├── llm.clj, ui.clj     — the `:llm` and `:ui` contracts
+├── config.clj, config_schema.clj, project_context.clj — settings, their
+│                         schema, and the project context
 ├── world.clj           — the process world: `load!` (catalogs, config, themes,
 │                         CLI flags) and the deferred `:world` row that mounts it
 ├── root.clj            — the one process-root atom and the publish rule
 ├── front_end.clj       — the front end's published surface
 ├── inspect.clj         — `/units` and the ctx-tree dump
+├── model_resolver.clj  — model patterns → catalog ids
+├── keybindings.clj, retry.clj, loop_guard.clj — the key-hint table and the
+│                         loop's two stage leaves
 └── version.clj         — the version string and the source-run marker
 ```
 
 Each row names its own file (`tools.clj`, `sessions.clj`, `extensions.clj`,
 `agents.clj`, …): a row is a `srce` plugin whose `apply` provides its service,
-and `registries.clj` is the router behind them.
-
-[`new-app.md`](../new-app.md) is the app's design record and migration ledger:
-why the rows are what they are, what each landing shipped, and the items that
-did not ship (`:ext/…` composition rows, the profile file layers beyond
-`--patch`). Its "Reconciliation" section maps the historical names to HEAD;
-this file stays the current map.
+and `registries.clj` is the router behind them. How the rows are composed is
+§ Composition below; [`new-app.md`](../new-app.md) keeps the design record and
+the items that did not ship.
 
 ### The front end (`modules/app/src/kmet/ui`)
 
@@ -131,6 +144,8 @@ this file stays the current map.
 kmet/ui/
 ├── tui.clj             — the TUI provider + mode row (one artifact: the
 │                         `:ui` surface and its `:mode` entry)
+├── headless.clj        — the `:ui/headless` provider (the ABI's own answers)
+├── shared.clj          — the helpers the front ends share
 └── tui/
     ├── interactive/    — the interactive cluster: layout, turn, session admin,
     │                     builtins, state (CoreState), status, auth, resources,
@@ -159,6 +174,375 @@ docs/examples/          — copyable, non-auto-loaded settings and complete them
 The tree is a working map: update it in the same change that moves a
 namespace, and keep detailed behavior in the topic documents listed in the
 root `AGENTS.md` topic map.
+
+## Composition
+
+The app is assembled from EDN composition data, not code. `kmet/app/profiles.edn`
+is the built-in table of **bundles** (reusable rows plus patches) and
+**profiles** (the app entry: bundles stacked in order, then its own rows and
+patches); `kmet.app.profile` resolves and patches it — data only, it never loads
+a plugin or reads a process value; `kmet.app.catalog` describes rows as cards
+for `--dump-config`; and `kmet.app.core` mounts the composed result. The
+generated catalog of what the shipped profiles mount, rows and model-facing tool
+text included, is [`composition.md`](composition.md) (`bb generate-catalog` /
+`bb check-catalog`; `bb test-changed` runs the check, so a stale page cannot
+pass).
+
+- A **row** names a plugin **source** — a var (`kmet.app.tools.bash/plugin`) for
+  a built-in, or `:ext/<name>` for an installed extension, resolved by
+  `kmet.app.extensions.rows` before composition — plus its config:
+  `{:id :tool/bash :plugin kmet.app.tools.bash/plugin :config {}}`. `:id` is the
+  identity a patch targets and `--dump-config` prints; it defaults to the
+  plugin's `:name`. A built-in tool is a row, so the model's table is what the
+  composition mounted and `{:id :tool/bash :remove true}` is how a profile (or a
+  preset) runs without bash.
+- A **patch** targets one row: `{:id … :config {…}}` deep-merges the row's
+  config, `{:id … :remove true}` drops it, and an unknown `:id` that carries a
+  `:plugin` inserts a row (positioned by `:after`/`:before`, else appended). A
+  patch that names an unknown row without a plugin is an error, and so is a
+  duplicate id across stacked layers. Configuration *values* deep-merge;
+  composition does not.
+- Layers apply in order: the built-in table < `~/.kmet/agent/patch.edn` <
+  `.kmet/patch.edn` < `--patch FILE` (repeatable). `--dump-default-config`
+  prints the built-in table alone, and `kmet config` edits the two ambient
+  layers through `kmet.app.extensions.layers`. A profile still comes only from
+  the built-in table: there is no named home profile and no project-shipped
+  profile table. (dsh applies its home-level patch *after* the profile's own
+  rows and has no project layer; kmet puts both ambient layers before the
+  profile's own rows and the `--patch` files, the usual project-over-user
+  order.)
+- Four row keys are not composition data. `:mode true` marks the row the entry
+  runs; `:prompt true` makes the command line's remaining arguments the mode's
+  input (an empty one is a usage error); `:session-lifecycle true` says the mode
+  resolves `-c`/`-r`/`--session` itself; `:defer true` says a generic boot must
+  not mount the row. `:defer` exists for rows only the entry can mount: the
+  process world is the one today, so `runtime/boot` returns it in `:deferred`,
+  `run-mode` mounts it with the invocation before the mode, and `--dump-state`
+  reports `deferred: :world` instead of reading the machine's settings.
+- A **preset** mounts a bundle under one agent's child ctx.
+  `:agents/create!`'s `:setup` seam is the mount point, a mode row names its
+  presets in `:config` (`{:presets [:bundle/gated]}`, `:profile tui-ask`), and
+  the rows must be active when the mount settles: a preset that composes but
+  does not mount throws before the agent exists and unwinds what did mount.
+- Extensions are composition-only: a run loads exactly the `:ext/<id>` rows its
+  composition names (`kmet.app.world` loads none from settings), the row's
+  config arrives as `(:config api)`, and `/reload` unmounts and remounts each
+  mounted row's extension with the same config without re-reading the
+  composition. An extension's own `:rows` mount as children of its fiber, so
+  they provide into that ctx only; a preset refuses an `:ext/…` row, which is
+  why an `:ext/…` row belongs to a root profile rather than an agent preset.
+
+## Service catalog
+
+The application is its services: one key per seam, one implementation per
+scope. A plugin writes `inject [:tools]`, never `[:registries]`, so a per-agent
+override is per-seam rather than all-or-nothing. A service value is mostly a map
+of fns, so a malli schema could only assert `fn?`: the catalog entry plus one
+contract test per service is the check that pays (plugin *config* is still
+schema-validated at load).
+
+| Service | Value | Provider |
+|---|---|---|
+| `:world` | `{:config …}` — catalogs, models layer, settings, themes and extension flags as loaded | `kmet.app.world/plugin` (`:defer`, root only) |
+| `:llm` | `{:send-message (fn [opts])}` | `kmet.app.llm/plugin`; builtin `kmet.ai.llm/send-message` |
+| `:tools` | a `Registry` handle (tag + name) | `kmet.app.tools/plugin`; each tool row registers through it |
+| `:commands` `:prompts` `:skills` | a `Registry` handle each | `kmet.app.registries/{commands,prompts,skills}` |
+| `:events` | the event vocabulary registry | `kmet.app.events/plugin` |
+| `:systemPrompt` | ordered sections assembled over `:skills` | `kmet.app.system-prompt/plugin` |
+| `:sessionPersistence` | `{:create! :load :paths :append! :entries :delete! :header}` | `kmet.app.session.backend/plugin` (EDNL files) |
+| `:sessions` | the log over the backend, plus the id index | `kmet.app.sessions/plugin` |
+| `:projections` | derived state over the log: inbox, boundaries, token meter | `kmet.app.projections/plugin` |
+| `:agents` | live handles, the factory seam, the send/control surface | `kmet.app.agents/plugin` |
+| `:agentLoop` | the driver; registers the `:agents` factory | `kmet.app.loop.driver/plugin` |
+| `:retry-policy` `:loop-guard` | the loop's stages | `kmet.app.loop.stages/{retry-policy-row,loop-guard-row}` |
+| `:compaction` | the compaction stage's operations | `kmet.app.compaction/plugin` |
+| `:permissions` | `{:policy :remember!}` — the tool-call decision | `kmet.app.permissions/permissions`, per agent |
+| `:approvals` | `{:ask!}` — the one `:ask` delivery seam | `kmet.app.permissions/approvals` at the root; the TUI and server rows supply their own |
+| `:shell` `:sandbox` | the agent's shell options; the realm names a script's tool calls are blocked from | provided per agent by the agents factory; a preset row that mounts first wins |
+| `:ui` | the capability service (`kmet.app.ui`) | `kmet.ui.headless/plugin`, `kmet.ui.tui/provider-plugin` |
+| `:extensions` | no service: the row binds the host's services (registry handle, ctx, resource ops, owner sweep) and publishes `process-handle` | `kmet.app.extensions/plugin` |
+
+`:models`, `:config` and `:auth` stay libraries on purpose: the model catalog
+is files, credentials are read before a ctx exists, and a provider is registered
+with `register-model-provider!` — a registry concern, not the request.
+`:workspace`/`:fs` need no service either (`kmet.libs.path` resolves against
+`(:cwd ctx)` and the run binds `*cwd*`), and `:subprocess` is the tool layer's
+own spawn.
+
+The kernel's placement rule decides where a value can mount: a child ctx cannot
+shadow a service its ancestor provides, so a per-agent value exists only where
+nothing above provides one. `:permissions`, `:shell` and `:sandbox` are
+per-agent for that reason, and `:bundle/minimal` deliberately carries no
+`:permissions` row — a policy at the root would be every agent's policy
+forever. `:approvals` is the mirror case: it belongs in the bundle at the root,
+because asking is the front end's job and one process-wide seam, and its default
+denies ("nobody can ask" is not "yes").
+
+## Multi-session server mode
+
+**An agent is a child context plus a handle.** The child ctx extends the ctx
+`create!` was called with (the app ctx, or another agent's for a subagent),
+inherits the root's services, and is the `[:app :agent/<id>]` line
+`--dump-state` prints. The handle is the driver's: `:agents` never learns what a
+turn, a session or a model is. `create!` is serialized and its `:setup` composes
+the agent's world before the handle is published, so nothing observes a
+half-built agent; a failing setup (or preset) rolls the child ctx back and
+leaves no handle. `dispose!` takes the handle and nothing else — the handle is
+the capability — aborts the live turn, drains the loop at the turn boundary and
+then releases the ctx, so no caller observes a half-disposed agent.
+
+The handle's ops are the front-end surface, measured from the front ends: the
+send surface (`send!`, `steer!`, `follow-up!`, `inject!`, `cancel!`,
+`when-idle`, `status`, `inbox`), the settings setters (`set-model!`,
+`set-thinking-level!`, the cycles, `set-config!`, the tool/compaction/steering
+switches) and the session lifecycle (`new-session!`, `resume-session!`,
+`switch-session!`, `fork!`, `branch-session!`, `clone!`, `set-session-name!`,
+`export-html!`). Readers stay accessors over the handle (`:agent`, `:config`,
+`:cwd`, `:turn-running?`, the queue atoms); every mutator is a registry op, so
+a front end never reaches the driver.
+
+The **server** makes that value multi-agent within one principal: accepting a
+socket creates an agent, every record carries its `:agent-id`, and closing the
+socket disposes it. A connection authenticates before it gets an agent and
+brings its world (`:cwd`, `:config`, the run's overrides). Its writes are a
+bounded per-connection lane that drops the **oldest** record and emits
+`{:type :stream-gap :dropped n}`, so a client resyncs with `:get-state` instead
+of silently losing a message. [`serve.md`](serve.md) is the connection rules;
+[`rpc.md`](rpc.md) is the command table the rpc and server modes share.
+
+## The event bus
+
+One table. The listener table and the six non-awaiting dispatch modes are the
+kernel's ([`srce.md`](../modules/srce/src/kmet/srce/srce.md) §5);
+`kmet.app.events` owns what a kernel must not know — the vocabulary and the
+owner a registration carries — and `kmet.app.wire` the projection a headless
+consumer reads. `events/on!` registers through `srce/on` with the registrant's
+ctx, so a listener is an effect of the registering fiber and hears only its own
+subtree, and `emit!` dispatches by the mode the event declares.
+
+- The vocabulary is a **registry**, like `:commands`: a plugin's `:events` map
+  is registered at mount under its owner, so a plugin's own events dispatch by
+  their declaration and unloading sweeps them. `emit!` refuses a mode the kernel
+  does not implement, and an emission must name a ctx.
+- **One event, one dispatch.** `:agent-settled` is emitted once per prompt and
+  carries the run's `:outcome`; the boundary modes are the declaration's job,
+  not a second dispatcher.
+- **Extension-only events are a vocabulary property** (`:public false`): the
+  provider bridges and the `:session-before-*` hooks carry request payloads, the
+  `Authorization` header and an abort atom, none of it EDN. `on-every` is the
+  public stream and skips them.
+- Hooks are host registrations, not a service (`:kmet/hook` in the registry
+  handle); the extension ABI registers on the host's ctx like any other
+  listener. A front end that needs data not on the stream extends the event, not
+  the reader.
+
+## Permissions and approvals
+
+Approvals are a policy plus one delivery seam, not two request APIs.
+`:permissions` decides, synchronously and per agent; `:approvals/ask!` is the
+one place an `:ask` goes, and it owns its timeout and abort (the run's `:signal`
+lets a dialog give up; the gate imposes no deadline). The TUI answers with its
+dialog, the server answers later over the wire, headless answers with its
+configured default, and `:ui/request!` stays the generic dialog channel.
+
+The gate is the loop's pre-tool waterfall and runs **after** the extension
+hooks, so a hook's argument rewrite is judged by the policy instead of slipping
+past it; `run_code`'s bridge composes the same gate into the tool hooks, so a
+script's inner `tools/call` is gated too. A policy that throws, or answers
+something that is not a verdict, is a deny — the failure mode of an approval
+gate must never be allow. `:remember!` records an answer at `:once`, `:agent` or
+`:workspace` scope in the memory the agent's ctx carries, which is what makes a
+remote session usable without a prompt per call.
+
+## Tools and the script sandbox
+
+The tool layer is `kmet.app.tools`: one record per tool, mounted as a row
+(`:tool/read`, `:tool/bash`, …) and dispatched through the `:tools` service. Two
+things are worth knowing before changing a tool.
+
+**One invocation pipeline.** `kmet.app.tools.invoke` is the only
+prepare → execute → finish path:
+
+- `prepare-tool-call` runs the before hook (pass, rewrite args, or block the
+  call with a result);
+- `execute-tool-call` executes under the caller's worker bindings and turns a
+  throwing tool into an error result;
+- `finish-tool-call` applies the after hook's `:content`/`:is-error` overrides,
+  for blocked calls too.
+
+The loop splits the phases so it can prepare sequentially, execute a batch
+concurrently, and keep emitting events and appending to the session; the
+`run_code` bridge runs all three inside one worker task and keeps its own
+promise and call trace. A scripted call therefore meets the run's
+before/after tool hooks exactly as a loop batch does — and the policy gate is
+the outer `run_code` call, not an inner one, because a per-tool hook is not a
+sandbox (a script can shell out through `babashka.process`).
+
+**`run_code`** (`kmet.app.tools.run-code`, the `:tool/run_code` row) is
+model-written Clojure in a per-call sandbox with the agent's tools bridged in.
+*Why it exists*: a tool result is re-sent on every later turn, so its token
+cost is paid repeatedly. The tool was measured before it was built — ~78% of
+result tokens were the find/read workload, mostly leaking through `bash`
+(`cat`/`rg`) rather than the `read` tool — and adoption is still the limiter
+after it landed (0.5% of result tokens, with the bash/read split unchanged).
+Its value is designed into the description and the batched surface, not assumed
+from per-call cost.
+
+- **The boundary is the ctx.** The loop hands every call the run's ctx as
+  `:srce-ctx`; `run_code` replaces it with a `srce/isolate` **realm** of that
+  ctx blocked for the names the agent's `:sandbox` value names (`:tools`,
+  `:shell`, `:workspace` by default — `kmet.app.sandbox`). A tool a script
+  calls cannot look the composition's services up from the ctx it was handed;
+  what it may use — this call's tool surface, cwd, shell and skills — travels
+  in the invocation's `:bindings`. The realm is per call and detached when the
+  script returns.
+- **Lifecycle.** One fresh SCI context per call, discarded on return. The
+  host's `clojure.*`/`babashka.*` namespaces are copied in (public vars
+  re-wrapped so macros survive), babashka gets the host class table, and the
+  fixed bundled-extension set (`kmet.app.extensions.libs`) is shared by value
+  the way an extension context gets it. `:load-fn` refuses anything else, so
+  requiring a kmet namespace is the named boundary error. Jolt's SCI exposes no
+  class table and the JVM host an explicit `java.lang`/`java.io`/`java.util`
+  subset. A `def` in one call is invisible to the next, and redefining an
+  injected var stays call-local.
+- **The bridge.** `(tools/call name args)` and the four builtin sugars return a
+  promise that settles with the record's verbatim result map
+  (`{:content :is-error :details :truncation :images}`); `tools/call-many`
+  validates and submits a batch, and `tools/await-all` derefs it in input order
+  while polling the cancel signal. Calls run on a shared process-wide pool (16
+  daemon workers), and a per-call admission lane gives **submission-order
+  starts** and treats a `:sequential` tool as a barrier — the same
+  `:execution-mode` the loop's own batches honour, so no built-in declares it
+  and the guarantee is for extension/contributed tools. Discovery
+  (`tools/list`, `tools/describe`) is a bridge-local read and never exposes
+  `:execute`.
+- **The callable set** is the loop's `select-tools` result: all tools ∩ the
+  agent's enabled set, plus extension-contributed sandbox-only sources, minus
+  the exclusions (`run_code` itself, so a bridge submission cannot nest). A
+  source is registered on the `:kmet/tool-source` tag, resolved per call, and
+  never joins the model's table — the mcp-adapter contributes its MCP catalog
+  this way (`kmet.app.tools.registry/register-tool-source!`). Listing and
+  dispatch therefore cannot drift.
+- **Output is `emit` only.** `(emit v)` (also `sandbox/emit`, and the bare
+  `emit` in the script namespace) is the one reported text channel: strings
+  print raw, other data `pr-str`, and it returns nil. stdout, stderr and the
+  final value are captured for the budget but never reported, so a script that
+  wants the model to see something must emit it. `(emit-image path-or-block)`
+  is the second channel, capped at 4 MiB of base64 per image and 8 images per
+  call, accepting exactly what `read` accepts. Capture is bounded at 1 MiB
+  (exceeding it aborts with `:output-limit`), printing is bounded
+  (`*print-length*`/`*print-level*`), and the emitted body is truncated to
+  16 KiB / 2,000 lines by default (`:max-output-bytes` may raise it to the
+  shared 50 KiB tool cap).
+- **Deadlines and cancellation are one signal.** Eval runs on a daemon thread
+  with SCI's `:interrupt-fn`. `:timeout` is seconds (absent or 0 = no deadline,
+  bash's semantics); Escape and the script's own abort (timeout/output-limit)
+  both feed the bridge's signal, which is the read-only OR of the run's and the
+  script's (`kmet.libs.concurrent/or-signal`), so an inner call is cancelled by
+  either. A pool task checks that signal at admission and again after the before
+  hook, so a slow hook cannot start a call past the abort. Per-tool coverage
+  stays cooperative (bash kills its process tree; MCP calls have no signal
+  plumbing), and a host-blocked script is abandoned after a 1.5 s interrupt
+  grace rather than killed — the one accepted limitation of an in-process
+  sandbox, with the process-isolation tier recorded in
+  [`new-app.md`](../new-app.md) § Open at HEAD.
+- **Result shape.** `:details` carries the effective `:timeout`, the measured
+  `:elapsed-ms` (wall clock for the whole call, including the grace and the
+  capture drain) and the call trace `{:calls [...]}` — one entry per inner
+  call, `:incomplete` when a tool ignored the abort. Inner results never enter
+  the transcript, the session or the context, and no tool-execution event is
+  emitted for them; the only things the model sees are the emitted text, the
+  images and the result map.
+
+The bridge pool is process-wide **by decision**: it is a bound, not a setting,
+and everything per-run travels in the submission's `:bindings`, so two agents
+share the pool and still run in their own cwd and shell. The cell is in
+`kmet.app.test-process-state`'s ledger with that reason.
+
+## Pluggable UI
+
+`:ui` is a capability service, not an inherited widget set. Required of every
+provider: `:kind`, `:render-tree`, `:request!`, `:capabilities`; everything else
+(`:widget-set`, `:input!`, `:notify`) is optional and must be named in
+`:capabilities`, so a consumer asks what the provider it has can do instead of
+probing. `kmet.app.ui/check` fails at the mount, naming the provider and the
+missing key, and `port` gives a mode the ABI map it binds
+(`kmet.app.front-end/install!`).
+
+The providers the tree ships are `:ui/headless` — nothing renders and every
+dialog answers the ABI's own default, so it is the base print/rpc/server stack
+rather than a stub — and `:ui/terminal` (`kmet.ui.tui/provider-plugin`, half of
+the TUI's two rows). A `ui-tk` provider and a web provider are separate
+development.
+
+A consumer declares `{:ui :optional}` so an absent provider does not hold its
+fiber pending, and upgrades itself when a richer UI attaches. The upgrade is a
+dispose-and-remount, so a UI consumer must be stateless: its state is the
+session log, the agent handle and the widget tree, never its `apply` closure.
+The one-line division to keep straight: **`kmet.tui` renders components;
+`kmet.ui` decides which backend renders.**
+
+## Modes
+
+A mode is a row (`:mode true`) and the profile is the selector — there is no
+`:modes` service and no listing registry, because `--dump-config` already prints
+the mode rows. The headless modes are `kmet.app.modes/{print,rpc,server}`;
+interactive is `kmet.ui.tui`, which is also the terminal `:ui` provider, and it
+can be both because a row names a plugin by var (a rank-3 provider costs a
+rank-2 mode no require). `kmet.test-layer-guard` holds the boundary in both
+directions: a business namespace never requires `kmet.ui.**`, `kmet.tui.**`,
+`kmet.tk.**` or a mode row, and a front end reaches the engine through the
+session runtime rather than the loop, its stages or the retired session engine.
+An extension cannot add a mode — the mode row is scanned before boot — but it
+can contribute the commands and tools a mode offers.
+
+## Reload and the turn boundary
+
+The kernel is synchronous (a provider change runs the refresh pass to a fixpoint
+before the call returns), so *when* the app allows a reload is the app's rule:
+at the turn's closing boundary, never mid-turn.
+
+- The boundary is `:agent-settled`. `kmet.app.loop/settle-boundary!` drains
+  `kmet.app.runtime`'s queue **before** the emit, so the event means both "no
+  turn in flight" and "no pending refresh": a tool thread's mount is invisible
+  to the turn that submitted it and live when the event fires.
+- `kmet.app.runtime/boundary!` admits **one** boundary at a time per root: turns
+  run on futures, and two drains at once would mount plugin code concurrently
+  (the pass flag does not prevent it — a `plugin!` that loses the pass runs its
+  `apply` inline).
+- A thread that must mount or provide **submits** (`submit!`) instead of
+  mutating; `kmet.app.test-submit-guard` holds every structural kernel call site
+  to a written owner-side reason and refuses one in the tool layer, the mode
+  rows or the UI. The kernel's half is in `srce.md` §3–§4.
+- **A request's tool list is one capture**: the wire list, the declared set and
+  the dispatch resolve against the snapshot taken when the request was built, so
+  a tool unloaded mid-request still runs for the request that offered it and a
+  tool added mid-request is not dispatched.
+- **Disposal never waits.** A teardown does not block on quiescence — the
+  boundary is where quiescence is decided — and a teardown that finds work in
+  flight cancels it. A remounted dependent is stateless, for the same reason the
+  UI upgrade is: its state lives in a service handle, not in `apply`'s closure.
+
+## Inspection
+
+`--dump-config` answers "what is composed" without booting; `--dump-state` and
+`/units` answer "what is mounted". One renderer (`kmet.app.inspect/units`), two
+entry points, both handed the process root — so a command and a flag cannot
+compute two listings that drift. One unit per line, path first, parents before
+children, fibers in mount order:
+
+- a **ctx** line is a path and its child count;
+- a **fiber** line is its state, its `inject` (an optional dependency marked
+  `?`), what it `provides` and its effect labels, plus the two facts a
+  registration table could never show: a `:pending` fiber's `waiting-for` and a
+  `:failed` one's error.
+
+`--dump-state` boots a **diagnostic** composition (`{:diagnose? true}`), so a row
+that stays `:pending` or ends `:failed` is a line in the tree instead of a boot
+error — a dump that failed on the very state it exists to explain would be
+useless exactly when it is wanted. It mounts every row except the `:defer` ones
+and prints them as a trailing `deferred: …` line. Effect labels are the
+inspection contract (`srce.md` §4): a catch-all label makes the line useless.
 
 ## Architecture and portability
 
@@ -393,6 +777,29 @@ bb format-check-changed # (or bb format-changed to write the fix)
 The full gates — `bb test`, `bb test-ext`, `bb lint` (0 findings required) and
 `bb format-check` — are slow. Use the changed-file tasks while iterating and
 run the full gates when requested or before release.
+
+### Guards
+
+The structural rules above are tests, not conventions. The ones that hold this
+document are:
+
+| Guard | Holds |
+|---|---|
+| `kmet.test-module-deps` | ranks stay strictly downward; a module's `deps.edn` is its `src` edge list in both directions |
+| `kmet.test-modules-manifest` | `modules.edn`, `bb.edn` `:paths`, `deps.edn`'s embed list and the packagers name the same trees |
+| `kmet.test-seam-requires` | a namespace requires no module above its own rank; `kmet.ai`/`kmet.libs` never reach up |
+| `kmet.test-layer-guard` | the business tree never requires the front ends (UI, TUI, Tk, a mode row); a front end reaches the runtime, not the loop or the retired engine |
+| `kmet.test-front-end-policy` | a front end names the process's resource policy and expansion chain where it wires a run; the TUI reads a handle, not the engine |
+| `kmet.test-no-global-node` | the retired process node and store names appear nowhere |
+| `kmet.test-retirement` | no `kmet.agent.*` name but `kmet.agent.ui.tui.tool-renderers` (an extension ABI name) |
+| `kmet.test-process-exit-guard` | `System/exit` only in `kmet.app.core/-main` and the two model generators' `-main`s |
+| `kmet.test-time-boundary` | durations use `kmet.libs.concurrent/monotonic-ms`, never the wall clock |
+| `kmet.app.test-process-state` | every remaining process cell has a written reason, checked both directions |
+| `kmet.app.test-submit-guard` | structural kernel calls only from the owner's side |
+| `bb check-catalog` | `docs/composition.md` matches the built-in composition |
+
+The kernel's own gates (contract tests, self-containment, the no-`scope` ban)
+are in [`srce.md`](../modules/srce/src/kmet/srce/srce.md).
 
 The commit-msg hook installed by `sh scripts/install_hooks.sh` refuses
 co-author trailers, AI session links, machine addresses and generated-with

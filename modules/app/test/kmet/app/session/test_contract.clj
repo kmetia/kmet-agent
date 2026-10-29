@@ -2,7 +2,7 @@
   "The `:sessionPersistence` contract, run against both backends: kmet2's
    in-process `memory-backend` and the EDNL files kmet1's store owns. One set of
    assertions, so the storage seam cannot drift from the store it will replace
-   (`new-app.md`, landing 4a).
+   (`docs/architecture.md` § Service catalog).
 
    Each backend gets a fresh session directory, so one case's files never leak
    into the next."

@@ -151,8 +151,8 @@
 
 (t/deftest test-loop-state-names-its-ctx
   ;; A state names the ctx it reads its stages and tool table from — there is no
-  ;; process default left (new-app.md, 7a) — and a run can be pointed at its own
-  ;; child ctx (landing 4c-ii-b).
+  ;; process default left — and a run can be pointed at its own
+  ;; child ctx.
   (let [mine (:ctx (support/test-ctx))]
     (t/is (identical? mine (:ctx (support/make-agent-state :ctx mine)))
           "a run names the ctx it reads")
@@ -164,7 +164,7 @@
 (t/deftest test-loop-runs-the-guard-in-its-ctx
   ;; The guard is the ctx's stage, not a namespace read: a spy in the run's
   ;; own ctx filters the batch (and trips it on the second, so the run
-  ;; settles), and the stage config supplies the threshold (new-app.md,
+  ;; settles), and the stage config supplies the threshold (docs/architecture.md,
   ;; "Reload and the turn boundary").
   (let [calls (atom [])
         spy (fn [state threshold tool-calls]
@@ -200,7 +200,7 @@
 (t/deftest test-loop-runs-the-retry-policy-in-its-ctx
   ;; The retry policy is a ctx stage too: a spy replacing it decides the
   ;; errored call's next move, and its config overrides the run's own option
-  ;; (new-app.md, "Reload and the turn boundary").
+  ;; (docs/architecture.md, "Reload and the turn boundary").
   (let [seen (atom [])
         spy (fn [state]
               (swap! seen conj state)

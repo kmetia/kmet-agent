@@ -825,7 +825,7 @@
 
 (t/deftest test-a-boundary-decision-reaches-the-next-handler
   ;; One chain: a front end's contribution reaches the handler after it, so two
-  ;; layers cannot hold different opinions (new-app.md, 7b-i). The handlers sit
+  ;; layers cannot hold different opinions (docs/architecture.md § The event bus). The handlers sit
   ;; on the run's own ctx, which is where the loop dispatches.
   (let [{ctx :ctx} (support/test-ctx)
         front-end-saw (atom [])

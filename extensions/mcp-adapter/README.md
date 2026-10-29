@@ -229,8 +229,8 @@ cached metadata so no server spawns at startup. Names are lowercased with
   lazy connect, failure backoff, auth and the output guard match the
   proxy; progress notifications stream while a call runs. The separate
   `mcpScript` tool and its `bb`-subprocess runtime retired
-  (run_code.md T2) — scripts are the one scripted-MCP surface. See
-  `skills/mcp/SKILL.md`.
+  (architecture.md § Tools and the script sandbox) — scripts are the one
+  scripted-MCP surface. See `skills/mcp/SKILL.md`.
 - **include/exclude globs**: server `:include-tools`/`:exclude-tools`
   (`["server_*"]`) filter which tools register as direct tools;
   `:search-keywords {"server_*" ["capture"]}` boost proxy search.

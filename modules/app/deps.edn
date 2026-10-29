@@ -25,7 +25,7 @@
  ;; (landing 3), the tool layer (`kmet.app.tools.*`, moved at 4f in five
  ;; steps), and the host's leaf dependencies (kmet.app.debug, .config-schema,
  ;; .event-bus, .tools.util) were lifted ahead of the extension host's own move
- ;; so its requires stop pointing upward (new-app.md, 4b-ii). 5l-i closed the
+ ;; so its requires stop pointing upward (docs/architecture.md § Layer boundaries). 5l-i closed the
  ;; session pair the front ends read: kmet.app.session.driver (the engine's
  ;; operations, retired with the handle migration) and
  ;; kmet.app.commands.builtins (the portable slash commands) — the driver

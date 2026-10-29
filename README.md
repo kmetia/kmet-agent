@@ -16,7 +16,7 @@ kmet is inspired by two reference harnesses:
   extensions that mount beside the core instead of patching it.
 
 The gap to pi is tracked in [pi alignment](docs/pi-alignment.md); the plugin
-architecture and its closed landings are in [the design record](new-app.md).
+architecture is in the [developer guide](docs/architecture.md).
 
 kmet runs on Linux, macOS, Windows, WSL, and Termux from one source tree on
 three hosts: [Babashka](https://babashka.org/) (the primary runtime), native

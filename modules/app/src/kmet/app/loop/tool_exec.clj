@@ -65,8 +65,8 @@
    (a process default is not a fallback), and `run_code` replaces the value
    with its sandbox realm before a script's inner call goes out, so what a
    script can reach through a tool is the boundary and not the composition
-   (`kmet.app.sandbox`, new-app.md 9c). Key absent — a caller outside a run —
-   means no ctx, not the process's."
+   (`kmet.app.sandbox`, docs/architecture.md § Service catalog). Key absent —
+   a caller outside a run — means no ctx, not the process's."
   [agent]
   (cond-> (extensions/build-extension-context)
     ;; absent when the state has no ctx, so "no :srce-ctx" reads as "no ctx"

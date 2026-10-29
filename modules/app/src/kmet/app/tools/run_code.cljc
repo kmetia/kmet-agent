@@ -1,6 +1,6 @@
 (ns kmet.app.tools.run-code
   "The `run_code` tool — model-written Clojure in a per-call SCI sandbox with
-   kmet's tools bridged in (design: run_code.md).
+   kmet's tools bridged in (design: docs/architecture.md § Tools and the script sandbox).
 
    Lifecycle: every call builds a fresh SCI context and discards it on
    return. The context carries the capability namespaces, the surface's
@@ -807,8 +807,9 @@
 ;; ─── Submission order ─────────────────────────────────────────────────────
 ;;
 ;; A script's inner calls START in submission order (dsh parity, see
-;; run_code.md § T1 bridge): calls to parallel tools overlap, while a call to
-;; a :sequential tool — the same field kmet.app.loop runs its own batches
+;; docs/architecture.md § Tools and the script sandbox): calls to parallel
+;; tools overlap, while a call to a :sequential tool — the same field
+;; kmet.app.loop runs its own batches
 ;; by — waits until everything submitted before it has settled and then runs
 ;; alone, so a later call cannot overtake it. No built-in tool declares
 ;; :sequential (pi's built-ins don't either; mutations are serialized per
@@ -1171,7 +1172,7 @@
   "The realm the script's inner tool calls execute in: a child of the run's
    ctx blocked for the names the agent's `:sandbox` value names, so a tool a
    script calls cannot read the composition's services from the ctx it was
-   handed (`kmet.app.sandbox`, new-app.md 9c).
+   handed (`kmet.app.sandbox`).
 
    nil when there is nothing to add — the caller passed no run ctx (extension
    code calling the tool outside a run), or the value isolates nothing (a
@@ -1309,7 +1310,7 @@
    tests may build their own):
      :get-all-tools — 0-arg registry tool map (the model's tools)
      :get-contributed-tools — 0-arg extension-contributed sandbox tool map
-                              (run_code.md T2; optional, defaults to none)
+                              (contributed sandbox sources; optional, defaults to none)
      :select-tools  — (fn [all {:keys [enabled contributed exclude]}]) — the
                       registry's surface filter, so a script's callable set
                       resolves exactly like the loop's schema

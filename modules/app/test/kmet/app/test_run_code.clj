@@ -1,7 +1,7 @@
 (ns kmet.app.test-run-code
   "The run_code tool: per-call SCI sandbox with the full babashka namespace/
    class surface, emit-only output, async tools bridge and deadline behavior
-   (design: run_code.md)."
+   (design: docs/architecture.md § Tools and the script sandbox)."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
@@ -381,7 +381,7 @@
 
 (t/deftest test-run-code-fan-out-exceeds-worker-pool
   ;; the bridge drains through a bounded worker pool; a fan-out larger than
-  ;; the pool must still settle every promise (run_code.md T1 bridge)
+  ;; the pool must still settle every promise (the bridge's submission order)
   (with-custom-tool {:name "run-code-test-echo"
                      :label "Echo"
                      :description "Echo args"
@@ -600,7 +600,7 @@
         (t/is (str/includes? (:content r) ":is-error true"))))))
 
 (t/deftest test-run-code-contributed-tools
-  ;; extension-contributed sources (run_code.md T2): sandbox-only tools join
+  ;; extension-contributed sources (the contributed-source seam): sandbox-only tools join
   ;; the surface and dispatch through the same execute-tool path
   (with-tool-source ::extension
     (fn []

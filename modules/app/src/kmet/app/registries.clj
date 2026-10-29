@@ -8,8 +8,8 @@
    plugin adding a command never re-provides). They stay **separate services**
    rather than one `:registries` key because their consumers differ — the model
    sees `:tools`, the slash parser `:commands`, the prompt builder `:prompts` —
-   and because a per-agent override should be per-seam ([`new-app.md`]
-   § Service catalog, decision 11).
+   and because a per-agent override should be per-seam ([`docs/architecture.md`]
+   § Service catalog).
 
    The rows are one declaration each and one implementation: a handle has no
    knowledge of its tag, so the difference between them is the name and the key,

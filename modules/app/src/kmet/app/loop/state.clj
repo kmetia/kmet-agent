@@ -108,8 +108,8 @@
                        ctx                   ;; the ctx this run reads its loop stages and tool
                                              ;; table from and scopes its events to: a child ctx
                                              ;; for an agent's run, and the app root when a process
-                                             ;; runs one (new-app.md, landing 4c-ii-b). There is no
-                                             ;; default: a state with no ctx has no tool table
+                                             ;; runs one (docs/architecture.md § Multi-session server mode).
+                                             ;; There is no default: a state with no ctx has no tool table
                        ])
 
 (defn make-agent-state
@@ -427,8 +427,9 @@ Be precise and concise in your responses."}}]
 ;; ─── The agent's tool table ──────────────────────────────────────────────────
 ;; The table is read from the `:tools` handle the agent's ctx provides, never
 ;; from a process default: a child ctx may provide its own, which is what makes
-;; two agents two tables (new-app.md, 4c-iii-c). The display path takes the same
-;; table as a `:tool-fn` from its caller, never a process default.
+;; two agents two tables (docs/architecture.md § Service catalog). The display
+;; path takes the same table as a `:tool-fn` from its caller, never a process
+;; default.
 
 (defn ctx-tool-table
   "The tool table a ctx provides: name → Tool record from its `:tools` handle.

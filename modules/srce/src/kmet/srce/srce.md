@@ -1,8 +1,8 @@
 # srce — a light Cordis kernel in Clojure
 
 Implementation note for the `kmet.srce.*` module, beside its code. kmet2's
-application architecture — services, agents, sessions, profiles, landings — is
-in `new-app.md`; this file is the kernel only: its
+application architecture — composition, services, agents, sessions — is in
+`docs/architecture.md`; this file is the kernel only: its
 ctx model, the lifecycle, the plugin contract, the contracts the tests pin, and
 what was deliberately left out. User-facing usage (what srce is for, the five
 principles and a how-to) is [`modules/srce/README.md`](../../../README.md); this
@@ -18,7 +18,7 @@ clear of `kmet.kernel`, `--list-kernels` and prose about OS kernels.
 Port the **concepts** that make Cordis a meta-framework, not the vendored
 member list. A mechanism is in the kernel only if all three hold:
 
-1. `new-app.md` needs it (a service, an agent, a profile, a UI
+1. `docs/architecture.md` needs it (a service, an agent, a profile, a UI
    provider),
 2. it is what separates a kernel from a service locator, and
 3. it cannot be added later without changing every caller.
@@ -219,7 +219,7 @@ it, and the tree grew a line per `extend` for the life of the process. So
 still mounted under it: a listing that hides a live unit is worse than one that
 lingers. The detach keeps `:parent`, so a value that still holds the ctx
 resolves services exactly as before; what changes is the tree, which is what
-the unit listing renders (`new-app.md`, "Inspection").
+the unit listing renders (`docs/architecture.md`, "Inspection").
 
 **Which kind of ctx this one is has one answer.** `(mount-fiber ctx)` is the
 fiber a mount's own ctx names, and `nil` for a plain child (which inherits its
@@ -252,7 +252,7 @@ Cordis's reflect layer, minus everything the light kernel doesn't need.
   shows both, and `services` from above shows neither. **A per-agent value
   therefore mounts where nothing above it provides one** — the agent's own ctx,
   never as a shadow of an app-wide row; the app follows this for
-  `:permissions` (new-app.md § *Permissions and approvals*), and a service that
+  `:permissions` (`docs/architecture.md` § *Permissions and approvals*), and a service that
   really needs a second instance over a provider it cannot remove wants
   `isolate`, not a child. A root-level `{realm-key name → impl}` store is Cordis's shape and would
   make that a throw instead; the per-ctx atom is chosen because the realm then
@@ -300,7 +300,7 @@ spelling. One shape, thrown — `normalize-inject` is not total, and
 An optional dependency participates in the **provider set** like a required
 one: absent contributes `:srce/absent`, present contributes the provider fiber's
 `uid`. The set is the epoch, and the epoch is what makes `{:ui :optional}`
-"upgrade when a richer UI attaches" (`new-app.md`, "Pluggable
+"upgrade when a richer UI attaches" (`docs/architecture.md`, "Pluggable
 UI").
 
 ### refresh: a fixpoint pass, not an epoch race
@@ -331,7 +331,7 @@ a provider change runs one synchronous pass that a second thread cannot split:
    listing's "fibers in mount order" is stable; only a fresh `plugin!` appends.
 
 That replaces `notify!`, the epoch and the drain queue with one loop. The
-observable rule `new-app.md` depends on survives: a dependent sees the new
+observable rule the app depends on survives: a dependent sees the new
 provider, and never a half-provided one.
 
 **The pass owns the pass.** §8 says mutations run on the owner thread, but
@@ -360,7 +360,7 @@ the set, and the owner's last round or its retry picks it up. The trailing
 `when` closes the window the six-line version left open: a change recorded
 between the last round's snapshot and the flag reset would otherwise sit until
 some *other* `settle!`, so `settle!` returning could not mean "nothing pending"
-and `new-app.md`'s "the boundary is also the drain" would be false. The
+and `docs/architecture.md`'s "the boundary is also the drain" would be false. The
 invariant now is: **when `settle!` returns and no other thread owns the pass,
 `:changes` is empty.** A change that lands while another thread owns the flag
 is that owner's, which is the "late, never corrupting" rule below.
@@ -753,7 +753,7 @@ an awaitable queue. The light kernel answers with a rule:
   whole distinction; "safe but late" is not a licence for `dispose!`.
 - **The app marshals.** Plugin work, reloads and approvals are submitted to the
   loop; a tool thread that must mutate the kernel asks the loop to do it. This
-  is app policy, recorded in `new-app.md`, and
+  is app policy, recorded in `docs/architecture.md`, and
   `kmet.app.test-submit-guard` holds it: the six calls that run plugin code
   (`plugin!`, `restart!`, `update!`, `dispose!`, `dispose-plugin!`,
   `dispose-subtree!`)
@@ -817,11 +817,11 @@ What the app loses with `ordered-registrations` is per-tag display order written
 in one place: each registry now owns its own (the atom handle's registration
 order), and `deregister-owner!` walks tags instead of matching key heads. The
 value-guarded stale deregister is the handle's entry-identity disposer. `/units`
-was not lost: 4d re-rendered it from the ctx tree (`new-app.md`,
+was not lost: 4d re-rendered it from the ctx tree (`docs/architecture.md`,
 "Inspection"). `scope.md` went with the code in the same change: its surviving
 rules moved to the homes that implement them (ownership and display order into
 `kmet.app.registry`'s docstring, the snapshot and tool-capture rules into
-`new-app.md`'s "Reload and the turn boundary", disposal order into §4 above),
+`docs/architecture.md`'s "Reload and the turn boundary", disposal order into §4 above),
 and the citations either dropped the pointer or repointed at one of those.
 
 Gate, met: no `(scope/` under `kmet.agent.*`, no `kmet.libs.scope` or
@@ -836,7 +836,7 @@ grows a keyword or a key, not a new shape.
 | Mechanism | Cordis member | Why out | How it comes back |
 |---|---|---|---|
 | Logger service (facades, exporters, formatters, palette, buffer) | `logger.ts` | kmet already has `kmet.app.debug`; a second logger is a copy | `:logger` is a service — provide a richer one |
-| `intercept` chain | `ctx.intercept`, `[Service.resolveConfig]` | unused by `new-app.md`; labels and realms carry the isolation it was needed for | inject values are reserved: they become intercept config |
+| `intercept` chain | `ctx.intercept`, `[Service.resolveConfig]` | unused by the app; labels and realms carry the isolation it was needed for | inject values are reserved: they become intercept config |
 | `Service` base / `defservice` | `service.ts` (`:check :invoke :extend :resolve-config`) | `:check` is a `provide!` option; `:invoke`/`:extend`/`:resolveConfig` are class ergonomics (the last needs `intercept`, which is out too) | a map with `:check` already exists on `provide!`; `:extend` is a second `provide!` |
 | `accessor`, `mixin`, `set-service!` | `reflect.ts` | no proxy to feed; a service re-provides, which is one effect | new keys on `provide!` |
 | isolate **labels** | `ctx.isolate(name, label)` | siblings sharing one realm nest under a common isolating ctx | a label argument on `isolate` |

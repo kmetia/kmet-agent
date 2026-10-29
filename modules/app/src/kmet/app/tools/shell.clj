@@ -7,7 +7,7 @@
    every agent in the process — exactly what a second session may not have. They
    are a per-agent service now: the agents factory provides `:shell` on each
    agent's own ctx, from that agent's config, which is where a preset's shell
-   settings already arrive (new-app.md, landing 9a).
+   settings already arrive (docs/architecture.md § Service catalog).
 
    Per agent and not a root row, for the kernel's reason: a child may not shadow
    a service its ancestor provides, so a per-agent value has to be the only

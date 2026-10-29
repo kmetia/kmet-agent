@@ -593,7 +593,7 @@
   "The usage error of a mode that does not open its own session, given the flag
    that asked: named after composition, before anything boots. Print, rpc and
    the server create their agent through `:agents`, whose factory takes no
-   session option yet (new-app.md, landing 10a), so accepting the flag there
+   session option yet, so accepting the flag there
    would silently start the fresh session the flag exists to prevent."
   [profile flag]
   (binding [*out* *err*]

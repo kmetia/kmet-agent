@@ -279,7 +279,7 @@
         ;; shellCommandPrefix read at tool creation and in executeBash) — the
         ;; tool resolves the run's :shell service before calling in, so no
         ;; process default is consulted here and two sessions cannot disagree
-        ;; about which shell they got (new-app.md, landing 9a).
+        ;; about which shell they got (docs/architecture.md § Service catalog).
         ;; Resolve command with prefix (pi: commandPrefix)
         resolved-command (if command-prefix
                            (str command-prefix "\n" command)

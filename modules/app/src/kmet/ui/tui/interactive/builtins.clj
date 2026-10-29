@@ -166,7 +166,7 @@
 ;; ─── Session info (/session) ────────────────────────────────────────────────
 
 (defn- tool-usage-text
-  "Per-tool result-token attribution for /session (run_code.md T0): each tool's
+  "Per-tool result-token attribution for /session: each tool's
    call count and estimated result tokens (chars/4), highest token count
    first, with a total line — the same numbers as session/tool-usage-report.
    nil when the session has no tool results, so the section is omitted."
@@ -186,7 +186,7 @@
 
 (defn- session-info-text
   "Pi: handleSessionCommand — stats + name + token/cost breakdown, plus
-   per-tool result-token attribution (run_code.md T0, see tool-usage-text).
+   per-tool result-token attribution (see tool-usage-text).
    Plain text with theme styling, rendered as an assistant message."
   [sess]
   (let [stats (session/get-session-stats sess)

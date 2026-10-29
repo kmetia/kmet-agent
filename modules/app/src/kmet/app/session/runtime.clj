@@ -56,7 +56,7 @@
   "The run's `:shell` service value on the engine's ctx —
    `{:shell-path … :command-prefix …}` — or nil when the composition did not
    mount the `:shell` row. The TUI's `!` path binds it so its bash uses the
-   same shell an agent run would (new-app.md, landing 9a)."
+   same shell an agent run would (docs/architecture.md § Service catalog)."
   [engine]
   (some-> (agent-ctx engine) (srce/get :shell) deref))
 

@@ -19,7 +19,7 @@
 
    **The handle is a parameter.** Every reader and writer takes the registry it
    works on, first, so two agents can hold different tool tables with nothing
-   shared between them (new-app.md, landing 4c-iii-c) and nothing below the app
+   shared between them (docs/architecture.md § Service catalog) and nothing below the app
    can name a process-wide one.
 
    There is deliberately no default. An earlier draft resolved an installed
@@ -144,7 +144,8 @@
 ;; ─── Extension-contributed tool sources ────────────────────────────────────
 ;; Sandbox-only tools: a source contributes tool maps into the run_code tool's
 ;; surface without joining get-all-tools (the model's tool set). The
-;; mcp-adapter contributes its cached MCP catalog this way (run_code.md T2).
+;; mcp-adapter contributes its cached MCP catalog this way
+;; (docs/architecture.md § Tools and the script sandbox).
 
 (defn- registered-tool-sources
   "REGISTRY's contributed tool sources in registration order: [[id fn] …].

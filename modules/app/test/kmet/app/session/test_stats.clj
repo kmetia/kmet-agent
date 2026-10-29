@@ -223,7 +223,7 @@
         (t/is (= ["unknown"] (mapv :key (s/usage-breakdown sess))))
         (finally (fs/delete-tree dir))))))
 
-;; ─── Tool-result token attribution (run_code.md T0) ─────────────────────────
+;; ─── Tool-result token attribution ─────────────────────────────────────────
 
 (t/deftest test-session-tool-usage
   (let [session (s/create-session support/test-dir)]
