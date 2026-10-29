@@ -20,6 +20,22 @@ EROSION 0.348   315 of 8774 functions CC>10   max CC 69
 VERBOSITY 0.013
 ```
 
+After the clojure_edit `execute` (landed below):
+
+```
+EROSION 0.346   314 of 8777 functions CC>10   max CC 69
+                mass 35568.8 of 102801.8
+VERBOSITY 0.013
+```
+
+After the lsp-adapter `execute` (landed below):
+
+```
+EROSION 0.344   313 of 8784 functions CC>10   max CC 69
+                mass 35307.8 of 102683.4
+VERBOSITY 0.013
+```
+
 Two facts drive the ordering. CC is a cliff — a function at CC 11 contributes
 100% of its mass, at CC 10 none — so crossing the line beats shrinking it;
 and SLOC is `sqrt`-weighted, so splitting beats trimming. The five open
@@ -146,21 +162,58 @@ Ordered by mass, descending.
       Verified: `bb lint-changed` 0/0, `bb format-check-changed`, and
       `kmet.app.test-core` 35 tests / 192 assertions green.
 
-- [ ] **`execute`** (lsp-adapter) —
+- [x] **`execute`** (lsp-adapter) —
       `extensions/lsp-adapter/src/kmet/extensions/lsp_adapter/tools.clj:334`,
-      CC 29 / 81 SLOC / mass 261.0. Shape: validation ladder over an
-      operation table.
-      Fix: per-operation handlers in a dispatch map, so the `cond` keeps only
-      the guards (blank/missing `:operation`, unknown operation, abort signal,
-      missing `:filePath`).
+      CC 29 / 81 SLOC / mass 261.0. Shape: validation ladder over an operation
+      table.
+      Landed as `read-request` (operation → unlisted operation → abort →
+      filePath, the published order, and the request map with `:position-op?`),
+      `check-shape` (numeric 1-based position, symbol query), `op-params`, `run-request`
+      (`runtime/for-file` + the hierarchy prepare/walk), `shape-results`,
+      `diagnostics-result` and `run-op`; `execute` is the `or` of them. CC:
+      `read-request` 6, `check-shape` 6, `run-op` 6, `run-request` 3, the rest
+      smaller; only `shape-result` (CC 12, not a target) remains an outlier in
+      the file.
+      Perf (criterion 2): abort path 1.8 → 1.2 µs per call, unknown-operation
+      path 38 → 36 µs, shape-guard path within run-to-run noise (both dominated
+      by building the `ex-info`); a real operation is milliseconds of LSP
+      traffic. All five usage messages and the abort map compare byte-identical
+      against the pre-change code.
+      Verified: `kmet.extensions.lsp-adapter.tools-test` 12 tests / 48
+      assertions, `e2e-test` 2 tests / 18 assertions (the live request path —
+      `tools-test` never opens a connection, which is how the first cut passed
+      `tools-test` while calling `for-file` with one argument too few; lint
+      caught it), `bb lint-changed` 0/0, `bb format-check-changed`.
+      Step 2 (not done): the `op-params` `cond` still decides the wire shape
+      outside the `operations` table. Moving `:params` / `:position` /`:report`
+      into the rows would make a row describe its whole request, but it changes
+      the table's contract and earns its own commit.
 
-- [ ] **`execute`** (clojure edit tool) —
+- [x] **`execute`** (clojure edit tool) —
       `extensions/clojure/src/kmet/extensions/clojure/edit_tool.clj:154`,
-      CC 27 / 88 SLOC / mass 253.3. Same shape as the lsp-adapter `execute`:
-      a guard chain (blank `:file_path`, not-a-Clojure-file, missing vs blank
-      `:content`) over an operation `case`. The guards are the part the two
-      **share** — they are separate extensions, so a shared guard/first-error
-      helper belongs in a lib both may require, not in a copy of the table.
+      CC 27 / 88 SLOC / mass 253.3. Shape: guard chain over an operation
+      `case`, with the work in a closure.
+      Landed as four pieces: `guard-args` (the eight parameter checks, **order
+      preserved** — a call missing two things still names the first), `content-error`
+      (parse problem, then form shape; the form-type `case` became a lookup, so
+      a new form type just gets the generic example), `find-edit` (the
+      edit → re-indent → re-edit pass, now a top-level fn taking the request
+      map), and `execute` = `or` over the three. `execute` is CC ~5, `guard-args`
+      9, `content-error` 6, `find-edit` 4; the file's only remaining outlier is
+      `find-top-level-form` (CC 13), which was not a target.
+      Perf (criterion 2): guard path 0.6 → 1.0 µs per call, content-error path
+      0.7 → 1.05 µs — one extra call, against a tool call that reads and writes
+      a file. Both paths return byte-identical maps (asserted in the bench).
+      Verified: `kmet.extensions.clojure.edit-tool-test` 54 tests / 153
+      assertions, `bb lint-changed` 0/0, `bb format-check-changed`, VERBOSITY
+      unchanged at 4 flagged lines (an inlined `enhanced-name` binding kept a
+      fifth `redundant-let` out).
+      Correction to the earlier note: the two `execute` functions do **not**
+      share a guard chain worth a shared lib — only the shape. This one returns
+      `{:content … :is-error true}` with `file_path`/`form_type`/`content`; the
+      lsp one throws `::usage` ex-infos with `filePath`/`showOutput`. Unifying
+      them would change both tools' published error surfaces for ~5 lines of
+      helper, so each extension keeps its own guards.
 
 ## Guardrails
 

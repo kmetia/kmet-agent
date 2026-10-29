@@ -151,113 +151,136 @@
   [args]
   (util/title "clojure_edit" args))
 
+(def ^:private op-kinds
+  "The operations the tool publishes, and the keyword the edit pipeline
+   switches on. An unknown operation falls back to `:replace`, which is how the
+   tool has always read it."
+  {"replace" :replace
+   "insert_before" :insert-before
+   "insert_after" :insert-after})
+
+(defn- guard-args
+  "The usage error ARGS earns, or nil. Order is the contract: a required
+   parameter before the operation's content rule, the content rule before the
+   target file, and the file's existence before its form type — so a call
+   missing two things names the first one in this list."
+  [{:keys [file_path form_type form_identifier operation]}
+   op-kw missing-content? blank-insert?]
+  (cond
+    (str/blank? file_path)
+    {:content "Missing required parameter: file_path" :is-error true}
+
+    (not (util/clojure-file? file_path))
+    {:content (util/not-clojure-file-msg "clojure_edit" file_path)
+     :is-error true}
+
+    (str/blank? form_type)
+    {:content (str "Missing required parameter: form_type "
+                   "(e.g. \"defn\", \"defmethod\", \"def\")")
+     :is-error true}
+
+    (str/blank? form_identifier)
+    {:content "Missing required parameter: form_identifier" :is-error true}
+
+    ;; Deletion follows the edit tool's convention: content stays required, and
+    ;; a blank value with "replace" removes the form; a missing content is
+    ;; still an error.
+    missing-content?
+    {:content (str "Missing required parameter: content"
+                   (if (= op-kw :replace)
+                     " — pass \"\" (empty string) to delete the form."
+                     " — insert_before/insert_after need the content to insert."))
+     :is-error true}
+
+    blank-insert?
+    {:content (str "content cannot be empty for operation \"" operation
+                   "\" — insert_before/insert_after need the content to insert. "
+                   "An empty content deletes only with operation \"replace\".")
+     :is-error true}
+
+    (not (fs/exists? file_path))
+    {:content (str "File not found: " file_path) :is-error true}
+
+    (= form_type "comment")
+    {:content (str "Form type 'comment' is not supported. "
+                   "Use the edit tool for comment blocks.")
+     :is-error true}))
+
+(def ^:private form-examples
+  "The balanced-form example a rejected content's message ends with, by form
+   type; anything else gets `(FORM_TYPE …)`."
+  {"defn" "defn my-fn [args] body"
+   "def" "def my-var value"
+   "deftest" "deftest my-test (is ...)"
+   "ns" "ns my.namespace"
+   "defmethod" "defmethod my-fn :dispatch [args] body"})
+
+(defn- content-error
+  "The error CONTENT earns for FORM-TYPE, or nil: unparsable content is rejected
+   up front, stating what is wrong and where — unbalanced delimiters AND other
+   reader errors, which used to surface later as a confusing pipeline failure —
+   then the form's own shape. On \"replace\" the content must produce the
+   anchor's type; an inserted form is independent of the anchor, so it is
+   checked against its own head (a def may be inserted beside a defn anchor)."
+  [form_type content op-kw]
+  (if-let [problem (util/parse-problem "content" content)]
+    {:content (str "Invalid " form_type " content: "
+                   (case (:kind problem)
+                     :delimiter "unbalanced delimiters"
+                     :syntax "invalid syntax")
+                   ".\n"
+                   (:report problem)
+                   "\nThe content must be a complete, balanced " form_type
+                   " form, e.g. ("
+                   (get form-examples form_type (str form_type " ...")) ").")
+     :is-error true}
+    (let [content-type (if (= op-kw :replace)
+                         form_type
+                         (or (util/form-head content) form_type))]
+      (when-let [shape-error (util/validate-form-shape content-type content)]
+        {:content (str "Invalid " content-type " content: " shape-error
+                       "\nPass the complete " content-type " form explicitly.")
+         :is-error true}))))
+
+(defn- find-edit
+  "The zipper edit for one pass: a blank content under \"replace\" is a deletion,
+   so nothing is parsed or re-indented; otherwise the replacement is re-indented
+   to the found form's column and the edit re-run, because one pass would leave
+   the content at column 0."
+  [zloc {:keys [file_path form_type content op-kw blank-content? enhanced-name]}]
+  (if blank-content?
+    (edit-top-level-form zloc form_type enhanced-name content op-kw)
+    (let [result (edit-top-level-form zloc form_type enhanced-name content op-kw)]
+      (if (:error result)
+        result
+        (let [found-zloc (:zloc result)
+              form-col (second (z/position found-zloc))
+              content' (if form-col
+                         (util/format-form-in-isolation content form-col
+                                                        (util/project-fmt-opts file_path))
+                         content)]
+          (edit-top-level-form zloc form_type enhanced-name content' op-kw))))))
+
 (defn execute
   "Tool entry point.  Returns {:content str :is-error bool}."
   [{:keys [file_path form_type form_identifier content operation]
-    :or   {operation "replace"}}]
-  (let [op-kw (case operation
-                "replace"       :replace
-                "insert_before" :insert-before
-                "insert_after"  :insert-after
-                :replace)
-        ;; Deletion follows the edit tool's convention: content stays
-        ;; required, and an empty (blank) value with "replace" removes the
-        ;; form; a missing content is still an error.
+    :or   {operation "replace"} :as args}]
+  (let [op-kw (get op-kinds operation :replace)
         missing-content? (nil? content)
-        blank-content?   (and (not missing-content?) (str/blank? content))]
-    (cond
-      (str/blank? file_path)
-      {:content "Missing required parameter: file_path" :is-error true}
-
-      (not (util/clojure-file? file_path))
-      {:content (util/not-clojure-file-msg "clojure_edit" file_path)
-       :is-error true}
-
-      (str/blank? form_type)
-      {:content (str "Missing required parameter: form_type "
-                     "(e.g. \"defn\", \"defmethod\", \"def\")")
-       :is-error true}
-
-      (str/blank? form_identifier)
-      {:content "Missing required parameter: form_identifier" :is-error true}
-
-      missing-content?
-      {:content (str "Missing required parameter: content"
-                     (if (= op-kw :replace)
-                       " — pass \"\" (empty string) to delete the form."
-                       " — insert_before/insert_after need the content to insert."))
-       :is-error true}
-
-      (and blank-content? (not= op-kw :replace))
-      {:content (str "content cannot be empty for operation \"" operation
-                     "\" — insert_before/insert_after need the content to insert. "
-                     "An empty content deletes only with operation \"replace\".")
-       :is-error true}
-
-      (not (fs/exists? file_path))
-      {:content (str "File not found: " file_path) :is-error true}
-
-      (= form_type "comment")
-      {:content (str "Form type 'comment' is not supported. "
-                     "Use the edit tool for comment blocks.")
-       :is-error true}
-
-      :else
-      ;; Reject any unparsable content up front, stating exactly what is
-      ;; wrong and where — unbalanced delimiters AND other reader errors
-      ;; (which used to surface later as a confusing pipeline failure).
-      (if-let [problem (util/parse-problem "content" content)]
-        {:content (str "Invalid " form_type " content: "
-                       (case (:kind problem)
-                         :delimiter "unbalanced delimiters"
-                         :syntax "invalid syntax")
-                       ".\n"
-                       (:report problem)
-                       "\nThe content must be a complete, balanced " form_type
-                       " form, e.g. ("
-                       (case form_type
-                         "defn" "defn my-fn [args] body"
-                         "def" "def my-var value"
-                         "deftest" "deftest my-test (is ...)"
-                         "ns" "ns my.namespace"
-                         "defmethod" "defmethod my-fn :dispatch [args] body"
-                         (str form_type " ...")) ").")
-         :is-error true}
-        (let [;; replace must produce the anchor's type; an inserted form is
-              ;; independent of the anchor, so check it against its own head
-              ;; (e.g. a def may be inserted beside a defn anchor)
-              content-type (if (= op-kw :replace)
-                             form_type
-                             (or (util/form-head content) form_type))
-              shape-error  (util/validate-form-shape content-type content)]
-          (if shape-error
-            {:content (str "Invalid " content-type " content: " shape-error
-                           "\nPass the complete " content-type " form explicitly.")
-             :is-error true}
-            (let [enhanced-name (enhance-defmethod-name form_type form_identifier content)
-                  find-edit (fn [zloc]
-                              (if blank-content?
-                                ;; deletion: nothing to parse or re-indent
-                                (edit-top-level-form zloc form_type enhanced-name
-                                                     content op-kw)
-                                (let [result (edit-top-level-form zloc form_type enhanced-name
-                                                                  content op-kw)]
-                                  (if (:error result)
-                                    result
-                                    (let [found-zloc (:zloc result)
-                                          form-col   (second (z/position found-zloc))
-                                ;; Re-indent the replacement to the found
-                                ;; form's column, then re-edit
-                                          content'' (if form-col
-                                                      (util/format-form-in-isolation
-                                                       content form-col
-                                                       (util/project-fmt-opts file_path))
-                                                      content)
-                                          result2 (edit-top-level-form
-                                                   zloc form_type enhanced-name
-                                                   content'' op-kw)]
-                                      result2)))))]
-              (util/edit-pipeline file_path find-edit))))))))
+        blank-content? (and (not missing-content?) (str/blank? content))
+        blank-insert? (and blank-content? (not= op-kw :replace))]
+    (or (guard-args args op-kw missing-content? blank-insert?)
+        (content-error form_type content op-kw)
+        (util/edit-pipeline
+         file_path
+         (fn [zloc]
+           (find-edit zloc {:file_path file_path
+                            :form_type form_type
+                            :content content
+                            :op-kw op-kw
+                            :blank-content? blank-content?
+                            :enhanced-name (enhance-defmethod-name
+                                            form_type form_identifier content)}))))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════════
 ;; Tool registration

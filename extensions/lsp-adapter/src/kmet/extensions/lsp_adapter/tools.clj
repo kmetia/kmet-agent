@@ -331,6 +331,112 @@
 (defn- usage-error [msg]
   (throw (ex-info (str msg ". " usage) {:type ::usage})))
 
+(defn- read-request
+  "The call ARGS names, or ::aborted when the run was interrupted. A malformed
+   call throws its usage error in this order: no operation, an unlisted
+   operation, no filePath — so an aborted run that also named no operation still
+   reports the missing operation."
+  [signal args]
+  (let [args (or args {})
+        raw-op (:operation args)
+        op (canonical-op raw-op)
+        spec (some-> op name operations)]
+    (cond
+      (str/blank? (str raw-op)) (usage-error "operation is required")
+      (nil? op) (usage-error (str "unknown operation: " raw-op))
+      (and signal @signal) ::aborted
+      (not (:filePath args)) (usage-error "filePath is required")
+      :else {:op op
+             :spec spec
+             :args args
+             :position-op? (not (or (:file-only spec) (:symbol-query spec)
+                                    (:diagnostics spec)))})))
+
+(defn- check-shape
+  "Throws the usage error a call of the wrong shape earns: numeric 1-based line
+   and character for a position operation, and a query for workspaceSymbol."
+  [{:keys [op spec args position-op?]}]
+  (when position-op?
+    (when-not (and (number? (:line args)) (number? (:character args)))
+      (usage-error (str (name op) " requires numeric 1-based line and character"))))
+  (when (and (:symbol-query spec) (str/blank? (:query args)))
+    (usage-error "workspaceSymbol requires query")))
+
+(defn- op-params
+  "The params one request carries: the row's own `:params` fn when it has one,
+   the symbol query for workspaceSymbol, the position for a position operation,
+   and the bare document otherwise. A position operation that forgets its
+   position makes servers 500 (-32603), so the position branch is not optional."
+  [{:keys [spec position-op?]} td pos args]
+  (cond
+    (:params spec) ((:params spec) td pos)
+    (:symbol-query spec) {:query (:query args)}
+    position-op? {:textDocument td :position pos}
+    :else {:textDocument td}))
+
+(defn- run-request
+  "One operation against the file's servers → `{:keys [results errors]}`. A
+   hierarchy operation prepares the call hierarchy at the position first and
+   asks for the item; with no item there is nothing to walk, which is ::none (an
+   empty result, not an error)."
+  [st spec path td pos params]
+  (let [request (fn [conn method prm] (jrpc/request! (:client conn) method prm {}))]
+    (runtime/for-file
+     st path
+     (fn [conn]
+       (if-let [hierarchy (:hierarchy spec)]
+         (let [prep (request conn "textDocument/prepareCallHierarchy"
+                             {:textDocument td :position pos})
+               item (first prep)]
+           (if item
+             (request conn hierarchy {:item item})
+             ::none))
+         (request conn (:method spec) params))))))
+
+(defn- shape-results
+  "RESULTS shaped by the operation's shaper; a hierarchy's ::none becomes an
+   empty result."
+  [op results]
+  (for [{:keys [name root value]} results]
+    {:name name
+     :root root
+     :shaped (if (= ::none value)
+               {:lines [] :items []}
+               (or (shape-result op value) {:lines [] :items []}))}))
+
+(defn- diagnostics-result
+  "The diagnostics answer: the rendered report plus the structured sections the
+   TUI renderer consumes. Pushed state only — no round-trip."
+  [st path cwd]
+  (let [{:keys [text sections]} (diagnostics-report st path)]
+    {:content text
+     :details {:op :diagnostics :cwd cwd :sections (vec sections)}}))
+
+(defn- run-op
+  "Run one operation against the file's servers and shape the answer: the
+   assembled text, plus `:details` unless the answer is \"(no results)\"."
+  [st {:keys [op spec args position-op?]} path cwd]
+  (when-not (fs/exists? path)
+    (throw (ex-info (str "no such file: " path) {:type ::usage})))
+  (let [td {:uri (lsp/path->uri path)}
+        ;; 1-based wire input, clamped against 0/negative values
+        pos {:line (max 0 (dec (or (:line args) 1)))
+             :character (max 0 (dec (or (:character args) 1)))}
+        params (op-params {:spec spec :position-op? position-op?} td pos args)
+        {:keys [results errors]} (run-request st spec path td pos params)
+        shaped (shape-results op results)
+        content (or (assemble shaped errors cwd) "(no results)")]
+    (cond-> {:content content}
+      (not= content "(no results)")
+      (assoc :details {:op op
+                       :cwd cwd
+                       :sections (vec (concat
+                                       (detail-sections op shaped)
+                                       (for [{:keys [name message]} errors]
+                                         {:kind :error
+                                          :items [{:name name
+                                                   :message message}]})))}))))
+
 (defn execute
   "Tool executor. SIGNAL is the run's abort atom — polled before starting,
    so ESC skips the round-trip entirely (in-flight waits stay bounded by
@@ -338,80 +444,13 @@
    the shaped multi-server text, DETAILS the structured sections the TUI
    renderer consumes (absent on usage/abort paths)."
   [st signal args]
-  (let [args (or args {})
-        raw-op (:operation args)
-        op (canonical-op raw-op)
-        spec (some-> op name operations)
-        cwd (str (fs/cwd))]
-    (cond
-      (str/blank? (str raw-op)) (usage-error "operation is required")
-      (nil? op) (usage-error (str "unknown operation: " raw-op))
-      (and signal @signal) {:content "(aborted)"}
-      (not (:filePath args)) (usage-error "filePath is required")
-      :else
-      (let [path (resolve-path cwd (:filePath args))
-            line (:line args)
-            character (:character args)
-            position-op? (not (or (:file-only spec) (:symbol-query spec)
-                                  (:diagnostics spec)))]
-        (when position-op?
-          (when-not (and (number? line) (number? character))
-            (usage-error (str (name op) " requires numeric 1-based line and "
-                              "character"))))
-        (when (and (:symbol-query spec) (str/blank? (:query args)))
-          (usage-error "workspaceSymbol requires query"))
+  (let [request (read-request signal args)]
+    (if (= ::aborted request)
+      {:content "(aborted)"}
+      (let [{:keys [spec args]} request
+            cwd (str (fs/cwd))
+            path (resolve-path cwd (:filePath args))]
+        (check-shape request)
         (if (:diagnostics spec)
-          (let [{:keys [text sections]} (diagnostics-report st path)]
-            {:content text
-             :details {:op :diagnostics :cwd cwd
-                       :sections (vec sections)}})
-          (do
-            (when-not (fs/exists? path)
-              (throw (ex-info (str "no such file: " path) {:type ::usage})))
-            (let [td {:uri (lsp/path->uri path)}
-                  ;; 1-based wire input, clamped against 0/negative values
-                  pos {:line (max 0 (dec (or line 1)))
-                       :character (max 0 (dec (or character 1)))}
-                  ;; position ops without a custom :params fn still must
-                  ;; carry the position — servers 500 without one (-32603)
-                  params (cond
-                           (:params spec) ((:params spec) td pos)
-                           (:symbol-query spec) {:query (:query args)}
-                           position-op? {:textDocument td :position pos}
-                           :else {:textDocument td})
-                  request (fn [conn method prm]
-                            (jrpc/request! (:client conn) method prm {}))
-                  hierarchy? (boolean (:hierarchy spec))
-                  {:keys [results errors]}
-                  (runtime/for-file st path
-                                    (fn [conn]
-                                      (if hierarchy?
-                                        (let [prep (request
-                                                    conn
-                                                    "textDocument/prepareCallHierarchy"
-                                                    {:textDocument td
-                                                     :position pos})
-                                              item (first prep)]
-                                          (if item
-                                            (request conn (:hierarchy spec)
-                                                     {:item item})
-                                            ::none))
-                                        (request conn (:method spec) params))))
-                  shaped (for [{:keys [name root value]} results]
-                           {:name name
-                            :root root
-                            :shaped (if (= ::none value)
-                                      {:lines [] :items []}
-                                      (or (shape-result op value)
-                                          {:lines [] :items []}))})
-                  content (or (assemble shaped errors cwd)
-                              "(no results)")]
-              (cond-> {:content content}
-                (not= content "(no results)")
-                (assoc :details {:op op :cwd cwd
-                                 :sections (vec (concat
-                                                 (detail-sections op shaped)
-                                                 (for [{:keys [name message]} errors]
-                                                   {:kind :error
-                                                    :items [{:name name
-                                                             :message message}]})))})))))))))
+          (diagnostics-result st path cwd)
+          (run-op st request path cwd))))))
