@@ -1512,15 +1512,17 @@
    :chutes {:providers #{}
             :urls ["chutes.ai"]}})
 
+(defn- url-marker?
+  "Whether URL contains any of MARKERS."
+  [url markers]
+  (boolean (some #(str/includes? url %) markers)))
+
 (defn- compat-family?
-  "Whether MM's provider or base URL belongs to FAMILY."
+  "Whether PROVIDER or BASE-URL belongs to FAMILY."
   [{:keys [providers urls lowercase-url?]} provider base-url]
   (or (contains? providers provider)
-      (some #(str/includes? (if lowercase-url?
-                              (str/lower-case base-url)
-                              base-url)
-                            %)
-            urls)))
+      (url-marker? (if lowercase-url? (str/lower-case base-url) base-url)
+                   urls)))
 
 (defn- compat-flags
   "The compat families MM belongs to, plus the flags derived from them: the

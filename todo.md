@@ -240,11 +240,13 @@ byte. Their numbers are in § Adjacent.
       The file now has **0 of 37 functions over CC 10** (max CC 10, erosion
       0.000 from 0.292): both targets gone in one landing, 598.3 mass.
       Perf (criterion 2): the per-chunk streaming path (decode → sanitize →
-      rolling tail, 2000 × 1 KiB chunks per call) went 111.98 → 113.53 µs per
-      chunk, **+1.4%** by min-of-five rounds — inside the 2% budget; a whole
-      `execute-bash` call was within run-to-run noise, because it pays a process
-      spawn and the 100 ms grace poll that dwarf the streaming work.
-      Verified: a new `kmet.app.tools.test-bash-executor` (11 ^:slow tests, real
+      rolling tail, 2000 × 1 KiB chunks per call) measured 111.98 → 113.53 µs
+      per chunk at landing (+1.4%, min of five rounds) and 103.27 → 102.34 µs
+      (−0.9%, same rig) after the follow-up simplification — the first reading
+      was noise-dominated, and the honest summary is parity. A whole
+      `execute-bash` call is within run-to-run noise either way: it pays a
+      process spawn and the 100 ms grace poll that dwarf the streaming work.
+      Verified: a new `kmet.app.tools.test-bash-executor` (12 ^:slow tests, real
       subprocesses: exit code, stdout+stderr, truncation and its spill file,
       timeout tree kill, cancel signal, missing cwd, spawn hook + env merge,
       command prefix, the `shell-args` argv transport, and the up-front

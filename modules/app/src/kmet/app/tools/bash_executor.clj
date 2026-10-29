@@ -124,27 +124,25 @@
   [shell shell-args]
   (and (nil? shell-args) process/windows-os? (wsl-launcher-bash? shell)))
 
+(defn- with-setsid
+  "SHELL's argv, prefixed with setsid when the host has one: the shell then owns
+   its process group and kill-process-tree! can group-kill it, which catches the
+   background jobs mksh reparents outside the ppid tree."
+  [shell args]
+  (if-let [setsid @process/setsid-path]
+    (into [setsid shell] args)
+    (into [shell] args)))
+
 (defn- shell-argv
   "The argv that runs COMMAND under SHELL. An explicit SHELL-ARGS template wins
    (pi: ShellConfig args, argv transport) and the command is its final element;
-   then cmd /c, the WSL `-s` stdin transport, and sh -c. setsid wraps it when
-   the host has one, so the shell leads its own process group and
-   kill-process-tree! can group-kill it — catches the background jobs mksh
-   reparents outside the ppid tree."
+   then cmd /c, the WSL `-s` stdin transport, and sh -c."
   [shell shell-args command use-stdin?]
   (cond
-    (some? shell-args)
-    (if-let [setsid @process/setsid-path]
-      (into [setsid shell] (conj (vec shell-args) command))
-      (into [shell] (conj (vec shell-args) command)))
-
+    (some? shell-args) (with-setsid shell (conj (vec shell-args) command))
     (str/includes? shell "cmd") [shell "/c" command]
-
     use-stdin? [shell "-s"]
-
-    :else (if-let [setsid @process/setsid-path]
-            [setsid shell "-c" command]
-            [shell "-c" command])))
+    :else (with-setsid shell ["-c" command])))
 
 (defn- track-spawned-pid!
   "The child's pid, tracked while it runs so kill-process-tree! can reach the
@@ -289,10 +287,6 @@
             _ (when use-stdin? (write-command-to-stdin! p command))
             pid (track-spawned-pid! p)
             timed-out (atom false)
-            ;; DONE is shared by both watchers below: it becomes true once the
-            ;; process has exited, so each watcher can stop itself instead of
-            ;; sleeping out its full window (future-cancel can't stop a running
-            ;; future).
             done (atom false)
             _ (watch-timeout! pid timeout done timed-out)
             out-future (future (try (pump-stream! (:out p) :stdout on-data)
@@ -341,7 +335,7 @@
           (let [removed (first @tail-buf)]
             (swap! tail-buf subvec 1)
             (swap! tail-bytes - (bash-out/byte-length removed))
-            (when (not (str/ends-with? removed "\n"))
+            (when-not (str/ends-with? removed "\n")
               (reset! tail-starts-at-line-boundary false)))
           (recur))))
     (when on-chunk
@@ -368,6 +362,9 @@
           (.flip decode-out)
           (.append sb decode-out)
           (.clear decode-out))
+        decoded-string
+        (fn [^StringBuilder sb]
+          (not-empty (str sb)))
         decode-into!
         (fn [sb end?]
           (loop []
@@ -384,8 +381,7 @@
        (let [sb (StringBuilder.)]
          (decode-into! sb false)
          (.compact decode-in)
-         (let [s (str sb)]
-           (when (pos? (count s)) s))))
+         (decoded-string sb)))
      :finish
      (fn []
        (.flip decode-in)
@@ -397,22 +393,26 @@
                (throw (ex-info "UTF-8 flush error" {:result (str res)})))
              (append-out! sb)
              (when (.isOverflow res) (recur))))
-         (let [s (str sb)]
-           (when (pos? (count s)) s))))}))
+         (decoded-string sb)))}))
+
+(defn- open-spill-file!
+  "Create the spill file and replay the chunks held in memory into it, so the
+   file holds the whole output from the first spill on."
+  [{:keys [raw-chunks temp-file-path temp-file-stream temp-file-prefix]}]
+  (let [path (create-temp-file temp-file-prefix)
+        output-stream (java.io.FileOutputStream. path)]
+    (reset! temp-file-path path)
+    (reset! temp-file-stream output-stream)
+    (doseq [[data start end] @raw-chunks]
+      (.write output-stream data start (- end start)))
+    (.flush output-stream)))
 
 (defn- spill-chunk!
-  "Switch the output to the spill file (once, replaying the in-memory chunk log
-   into it) and append RAW-BYTES: the file then holds the whole output."
-  [{:keys [raw-chunks temp-file-path temp-file-stream temp-file-prefix]}
-   raw-bytes offset len]
+  "Append RAW-BYTES to the spill file, opening it on the first spill: the file
+   then holds the whole output, written exactly once."
+  [{:keys [temp-file-path temp-file-stream] :as ctx} raw-bytes offset len]
   (when (nil? @temp-file-path)
-    (let [path (create-temp-file temp-file-prefix)
-          output-stream (java.io.FileOutputStream. path)]
-      (reset! temp-file-path path)
-      (reset! temp-file-stream output-stream)
-      (doseq [[data start end] @raw-chunks]
-        (.write output-stream data start (- end start)))
-      (.flush output-stream)))
+    (open-spill-file! ctx))
   (when @temp-file-stream
     (.write @temp-file-stream raw-bytes offset len)
     (.flush @temp-file-stream)))
