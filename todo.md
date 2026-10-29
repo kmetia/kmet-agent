@@ -108,14 +108,6 @@ move (`git mv`) plus link fixes — no content rewrite.
 
 ## Open — P2
 
-### P2.1 — Rename `srce/get` / `srce/extend`
-
-`modules/srce/src/kmet/srce/core.clj:11` excludes `get` and `extend` from
-`clojure.core`; 44 namespaces require `srce` and 11 already add the exclusion.
-Add `service` / `extend-ctx` as the canonical names, keep the old names as
-aliases for one cycle (or do one mechanical pass pre-1.0.0), and update the
-kernel docs and tests.
-
 ### P2.2 — Watch: the remaining large units
 
 `run-render-loop!` (723 lines), `build-extension-ui-registry` (520),
@@ -126,6 +118,10 @@ real change.
 
 ## Out of scope (recorded)
 
+- **Renaming `srce/get` / `srce/extend`** — dropped: the kernel's vocabulary
+  follows Cordis (`ctx.get`, `ctx.extend`, `ctx.provide`, `ctx.isolate`), and
+  the §11 parity matrix keeps both names; the Clojure core shadowing is a host
+  artifact confined to the kernel's own namespaces.
 - **CI for tests/lint/format** — declined; the gates stay local.
 - **Extension ABI version** — deferred until after 1.0.0.
 - **Splitting `app` and `ui` back into modules** — declined.

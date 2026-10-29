@@ -144,7 +144,11 @@ resolver only when a plugin source is a keyword (§6).
 
 Two public names shadow `clojure.core` — `get` and `extend` — so the kernel's
 own namespaces carry `(:refer-clojure :exclude [get extend])` rather than
-spelling `clojure.core/get` at every call site.
+spelling `clojure.core/get` at every call site. They are Cordis's names
+(`ctx.get`, `ctx.extend`; the §11 parity matrix keeps both): the kernel follows
+that vocabulary instead of renaming around a Clojure-specific collision. The
+shadowing stays confined to the kernel's own namespaces — callers either
+qualify (`srce/get`) or exclude the two names explicitly.
 
 ## 2. The ctx value
 
