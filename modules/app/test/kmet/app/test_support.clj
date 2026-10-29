@@ -8,6 +8,7 @@
             [kmet.app.core :as core]
             [kmet.app.events :as events]
             [kmet.app.runtime :as runtime]
+            [kmet.app.session.core :as session]
             [kmet.srce.core :as srce]
             [kmet.test-utils :as tu]))
 
@@ -149,6 +150,30 @@
   "The composed root ctx `with-composition` bound."
   []
   (:ctx *composition*))
+
+(defn create-agent-handle!
+  "A real handle created through the composition's `:agents` factory — the
+   value a front end drives. A session is created in a scratch dir under
+   target/ unless OPTS names one. OPTS: `:session`, `:config` (merged over
+   the run defaults), `:cwd`."
+  ([] (create-agent-handle! {}))
+  ([{:keys [session config cwd]}]
+   (let [ctx (composition-ctx)
+         agents (srce/get ctx :agents)
+         dir (str (fs/path "target" "test-handles" (str (random-uuid))))
+         sess (or session
+                  (do (fs/create-dirs dir)
+                      (session/create-session dir {:cwd (str (fs/cwd))})))
+         handle ((:create! agents)
+                 ctx
+                 {:session sess
+                  :config (merge {:provider :opencode-go
+                                  :model "deepseek-v4-flash"
+                                  :session-dir dir}
+                                 config)})]
+     (when (some? cwd)
+       (reset! (:cwd handle) cwd))
+     handle)))
 
 (defn on-event
   "Register F for TYPE on the composition's root ctx — the ctx a booted run's

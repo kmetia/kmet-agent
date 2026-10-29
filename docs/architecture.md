@@ -92,8 +92,8 @@ kmet/app/
 │                         schema, export, backend), the runtime
 │                         (`runtime.clj`: state, lifecycle, submission chain,
 │                         queues, compaction, subscribers), and the shared
-│                         lifecycle (the bare-engine fixture retired to the
-│                         test tree)
+│                         lifecycle (the bare engine is gone; tests drive
+│                         handles)
 ├── loop/               — the agent loop: message, state, completion,
 │                         tool_exec, the stages, and `driver.clj`/`stages.clj`
 ├── compaction/         — the compaction subsystem (`core`, `stage`)

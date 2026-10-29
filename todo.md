@@ -19,15 +19,14 @@ Docs: `docs/usage.md`, `tui.md`, `srce.md`.
 
 ### P0.2 — Retire the test-only session engine — **landed**
 
-`kmet.app.session.driver` moved out of `src` to the test fixture
-`modules/app/test/kmet/app/session/test_engine.clj`
-(`kmet.app.session.test-engine`). The builtin commands are handle-only
-(`:send!` / `:request-compaction!`); an engine without either reports the
-front end cannot do the op instead of falling through to a driver.
-`kmet.test-layer-guard` now fails on any module source requiring the retired
-namespace. Stale pointers in `runtime.clj`, `lifecycle.clj`, `submission.clj`,
-`extensions/core.cljc`, `deps.edn`, `docs/architecture.md` and `new-app.md`
-were updated.
+`kmet.app.session.driver` left `src` (the tests used it through a fixture at
+first; P2.3 deleted the fixture once the tests drove handles). The builtin
+commands are handle-only (`:send!` / `:request-compaction!`); an engine
+without either reports the front end cannot do the op instead of falling
+through to a driver. `kmet.test-layer-guard` now fails on any module source
+requiring the retired namespace. Stale pointers in `runtime.clj`,
+`lifecycle.clj`, `submission.clj`, `extensions/core.cljc`, `deps.edn`,
+`docs/architecture.md` and `new-app.md` were updated.
 
 ### P0.3 — Only entry points exit — **landed**
 
@@ -51,7 +50,24 @@ generators' `-main`s.
 `modules/ai/src/kmet/ai/llm.clj.bak` is removed, and `.gitignore` covers
 `*.bak` / `*.orig` / `*.rej`.
 
-Verification: `bb test` 4,364 tests / 26,544 assertions, `bb test-ext` 139 /
+### P2.3 — Shrink the session-engine fixture — **landed**
+
+The test-only engine is gone. `kmet.app.test-session-runtime` now drives a
+real handle from the composition's `:agents` factory
+(`support/create-agent-handle!`): 29 tests cover the accessors, run options,
+compaction queue, model/settings ops, branch summary, session dirs, app-wide
+registries and tool hooks. The engine-only tests went with the engine —
+bootstrap options, subscriber lists, the engine UI-request pair,
+`resolve-run-session`, `wait-idle!`, one-builder and subscription-outlives.
+`test-runtime-capabilities` was deleted (its queue/settle case moved into the
+handle suite; the running-agent capability is covered by `loop/test-driver`),
+`test-ui-port` keeps only the front-end binding tests, `test-import` calls
+`lifecycle/apply-session-cwd!`, and `kmet.test-utils/test-engine` builds only
+the `Engine` record the mode tests need. The fixture file
+`modules/app/test/kmet/app/session/test_engine.clj` is deleted; the layer
+guard stays as the retirement belt.
+
+Verification: `bb test` 4,348 tests / 26,453 assertions, `bb test-ext` 139 /
 709, `bb lint` 0/0, `bb format-check` clean, `bb check` compiles all source
 namespaces.
 
@@ -107,15 +123,6 @@ kernel docs and tests.
 lines. Not a defect — the codebase has 4,685 defns and only 34 reach 100 lines
 — but these are the onboarding cliff. Extract only when touching them for a
 real change.
-
-### P2.3 — Shrink the session-engine fixture
-
-`kmet.app.session.test-engine` is ~610 lines of the retired engine kept so 14
-test namespaces can drive the old `Engine` shape. Production only drives
-handles, so those tests validate a path users do not run. Port the fixture's
-tests to handles (`kmet.app.loop.driver` + `:agents`) a namespace at a time and
-delete the fixture; the `kmet.test-layer-guard` check stays as the retirement
-belt.
 
 ## Out of scope (recorded)
 

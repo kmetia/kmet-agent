@@ -1,76 +1,68 @@
 (ns kmet.app.test-session-runtime
-  "Tests for kmet.app.session.runtime: the engine front ends drive, and
-   the front-end surface (state accessors + operations) modes and app UI
-   use to read and drive it."
+  "Tests for kmet.app.session.runtime over a real handle: the value a front end
+   drives, the accessors it reads, and the operations a handle answers.
+
+   The subject is the handle the composition's `:agents` factory creates, not a
+   stand-in engine — the shape production runs."
   (:require [babashka.fs :as fs]
             [clojure.test :refer [deftest is testing]]
             [kmet.app.commands :as commands]
+            [kmet.app.compaction :as agent-compact]
             [kmet.app.config :as cfg]
             [kmet.app.extensions.core :as extensions]
-            [kmet.app.compaction :as agent-compact]
             [kmet.app.loop :as agent]
-            [kmet.app.packages :as packages]
+            [kmet.app.loop.state :as loop-state]
             [kmet.app.prompts :as prompts]
             [kmet.app.session.core :as session]
-            [kmet.app.skills :as skills]
-            [kmet.app.session.test-engine :as session-driver]
             [kmet.app.session.runtime :as rt]
+            [kmet.app.session.submission :as submission]
+            [kmet.app.session.summary :as summary]
+            [kmet.app.skills :as skills]
             [kmet.app.tools.invoke :as invoke]
             [kmet.app.tools.registry :as tools-reg]
             [kmet.ai.models :as models]
             [kmet.app.registry :as registry]
-            [kmet.app.registries :as registries]
             [kmet.srce.core :as srce]
             [kmet.test-utils :as tu]
-            [kmet.app.events :as events]
             [kmet.app.test-support :as support]))
-;; The extension host and the registries a bootstrapped engine reads are the
-;; composition's, so the namespace boots one for its duration.
-(clojure.test/use-fixtures :once support/with-composition)
 
-;; Several tests bootstrap real engines into the app's registries (loading the
-;; developer's own skills and prompts) and register app-wide fixtures; clear
-;; the process-global registrations between tests.
+;; The composition provides the handle factory, its ctx and the prompt row.
+(clojure.test/use-fixtures :once support/with-composition)
+;; Several tests register app-wide commands, tools, prompts, skills and hooks;
+;; clear the process-global registrations between tests.
 (clojure.test/use-fixtures :each tu/with-clean-app-registries)
 
-(defn- test-config
-  "A sparse run config — every derived option falls back to its default."
-  []
-  {:provider :opencode-go :model "deepseek-v4-flash"})
-
-(defn- with-engine
-  "Bootstrap an engine over a fresh temp session and call F with it,
-   disposing it and removing the temp dir afterwards. OPTS are added to the
-   bootstrap options (an empty map for the default engine)."
-  ([f] (with-engine {} f))
+(defn- with-handle
+  "Create a real handle through the composition and call F with it and its
+   session, disposing it through the registry afterwards (which also releases
+   its child ctx) and removing its scratch session dir."
+  ([f] (with-handle {} f))
   ([opts f]
-   (let [dir (str "target/test-session-runtime-" (System/currentTimeMillis))
-         sess (session/create-session dir {:cwd (str (fs/cwd))})]
-     (try
-       (let [engine (session-driver/bootstrap (test-config)
-                                              (merge {:session sess :ctx (support/composition-ctx)} opts))]
-         (try (f engine sess)
-              (finally (session-driver/dispose! engine))))
-       (finally (fs/delete-tree dir))))))
+   (let [handle (support/create-agent-handle! opts)
+         agents (srce/get (support/composition-ctx) :agents)
+         dir (:session-dir (rt/config handle))]
+     (try (f handle (rt/session handle))
+          (finally
+            ((:dispose! agents) handle)
+            (when dir (fs/delete-tree dir {:missing-ok true})))))))
 
 (deftest test-commands-outlive-an-engine
-  ;; The app root's store owns commands, so disposing an engine does not drop
-  ;; them — with the engine atom they were its copy of the pending buffer.
-  (with-engine
-    (fn [_engine _sess]
+  ;; The app root's store owns commands, so disposing a handle does not drop
+  ;; them.
+  (with-handle
+    (fn [_ _]
       (commands/register-command!
        {:name "outlives-demo" :handler (fn [& _] nil)})))
   (try
     (is (some? (commands/find-command "outlives-demo")))
     (finally
-      (commands/unregister-command!  "outlives-demo"))))
+      (commands/unregister-command! "outlives-demo"))))
 
 (deftest test-tools-outlive-an-engine
-  ;; Custom tools and contributed sources are the app's too (P2): registered
-  ;; while an engine runs, they are found after its disposal, where the
-  ;; pending buffer could only have filled the engine that was copied from.
-  (with-engine
-    (fn [_engine _sess]
+  ;; Custom tools and contributed sources are the app's: registered while a
+  ;; handle runs, they are found after its disposal.
+  (with-handle
+    (fn [_ _]
       (tools-reg/register-tool! (registry/current)
                                 {:name "outlives-tool" :label "Outlives"
                                  :description "d"
@@ -88,10 +80,10 @@
       (tools-reg/unregister-tool-source! (registry/current) ::outlives))))
 
 (deftest test-prompt-templates-outlive-an-engine
-  ;; Prompt templates are the app's too (P2): one registered while an engine
-  ;; runs is found after its disposal, and looked up by name from the store.
-  (with-engine
-    (fn [_engine _sess]
+  ;; Prompt templates are the app's: one registered while a handle runs is
+  ;; found after its disposal, and looked up by name from the store.
+  (with-handle
+    (fn [_ _]
       (prompts/register-prompt-template!
        {:name "outlives-template" :content "---\ndescription: d\n---\nBody"
         :location "my-ext:prompts/outlives.md" :extension "my-ext"})))
@@ -101,165 +93,101 @@
       (prompts/clear-prompt-templates!))))
 
 (deftest test-skills-outlive-an-engine
-  ;; Skills are the app's too (P2): one registered while an engine runs is
-  ;; found after its disposal, and looked up by name from the store.
-  (with-engine
-    (fn [_engine _sess]
-      (skills/register-skill!  "outlives-skill" "A skill that outlives the engine.")))
+  ;; Skills are the app's: one registered while a handle runs is found after
+  ;; its disposal, and looked up by name from the store.
+  (with-handle
+    (fn [_ _]
+      (skills/register-skill! "outlives-skill" "A skill that outlives the handle.")))
   (try
     (is (= "outlives-skill" (:name (skills/get-skill "outlives-skill"))))
     (finally
       (skills/clear-skills!))))
 
-(deftest test-bootstrap-loads-only-what-the-caller-names
-  ;; Resource loading is the process's policy, not the engine's: a front end
-  ;; passes the unified package resolution, and an engine handed none loads
-  ;; none (kmet2's driver loads per its own rows).
-  (let [loads (atom [])]
-    (with-engine {:load-resources! #(swap! loads conj :caller)}
-      (fn [_engine _sess]
-        (is (= [:caller] @loads) "the caller's thunk ran, once"))))
-  (let [loads (atom [])]
-    (with-redefs [packages/load-skills! (fn [& _] (swap! loads conj :skills))
-                  packages/load-prompts! (fn [& _] (swap! loads conj :prompts))]
-      (with-engine
-        (fn [_engine _sess]
-          (is (empty? @loads) "no option, no load"))))))
-
-(deftest test-the-prompt-row-is-the-default-builder
-  ;; The Engine's prompt policy is the composition's `:systemPrompt` row when
-  ;; the ctx has one (kmet1 boots kmet2 behind its app root), and an
-  ;; `:agent-opts` builder still wins over it.
-  (let [ctx (srce/root {:name :app})]
-    (srce/plugin! ctx {:name :fake-app
-                       :provide #{:system-prompt :tools}
-                       :apply (fn [mount _]
-                                (srce/provide! mount :system-prompt
-                                               (fn [& _] "FROM-THE-ROW")
-                                               {:in (:parent mount)})
-                                (srce/provide! mount :tools
-                                               (registries/service)
-                                               {:in (:parent mount)}))})
-    (with-engine {:ctx ctx}
-      (fn [engine _sess]
-        (is (= "FROM-THE-ROW" @(:system (rt/agent-state engine))))))
-    (with-engine {:ctx ctx
-                  :agent-opts {:system-prompt-fn (fn [& _] "FROM-THE-OPTS")}}
-      (fn [engine _sess]
-        (is (= "FROM-THE-OPTS" @(:system (rt/agent-state engine))))))))
-
-(deftest test-expansion-is-the-callers
-  ;; The Engine knows when text expands, not what a command stands for: kmet1's
-  ;; front ends pass packages/expand-input, and an engine given none queues its
-  ;; text as written. One template, two engines.
-  (prompts/register-prompt-template! {:name "expand-me" :content "Expanded body."})
-  (with-engine {:expand-input packages/expand-input}
-    (fn [engine _sess]
-      (is (= "Expanded body." (session-driver/expand-queued-text engine "/expand-me")))))
-  (with-engine
-    (fn [engine _sess]
-      (is (= "/expand-me" (session-driver/expand-queued-text engine "/expand-me"))
-          "no chain, no substitution"))))
-
-(deftest test-bootstrap-builds-the-engine
-  (with-engine
-    (fn [engine sess]
-      (let [ag (rt/agent-state engine)]
-        (is (identical? sess (rt/session engine)) "the session is the resolved record")
+(deftest test-handle-carries-the-run-config
+  (with-handle
+    (fn [handle sess]
+      (let [ag (rt/agent-state handle)]
+        (is (identical? sess (rt/session handle)) "the session is the resolved record")
         (is (identical? sess (:session ag)) "the agent runs on the same session")
         (is (= :opencode-go @(:provider ag)))
         (is (= "deepseek-v4-flash" @(:model ag)))
         (is (string? @(:system ag)) "the system prompt was built")
-        (is (fn? (:on-event ag)) "the agent's UI callback is the subscriber dispatcher")
-        (is (= [] (rt/scoped-models engine)))
+        (is (= [] (rt/scoped-models handle)))
         (is (= :off @(:thinking ag)) "thinking defaults to off")
-        (is (identical? (support/composition-ctx) (rt/agent-ctx engine))
-            "the engine resolves a ctx: the app root's by default")
-        (is (identical? sess (extensions/get-session))
-            "the extension session handle is installed")
-        (is (= :print (extensions/extension-mode))
-            "the front end's headless kind is bound")
-        (is (contains? (registry/by-owner (registry/current) :kmet/ui-port :port) [:app :ui])
-            "the front end's headless port is the [:app :ui] registration")))))
+        (is (srce/inside? (rt/agent-ctx handle) (support/composition-ctx))
+            "the handle's ctx is the composition's child")))))
 
-(deftest test-subscribe-receives-and-unsubscribes
-  (with-engine
-    (fn [engine _]
-      (let [events (atom [])
-            unsub (session-driver/subscribe! engine #(swap! events conj %))]
-        (session-driver/cancel! engine)
-        (is (seq @events) "the subscriber receives the stream")
-        (is (= :queue-update (:type (first @events))))
-        (reset! events [])
-        (unsub)
-        (session-driver/cancel! engine)
-        (is (empty? @events) "an unsubscribed fn receives nothing")))))
+(deftest test-expansion-chain
+  ;; The handle's expansion is the process's unified chain, applied to queued
+  ;; and submitted text before it reaches the run.
+  (with-handle
+    (fn [handle _]
+      (prompts/register-prompt-template! {:name "expand-me" :content "Expanded body."})
+      (is (= "Expanded body." (submission/expand-text handle "/expand-me"))))))
 
-(deftest test-subscriber-errors-are-isolated
-  (with-engine
-    (fn [engine _]
-      (let [events (atom [])]
-        (session-driver/subscribe! engine (fn [_] (throw (ex-info "boom" {}))))
-        (session-driver/subscribe! engine #(swap! events conj %))
-        (is (nil? (session-driver/cancel! engine))
-            "a throwing subscriber cannot escape into the loop")
-        (is (seq @events) "the other subscribers still receive the event")))))
-
-(deftest test-prompt-passes-through-and-records-the-run
-  (with-engine
-    (fn [engine _]
+(deftest test-send-starts-and-records-the-run
+  (with-handle
+    (fn [handle _]
       (let [seen (atom nil)
-            run (future :settled)
-            called (atom [])
-            done (fn [t] (swap! called conj t))]
+            run (future :settled)]
         (with-redefs [agent/run-agent-turn
-                      (fn [ag run-opts]
-                        (reset! seen {:ag ag :opts run-opts})
+                      (fn [ag opts]
+                        (reset! seen {:ag ag :opts opts})
                         run)]
-          (is (nil? (session-driver/prompt! engine {:text "hi" :on-done done}))
-              "prompt! returns immediately (completion is :agent-settled)")
-          (is (identical? (rt/agent-state engine) (:ag @seen)))
+          (is (= :started ((:send! handle) "hi" {:target :next-turn}))
+              "send returns the delivery outcome immediately")
+          (is (identical? (rt/agent-state handle) (:ag @seen)))
           (is (= "hi" (:message (:opts @seen))))
-          (is (true? (rt/turn-running? engine)) "the prompt owns the turn flag")
-          (is (fn? (:on-done (:opts @seen))) "the runtime wraps the callback")
+          (is (true? (rt/turn-running? handle)) "the send owns the turn flag")
+          (is (fn? (:on-done (:opts @seen))) "the runtime wraps the settle")
           ((:on-done (:opts @seen)) "answer")
-          (is (= ["answer"] @called) "the front end's :on-done runs after the flag clears")
-          (is (false? (rt/turn-running? engine))
-              "the wrapped :on-done clears the turn flag before the front end runs")
-          (is (identical? run @(:last-run engine)) "the run is recorded for dispose!"))))))
+          (is (false? (rt/turn-running? handle))
+              "the wrapped settle clears the turn flag")
+          (is (identical? run @(:last-run handle))
+              "the run is recorded for disposal"))))))
 
-(deftest test-prompt-uses-the-live-agent-after-a-session-switch
-  ;; a session switch replaces the agent state in the shared atom; prompt!
-  ;; must run the new record, not the bootstrap one
-  (with-engine
-    (fn [engine _]
+(deftest test-send-uses-the-live-agent-after-a-session-switch
+  ;; A session switch replaces the agent state in the shared atom; the send
+  ;; must run the new record, not the one the handle was created with.
+  (with-handle
+    (fn [handle _]
       (let [seen (atom nil)]
-        (reset! (:agent-state engine)
-                (assoc (rt/agent-state engine) :session ::switched))
+        (reset! (:agent-state handle)
+                (assoc (rt/agent-state handle) :session ::switched))
         (with-redefs [agent/run-agent-turn (fn [ag _]
                                              (reset! seen (:session ag))
                                              (future))]
-          (session-driver/prompt! engine {:text "hi"})
+          ((:send! handle) "hi" {:target :next-turn})
           (is (= ::switched @seen)))))))
 
-(deftest test-dispose-clears-subscribers-and-wiring
-  (with-engine
-    (fn [engine _]
-      (let [events (atom [])]
-        (session-driver/subscribe! engine #(swap! events conj %))
-        (is (nil? (session-driver/dispose! engine)))
-        (is (nil? (extensions/get-session)) "the extension session handle is cleared")
-        (is (= :print (extensions/extension-mode))
-            "dispose! restores the headless front-end binding")
-        (is (nil? (session-driver/dispose! engine)) "dispose! is idempotent")
-        (session-driver/cancel! engine)
-        (is (empty? @events))))))
+(deftest test-send-queues-while-the-turn-flag-is-set
+  ;; The turn flag is set synchronously when a prompt starts, so a second send
+  ;; queues into the run instead of starting a concurrent one — even when the
+  ;; agent's status already reads idle (the settle window).
+  (with-handle
+    (fn [handle _]
+      (let [started (atom 0)]
+        (with-redefs [agent/run-agent-turn (fn [& _]
+                                             (swap! started inc)
+                                             (future))]
+          (reset! (:turn-running? handle) true)
+          (is (= :steered ((:send! handle) "queued" {:target :next-turn})))
+          (is (= ["queued"] @(:follow-up (rt/agent-state handle))))
+          (is (= 0 @started) "no concurrent run")
+          (reset! (:turn-running? handle) false)
+          (is (= :started ((:send! handle) "fresh" {:target :next-turn})))
+          (is (= 1 @started) "an idle send starts the run"))))))
+
+(deftest test-dispose-is-idempotent
+  (with-handle
+    (fn [handle _]
+      (is (nil? ((:dispose! handle))))
+      (is (true? @(:disposed? handle)))
+      (is (nil? ((:dispose! handle))) "dispose! is idempotent"))))
 
 (deftest test-session-install-is-last-wins
   ;; The extension-facing session is one process cache (one live front end at
-  ;; a time): installing a session replaces the previous one, and nothing
-  ;; owner-scoped shadows it since the host stopped registering into the tree
-  ;; (4b-ii-a).
+  ;; a time): installing a session replaces the previous one.
   (try
     (extensions/install-session! :old-session)
     (extensions/install-session! :newer-session)
@@ -268,68 +196,68 @@
       (extensions/install-session! nil))))
 
 (deftest test-snapshot-is-plain-data
-  (with-engine
-    (fn [engine sess]
-      (let [snap (rt/snapshot engine)]
+  (with-handle
+    (fn [handle sess]
+      (let [snap (rt/snapshot handle)]
         (is (identical? sess (:session snap)))
         (is (= :idle (:status snap)))
         (is (= :opencode-go (:provider snap)))
         (is (= "deepseek-v4-flash" (:model snap)))
         (is (= {:steering [] :follow-up []} (:queues snap)))
         (is (= :completed (:last-outcome snap)))
-        (is (not (contains? snap :subscribers)) "the snapshot is a view, not the engine")))))
+        (is (not (contains? snap :agent-state)) "the snapshot is a view, not the engine")))))
 
 (deftest test-front-end-state-accessors
-  (with-engine
-    (fn [engine _]
-      (let [ag (rt/agent-state engine)]
-        (is (= "deepseek-v4-flash" (rt/model engine)))
-        (is (= :opencode-go (rt/provider engine)))
+  (with-handle
+    (fn [handle _]
+      (let [ag (rt/agent-state handle)]
+        (is (= "deepseek-v4-flash" (rt/model handle)))
+        (is (= :opencode-go (rt/provider handle)))
         (with-redefs [models/get-model (fn [p id] {:provider p :id id})]
           (is (= {:provider :opencode-go :id "deepseek-v4-flash"}
-                 (rt/model-record engine))
+                 (rt/model-record handle))
               "the record resolves from the live provider/model"))
-        (is (= :off (rt/thinking-level engine)))
+        (is (= :off (rt/thinking-level handle)))
         (reset! (:thinking ag) :high)
-        (is (= :high (rt/thinking-level engine))
+        (is (= :high (rt/thinking-level handle))
             "accessors read the live atom, not a captured record")
-        (is (= @(:system ag) (rt/system-prompt engine)))
-        (is (false? (rt/compacting? engine)))
+        (is (= @(:system ag) (rt/system-prompt handle)))
+        (is (false? (rt/compacting? handle)))
         (reset! (:compacting? ag) true)
-        (is (true? (rt/compacting? engine)))
-        (is (nil? (rt/compaction-error engine)))
+        (is (true? (rt/compacting? handle)))
+        (is (nil? (rt/compaction-error handle)))
         (reset! (:compaction-error ag) "boom")
-        (is (= "boom" (rt/compaction-error engine)))
-        (is (false? (rt/cancel-signal engine)))
+        (is (= "boom" (rt/compaction-error handle)))
+        (is (false? (rt/cancel-signal handle)))
         (reset! (:signal ag) true)
-        (is (true? (rt/cancel-signal engine)))
-        (is (false? (rt/has-queued-messages? engine)))
-        (session-driver/steer! engine "queued")
-        (is (true? (rt/has-queued-messages? engine))
+        (is (true? (rt/cancel-signal handle)))
+        (is (false? (rt/has-queued-messages? handle)))
+        (loop-state/steer! ag "queued")
+        (is (true? (rt/has-queued-messages? handle))
             "a queued steer message makes the engine non-idle for extensions")))))
 
 (deftest test-run-options-are-live-and-merge
-  (with-engine
-    (fn [engine _]
-      (is (= :all (:steering-mode (rt/run-options engine))))
-      (rt/set-run-options! engine {:context-window 12345})
-      (is (= 12345 (:context-window (rt/run-options engine)))
+  (with-handle
+    (fn [handle _]
+      (is (= :all (:steering-mode (rt/run-options handle))))
+      (rt/set-run-options! handle {:context-window 12345})
+      (is (= 12345 (:context-window (rt/run-options handle)))
           "the option applies live")
-      (is (= :all (:steering-mode (rt/run-options engine)))
+      (is (= :all (:steering-mode (rt/run-options handle)))
           "merge keeps untouched options")
-      (rt/set-run-options! engine {:steering-mode :one-at-a-time})
-      (is (= :one-at-a-time (:steering-mode (rt/run-options engine))))
-      (is (= 12345 (:context-window (rt/run-options engine)))))))
+      (rt/set-run-options! handle {:steering-mode :one-at-a-time})
+      (is (= :one-at-a-time (:steering-mode (rt/run-options handle))))
+      (is (= 12345 (:context-window (rt/run-options handle)))))))
 
 (deftest test-snapshot-carries-queue-and-compaction-state
-  (with-engine
-    (fn [engine _]
-      (rt/set-scoped-models! engine ["opencode-go/a" "opencode-go/b"])
-      (rt/set-run-options! engine {:steering-mode :one-at-a-time
+  (with-handle
+    (fn [handle _]
+      (rt/set-scoped-models! handle ["opencode-go/a" "opencode-go/b"])
+      (rt/set-run-options! handle {:steering-mode :one-at-a-time
                                    :follow-up-mode :all
                                    :auto-compact false})
-      (reset! (:compacting? (rt/agent-state engine)) true)
-      (let [snap (rt/snapshot engine)]
+      (reset! (:compacting? (rt/agent-state handle)) true)
+      (let [snap (rt/snapshot handle)]
         (is (= ["opencode-go/a" "opencode-go/b"] (:scoped-models snap)))
         (is (true? (:compacting? snap)))
         (is (= :one-at-a-time (:steering-mode snap)))
@@ -337,101 +265,104 @@
         (is (false? (:auto-compact snap)))))))
 
 (deftest test-set-system-prompt-replaces-prompt-and-opts
-  (with-engine
-    (fn [engine _]
-      (let [ag (rt/agent-state engine)
+  (with-handle
+    (fn [handle _]
+      (let [ag (rt/agent-state handle)
             opts {:cwd "target/test-prompt-cwd"}]
-        (rt/set-system-prompt! engine "custom prompt" opts)
-        (is (= "custom prompt" (rt/system-prompt engine)))
+        (rt/set-system-prompt! handle "custom prompt" opts)
+        (is (= "custom prompt" (rt/system-prompt handle)))
         (is (= opts @(:system-prompt-opts ag)))))))
 
 (deftest test-active-tools-follow-the-default-selection
-  (with-engine
-    (fn [engine _]
-      (is (contains? (set (map :name (rt/active-tools engine))) "read")
+  (with-handle
+    (fn [handle _]
+      (is (contains? (set (map :name (rt/active-tools handle))) "read")
           "the bootstrap default set is active")
       (is (= ["read" "bash"]
-             (rt/apply-default-tools! engine ["read" "bash"]))
+             (rt/apply-default-tools! handle ["read" "bash"]))
           "the applied selection is returned")
-      (let [names (set (map :name (rt/active-tools engine)))]
+      (let [names (set (map :name (rt/active-tools handle)))]
         (is (contains? names "read"))
         (is (contains? names "bash"))
         (is (not (contains? names "write"))
             "built-ins outside the selection are inactive")))))
 
 (deftest test-add-context-message-and-bash-result
-  (with-engine
-    (fn [engine _]
-      (let [before (count (rt/messages engine))]
-        (rt/add-context-message! engine {:role :custom :content "note"})
-        (is (= (inc before) (count (rt/messages engine))))
-        (is (= [{:type :text :text "note"}] (:content (last (rt/messages engine))))
+  (with-handle
+    (fn [handle _]
+      (let [before (count (rt/messages handle))]
+        (rt/add-context-message! handle {:role :custom :content "note"})
+        (is (= (inc before) (count (rt/messages handle))))
+        (is (= [{:type :text :text "note"}] (:content (last (rt/messages handle))))
             "string content is normalized to a text block"))
-      (rt/add-bash-result! engine "echo hi" {:output "hi" :exit-code 0} false)
-      (let [entry (last (rt/messages engine))]
+      (rt/add-bash-result! handle "echo hi" {:output "hi" :exit-code 0} false)
+      (let [entry (last (rt/messages handle))]
         (is (= :bash (:role entry)) "an idle bash result reaches the context")
         (is (= "echo hi" (:command entry)))
         (is (= "hi" (:output entry)))))))
 
 (deftest test-abort-compaction-signals
-  (with-engine
-    (fn [engine _]
-      (let [ag (rt/agent-state engine)]
+  (with-handle
+    (fn [handle _]
+      (let [ag (rt/agent-state handle)]
         (is (false? @(:compaction-signal ag)))
-        (is (nil? (session-driver/abort-compaction! engine)))
+        (is (nil? ((:abort-compaction! handle))))
         (is (true? @(:compaction-signal ag)) "escape during compaction signals it")
         (is (false? @(:signal ag)) "the run-cancel signal is untouched")))))
 
 (deftest test-request-compaction-starts-when-idle
-  (with-engine
-    (fn [engine _]
+  (with-handle
+    (fn [handle _]
       (let [completed (promise)]
         (with-redefs [agent-compact/compact-context! (fn [& _] true)]
-          (is (= :started (session-driver/request-compaction! engine nil {:on-complete #(deliver completed %)})))
+          (is (= :started ((:request-compaction! handle) nil
+                                                         {:on-complete #(deliver completed %)})))
           (is (true? (deref completed 2000 ::timeout))
               "an idle request starts immediately and reports its result"))
-        (reset! (:compacting? (rt/agent-state engine)) true)
-        (is (= :compacting (session-driver/request-compaction! engine nil nil))
+        (reset! (:compacting? (rt/agent-state handle)) true)
+        (is (= :compacting ((:request-compaction! handle) nil nil))
             "a compaction in flight refuses a second one")
-        (is (empty? (rt/pending-compaction engine))
+        (is (empty? (rt/pending-compaction handle))
             "a refused request is not queued")))))
 
 (deftest test-request-compaction-defers-while-a-turn-runs
-  (with-engine
-    (fn [engine _]
+  (with-handle
+    (fn [handle _]
       (let [completed (promise)
             seen (atom [])]
-        (reset! (:turn-running? engine) true)
+        (reset! (:turn-running? handle) true)
         (with-redefs [agent-compact/compact-context!
                       (fn [_ag instructions reason]
                         (swap! seen conj [instructions reason])
                         true)]
           (is (= :scheduled
-                 (session-driver/request-compaction! engine "focus" {:on-complete #(deliver completed %)}))
+                 ((:request-compaction! handle) "focus"
+                                                {:on-complete #(deliver completed %)}))
               "a live prompt defers the request")
-          (is (= ["focus"] (mapv :custom-instructions (rt/pending-compaction engine))))
+          (is (= ["focus"] (mapv :custom-instructions (rt/pending-compaction handle))))
           ;; a settle while a newer prompt already owns the runtime leaves it
           ;; queued for the next settle
-          ((:on-event (rt/agent-state engine)) {:type :agent-settled :outcome :completed})
+          ((:on-event (rt/agent-state handle)) {:type :agent-settled :outcome :completed})
           (is (false? (realized? completed)) "a busy settle does not start it")
-          (is (= 1 (count (rt/pending-compaction engine))) "still queued")
-          (reset! (:turn-running? engine) false)
-          ((:on-event (rt/agent-state engine)) {:type :agent-settled :outcome :completed})
+          (is (= 1 (count (rt/pending-compaction handle))) "still queued")
+          (reset! (:turn-running? handle) false)
+          ((:on-event (rt/agent-state handle)) {:type :agent-settled :outcome :completed})
           (is (true? (deref completed 2000 ::timeout))
               "the settle event starts the deferred compaction")
           (is (= [["focus" :manual]] @seen)
               "it runs as a manual compaction with its instructions"))
-        (is (empty? (rt/pending-compaction engine)) "the queue drained")))))
+        (is (empty? (rt/pending-compaction handle)) "the queue drained")))))
 
 (deftest test-request-compaction-reports-failures
-  (with-engine
-    (fn [engine _]
+  (with-handle
+    (fn [handle _]
       (let [failed (promise)]
         (with-redefs [agent-compact/compact-context!
                       (fn [ag & _]
                         (reset! (:compaction-error ag) "Compaction failed: boom")
                         :failed)]
-          (session-driver/request-compaction! engine nil {:on-error #(deliver failed (ex-message %))})
+          ((:request-compaction! handle) nil
+                                         {:on-error #(deliver failed (ex-message %))})
           (is (= "Compaction failed: boom" (deref failed 2000 ::timeout))
               ":failed reports pi's message through :on-error"))))))
 
@@ -439,36 +370,30 @@
   (testing "a compaction deferred for the outgoing session dies with it —
             starting a new session must not let the settle drain run it
             against the swap"
-    (let [dir (str "target/test-session-runtime-new-" (System/currentTimeMillis))
-          sess (session/create-session dir {:cwd (str (fs/cwd))})]
-      (try
-        (let [engine (session-driver/bootstrap (assoc (test-config) :session-dir dir)
-                                               {:session sess :ctx (support/composition-ctx)})]
-          (try
-            (reset! (:turn-running? engine) true)
-            (is (= :scheduled (session-driver/request-compaction! engine nil nil)))
-            (is (= 1 (count (rt/pending-compaction engine))))
-            (session-driver/new-session! engine)
-            (is (empty? (rt/pending-compaction engine))
-                "the deferred request is dropped before the settle")
-            (finally (session-driver/dispose! engine))))
-        (finally (fs/delete-tree dir))))))
+    (with-handle
+      (fn [handle _]
+        (reset! (:turn-running? handle) true)
+        (is (= :scheduled ((:request-compaction! handle) nil nil)))
+        (is (= 1 (count (rt/pending-compaction handle))))
+        ((:new-session! handle))
+        (is (empty? (rt/pending-compaction handle))
+            "the deferred request is dropped before the settle")))))
 
 (deftest test-http-timeout-setters
-  (with-engine
-    (fn [engine _]
-      (rt/set-http-idle-timeout-ms! engine 5000)
-      (is (= 5000 (:http-idle-timeout-ms (rt/run-options engine))))
-      (rt/set-http-total-timeout-ms! engine 9000)
-      (is (= 9000 (:http-total-timeout-ms (rt/run-options engine))))
-      (rt/set-http-total-timeout-ms! engine nil)
-      (is (nil? (:http-total-timeout-ms (rt/run-options engine)))
+  (with-handle
+    (fn [handle _]
+      (rt/set-http-idle-timeout-ms! handle 5000)
+      (is (= 5000 (:http-idle-timeout-ms (rt/run-options handle))))
+      (rt/set-http-total-timeout-ms! handle 9000)
+      (is (= 9000 (:http-total-timeout-ms (rt/run-options handle))))
+      (rt/set-http-total-timeout-ms! handle nil)
+      (is (nil? (:http-total-timeout-ms (rt/run-options handle)))
           "nil follows the idle timeout"))))
 
 (deftest test-switch-model-applies-the-rank-rule-and-persists
-  (with-engine
-    (fn [engine _]
-      (let [ag (rt/agent-state engine)
+  (with-handle
+    (fn [handle _]
+      (let [ag (rt/agent-state handle)
             reasoner (models/map->Model {:provider :test-native :id "reasoner"
                                          :reasoning true})
             plain (models/map->Model {:provider :test-native :id "plain"
@@ -485,18 +410,18 @@
           (reset! (:model ag) "reasoner")
           (reset! (:thinking ag) :low)
           (testing "a non-reasoning target drops the reasoning level to :off"
-            (is (= :off (rt/switch-model! engine plain nil)))
-            (is (= "plain" (rt/model engine)) "the model is applied")
-            (is (= :off (rt/thinking-level engine)) "the clamped level is applied")
+            (is (= :off (rt/switch-model! handle plain nil)))
+            (is (= "plain" (rt/model handle)) "the model is applied")
+            (is (= :off (rt/thinking-level handle)) "the clamped level is applied")
             (is (= [:test-native "plain"] @persisted) "persisted as the default"))
           (testing "an explicit level wins and is clamped to the target"
-            (is (= :high (rt/switch-model! engine reasoner :high)))
-            (is (= :high (rt/thinking-level engine)))
+            (is (= :high (rt/switch-model! handle reasoner :high)))
+            (is (= :high (rt/thinking-level handle)))
             (is (= [:test-native "reasoner"] @persisted))))))))
 
 (deftest test-generate-branch-summary-forwards-to-the-agent
-  (with-engine
-    (fn [engine _]
+  (with-handle
+    (fn [handle _]
       (let [signal (atom false)
             seen (atom nil)]
         (with-redefs [agent-compact/generate-branch-summary
@@ -504,9 +429,9 @@
                         (reset! seen [ag entries instructions sig replace?])
                         {:summary "s"})]
           (is (= {:summary "s"}
-                 (session-driver/generate-branch-summary engine [{:id "e1"}] "instr" signal true)))
-          (is (identical? (rt/agent-state engine) (nth @seen 0))
-              "the wrapper hands the live agent state over")
+                 (summary/generate-branch-summary handle [{:id "e1"}] "instr" signal true)))
+          (is (identical? (rt/agent-state handle) (nth @seen 0))
+              "the call hands the live agent state over")
           (is (= [[{:id "e1"}] "instr" signal true] (subvec @seen 1))))))))
 
 (deftest test-session-directory-helpers
@@ -526,100 +451,19 @@
             "the most recent session for the cwd is found"))
       (finally (fs/delete-tree dir)))))
 
-(deftest test-resolve-run-session-policy
-  (let [dir (str "target/test-session-runtime-resolve-" (System/currentTimeMillis))
-        config {:provider :opencode-go :model "deepseek-v4-flash" :session-dir dir}]
+(deftest test-two-handles-do-not-cross-contaminate
+  (let [h1 (support/create-agent-handle!)
+        h2 (support/create-agent-handle!)
+        agents (srce/get (support/composition-ctx) :agents)
+        dirs (map (comp :session-dir rt/config) [h1 h2])]
     (try
-      (let [fresh (session-driver/resolve-run-session config {})]
-        (is (some? (:file fresh)) "a fresh session is created in the cwd dir")
-        ;; sessions reach disk on their first entry (create-session is lazy),
-        ;; and --continue/--session search the files
-        (session/append-entry fresh {:role :assistant :content "prior"})
-        (is (= (:id fresh) (:id (session-driver/resolve-run-session config {:continue true})))
-            "--continue finds the most recent session for the cwd")
-        (is (= (:id fresh)
-               (:id (session-driver/resolve-run-session config {:session (subs (:id fresh) 0 8)})))
-            "--session takes an id prefix"))
-      (is (nil? (session-driver/resolve-run-session config {:session "no-such-session"}))
-          "--session matching nothing resolves to nil (the caller reports it)")
-      (finally (fs/delete-tree dir)))))
-
-(deftest test-wait-idle
-  (with-engine
-    (fn [engine _]
-      (is (true? (session-driver/wait-idle! engine 100)) "an idle engine is idle immediately")
-      (reset! (:turn-running? engine) true)
-      (is (false? (session-driver/wait-idle! engine 30)) "a stuck turn times out")
-      (reset! (:turn-running? engine) false)
-      (reset! (:compacting? (rt/agent-state engine)) true)
-      (is (false? (session-driver/wait-idle! engine 30)) "a stuck compaction times out")
-      (reset! (:compacting? (rt/agent-state engine)) false)
-      (is (true? (session-driver/wait-idle! engine 100)) "idle again after both clear"))))
-
-(deftest test-a-subscription-outlives-any-engine
-  ;; Extensions subscribe at load, before any engine exists, at the composition
-  ;; root: an engine neither adopts nor wipes it, so a subscription is live
-  ;; before the first engine and after that engine is disposed — the
-  ;; engine-owned copy started the next one blind.
-  (support/clear-listeners!)
-  (let [fired (atom 0)
-        dereg (support/on-event :message-start (fn [_] (swap! fired inc)))]
-    (try
-      (with-engine (fn [_ _] (events/emit! (support/composition-ctx) {:type :message-start})))
-      (is (= 1 @fired) "the subscription registered before the engine fires")
-      (with-engine (fn [_ _] (events/emit! (support/composition-ctx) {:type :message-start})))
-      (is (= 2 @fired) "and it survives the first engine's disposal")
-      (finally (dereg)))))
-
-(deftest test-an-engine-builds-every-prompt-with-one-builder
-  ;; The Engine resolves the builder once — the caller's (kmet2's :systemPrompt
-  ;; row) or the process wrapper — and the initial build, a cwd move and the
-  ;; state's active-tools rebuild all go through it, so one engine cannot hold a
-  ;; prompt built by one rule and rebuilt by another.
-  (let [dir (str "target/test-prompt-fn-" (System/currentTimeMillis))
-        sess (session/create-session dir {:cwd (str (fs/cwd))})
-        calls (atom 0)
-        engine (session-driver/bootstrap (test-config)
-                                         {:session sess
-                                          :ctx (support/composition-ctx)
-                                          :agent-opts {:system-prompt-fn
-                                                       (fn [& _] (swap! calls inc) "custom-prompt")}})]
-    (try
-      (is (= "custom-prompt" @(:system (rt/agent-state engine)))
-          "the initial build uses the caller's builder")
-      (is (= 1 @calls))
-      (session-driver/apply-session-cwd! engine (session/create-session dir {:cwd "/"}))
-      (is (= "custom-prompt" @(:system (rt/agent-state engine)))
-          "and so does a cwd move")
-      (is (= 2 @calls))
-      (finally
-        (session-driver/dispose! engine)
-        (fs/delete-tree dir)))))
-
-(deftest test-two-engines-do-not-cross-contaminate
-  (let [dir1 (str "target/test-multi-engine-a-" (System/currentTimeMillis))
-        dir2 (str "target/test-multi-engine-b-" (System/currentTimeMillis))
-        sess1 (session/create-session
-               (rt/ensure-cwd-session-dir dir1 (str (fs/cwd)))
-               {:cwd (str (fs/cwd))})
-        e1 (session-driver/bootstrap (test-config) {:session sess1 :ctx (support/composition-ctx)})
-        sess2 (session/create-session
-               (rt/ensure-cwd-session-dir dir2 (str (fs/cwd)))
-               {:cwd (str (fs/cwd))})
-        e2 (session-driver/bootstrap (test-config) {:session sess2 :ctx (support/composition-ctx)})]
-    (try
-      ;; The bus is not an engine's (F10): its registry is process-level, so
-      ;; there is no per-engine listener storage to compare (see
-      ;; test-a-subscription-outlives-any-engine).
-      ;; The registries moved in P2 — tools, commands, prompts, skills,
-      ;; renderers, flags and the extension hooks — are the app's, not an
-      ;; engine's: neither engine owns them, so a registration reaches both,
-      ;; and a deregistered hook is gone from the tree every engine reads.
-      ;; The pending buffer could only fill the first engine, and its stale
-      ;; copy outlived an unload.
+      (is (not (identical? (:ctx h1) (:ctx h2))) "one child ctx per handle")
+      ;; The registries are the app's, not a handle's: a registration reaches
+      ;; both, and a deregistered hook is gone from the tree every handle reads.
       (let [fired (atom 0)
-            dereg (extensions/register-input-hook! (extensions/extension-owner "test-hooks-app-wide")
-                                                   (fn [_] (swap! fired inc) nil))]
+            dereg (extensions/register-input-hook!
+                   (extensions/extension-owner "test-hooks-app-wide")
+                   (fn [_] (swap! fired inc) nil))]
         (try
           (commands/register-command!
            {:name "app-wide-demo" :handler (fn [& _] nil)})
@@ -630,27 +474,19 @@
           (extensions/apply-input-hooks "hello" :interactive)
           (is (= 1 @fired) "and a deregistered hook stays gone")
           (finally
-            (commands/unregister-command!  "app-wide-demo"))))
-      (let [e1-events (atom [])
-            e2-events (atom [])]
-        (session-driver/subscribe! e1 #(swap! e1-events conj %))
-        (session-driver/subscribe! e2 #(swap! e2-events conj %))
-        (session-driver/cancel! e1)
-        (is (seq @e1-events) "the first engine's subscribers receive its events")
-        (is (empty? @e2-events) "the second engine's subscribers receive nothing"))
+            (commands/unregister-command! "app-wide-demo"))))
       (finally
-        (session-driver/dispose! e2)
-        (session-driver/dispose! e1)
-        (fs/delete-tree dir1)
-        (fs/delete-tree dir2)))))
+        ((:dispose! agents) h2)
+        ((:dispose! agents) h1)
+        (doseq [dir dirs]
+          (when dir (fs/delete-tree dir {:missing-ok true})))))))
 
 (deftest test-tool-hooks-come-from-the-app-tree
   ;; The transform chain reads the store (P2), so a hook an extension
   ;; registered reaches the engine — and leaves when it is deregistered.
-  ;; test-extensions covers the load/unload wiring end to end.
-  (with-engine
-    (fn [engine _sess]
-      (let [ag (rt/agent-state engine)
+  (with-handle
+    (fn [handle _]
+      (let [ag (rt/agent-state handle)
             before (fn [ctx] (@(:before-tool-call ag) ctx))
             after (fn [ctx] (@(:after-tool-call ag) ctx))
             owner (extensions/extension-owner "test-tool-hooks")

@@ -1,21 +1,14 @@
 (ns kmet.app.test-ui-port
-  "Front-end extension binding + UI request/response contract: bind-extensions!
-   carries the front-end kind (ctx.mode /
-   ctx.has-ui), the headless port auto-answers, and request-ui!/respond!
-   pair a request with its answer."
-  (:require [babashka.fs :as fs]
-            [clojure.test :as t :refer [deftest testing]]
+  "Front-end extension binding + UI provider contract: bind-extensions!
+   carries the front-end kind (ctx.mode / ctx.has-ui), the headless port
+   auto-answers, and the install/unbind pair owns the port registration."
+  (:require [clojure.test :as t :refer [deftest testing]]
             [kmet.app.extensions.core :as ex]
             [kmet.app.registry :as registry]
-            [kmet.srce.core :as srce]
-            [kmet.app.session.core :as session]
-            [kmet.app.session.test-engine :as session-driver]
-            [kmet.app.loop.test-support :as loop-support]
             [kmet.test-utils :as tu]))
 
 ;; The binding and the app's registrations are process-global state;
-;; every test starts and ends headless with a cleared tree (the bootstrap test
-;; loads the developer's own skills).
+;; every test starts and ends headless with a cleared tree.
 (t/use-fixtures :each
   (fn [f]
     (ex/unbind-extensions!)
@@ -28,11 +21,6 @@
              (finally
                (ex/unbind-extensions!)
                (tu/clear-app-registries!)))))))
-
-(defn- bare-engine
-  "A bare engine with just enough agent state for request/dispose tests."
-  []
-  (tu/test-engine {:agent-state (atom {:compacting? (atom false)})}))
 
 (deftest test-bind-extensions-sets-kind-and-port
   (testing "bind-extensions! installs the front-end kind and capability map"
@@ -111,119 +99,3 @@
     (ex/bind-extensions! {:mode :print :has-ui false :ui (ex/headless-ui-port)})
     (t/is (nil? (deref (ex/ui-custom (fn [_ _ _ done] (done nil)) {})
                        100 ::timeout)))))
-
-(deftest test-request-ui-falls-back-to-defaults
-  (testing "without a :request capability the degraded default answers"
-    (let [engine (bare-engine)]
-      (t/is (false? (deref (session-driver/request-ui! engine :confirm {}) 100 ::timeout)))
-      (t/is (nil? (deref (session-driver/request-ui! engine :select {}) 100 ::timeout)))
-      (t/is (true? (deref (session-driver/request-ui! engine :confirm {:default true})
-                          100 ::timeout))
-            ":default overrides the kind default"))))
-
-(deftest test-request-ui-sync-port
-  (testing "a port answering in-process returns the value — nil included"
-    (let [seen (atom [])
-          engine (bare-engine)]
-      (ex/bind-extensions!
-       {:mode :interactive :has-ui true
-        :ui {:request (fn [request]
-                        (swap! seen conj request)
-                        (case (:kind request)
-                          :confirm true
-                          :select nil))}})
-      (t/is (true? (deref (session-driver/request-ui! engine :confirm {:title "ok?"})
-                          100 ::timeout)))
-      (t/is (nil? (deref (session-driver/request-ui! engine :select {}) 100 ::timeout))
-            "a synchronous nil answer resolves (not treated as pending)")
-      (let [{:keys [type id kind title]} (first @seen)]
-        (t/is (= :ui-request type))
-        (t/is (= :confirm kind))
-        (t/is (= "ok?" title))
-        (t/is (string? id))
-        (t/is (not (contains? (first @seen) :default))
-              "the degraded default is not part of the request payload")
-        (t/is (empty? @(:pending-ui engine))
-              "a synchronous answer leaves nothing pending")))))
-
-(deftest test-request-ui-async-port-responds
-  (testing "a forwarding port leaves the promise pending until respond!"
-    (let [requests (atom [])
-          engine (bare-engine)]
-      (ex/bind-extensions!
-       {:mode :rpc :has-ui false
-        :ui {:request (fn [request] (swap! requests conj request)
-                        ex/request-pending)}})
-      (let [p (session-driver/request-ui! engine :input {:title "name?" :default "fallback"})
-            {:keys [id]} (first @requests)]
-        (t/is (not (realized? p)))
-        (t/is (= 1 (count @(:pending-ui engine))))
-        (t/is (= "fallback" (session-driver/request-default engine id))
-              "a forwarding port's own deadline resolves with the recorded default")
-        (t/is (nil? (session-driver/respond! engine id "marko")))
-        (t/is (= "marko" (deref p 100 ::timeout)))
-        (t/is (empty? @(:pending-ui engine)))
-        (t/is (nil? (session-driver/request-default engine id)) "unknown once answered")
-        (t/is (nil? (session-driver/respond! engine id "twice"))
-              "an already-answered id is ignored")))))
-
-(deftest test-request-ui-throwing-port
-  (testing "a throwing port propagates but leaves nothing pending"
-    (let [engine (bare-engine)]
-      (ex/bind-extensions! {:mode :interactive :has-ui true
-                            :ui {:request (fn [_] (throw (ex-info "boom" {})))}})
-      (t/is (thrown? Exception (session-driver/request-ui! engine :confirm {})))
-      (t/is (empty? @(:pending-ui engine))))))
-
-(deftest test-dispose-resolves-pending-requests
-  (testing "dispose! cannot leave an extension dialog parked"
-    (let [engine (bare-engine)]
-      (ex/bind-extensions! {:mode :rpc :has-ui false
-                            :ui {:request (fn [_] ex/request-pending)}})
-      (let [p (session-driver/request-ui! engine :confirm {})]
-        (t/is (not (realized? p)))
-        (session-driver/dispose! engine)
-        (t/is (false? (deref p 100 ::timeout))
-              "the kind's degraded default resolves it, not nil")
-        (t/is (empty? @(:pending-ui engine)))
-        (t/is (= :print (ex/extension-mode))
-              "dispose! unbinds the front-end surface"))))
-  (testing "a request with :default resolves with it on dispose"
-    (let [engine (bare-engine)]
-      (ex/bind-extensions! {:mode :rpc :has-ui false
-                            :ui {:request (fn [_] ex/request-pending)}})
-      (let [p (session-driver/request-ui! engine :select {:default :cancelled})]
-        (session-driver/dispose! engine)
-        (t/is (= :cancelled (deref p 100 ::timeout)))))))
-
-(deftest test-bootstrap-binds-headless-print-defaults
-  (testing "a print-mode engine gets the degraded port, ctx says :print"
-    (let [dir (str "target/test-ui-port-" (System/currentTimeMillis))
-          sess (session/create-session dir {:cwd (str (fs/cwd))})
-          ;; the engine's scope: the port and the capabilities hang on the ctx
-          ;; the driver is handed, and a run reads its tool table from that
-          ;; ctx's service — the loop support's bare ctx provides both
-          ctx (:ctx (loop-support/test-ctx))]
-      (try
-        (let [engine (session-driver/bootstrap {:provider :opencode-go
-                                                :model "deepseek-v4-flash"}
-                                               {:session sess :ctx ctx})]
-          (try
-            (t/is (= :print (ex/extension-mode)))
-            (t/is (false? (ex/extension-has-ui?)))
-            (let [ctx (ex/build-extension-context)]
-              (t/is (= :print (:mode ctx)))
-              (t/is (false? (:has-ui ctx))))
-            (t/is (false? (deref (session-driver/request-ui! engine :confirm {})
-                                 100 ::timeout))
-                  "a print-mode extension dialog answers with the default")
-            (t/is (vector? (ex/runtime-call :get-active-tools))
-                  "the runtime capabilities are installed for every front end")
-            (t/is (false? (ex/runtime-call :set-model nil))
-                  "a nil model is rejected without touching settings")
-            (finally (session-driver/dispose! engine)))
-          (t/is (nil? (ex/runtime-call :get-active-tools))
-                "dispose! clears the runtime capabilities"))
-        (finally
-          (srce/dispose-subtree! ctx)
-          (fs/delete-tree dir))))))

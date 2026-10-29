@@ -2,10 +2,10 @@
   "The session lifecycle on an engine: new, resume, switch, fork, clone and
    branch, with the settle/event sequence around them.
 
-   Below the drivers. `kmet.app.loop.driver`'s handle (production) and
-   `kmet.app.session.test-engine` (the retired driver, now a test fixture)
-   run these same fns; what a front end does *around* a switch — its UI
-   cleanup, its extension install — stays the front end's.
+   Below the drivers. `kmet.app.loop.driver`'s handle (production) and the
+   bare-engine tests (`kmet.test-utils/test-engine`) run these same fns; what
+   a front end does *around* a switch — its UI cleanup, its extension install —
+   stays the front end's.
 
    The split that matters is `:install!`: kmet1 installs the switched session
    into the process-wide extension slot (`extensions/install-session!`), and a

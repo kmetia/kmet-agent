@@ -12,10 +12,10 @@
    loads the process's resources before it creates its agent and names that
    call, the driver names the expansion chain the engine applies, and neither
    the TUI nor the interactive cluster requires the retired
-   `kmet.app.session.driver` (now the test fixture `kmet.app.session.test-engine`)
-   — they read a handle and the shared lifecycle. The require graph has no edge
-   from here to the front ends, so this runs in the full suite (`bb test`), not
-   in the changed-file loop of a front-end edit."
+   `kmet.app.session.driver` (deleted with the handle migration) — they read a
+   handle and the shared lifecycle. The require graph has no edge from here to
+   the front ends, so this runs in the full suite (`bb test`), not in the
+   changed-file loop of a front-end edit."
   (:require [babashka.fs :as fs]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -68,9 +68,9 @@
           "and the interactive cluster is scanned")
     (doseq [path files]
       (t/is (not (contains? (ns-requires path) 'kmet.app.session.driver))
-            (str path " requires the retired engine (now"
-                 " kmet.app.session.test-engine in the test tree) — the TUI"
-                 " reads a handle and the shared lifecycle")))))
+            (str path " requires the retired engine (deleted with the handle"
+                 " migration) — the TUI reads a handle and the shared"
+                 " lifecycle")))))
 
 (t/deftest a-handle-front-end-names-its-half-of-the-resource-policy
   (doseq [[path value] handle-front-ends]

@@ -6,10 +6,10 @@
    `/new` is the case that shows the seam: the handle's `:new-session!` moves
    the agent in place and installs nothing, so the mode's own
    `install-live-session!` is what points the process-wide extension slot at
-   the session an out-of-run handler must see. A test that stood up the bare
-   `Engine` fixture (`kmet.app.session.test-engine`) would pass even if the
-   handle's op were missing, so this one creates through `:agents` and reads
-   the registry afterwards: one agent, one new session."
+   the session an out-of-run handler must see. A test that stood up a
+   stand-in `Engine` would pass even if the handle's op were missing, so this
+   one creates through `:agents` and reads the registry afterwards: one agent,
+   one new session."
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.app.extensions.core :as extensions]

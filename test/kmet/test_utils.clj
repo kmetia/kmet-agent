@@ -9,8 +9,6 @@
             [kmet.app.registries :as registries]
             [kmet.app.registry :as registry]
             [kmet.app.runtime :as runtime]
-            [kmet.app.session.test-engine :as session-driver]
-            [kmet.app.session.lifecycle :as lifecycle]
             [kmet.app.session.runtime :as rt]
             [kmet.app.skills :as skills]
             [kmet.app.tools.registry :as tools]
@@ -18,70 +16,33 @@
             [kmet.tui.utils :as u]))
 
 (defn test-engine
-  "A minimal session-runtime engine for mode-level tests: the given
+  "A minimal session-runtime Engine for mode-level tests: the given
    :agent-state and :session atoms (exactly as the Engine record holds
    them), plus optional :config, :cwd (a value or an atom) and the
    :turn-running?/:compaction-queued/:pending-compaction atoms. Subscribers,
    last-run and disposal are fresh.
 
-   The engine also answers the handle's run and session ops — the fns a front
-   end calls after landing 8. The run ops delegate to the driver (the reference
-   for their shapes); the session ops delegate to the session lifecycle, which
-   is what the handle wraps and which installs nothing — the front end installs
-   the process-wide extension session itself, so a test that forgot that
-   install cannot pass through the double. A mode test's subject is the UI; the
-   handle's ids, child ctx and registry lifecycle are the loop driver's tests.
-   Production builds handles through `kmet.app.loop.driver`'s factory."
+   The Engine record is what `kmet.app.session.runtime` reads, and production
+   builds one through `kmet.app.loop.driver`'s handle factory. A mode test's
+   subject is the UI, so it takes the value without booting a composition; a
+   test that needs the run ops creates a handle instead."
   [{:keys [agent-state session config cwd turn-running? compaction-queued
            pending-compaction]}]
-  (let [engine (rt/map->Engine {:agent-state agent-state
-                                :session session
-                                :config (atom (or config {}))
-                                :subscribers (atom [])
-                                :last-run (atom nil)
-                                :disposed? (atom false)
-                                :cwd (if (instance? clojure.lang.IDeref cwd)
-                                       cwd
-                                       (atom (or cwd (str (fs/cwd)))))
-                                :turn-running? (or turn-running? (atom false))
-                                :compaction-queued (or compaction-queued (atom []))
-                                :pending-compaction (or pending-compaction (atom []))
-                                :pending-ui (atom {})
-                                :run-callbacks (atom nil)
-                                :front-end (atom nil)})]
-    ;; the run ops a front end calls on a handle (landing 8), over this
-    ;; engine: the driver's fns are their production reference
-    (assoc engine
-           :send! (fn [msg {:keys [target] :or {target :next-turn}}]
-                    (let [text (if (map? msg) (:text msg) msg)]
-                      (if (rt/turn-running? engine)
-                        (if (= :next-turn target)
-                          (session-driver/follow-up! engine text)
-                          (session-driver/steer! engine text))
-                        (session-driver/prompt! engine
-                                                (cond-> {}
-                                                  (some? text) (assoc :text text))))))
-           :submit! (fn [text opts] (session-driver/submit! engine text opts))
-           :cancel! (fn [_opts] (session-driver/cancel! engine))
-           :when-idle (fn [] (when-let [run @(:last-run engine)] (deref run)))
-           :abort-compaction! (fn [] (session-driver/abort-compaction! engine))
-           :queue-compaction-message! (fn [text mode]
-                                        (session-driver/queue-compaction-message! engine text mode))
-           :flush-compaction-queue! (fn [will-retry]
-                                      (session-driver/flush-compaction-queue! engine will-retry nil))
-           :clear-compaction-queue! (fn [] (session-driver/clear-compaction-queue! engine))
-           :request-compaction! (fn [& args]
-                                  (apply session-driver/request-compaction! engine args))
-           :dispose! (fn [] (session-driver/dispose! engine))
-           ;; the session lifecycle the handle wraps: it moves the agent in
-           ;; place and installs nothing (no :install!), so the front end's own
-           ;; install is what a mode test exercises
-           :new-session! (fn [& args] (apply lifecycle/new-session! engine args))
-           :resume-session! (fn [& args] (apply lifecycle/resume! engine args))
-           :switch-session! (fn [& args] (apply lifecycle/switch-session! engine args))
-           :branch-session! (fn [& args] (apply lifecycle/branch-session! engine args))
-           :fork! (fn [& args] (apply lifecycle/fork! engine args))
-           :clone! (fn [& args] (apply lifecycle/clone! engine args)))))
+  (rt/map->Engine {:agent-state agent-state
+                   :session session
+                   :config (atom (or config {}))
+                   :subscribers (atom [])
+                   :last-run (atom nil)
+                   :disposed? (atom false)
+                   :cwd (if (instance? clojure.lang.IDeref cwd)
+                          cwd
+                          (atom (or cwd (str (fs/cwd)))))
+                   :turn-running? (or turn-running? (atom false))
+                   :compaction-queued (or compaction-queued (atom []))
+                   :pending-compaction (or pending-compaction (atom []))
+                   :pending-ui (atom {})
+                   :run-callbacks (atom nil)
+                   :front-end (atom nil)}))
 
 (defn with-test-engine
   "Add a test engine to a CoreState-like map, reusing the map's legacy
@@ -104,7 +65,7 @@
 (defn clear-app-registries!
   "Clear the process-global registrations a test leaves in the app's
    registries: commands, prompt templates, skills, and the themes loaded from
-   contributed paths. A test that exercises a real bootstrap loads the
+   contributed paths. A test that exercises a real composition loads the
    developer's own skills and prompts, and one that registers the builtin
    commands leaves the app's slash registry filled; P2 made those
    registrations app-scoped rather than per-engine, so a later namespace in

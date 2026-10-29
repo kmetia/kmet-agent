@@ -28,7 +28,7 @@
             [kmet.libs.terminal-image :as timg]
             [kmet.app.session.core :as session]
             [kmet.app.session.export :as session-export]
-            [kmet.app.session.test-engine :as session-driver]
+            [kmet.app.session.lifecycle :as lifecycle]
             [kmet.app.session.runtime :as runtime]
             [kmet.app.skills :as skills]
             [kmet.ui.tui.footer-data-provider :as fdp]
@@ -525,7 +525,7 @@
         (fs/create-dirs project)
         (let [sess (session/create-session (str dir "/sessions") {:cwd project})
               engine (hs/handle-with {:session sess :cwd spelled})]
-          (t/is (= spelled ((var session-driver/apply-session-cwd!) engine sess))
+          (t/is (= spelled ((var lifecycle/apply-session-cwd!) engine sess))
                 "the cwd in effect is returned unchanged")
           (t/is (= spelled (runtime/cwd engine)) "and kept as spelled"))
         (finally (fs/delete-tree dir))))))

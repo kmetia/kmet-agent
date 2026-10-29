@@ -9,8 +9,8 @@
    than a module rank: both trees live under `modules/app/src`. Its subject is
    the app source tree, not one module's tests, so it lives beside the other
    cross-cutting guards. One more rule is global: no module source may require
-   the retired `kmet.app.session.driver` (its bare-engine fixture is
-   `kmet.app.session.test-engine` in the test tree)."
+   the retired `kmet.app.session.driver` — it was deleted with the handle
+   migration, and the name must not come back."
   (:require [clojure.test :as t :refer [deftest is testing]]
             [clojure.string :as str]
             [babashka.fs :as fs]
@@ -133,9 +133,9 @@
      the compaction stage. A front end reaches the engine through the session
      runtime, not the machinery under it (the pure `kmet.app.compaction.core`
      helpers are fine — the footer reads tokens).
-   - `:ui` (the app-UI widgets alone): the session driver. It starts work —
-     prompts, turns, session switching, disposal — and a mode owns a run and may
-     drive it, while a widget reads the engine instead
+   - `:ui` (the app-UI widgets alone): the retired session engine's name. It
+     started work — prompts, turns, session switching, disposal — and a mode
+     owns a run and may drive it, while a widget reads the engine instead
      (`kmet.app.session.runtime`). The TUI mode entry and its interactive
      cluster are front ends that *are* a mode: they keep the `:front-ends` rule
      and this one skips them (`ui-mode-files`)."
@@ -147,9 +147,8 @@
     :why "the UI layer reads the engine; the driver starts work, and a mode owns a run"}])
 
 (deftest the-retired-session-engine-is-not-required
-  (testing "kmet.app.session.driver was retired to the test fixture
-            kmet.app.session.test-engine; the production require must not
-            come back"
+  (testing "kmet.app.session.driver was retired with the handle migration;
+            the production require must not come back"
     (let [files (->> (kmod/modules)
                      (mapcat (fn [{:keys [src]}] (source-files-under src)))
                      sort)
