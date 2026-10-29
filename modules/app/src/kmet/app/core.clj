@@ -173,6 +173,158 @@
         (assoc opts :profile (keyword mode))))
     opts))
 
+(defn- read-bool-flag
+  "A boolean flag (`bool-flags`) takes no value; the `=` form is a usage error
+   rather than a silently ignored value."
+  [opts in _arg flag value]
+  (if (= ::missing value)
+    [(assoc opts (bool-flags flag) true) (next in)]
+    (throw (bad-args (str flag " takes no value")))))
+
+(defn- read-list-models
+  "kmet1's maintenance flag: the filter is the next argument unless it starts
+   with `-` or `@`, and a bare flag lists everything."
+  [opts in _arg _flag value]
+  (let [[v in] (if (= ::missing value)
+                 (let [nxt (second in)]
+                   (if (and nxt
+                            (not (str/starts-with? nxt "-"))
+                            (not (str/starts-with? nxt "@")))
+                     [nxt (nnext in)]
+                     [true (next in)]))
+                 [value (next in)])]
+    [(assoc opts :list-models v) in]))
+
+(defn- read-value-flag
+  "A value flag (`value-flags`), coerced by key: `--patch` accumulates, the
+   scope keywords become keywords, `--models` is kmet1's comma-separated list
+   (`invocation/resolve-overrides` resolves it before the run), the repeatable
+   append-prompt collects its pieces (`cfg/get-append-system-prompt` joins
+   them like pi), and the server's port and its three caps are parsed here —
+   so a non-number is a usage error now rather than a mode serving without a
+   cap. The rest is free text."
+  [opts in _arg flag value]
+  (let [k (value-flags flag)
+        [v in] (flag-value flag value in)]
+    [(case k
+       :patch (update opts :patch conj v)
+       (:profile :provider :thinking) (assoc opts k (keyword v))
+       :models (assoc opts k (mapv str/trim (str/split v #",")))
+       :append-system-prompt (update opts k (fnil conj []) v)
+       (:port :max-sessions :queue-depth :idle-timeout)
+       (assoc opts k (or (parse-long v)
+                         (throw (bad-args (str flag " needs a number, got " (pr-str v))))))
+       (assoc opts k v))
+     in]))
+
+(defn- read-print-flag
+  "kmet1's one-shot spelling selects print mode's text output; `-p=edn` is not
+   a form kmet1 accepts (`--mode edn` is the documented spelling)."
+  [opts in _arg flag value]
+  (if (= ::missing value)
+    [(assoc opts :mode "text") (next in)]
+    (throw (bad-args (str flag " takes no value")))))
+
+(defn- read-at-file
+  "kmet1's `@file`: read at parse time, one message per file in the order
+   given. A file that cannot be read is a warning and an empty message, as in
+   kmet1 — the rest of the invocation still runs."
+  [opts in arg _flag _value]
+  (let [path (subs arg 1)]
+    (if (seq path)
+      (let [text (try (slurp path)
+                      (catch Exception _
+                        (binding [*out* *err*]
+                          (println "Warning: could not read" path))
+                        ""))]
+        [(update opts :args conj text) (next in)])
+      (do (binding [*out* *err*] (println "Warning: empty path after @"))
+          [opts (next in)]))))
+
+(defn- read-retired-flag
+  "A retired flag is answered by name; letting it fall through to the
+   extension-flag rule would turn its value into data for an extension."
+  [_opts _in _arg flag _value]
+  (throw (bad-args (str flag " is gone: there is one app now, so nothing "
+                        "selects between two — drop the flag"))))
+
+(defn- read-ext-flag
+  "kmet1's extension-flag rule: an unsupported `--flag` is data for the
+   extension host, not a usage error — `=` splits, a following token that does
+   not start with `-` is the value, and nothing following is `true`. The key
+   drops the dashes, as `get-flag` reads it."
+  [opts in _arg flag value]
+  (let [name (subs flag 2)]
+    (cond
+      (not= ::missing value)
+      [(assoc-in opts [:ext-flags name] value) (next in)]
+
+      (and (seq (next in))
+           (not (str/starts-with? (second in) "-")))
+      [(assoc-in opts [:ext-flags name] (second in)) (nnext in)]
+
+      :else
+      [(assoc-in opts [:ext-flags name] true) (next in)])))
+
+(defn- read-unknown-option
+  "A single-dash flag that is not in any set is a typo, not extension data."
+  [_opts _in arg _flag _value]
+  (throw (bad-args (str "unknown option " arg))))
+
+(defn- read-positional
+  "Anything that is not a flag is positional — the prompt, or the trailing
+   arguments a mode reads."
+  [opts in arg _flag _value]
+  [(update opts :args conj arg) (next in)])
+
+(def ^:private flag-rows
+  "FLAG → the row that consumes it. Built from the same tables the readers test,
+   so there is no second list to drift, and a flag costs one map lookup instead
+   of a walk over every row."
+  (reduce (fn [m {:keys [flags] :as row}]
+            (reduce (fn [m f] (assoc m f row)) m flags))
+          {}
+          [{:flags (keys bool-flags) :read read-bool-flag}
+           {:flags ["--list-models"] :read read-list-models}
+           {:flags (keys value-flags) :read read-value-flag}
+           {:flags print-flags :read read-print-flag}
+           {:flags retired-flags :read read-retired-flag}]))
+
+(def ^:private shape-rows
+  "The rows for arguments that are not flags, tried in order: `@file`, an
+   unsupported `--flag` (extension data), a single-dash flag (usage error) and
+   the positional fallback. Order is load-bearing: the extension rule would
+   otherwise swallow a single-dash typo, and the fallback must come last."
+  [{:when (fn [arg _] (str/starts-with? arg "@")) :read read-at-file}
+   {:when (fn [arg flag] (and (str/starts-with? arg "--")
+                              (not (str/blank? (subs flag 2)))))
+    :read read-ext-flag}
+   {:when (fn [arg _] (str/starts-with? arg "-")) :read read-unknown-option}
+   {:when (fn [_ _] true) :read read-positional}])
+
+(defn- arg-row
+  "The row that consumes ARG: the flag's row when FLAG names a known flag, else
+   the first matching shape row. `some` rather than `(first (filter …))` keeps
+   the per-argument walk allocation-free, and the shape table ends in the
+   positional fallback, so a match always exists."
+  [arg flag]
+  (or (get flag-rows flag)
+      (some (fn [row] (when ((:when row) arg flag) row)) shape-rows)))
+
+(defn- finish-opts
+  "OPTS once every argument is read: the mode applied, the default profile
+   filled in. Asking for more than one of the three dumps is a usage error —
+   they are different views of one composition, so a silent pick would hide
+   the other requests."
+  [opts]
+  (let [opts (-> (resolve-mode opts)
+                 (update :profile #(or % profile/default-profile)))]
+    (when (> (count (filter opts [:dump-config? :dump-default-config?
+                                  :dump-state?]))
+             1)
+      (throw (bad-args "--dump-config, --dump-default-config and --dump-state are separate dumps; pass one")))
+    opts))
+
 (defn parse-args
   "Parse kmet2's argv → `{:profile kw :patch [path …] :args [rest …] :version?
    :help? :dump-config? :dump-default-config? :dump-state? :format kw :model str
@@ -191,106 +343,13 @@
    usage error. The three dumps are different views of one composition, so
    asking for more than one is a usage error rather than a silent pick."
   [args]
-  (loop [in (seq args) opts {:patch [] :args []}]
+  (loop [in (seq args), opts {:patch [] :args []}]
     (if-not in
-      (let [opts (-> (resolve-mode opts)
-                     (update :profile #(or % profile/default-profile)))]
-        (when (> (count (filter opts [:dump-config? :dump-default-config?
-                                      :dump-state?]))
-                 1)
-          (throw (bad-args "--dump-config, --dump-default-config and --dump-state are separate dumps; pass one")))
-        opts)
+      (finish-opts opts)
       (let [arg (first in)
-            [flag value] (split-flag arg)]
-        (cond
-          (contains? bool-flags flag)
-          (if (= ::missing value)
-            (recur (next in) (assoc opts (bool-flags flag) true))
-            (throw (bad-args (str flag " takes no value"))))
-
-          ;; kmet1's maintenance flag: the filter is the next argument unless
-          ;; it starts with `-` or `@`, and a bare flag lists everything
-          (= flag "--list-models")
-          (let [[v in] (if (= ::missing value)
-                         (let [nxt (second in)]
-                           (if (and nxt
-                                    (not (str/starts-with? nxt "-"))
-                                    (not (str/starts-with? nxt "@")))
-                             [nxt (nnext in)]
-                             [true (next in)]))
-                         [value (next in)])]
-            (recur in (assoc opts :list-models v)))
-
-          (contains? value-flags flag)
-          (let [k (value-flags flag)
-                [v in] (flag-value flag value in)]
-            (recur in (case k
-                        :patch (update opts :patch conj v)
-                        (:profile :provider :thinking) (assoc opts k (keyword v))
-                        ;; kmet1's spelling for the scope: one argument split on
-                        ;; commas (`--models a,b`), resolved by
-                        ;; `invocation/resolve-overrides` before the run
-                        :models (assoc opts k (mapv str/trim (str/split v #",")))
-                        ;; repeatable; `cfg/get-append-system-prompt` resolves
-                        ;; the pieces and joins them like pi
-                        :append-system-prompt (update opts k (fnil conj []) v)
-                        ;; a socket port and the server's limits are numbers: a
-                        ;; value that is not one is a usage error here rather
-                        ;; than a boot failure, and a mode that read a nil cap
-                        ;; would serve without one
-                        (:port :max-sessions :queue-depth :idle-timeout)
-                        (assoc opts k (or (parse-long v)
-                                          (throw (bad-args (str flag " needs a number, got " (pr-str v))))))
-                        (assoc opts k v))))
-
-          (contains? print-flags flag)
-          (if (= ::missing value)
-            (recur (next in) (assoc opts :mode "text"))
-            (throw (bad-args (str flag " takes no value"))))
-
-          (str/starts-with? arg "@")
-          ;; kmet1 reads a file into the message at parse time, and kmet2 keeps
-          ;; that: the file's text is the message the mode gets, one per @file
-          ;; in the order given. A file that cannot be read is a warning and an
-          ;; empty message, as in kmet1 — the rest of the invocation still runs
-          (let [path (subs arg 1)]
-            (if (seq path)
-              (let [text (try (slurp path)
-                              (catch Exception _
-                                (binding [*out* *err*]
-                                  (println "Warning: could not read" path))
-                                ""))]
-                (recur (next in) (update opts :args conj text)))
-              (do (binding [*out* *err*] (println "Warning: empty path after @"))
-                  (recur (next in) opts))))
-
-          (contains? retired-flags flag)
-          (throw (bad-args (str flag " is gone: there is one app now, so nothing "
-                                "selects between two — drop the flag")))
-
-          (and (str/starts-with? arg "--")
-               (not (str/blank? (subs flag 2))))
-          ;; kmet1's extension-flag rule: an unsupported `--flag` is data for
-          ;; the extension host, not a usage error — `=` splits, a following
-          ;; token that does not start with `-` is the value, and nothing
-          ;; following is `true`. The key drops the dashes, as `get-flag` reads
-          ;; it.
-          (let [name (subs flag 2)]
-            (cond
-              (not= ::missing value)
-              (recur (next in) (assoc-in opts [:ext-flags name] value))
-
-              (and (seq (next in))
-                   (not (str/starts-with? (second in) "-")))
-              (recur (nnext in) (assoc-in opts [:ext-flags name] (second in)))
-
-              :else
-              (recur (next in) (assoc-in opts [:ext-flags name] true))))
-
-          (str/starts-with? arg "-")
-          (throw (bad-args (str "unknown option " arg)))
-
-          :else (recur (next in) (update opts :args conj arg)))))))
+            [flag value] (split-flag arg)
+            [opts in] ((:read (arg-row arg flag)) opts in arg flag value)]
+        (recur in opts)))))
 
 ;; ── --dump-config, --dump-default-config and --dump-state ────────────────
 
