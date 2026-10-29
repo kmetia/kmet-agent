@@ -412,7 +412,6 @@
       (reset! temp-file-stream output-stream)
       (doseq [[data start end] @raw-chunks]
         (.write output-stream data start (- end start)))
-      (.write output-stream raw-bytes offset len)
       (.flush output-stream)))
   (when @temp-file-stream
     (.write @temp-file-stream raw-bytes offset len)
