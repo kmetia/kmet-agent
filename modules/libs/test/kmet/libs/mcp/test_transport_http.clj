@@ -2,7 +2,7 @@
   "Streamable-HTTP transport without sockets: responses are injected with
    :request-fn, so parsing, header negotiation, retry and timeout paths run
    as plain unit tests (the socket-level cases stay in the extension's
-   scripts/validate-client.bb)."
+   extensions/mcp-adapter/test/.../client_test.clj)."
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]

@@ -91,20 +91,41 @@ cited a removed section.
 
 ## Open — P1
 
-### P1.1 — Put the shipped adapters under a gate
+### P1.1 — Put the shipped adapters under a gate — **landed**
 
-`extensions/mcp-adapter` is 5,268 lines across 21 files and
-`extensions/lsp-adapter` is 1,831 lines; neither has a `test/` tree, and neither
-is in `modules.edn`'s extension test projects. They ship `scripts/*.bb` with
-fake servers (`validate-all.bb`, `validate.bb`), but nothing in `bb.edn` or the
-runner invokes them.
+Both adapters are extension test projects now: `modules.edn` registers
+`extensions/mcp-adapter/test` and `extensions/lsp-adapter/test`, the root
+`bb.edn`/`deps.edn` paths carry them, and each project has its own `bb.edn`
+(module `:paths`, the data.json/malli `:deps`, a `test` task). The root
+runner discovers the namespaces, so `bb test` / `bb test-ext` gate them.
 
-Preferred: add `test/` trees and register both projects in `modules.edn`
-extensions (plus the root `bb.edn` / `deps.edn` paths), so `bb test` discovers
-them like clojure/tree-sitter/review. Minimum: a `bb test-adapters` task that
-runs each adapter's validate script against its fake server, documented in the
-dev loop. MCP coverage first: modern vs legacy era negotiation,
-`x-mcp-header` filtering, cache-hint invalidation, OAuth flow, config parsing.
+The nine `validate-*.bb` scripts and `e2e.bb` became test namespaces — no
+validation logic was left behind a script. Normal (no subprocess): naming,
+prompt snippets and catalog helpers, config/precedence/host adoption,
+metadata cache, status/describe/list, output guard, search ranking, prompts,
+proxy param validation and tool records, the setup panel, the McpPanel,
+auth policy and the token-store vocabulary, and on the LSP side detection,
+the wire helpers (path↔URI in and out of the sci sandbox, document sync,
+the server→client policy), result shaping/rendering, the runtime's broken
+set/claiming/reaper, the panel, and the entry point. `^:slow` (fixtures):
+`client-test`, `protocol-test`, `oauth-test`, `script-test`, `e2e-test`,
+the panel's inactivity timer, the env kill switch, the LSP `e2e-test` and
+the two handshake failure cases. Scripts/ keeps only the fake servers.
+
+New tests that a script could not express found and fixed six defects:
+regex search ANDed its name/description/keyword matchers (so a regex
+almost never matched) and ranked hits dropped `:inputSchema`; the output
+guard's env kill switch could only enable (an `or` swallowed its `false`);
+host-config adoption resolved relative paths against the process cwd and
+keywordized the server names it merged; the setup panel never wired DONE
+(so Esc could not close it), rendered the focused input in every form row,
+and dispatched protocol calls at a duck-typed screen; the LSP reaper read
+`:idle-timeout-minutes` while the README documents `:idle-timeout`, and
+never saw a descriptor's `:env`/`:initialization-options`.
+
+Verification: `bb test` 4,513 tests / 27,279 assertions, `bb test-ext`
+185 tests / 1,030 assertions, `bb lint` 0/0, `bb format-check` clean,
+`bb check` compiles, `bb check-catalog`/`bb check-model-data` unchanged.
 
 ### P1.2 — Extend the process-state ledger below the app
 

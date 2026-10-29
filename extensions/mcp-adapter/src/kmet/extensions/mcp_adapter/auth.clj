@@ -89,7 +89,8 @@
   [cfg default-port default-path]
   (if-let [configured (:redirect-uri cfg)]
     (let [uri (try (java.net.URI. configured) (catch Exception _ nil))
-          host (some-> uri .getHost str/lower-case)
+          ;; java.net.URI keeps an IPv6 literal's brackets in getHost
+          host (some-> uri .getHost str/lower-case (str/replace #"[\[\]]" ""))
           port (some-> uri .getPort)]
       (when-not (and uri (= "http" (.getScheme uri))
                      (contains? #{"localhost" "127.0.0.1" "::1"} host)

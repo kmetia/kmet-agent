@@ -11,7 +11,9 @@
  :paths ["tasks"
          "extensions/clojure/src" "extensions/clojure/test"
          "extensions/tree-sitter/src" "extensions/tree-sitter/test"
-         "extensions/review/src" "extensions/review/test"]
+         "extensions/review/src" "extensions/review/test"
+         "extensions/mcp-adapter/src" "extensions/mcp-adapter/test"
+         "extensions/lsp-adapter/src" "extensions/lsp-adapter/test"]
  ;; tasks/ (the bb-task implementations) is a source root but deliberately NOT
  ;; an embed root: :paths are runtime source roots resolved against JOLT_PWD
  ;; (and the app's own require closure decides what compiles), so task code is

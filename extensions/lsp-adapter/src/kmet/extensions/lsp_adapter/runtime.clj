@@ -258,15 +258,17 @@
 
 (defn reaping?
   "True when CONN's server should be disconnected now (idle past its
-   timeout). Never reaps mid-handshake: a conn only exists post-initialize."
+   timeout). Never reaps mid-handshake: a conn only exists post-initialize.
+   The documented per-server key is :idle-timeout (minutes, 0 disables); a
+   :keep-alive server is exempt — it is meant to stay warm."
   [st {:keys [name] :as conn}]
-  (let [desc (some (fn [d] (when (= (:id d) name) d))
-                   (detect/effective-servers (configured-servers st)))
-        min* (setting st name :idle-timeout-minutes idle-timeout-minutes)
+  (let [min* (setting st name :idle-timeout idle-timeout-minutes)
+        lifecycle (or (get-in (config st) [:servers name :lifecycle])
+                      (get-in (config st) [:settings :lifecycle]))
         idle-ms (- (concurrent/monotonic-ms) (last-used conn))]
     (and (pos? min*)
-         (> idle-ms (* min* 60 1000))
-         (not= :keep-alive (:lifecycle desc)))))
+         (not= :keep-alive lifecycle)
+         (> idle-ms (* min* 60 1000)))))
 
 (defn reap-tick!
   "Disconnect idle conns. Best-effort per conn; runs on the reaper daemon."

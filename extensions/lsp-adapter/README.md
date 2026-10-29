@@ -91,5 +91,8 @@ Headless: same data as text.
 - `workspace/applyEdit` is refused by design: edits flow through kmet's
   own edit tools exclusively.
 - ESC during a query abandons it promptly; the server process stays warm.
-- Validation: `bb -cp ../../src:src scripts/validate.bb` (26 checks,
-  hermetic — spawns `scripts/fake-lsp-server.bb`, touches nothing real).
+- Tests live in `test/` and run through the repository's runner:
+  `bb test` covers detection, the wire helpers, result shaping/rendering,
+  the runtime's broken set and reaper, the panel and the entry point;
+  `bb test-ext` adds `e2e-test`, which spawns
+  `scripts/fake-lsp-server.bb`.

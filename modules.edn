@@ -37,7 +37,9 @@
  :extensions
  [{:name "clojure" :src "extensions/clojure/src" :test "extensions/clojure/test"}
   {:name "tree-sitter" :src "extensions/tree-sitter/src" :test "extensions/tree-sitter/test"}
-  {:name "review" :src "extensions/review/src" :test "extensions/review/test"}]
+  {:name "review" :src "extensions/review/src" :test "extensions/review/test"}
+  {:name "mcp-adapter" :src "extensions/mcp-adapter/src" :test "extensions/mcp-adapter/test"}
+  {:name "lsp-adapter" :src "extensions/lsp-adapter/src" :test "extensions/lsp-adapter/test"}]
 
  ;; Classpath roots beyond the module and extension trees; :test marks the root
  ;; that holds tests (the runner scans module test dirs, this root, and the

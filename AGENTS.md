@@ -179,8 +179,9 @@ GUI-independent steps landed.)
   live under the root `test/kmet/` (task tests under `test/kmet/tasks/`).
 - Mark tests that use real sleeps, network calls, terminal timeouts, or
   subprocesses with `^:slow`; the runner separates them between `bb test` and
-  `bb test-ext`. Extension tests are separate projects and run from their own
-  directory.
+  `bb test-ext`. An extension project declares its `test/` tree in
+  `modules.edn` so the root runner discovers those namespaces too, and keeps
+  its own `bb.edn` `test` task for running one project in place.
 - Test namespaces are discovered, not registered:
   `kmet.tasks.runner/all-namespaces` derives from the manifest test roots
   (`kmet.tasks.modules/test-namespaces`), so a new namespace need only live

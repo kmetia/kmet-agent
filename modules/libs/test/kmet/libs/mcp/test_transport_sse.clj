@@ -1,7 +1,7 @@
 (ns kmet.libs.mcp.test-transport-sse
   "Legacy SSE transport internals against an injected stream: endpoint
    resolution, event assembly and stream death. The real-server path is
-   covered by the extension's scripts/validate-client.bb."
+   covered by the extension's client_test.clj (^:slow)."
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
             [clojure.test :as t :refer [deftest is testing]]

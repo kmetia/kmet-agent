@@ -324,31 +324,25 @@ configure. Only add servers you trust.
 
 ## Development
 
-The `scripts/` directory carries fake MCP/OAuth servers (legacy and
-2026-07-28 modern modes) and nine validation scripts
-(names assignment, prompt snippets, protocol wire shape, client transports,
-config/extension load, OAuth flow, McpPanel/TextDialog/prompt components,
-scripted-MCP end-to-end) plus an end-to-end smoke of the proxy-tool surface
-(`e2e.bb`, headless — see plan §15.22). `validate-all.bb` runs the whole
-set:
+`scripts/` holds the fake servers the integration suites drive — a stdio
+MCP server (legacy and 2026-07-28 modern modes), a streamable-HTTP/SSE
+server, and an OAuth authorization server. The suites themselves live in
+`test/` and run through the repository's runner:
 
 ```bash
-# `bb -cp` replaces the config classpath, so a direct run needs both roots:
-# this extension's src and the repo's own classpath (the module srcs plus the
-# bundled-extension deps — malli, cljfmt, parinferish). validate-all.bb builds
-# the same string for the children it spawns.
-CP="src:$(cd ../../ && bb -e '(print (babashka.classpath/get-classpath))')"
-bb scripts/validate-all.bb
-bb -cp "$CP" scripts/validate-names.bb
-bb -cp "$CP" scripts/validate-snippets.bb
-bb -cp "$CP" scripts/validate-protocol.bb scripts/fake-mcp-server.bb scripts/fake-http-mcp-server.bb
-bb -cp "$CP" scripts/validate-client.bb scripts/fake-mcp-server.bb scripts/fake-http-mcp-server.bb
-bb -cp "$CP" scripts/validate-config.bb
-bb -cp "$CP" scripts/validate-panel.bb
-bb -cp "$CP" scripts/validate-oauth.bb scripts/fake-oauth-server.bb
-bb -cp "$CP" scripts/validate-script.bb scripts/fake-mcp-server.bb
-bb -cp "$CP" scripts/e2e.bb scripts/fake-mcp-server.bb scripts/fake-http-mcp-server.bb
+bb test            # the whole fast suite, extension projects included
+bb test-ext        # the suites that spawn the fake servers
 ```
+
+Marked `^:slow` (they spawn `bb` children or make loopback calls):
+`client-test` (stdio/streamable-HTTP/SSE transports, negotiation, the
+modern era and its subscriptions), `protocol-test` (raw wire shape),
+`oauth-test` (DCR/PKCE/device/machine grants), `script-test` (the run_code
+sandbox bridge), `e2e-test` (the proxy tool end to end), `panel-test`'s
+inactivity timer and `output-guard-test`'s env kill switch. The rest —
+naming, config, metadata cache, status/search/describe, prompts, the
+proxy's parameter validation, the setup panel, the panel and auth policy
+— run in the normal suite with no subprocess.
 
 ## Phase-3 roadmap
 

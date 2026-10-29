@@ -150,9 +150,9 @@
             :when (and (not (catalog/disabled? state server-name))
                        (or (nil? server) (= server server-name)))]
       (doseq [tool (or (catalog/cached-tools state server-name) [])]
-        (let [tool {:name (:name tool)
-                    :original-name (:name tool)
-                    :description (:description tool)}
+        ;; the cached record keeps its :inputSchema — the ranked output
+        ;; renders the param lines from it
+        (let [tool (assoc tool :original-name (:name tool))
               keywords (resolve-search-keywords definition (:name tool) server-name)
               score (score-tool-match tool server-name query keywords)]
           (when score
@@ -206,7 +206,9 @@
                           kw-match? (if compiled
                                       (boolean (some #(re-find compiled %) keywords))
                                       true)]
-                      (when (and name-match? desc-match? kw-match?)
+                      ;; regex mode matches when the pattern hits ANY of the
+                      ;; three fields (all are true when no regex is given)
+                      (when (or name-match? desc-match? kw-match?)
                         (swap! items conj {:server name
                                            :tool tool
                                            :score 0})))))

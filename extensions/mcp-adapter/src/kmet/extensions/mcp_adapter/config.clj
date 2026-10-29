@@ -462,13 +462,17 @@
 
 (defn extract-host-servers
   "Every usable server from a host config file: {name edn-entry} (pi
-   extractServers). Entries that do not normalize to a command or url are
-   skipped. Returns {} for missing/unparsable files."
+   extractServers), keyed by string name like the EDN config files — the
+   JSON reader keywordizes its keys, and the merged config must not carry
+   a keyword-keyed server beside the EDN ones. Entries that do not
+   normalize to a command or url are skipped. Returns {} for
+   missing/unparsable files."
   [path]
   (into {}
         (keep (fn [[name entry]]
                 (when-let [edn-entry (host-entry->edn entry)]
-                  [name edn-entry])))
+                  [(if (keyword? name) (clojure.core/name name) (str name))
+                   edn-entry])))
         (or (host-servers-map path) {})))
 
 (defn host-config-discoveries
@@ -481,9 +485,9 @@
          (sort-by key)
          (keep (fn [[kind paths]]
                  (some (fn [path]
-                         (let [path (if (str/starts-with? path "./")
-                                      (str cwd "/" (subs path 2))
-                                      path)]
+                         (let [path (if (fs/absolute? path)
+                                      path
+                                      (str cwd "/" path))]
                            (when (fs/exists? path)
                              (let [servers (extract-host-servers path)]
                                (when (seq servers)

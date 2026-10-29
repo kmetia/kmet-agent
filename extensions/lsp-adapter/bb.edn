@@ -1,0 +1,27 @@
+{:paths ["src" "test"
+         "../../modules/reakt/src"
+         "../../modules/hikap/src" "../../modules/libs/src"
+         "../../modules/tui/src" "../../modules/ai/src"
+         "../../modules/loader/src"
+         "../../modules/srce/src" "../../modules/app/src"
+         "../../modules/tk/src"]
+ :deps {;; the module trees require kmet.libs.json (clojure.data.json, bundled
+        ;; by bb >= 1.13.224 but declared for a standalone classpath) and
+        ;; malli at load time; pinned at the root deps.edn versions.
+        org.clojure/data.json {:mvn/version "2.5.2"}
+        metosin/malli {:mvn/version "0.20.1"}}
+ :tasks
+ {test {:doc "Run lsp-adapter tests (args: test namespace names; defaults to the offline set; add the e2e suite to spawn the fake server)"
+        :task (let [nss (or (some->> *command-line-args* (map symbol))
+                            '[kmet.extensions.lsp-adapter.core-test
+                              kmet.extensions.lsp-adapter.detect-test
+                              kmet.extensions.lsp-adapter.lsp-test
+                              kmet.extensions.lsp-adapter.panel-test
+                              kmet.extensions.lsp-adapter.render-test
+                              kmet.extensions.lsp-adapter.runtime-test
+                              kmet.extensions.lsp-adapter.tools-test])]
+                (doseq [ns-sym nss]
+                  (require ns-sym))
+                (let [summary (apply clojure.test/run-tests nss)]
+                  (when (pos? (+ (:fail summary) (:error summary)))
+                    (System/exit 1))))}}}

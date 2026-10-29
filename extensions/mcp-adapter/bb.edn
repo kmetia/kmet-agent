@@ -1,0 +1,33 @@
+{:paths ["src" "test" "../../test"
+         "../../modules/reakt/src"
+         "../../modules/hikap/src" "../../modules/libs/src"
+         "../../modules/tui/src" "../../modules/ai/src"
+         "../../modules/loader/src"
+         "../../modules/srce/src" "../../modules/app/src"
+         "../../modules/tk/src"]
+ :deps {;; the module trees require kmet.libs.json (clojure.data.json, bundled
+        ;; by bb >= 1.13.224 but declared for a standalone classpath) and
+        ;; malli at load time; pinned at the root deps.edn versions.
+        org.clojure/data.json {:mvn/version "2.5.2"}
+        metosin/malli {:mvn/version "0.20.1"}}
+ :tasks
+ {test {:doc "Run mcp-adapter tests (args: test namespace names; defaults to the offline set; pass everything for the subprocess suites)"
+        :task (let [nss (or (some->> *command-line-args* (map symbol))
+                            '[kmet.extensions.mcp-adapter.auth-test
+                              kmet.extensions.mcp-adapter.catalog-test
+                              kmet.extensions.mcp-adapter.config-test
+                              kmet.extensions.mcp-adapter.core-test
+                              kmet.extensions.mcp-adapter.metadata-test
+                              kmet.extensions.mcp-adapter.names-test
+                              kmet.extensions.mcp-adapter.output-guard-test
+                              kmet.extensions.mcp-adapter.panel-test
+                              kmet.extensions.mcp-adapter.prompts-test
+                              kmet.extensions.mcp-adapter.search-test
+                              kmet.extensions.mcp-adapter.setup-test
+                              kmet.extensions.mcp-adapter.status-test
+                              kmet.extensions.mcp-adapter.tool-proxy-test])]
+                (doseq [ns-sym nss]
+                  (require ns-sym))
+                (let [summary (apply clojure.test/run-tests nss)]
+                  (when (pos? (+ (:fail summary) (:error summary)))
+                    (System/exit 1))))}}}

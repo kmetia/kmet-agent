@@ -45,8 +45,10 @@
   [settings]
   (let [configured (:output-guard settings)
         tuning (when (map? configured) configured)]
-    {:enabled (or (env-kill-switch)
-                  (not (false? configured)))
+    {:enabled (let [env (env-kill-switch)]
+                ;; an env value is authoritative either way: `or` would
+                ;; treat the kill switch's false as absent and re-enable
+                (if (some? env) env (not (false? configured))))
      :max-bytes (or (positive-int (:max-bytes tuning)) default-max-bytes)
      :max-lines (or (positive-int (:max-lines tuning)) default-max-lines)
      :details-max-bytes (or (positive-int (:details-max-bytes tuning))

@@ -3,7 +3,7 @@
  ;; implementation lives there (see AGENTS.md § File layout). Both hosts
  ;; resolve kmet.tasks.* from it, and neither artifact carries it — the
  ;; uberjar walks src/, jolt's :jolt/build :embed does too.
- :paths ["modules/reakt/src" "modules/reakt/test" "modules/hikap/src" "modules/hikap/test" "modules/libs/src" "modules/libs/test" "modules/tui/src" "modules/tui/test" "modules/ai/src" "modules/ai/test" "modules/loader/src" "modules/loader/test" "modules/srce/src" "modules/srce/test" "modules/app/src" "modules/app/test" "modules/tk/src" "modules/tk/test" "test" "tasks" "extensions/clojure/src" "extensions/clojure/test" "extensions/tree-sitter/src" "extensions/tree-sitter/test" "extensions/review/src" "extensions/review/test"]
+ :paths ["modules/reakt/src" "modules/reakt/test" "modules/hikap/src" "modules/hikap/test" "modules/libs/src" "modules/libs/test" "modules/tui/src" "modules/tui/test" "modules/ai/src" "modules/ai/test" "modules/loader/src" "modules/loader/test" "modules/srce/src" "modules/srce/test" "modules/app/src" "modules/app/test" "modules/tk/src" "modules/tk/test" "test" "tasks" "extensions/clojure/src" "extensions/clojure/test" "extensions/tree-sitter/src" "extensions/tree-sitter/test" "extensions/review/src" "extensions/review/test" "extensions/mcp-adapter/src" "extensions/mcp-adapter/test" "extensions/lsp-adapter/src" "extensions/lsp-adapter/test"]
  :deps {dev.weavejester/cljfmt {:mvn/version "0.16.6"}
         ;; babashka >= 1.13.224 bundles data.json (2.5.2 as of 1.13.225) and
         ;; the built-in wins over any declared copy; pinned at the bundled

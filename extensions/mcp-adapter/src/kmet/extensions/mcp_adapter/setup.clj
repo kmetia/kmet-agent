@@ -25,7 +25,6 @@
    parity with the McpPanel)."
   (:require [clojure.string :as str]
             [kmet.tui.keys :as keys]
-            [kmet.tui.keybindings :as kb]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.utils :as u]
             [kmet.tui.components.input :as input]
@@ -231,10 +230,11 @@
                (let [inner-w (max 1 (- width 2))
                      render-row (fn [row]
                                   (content-row row inner-w))]
-                 (vec (mapcat (fn [field]
+                 (vec (mapcat (fn [i field]
                                 [(render-row (fg (:hint setup-theme) (:label field)))
                                  (render-row (first (protocols/render
-                                                     (nth inputs @focus) inner-w)))])
+                                                     (nth inputs i) inner-w)))])
+                              (range (count @fields))
                               @fields))))
      :handle-input (fn [data]
                      (protocols/handle-input (nth inputs @focus) data))
@@ -251,13 +251,37 @@
             :imports (make-imports-screen panel)
             :form (make-form-screen panel))))
 
+;; ─── Screen dispatch ─────────────────────────────────────────────────────
+;; The action/presets/imports screens are defcomponents; the custom-server
+;; form is a duck-typed map (inputs it delegates to are components again).
+;; Dispatch on what the screen actually is instead of assuming a protocol
+;; implementation.
+
+(defn- component-render
+  [content width]
+  (if (satisfies? protocols/IComponent content)
+    (protocols/render content width)
+    ((:render content) width)))
+
+(defn- component-handle-input
+  [content data]
+  (if (satisfies? protocols/IComponent content)
+    (protocols/handle-input content data)
+    ((:handle-input content) data)))
+
+(defn- component-invalidate
+  [content]
+  (if (satisfies? protocols/IComponent content)
+    (protocols/invalidate content)
+    ((:invalidate content))))
+
 (defn- render
   [this width]
   (let [inner-w (max 1 (- width 2))
         screen @(:screen-atom this)
         content @(:content-atom this)
         notice @(:notice-atom this)
-        content-lines (protocols/render content (- width 2))
+        content-lines (component-render content (- width 2))
         hint (case screen
                :actions "Enter selects · Esc closes"
                :presets "Enter adds the server · Esc back"
@@ -276,20 +300,17 @@
           [(bottom-line inner-w (str (italic "↑↓") " navigate · " hint))]))))
 
 (defn- handle-input
+  "Esc is not intercepted here: each screen's own cancel handling navigates
+   back (the form steps back a field, the pickers return to the action
+   list), and the action list closes the overlay — which is what the
+   footer hint says."
   [this data]
-  (let [content @(:content-atom this)
-        kmgr (kb/get-global-keybindings)]
-    (cond
-      (kb/matches-key kmgr data "tui.select.cancel")
-      (do (close-panel! this) nil)
-
-      :else
-      (protocols/handle-input content data))))
+  (component-handle-input @(:content-atom this) data))
 
 (defn- invalidate
   [this]
   (when-let [content @(:content-atom this)]
-    (protocols/invalidate content)))
+    (component-invalidate content)))
 
 (defn- component
   "The duck-typed component surface (the entry mounts it via ui-custom)."
@@ -311,6 +332,8 @@
                :content-atom (atom nil)
                :notice-atom (atom nil)
                :imports-selected (atom #{})
-               :close-fn (atom nil)}]
+               ;; the DONE callback — close-panel! invokes it on Esc, so the
+               ;; overlay actually closes (the McpPanel's field is the same)
+               :close-fn (atom done)}]
     (switch-screen! panel :actions)
     (component panel)))

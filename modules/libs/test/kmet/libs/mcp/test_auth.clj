@@ -7,7 +7,7 @@
    binding (SEP-2352), the SEP-837 application_type, and the RFC 9207
    authorization-response `iss` validation. Discovery and the interactive
    flows keep their socket-level coverage in the extension's
-   validate-oauth.bb."
+   extensions/mcp-adapter/test/.../oauth_test.clj."
   (:require [babashka.fs :as fs]
             [clojure.edn :as edn]
             [clojure.string :as str]

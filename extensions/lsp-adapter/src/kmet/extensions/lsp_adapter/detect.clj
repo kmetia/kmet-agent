@@ -120,21 +120,30 @@
      unknown id     — becomes a custom server when it carries :command;
                       ignored (shown as misconfigured by callers) otherwise
 
-   Returns an ordered vector of normalized descriptors. Non-map values are
-   ignored — type-malformed configs degrade like syntax-malformed ones."
+   :env and :initialization-options pass through for spawning (the runtime
+   reads them off the descriptor). Returns an ordered vector of normalized
+   descriptors. Non-map values are ignored — type-malformed configs degrade
+   like syntax-malformed ones."
   [cfg-servers]
   (let [overrides (into {}
                         (keep (fn [[name entry]]
                                 (when (map? entry) [name entry])))
                         cfg-servers)
         disabled? (fn [id] (true? (get-in overrides [id :disabled])))
+        spawn-fields (fn [desc entry]
+                       (cond-> desc
+                         (contains? entry :env) (assoc :env (:env entry))
+                         (contains? entry :initialization-options)
+                         (assoc :initialization-options
+                                (:initialization-options entry))))
         customize (fn [desc]
                     (let [ovr (get overrides (:id desc))
                           argv (or (as-argv ovr) (:command desc))
                           exts (or (some-> ovr :extensions set)
                                    (:extensions desc))
                           extra (some-> ovr :extend-extensions set)]
-                      (cond-> (assoc desc :command argv :extensions exts)
+                      (cond-> (spawn-fields (assoc desc :command argv :extensions exts)
+                                            ovr)
                         (contains? ovr :root-markers)
                         (assoc :root-markers (:root-markers ovr))
                         (contains? ovr :exclude-root-markers)
@@ -153,10 +162,11 @@
                       :when (and (map? entry)
                                  (:command entry)
                                  (not (contains? builtin-ids name)))]
-                  (-> {:id name
-                       :command (as-argv entry)
-                       :extensions (set (:extensions entry))
-                       :filenames (set (:filenames entry))}
+                  (-> (spawn-fields {:id name
+                                     :command (as-argv entry)
+                                     :extensions (set (:extensions entry))
+                                     :filenames (set (:filenames entry))}
+                                    entry)
                       (cond->
                        (:root-markers entry)
                         (assoc :root-markers (:root-markers entry))
