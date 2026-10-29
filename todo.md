@@ -206,7 +206,7 @@ byte. Their numbers are in § Adjacent.
       (`:non-standard?`, `:supports-strict-mode`, …) as data read by
       `any-flag?`, so a provider joining a group is a row edit.
       File masses: sse.clj 1483.3 → 794.9, bedrock_converse_stream.clj 422.8 →
-      188.3, model_gen.clj 1297.9 → 1028.7 (`bedrock-request` CC 23 and
+      188.3, model_gen.clj 1263.0 → 1028.7 (`bedrock-request` CC 23 and
       `parse-anthropic-event` CC 25 remain, not targets).
       Perf (criterion 2): not measured per event — these are once-per-stream-
       event paths whose cost is dominated by the JSON parse and the HTTP read,
