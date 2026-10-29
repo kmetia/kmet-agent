@@ -55,11 +55,13 @@
       (try (notify @conn-atom msg) (catch Exception _ nil)))))
 
 (defn- dead-message
-  "Diagnostic message for a dead stdio process (stderr tail appended)."
+  "Diagnostic message for a dead stdio process (stderr tail appended). The
+   drain thread races process death, so wait for its EOF before reading the
+   tail — the lines saying why the child died are the whole value here."
   [conn method]
   (str "MCP connect failed: process exited"
        (when method (str " while waiting for " method))
-       (let [tail (str/join " — " (jrpc/stderr-tail conn))]
+       (let [tail (str/join " — " (jrpc/await-stderr conn 500))]
          (when (seq tail) (str " (stderr: " tail ")")))))
 
 (defn- translate-exception

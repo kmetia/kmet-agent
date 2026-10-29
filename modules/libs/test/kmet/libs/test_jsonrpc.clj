@@ -310,6 +310,36 @@
        (is (> (jsonrpc/last-used conn) t0))
        (is (empty? (jsonrpc/stderr-tail conn)) "stderr tail starts empty")))))
 
+(deftest ^:slow await-stderr-waits-for-the-drain
+  (testing "the tail is complete once the drain reaches EOF, however late the lines land
+            (a child dead to the OS reads as alive for a moment, so liveness polling loses them)"
+    (let [err-in (java.io.PipedInputStream.)
+          err-out (java.io.PipedOutputStream. err-in)
+          c2s (pipe-pair)
+          s2c (pipe-pair)
+          conn (jsonrpc/connect-streams {:in (:in s2c) :out (:out c2s) :err err-in})]
+      (try
+        (.write err-out (.getBytes "boom: no tmp here\n" "UTF-8"))
+        (.flush err-out)
+        (let [f (future (jsonrpc/await-stderr conn 2000))]
+          ;; the drain cannot have seen EOF while the writer is open
+          (Thread/sleep 50)
+          (is (= ::blocked (deref f 100 ::blocked)))
+          (.close err-out)
+          (is (= ["boom: no tmp here"] (deref f 3000 ::blocked))))
+        (finally
+          (try (.close err-out) (catch Exception _ nil))
+          (jsonrpc/close! conn)))))
+  (testing "a connection without stderr does not wait for a drain that will never come"
+    (let [c2s (pipe-pair)
+          s2c (pipe-pair)
+          conn (jsonrpc/connect-streams {:in (:in s2c) :out (:out c2s)})]
+      (try
+        (let [t0 (concurrent/monotonic-ms)]
+          (is (empty? (jsonrpc/await-stderr conn 2000)))
+          (is (< (- (concurrent/monotonic-ms) t0) 1000) "returns at once, not at the timeout"))
+        (finally (jsonrpc/close! conn))))))
+
 (deftest line-delimited-end-to-end
   (run-with-conn
    :line-delimited

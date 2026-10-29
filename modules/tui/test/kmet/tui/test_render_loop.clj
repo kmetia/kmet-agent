@@ -138,6 +138,21 @@
     (handle-input [_ _] nil)
     (invalidate [_] nil)))
 
+(defn- held-before-snapshot-component
+  "Like test-component, but the first render after ARMED is set blocks on GATE
+   before it reads LINES, and stays blocked until RELEASE is delivered. The
+   loop is single-threaded, so no frame can land while it waits: state changes
+   made during the hold are all seen by that one frame."
+  [lines armed gate release]
+  (reify core/IComponent
+    (render [_ _]
+      (when (compare-and-set! armed true false)
+        (deliver gate true)
+        (deref release))
+      @lines)
+    (handle-input [_ _] nil)
+    (invalidate [_] nil)))
+
 ;; ─── Render-loop driver ────────────────────────────────────────────────────
 
 (defn- start-loop
@@ -647,10 +662,15 @@
             unchanged: the hint describes the pre-flash lines, so the frame after a flash frame
             falls back to the diff's own scan (a hint would cover only the other changed line)"
     (let [lines (atom ["alpha" "beta" "gamma"])
+          armed (atom false)
+          gate (promise)
+          release (promise)
           vt (make-virtual-terminal)
-          tui (core/create-tui (:terminal vt))]
+          tui (core/create-tui (:terminal vt))
+          changed (fn [] (some #(when (str/includes? % "gamma changed") %)
+                               (frame-writes (:writes vt))))]
       (try
-        (core/tui-add-child tui (test-component lines))
+        (core/tui-add-child tui (held-before-snapshot-component lines armed gate release))
         (start-loop tui)
         (wait-for-frames (:writes vt) 1 5000)
         (core/tui-flash! tui "Copied!" :duration-ms 60000)
@@ -660,16 +680,25 @@
               "the flash is painted over the first row")
         ;; dispose the flash and change a DIFFERENT row in the same frame: the
         ;; flash row's raw line is identical across the two frames, so a
-        ;; raw-identity hint would not cover it
+        ;; raw-identity hint would not cover it. The frame is held before its
+        ;; document snapshot, because the dispose requests a render of its own
+        ;; and would otherwise land between the two changes as a frame that
+        ;; restores the flash row on its own.
+        (reset! armed true)
+        (core/tui-request-render tui)
+        (t/is (true? (deref gate 5000 false))
+              "a frame is held before it reads the document")
         (core/tui-flash-dispose! tui)
         (swap! lines assoc 2 "gamma changed")
-        (core/tui-request-render tui)
-        (wait-for-frames (:writes vt) 3 5000)
-        (let [after (nth (frame-writes (:writes vt)) 2)]
-          (t/is (str/includes? after "gamma changed") "the changed row is painted")
+        (deliver release true)
+        (t/is (wait-until #(some? (changed)) 5000) "the change frame is painted")
+        (let [after (changed)]
           (t/is (str/includes? after "alpha") "the flash row is restored")
           (t/is (not (str/includes? after "Copied!")) "and the flash is gone"))
         (finally
+          (reset! armed false)
+          (deliver gate true) ;; never leave the render loop blocked
+          (deliver release true)
           (stop-loop tui))))))
 
 (deftest ^:slow ordinary-diff-does-not-clear

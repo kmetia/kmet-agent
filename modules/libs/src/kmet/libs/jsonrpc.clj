@@ -241,18 +241,23 @@
 
 (defn- start-stderr-drain!
   "Keeps the last N lines of ERR in CONN's tail for diagnostics. No-op when
-   ERR is nil (stream-injected connections without stderr)."
+   ERR is nil (stream-injected connections without stderr, where the tail is
+   complete by definition). Delivers CONN's :stderr-done when the drain
+   reaches EOF — the child closed its stderr, so the diagnosis has landed."
   [conn err]
-  (when err
+  (if err
     (let [t (Thread. (fn []
                        (try
                          (with-open [rdr (io/reader err)]
                            (doseq [line (line-seq rdr)]
                              (tail-log! conn line)))
-                         (catch Exception _ nil))))]
+                         (catch Exception _ nil)
+                         (finally (deliver (:stderr-done conn) true)))))]
       (.setDaemon t true)
       (.start t)
-      t)))
+      t)
+    (do (deliver (:stderr-done conn) true)
+        nil)))
 
 (defn connect-streams
   "Connection over already-built streams — the seam tests use instead of a
@@ -279,6 +284,7 @@
               :write-lock (Object.)
               :last-used (atom (concurrent/monotonic-ms))
               :stderr-tail (atom [])
+              :stderr-done (promise)
               :tail-lines (or tail-lines 20)}]
     (start-reader! conn)
     (start-stderr-drain! conn err)
@@ -326,6 +332,18 @@
 (defn stderr-tail
   "The last N captured stderr/log lines (oldest first)."
   [conn]
+  @(:stderr-tail conn))
+
+(defn await-stderr
+  "Waits up to TIMEOUT-MS for the stderr drain to reach EOF (the child closed
+   its stderr — process death), then returns the tail. A startup failure reads
+   this before building its diagnosis: the drain thread races process death,
+   and a child dead to the OS still reads as alive for a moment, so polling
+   `alive?` loses the lines that say why it died. Connections without a drain
+   (stream-injected test doubles) return their tail at once."
+  [conn timeout-ms]
+  (when-let [done (:stderr-done conn)]
+    (deref done timeout-ms nil))
   @(:stderr-tail conn))
 
 (defn request!

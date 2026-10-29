@@ -138,13 +138,10 @@
                  (catch Exception e
                    ;; A server that dies during startup takes its diagnosis
                    ;; to stderr (missing temp dir, bad interpreter, ...).
-                   ;; The drain thread races process death, so give it a
-                   ;; bounded beat to land the lines before rethrowing.
-                   (let [tail (loop [tries 0]
-                                (or (not-empty (jrpc/stderr-tail conn))
-                                    (when (and (< tries 5) (not (jrpc/alive? conn)))
-                                      (Thread/sleep 100)
-                                      (recur (inc tries)))))
+                   ;; The drain thread races process death — and a child
+                   ;; dead to the OS still reads as alive for a moment — so
+                   ;; wait for the drain's EOF instead of polling liveness.
+                   (let [tail (not-empty (jrpc/await-stderr conn 500))
                          msg (ex-message e)]
                      (jrpc/close! conn)
                      (throw (ex-info
