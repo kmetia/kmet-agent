@@ -38,9 +38,10 @@ VERBOSITY 0.013
 
 Two facts drive the ordering. CC is a cliff — a function at CC 11 contributes
 100% of its mass, at CC 10 none — so crossing the line beats shrinking it;
-and SLOC is `sqrt`-weighted, so splitting beats trimming. The five open
-targets carry 3,265 of 102,937 mass (3.2%); landing all of them under CC 10
-moves erosion to ~0.316.
+and SLOC is `sqrt`-weighted, so splitting beats trimming. The three open
+targets carry 2,751 of 102,683 mass (2.7%). Both large ones are blocked by
+criterion 2 (see their entries); landing the TUI pair under CC 10 anyway
+would move erosion to ~0.323, and `parse-inline` to ~0.317.
 
 ## Criteria (every landing)
 
@@ -88,20 +89,55 @@ fails (2) is reverted, however much it improves (1).
 
 Ordered by mass, descending.
 
-- [ ] **`run-render-loop!`** — `modules/tui/src/kmet/tui/core.clj:2385`,
-      CC 52 / 462 SLOC / mass 1117.7. Shape: phase machine in one fn.
-      Fix: one `defn` per phase (activate, pump, render, diff-commit) plus a
-      small state record; the loop's `cond` dispatches on phase, not on
-      everything. **Read `modules/tui/src/kmet/tui/tui.md` first** — the
-      render loop's redraw and terminal-negotiation rules are documented, and
-      this function owns raw-mode activation and restore.
+Both large targets are blocked by criterion 2 (see their entries), so what is
+left is the mid-size set: functions over the cliff for a *dispatch* reason
+rather than a per-element one, where a split costs nothing per frame or per
+byte. Their numbers are in § Adjacent.
 
-- [ ] **`main-diff`** — same file, `:2685`, CC 69 / 215 SLOC / mass 1011.7.
-      It is a local `fn` inside `run-render-loop!`, so the phase split above
-      moves it to a top-level helper. Fix: the diff pass's `cond` on hint
-      becomes three named helpers (prove-unchanged / scan-range / full-walk)
-      selected by one `case`. The `::scan` / `nil` hint contract must keep its
-      current meaning — it decides whether the document is repainted.
+- [ ] **`run-render-loop!` + `main-diff`** (one job) —
+      `modules/tui/src/kmet/tui/core.clj:2385` (CC 52 / 462 SLOC / mass 1117.7)
+      and the local `main-diff` at `:2685` (CC 69 / 215 SLOC / mass 1011.7).
+      **Attempted and reverted — blocked by criterion 2**, like `parse-inline`.
+      The decomposition worked and every behaviour held: the frame split into
+      `frame-context` (document pass), `full-redraw-reason` (the renderer
+      choice), `diff-frame!` plus one fn per branch (`render-region!`,
+      `render-tail-delete!`, `render-shrink-above!`, `render-unchanged-tail!`,
+      `changed-range`/`scan-changed-range`, the three window predicates),
+      `commit-frame!`, `run-scrollback-heal!`, and the loop's own `park-loop!` /
+      `stop-render-loop!` / `publish-terminal-size!` / `blank-frame-state!` —
+      all sharing one 35-key per-frame context map. `run-render-loop!` fell to
+      ~6 decisions and `main-diff` disappeared; file erosion 0.378 from 0.666
+      (mass 1276.5 from 3154.8, 11 of 221 CC>10 from 9 of 197). 27/27
+      render-loop tests (146 assertions) and 303 TUI tests (1700 assertions)
+      passed, lint and format clean, on the first splice.
+      It then measured slower than the `let` it replaced — a typing frame's
+      renderer tail (end of the document pass → terminal write), p50 µs,
+      three runs per side, each in a fresh process:
+
+      | run | before | after | delta |
+      |---|---|---|---|
+      | 1 | 260 | 357 | +37% |
+      | 2 | 290 | 342 | +18% |
+      | 3 | 305 | 364 | +19% |
+
+      Cause, measured: the frame body became ~12 extra function calls and a
+      35-key map built and destructured several times per frame, and a frame's
+      *total* work is 1.1-1.3 ms on this phone — so a ~70 µs tax is +5% of the
+      frame, not the +0.2% a once-per-frame call would cost. The same lesson as
+      `parse-inline`: on a per-frame path the call/lookup tax is not noise.
+      The `:stream` scenario is not usable as evidence: there the document
+      outgrows the window, the scrollback dirty latches, and the heal's forced
+      follow-up frame makes the old and new render counts differ — measure
+      `:typing` (or a frame count that does not include a heal) instead.
+      Way in, next attempt: keep the frame body one `let` (closures over the
+      frame's locals stay the cheap form) and split only the *dispatch* — a
+      handful of local closures, three or four extra calls per frame, no
+      context map. Budget the regression as ≤2% of the tail (~6 µs) and measure
+      before writing the second half. **Read `modules/tui/src/kmet/tui/tui.md`
+      first** — the loop owns raw-mode activation, restore, and the redraw
+      rules; `scripts/bench/kmet_frame_bench.clj` needs a session file, so the
+      render-loop test harness (virtual terminal, `bf-end → write` window) is
+      the practical A/B rig.
 
 - [ ] **`parse-inline`** — `modules/libs/src/kmet/libs/markdown.clj:289`,
       CC 52 / 143 SLOC / mass 621.8. Shape: branchy parser.
@@ -231,8 +267,19 @@ Ordered by mass, descending.
 ## Adjacent, same shapes (not in this batch)
 
 Remaining outliers whose fixes are the treatments above:
-`process-input-buffer!` (CC 45 / 114, `kmet.tui.core`, phase + input ladder),
-`agent-handle` (CC 20 / 221, `kmet.app.loop.driver`), `execute-bash` and its
-inner `fn` (CC 19 / 201 and CC 37 / 79,
-`kmet.app.tools.bash-executor` — the nested fn is the cliff case), `run-bash`
-(CC 26 / 92, `kmet.app.tools.bash`).
+`process-input-buffer!` (CC 45 / 480.5, `kmet.tui.core` — the largest mass
+left in the tree, and the input reader's hot path: the `parse-inline`
+per-element argument applies), `agent-handle` (CC 20 / 221,
+`kmet.app.loop.driver`), `execute-bash` and its inner `fn` (CC 19 / 201 and
+CC 37 / 79, `kmet.app.tools.bash-executor` — the nested fn is the cliff case),
+`run-bash` (CC 26 / 92, `kmet.app.tools.bash`).
+
+The once-per-event outliers, which are the cheap landings now that both large
+targets are blocked: `build-frame-lines` (`kmet.tui.core:143`, CC 13 /
+mass 129.3 — once per frame, and its branches are the line-memo QUICK? path),
+`dispatch-input!` (`:1332`, CC 14 / 103.8 — per keystroke),
+`resolve-overlay-layout` (`:527`, CC 15 / 97.2 — per overlay layout),
+`shape-result` (`extensions/lsp-adapter/.../tools.clj:161`, CC 12 / 63.5 —
+once per tool result, the `execute` work's leftovers) and
+`find-top-level-form` (`extensions/clojure/.../edit_tool.clj:64`, CC 13 /
+76.9 — once per edit).
