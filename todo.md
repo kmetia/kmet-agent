@@ -44,6 +44,14 @@ EROSION 0.339   310 of 8801 functions CC>10   max CC 69
 VERBOSITY 0.012
 ```
 
+After the five AI stream parsers (landed below):
+
+```
+EROSION 0.329   305 of 8837 functions CC>10   max CC 69
+                mass 33494.6 of 101723.6
+VERBOSITY 0.012
+```
+
 Two facts drive the ordering. CC is a cliff — a function at CC 11 contributes
 100% of its mass, at CC 10 none — so crossing the line beats shrinking it;
 and SLOC is `sqrt`-weighted, so splitting beats trimming. The three open
@@ -174,6 +182,43 @@ byte. Their numbers are in § Adjacent.
       for a line once (one pass, `str/index-of` over the `@`s) and let the loop
       chunk like the non-`@` path. That is a parser change, not an extraction,
       and it needs its own benchmark and tests.
+
+- [x] **Five AI stream parsers** (one batch) —
+      `parse-responses-event` (`modules/ai/src/kmet/ai/api/sse.clj:216`,
+      CC 27 / 76 SLOC / 235.4), `parse-mistral-event` (`:553`, CC 29 / 65 /
+      233.8), `bedrock-frame-event` (`:786`, CC 31 / 50 / 219.2),
+      `bedrock-messages` (`api/bedrock_converse_stream.clj:100`, CC 25 / 88 /
+      234.5) and `detect-openai-completions-compat` (`model_gen.clj:1481`,
+      CC 30 / 61 / 234.3) — 1,157 mass. All run once per stream event, tool
+      call or model detection, so the per-event budget is µs.
+      The three SSE parsers became handler tables keyed by the wire's event
+      name (`responses-event-handlers`, `bedrock-frame-handlers`) or by delta
+      kind (`mistral-content-events` / `mistral-tool-call-event`), each row a
+      fn over the parsed payload; the frame logic that was inline in the
+      `case`/`cond` is now one fn per event kind (`responses-item-added`,
+      `responses-args-delta`, `responses-args-done`, `bedrock-tool-use-start`,
+      `bedrock-content-delta`, `bedrock-usage`, …). `bedrock-messages` split
+      into one fn per role (bash / tool / assistant / user) plus
+      `bedrock-reasoning-block` for the thinking-signature rule, and the loop
+      in `bedrock-conversation` only dispatches. `detect-openai-completions-
+      compat` became a family table (`compat-families`: provider keywords and
+      URL markers per family) plus `compat-flags`, with the policy lists
+      (`:non-standard?`, `:supports-strict-mode`, …) as data read by
+      `any-flag?`, so a provider joining a group is a row edit.
+      File masses: sse.clj 1483.3 → 794.9, bedrock_converse_stream.clj 422.8 →
+      188.3, model_gen.clj 1297.9 → 1028.7 (`bedrock-request` CC 23 and
+      `parse-anthropic-event` CC 25 remain, not targets).
+      Perf (criterion 2): not measured per event — these are once-per-stream-
+      event paths whose cost is dominated by the JSON parse and the HTTP read,
+      and the decompositions add at most one table lookup per event (no
+      per-element work moves). Recorded as such rather than as a number.
+      Verified: `kmet.ai.test-sse` 32 / 100, `test-llm-bedrock`,
+      `test-llm-mistral`, `test-llm-openai`, `test-models`, `test-api-tools`,
+      `test-model-data`, `test-llm-models`, `test-model-config`,
+      `test-provider-composer` — the affected AI suites, all green (the
+      provider-detection test covers every family's strict-mode and
+      thinking-format answer). `bb lint-changed` 0/0, `bb format-check-changed`,
+      and the flagged-line counts are unchanged in all three files.
 
 - [x] **`fn@123` + `execute-bash`** (bash executor) —
       `modules/app/src/kmet/app/tools/bash_executor.clj:123` (CC 37 / 79 SLOC /
@@ -320,11 +365,10 @@ ladder around it is landable), `agent-handle` (CC 20 / 297.3,
 245.3, mcp search), `load-extension*` (CC 23 / 237.9, once per load),
 `parse-kitty-sequence` (CC 34 / 235.6, per escape sequence),
 `interactive/run` (CC 37 / 395.1, once per process start), `myers-ops`
-(CC 26 / 206.4, per edit), and the five AI stream parsers
-(`parse-responses-event` 235.4, `bedrock-messages` 234.5,
-`detect-openai-completions-compat` 234.3, `parse-mistral-event` 233.8,
-`bedrock-frame-event` 219.2 — once per stream event, and one shared row
-shape).
+(CC 26 / 206.4, per edit), `parse-anthropic-event` (CC 25 / 188.7, once per
+stream event — the last of the sse.clj parsers), `bedrock-request` (CC 23 /
+188.3, once per request) and `validate-groups!` (CC 22 / 160.2, once per
+catalog generation).
 
 The once-per-event outliers, which are the cheap landings now that both large
 targets are blocked: `build-frame-lines` (`kmet.tui.core:143`, CC 13 /

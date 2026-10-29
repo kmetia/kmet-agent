@@ -97,6 +97,124 @@
                        (bedrock-image-block (:mime-type i) (:data i))))]
     (if (seq blocks) blocks [{:text bedrock-empty-text-placeholder}])))
 
+(defn- bedrock-bash-message
+  "A bash execution's user message, or nil when the execution is excluded from
+   the context."
+  [m]
+  (when-not (:exclude-from-context? m)
+    {:role "user"
+     :content [{:text (bash-execution-text m)}]}))
+
+(defn- bedrock-tool-result-block
+  "One tool result as a toolResult block, its id normalized to Bedrock's shape."
+  [tr]
+  {:toolResult {:toolUseId (bedrock-normalize-tool-call-id
+                            (-> tr :content first :tool_use_id))
+                :content (bedrock-tool-result-content
+                          (or (-> tr :content first :content) "")
+                          (:images tr))
+                :status (if (:is-error tr) "error" "success")}})
+
+(defn- bedrock-tool-results-message
+  "Consecutive tool results merged into one user message (pi convertMessages).
+   Returns `{:count n :message m}`: COUNT is how many messages the merge
+   consumed."
+  [msgs]
+  (let [tool-results (take-while #(= :tool (:role %)) msgs)]
+    {:count (count tool-results)
+     :message {:role "user"
+               :content (mapv bedrock-tool-result-block tool-results)}}))
+
+(defn- bedrock-reasoning-block
+  "The assistant turn's reasoning block for its thinking, or nil when it has
+   none. pi supportsThinkingSignature: only Claude accepts the signature field
+   — signed same-model reasoning replays inside reasoningContent with the
+   signature, unsigned or cross-provider reasoning falls back to plain text for
+   Claude (Bedrock rejects a reasoningContent block without a signature), and
+   non-Claude models take reasoningContent without one."
+  [m model provider]
+  (when-let [thinking (not-empty (str/trim (or (:thinking m) "")))]
+    (let [same-model? (and (= (:provider m) provider)
+                           (= (:model m) (:id model)))
+          signature (:thinking-signature m)]
+      (cond
+        (not (bedrock-is-claude? model))
+        [{:reasoningContent {:reasoningText {:text thinking}}}]
+
+        (and same-model? (seq signature))
+        [{:reasoningContent {:reasoningText {:text thinking
+                                             :signature signature}}}]
+
+        :else
+        [{:text thinking}]))))
+
+(defn- bedrock-assistant-message
+  "An assistant turn as one message: its text blocks, its tool calls, and its
+   reasoning; nil when nothing survives."
+  [m model provider]
+  (let [content-blocks (into []
+                             (concat
+                              (keep (fn [b]
+                                      (when (= :text (:type b))
+                                        (bedrock-text-block (:text b))))
+                                    (:content m))
+                              (for [tc (:tool-calls m)]
+                                {:toolUse {:toolUseId (bedrock-normalize-tool-call-id (:id tc))
+                                           :name (:name tc)
+                                           :input (:arguments tc {})}})
+                              (bedrock-reasoning-block m model provider)))]
+    (when (seq content-blocks)
+      {:role "assistant" :content content-blocks})))
+
+(defn- bedrock-user-blocks
+  "A user turn's content blocks; a turn that yields none degrades to the empty
+   placeholder."
+  [m]
+  (let [content (:content m)
+        blocks (if (string? content)
+                 [{:text content}]
+                 (into []
+                       (keep (fn [b]
+                               (cond
+                                 (= :text (:type b)) (bedrock-text-block (:text b))
+                                 (image-block? b) (bedrock-image-block (:mime-type b) (:data b))
+                                 :else nil)))
+                       content))]
+    (if (seq blocks) blocks [{:text bedrock-empty-text-placeholder}])))
+
+(defn- bedrock-conversation
+  "The messages without the system prompt, converted to ConverseStream shape
+   (pi convertMessages): bash executions and user turns, assistant turns, and
+   consecutive tool results merged into one user message. A turn that converts
+   to nothing is dropped."
+  [messages model provider]
+  (loop [msgs (remove #(= :system (:role %)) messages)
+         out []]
+    (if-let [m (first msgs)]
+      (let [role (name (:role m))]
+        (cond
+          (= role "bash")
+          (recur (rest msgs)
+                 (if-let [message (bedrock-bash-message m)]
+                   (conj out message)
+                   out))
+
+          (= role "tool")
+          (let [{:keys [count message]} (bedrock-tool-results-message msgs)]
+            (recur (drop count msgs) (conj out message)))
+
+          (= role "assistant")
+          (recur (rest msgs)
+                 (if-let [message (bedrock-assistant-message m model provider)]
+                   (conj out message)
+                   out))
+
+          :else
+          (recur (rest msgs)
+                 (conj out {:role "user"
+                            :content (bedrock-user-blocks m)}))))
+      out)))
+
 (defn bedrock-messages
   "ConverseStream messages (pi convertMessages): user content with
    text/image blocks (blank text degrades to the <empty> placeholder),
@@ -120,78 +238,7 @@
          system-blocks (when (seq system)
                          (cond-> [{:text system}]
                            caching? (conj cache-block)))
-         result (loop [msgs (remove #(= :system (:role %)) messages)
-                       out []]
-                  (if-let [m (first msgs)]
-                    (let [role (name (:role m))]
-                      (cond
-                        (= role "bash")
-                        (if (:exclude-from-context? m)
-                          (recur (rest msgs) out)
-                          (recur (rest msgs)
-                                 (conj out {:role "user"
-                                            :content [{:text (bash-execution-text m)}]})))
-                        (= role "tool")
-                       ;; merge consecutive tool results into one user message
-                        (let [tool-results (take-while #(= :tool (:role %)) msgs)
-                              blocks (mapv (fn [tr]
-                                             {:toolResult {:toolUseId (bedrock-normalize-tool-call-id
-                                                                       (-> tr :content first :tool_use_id))
-                                                           :content (bedrock-tool-result-content
-                                                                     (or (-> tr :content first :content) "")
-                                                                     (:images tr))
-                                                           :status (if (:is-error tr) "error" "success")}})
-                                           tool-results)]
-                          (recur (drop (count tool-results) msgs)
-                                 (conj out {:role "user" :content blocks})))
-                        (= role "assistant")
-                        (let [content-blocks (into []
-                                                   (concat
-                                                    (keep (fn [b]
-                                                            (when (= :text (:type b))
-                                                              (bedrock-text-block (:text b))))
-                                                          (:content m))
-                                                    (for [tc (:tool-calls m)]
-                                                      {:toolUse {:toolUseId (bedrock-normalize-tool-call-id (:id tc))
-                                                                 :name (:name tc)
-                                                                 :input (:arguments tc {})}})
-                                                   ;; pi supportsThinkingSignature: only Claude
-                                                   ;; accepts the signature field. Signed
-                                                   ;; same-model reasoning replays inside
-                                                   ;; reasoningContent with the signature;
-                                                   ;; unsigned or cross-provider reasoning falls
-                                                   ;; back to plain text for Claude (Bedrock
-                                                   ;; rejects a reasoningContent block without a
-                                                   ;; signature); non-Claude models take
-                                                   ;; reasoningContent without a signature (pi)
-                                                    (when-let [th (not-empty (str/trim (or (:thinking m) "")))]
-                                                      (let [same-model? (and (= (:provider m) provider)
-                                                                             (= (:model m) (:id model)))
-                                                            sig (:thinking-signature m)]
-                                                        (if (bedrock-is-claude? model)
-                                                          (if (and same-model? (seq sig))
-                                                            [{:reasoningContent {:reasoningText {:text th
-                                                                                                 :signature sig}}}]
-                                                            [{:text th}])
-                                                          [{:reasoningContent {:reasoningText {:text th}}}])))))]
-                          (if (seq content-blocks)
-                            (recur (rest msgs) (conj out {:role "assistant" :content content-blocks}))
-                            (recur (rest msgs) out)))
-                        :else
-                       ;; user
-                        (let [content (:content m)
-                              blocks (if (string? content)
-                                       [{:text content}]
-                                       (let [blocks (into []
-                                                          (keep (fn [b]
-                                                                  (cond
-                                                                    (= :text (:type b)) (bedrock-text-block (:text b))
-                                                                    (image-block? b) (bedrock-image-block (:mime-type b) (:data b))
-                                                                    :else nil)))
-                                                          content)]
-                                         (if (seq blocks) blocks [{:text bedrock-empty-text-placeholder}])))]
-                          (recur (rest msgs) (conj out {:role "user" :content blocks})))))
-                    out))]
+         result (bedrock-conversation messages model provider)]
      [(cond-> result
         (and caching? (seq result)
              (= "user" (get-in result [(dec (count result)) :role])))

@@ -213,6 +213,110 @@
       details (str "incomplete: " (:reason details))
       :else "Unknown error (no error details in response)")))
 
+(defn- tool-call-slot
+  "The tool-call slot at IDX, or nil when that output index holds something
+   else (a reasoning/text item, or nothing yet)."
+  [slots idx]
+  (let [slot (get slots idx)]
+    (when (= :tool-call (:kind slot)) slot)))
+
+(defn- responses-item-added
+  "response.output_item.added: a function_call item opens its tool-call slot,
+   keyed by output index (pi processResponsesStream's outputSlots)."
+  [d state _slots]
+  (let [item (:item d)
+        idx (:output_index d)]
+    (if (= "function_call" (:type item))
+      (let [slot {:kind :tool-call
+                  :id (responses-tool-call-id item)
+                  :name (:name item)
+                  :partial-json (or (:arguments item) "")}]
+        (swap! state assoc-in [:slots idx] slot)
+        [{:type :tool-call :id (:id slot) :name (:name slot)
+          :arguments (or (:arguments item) "") :index idx}])
+      [])))
+
+(defn- responses-args-delta
+  "response.function_call_arguments.delta: accumulate the partial JSON and emit
+   the delta; an index without a tool-call slot emits nothing."
+  [d state slots]
+  (let [idx (:output_index d)]
+    (if-let [slot (tool-call-slot slots idx)]
+      (do (swap! state assoc-in [:slots idx :partial-json]
+                 (str (:partial-json slot) (:delta d)))
+          [{:type :tool-call-args :arguments (:delta d) :index idx}])
+      [])))
+
+(defn- responses-args-done
+  "response.function_call_arguments.done: replace the accumulated partial with
+   the final arguments. The final arguments normally extend the partial (pi
+   emits only the extension as a delta); when they do not — complete arguments
+   arrived in the item — there is nothing to add."
+  [d state slots]
+  (let [idx (:output_index d)
+        final (or (:arguments d) "")]
+    (if-let [slot (tool-call-slot slots idx)]
+      (let [previous (:partial-json slot)]
+        (swap! state assoc-in [:slots idx :partial-json] final)
+        (if (and (str/starts-with? final previous)
+                 (pos? (- (count final) (count previous))))
+          [{:type :tool-call-args :arguments (subs final (count previous))
+            :index idx}]
+          []))
+      [])))
+
+(defn- responses-terminal
+  "response.completed / .incomplete / .done: the terminal events, plus the
+   processor's saw-terminal flag."
+  [d state _slots]
+  (responses-terminal-events d state))
+
+(defn- responses-failed
+  "response.failed: one error event, and the stream is now terminal."
+  [d state _slots]
+  (swap! state assoc :saw-terminal? true)
+  [{:type :error :message (responses-failed-message d)}])
+
+(defn- delta-handler
+  "The handler for an event whose payload is one content delta of EVENT-TYPE."
+  [event-type]
+  (fn [d _state _slots]
+    [{:type event-type :content (:delta d)}]))
+
+(def ^:private responses-event-handlers
+  "One handler per streamed Responses event, keyed by the SSE event name. Each
+   takes the parsed payload, the processor state and the current output slots,
+   and returns the kmet events the frame produces (pi
+   processResponsesStream). An unknown event yields nothing."
+  {"response.output_text.delta" (delta-handler :text)
+   "response.refusal.delta" (delta-handler :text)
+   "response.reasoning_text.delta" (delta-handler :thinking)
+   "response.reasoning_summary_text.delta" (delta-handler :thinking)
+   "response.reasoning_summary_part.done" (fn [_ _ _]
+                                            [{:type :thinking :content "\n\n"}])
+   ;; Text/thinking/tool-call content already streamed as deltas; the final
+   ;; item only carries the same values (no signature replay in kmet —
+   ;; sessions don't persist signatures).
+   "response.output_item.done" (fn [_ _ _] [])
+   "response.output_item.added" responses-item-added
+   "response.function_call_arguments.delta" responses-args-delta
+   "response.function_call_arguments.done" responses-args-done
+   "response.completed" responses-terminal
+   "response.incomplete" responses-terminal
+   "response.done" responses-terminal
+   "response.failed" responses-failed
+   "error" (fn [d _ _]
+             [{:type :error
+               :message (str "Error Code " (:code d) ": " (:message d))}])})
+
+(defn- responses-events
+  "The events one parsed Responses payload produces: the event's handler, or
+   nothing for an unknown event name."
+  [event d state]
+  (if-let [handler (get responses-event-handlers event)]
+    (handler d state (:slots @state))
+    []))
+
 (defn parse-responses-event
   "Parse one OpenAI Responses SSE (event-name, data) pair into a vector of
    kmet events: :text, :thinking, :tool-call (start, with the id/name),
@@ -226,79 +330,14 @@
    response.function_call_arguments.delta with a final .done that may
    extend the accumulated partial. function_call items are created on
    response.output_item.added; the id is `call_id|item_id` (pi), so the
-   tool executor and session replay treat it opaquely."
+   tool executor and session replay treat it opaquely.
+
+   The frame kinds are responses-event-handlers, one entry per event name."
   [event data state]
   (if (nil? data)
     []
     (try
-      (let [d (json/parse-string data true)
-            slots (:slots @state)
-            add-slot! (fn [idx slot] (swap! state assoc-in [:slots idx] slot))]
-        (case event
-          "response.output_item.added"
-          (let [item (:item d) idx (:output_index d)]
-            (case (:type item)
-              "function_call"
-              (let [slot {:kind :tool-call
-                          :id (responses-tool-call-id item)
-                          :name (:name item)
-                          :partial-json (or (:arguments item) "")}]
-                (add-slot! idx slot)
-                [{:type :tool-call :id (:id slot) :name (:name slot)
-                  :arguments (or (:arguments item) "") :index idx}])
-              []))
-
-          "response.reasoning_summary_text.delta"
-          [{:type :thinking :content (:delta d)}]
-          "response.reasoning_summary_part.done"
-          [{:type :thinking :content "\n\n"}]
-          "response.reasoning_text.delta"
-          [{:type :thinking :content (:delta d)}]
-          "response.output_text.delta"
-          [{:type :text :content (:delta d)}]
-          "response.refusal.delta"
-          [{:type :text :content (:delta d)}]
-
-          "response.function_call_arguments.delta"
-          (let [slot (get slots (:output_index d))]
-            (if (and slot (= :tool-call (:kind slot)))
-              (do (swap! state assoc-in [:slots (:output_index d) :partial-json]
-                         (str (:partial-json slot) (:delta d)))
-                  [{:type :tool-call-args :arguments (:delta d)
-                    :index (:output_index d)}])
-              []))
-
-          "response.function_call_arguments.done"
-          (let [slot (get slots (:output_index d))
-                final (or (:arguments d) "")]
-            (if (and slot (= :tool-call (:kind slot)))
-              (let [previous (:partial-json slot)]
-                (swap! state assoc-in [:slots (:output_index d) :partial-json] final)
-                ;; The final arguments normally extend the accumulated partial
-                ;; (pi: emit only the extension as a delta); when they don't
-                ;; (complete arguments arrived in the item), nothing to add.
-                (if (and (str/starts-with? final previous)
-                         (pos? (- (count final) (count previous))))
-                  [{:type :tool-call-args :arguments (subs final (count previous))
-                    :index (:output_index d)}]
-                  []))
-              []))
-
-          "response.output_item.done"
-          ;; Text/thinking/tool-call content already streamed as deltas; the
-          ;; final item only carries the same values (no signature replay in
-          ;; kmet — sessions don't persist signatures).
-          []
-
-          "response.completed" (responses-terminal-events d state)
-          "response.incomplete" (responses-terminal-events d state)
-          "response.done" (responses-terminal-events d state)
-          "response.failed"
-          (do (swap! state assoc :saw-terminal? true)
-              [{:type :error :message (responses-failed-message d)}])
-          "error"
-          [{:type :error :message (str "Error Code " (:code d) ": " (:message d))}]
-          []))
+      (responses-events event (json/parse-string data true) state)
       (catch Exception e
         [{:type :error :message (str "Parse error: " (ex-message e))}]))))
 
@@ -550,6 +589,72 @@
     (= reason "error") {:stop-reason :error :error-message "Provider stopped with: error"}
     :else {:stop-reason :error :error-message (str "Provider stopped with: " reason)}))
 
+(defn- mistral-tool-args
+  "A tool call's arguments as text: a string is used as is, an object is
+   stringified for the accumulator, and a name-only delta starts empty."
+  [fargs]
+  (cond
+    (string? fargs) fargs
+    (some? fargs) (json/generate-string fargs)
+    :else ""))
+
+(defn- mistral-tool-call-event
+  "One streamed tool_calls entry: a named delta starts the call (its id falls
+   back to a derived one when the wire sends a missing or \"null\" id, like the
+   SDK), an arguments-only delta continues it."
+  [tc]
+  (let [fname (get-in tc [:function :name])
+        fargs (get-in tc [:function :arguments])
+        raw-id (:id tc)]
+    (cond
+      (some? fname)
+      {:type :tool-call
+       :id (if (and raw-id (not= "null" raw-id))
+             raw-id
+             (derive-mistral-tool-call-id (str "toolcall:" (or (:index tc) 0))))
+       :name fname
+       :arguments (mistral-tool-args fargs)
+       :index (:index tc)}
+
+      (some? fargs)
+      {:type :tool-call-args
+       :id raw-id
+       :arguments (mistral-tool-args fargs)
+       :index (:index tc)})))
+
+(defn- mistral-content-item
+  "One streamed delta content item: a bare string, {type text} with its text
+   part, or {type thinking} with its nested text parts joined. Empty items
+   yield nothing."
+  [item]
+  (cond
+    (string? item)
+    (when (pos? (count item))
+      {:type :text :content item})
+
+    (= "text" (:type item))
+    (let [t (or (:text item) "")]
+      (when (pos? (count t))
+        {:type :text :content t}))
+
+    (= "thinking" (:type item))
+    (let [t (str/join (keep :text (:thinking item)))]
+      (when (pos? (count t))
+        {:type :thinking :content t}))))
+
+(defn- mistral-content-events
+  "The delta's content as events: a plain string is one text event, an array is
+   one event per text/thinking item (pi readMistralEvents)."
+  [content]
+  (cond
+    (string? content)
+    (if (pos? (count content)) [{:type :text :content content}] [])
+
+    (sequential? content)
+    (keep mistral-content-item content)
+
+    :else []))
+
 (defn parse-mistral-event
   "Parse a Mistral chat-completions SSE data payload into a vector of kmet
    events (pi readMistralEvents + consumeChatStream): :text, :thinking,
@@ -557,64 +662,27 @@
    :error. The streamed delta content is a plain string or an array of
    items ({type text} / {type thinking} with nested text parts);
    tool_calls carry the function name/arguments deltas (arguments as a
-   string or a full object — stringified for the accumulator)."
+   string or a full object — stringified for the accumulator).
+
+   A payload that yields no events at all still reports the raw chunk, so the
+   caller can see it."
   [data]
   (if (or (nil? data) (= data "[DONE]"))
     [{:type :done :stop-reason :stop}]
     (try
       (let [chunk (:data (json/parse-string data true))
-            usage (:usage chunk)
             choice (first (:choices chunk))
             delta (or (:delta choice) {})
-            finish (:finish_reason choice)
-            events (volatile! [])]
-        (when usage
-          (vswap! events conj {:type :usage :usage usage}))
-        (let [content (:content delta)]
-          (cond
-            (string? content)
-            (when (pos? (count content))
-              (vswap! events conj {:type :text :content content}))
-            (sequential? content)
-            (doseq [item content]
-              (cond
-                (string? item)
-                (when (pos? (count item))
-                  (vswap! events conj {:type :text :content item}))
-                (= "text" (:type item))
-                (let [t (or (:text item) "")]
-                  (when (pos? (count t))
-                    (vswap! events conj {:type :text :content t})))
-                (= "thinking" (:type item))
-                (let [t (str/join (keep :text (:thinking item)))]
-                  (when (pos? (count t))
-                    (vswap! events conj {:type :thinking :content t})))
-                :else nil))))
-        ;; Tool call deltas (pi: for-each; a missing/"null" id falls back to
-        ;; a derived one like the SDK's).
-        (doseq [tc (seq (:tool_calls delta))]
-          (let [fname (get-in tc [:function :name])
-                fargs (get-in tc [:function :arguments])
-                args-str (cond
-                           (string? fargs) fargs
-                           (some? fargs) (json/generate-string fargs)
-                           ;; name-only delta (call start): empty initial
-                           :else "")
-                raw-id (:id tc)]
-            (cond
-              (some? fname)
-              (vswap! events conj {:type :tool-call
-                                   :id (if (and raw-id (not= "null" raw-id))
-                                         raw-id
-                                         (derive-mistral-tool-call-id (str "toolcall:" (or (:index tc) 0))))
-                                   :name fname :arguments args-str :index (:index tc)})
-              (some? fargs)
-              (vswap! events conj {:type :tool-call-args :id raw-id
-                                   :arguments args-str :index (:index tc)}))))
-        (when finish
-          (vswap! events conj (merge {:type :done} (mistral-stop-reason finish))))
-        (if (seq @events)
-          @events
+            events (vec (concat
+                         (when-let [usage (:usage chunk)]
+                           [{:type :usage :usage usage}])
+                         (mistral-content-events (:content delta))
+                         (keep mistral-tool-call-event (:tool_calls delta))
+                         (when-let [finish (:finish_reason choice)]
+                           [(merge {:type :done}
+                                   (mistral-stop-reason finish))])))]
+        (if (seq events)
+          events
           [{:type :delta :chunk chunk}]))
       (catch Exception e
         [{:type :error :message (str "Parse error: " (ex-message e))}]))))
@@ -783,63 +851,89 @@
     reason {:stop-reason :error :error-message (str "Provider stopped with: " reason)}
     :else {:stop-reason :error}))
 
+(defn- bedrock-error-event
+  "A frame whose message type is not `event`: an exception event names its
+   event type and message, anything else is a stream error."
+  [message-type headers payload]
+  (if (= "exception" message-type)
+    {:type :error
+     :message (str "Bedrock " (name (or (:event-type headers) :error))
+                   (when (:message payload) (str ": " (:message payload))))}
+    {:type :error
+     :message (str "Bedrock stream error: "
+                   (or (:message payload) "unknown error"))}))
+
+(defn- bedrock-tool-use-start
+  "contentBlockStart carrying a toolUse block: the call opens here and its
+   arguments stream after it."
+  [payload]
+  (when-let [tool-use (get-in payload [:start :toolUse])]
+    {:type :tool-call
+     :index (:contentBlockIndex payload)
+     :id (or (:toolUseId tool-use) "")
+     :name (or (:name tool-use) "")
+     :arguments ""}))
+
+(defn- bedrock-content-delta
+  "contentBlockDelta: text, tool-use arguments, or reasoning text, whichever the
+   delta carries; empty ones yield nothing."
+  [payload]
+  (let [delta (:delta payload)
+        index (:contentBlockIndex payload)]
+    (cond
+      (contains? delta :text)
+      (when (seq (:text delta))
+        {:type :text :content (:text delta)})
+
+      (contains? delta :toolUse)
+      {:type :tool-call-args
+       :index index
+       :arguments (or (get-in delta [:toolUse :input]) "")}
+
+      (:reasoningContent delta)
+      (let [rt (:reasoningText (:reasoningContent delta))
+            text (or (:text rt) "")]
+        (when (seq text)
+          {:type :thinking :content text}))
+
+      :else nil)))
+
+(defn- bedrock-usage
+  "metadata carrying a usage block: the token counts, absent fields zeroed."
+  [payload]
+  (when-let [usage (:usage payload)]
+    {:type :usage
+     :usage {:input_tokens (or (:inputTokens usage) 0)
+             :output_tokens (or (:outputTokens usage) 0)
+             :total_tokens (or (:totalTokens usage) 0)
+             :cache_read_input_tokens (or (:cacheReadInputTokens usage) 0)
+             :cache_write_input_tokens (or (:cacheWriteInputTokens usage) 0)}}))
+
+(def ^:private bedrock-frame-handlers
+  "One handler per ConverseStream event type, keyed by the frame's event-type
+   header. messageStart and contentBlockStop carry no content of their own; an
+   unknown event type yields nothing."
+  {"messageStart" (fn [_] nil)
+   "contentBlockStart" bedrock-tool-use-start
+   "contentBlockDelta" bedrock-content-delta
+   "contentBlockStop" (fn [_] nil)
+   "messageStop" (fn [payload]
+                   (merge {:type :done} (bedrock-stop-reason (:stopReason payload))))
+   "metadata" bedrock-usage})
+
 (defn- bedrock-frame-event
   "One ConverseStream event frame → kmet event map, or nil for frames that
    carry no content (messageStart, contentBlockStop, ping). Exceptions and
-   error messages become :error events."
+   error messages become :error events. The content frames are
+   bedrock-frame-handlers, one entry per event type."
   [{:keys [event-type headers payload]}]
   (let [message-type (:message-type headers)
-        payload (when (seq payload) (json/parse-string (String. payload "UTF-8") true))]
-    (cond
-      (not= "event" message-type)
-      {:type :error
-       :message (if (= "exception" message-type)
-                  (str "Bedrock " (name (or (:event-type headers) :error))
-                       (when (:message payload) (str ": " (:message payload))))
-                  (str "Bedrock stream error: " (or (:message payload) "unknown error")))}
-
-      (= "messageStart" event-type) nil
-
-      (= "contentBlockStart" event-type)
-      (when-let [tool-use (get-in payload [:start :toolUse])]
-        {:type :tool-call
-         :index (:contentBlockIndex payload)
-         :id (or (:toolUseId tool-use) "")
-         :name (or (:name tool-use) "")
-         :arguments ""})
-
-      (= "contentBlockDelta" event-type)
-      (let [delta (:delta payload)
-            index (:contentBlockIndex payload)]
-        (cond
-          (contains? delta :text)
-          (when (seq (:text delta))
-            {:type :text :content (:text delta)})
-          (contains? delta :toolUse)
-          {:type :tool-call-args :index index
-           :arguments (or (get-in delta [:toolUse :input]) "")}
-          (:reasoningContent delta)
-          (let [rt (:reasoningText (:reasoningContent delta))
-                text (or (:text rt) "")]
-            (when (seq text)
-              {:type :thinking :content text}))
-          :else nil))
-
-      (= "contentBlockStop" event-type) nil
-
-      (= "messageStop" event-type)
-      (merge {:type :done} (bedrock-stop-reason (:stopReason payload)))
-
-      (= "metadata" event-type)
-      (when-let [usage (:usage payload)]
-        {:type :usage
-         :usage {:input_tokens (or (:inputTokens usage) 0)
-                 :output_tokens (or (:outputTokens usage) 0)
-                 :total_tokens (or (:totalTokens usage) 0)
-                 :cache_read_input_tokens (or (:cacheReadInputTokens usage) 0)
-                 :cache_write_input_tokens (or (:cacheWriteInputTokens usage) 0)}})
-
-      :else nil)))
+        payload (when (seq payload)
+                  (json/parse-string (String. payload "UTF-8") true))]
+    (if (not= "event" message-type)
+      (bedrock-error-event message-type headers payload)
+      (when-let [handler (get bedrock-frame-handlers event-type)]
+        (handler payload)))))
 
 (defn process-bedrock-stream
   "Read an AWS Bedrock ConverseStream response body (binary event-stream

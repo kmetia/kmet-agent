@@ -1478,67 +1478,121 @@
    :supports-strict-mode false :send-session-affinity-headers false
    :supports-long-cache-retention true})
 
-(defn- detect-openai-completions-compat
-  "pi detectOpenAICompletionsCompat: the URL/provider-based detection for an
-   openai-completions model."
+(def ^:private compat-families
+  "The provider families the openai-completions compat detection recognizes,
+   keyed by the flag they set: either a provider keyword match or a base-URL
+   marker (pi detectOpenAICompletionsCompat). `:chutes` and `:opencode` are
+   URL-only families: they matter for the derived flags, not on their own."
+  {:zai {:providers #{:zai :zai-coding-cn}
+         :urls ["api.z.ai" "open.bigmodel.cn"]}
+   :together {:providers #{:together}
+              :urls ["api.together.ai" "api.together.xyz"]}
+   :moonshot {:providers #{:moonshotai :moonshotai-cn}
+              :urls ["api.moonshot."]}
+   :openrouter {:providers #{:openrouter}
+                :urls ["openrouter.ai"]}
+   :cloudflare-workers-ai {:providers #{:cloudflare-workers-ai}
+                           :urls ["api.cloudflare.com"]}
+   :cloudflare-ai-gateway {:providers #{:cloudflare-ai-gateway}
+                           :urls ["gateway.ai.cloudflare.com"]}
+   :nvidia {:providers #{:nvidia}
+            :urls ["integrate.api.nvidia.com"]}
+   :ant-ling {:providers #{:ant-ling}
+              :urls ["api.ant-ling.com"]}
+   :cerebras {:providers #{:cerebras}
+              :urls ["cerebras.ai"]}
+   ;; deepseek is matched against the lower-cased URL (pi does the same)
+   :deepseek {:providers #{:deepseek}
+              :urls ["deepseek.com"]
+              :lowercase-url? true}
+   :xai {:providers #{:xai}
+         :urls ["api.x.ai"]}
+   :opencode {:providers #{:opencode}
+              :urls ["opencode.ai"]}
+   :chutes {:providers #{}
+            :urls ["chutes.ai"]}})
+
+(defn- compat-family?
+  "Whether MM's provider or base URL belongs to FAMILY."
+  [{:keys [providers urls lowercase-url?]} provider base-url]
+  (or (contains? providers provider)
+      (some #(str/includes? (if lowercase-url?
+                              (str/lower-case base-url)
+                              base-url)
+                            %)
+            urls)))
+
+(defn- compat-flags
+  "The compat families MM belongs to, plus the flags derived from them: the
+   non-standard set (no store, no developer role), the max-tokens field, the
+   OpenRouter developer-role rule, and Together's reasoning-only models."
   [mm]
   (let [provider (:provider mm)
         base-url (:base-url mm)
         id (:id mm)
-        is-zai? (or (= :zai provider) (= :zai-coding-cn provider)
-                    (str/includes? base-url "api.z.ai")
-                    (str/includes? base-url "open.bigmodel.cn"))
-        is-together? (or (= :together provider)
-                         (str/includes? base-url "api.together.ai")
-                         (str/includes? base-url "api.together.xyz"))
-        is-moonshot? (or (= :moonshotai provider) (= :moonshotai-cn provider)
-                         (str/includes? base-url "api.moonshot."))
-        is-openrouter? (or (= :openrouter provider) (str/includes? base-url "openrouter.ai"))
-        is-cloudflare-workers-ai? (or (= :cloudflare-workers-ai provider)
-                                      (str/includes? base-url "api.cloudflare.com"))
-        is-cloudflare-ai-gateway? (or (= :cloudflare-ai-gateway provider)
-                                      (str/includes? base-url "gateway.ai.cloudflare.com"))
-        is-nvidia? (or (= :nvidia provider) (str/includes? base-url "integrate.api.nvidia.com"))
-        is-ant-ling? (or (= :ant-ling provider) (str/includes? base-url "api.ant-ling.com"))
-        is-cerebras? (or (= :cerebras provider) (str/includes? base-url "cerebras.ai"))
-        together-reasoning-only? (and is-together?
-                                      (contains? together-reasoning-only-models id))
-        is-deepseek? (or (= :deepseek provider)
-                         (str/includes? (str/lower-case base-url) "deepseek.com"))
-        is-non-standard? (or is-nvidia? is-cerebras?
-                             (= :xai provider) (str/includes? base-url "api.x.ai")
-                             is-together? (str/includes? base-url "chutes.ai")
-                             is-deepseek? is-zai? is-moonshot?
-                             (= :opencode provider) (str/includes? base-url "opencode.ai")
-                             is-cloudflare-workers-ai? is-cloudflare-ai-gateway? is-ant-ling?)
-        use-max-tokens? (or (str/includes? base-url "chutes.ai") is-deepseek?
-                            is-moonshot? is-cloudflare-ai-gateway? is-together?
-                            is-nvidia? is-ant-ling? is-zai?)
-        is-grok? (or (= :xai provider) (str/includes? base-url "api.x.ai"))
-        openrouter-dev-role? (and is-openrouter?
-                                  (or (str/starts-with? id "anthropic/")
-                                      (str/starts-with? id "openai/")))
-        thinking-format (cond
-                          is-deepseek? :deepseek
-                          is-zai? :zai
-                          (and is-together? (not together-reasoning-only?)) :together
-                          is-ant-ling? :ant-ling
-                          is-openrouter? :openrouter
-                          :else :openai)]
-    {:supports-store (not is-non-standard?)
-     :supports-developer-role (or openrouter-dev-role?
-                                  (and (not is-non-standard?) (not is-openrouter?)))
-     :supports-reasoning-effort (not (or is-grok? is-zai? is-moonshot? is-together?
-                                         is-cloudflare-ai-gateway? is-nvidia? is-ant-ling?))
-     :max-tokens-field (if use-max-tokens? :max-tokens :max-completion-tokens)
-     :requires-reasoning-content-on-assistant-messages is-deepseek?
-     :thinking-format thinking-format
+        family (into {}
+                     (map (fn [[flag row]]
+                            [flag (compat-family? row provider base-url)]))
+                     compat-families)]
+    (assoc family
+           :non-standard? (boolean (some family
+                                         [:nvidia :cerebras :xai :together :chutes
+                                          :deepseek :zai :moonshot :opencode
+                                          :cloudflare-workers-ai
+                                          :cloudflare-ai-gateway :ant-ling]))
+           :use-max-tokens? (boolean (some family
+                                           [:chutes :deepseek :moonshot
+                                            :cloudflare-ai-gateway :together :nvidia
+                                            :ant-ling :zai]))
+           :together-reasoning-only? (and (get family :together)
+                                          (contains? together-reasoning-only-models id))
+           :openrouter-dev-role? (and (get family :openrouter)
+                                      (some #(str/starts-with? id %)
+                                            ["anthropic/" "openai/"])))))
+
+(defn- any-flag?
+  "Whether any flag in FLAGS is set in the family map."
+  [flags ks]
+  (boolean (some flags ks)))
+
+(defn- compat-thinking-format
+  "The thinking format this model's provider expects."
+  [{:keys [deepseek zai together together-reasoning-only? ant-ling openrouter]}]
+  (cond
+    deepseek :deepseek
+    zai :zai
+    (and together (not together-reasoning-only?)) :together
+    ant-ling :ant-ling
+    openrouter :openrouter
+    :else :openai))
+
+(defn- detect-openai-completions-compat
+  "pi detectOpenAICompletionsCompat: the URL/provider-based detection for an
+   openai-completions model. The families are table rows and the policy lists
+   are data, so a provider that joins one of the groups is a row edit."
+  [mm]
+  (let [flags (compat-flags mm)
+        flag #(get flags %)]
+    {:supports-store (not (flag :non-standard?))
+     :supports-developer-role (or (flag :openrouter-dev-role?)
+                                  (and (not (flag :non-standard?))
+                                       (not (flag :openrouter))))
+     :supports-reasoning-effort
+     (not (any-flag? flags [:xai :zai :moonshot :together
+                            :cloudflare-ai-gateway :nvidia :ant-ling]))
+     :max-tokens-field (if (flag :use-max-tokens?)
+                         :max-tokens
+                         :max-completion-tokens)
+     :requires-reasoning-content-on-assistant-messages (flag :deepseek)
+     :thinking-format (compat-thinking-format flags)
      :zai-tool-stream false
-     :supports-strict-mode (not (or is-moonshot? is-together?
-                                    is-cloudflare-ai-gateway? is-nvidia? is-cerebras?))
+     :supports-strict-mode (not (any-flag? flags [:moonshot :together
+                                                  :cloudflare-ai-gateway
+                                                  :nvidia :cerebras]))
      :send-session-affinity-headers false
-     :supports-long-cache-retention (not (or is-together? is-cloudflare-workers-ai?
-                                             is-cloudflare-ai-gateway? is-nvidia? is-ant-ling?))}))
+     :supports-long-cache-retention
+     (not (any-flag? flags [:together :cloudflare-workers-ai
+                            :cloudflare-ai-gateway :nvidia :ant-ling]))}))
 
 (defn- compat-delta
   "pi openAICompletionsCompatDelta: only keys differing from the defaults."
