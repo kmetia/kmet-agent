@@ -10,12 +10,14 @@
             [kmet.app.config :as cfg]
             [kmet.tui.core :as tui]
             [kmet.tui.keybindings :as tui-kb]
+            [kmet.tui.components.expandable-text :as expandable-text]
             [kmet.libs.theme :as th]
             [kmet.tui.terminal :as term]
             [kmet.tui.components.container :as container]
             [kmet.app.session.submission :as submission]
             [kmet.app.session.runtime :as runtime]
             [kmet.ui.tui.chat-history :as chat-history]
+            [kmet.ui.tui.loaded-resources :as loaded-resources]
             [kmet.ui.tui.bash-execution :as be]
             [kmet.app.tools.bash-executor :as bash-exec]
             [kmet.app.tools.bash :as bash-tool]
@@ -338,6 +340,44 @@
    explicit reflow asks for the clear."
   [cs]
   (tui/tui-request-render (:tui cs) true))
+
+(defn cycle-tool-display!
+  "Cycle the transcript's tool display (collapsed → quiet → expanded): one
+   reset! on the chat history's shared mode atom re-derives every tool and
+   skill block, the header and loaded-resources sections follow (quiet reads
+   as collapsed, pi's getStartupExpansionState), the setting persists, a
+   status line names the new mode, and the reflow repaints the scrollback.
+   The editor's app.tools.expand binding and the ask dialog's listener share
+   this one action."
+  [cs]
+  (let [ch (:chat-history cs)
+        mode (chat-history/chat-history-cycle-tool-display! ch)
+        expanded? (= :expanded mode)]
+    (try (cfg/set-tool-display-mode! mode)
+         (catch Exception e
+           (debug/log "Failed to persist tool-display-mode: " e)))
+    (when-let [hdr (:header-comp cs)]
+      (expandable-text/expandable-text-set-expanded! hdr expanded?))
+    (when-let [lr (:loaded-resources-comp cs)]
+      (loaded-resources/loaded-resources-set-expanded! lr expanded?))
+    (chat-history/chat-history-show-status! ch (str "Tool display: " (name mode)))
+    (request-global-reflow-render! cs)))
+
+(defn tool-display-listener
+  "Build the TUI input listener for the tool-display cycle (app.tools.expand).
+   Installed while the permission ask blocks on a human: the dialog holds
+   every key, so the editor's own binding never runs, and the transcript the
+   human is deciding about could not be expanded, collapsed or quieted. The
+   listener chain runs before focus dispatch, the binding resolves per event
+   through the global manager (keybindings.edn overrides apply), and the event
+   is consumed so the dialog does not also act on it. Scoped to the ask on
+   purpose: a selector that owns the same chord itself (/tree's filter cycle)
+   keeps it, because nothing is installed while it is up."
+  [cs]
+  (fn [data]
+    (when (tui-kb/matches-key (tui-kb/get-global-keybindings) data "app.tools.expand")
+      (cycle-tool-display! cs)
+      {:consume true})))
 
 (defn start-agent-run!
   "Start an agent run: hand the prompt to the handle (the one start-or-queue

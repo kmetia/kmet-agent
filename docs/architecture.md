@@ -356,6 +356,15 @@ gate must never be allow. `:remember!` records an answer at `:once`, `:agent` or
 `:workspace` scope in the memory the agent's ctx carries, which is what makes a
 remote session usable without a prompt per call.
 
+A tool call's events split at that seam: `:tool-execution-start` fires before
+the gate (the call's block exists while the question is up), and
+`:tool-execution-prepared` fires once the hooks and the policy passed, just
+before the body runs — a front end starts the tool's elapsed timer there, so a
+human's thinking time is not counted as the tool's. The TUI's ask shows the
+call's own one-line title (`$ <command>`, the path) in the question, because
+the transcript block behind the dialog can be scrolled out of the window, and
+keeps `app.tools.expand` live while the question waits.
+
 ## Tools and the script sandbox
 
 The tool layer is `kmet.app.tools.*`: one record per tool, mounted as a row

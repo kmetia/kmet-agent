@@ -5,13 +5,14 @@
    tool that opted in with :status, or when both renderers produce nothing
    — the block's only presence then).
    Matching Pi architecture: Box handles padding/background/caching.
-   Timing is managed internally (started-at on first content, ended-at on error/finalize).
+   Timing is managed internally: started-at when the call is prepared to run
+   (the loop's :tool-execution-prepared — after an approval ask, if any),
+   ended-at on error/finalize.
    Quiet mode (:quiet display) short-circuits before any renderer runs:
    one dimmed title line (like hidden thinking), styled once and
    reading only name/args/is-error/ended-ness — custom renderers never run, so quiet
    can never be overridden and stays immutable."
-  (:require [clojure.string :as str]
-            [kmet.ui.tui.subs :as s]
+  (:require [kmet.ui.tui.subs :as s]
             [kmet.reakt.core :as reakt]
             [kmet.tui.protocols :as protocols]
             [kmet.libs.theme :as theme]
@@ -131,36 +132,20 @@
    :is-error @(:is-error-atom comp)})
 
 ;; ─── Record ────────────────────────────────────────────────────────────────
-;; Pi matching: ToolExecutionComponent manages its own timing.
-;; started-at is set on first set-content! call (execution start).
-;; ended-at is set on set-error! or on final full-content set-content!.
-
-(defn- quiet-one-line
-  "Collapse a quiet title to a single visual line: newlines (with
-   surrounding horizontal whitespace) become one space, remaining tabs
-   expand to 3 spaces (like the renderers). truncate-to-width counts
-   columns, not lines — an embedded newline (e.g. a multiline bash
-   command) would wrap the quiet line into two."
-  [s]
-  (-> s
-      (str/replace #"[ \t]*[\r\n]+[ \t\r\n]*" " ")
-      (str/replace "\t" "   ")))
+;; Pi matching: ToolExecutionComponent manages its own timing — started-at when
+;; the call is prepared to run (its block exists from :tool-execution-start,
+;; which fires before a permission `:ask`), ended-at on set-error! or on the
+;; final full-content set-content!.
 
 (defn- quiet-title-for
-  "Resolve the quiet title body for NAME/ARGS: the tool's :title fn (pure
-   plain-text data) run with the component's CWD bound as the runtime cwd —
-   so a title that resolves display paths (the bash tool's redundant
-   `cd <session cwd> &&`) sees the session's directory, exactly like the
-   render context's :cwd — or the tool name when the tool defines none or
-   it returns blank. The result is collapsed to one line (see
-   quiet-one-line). Never throws — a throwing title degrades to the name
-   (a broken title must not take the frame down)."
+  "The quiet one-liner for NAME/ARGS: the tool's :title body (see
+   `tool-util/title-body`), with the component's CWD bound as the runtime cwd
+   so a title that resolves display paths (bash's redundant `cd <session cwd>
+   &&`) sees the session's directory, like the render context's :cwd — or the
+   tool name when the tool defines none."
   [title-fn name args cwd]
-  (let [t (try (when (fn? title-fn)
-                 (binding [tool-util/*cwd* cwd]
-                   (title-fn args)))
-               (catch Exception _ nil))]
-    (if (and (string? t) (seq (str/trim t))) (quiet-one-line t) (quiet-one-line name))))
+  (binding [tool-util/*cwd* cwd]
+    (or (tool-util/title-body title-fn args) (str name))))
 
 (defcomponent ToolExecutionComponent :tool
               [name-atom args-atom content-atom is-error-atom
@@ -481,13 +466,17 @@
       (reset! (:renderer-state-atom comp) (dissoc state :timer-id)))))
 
 (defn tool-execution-mark-execution-started!
-  "Mark that tool execution has started (Pi: markExecutionStarted()).
-   Sets started-at so pending background and timer activate from tool start
-   rather than waiting for first content delivery. This is the ONLY thing
-   that may stamp started-at: content updates are plain resets on the
-   :content-atom — if they stamped too, replayed results (restore / -c)
-   would show a fabricated \"Took 0.0s\" (pi renders replayed tools without
-   a duration: startedAt stays undefined, updateResult never touches it)."
+  "Mark that tool execution has started (Pi: markExecutionStarted()). Called
+   from the loop's :tool-execution-prepared event — the call passed its before
+   hooks and the permission gate — never from :tool-execution-start: that one
+   fires before a permission `:ask`, and the timer must not count a human's
+   thinking time as the tool's. Sets started-at so the tail Elapsed line and
+   its ticker activate from execution start rather than waiting for the first
+   content delivery. This is the ONLY thing that may stamp started-at: content
+   updates are plain resets on the :content-atom — if they stamped too,
+   replayed results (restore / -c) would show a fabricated \"Took 0.0s\" (pi
+   renders replayed tools without a duration: startedAt stays undefined,
+   updateResult never touches it)."
   [comp]
   (when (nil? @(:started-at-atom comp))
     (reset! (:started-at-atom comp) (System/currentTimeMillis))))

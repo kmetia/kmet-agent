@@ -86,6 +86,8 @@
     :message-end {:type :message-end :message {:role :assistant :content ""}}
     :tool-execution-start {:type :tool-execution-start
                            :tool-call-id "t1" :tool-name "bash" :args {}}
+    :tool-execution-prepared {:type :tool-execution-prepared
+                              :tool-call-id "t1" :tool-name "bash" :args {}}
     :tool-execution-update {:type :tool-execution-update
                             :tool-call-id "t1" :content "x" :is-partial true}
     :tool-execution-end {:type :tool-execution-end
@@ -260,10 +262,22 @@
         (is (some? comp2) "second tool component tracked")
         (is (not (identical? comp1 comp2))
             "each parallel tool call owns its own component")
-        ;; render comp1 → its bash render-result starts the 100ms ticker
+        ;; a permission ask may still be up: the block exists, the timer does
+        ;; not — the human's thinking time is not the tool's
         (protocols/render comp1 60)
+        (is (nil? @(:started-at-atom comp1))
+            "an unprepared call has no start stamp")
+        (is (nil? (:timer-id @(:renderer-state-atom comp1)))
+            "and no elapsed ticker")
+        ;; the gate answered: execution begins
+        (h {:type :tool-execution-prepared :tool-call-id "t1" :tool-name "bash"
+            :args {:command "sleep 5"}})
+        (protocols/render comp1 60)
+        (is (some? @(:started-at-atom comp1)) "prepared stamps the start")
         (is (some? (:timer-id @(:renderer-state-atom comp1)))
             "t1 elapsed ticker running")
+        (is (nil? @(:started-at-atom comp2))
+            "the other call is still waiting for its own prepared event")
         ;; partial update for t1 reaches only comp1
         (h {:type :tool-execution-update :tool-call-id "t1" :content "chunk"
             :is-partial true})
@@ -1195,6 +1209,32 @@
               (is (nil? (listener "\u0011")) "ctrl+q no longer quits")
               (is (= {:consume true} (listener "\u001bx"))
                   "the override key quits"))))
+        (finally (tui-kb/set-global-keybindings! prev-global))))))
+
+(deftest tool-display-listener
+  (testing "app.tools.expand (ctrl+o by default) cycles the tool display while
+            the permission ask holds the keys, and consumes the key"
+    (let [prev-global (tui-kb/get-global-keybindings)]
+      (try
+        (tui-kb/set-global-keybindings! (app-kb/make-agent-keybindings-manager))
+        (with-redefs [cfg/set-tool-display-mode! (fn [_] nil)]
+          (let [ch (chat-history/make-chat-history)
+                cs {:tui {:render-requested? (atom false)
+                          :force-redraw? (atom false)}
+                    :chat-history ch}
+                listener ((var turn/tool-display-listener) cs)]
+            (is (= :collapsed (chat-history/chat-history-get-tool-display-mode ch)))
+            (is (= {:consume true} (listener "\u000f"))
+                "ctrl+o is consumed so the dialog never sees it")
+            (is (= :quiet (chat-history/chat-history-get-tool-display-mode ch))
+                "the transcript behind the dialog cycles")
+            (is (nil? (listener "x")) "other keys pass through untouched")
+            (testing "a keybindings.edn override moves the cycle key"
+              (tui-kb/set-user-bindings! (tui-kb/get-global-keybindings)
+                                         {"app.tools.expand" "alt+x"})
+              (is (nil? (listener "\u000f")) "ctrl+o no longer cycles")
+              (is (= {:consume true} (listener "\u001bx"))
+                  "the override key does"))))
         (finally (tui-kb/set-global-keybindings! prev-global))))))
 
 (deftest run-clears-the-extension-ui-registry-on-mode-end

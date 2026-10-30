@@ -100,6 +100,7 @@
    :summarization-retry-finished ignore
    :thinking-level-select ignore
    :tool-execution-start on-tool-start
+   :tool-execution-prepared ignore
    :tool-execution-update ignore
    :tool-execution-end on-tool-end
    :turn-start ignore

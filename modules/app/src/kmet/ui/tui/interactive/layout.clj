@@ -103,14 +103,24 @@
         (reset! (:tool-call-id-atom comp) (:tool-call-id evt))
         ;; Args are complete when received (kmet: no streaming args)
         (tool-execution/tool-execution-set-args-complete! comp)
-        ;; Mark execution started so pending bg + timer activate now
-        (tool-execution/tool-execution-mark-execution-started! comp)
         ;; Pi: pendingTools.set(toolCallId, component) — parallel tool
         ;; calls each own a component; updates/ends correlate by id
         (swap! pending-tool-comps assoc (:tool-call-id evt) comp))
       ;; mount poke stays: the new message lands in the untracked
       ;; messages-atom, so no watch exists for it yet
       (tui/tui-request-render tui))
+
+    :tool-execution-prepared
+    ;; The call cleared its hooks and the permission gate (a permission
+    ;; `:ask` was answered): the tool is about to run, so the elapsed timer
+    ;; starts here — not at :tool-execution-start, which fires while the
+    ;; dialog is still waiting for a human and would count their thinking
+    ;; time as the tool's.
+    (when-let [comp (get @pending-tool-comps (:tool-call-id evt))]
+      (tool-execution/tool-execution-mark-execution-started! comp)
+      ;; a pre-mount prepared event has no track! watch yet
+      (when (nil? @(:cache-atom comp))
+        (tui/tui-request-render tui)))
 
     :tool-execution-update
     ;; Pi: live partial content from streaming tools (bash). For a
@@ -498,7 +508,8 @@
   [deps]
   (fn [evt]
     (case (:type evt)
-      (:tool-execution-start :tool-execution-update :tool-execution-end)
+      (:tool-execution-start :tool-execution-prepared :tool-execution-update
+                             :tool-execution-end)
       (on-tool-execution deps evt)
 
       (:message-start :message-update :message-end)
@@ -943,20 +954,10 @@
                                                  (tui/tui-request-render t)))))))
        (editor/editor-set-on-action! ed "app.tools.expand"
                                      (fn []
-          ;; pi: the same toggle drives tool expansion, the builtInHeader, and
-          ;; the loaded-resources sections (getStartupExpansionState) —
-          ;; extended: ctrl+o cycles collapsed → expanded → quiet. Header,
-          ;; resources and the info banner treat quiet as collapsed.
-                                       (let [mode (chat-history/chat-history-cycle-tool-display! ch)
-                                             expanded? (= :expanded mode)]
-                                         (try (cfg/set-tool-display-mode! mode)
-                                              (catch Exception e
-                                                (debug/log "Failed to persist tool-display-mode: " e)))
-                                         (expandable-text/expandable-text-set-expanded! hdr expanded?)
-                                         (loaded-resources/loaded-resources-set-expanded! lr expanded?)
-                                         (chat-history/chat-history-show-status! ch
-                                                                                 (str "Tool display: " (name mode)))
-                                         (turn/request-global-reflow-render! cs))))
+          ;; pi: the same toggle drives tool expansion, the builtInHeader and
+          ;; the loaded-resources sections; extended: ctrl+o cycles collapsed →
+          ;; quiet → expanded (the ask dialog's listener calls the same cycle).
+                                       (turn/cycle-tool-display! cs)))
        (editor/editor-set-on-action! ed "app.thinking.toggle"
                                      (fn []
           ;; pi: showStatus feedback on toggle + persist hideThinkingBlock to

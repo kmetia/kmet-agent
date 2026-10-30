@@ -532,7 +532,8 @@ them by name, as above.
 Event types: `:agent-start` `:agent-end` `:agent-settled` `:turn-start`
 `:turn-end` `:agent-before-settle` `:message-start` `:message-update`
 `:message-end`
-`:tool-execution-start` `:tool-execution-update` `:tool-execution-end`
+`:tool-execution-start` `:tool-execution-prepared` `:tool-execution-update`
+`:tool-execution-end`
 `:status` `:error` `:session-start` `:session-shutdown`
 `:session-info-changed` `:user-bash`
 `:session-before-tree` `:session-before-switch` `:session-before-fork`

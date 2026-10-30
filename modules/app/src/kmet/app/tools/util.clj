@@ -101,3 +101,26 @@
                (= (display-dir dir cwd) (display-dir cwd cwd)))
         rest-command
         command))))
+
+;; ─── One-line call names ──────────────────────────────────────────────────
+
+(defn- collapse-to-line
+  "S collapsed to one visual line: newline runs (with the horizontal
+   whitespace around them) become one space, remaining tabs expand to 3
+   spaces. One-line displays count columns, not lines — an embedded newline
+   (a multiline shell command) would wrap them into two."
+  [s]
+  (-> s
+      (str/replace #"[ \t]*[\r\n]+[ \t\r\n]*" " ")
+      (str/replace "\t" "   ")))
+
+(defn title-body
+  "The plain-text body of a tool definition's :title for ARGS, collapsed to
+   one visual line — or nil when TITLE-FN is not a fn, throws, or returns
+   blank. Never throws: a broken title must not take a transcript line or a
+   dialog down."
+  [title-fn args]
+  (when (fn? title-fn)
+    (let [t (try (title-fn args) (catch Throwable _ nil))]
+      (when (and (string? t) (seq (str/trim t)))
+        (collapse-to-line t)))))

@@ -46,7 +46,10 @@
          (interactive/ask-answer "No")))
   (is (= {:decision :deny :reason "denied at the terminal"}
          (interactive/ask-answer nil))
-      "a cancelled dialog is a no, not a yes"))
+      "a cancelled dialog is a no, not a yes")
+  (is (= (interactive/ask-answer "No")
+         (interactive/ask-answer nil))
+      "cancel is that same single No: this call denied, nothing remembered"))
 
 (deftest the-profile-names-the-gate-and-the-plain-tui-names-none
   (is (= [:bundle/gated] (get-in (mode-row :tui-ask) [:config :presets]))
@@ -88,3 +91,29 @@
             (is (nil? (srce/get ctx :permissions))
                 "the policy row is the agent's, not the root's")))
         (finally (srce/dispose-subtree! ctx))))))
+
+(deftest the-question-shows-the-call-being-approved
+  ;; The transcript block sits behind the dialog and its call line can be
+  ;; scrolled out of the visible window, so the question carries the call —
+  ;; the tool's own one-line title (`$ <command>` for bash, the path for the
+  ;; file tools). A human approves what they can see.
+  (let [boot (runtime/boot (core/compose-config {:profile :tui-ask}) {})
+        ctx (:ctx boot)]
+    (try
+      (is (= "Allow bash?\n$ echo hi"
+             (interactive/ask-title ctx {:tool-name "bash"
+                                         :args {:command "echo hi"}})))
+      (is (= "Allow bash?\n$ echo hi\nask before every call"
+             (interactive/ask-title ctx {:tool-name "bash"
+                                         :args {:command "echo hi"}
+                                         :reason "ask before every call"}))
+          "the policy's reason stays under the call")
+      (is (= "Allow read?\nread README.md"
+             (interactive/ask-title ctx {:tool-name "read"
+                                         :args {:path "README.md"}}))
+          "a file tool shows the path its own title names")
+      (is (= "Allow no-such-tool?"
+             (interactive/ask-title ctx {:tool-name "no-such-tool"}))
+          "a tool outside the table still names itself, with no call line")
+      (finally (srce/dispose-subtree! ctx)))))
+

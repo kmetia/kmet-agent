@@ -1,6 +1,7 @@
 (ns kmet.app.tools.test-util
-  "Unit tests for the tools' shared helpers — the quiet-title path forms and
-   the shell-command display normalization."
+  "Unit tests for the tools' shared helpers — the quiet-title path forms, the
+   one-line title bodies (the quiet transcript line and the approval question),
+   and the shell-command display normalization."
   (:require [clojure.test :as t]
             [kmet.app.tools.util :as util]
             [kmet.test-utils :refer [slash]]))
@@ -44,3 +45,18 @@
       (t/is (= "cd /work && ls" (util/strip-cwd-cd-prefix "cd /work && ls" "")))
       (t/is (nil? (util/strip-cwd-cd-prefix nil cwd)))
       (t/is (= {:command "cd /work && ls"} (util/strip-cwd-cd-prefix {:command "cd /work && ls"} cwd))))))
+
+;; ─── One-line call names ──────────────────────────────────────────────────
+
+(t/deftest test-title-body
+  (t/is (= "$ echo hi" (util/title-body (fn [_] "$ echo hi") {})))
+  (t/is (= "echo hi && ls" (util/title-body (fn [_] "echo hi\n  &&\n ls") {}))
+        "a multiline title collapses to one line (whitespace around the newline too)")
+  (t/is (= "a b" (util/title-body (fn [_] "a\r\n\r\nb") {}))
+        "CRLF runs collapse too")
+  (t/is (= "a   b" (util/title-body (fn [_] "a\tb") {})) "tabs expand")
+  (t/is (nil? (util/title-body nil {})) "a tool with no :title has no body")
+  (t/is (nil? (util/title-body (fn [_] "  \n ") {})) "a blank body is no body")
+  (t/is (nil? (util/title-body (fn [_] (throw (ex-info "boom" {}))) {}))
+        "a throwing title degrades to no body, never to an exception")
+  (t/is (nil? (util/title-body (fn [_] :not-a-string) {}))))

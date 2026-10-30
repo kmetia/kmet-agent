@@ -38,10 +38,36 @@
                                            {:content "should not run" :is-error false})]
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
     (t/is (false? @executed) "blocked tool must not execute")
+    (t/is (not-any? #(= :tool-execution-prepared (:type %)) @events)
+          "a blocked call never reaches execution, so it is never prepared")
     (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
       (t/is (= "tc1" (:tool-call-id end)))
       (t/is (true? (:is-error end)) "blocked tool result is an error")
       (t/is (= "Permission denied" (:content (:result end)))))))
+
+(t/deftest test-loop-prepared-event-follows-the-before-hook
+  ;; :tool-execution-start fires before the before-tool-call hook (pi), so a
+  ;; gated call's block exists while an approval `:ask` is still up;
+  ;; :tool-execution-prepared is emitted once the hook and the permission gate
+  ;; passed, just before the body runs — the moment a front end starts timing
+  ;; the tool.
+  (let [order (atom [])
+        agent (support/make-agent-state
+               :on-event (fn [e]
+                           (when (#{:tool-execution-start :tool-execution-prepared
+                                    :tool-execution-end} (:type e))
+                             (swap! order conj (:type e)))))]
+    (reset! (:before-tool-call agent)
+            (fn [_] (swap! order conj :gate) nil))
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message (support/stub-llm-tool-then-text (atom 0))
+                  state/execute-tool-for (fn [_ _ _ _] (swap! order conj :exec)
+                                           {:content "ok" :is-error false})]
+      @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+    (t/is (= [:tool-execution-start :gate :tool-execution-prepared :exec
+              :tool-execution-end]
+             @order)
+          "start, the gate, prepared, the body, end — in that order")))
 
 (t/deftest test-loop-before-tool-call-terminate
   (let [events (atom [])

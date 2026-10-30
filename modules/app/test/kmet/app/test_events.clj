@@ -38,7 +38,8 @@
   (doseq [type [:agent-start :agent-end :agent-settled :turn-start :turn-end
                 :agent-before-settle
                 :message-start :message-update :message-end
-                :tool-execution-start :tool-execution-update :tool-execution-end
+                :tool-execution-start :tool-execution-prepared
+                :tool-execution-update :tool-execution-end
                 :status :error :user-bash]]
     (is (events/known-event-type? type) (str type " should be a known event type"))))
 

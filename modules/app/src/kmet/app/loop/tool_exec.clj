@@ -72,12 +72,27 @@
     ;; absent when the state has no ctx, so "no :srce-ctx" reads as "no ctx"
     (:ctx agent) (assoc :srce-ctx (:ctx agent))))
 
+(defn- emit-prepared!
+  "Emit :tool-execution-prepared — the call passed its before hooks and the
+   permission gate in preparation and its body is about to run. Separate from
+   :tool-execution-start, which fires before those gates: the call's block
+   exists while an `:ask` is still waiting for a human, so a front end starts
+   measuring the tool's duration here, per call, when execution really begins
+   (a batch is prepared before any of it runs, and a denied call never gets
+   this far)."
+  [agent tc]
+  (state/emit agent {:type :tool-execution-prepared
+                     :tool-call-id (:id tc)
+                     :tool-name (:name tc)
+                     :args (:arguments tc)}))
+
 (defn- prepare-tool-call!
   "Run one tool call's preparation: emit :tool-execution-start, then either settle
    it immediately when the tool is not in the request's captured tool map (pi:
    prepareToolCall's tools.find) or run the before-tool-call hook and return TC
    with any rewritten :arguments. Scheduling of the execution itself stays with
-   the caller (parallel vs sequential)."
+   the caller (parallel vs sequential), which emits :tool-execution-prepared
+   when the body starts."
   [agent assistant-msg tc declared-tools]
   (let [tc-id (:id tc)
         tc-name (:name tc)
@@ -127,10 +142,11 @@
 (defn- execute-tool-calls-parallel!
   "Execute tool calls concurrently (pi: executeToolCallsParallel).
    Preparation (start events + before hooks) is sequential; execution is
-   concurrent. Each call finalizes (after hook) and emits its
-   tool-execution-end inside its own future, so a tool flips to done — with
-   its own Took duration — the moment it finishes (pi: emitToolExecutionEnd
-   in the concurrent closure) instead of when the slowest sibling does;
+   concurrent. Each call emits its tool-execution-prepared and finalizes
+   (after hook + tool-execution-end) inside its own future, so a tool's clock
+   starts when its body does and it flips to done — with its own Took
+   duration — the moment it finishes (pi: emitToolExecutionEnd in the
+   concurrent closure) instead of when the slowest sibling does;
    blocked and undeclared calls settle during preparation. Context/session
    results are appended afterwards, in source order. Returns results in
    source order.
@@ -175,6 +191,11 @@
                                 [(:id tc)
                                  (future
                                    (let [tc-id (:id tc)
+                                         ;; the body starts now: the batch
+                                         ;; is prepared (and every ask
+                                         ;; answered) before any future runs,
+                                         ;; so the clock starts per call here
+                                         _ (emit-prepared! agent tc)
                                          result (finish-call
                                                  tc
                                                  (invoke/execute-tool-call
@@ -225,7 +246,10 @@
             ;; before-tool-call hook (+ undeclared handling)
             prepared (prepare-tool-call! agent assistant-msg tc declared-tools)
             args (:arguments prepared)
-            raw (if (contains? prepared :kmet/blocked)
+            blocked? (contains? prepared :kmet/blocked)
+            ;; the body starts here: the clock starts with it
+            _ (when-not blocked? (emit-prepared! agent prepared))
+            raw (if blocked?
                   (:kmet/blocked prepared)
                   (invoke/execute-tool-call
                    (state/tool-executor agent)

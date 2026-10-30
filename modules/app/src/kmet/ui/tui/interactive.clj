@@ -16,6 +16,9 @@
             [kmet.app.extensions.core :as extensions]
             [kmet.app.session.core :as session]
             [kmet.app.session.runtime :as runtime]
+            [kmet.app.tools.registry :as tool-registry]
+            [kmet.app.tools.util :as tool-util]
+            [kmet.srce.core :as srce]
             [kmet.ui.tui.theme-controller :as theme-ctrl]
             [kmet.ui.tui.bash-execution :as bash-execution]
             [kmet.ui.tui.chat-history :as chat-history]
@@ -26,7 +29,8 @@
             [kmet.reakt.core :as reakt]
             [kmet.ui.tui.interactive.layout :as layout]
             [kmet.ui.tui.interactive.session-admin :as session-admin]
-            [kmet.ui.tui.interactive.state :as state]))
+            [kmet.ui.tui.interactive.state :as state]
+            [kmet.ui.tui.interactive.turn :as turn]))
 
 ;; CoreState lives in kmet.ui.tui.interactive.state; the constructors
 ;; stay re-exported here for consumers of this namespace (tests).
@@ -227,29 +231,52 @@
 (defn ask-answer
   "The approver answer CHOICE names: `:allow` for this call, `:allow` scoped to
    the agent or the workspace, or a deny — `:once` is what an unscoped `:allow`
-   already means, so `Yes` carries no scope rather than a redundant one."
+   already means, so `Yes` carries no scope rather than a redundant one. A
+   cancelled dialog (nil) is the No answer: it denies this one call, remembers
+   nothing, and is not a verdict of its own."
   [choice]
   (case choice
     "Yes" :allow
     "Always for this agent" {:decision :allow :scope :agent}
     "Always for this workspace" {:decision :allow :scope :workspace}
+    ;; "No", and a cancelled dialog (nil): deny this call, remember nothing
     {:decision :deny :reason "denied at the terminal"}))
 
+(defn ask-title
+  "The dialog title a permission `:ask` puts to the human: the tool's name, the
+   call's one-line title when its definition has one (`$ <command>` for bash,
+   the path for read/write/edit — `kmet.app.tools.util/title-body`, the same
+   plain-text body the quiet transcript line falls back to), then the policy's
+   reason. Plain text: the dialog styles it. The call belongs in the question
+   because the transcript block is behind the dialog and may be scrolled out of
+   the visible window — a human approves what they can see."
+  [ctx request]
+  (let [reason (:reason request)
+        tool (when-let [tools (srce/get ctx :tools)]
+               (tool-registry/get-tool tools (:tool-name request)))
+        call (when tool (tool-util/title-body (:title tool) (:args request)))]
+    (str "Allow " (or (:tool-name request) "this tool") "?"
+         (when call (str "\n" call))
+         (when-not (str/blank? reason) (str "\n" reason)))))
+
 (defn ask!
-  "Answer a permission `:ask` through the live TUI: a dialog naming the tool and,
-   when the policy gave one, its reason — yes once, yes for this agent, yes for
-   this workspace, or no. The two `Always …` answers are what the permission
-   row's memory records, so a gated tool is asked once rather than per call.
-   A deny otherwise, including outside a run, because nobody being able to ask
-   is not a yes. Blocks while the dialog is up, so the caller must be a run
-   thread (the gate's) and never a TUI render/input thread; a future front-end
-   surface answers extension requests asynchronously for the same reason."
-  [_ctx request]
+  "Answer a permission `:ask` through the live TUI: a dialog naming the tool,
+   the call it will run (`ask-title`), and, when the policy gave one, its
+   reason — yes once, yes for this agent, yes for this workspace, or no. The
+   two `Always …` answers are what the permission row's memory records, so a
+   gated tool is asked once rather than per call. A deny otherwise, including
+   outside a run, because nobody being able to ask is not a yes. Blocks while
+   the dialog is up, so the caller must be a run thread (the gate's) and never
+   a TUI render/input thread; a future front-end surface answers extension
+   requests asynchronously for the same reason."
+  [ctx request]
   (if-let [cs @live-mode]
-    (let [reason (str (:reason request))
-          title (str "Allow " (or (:tool-name request) "this tool") "?"
-                     (when-not (str/blank? reason) (str "\n" reason)))]
-      (ask-answer (choose! cs title ask-choices)))
+    (let [tui (:tui cs)
+          listener (turn/tool-display-listener cs)]
+      (tui/tui-add-input-listener tui listener)
+      (try
+        (ask-answer (choose! cs (ask-title ctx request) ask-choices))
+        (finally (tui/tui-remove-input-listener tui listener))))
     {:decision :deny :reason "no terminal is running — nobody can ask"}))
 
 ;; ─── Run ───────────────────────────────────────────────────────────────────
