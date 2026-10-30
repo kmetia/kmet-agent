@@ -20,18 +20,21 @@
      erosion = high-CC mass share
        mass(f) = CC(f) * sqrt(SLOC(f)); erosion is the mass of functions
        with CC > 10 divided by the mass of all functions. Cyclomatic
-       complexity is a Clojure adaptation: +1 per `if`/`if-let`/`when`/
-       `and`/`or`/`loop`/`doseq`/`dotimes`/`for`/`some->` family head and
-       per `cond`/`condp`/`case` clause, per `cond->` pair (direct or
-       threaded through `->`) and per `catch` clause. Nested functions
-       (`fn`, `defn`, `defmacro`, `defmethod`, `deftype`/`defrecord`/
-       `reify` method bodies) are counted as their own functions;
+       complexity is a Clojure adaptation that follows radon, the tool
+       SCBench's cutoff refers to: +1 per `if`/`if-not`/`when`/`when-not`/
+       `when-first`/`while`/`loop`/`dotimes`/`assert`, per `and`/`or`/
+       `some->`/`some->>` operand after the first, per
+       `cond`/`case`/`condp` clause (a trailing `:else`/`:default`/condp
+       default form is the default path, not a clause), per `cond->` pair
+       (direct or threaded through `->`), per `for`/`doseq` binding and
+       `:when`/`:while` modifier, per `if-let`/`if-some`/`when-let`/
+       `when-some` binding, and per `catch` clause. Nested functions (`fn`,
+       `defn`, `defmacro`, `defmethod`, `letfn` bindings, `proxy` methods
+       and `deftype`/`defrecord`/`reify`/`extend-type`/`extend-protocol`/
+       `specify!` method bodies) are counted as their own functions;
        multi-arity definitions count as one function. Quoted and `comment`
-       forms are not code and contribute nothing. Known limitation:
-       `extend-type`/`extend-protocol`/`specify!`/`letfn`/`proxy` method
-       bodies are not collected as functions, so decisions inside them do
-       not contribute to the metric. Reader conditionals are read with the
-       #{:clj :bb} feature view.
+       forms are not code and contribute nothing. Reader conditionals are
+       read with the #{:clj :bb} feature view.
 
    Reference rows for verbosity/erosion are the paper's calibration panel:
    473 maintained human Python repositories and 2,869 agent checkpoints.
@@ -163,18 +166,39 @@
 ;; -------------------------------------------------------------- complexity
 
 (def ^:private fn-heads '#{defn defn- defmacro defmethod fn fn*})
-(def ^:private type-heads '#{deftype defrecord reify})
-(def ^:private simple-decisions
-  '#{if if-let if-some if-not when when-let when-some when-not when-first
-     while and or loop doseq dotimes for some-> some->>})
+(def ^:private method-container-heads
+  "Form heads whose method bodies (and letfn bindings) are functions of
+   their own: their decisions must not land on the enclosing function."
+  '#{deftype defrecord reify letfn proxy extend-type extend-protocol specify!})
+(def ^:private one-decision-heads
+  '#{if if-not when when-not when-first while loop dotimes assert})
+(def ^:private chain-heads '#{and or some-> some->>})
+(def ^:private binding-heads '#{if-let if-some when-let when-some})
+(def ^:private comprehension-heads '#{for doseq})
 
-(defn- fn-form? [f] (and (seq? f) (contains? fn-heads (first f))))
-(defn- type-form? [f] (and (seq? f) (contains? type-heads (first f))))
+(defn- headed-by?
+  "True when FORM is a list whose head is in HEADS."
+  [form heads]
+  (and (seq? form) (contains? heads (first form))))
+
+(defn- fn-form? [form] (headed-by? form fn-heads))
+(defn- method-container? [form] (headed-by? form method-container-heads))
+
+(defn- method-form?
+  "True for a method or letfn spec `(name [args] body...)` - including the
+   multi-arity `(name ([args] body...) ...)` shape - i.e. the shape of
+   deftype/defrecord/reify/proxy/extension methods and letfn bindings."
+  [form]
+  (and (seq? form)
+       (symbol? (first form))
+       (let [args (second form)]
+         (or (vector? args)
+             (and (seq? args) (vector? (first args)))))))
 
 (defn- suppressed-form?
   "True for reader-level non-code (`quote` and `comment`) forms."
-  [f]
-  (and (seq? f) (contains? '#{quote comment} (first f))))
+  [form]
+  (headed-by? form '#{quote comment}))
 
 (defn- condp-clauses
   "Number of `condp` clauses in ARGS (predicate and expression first): the
@@ -188,43 +212,70 @@
       (= :>> (second cs)) (recur (drop 3 cs) (inc n))
       :else (recur (drop 2 cs) (inc n)))))
 
+(defn- cond-clauses
+  "Number of `cond` test forms in ARGS (one decision each). A trailing
+   `:else` is the default path, not a decision."
+  [args]
+  (let [tests (take-nth 2 args)]
+    (count (if (= :else (last tests)) (butlast tests) tests))))
+
+(defn- binding-count
+  "Decisions in an `if-let`/`if-some`/`when-let`/`when-some` binding vector:
+   one per binding pair."
+  [bindings]
+  (if (vector? bindings) (quot (count bindings) 2) 0))
+
+(defn- comprehension-count
+  "Decisions in a `for`/`doseq` binding vector: one per binding and one per
+   `:when`/`:while` modifier; `:let` bindings are not decisions."
+  [bindings]
+  (if (vector? bindings)
+    (count (remove #(= :let (first %)) (partition 2 bindings)))
+    0))
+
 (defn cc
-  "Cyclomatic complexity increment of a form. Nested functions contribute 0
-   (they are counted as their own function); quoted and commented forms are
-   not code and contribute 0 as well."
+  "Cyclomatic complexity increment of a form, following radon's
+   decision-point counting. Nested functions contribute 0 (they are counted
+   as their own function); quoted and commented forms are not code and
+   contribute 0 as well; a `letfn` contributes its body only, its bindings
+   are functions of their own."
   [form]
   (cond
-    (or (fn-form? form) (type-form? form) (suppressed-form? form)) 0
+    (or (fn-form? form) (suppressed-form? form)) 0
+    (method-container? form)
+    (if (= 'letfn (first form))
+      (reduce + 0 (map cc (drop 2 form)))
+      (reduce + 0 (map cc (remove method-form? (rest form)))))
     (seq? form)
     (let [h (first form) args (rest form)]
       (+ (cond
-           (= h 'cond) (quot (count args) 2)
+           (= h 'cond) (cond-clauses args)
            (= h 'condp) (condp-clauses args)
            (= h 'case) (quot (count (rest args)) 2)
-           (or (= h 'cond->) (= h 'cond->>)) (quot (count args) 2)
+           (contains? '#{cond-> cond->>} h) (quot (count args) 2)
            (= h 'try) (count (filter #(and (seq? %) (= 'catch (first %))) args))
-           (contains? simple-decisions h) 1
+           (contains? binding-heads h) (binding-count (first args))
+           (contains? comprehension-heads h) (comprehension-count (first args))
+           (contains? chain-heads h) (max 0 (dec (count args)))
+           (contains? one-decision-heads h) 1
            :else 0)
          (reduce + 0 (map cc args))))
     (coll? form) (reduce + 0 (map cc form))
     :else 0))
 
-(defn- method-form?
-  "True for a method definition `(name [args] body...)`, the shape used by
-   deftype/defrecord/reify method bodies."
-  [form]
-  (and (seq? form) (symbol? (first form)) (vector? (second form))))
-
 (defn- collect-fns [form]
   (cond
     (suppressed-form? form) nil
     (fn-form? form) (cons form (mapcat collect-fns (rest form)))
-    (type-form? form) (let [children (rest form)
-                            methods (filter method-form? children)
-                            other (remove method-form? children)]
-                        (concat methods
-                                (mapcat collect-fns methods)
-                                (mapcat collect-fns other)))
+    (method-container? form)
+    (let [children (rest form)
+          [methods others] (if (= 'letfn (first form))
+                             [(filter method-form? (first children)) (rest children)]
+                             [(filter method-form? children)
+                              (remove method-form? children)])]
+      (concat methods
+              (mapcat collect-fns methods)
+              (mapcat collect-fns others)))
     (coll? form) (mapcat collect-fns form)
     :else nil))
 
@@ -235,7 +286,9 @@
     (cond
       (= h 'defmethod) (str nm " " (pr-str (nth form 2)))
       (symbol? nm) (str nm)
-      :else (str (if (= h 'fn*) "fn#" "fn") "@" (or (:row (meta form)) "?")))))
+      (contains? fn-heads h) (str (if (= h 'fn*) "fn#" "fn") "@"
+                                  (or (:row (meta form)) "?"))
+      :else (str h))))
 
 (defn- form-sloc [lines row end-row]
   (let [lo (dec row)

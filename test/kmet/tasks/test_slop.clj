@@ -34,6 +34,16 @@
                   :lines (str/split-lines src)
                   :forms (slop/parse-text src)}))
 
+(defn- cc-of
+  "CC of the first function in SRC."
+  [src]
+  (:cc (first (parsed-fns src))))
+
+(defn- fn-cc-pairs
+  "Label and CC of each function in SRC, in collection order."
+  [src]
+  (mapv (juxt :label :cc) (parsed-fns src)))
+
 (deftest tokenize-drops-comments-keeps-literals
   (let [{:keys [tokens lines]} (slop/tokenize ";; lead\n(def x \"a;b\") ; tail\n")]
     (is (= ["(" "def" "x" "\"a;b\"" ")"] tokens))
@@ -134,13 +144,43 @@
                  (is (= 1 (count (:outliers report)))))))))
 
 (deftest cc-counts-clojure-decision-heads
-  (in-tree {"heads.clj" (str "(defn f [a b] (and a (or b a)))\n"
-                             "(defn g [x] (cond x 1 :else 2))\n"
-                             "(defn h [x] (case x 1 :a 2 :b :other))\n")}
-           (fn [dir]
-             (let [report (slop/scan dir {})]
-               (is (= 3 (:functions report)))
-               (is (= 3 (:max-cc report)))))))
+  (is (= 3 (cc-of "(defn f [a b] (and a (or b a)))")))
+  (is (= 2 (cc-of "(defn g [x] (cond x 1 :else 2))")))
+  (is (= 2 (cc-of "(defn i [x] (if x 1 2))")))
+  (is (= 3 (cc-of "(defn h [x] (case x 1 :a 2 :b :other))")))
+  ;; only a literal `:else` is the default path; any other final test counts
+  (is (= 3 (cc-of "(defn j [x] (cond x 1 true 2))")))
+  (is (= 2 (cc-of "(defn k [] (assert x))"))))
+
+(deftest cc-counts-chain-operands
+  (is (= 4 (cc-of "(defn f [a b c d] (and a b c d))")))
+  (is (= 1 (cc-of "(defn f [a] (and a))")))
+  (is (= 3 (cc-of "(defn f [x] (some-> x inc inc))")))
+  (is (= 2 (cc-of "(defn f [x] (some-> x inc))"))))
+
+(deftest cc-counts-bindings-and-comprehensions
+  (is (= 2 (cc-of "(defn f [x] (if-let [a x] a 1))")))
+  (is (= 3 (cc-of "(defn f [x] (if-let [a x b a] b))")))
+  (is (= 3 (cc-of "(defn f [x] (when-let [a x b a] b))")))
+  (is (= 2 (cc-of "(defn f [xs] (for [a xs] a))")))
+  (is (= 4 (cc-of "(defn f [xs ys] (for [a xs b ys :when a] b))")))
+  (is (= 2 (cc-of "(defn f [xs] (for [a xs :let [b a]] b))")))
+  (is (= 2 (cc-of "(defn f [xs] (dotimes [i xs] i))"))))
+
+(deftest cc-collects-letfn-and-extension-methods
+  (is (= [["f" 2] ["g" 2]]
+         (fn-cc-pairs "(defn f [x] (letfn [(g [y] (if y 1 2))] (if x (g x) 0)))")))
+  (is (= [["f" 1] ["g" 3]]
+         (fn-cc-pairs "(defn f [x] (letfn [(g ([y] (if y 1 2)) ([y z] (when z y)))] (g x)))")))
+  (is (= [["f" 1] ["toString" 2]]
+         (fn-cc-pairs "(defn f [] (proxy [Object] [] (toString [] (if x 1 2))))")))
+  (is (= [["f" 1] ["m" 2]]
+         (fn-cc-pairs "(defn f [] (extend-type T P (m [this] (if x 1 2))))")))
+  (is (= [["f" 1] ["m" 2]]
+         (fn-cc-pairs "(defn f [] (extend-protocol P T (m [x] (if x 1 2))))")))
+  ;; a specify! object expression is still the enclosing function's code
+  (is (= [["f" 2] ["m" 1]]
+         (fn-cc-pairs "(defn f [] (specify! (if x a b) P (m [x] 1)))"))))
 
 (deftest nested-functions-count-separately
   (in-tree {"nest.clj" "(defn outer [x] (fn [y] (if y (when y 1) 2)))\n"}
@@ -150,25 +190,20 @@
                (is (= 3 (:max-cc report)))))))
 
 (deftest cc-counts-threaded-cond->-pairs
-  (let [direct (parsed-fns "(defn f [x] (cond-> x a 1 b 2))")
-        threaded (parsed-fns "(defn f [x] (-> x (cond-> a 1 b 2)))")]
-    (is (= 3 (:cc (first direct))))
-    (is (= 3 (:cc (first threaded))))))
+  (is (= 3 (cc-of "(defn f [x] (cond-> x a 1 b 2))")))
+  (is (= 3 (cc-of "(defn f [x] (-> x (cond-> a 1 b 2)))"))))
 
 (deftest cc-counts-condp->>-clauses
-  (let [plain (parsed-fns "(defn f [x] (condp = x 1 :a 2 :b :other))")
-        shift (parsed-fns "(defn f [x] (condp = x 1 :>> inc 2 :b :other))")]
-    (is (= 3 (:cc (first plain))))
-    (is (= 3 (:cc (first shift))))))
+  (is (= 3 (cc-of "(defn f [x] (condp = x 1 :a 2 :b :other))")))
+  (is (= 3 (cc-of "(defn f [x] (condp = x 1 :>> inc 2 :b :other))"))))
 
 (deftest nested-fns-in-type-methods-count-once
-  (let [fns (parsed-fns "(defn outer [] (reify P (foo [this] (fn [x] (if x 1 2)))))")]
-    (is (= ["outer" "fn@1" "fn@1"] (mapv :label fns)))
-    (is (= [1 1 2] (mapv :cc fns)))))
+  (is (= [["outer" 1] ["foo" 1] ["fn@1" 2]]
+         (fn-cc-pairs "(defn outer [] (reify P (foo [this] (fn [x] (if x 1 2)))))"))))
 
 (deftest quoted-and-commented-forms-are-not-code
-  (is (= 1 (:cc (first (parsed-fns "(defn f [] '(if a b c))")))))
-  (is (= 1 (:cc (first (parsed-fns "(defn f [] (comment (if a b c)) 1)")))))
+  (is (= 1 (cc-of "(defn f [] '(if a b c))")))
+  (is (= 1 (cc-of "(defn f [] (comment (if a b c)) 1)")))
   (is (empty? (parsed-fns "'(defn dead [x] (if x 1 2))")))
   (is (empty? (parsed-fns "(comment (defn dead [x] (if x 1 2)))"))))
 
