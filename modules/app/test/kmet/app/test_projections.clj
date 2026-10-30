@@ -226,7 +226,8 @@
                                      :apply (fn [c _]
                                               (reset! seen (identical?
                                                             service
-                                                            (srce/get c :projections))))})
+                                                            (srce/get c :projections)))
+                                              nil)})
           child (srce/extend ctx {:name :agent-1})]
       (is (= :active (:state @sibling)))
       (is (true? @seen) "a sibling row reads the same value")

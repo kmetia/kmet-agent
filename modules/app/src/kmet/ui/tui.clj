@@ -95,7 +95,11 @@
    The TUI runs on a thread of its own, as print mode's run does: the mount has
    to finish so the composition can settle before the session starts, and the
    entry point blocks on `:on-result` rather than on the mount. A diagnostic
-   mount (`--dump-state`) hands the row no `:on-result` and starts nothing."
+   mount (`--dump-state`) hands the row no `:on-result` and starts nothing.
+
+   Answers nil: the run's future is neither a setup handle nor a disposer, and a
+   body that returned it would be read as an asynchronous setup (an unrealized
+   `IPending`, §4 of the kernel note) or called as a disposer."
   [ctx config]
   (when-let [on-result (:on-result config)]
     (when-not (:config config)
@@ -105,7 +109,8 @@
     ;; the app scope: the row's own ctx is a mount site, and every lookup the
     ;; run makes (:tools, :sessions, :skills) walks up from the scope it was
     ;; given
-    (future (run-tui! (:parent ctx) config on-result))))
+    (future (run-tui! (:parent ctx) config on-result))
+    nil))
 
 (def provider
   "The terminal `:ui` provider. Dialogs are answered by the running TUI; there

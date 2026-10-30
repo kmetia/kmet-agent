@@ -218,9 +218,13 @@
    fiber is `:starting` while the body runs, so the body may provide and register
    (the guard allows it) while its names stay invisible until `:active`.
 
-   The body's return value decides the rest: an undelivered promise keeps the
-   fiber `:starting` until the handle settles (`advance!`), anything else makes
-   it active now, and a non-nil value is the mount's first effect."
+   The body's return value decides the rest. `{:srce/setup p}` — a promise — is
+   an asynchronous setup: the fiber stays `:starting` until the handle settles
+   (`advance!`). Anything else is a synchronous setup decided now, and a non-nil
+   value is the mount's first effect, so it must be a disposer or `effect` throws
+   `:srce/bad-effect`. A bare promise is *not* the marker: returning one by
+   accident (the `future` a body started) fails the mount there instead of
+   leaving a setup nobody settles."
   [fiber]
   (let [{:keys [ctx inject plugin config]} @fiber
         epoch (providers ctx inject)
@@ -242,10 +246,18 @@
             (swap! fiber assoc :error nil :resolved cfg :setup nil)
             (set-state! fiber :starting)
             (let [result ((:apply plugin) ctx cfg)]
-              (if (ctx/in-flight? result)
+              (if (and (map? result) (contains? result :srce/setup))
                 ;; an asynchronous setup: the handle rides on the record for
                 ;; whoever awaits it, and `advance!` decides once it settles
-                (swap! fiber assoc :setup result)
+                (let [handle (:srce/setup result)]
+                  (when-not (ctx/awaitable? handle)
+                    (throw (ex-info (str "plugin " (pr-str (:name @fiber))
+                                         " :srce/setup must be a promise, got "
+                                         (pr-str (type handle)))
+                                    {:type :srce/bad-effect
+                                     :name (:name @fiber)
+                                     :value handle})))
+                  (swap! fiber assoc :setup handle))
                 (do (when (some? result)
                       (ctx/effect ctx (constantly result) (str "apply " (:name @fiber))))
                     (advance! fiber nil)))))

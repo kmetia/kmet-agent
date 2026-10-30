@@ -127,8 +127,10 @@ These are load-bearing and not obvious from the code:
   owner awaits — `shutdown!` at exit, the extension host for an async `shutdown`
   (only its code release is deferred; registrations and the record still go
   immediately), a reload before it remounts. A body that cannot finish inline
-  returns one too: the fiber is `:starting` with its names invisible and the
-  handle on `:setup`, and the pass decides when it settles (`srce.md` §4). What
+  answers `{:srce/setup p}`: the fiber is `:starting` with its names invisible
+  and the promise on `:setup`, and the pass decides when it settles
+  (`srce.md` §4). The marker is explicit where any other fresh return value
+  would be read as an effect — a body that starts a thread answers `nil`. What
   stays declined is the state machine behind `:loading`/`:unloading`,
   `fiber.await` and a kernel-owned drain — they need a resume path the app
   already implements once, as its submission queue (`srce.md` §8, §10).

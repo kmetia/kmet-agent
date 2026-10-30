@@ -69,6 +69,17 @@
           "no :on-result, so no run")
       (finally (srce/dispose-subtree! root)))))
 
+(deftest a-live-mount-answers-nil-not-the-runs-future
+  ;; `apply` answers nil: the run's future is neither a setup handle nor a
+  ;; disposer. The kernel reads an unrealized IPending return as an asynchronous
+  ;; setup, so handing the future back left the row `:starting` and the boot
+  ;; failed with "setup did not settle".
+  (let [root (srce/root {:name :app})]
+    (try
+      (is (nil? (with-redefs-fn {#'tui/run-tui! (fn [_ _ _] nil)}
+                  #((:apply tui/plugin) root {:on-result (fn [_] nil) :config {}}))))
+      (finally (srce/dispose-subtree! root)))))
+
 (deftest the-invocations-run-flags-reach-kmet1s-run
   ;; The same hand-off one category over: the run's overrides are kmet1's run
   ;; flags, and `interactive/run` applies them to the config it loads

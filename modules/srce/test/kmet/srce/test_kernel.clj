@@ -189,7 +189,7 @@
     (srce/provide! r :svc :v {:check (fn [] @ready?)})
     (let [f (srce/plugin! r {:name :needs
                              :inject [:svc]
-                             :apply (fn [_ _] (swap! applied inc))})]
+                             :apply (fn [_ _] (swap! applied inc) nil)})]
       (is (= :pending (:state @f)))
       (reset! ready? true)
       (srce/settle! r)
@@ -203,7 +203,7 @@
         applied (atom 0)
         f (srce/plugin! r {:name :tools/mount
                            :inject [:tools]
-                           :apply (fn [_ _] (swap! applied inc))})]
+                           :apply (fn [_ _] (swap! applied inc) nil)})]
     (is (= :pending (:state @f)))
     (is (= #{:tools} (:waiting-for @f)))
     (is (zero? @applied))
@@ -233,7 +233,7 @@
         applied (atom 0)
         f (srce/plugin! r {:name :ui/terminal
                            :inject {:ui :optional}
-                           :apply (fn [_ _] (swap! applied inc))})
+                           :apply (fn [_ _] (swap! applied inc) nil)})
         uid (:uid @f)]
     (is (= :active (:state @f)))
     (is (= 1 @applied))
@@ -436,7 +436,7 @@
         _ (srce/plugin! r {:name :bad :apply (fn [_ _] (throw (ex-info "boom" {})))})
         f (srce/plugin! r {:name :needs
                            :inject [:svc]
-                           :apply (fn [_ _] (swap! applied inc))})]
+                           :apply (fn [_ _] (swap! applied inc) nil)})]
     (is (= :pending (:state @f)))
     (is (zero? @applied))))
 
@@ -854,7 +854,7 @@
         f (srce/plugin! r {:name :probe/async
                            :apply (fn [c _]
                                     (srce/provide! c :probe/async-svc {:v 1} {:in (:parent c)})
-                                    setup)})]
+                                    {:srce/setup setup})})]
     (is (= :starting (:state (srce/fiber-info f))) "the promise keeps the mount in flight")
     (is (identical? setup (:setup (srce/fiber-info f))) "the handle is on the record")
     (is (nil? (srce/get r :probe/async-svc)) "and its names are invisible meanwhile")
@@ -870,7 +870,7 @@
         _ (srce/plugin! r {:name :probe/async-src
                            :apply (fn [c _]
                                     (srce/provide! c :probe/async-x true {:in (:parent c)})
-                                    setup)})
+                                    {:srce/setup setup})})
         dep (srce/plugin! r {:name :probe/async-dep
                              :inject [:probe/async-x]
                              :apply (fn [_ _] nil)})]
@@ -886,7 +886,7 @@
         f (srce/plugin! r {:name :probe/async-fail
                            :apply (fn [c _]
                                     (srce/provide! c :probe/async-failed true {:in (:parent c)})
-                                    setup)})]
+                                    {:srce/setup setup})})]
     (deliver setup (ex-info "nope" {:type :probe}))
     (srce/settle! r)
     (is (= :failed (:state (srce/fiber-info f))))
@@ -903,7 +903,7 @@
         setup (promise)
         b (srce/plugin! r {:name :probe/async-consumer
                            :inject [:probe/async-dep-x]
-                           :apply (fn [_ _] setup)})]
+                           :apply (fn [_ _] {:srce/setup setup})})]
     (is (= :starting (:state (srce/fiber-info b))))
     (srce/dispose! a)
     (is (= :starting (:state (srce/fiber-info b))) "not reloaded mid-setup")
@@ -915,11 +915,34 @@
 (deftest a-disposed-fiber-ignores-its-late-setup
   (let [[r] (kernel)
         setup (promise)
-        f (srce/plugin! r {:name :probe/async-disposed :apply (fn [_ _] setup)})]
+        f (srce/plugin! r {:name :probe/async-disposed
+                           :apply (fn [_ _] {:srce/setup setup})})]
     (is (= 1 (:disposed (srce/dispose! f))))
     (deliver setup :late)
     (srce/settle! r)
     (is (= :disposed (:state (srce/fiber-info f))) "a settled setup after disposal decides nothing")))
+
+(deftest a-bare-promise-is-not-a-setup
+  ;; Only the marker is asynchronous; the body's return value is otherwise
+  ;; checked like any other effect. This is the shape a body had when it started
+  ;; a thread and returned the future it started.
+  (let [[r] (kernel)
+        f (srce/plugin! r {:name :probe/bare-promise :apply (fn [_ _] (promise))})]
+    (is (= :failed (:state (srce/fiber-info f))))
+    (is (= :srce/bad-effect (:type (ex-data (:error (srce/fiber-info f)))))
+        "it fails the mount instead of leaving a setup nobody settles")))
+
+(deftest an-invalid-effect-shape-fails-the-mount
+  (let [[r] (kernel)
+        f (srce/plugin! r {:name :probe/not-an-effect :apply (fn [_ _] :nope)})]
+    (is (= :failed (:state (srce/fiber-info f))))
+    (is (= :srce/bad-effect (:type (ex-data (:error (srce/fiber-info f)))))))
+  (let [[r] (kernel)
+        f (srce/plugin! r {:name :probe/bad-handle
+                           :apply (fn [_ _] {:srce/setup :not-a-promise})})]
+    (is (= :failed (:state (srce/fiber-info f))))
+    (is (= :srce/bad-effect (:type (ex-data (:error (srce/fiber-info f)))))
+        "the marker's value must be a promise")))
 
 (deftest a-dispose-inside-a-disposer-reports-into-the-outer-run
   (let [[r] (kernel)

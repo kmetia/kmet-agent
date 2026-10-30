@@ -1524,11 +1524,15 @@
             fiber (srce/plugin!
                    host-ctx
                    (assoc plugin
+                          ;; answers nil: the body's return value is the mount's
+                          ;; first effect, and a `reset!`'s boolean is not a
+                          ;; disposer (`:srce/bad-effect`)
                           :apply (fn [fctx _config]
                                    (let [api (create-extension-api ext config)]
                                      (reset! (:api ext) api)
                                      ((loader-aware ext (:apply plugin)) fctx api)
-                                     (reset! (:initialized? ext) true)))))
+                                     (reset! (:initialized? ext) true)
+                                     nil))))
             _ (reset! (:fiber ext) fiber)
             ;; after the record holds the fiber: a refused declaration fails
             ;; the load, whose unload must find the mount to dispose it. An

@@ -254,13 +254,18 @@ including a registration attempted from inside a disposer — a `:starting` fibe
 may register too, because its body is what is running. Register from
 `:apply`, not from teardown.
 
-A body that hands back an undelivered promise is an **asynchronous setup**: the
-fiber stays `:starting`, nothing it provides is visible (`available?` requires
-`:active`), dependents stay `:pending`, and the handle rides on the record as
-`:setup` for whoever awaits it (`boot`, against `startup-timeout-ms`). The
-owner's next `(srce/settle! ctx)` advances a fiber whose setup has settled —
+A body that answers `{:srce/setup p}` is an **asynchronous setup**: the fiber
+stays `:starting`, nothing it provides is visible (`available?` requires
+`:active`), dependents stay `:pending`, and the promise rides on the record as
+`:setup` for whoever awaits it (`mount-rows!`, against `startup-timeout-ms`).
+The owner's next `(srce/settle! ctx)` advances a fiber whose setup has settled —
 nothing pokes the kernel when a promise is delivered, and a worker does not
 settle it (`settle!` runs plugin code). The kernel itself never waits.
+
+The marker is explicit on purpose: a body's return value is otherwise checked as
+an effect (nil, a disposer, or a seq of them), so `(fn [ctx _] (future …))` — a
+body that starts a thread and returns the future — fails the mount with
+`:srce/bad-effect` instead of leaving a setup nobody settles.
 
 ### Events
 
@@ -437,6 +442,7 @@ additive — see [`srce.md`](src/kmet/srce/srce.md) §13.
 | `:srce/bad-plugin` | the plugin map fails its shape check (`:problems` says which keys) | fix `:name` (keyword), `:apply` (fn), `:inject`, `:config` or `:provide` |
 | `:srce/bad-inject` | an inject value other than `nil` or `:optional` (thrown by `normalize-inject`; `plugin!` reports it as `:srce/bad-plugin` with the offending keys in `:problems`) | use the two supported values; other values are reserved |
 | `:srce/bad-source` | a keyword source with no `:resolver`, or an unsupported source value | pass a resolver to `root`, or mount a var/map |
+| `:srce/bad-effect` | a plugin body returned something that is not nil, a disposer, a seq of disposers or `{:srce/setup p}`; or the marker's value is not a promise | answer `nil` after starting work, or return the marker with a promise |
 | `:srce/ctx-busy` | `detach!` while child ctxs remain | dispose the mounts under it first |
 
 A pass that cannot reach a fixpoint within 8 rounds logs `:srce/churn` through

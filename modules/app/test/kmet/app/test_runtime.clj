@@ -354,7 +354,7 @@
    :plugin {:name :probe/async-row
             :apply (fn [ctx _]
                      (srce/provide! ctx :probe/async-row-svc :ready {:in (:parent ctx)})
-                     setup)}})
+                     {:srce/setup setup})}})
 
 (deftest boot-waits-for-an-asynchronous-row
   (let [setup (promise)

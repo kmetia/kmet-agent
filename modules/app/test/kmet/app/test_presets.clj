@@ -177,7 +177,7 @@
                                            :apply (fn [_ctx _]
                                                     (future (Thread/sleep 50)
                                                             (deliver setup :ready))
-                                                    setup)}}]}}
+                                                    {:srce/setup setup})}}]}}
                :profiles {}}]
     (try
       (let [{:keys [fibers]} (presets/mount! ctx table :bundle/async)]

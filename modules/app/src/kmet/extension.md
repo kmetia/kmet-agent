@@ -23,9 +23,11 @@ in-repo extensions under `extensions/` are updated in the same change
 An extension **is a plugin**: its namespace defines a `plugin` var (with
 `kmet.srce.core/defplugin`, or a plain map) whose `:apply` the loader calls
 with the extension's ctx and a map of runtime-bound capabilities — register
-everything there. `:apply` may hand back an undelivered promise for a setup it
-cannot finish inline: the mount stays `:starting` (its names invisible,
-dependents `:pending`), and the boot or the next settle decides it. The map's
+everything there. `:apply` may answer `{:srce/setup p}` — a promise — for a setup
+it cannot finish inline: the mount stays `:starting` (its names invisible,
+dependents `:pending`), and the next settle decides it. Any other return value
+is checked as an effect, so a body that starts background work answers `nil`
+rather than the `future` it started (that is `:srce/bad-effect`). The map's
 `:inject` decides when the mount activates.
 Optionally define `(defn shutdown [api])` for teardown — it runs on
 unload/reload, and **everything the extension registered is automatically

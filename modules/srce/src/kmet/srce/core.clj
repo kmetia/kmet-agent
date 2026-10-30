@@ -116,8 +116,9 @@
 
 (def plugin!
   "Mount SOURCE as a new fiber under CTX with CONFIG. The fiber is `:pending`
-   until its inject is satisfied, `:starting` while its body (or the setup it
-   handed back) runs, `:active` after — see `settle!`."
+   until its inject is satisfied, `:starting` while its body runs (or the
+   `{:srce/setup p}` it answered is in flight), `:active` after — see
+   `settle!`."
   fiber/plugin!)
 
 (def inject!

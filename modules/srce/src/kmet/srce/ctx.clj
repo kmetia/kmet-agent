@@ -242,17 +242,25 @@
    belongs to the caller that owns the lifetime."
   nil)
 
+(defn awaitable?
+  "Is V something a caller can wait on — an `IPending` (a promise, a `future`, a
+   `delay`)? The two markers this kernel reads are built from it: a plugin body
+   returns `{:srce/setup v}` to say its setup is asynchronous, and a disposer
+   returns an *unrealized* one to say its teardown is (`in-flight?`)."
+  [v]
+  (instance? clojure.lang.IPending v))
+
 (defn in-flight?
   "Is V work that is still running — an unrealized `IPending`, i.e. a promise
-   nobody has delivered yet? This is the marker a plugin body returns to say its
-   setup is asynchronous, and a disposer returns to say its teardown is.
+   nobody has delivered yet? This is the marker a disposer returns to say its
+   teardown is not finished.
 
    `IPending` is the guard, not `IDeref`: an atom is a derefable, but
    `realized?` is not defined for it on every host (babashka throws, Jolt
    answers true), so an unguarded `realized?` would turn a disposer that returns
    an atom into an error. A promise passes the guard on both hosts."
   [v]
-  (and (instance? clojure.lang.IPending v)
+  (and (awaitable? v)
        (not (realized? v))))
 
 (defn- collect-undoing!
@@ -287,12 +295,23 @@
 
    A disposer run early (a registration deregistered before its fiber unloads)
    also drops its entry from the fiber's `:effects`, so `effects` lists what is
-   installed rather than what was ever installed."
+   installed rather than what was ever installed.
+
+   What F returns must be a disposer: nil, a fn, or a seq of fns. Anything else
+   throws `:srce/bad-effect` at registration — the shapes are checked where they
+   are produced, so a body that ends with a `future` it meant as fire-and-forget
+   fails there instead of throwing from a teardown later."
   [ctx f & [label]]
   (let [fiber (:fiber ctx)]
     (assert-active! fiber)
     (let [undos (atom [])
-          live? (atom true)]
+          live? (atom true)
+          check! (fn [disposer]
+                   (when-not (fn? disposer)
+                     (throw (ex-info (str "invalid effect disposer: " (pr-str (type disposer)))
+                                     {:type :srce/bad-effect
+                                      :label (or label :effect)
+                                      :value disposer}))))]
       (letfn [(undo []
                 (when (compare-and-set! live? true false)
                   ;; the entry's :undo is this fn, so it finds its own entry
@@ -309,11 +328,13 @@
         ;; The entry is pushed before F runs, so a throwing body still leaves
         ;; cleanup behind for the failure path to run.
         (swap! fiber update :effects conj {:label (or label :effect) :undo undo})
-        (let [result (f)]
-          (swap! undos into (cond
-                              (nil? result) []
-                              (sequential? result) result
-                              :else [result])))
+        (let [result (f)
+              disposers (cond
+                          (nil? result) []
+                          (sequential? result) result
+                          :else [result])]
+          (doseq [disposer disposers] (check! disposer))
+          (swap! undos into disposers))
         undo))))
 
 (defn- drain-effects!
