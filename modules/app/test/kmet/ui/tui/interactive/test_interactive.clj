@@ -1237,6 +1237,27 @@
                   "the override key does"))))
         (finally (tui-kb/set-global-keybindings! prev-global))))))
 
+(deftest ^:slow a-cancelled-run-answers-its-open-question
+  (testing "a run cancelled while its permission question waits answers it
+            with the run-cancelled deny — the dialog must not hold a run that
+            is already gone (the poll is a timer thunk, so the close happens on
+            the loop thread)"
+    (let [signal (atom false)
+          answers (atom [])
+          abandon {:decision :deny :reason "abandoned for the test"}
+          watcher ((var inter/abandon-on-cancel!)
+                   {:signal signal :abandon abandon}
+                   (fn [answer] (swap! answers conj answer)))]
+      (try
+        (Thread/sleep 130)
+        (timers/pump!)
+        (is (empty? @answers) "nothing while the run is live")
+        (reset! signal true)
+        (Thread/sleep 130)
+        (timers/pump!)
+        (is (= [abandon] @answers) "the question is answered once, with the deny")
+        (finally (timers/cancel! watcher))))))
+
 (deftest run-clears-the-extension-ui-registry-on-mode-end
   (testing "interactive/run releases the mode when it ends: the extension UI
             registry closes over the TUI, chat history, editor and session,

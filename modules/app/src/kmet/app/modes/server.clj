@@ -241,8 +241,7 @@
       (let [verdict (loop []
                       (cond
                         (realized? answer) @answer
-                        (and signal @signal) {:decision :deny
-                                              :reason "the run was cancelled"}
+                        (and signal @signal) permissions/cancelled-answer
                         :else (do (Thread/sleep 20) (recur))))]
         (swap! (:pending server) dissoc id)
         verdict))

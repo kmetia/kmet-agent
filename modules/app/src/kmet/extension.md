@@ -357,8 +357,10 @@ and receive the same `ToolRenderContext` map the builtin renderers get
 expanded, display-mode (the resolved mode: :collapsed | :expanded | :quiet),
 is-error, show-images — whether images render: the
 `:terminal :show-images` setting AND terminal image support). A tool may also declare
-`:title (fn [args])` — pure plain-text data for that quiet line (nil-safe over
-partial streaming args; nil/blank falls back to the tool name).
+`:title (fn [args])` — the call's one-line plain-text name (nil-safe over
+partial streaming args; nil/blank falls back to the tool name): the quiet
+transcript line and the permission question's "allow this?" dialog both read
+it, so it stays pure and cheap — no IO, no styling.
 `:render-shell :self` lets the renderer own its outer
 box, padding, and framing. The default shell renders a constant box body
 and the component appends the tail state line (`state-result-nodes`) when

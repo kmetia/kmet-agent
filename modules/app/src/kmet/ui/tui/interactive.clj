@@ -14,6 +14,7 @@
             [kmet.app.debug :as debug]
             [kmet.app.events :as events]
             [kmet.app.extensions.core :as extensions]
+            [kmet.app.permissions :as permissions]
             [kmet.app.session.core :as session]
             [kmet.app.session.runtime :as runtime]
             [kmet.app.tools.registry :as tool-registry]
@@ -135,13 +136,25 @@
 ;; never be answered
 (defonce ^:private pending-answers (atom #{}))
 
+(defn- abandon-on-cancel!
+  "Arm the watcher that answers an open dialog with OPTS' `:abandon` answer
+   once its `:signal` — the run's cancel flag — is set: a question about a run
+   that is gone can never be answered, so it must not park its caller. The poll
+   is a timer thunk, which runs on the loop thread, because closing the dialog
+   disposes a component. Returns the timer id for the caller to cancel when the
+   dialog closes first, nil when the dialog names no run."
+  [{:keys [signal abandon]} answer!]
+  (when (and signal abandon)
+    (timers/every! 100 (fn [] (when @signal (answer! abandon))))))
+
 (defn- wait-for-dialog!
   "Mount the dialog MAKE builds — given ANSWER!, which closes the dialog and
    delivers its value — on CS's dock, and block until one of its callbacks
    answers. Returns that value, or nil when the mode tears down first (the
    promise joins `pending-answers` before the mount, and run's teardown denies
-   every one of them)."
-  [cs make]
+   every one of them). OPTS may carry the run's `:signal` and the `:abandon`
+   answer it implies — see abandon-on-cancel!."
+  [cs make opts]
   (let [dlg-atom (atom nil)
         result (promise)
         close! (fn []
@@ -150,25 +163,35 @@
         answer! (fn [value]
                   (close!)
                   (deliver result value))
-        dlg (make answer!)]
+        dlg (make answer!)
+        ;; armed only once the dialog is on the dock (below): the poll closes
+        ;; it, and a close racing the mount could dispose a panel the stack
+        ;; publishes afterwards. The `finally` disarms it, so a mount that
+        ;; throws cannot leave the poll answering a dialog nobody will show.
+        watcher (atom nil)]
     (reset! dlg-atom dlg)
     (swap! pending-answers conj result)
-    (dock/mount! cs dlg)
-    (tui/tui-request-render (:tui cs))
     (try
+      (dock/mount! cs dlg)
+      (tui/tui-request-render (:tui cs))
+      (reset! watcher (abandon-on-cancel! opts answer!))
       (deref result)
       (finally
+        (some-> @watcher timers/cancel!)
         (swap! pending-answers disj result)))))
 
 (defn- choose!
   "Mount a selector over OPTIONS on CS's dock and return the chosen label, nil
-   when it is cancelled or the mode tears down first. Blocks."
-  [cs title options]
-  (wait-for-dialog!
-   cs (fn [answer!]
-        (dialogs/make-selector-dialog title options
-                                      answer! #(answer! nil)
-                                      (th/get-current-theme)))))
+   when it is cancelled or the mode tears down first. Blocks. OPTS as in
+   wait-for-dialog!."
+  ([cs title options] (choose! cs title options nil))
+  ([cs title options opts]
+   (wait-for-dialog!
+    cs (fn [answer!]
+         (dialogs/make-selector-dialog title options
+                                       answer! #(answer! nil)
+                                       (th/get-current-theme)))
+    opts)))
 
 (defn- type-in!
   "Mount a one-line input dialog on CS's dock and return the submitted text,
@@ -177,7 +200,8 @@
   (wait-for-dialog!
    cs (fn [answer!]
         (dialogs/make-input-dialog title answer! #(answer! nil)
-                                   (th/get-current-theme) prefill))))
+                                   (th/get-current-theme) prefill))
+   nil))
 
 (defn- selected-value
   "The value CHOSEN names among OPTIONS: a map option's `:value`, a plain
@@ -233,14 +257,17 @@
    the agent or the workspace, or a deny — `:once` is what an unscoped `:allow`
    already means, so `Yes` carries no scope rather than a redundant one. A
    cancelled dialog (nil) is the No answer: it denies this one call, remembers
-   nothing, and is not a verdict of its own."
+   nothing, and is not a verdict of its own. A ready answer map — the deny a
+   cancelled run answers its question with — passes through."
   [choice]
-  (case choice
-    "Yes" :allow
-    "Always for this agent" {:decision :allow :scope :agent}
-    "Always for this workspace" {:decision :allow :scope :workspace}
-    ;; "No", and a cancelled dialog (nil): deny this call, remember nothing
-    {:decision :deny :reason "denied at the terminal"}))
+  (if (map? choice)
+    choice
+    (case choice
+      "Yes" :allow
+      "Always for this agent" {:decision :allow :scope :agent}
+      "Always for this workspace" {:decision :allow :scope :workspace}
+      ;; "No", and a cancelled dialog (nil): deny this call, remember nothing
+      {:decision :deny :reason "denied at the terminal"})))
 
 (defn ask-title
   "The dialog title a permission `:ask` puts to the human: the tool's name, the
@@ -268,14 +295,19 @@
    outside a run, because nobody being able to ask is not a yes. Blocks while
    the dialog is up, so the caller must be a run thread (the gate's) and never
    a TUI render/input thread; a future front-end surface answers extension
-   requests asynchronously for the same reason."
+   requests asynchronously for the same reason. A run cancelled while the
+   question waits answers it with a deny (`abandon-on-cancel!`), so the dialog
+   cannot hold a run that is already gone."
   [ctx request]
   (if-let [cs @live-mode]
     (let [tui (:tui cs)
           listener (turn/tool-display-listener cs)]
       (tui/tui-add-input-listener tui listener)
       (try
-        (ask-answer (choose! cs (ask-title ctx request) ask-choices))
+        (ask-answer
+         (choose! cs (ask-title ctx request) ask-choices
+                  {:signal (:signal request)
+                   :abandon permissions/cancelled-answer}))
         (finally (tui/tui-remove-input-listener tui listener))))
     {:decision :deny :reason "no terminal is running — nobody can ask"}))
 

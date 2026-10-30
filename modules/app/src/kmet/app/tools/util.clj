@@ -1,6 +1,6 @@
 (ns kmet.app.tools.util
   "Shared utilities for tool implementations — safe file traversal,
-   quiet-title path shortening, etc."
+   quiet-title path shortening, the one-line call names a title supplies, etc."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.libs.path :as path]))

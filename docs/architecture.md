@@ -362,8 +362,9 @@ the gate (the call's block exists while the question is up), and
 before the body runs — a front end starts the tool's elapsed timer there, so a
 human's thinking time is not counted as the tool's. The TUI's ask shows the
 call's own one-line title (`$ <command>`, the path) in the question, because
-the transcript block behind the dialog can be scrolled out of the window, and
-keeps `app.tools.expand` live while the question waits.
+the transcript block behind the dialog can be scrolled out of the window,
+keeps `app.tools.expand` live while the question waits, and answers a run
+cancelled under the dialog with a deny rather than parking the run thread.
 
 ## Tools and the script sandbox
 

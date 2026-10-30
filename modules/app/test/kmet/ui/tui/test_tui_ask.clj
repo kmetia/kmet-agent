@@ -49,7 +49,10 @@
       "a cancelled dialog is a no, not a yes")
   (is (= (interactive/ask-answer "No")
          (interactive/ask-answer nil))
-      "cancel is that same single No: this call denied, nothing remembered"))
+      "cancel is that same single No: this call denied, nothing remembered")
+  (is (= permissions/cancelled-answer
+         (interactive/ask-answer permissions/cancelled-answer))
+      "a ready answer — the deny a cancelled run gives — passes through"))
 
 (deftest the-profile-names-the-gate-and-the-plain-tui-names-none
   (is (= [:bundle/gated] (get-in (mode-row :tui-ask) [:config :presets]))

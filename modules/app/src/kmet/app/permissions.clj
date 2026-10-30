@@ -103,6 +103,12 @@
   {:decision :deny
    :reason "no approval channel is mounted — this run cannot ask"})
 
+(def cancelled-answer
+  "What a front end answers an open question with once its run was cancelled:
+   the question is about a run that is gone, so the call is denied rather than
+   parked. The wire ask and the TUI's dialog both answer this one value."
+  {:decision :deny :reason "the run was cancelled"})
+
 (def policies
   "The policies a composition can name as data, beside the fn form: a profile or
    a `--patch` layer is EDN, so mounting the gate means naming one of these."
