@@ -172,6 +172,21 @@ GUI-independent steps landed.)
   The layer map is in [`docs/architecture.md`](docs/architecture.md); the
   dispatcher list is in [`modules/tui/src/kmet/tui/tui.md`](modules/tui/src/kmet/tui/tui.md).
 
+### Complexity is a budget, not a scoreboard
+
+`bb slop` measures both ways a tree erodes: verbosity (clone and rule-flagged
+lines over SLOC) and erosion (the `CC × √SLOC` mass held by functions with
+CC > 10). Both grow one reasonable branch at a time, so hold them while
+editing, not after. It is an on-demand whole-tree scan, not part of the
+changed-file loop.
+
+- A function already past CC 10 does not gain another branch — extract the
+  case. Mass is not line count, so lifting a branch out lowers it.
+- Extend the shared helper instead of writing the near-copy; `bb slop --dups`
+  is what finds it.
+- Retire, in the same change, the path you replace. A second way to do one
+  thing is erosion the metric cannot see.
+
 ## Testing
 
 - Tests use `clojure.test` and live beside their module
