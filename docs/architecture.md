@@ -785,7 +785,8 @@ app's JVM aliases and with the test paths) and writes `.nrepl-port`
 `jolt nrepl-server 7802` is the Jolt server (its own default is 7888, so pass
 7802 or set `JOLT_NREPL_PORT=7802`) and writes the same `.nrepl-port` file;
 when the JVM and Jolt servers both run, pass an explicit `port` to
-`clojure_eval`.
+`clojure_eval`. Discovery checks the port files first, then probes 7801, 7802,
+7803 and the historical defaults 7888/1667.
 
 The `*-changed` tasks are the iteration loop — they cover only the current
 changes (git diff vs HEAD + untracked, plus the namespaces/tests that

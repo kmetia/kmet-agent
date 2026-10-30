@@ -1,29 +1,24 @@
 # kmet agent guidelines
 
-This is the short, cross-cutting rulebook for the repository. Detailed design
-and implementation rules live beside the package they govern. Read the
-relevant topic document before changing that area, and update it in the same
-change when behavior changes.
+The short, cross-cutting rulebook. Detailed design and implementation rules
+live beside the package they govern: read the relevant topic document before
+changing that area, and update it in the same change when behavior changes.
 
-kmet is inspired by two reference harnesses, and both stay visible in its
-design. Its **functionality** follows pi (the maintained gap list is
-[`docs/pi-alignment.md`](docs/pi-alignment.md); the reference checkout is
-`~/src/cvstree/pi/`). Its **application architecture** follows DeepSeek Harness
-(`dsh`) on Cordis (the reference checkout is
-`~/src/cvstree/deepseek-harness/`) — one context tree, services found by key,
-dependencies declared with `inject`, effects that unwind, declared event
-modes, and **everything is a plugin**: the loop, tools, sessions, model access
-and modes are replaceable rows — model access is the `:llm` service
-(`kmet.app.llm`, with the request as `kmet.ai.llm` behind the row) — and an
-extension mounts beside them instead of patching a privileged core. The module
-map, the composition and the service catalog are in
-[`docs/architecture.md`](docs/architecture.md); the open seams — a composition
-edit still has no `applied` / `restart-required` vocabulary among them — are in
-[`new-app.md`](new-app.md) § Open at HEAD. The kernel's deliberate differences
-from Cordis are in [`srce.md`](modules/srce/src/kmet/srce/srce.md) §5/§10. The
-architectural consequence for changes: new behavior attaches to a documented
-seam — a plugin row, a service, an event, or the extension contract — not to a
-branch in the entry or a new global.
+Functionality follows pi (`~/src/cvstree/pi/`; gap list
+[`docs/pi-alignment.md`](docs/pi-alignment.md)); application architecture
+follows DeepSeek Harness on Cordis (`~/src/cvstree/deepseek-harness/`) — one
+context tree, services found by key, dependencies declared with `inject`,
+effects that unwind, declared event modes, and **everything is a plugin**: the
+loop, tools, sessions, model access (the `:llm` service, `kmet.app.llm`, with
+the request as `kmet.ai.llm` behind the row) and modes are replaceable rows, and
+an extension mounts beside them instead of patching a privileged core. Module
+map, composition and service catalog: [`docs/architecture.md`](docs/architecture.md);
+open seams (a composition edit still has no `applied` / `restart-required`
+vocabulary among them): [`new-app.md`](new-app.md) § Open at HEAD; kernel
+departures from Cordis: [`srce.md`](modules/srce/src/kmet/srce/srce.md) §5/§10.
+**New behavior attaches to a documented seam — a plugin row, a service, an
+event, or the extension contract — not to a branch in the entry or a new
+global.**
 
 ## Topic map
 
@@ -40,71 +35,51 @@ branch in the entry or a new global.
 | Architecture lineage: pi functionality, dsh's Cordis "everything is a plugin" model | [`new-app.md`](new-app.md) § Prior art: DSH and § Reconciliation; [`modules/srce/src/kmet/srce/srce.md`](modules/srce/src/kmet/srce/srce.md) |
 | Loader design and backends | [`modules/loader/src/kmet/loader/loader.md`](modules/loader/src/kmet/loader/loader.md) |
 | Jolt provider scaffolding and host integration | [`jolt/src/jolt/kmet/README.md`](jolt/src/jolt/kmet/README.md) |
-| User guides and examples | [`docs/README.md`](docs/README.md), [`docs/examples/README.md`](docs/examples/README.md) |
-| Building and distribution | [`docs/building.md`](docs/building.md) |
+| Platforms (Linux, macOS, Windows, WSL, Termux), building and distribution | [`docs/building.md`](docs/building.md) |
+| User guides, examples, settings/theme/provider samples | [`docs/README.md`](docs/README.md), [`docs/examples/README.md`](docs/examples/README.md) |
 
-User-facing documentation belongs in `docs/`. Implementation notes belong next
-to their source package. The temporary notes `perf.md`,
-`jolt-bugs.md`, `tcl.md`, and `new-app.md` (the kmet2 design record: the open
-seams, the limits that shipped and the declined options) intentionally remain at
-the project root. (`engine.md` was folded/retired once the session-runtime split’s
-GUI-independent steps landed.)
+User-facing documentation belongs in `docs/` (keep the root
+[`README.md`](README.md) short and user-facing); implementation notes belong
+next to their source package. The temporary notes `perf.md`, `jolt-bugs.md`,
+`tcl.md` and `new-app.md` (the kmet2 design record: the open seams, the limits
+that shipped and the declined options) intentionally remain at the project
+root.
 
 ## Basic development flow
 
 - `bb start` starts `kmet.app.core/-main`, the process entry; `jolt start` is
-  the native-host equivalent. There is one app: kmet1 was retired with the
-  module that carried it, so the `--app` flag is gone and every host runs the
-  same composition. The composition and landings that got there are in
-  [`docs/architecture.md`](docs/architecture.md).
-- `bb clean` removes build output and caches; `bb clean --dry-run` lists what
-  it would remove. `jolt clean` is the native-host equivalent.
-- `bb nrepl` starts the development server on port 7801, blocks, and writes
-  no port file. `bb nrepl-jvm [port]` starts the JVM equivalent (default
-  7803, the app's JVM aliases) and writes `.nrepl-port` (gitignored); jolt's
-  built-in `jolt nrepl-server 7802` is the Jolt server, also writing
-  `.nrepl-port` (its own default is 7888, so pass 7802 or set
-  `JOLT_NREPL_PORT=7802`). `clojure_eval` discovers port files first, then
-  probes 7801, 7802, 7803 and the historical defaults 7888/1667. The three
-  servers use distinct ports, but the JVM and Jolt servers share the one
-  `.nrepl-port` file — pass `port` when both run.
-- `bb tasks` lists the one-line task summaries; `bb <task> --help` prints a
-  task's full usage (the details `bb tasks` leaves out).
-- Use the changed-file tasks for the normal loop:
-
-  ```sh
-  bb changed
-  bb test-changed
-  bb test-ext-changed
-  bb lint-changed
-  bb format-check-changed       # or bb format-changed
-  ```
-
-- `bb check` verifies source namespaces. Do not hand-edit generated catalogs:
+  the native-host equivalent. There is one app — kmet1 was retired with its
+  module and the `--app` flag is gone, so every host runs the same composition.
+- `bb clean` removes build output and caches (`--dry-run` lists what it would
+  remove; `jolt clean` is the native-host equivalent). `bb tasks` lists the
+  one-line task summaries; `bb <task> --help` prints a task's full usage.
+- nREPL: `bb nrepl` (7801, the bb reader view, writes no port file),
+  `bb nrepl-jvm [port]` (7803, the JVM view) and jolt's `jolt nrepl-server 7802`
+  (the Jolt view). The JVM and Jolt servers share one `.nrepl-port` file, so
+  pass `port` when both run — ports and discovery are in
+  [`docs/architecture.md`](docs/architecture.md) § Development workflow.
+- The changed-file tasks are the normal loop: `bb changed`,
+  `bb test-changed`, `bb test-ext-changed`, `bb lint-changed`,
+  `bb format-check-changed` (or `bb format-changed`).
+- `bb check` verifies source namespaces. Never hand-edit a generated catalog:
   the provider/image-model ones (`bb generate-models` / `bb check-model-data`,
   and `kmet --generate-models` for the user-level caches) or the composition
-  one (`bb generate-catalog` / `bb check-catalog` for `docs/composition.md`).
-- `sh scripts/install_hooks.sh` installs the commit-msg hook, which enforces
-  the commit-message rules below. The attribution workflow enforces the same
-  rules over a pushed or PR range — it is the repository's only CI check.
+  one (`bb generate-catalog` / `bb check-catalog` for
+  [`docs/composition.md`](docs/composition.md)).
 
 ### Interactive development
 
-- Prefer the running host's nREPL as the inner loop: edit, then `clojure_eval`
-  a `(require 'my.ns :reload)` and call the changed function. `bb nrepl` is
-  the bb reader view, `bb nrepl-jvm` the JVM view, and `jolt nrepl-server`
-  the jolt view. Restart the server
+- The running host's nREPL is the inner loop: edit, `clojure_eval` a
+  `(require 'my.ns :reload)`, call the changed function. Restart the server
   when structural redefinitions (protocols, records, macros) leave stale
-  behavior.
+  behavior. A REPL session does not replace the changed-file gates.
 - `clojure_eval` returns only the last form's value, and a `require` and the
   aliases it introduces must be in separate top-level forms.
 - Use a fresh process — `bb -e`, a scratch script, or a test — when a cold
-  start matters: namespace load order, extension/config discovery,
-  reproducible bug reports (`scripts/repros/` is the place for a repro).
+  start matters: namespace load order, extension/config discovery, reproducible
+  bug reports (`scripts/repros/` is where a repro goes).
 - The TUI cannot be driven from a REPL; use print mode or the tmux/pty capture
   scripts in `scripts/capture/` for real terminal behavior.
-- A REPL session does not replace the changed-file gates (`bb test-changed`,
-  `bb lint-changed`, `bb format-check-changed`).
 
 ## Editing rules
 
@@ -123,50 +98,49 @@ GUI-independent steps landed.)
 
 ### Portable Clojure
 
-- Avoid Java interop. Use `babashka.fs` for files, `babashka.process` for
-  subprocesses, `clojure.string` for string operations, and
-  `clojure.java.io` where appropriate. Do not import `java.io.*` or
-  `java.nio.file.*`, and avoid Java type hints.
+- Avoid Java interop: `babashka.fs` for files, `babashka.process` for
+  subprocesses, `clojure.string` for string operations, `clojure.java.io` where
+  appropriate. No `java.io.*` or `java.nio.file.*` imports, no Java type hints.
 - All outbound HTTP goes through `kmet.libs.http`. No other namespace may
   require `babashka.http-client` or spawn `curl`.
-- Reader conditionals name the host: `:bb` for Babashka and `:jolt` for Jolt.
-  Do not use `:clj` in kmet source because it matches both hosts. Use
+- Reader conditionals name the host: `:bb` for Babashka, `:jolt` for Jolt.
+  Never `:clj` in kmet source — it matches both hosts. Use
   `#?(:jolt X :default Y)` for a host-specific value with a portable default.
-- Both host lint views must remain valid for shared code.
-- The layer boundaries, task packaging rules, portability notes, and
-  application state conventions are maintained in
-  [`docs/architecture.md`](docs/architecture.md). Keep that document current
-  when those rules change.
+  Both host lint views must remain valid for shared code.
+- On Termux there is no `/tmp`: put scratch projects and test artifacts under
+  the repository (`target/` or a scratch dir beside the checkout), or use
+  `$TMPDIR` / `$PREFIX/tmp` when a real temp directory is needed.
+- Layer boundaries, task packaging, the remaining portability notes and
+  application state conventions are in [`docs/architecture.md`](docs/architecture.md)
+  — keep that document current when those rules change.
 
 ### Time and durations
 
-- Durations and deadlines go through `kmet.libs.concurrent/monotonic-ms` —
-  timeouts, sleep slices, backoff, idle reaping, elapsed counters.
-  `System/currentTimeMillis` steps (NTP, Android radio time, VM resume), so a
-  duration measured on it is wrong: a forward step fires timeouts early and
-  kills work that has just started, a backward step stalls them (a TUI timer
-  armed for 50ms can park for the step's length). Never mix the two clocks in
-  one deadline.
-- The wall clock stays right for absolute values and for comparisons against
-  externally-produced wall-clock data: token and JWT expiry, epoch ids and
-  timestamps, file mtimes, persisted cross-process cache TTLs.
+Durations and deadlines go through `kmet.libs.concurrent/monotonic-ms` —
+timeouts, sleep slices, backoff, idle reaping, elapsed counters. The wall clock
+steps (NTP, Android radio time, VM resume), so a duration measured on it is
+wrong: a forward step fires timeouts early and kills work that has just
+started, a backward step stalls them (a TUI timer armed for 50ms can park for
+the step's length). Never mix the two clocks in one deadline.
+
+The wall clock stays right for absolute values and for comparisons against
+externally-produced wall-clock data: token and JWT expiry, epoch ids and
+timestamps, file mtimes, persisted cross-process cache TTLs.
 
 ### Errors and logging
 
 - Use `ex-info` with a structured `:cause` or `:type` key. Let errors reach
   the top-level handler instead of silently swallowing them.
-- Lifecycle and handled-error logging belongs to `kmet.app.debug`; use
-  `kmet.app.debug/log` for opt-in debug output and `kmet.app.debug/log-error` for
-  unhandled top-level errors.
+- Lifecycle and handled-error logging belongs to `kmet.app.debug`: `log` for
+  opt-in debug output, `log-error` for unhandled top-level errors.
 
 ### Shared layers are extended, not copied
 
 - Call a facility where it lives; never re-implement it next to the caller.
   `kmet.tui.core` re-exports protocol-dispatching accessors (e.g.
-  `editor-get-text`, `editor-set-text!`, `editor-add-to-history!`) precisely
-  so upper layers never open-code a `(satisfies? …)` dispatch with a
-  field-based fallback, and `kmet.libs.*` owns its generic helpers the same
-  way.
+  `editor-get-text`, `editor-set-text!`, `editor-add-to-history!`) precisely so
+  upper layers never open-code a `(satisfies? …)` dispatch with a field-based
+  fallback, and `kmet.libs.*` owns its generic helpers the same way.
 - Needing a variant is the signal to extend the lower layer (or the nearest
   shared namespace) — a second implementation is a bug even when it works.
   The layer map is in [`docs/architecture.md`](docs/architecture.md); the
@@ -190,63 +164,30 @@ changed-file loop.
 ## Testing
 
 - Tests use `clojure.test` and live beside their module
-  (`modules/<module>/test/kmet/...`); cross-cutting and task-runner tests
-  live under the root `test/kmet/` (task tests under `test/kmet/tasks/`).
-- Mark tests that use real sleeps, network calls, terminal timeouts, or
-  subprocesses with `^:slow`; the runner separates them between `bb test` and
-  `bb test-ext`. An extension project declares its `test/` tree in
-  `modules.edn` so the root runner discovers those namespaces too, and keeps
-  its own `bb.edn` `test` task for running one project in place.
+  (`modules/<module>/test/kmet/...`); cross-cutting and task-runner tests live
+  under the root `test/kmet/` (task tests under `test/kmet/tasks/`). An
+  extension project declares its `test/` tree in `modules.edn` so the root
+  runner discovers those namespaces too, and keeps its own `bb.edn` `test` task
+  for running one project in place.
 - Test namespaces are discovered, not registered:
   `kmet.tasks.runner/all-namespaces` derives from the manifest test roots
   (`kmet.tasks.modules/test-namespaces`), so a new namespace need only live
   under a module/extension `test/` tree;
   `test/kmet/test_test_ns_registration.clj` holds the derivation honest.
-- Use `bb test-changed`, `bb lint-changed`, and
-  `bb format-check-changed` while iterating. Full gates are `bb test`,
+- Mark tests that use real sleeps, network calls, terminal timeouts, or
+  subprocesses with `^:slow`; the runner separates them between `bb test` and
+  `bb test-ext`.
+- Use the changed-file tasks above while iterating. Full gates are `bb test`,
   `bb test-ext`, `bb lint`, and `bb format-check`; do not run them during
-  routine iteration unless explicitly requested.
-- Lint must have zero errors, warnings, and informational findings.
-
-## Documentation and platform references
-
-- Keep the root [`README.md`](README.md) short and user-facing. Put extensive
-  user documentation in `docs/`.
-- Keep implementation and design documentation with its package, as listed in
-  the topic map; temporary project notes stay at the repository root.
-- TUI rules (components, Hiccup, `track!`, lifecycle/input, theming, and
-  full-redraw behavior) live in [`modules/tui/src/kmet/tui/tui.md`](modules/tui/src/kmet/tui/tui.md).
-- Tk backend rules (`kmet.tk.*`, the Tcl adapter, widget sets) live in
-  [`modules/tk/src/kmet/tk/README.md`](modules/tk/src/kmet/tk/README.md); the
-  module's widget sample (`kmet.gui-sample.*`, today `:ui/transcript`) is
-  documented there too. It is a dependency-free skeleton, not an app UI.
-- Jolt claims, guarded requires, loader capability floors, and native
-  packaging live in [`jolt/src/jolt/kmet/README.md`](jolt/src/jolt/kmet/README.md)
-  and [`docs/building.md`](docs/building.md).
-- Extension behavior lives in [`modules/app/src/kmet/extension.md`](modules/app/src/kmet/extension.md)
-  (the contract reference); the authoring guide is
-  [`docs/extensions.md`](docs/extensions.md), and shipped-extension user setup
-  remains in [`extensions/README.md`](extensions/README.md).
-- Supported platforms are Linux, macOS, Windows, WSL, and Termux. Start with
-  [`docs/building.md`](docs/building.md) for platform setup and distribution;
-  settings/theme/provider examples are in [`docs/examples/`](docs/examples/).
-- On Termux there is no `/tmp` directory. Never write scratch files there;
-  put temporary projects and test artifacts under the repository (e.g.
-  `target/` or a scratch dir beside the checkout), or use `$TMPDIR`/
-  `$PREFIX/tmp` when a real temp directory is needed.
+  routine iteration unless explicitly requested. Lint must have zero errors,
+  warnings, and informational findings.
 
 ## Git and instruction hierarchy
 
 - Commit messages describe the change and nothing else: no `Co-authored-by`
   trailers and no AI-assistant session links, machine addresses, or
-  generated-with footers. The commit-msg hook and the attribution workflow
-  enforce this.
-- When instructions conflict, use this order: explicit user instructions,
-  this file, the coding-agent defaults, then general best practices. Explain a
+  generated-with footers. The commit-msg hook (`sh scripts/install_hooks.sh`)
+  and the attribution workflow — the repository's only CI check — enforce this.
+- When instructions conflict, use this order: explicit user instructions, this
+  file, the coding-agent defaults, then general best practices. Explain a
   conflict and ask for confirmation rather than silently overriding it.
-- Before implementing a new feature, consult the relevant package document
-  and the reference implementations when useful — `~/src/cvstree/pi/` for
-  functionality (the maintained gap list is
-  [`docs/pi-alignment.md`](docs/pi-alignment.md)) and
-  `~/src/cvstree/deepseek-harness/` for the plugin architecture (the
-  comparison is [`new-app.md`](new-app.md) § Prior art: DSH).
