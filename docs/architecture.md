@@ -418,17 +418,16 @@ probe and no real use, and is gone;
   class table and the JVM host an explicit `java.lang`/`java.io`/`java.util`
   subset. A `def` in one call is invisible to the next, and redefining an
   injected var stays call-local.
-- **The bridge.** `(tools/call name args)` and the four builtin sugars return a
-  promise that settles with the record's verbatim result map
-  (`{:content :is-error :details :truncation :images}`). Calls run on a shared
-  process-wide pool (16 daemon workers) with no ordering guarantee between
-  themselves, and a script's call to a tool that declares `:sequential` is not
-  a barrier — that classifier belongs to the loop's own batches. There is no
-  batch helper: a script starts the calls it wants and derefs the promises.
-  Discovery (`tools/list`, `tools/describe`) is a bridge-local read and never
-  exposes `:execute`; listing carries each tool's name, description and
-  parameter schema, so a script chooses a call without one `describe` per
-  candidate.
+- **The bridge.** `(tools/call name args)` returns a promise that settles with
+  the record's verbatim result map (`{:content :is-error :details :truncation
+  :images}`). Calls run on a shared process-wide pool (16 daemon workers) with
+  no ordering guarantee between themselves, and a script's call to a tool that
+  declares `:sequential` is not a barrier — that classifier belongs to the
+  loop's own batches. There is no batch helper: a script starts the calls it
+  wants and derefs the promises. Discovery (`tools/list`, `tools/describe`) is
+  a bridge-local read and never exposes `:execute`; listing carries each tool's
+  name, description and parameter schema, so a script chooses a call without
+  one `describe` per candidate.
 - **The callable set** is the loop's `select-tools` result: all tools ∩ the
   agent's enabled set, plus extension-contributed sandbox-only sources, minus
   the exclusions (`run_code` itself, so a bridge submission cannot nest). A

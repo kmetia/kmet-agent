@@ -624,7 +624,7 @@
     (t/is (= "preloaded" (:content r)))))
 
 (t/deftest ^:slow test-run-code-inner-bash
-  (let [r (run "(emit @(tools/bash {:command \"echo inner-ok\"}))")]
+  (let [r (run "(emit @(tools/call \"bash\" {:command \"echo inner-ok\"}))")]
     (t/is (not (:is-error r)) (:content r))
     (t/is (str/includes? (:content r) "inner-ok"))
     (t/is (= "bash" (get-in r [:details :calls 0 :tool])))))
@@ -633,7 +633,7 @@
   (let [dir (temp-dir)]
     (try
       (binding [tool-util/*cwd* dir]
-        (let [r (run "(emit (clojure.string/trim (:content @(tools/bash {:command \"pwd\"}))))")]
+        (let [r (run "(emit (clojure.string/trim (:content @(tools/call \"bash\" {:command \"pwd\"}))))")]
           (t/is (not (:is-error r)) (:content r))
           (t/is (str/includes? (:content r) (fs/file-name dir)))))
       (finally (fs/delete-tree dir)))))

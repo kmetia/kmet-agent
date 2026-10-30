@@ -760,14 +760,13 @@ each other, and so may `:tool-execution-end` listeners. Keep shared
 extension state in atoms.
 
 Scripted tool calls run through the same hooks: a `run_code` call's inner
-`tools/call` (and the `tools/bash`/`read`/`write`/`edit` sugars) fires the
-before hook (block with `{:block true :reason ...}`, or rewrite with
-`{:args ...}`) and the after hook (override `:content` / `:is-error`). Two
-caveats: an inner call carries a synthetic `:tool-call-id` (but the batch's
-assistant message), and a blocked call's `:terminate` hint rides through to
-the script's result (a script has no batch to stop). Inner calls still produce no
-tool-execution events and
-no transcript/session entries.
+`tools/call` fires the before hook (block with `{:block true :reason ...}`,
+or rewrite with `{:args ...}`) and the after hook (override `:content` /
+`:is-error`). Two caveats: an inner call carries a synthetic `:tool-call-id`
+(but the batch's assistant message), and a blocked call's `:terminate` hint
+rides through to the script's result (a script has no batch to stop). Inner
+calls still produce no tool-execution events and no transcript/session
+entries.
 
 Hooks run **before** the app's permission policy (`:permissions`, an
 app-level service no extension can mount), so a hook can rewrite a call but

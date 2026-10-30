@@ -883,11 +883,7 @@
         p))))
 
 (defn- bridge-fns [opts]
-  {'call (fn [name & [args]] (dispatch! opts name args))
-   'read (fn [& [args]] (dispatch! opts "read" args))
-   'write (fn [& [args]] (dispatch! opts "write" args))
-   'edit (fn [& [args]] (dispatch! opts "edit" args))
-   'bash (fn [& [args]] (dispatch! opts "bash" args))})
+  {'call (fn [name & [args]] (dispatch! opts name args))})
 
 ;; ─── Result assembly ──────────────────────────────────────────────────────
 
