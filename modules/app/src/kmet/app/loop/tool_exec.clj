@@ -72,27 +72,19 @@
     ;; absent when the state has no ctx, so "no :srce-ctx" reads as "no ctx"
     (:ctx agent) (assoc :srce-ctx (:ctx agent))))
 
-(defn- emit-prepared!
-  "Emit :tool-execution-prepared — the call passed its before hooks and the
-   permission gate in preparation and its body is about to run. Separate from
-   :tool-execution-start, which fires before those gates: the call's block
-   exists while an `:ask` is still waiting for a human, so a front end starts
-   measuring the tool's duration here, per call, when execution really begins
-   (a batch is prepared before any of it runs, and a denied call never gets
-   this far)."
-  [agent tc]
+(defn- execute-tool-body!
+  "THE place a tool body starts, on the parallel and the sequential path alike:
+   emit :tool-execution-prepared — the call cleared its before hooks and the
+   permission gate in preparation, so the block that has existed since
+   :tool-execution-start (which fires before those gates, and so before an
+   `:ask` is answered) is now executing and a front end starts its clock here —
+   then run the body through the registry's executor. One entry point, so the
+   event and the body cannot drift and a third path cannot forget one of them."
+  [agent assistant-msg tc declared-tools]
   (state/emit agent {:type :tool-execution-prepared
                      :tool-call-id (:id tc)
                      :tool-name (:name tc)
-                     :args (:arguments tc)}))
-
-(defn- execute-tool-body!
-  "Emit the call's :tool-execution-prepared and run its body through the
-   registry's executor: THE place a tool body starts, on the parallel and the
-   sequential path alike, so a front end's clock and the body cannot drift and
-   a third path cannot forget one of them."
-  [agent assistant-msg tc declared-tools]
-  (emit-prepared! agent tc)
+                     :args (:arguments tc)})
   (invoke/execute-tool-call
    (state/tool-executor agent)
    {:tool-name (:name tc)

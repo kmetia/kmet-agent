@@ -30,8 +30,7 @@
             [kmet.reakt.core :as reakt]
             [kmet.ui.tui.interactive.layout :as layout]
             [kmet.ui.tui.interactive.session-admin :as session-admin]
-            [kmet.ui.tui.interactive.state :as state]
-            [kmet.ui.tui.interactive.turn :as turn]))
+            [kmet.ui.tui.interactive.state :as state]))
 
 ;; CoreState lives in kmet.ui.tui.interactive.state; the constructors
 ;; stay re-exported here for consumers of this namespace (tests).
@@ -278,8 +277,7 @@
    because the transcript block is behind the dialog and may be scrolled out of
    the visible window — a human approves what they can see."
   [ctx request]
-  ;; the reason is stringified: a policy's `:reason` is contractually a string,
-  ;; but a broken one must degrade the line, not throw the question away
+  ;; stringified: a broken policy reason must degrade this line, not throw it
   (let [reason (str (:reason request))
         tool (when-let [tools (srce/get ctx :tools)]
                (tool-registry/get-tool tools (:tool-name request)))
@@ -303,7 +301,7 @@
   [ctx request]
   (if-let [cs @live-mode]
     (let [tui (:tui cs)
-          listener (turn/tool-display-listener cs)]
+          listener (layout/tool-display-listener cs)]
       (tui/tui-add-input-listener tui listener)
       (try
         (ask-answer

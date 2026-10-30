@@ -566,6 +566,44 @@
       (turn/handle-submit cs text)
       (tui/tui-request-render (:tui cs)))))
 
+(defn- cycle-tool-display!
+  "Cycle the transcript's tool display (collapsed → quiet → expanded): one
+   reset! on the chat history's shared mode atom re-derives every tool and
+   skill block, the header and loaded-resources sections follow (quiet reads
+   as collapsed, pi's getStartupExpansionState), the setting persists, a
+   status line names the new mode, and the reflow repaints the scrollback.
+   The editor's app.tools.expand binding and the ask dialog's listener share
+   this one action."
+  [cs]
+  (let [ch (:chat-history cs)
+        mode (chat-history/chat-history-cycle-tool-display! ch)
+        expanded? (= :expanded mode)]
+    (try (cfg/set-tool-display-mode! mode)
+         (catch Exception e
+           (debug/log "Failed to persist tool-display-mode: " e)))
+    (when-let [hdr (:header-comp cs)]
+      (expandable-text/expandable-text-set-expanded! hdr expanded?))
+    (when-let [lr (:loaded-resources-comp cs)]
+      (loaded-resources/loaded-resources-set-expanded! lr expanded?))
+    (chat-history/chat-history-show-status! ch (str "Tool display: " (name mode)))
+    (turn/request-global-reflow-render! cs)))
+
+(defn tool-display-listener
+  "Build the TUI input listener for the tool-display cycle (app.tools.expand).
+   Installed while the permission ask blocks on a human: the dialog holds
+   every key, so the editor's own binding never runs, and the transcript the
+   human is deciding about could not be expanded, collapsed or quieted. The
+   listener chain runs before focus dispatch, the binding resolves per event
+   through the global manager (keybindings.edn overrides apply), and the event
+   is consumed so the dialog does not also act on it. Scoped to the ask on
+   purpose: a selector that owns the same chord itself (/tree's filter cycle)
+   keeps it, because nothing is installed while it is up."
+  [cs]
+  (fn [data]
+    (when (tui-kb/matches-key (tui-kb/get-global-keybindings) data "app.tools.expand")
+      (cycle-tool-display! cs)
+      {:consume true})))
+
 (defn- cycle-model-action!
   "Cycle the session model in DIRECTION (-1/1) and persist the new default
    (pi: onAction cycleModelForward/cycleModelBackward). Reports why nothing
@@ -957,7 +995,7 @@
           ;; pi: the same toggle drives tool expansion, the builtInHeader and
           ;; the loaded-resources sections; extended: ctrl+o cycles collapsed →
           ;; quiet → expanded (the ask dialog's listener calls the same cycle).
-                                       (turn/cycle-tool-display! cs)))
+                                       (cycle-tool-display! cs)))
        (editor/editor-set-on-action! ed "app.thinking.toggle"
                                      (fn []
           ;; pi: showStatus feedback on toggle + persist hideThinkingBlock to

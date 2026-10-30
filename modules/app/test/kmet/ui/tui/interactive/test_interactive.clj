@@ -1222,7 +1222,7 @@
                 cs {:tui {:render-requested? (atom false)
                           :force-redraw? (atom false)}
                     :chat-history ch}
-                listener ((var turn/tool-display-listener) cs)]
+                listener ((var layout/tool-display-listener) cs)]
             (is (= :collapsed (chat-history/chat-history-get-tool-display-mode ch)))
             (is (= {:consume true} (listener "\u000f"))
                 "ctrl+o is consumed so the dialog never sees it")
