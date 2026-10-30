@@ -86,6 +86,24 @@
                      :tool-name (:name tc)
                      :args (:arguments tc)}))
 
+(defn- execute-tool-body!
+  "Emit the call's :tool-execution-prepared and run its body through the
+   registry's executor: THE place a tool body starts, on the parallel and the
+   sequential path alike, so a front end's clock and the body cannot drift and
+   a third path cannot forget one of them."
+  [agent assistant-msg tc declared-tools]
+  (emit-prepared! agent tc)
+  (invoke/execute-tool-call
+   (state/tool-executor agent)
+   {:tool-name (:name tc)
+    :args (:arguments tc)
+    :tool-call-id (:id tc)
+    :assistant-message assistant-msg
+    :signal (:signal agent)
+    :ctx (tool-ctx agent)
+    :tools declared-tools
+    :on-update (tool-on-update agent (:id tc))}))
+
 (defn- prepare-tool-call!
   "Run one tool call's preparation: emit :tool-execution-start, then either settle
    it immediately when the tool is not in the request's captured tool map (pi:
@@ -190,24 +208,14 @@
         futures (into {} (map (fn [tc]
                                 [(:id tc)
                                  (future
-                                   (let [tc-id (:id tc)
-                                         ;; the body starts now: the batch
-                                         ;; is prepared (and every ask
-                                         ;; answered) before any future runs,
-                                         ;; so the clock starts per call here
-                                         _ (emit-prepared! agent tc)
-                                         result (finish-call
+                                   ;; a batch is prepared, asks answered, before
+                                   ;; any future runs: each call's clock starts
+                                   ;; with its own body
+                                   (let [result (finish-call
                                                  tc
-                                                 (invoke/execute-tool-call
-                                                  (state/tool-executor agent)
-                                                  {:tool-name (:name tc)
-                                                   :args (:arguments tc)
-                                                   :tool-call-id tc-id
-                                                   :assistant-message assistant-msg
-                                                   :signal (:signal agent)
-                                                   :ctx (tool-ctx agent)
-                                                   :tools declared-tools
-                                                   :on-update (tool-on-update agent tc-id)}))]
+                                                 (execute-tool-body!
+                                                  agent assistant-msg tc
+                                                  declared-tools))]
                                      (settle! tc result)
                                      result))])
                               pending))
@@ -246,21 +254,9 @@
             ;; before-tool-call hook (+ undeclared handling)
             prepared (prepare-tool-call! agent assistant-msg tc declared-tools)
             args (:arguments prepared)
-            blocked? (contains? prepared :kmet/blocked)
-            ;; the body starts here: the clock starts with it
-            _ (when-not blocked? (emit-prepared! agent prepared))
-            raw (if blocked?
+            raw (if (contains? prepared :kmet/blocked)
                   (:kmet/blocked prepared)
-                  (invoke/execute-tool-call
-                   (state/tool-executor agent)
-                   {:tool-name tc-name
-                    :args args
-                    :tool-call-id tc-id
-                    :assistant-message assistant-msg
-                    :signal (:signal agent)
-                    :ctx (tool-ctx agent)
-                    :tools declared-tools
-                    :on-update (tool-on-update agent tc-id)}))
+                  (execute-tool-body! agent assistant-msg prepared declared-tools))
             result (finish-tool-call! agent assistant-msg prepared args raw)
             result-msg (message/tool-result-message tc-id tc-name result)]
         (when (not= false append?)
