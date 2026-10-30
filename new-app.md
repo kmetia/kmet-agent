@@ -188,6 +188,15 @@ bridges the rest. `select-tools` stays the selection seam, so nothing about tool
 tables, rows or `:default-tools` changes; the reserved-name rule arrives with
 PTC. It waits on a second executor to plug in.
 
+**Measured over the session logs at the time of the change (689 `run_code`
+calls):** 98% never touch the bridge; the 14 that do are all in kmet's own
+sessions — 8 one web fetch, 3 redundant `bash`, 3 probes — and batching is
+absent (one `call-many`, zero `await-all`, zero `pmap`). So PTC is not the
+next executor: what the bridge needs first is a program-shaped result (a
+structured value beside the rendered `:content`), and the unexercised batch
+half is the first thing to retire. `scripts/bench/run_code_adoption.bb`
+reproduces the numbers.
+
 ### 3. `permissions/gate` is a call site, not a row
 
 The loop's pre-tool gate is a function the loop calls

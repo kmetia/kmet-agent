@@ -582,7 +582,7 @@
   (let [r (run "(emit @(tools/call \"script\" {:code \"1\"}))")]
     (t/is (str/includes? (:content r) "not active")))
   (binding [run-code/*enabled-tools-fn* (fn [] #{"read"})]
-    (t/is (= "[\"read\"]" (:content (run "(emit (tools/list))"))))
+    (t/is (= "[\"read\"]" (:content (run "(emit (mapv :name (tools/list)))"))))
     (let [r (run "(emit @(tools/call \"bash\" {}))")]
       (t/is (str/includes? (:content r) "not active")))))
 
@@ -590,12 +590,20 @@
   (with-custom-tool {:name "run-code-test-echo"
                      :label "Echo"
                      :description "Echo args"
+                     :params {:x {:type :number}}
                      :execute (fn [_] {:content "x"})}
     (fn []
-      (let [r (run "(emit (let [names (tools/list)] [(boolean (some #{\"run-code-test-echo\"} names)) (boolean (some #{\"run_code\"} names))]))")]
-        (t/is (= "[true false]" (:content r))))
-      (let [r (run "(emit (let [d (tools/describe \"run-code-test-echo\")] [(:name d) (:label d) (contains? d :execute)]))")]
-        (t/is (= "[\"run-code-test-echo\" \"Echo\" false]" (:content r))))
+      (let [r (run (str "(emit (let [ts (tools/list)"
+                        "            names (mapv :name ts)"
+                        "            t (first (filter #(= \"run-code-test-echo\" (:name %)) ts))]"
+                        "        [(boolean (some #{\"run-code-test-echo\"} names))"
+                        "         (boolean (some #{\"run_code\"} names))"
+                        "         (:description t)"
+                        "         (get-in t [:parameters :properties \"x\" :type])"
+                        "         (contains? t :execute) (contains? t :label)]))"))]
+        (t/is (= "[true false \"Echo args\" \"number\" false false]" (:content r))))
+      (let [r (run "(emit (let [d (tools/describe \"run-code-test-echo\")] [(:name d) (:description d) (contains? d :execute)]))")]
+        (t/is (= "[\"run-code-test-echo\" \"Echo args\" false]" (:content r))))
       (let [r (run "(emit (tools/describe \"no-such-tool\"))")]
         (t/is (str/includes? (:content r) ":is-error true"))))))
 
@@ -617,9 +625,9 @@
     (fn []
       (t/is (str/includes? (:content (run "(emit (tools/list))")) "run-code-test-contributed"))
       (let [r (run (str "(emit (let [d (tools/describe \"run-code-test-contributed\")]"
-                        "  [(:name d) (:label d) (contains? d :execute)"
+                        "  [(:name d) (:description d) (contains? d :execute)"
                         "   (get-in d [:parameters :properties \"x\" :type])]))"))]
-        (t/is (= "[\"run-code-test-contributed\" \"Contributed\" false \"number\"]"
+        (t/is (= "[\"run-code-test-contributed\" \"A sandbox-only tool\" false \"number\"]"
                  (:content r))))
       (let [r (run "(emit @(tools/call \"run-code-test-contributed\" {:x 7}))")]
         (t/is (str/includes? (:content r) "contributed:7"))
@@ -630,8 +638,8 @@
         (t/is (str/includes? (:content r) "not active"))
         (t/is (not (str/includes? (:content r) "should never run"))))
       ;; a registry name wins a collision (the model's names keep meaning)
-      (let [r (run "(emit (let [d (tools/describe \"read\")] (:label d)))")]
-        (t/is (= "Read file" (:content r)))))))
+      (let [r (run "(emit (let [d (tools/describe \"read\")] (:name d)))")]
+        (t/is (= "read" (:content r)))))))
 
 (t/deftest test-run-code-contributed-tools-bypass-enabled
   ;; contributions are sandbox-only: set-active-tools! filters the model's
@@ -642,7 +650,7 @@
                                          :execute (fn [_] {:content "x" :is-error false})}})
     (fn []
       (binding [run-code/*enabled-tools-fn* (fn [] #{"read"})]
-        (t/is (= "[\"read\" \"run-code-test-contributed\"]" (:content (run "(emit (tools/list))"))))
+        (t/is (= "[\"read\" \"run-code-test-contributed\"]" (:content (run "(emit (mapv :name (tools/list)))"))))
         (t/is (str/includes? (:content (run "(emit @(tools/call \"bash\" {}))")) "not active"))))))
 
 (t/deftest test-run-code-contributed-tools-unregister

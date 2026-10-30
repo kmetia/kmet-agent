@@ -299,9 +299,9 @@ the wrappers below or directly.
 A tool source contributes a whole catalog of tools **only to the `run_code`
 tool's sandbox surface**: the model never sees them in its tool schema and
 `set-active-tools!` does not filter them. Use it for tools that are meant
-to be looped over or fanned out inside scripts but would bloat the model's
-context if advertised (the mcp-adapter contributes its cached MCP catalog
-this way — see `docs/architecture.md` § Tools and the script sandbox):
+to be looped over inside scripts but would bloat the model's context if
+advertised (the mcp-adapter contributes its cached MCP catalog this way —
+see `docs/architecture.md` § Tools and the script sandbox):
 
 ```clojure
 (ext/register-tool-source! api :my-catalog

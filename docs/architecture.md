@@ -393,12 +393,14 @@ sandbox (a script can shell out through `babashka.process`).
 **`run_code`** (`kmet.app.tools.run-code`, the `:tool/run_code` row) is
 model-written Clojure in a per-call sandbox with the agent's tools bridged in.
 *Why it exists*: a tool result is re-sent on every later turn, so its token
-cost is paid repeatedly. The tool was measured before it was built — ~78% of
-result tokens were the find/read workload, mostly leaking through `bash`
-(`cat`/`rg`) rather than the `read` tool — and adoption is still the limiter
-after it landed (0.5% of result tokens, with the bash/read split unchanged).
-Its value is designed into the description and the batched surface, not assumed
-from per-call cost.
+cost is paid repeatedly. Measured over the session logs at the time of the
+change (689 `run_code` calls): 98% never touch the bridge — 628 `emit`, 342
+`slurp`, 327 `sh`, 235 regular-expression, 0 `pmap`, 0 futures, 1 `call-many`
+— and the 14 calls that do are all in kmet's own sessions: 8 one web fetch (a
+tool with no local twin), 3 redundant `bash` calls, 3 bridge probes. Its value
+is designed into the description and the emit-only channel, not assumed from
+per-call cost; the batch half has one observed call, and
+`scripts/bench/run_code_adoption.bb` reproduces the numbers.
 
 - **The boundary is the ctx.** The loop hands every call the run's ctx as
   `:srce-ctx`; `run_code` replaces it with a `srce/isolate` **realm** of that
@@ -427,7 +429,8 @@ from per-call cost.
   `:execution-mode` the loop's own batches honour, so no built-in declares it
   and the guarantee is for extension/contributed tools. Discovery
   (`tools/list`, `tools/describe`) is a bridge-local read and never exposes
-  `:execute`.
+  `:execute`; listing carries each tool's name, description and parameter
+  schema, so a script chooses a call without one `describe` per candidate.
 - **The callable set** is the loop's `select-tools` result: all tools ∩ the
   agent's enabled set, plus extension-contributed sandbox-only sources, minus
   the exclusions (`run_code` itself, so a bridge submission cannot nest). A
