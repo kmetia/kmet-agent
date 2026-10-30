@@ -5,7 +5,7 @@
             [clojure.edn :as edn]
             [babashka.fs :as fs]
             [kmet.ai.auth :as auth]
-            [kmet.libs.aws-sigv4 :as aws-sigv4]
+            [kmet.ai.aws-sigv4 :as aws-sigv4]
             [kmet.ai.google-adc :as google-adc]
             [kmet.app.config :as cfg]))
 

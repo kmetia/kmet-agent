@@ -238,8 +238,6 @@
    drift guard in kmet.agent.test-extensions keeps this list and the source
    trees in sync."
   '[kmet.libs.archive
-    kmet.libs.aws-sigv4
-    kmet.libs.catalog-cache
     kmet.libs.clipboard
     kmet.libs.concurrent
     kmet.libs.crypto

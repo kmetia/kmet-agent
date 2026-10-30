@@ -6,7 +6,7 @@
             [babashka.fs :as fs]
             [kmet.ai.llm :as llm]
             [kmet.ai.auth :as auth]
-            [kmet.libs.aws-sigv4 :as aws-sigv4]
+            [kmet.ai.aws-sigv4 :as aws-sigv4]
             [kmet.ai.google-adc :as google-adc]
             [kmet.app.tools.util :as tool-util]
             [kmet.app.extensions.core :as extensions]

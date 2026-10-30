@@ -19,7 +19,7 @@
             [kmet.ai.auth :as auth]
             [kmet.ai.models :as models]
             [kmet.ai.registry :as registry]
-            [kmet.libs.catalog-cache :as catalog-cache]
+            [kmet.ai.catalog-cache :as catalog-cache]
             [kmet.libs.http :as http]))
 
 ;; ─── Records (pi types.ts ImagesModel / images-models.ts ImagesProvider) ──

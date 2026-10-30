@@ -6,7 +6,7 @@
             [kmet.libs.json :as json]
             [clojure.string :as str]
             [kmet.ai.auth :as auth]
-            [kmet.libs.aws-sigv4 :as aws-sigv4]
+            [kmet.ai.aws-sigv4 :as aws-sigv4]
             [kmet.ai.llm :as llm]
             [kmet.ai.api.shared :as shared]
             [kmet.ai.api.openai-responses :as responses]

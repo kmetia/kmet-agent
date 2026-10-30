@@ -24,7 +24,7 @@
             [kmet.ai.registry :as registry]
             [kmet.ai.oauth :as oauth]
             [kmet.ai.provider-composer :as composer]
-            [kmet.libs.catalog-cache :as catalog-cache]))
+            [kmet.ai.catalog-cache :as catalog-cache]))
 
 ;; ─── Records (pi: types.ts Model / models.ts Provider) ─────────────────────
 

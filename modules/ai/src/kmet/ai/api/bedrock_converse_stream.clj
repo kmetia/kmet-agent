@@ -5,7 +5,7 @@
    [kmet.ai.http :as ai-http]
    [kmet.ai.api.sse :as sse]
    [clojure.string :as str]
-   [kmet.libs.aws-sigv4 :as aws-sigv4]
+   [kmet.ai.aws-sigv4 :as aws-sigv4]
    [kmet.ai.constrained-sampling :as cs]
    [kmet.libs.http :refer [transport-error-message]]
    [kmet.ai.message :refer [content-text image-block?]]

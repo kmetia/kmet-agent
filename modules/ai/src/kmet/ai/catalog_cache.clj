@@ -1,5 +1,6 @@
-(ns kmet.libs.catalog-cache
-  "Shared announce-once cache loading for AI model catalogs.")
+(ns kmet.ai.catalog-cache
+  "Announce-once cache loading for the model catalogs (models and
+   image-models share it).")
 
 (defn try-cached
   "Try to READ cache, announcing it on first adoption. Returns nil (and prints

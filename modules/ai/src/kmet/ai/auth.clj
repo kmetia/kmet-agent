@@ -15,7 +15,7 @@
    order."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
-            [kmet.libs.aws-sigv4 :as aws-sigv4]
+            [kmet.ai.aws-sigv4 :as aws-sigv4]
             [kmet.libs.edn-store :as cred]
             [kmet.libs.dynamic-value :as dynamic-value]
             [kmet.ai.slots :as slots]
