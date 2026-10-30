@@ -11,7 +11,7 @@
    flag.
 
    Everything here works on the value and the app's services; nothing here starts
-   work. That is what lets the UI layer require it: a front end reads an engine
+   a turn. That is what lets the UI layer require it: a front end reads an engine
    (session, model, thinking level) without reaching the driver, which owns the
    turns and sits above the UI's module.
 
@@ -21,6 +21,7 @@
    paths, never by a reader."
   (:require
    [babashka.fs :as fs]
+   [kmet.app.compaction :as agent-compact]
    [kmet.app.config :as cfg]
    [kmet.app.events :as events]
    [kmet.app.loop.stages :as loop-stages]
@@ -389,3 +390,12 @@
     (loop-state/set-thinking-level! ag level)
     (cfg/set-default-model! (:provider model) (:id model))
     level))
+
+(defn generate-branch-summary
+  "LLM summary of abandoned branch entries for tree navigation (`/tree`), a
+   one-shot call *about* the session rather than inside a turn. Returns
+   `{:summary str :usage map}` | `{:aborted true}` | `{:error msg}`; SIGNAL
+   aborts the call."
+  [engine entries custom-instructions signal replace-instructions?]
+  (agent-compact/generate-branch-summary (agent-state engine) entries
+                                         custom-instructions signal replace-instructions?))

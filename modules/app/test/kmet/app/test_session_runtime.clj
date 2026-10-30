@@ -16,7 +16,6 @@
             [kmet.app.session.core :as session]
             [kmet.app.session.runtime :as rt]
             [kmet.app.session.submission :as submission]
-            [kmet.app.session.summary :as summary]
             [kmet.app.skills :as skills]
             [kmet.app.tools.invoke :as invoke]
             [kmet.app.tools.registry :as tools-reg]
@@ -429,7 +428,7 @@
                         (reset! seen [ag entries instructions sig replace?])
                         {:summary "s"})]
           (is (= {:summary "s"}
-                 (summary/generate-branch-summary handle [{:id "e1"}] "instr" signal true)))
+                 (rt/generate-branch-summary handle [{:id "e1"}] "instr" signal true)))
           (is (identical? (rt/agent-state handle) (nth @seen 0))
               "the call hands the live agent state over")
           (is (= [[{:id "e1"}] "instr" signal true] (subvec @seen 1))))))))

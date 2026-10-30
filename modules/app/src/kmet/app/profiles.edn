@@ -31,7 +31,7 @@
           ;; and those registries' loaders move with the modes (landing 5).
           {:id :extensions :plugin kmet.app.extensions/plugin}
           {:id :events :plugin kmet.app.events/plugin}
-          {:id :tools :plugin kmet.app.tools/plugin}
+          {:id :tools :plugin kmet.app.registries/tools}
           ;; The tool rows: one per model-facing tool, named `:tool/<name>` — the
           ;; model's own spelling of the tool, so `--dump-config` prints a row
           ;; whose id is the name the model calls, and a patch targets it

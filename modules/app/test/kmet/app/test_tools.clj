@@ -2,15 +2,15 @@
   "The `:tools` service: installed by one `provide!`, mutated through its
    handle, visible to a sibling row, and gone with the fiber."
   (:require [clojure.test :refer [deftest is testing]]
+            [kmet.app.registries :as registries]
             [kmet.app.registry :as registry]
-            [kmet.app.tools :as tools]
             [kmet.srce.core :as srce]))
 
 (defn- mounted
   "The root ctx and the tools row's fiber."
   []
   (let [ctx (srce/root)
-        fiber (srce/plugin! ctx tools/plugin)]
+        fiber (srce/plugin! ctx registries/tools)]
     [ctx fiber]))
 
 (deftest the-service-is-provided-once-and-mutated-through-its-handle
@@ -45,4 +45,4 @@
   (let [[a _] (mounted)
         [b _] (mounted)]
     (is (not (identical? (srce/get a :tools) (srce/get b :tools)))))
-  (is (not (identical? (tools/service) (tools/service)))))
+  (is (not (identical? (registries/service) (registries/service)))))

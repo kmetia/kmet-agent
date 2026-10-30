@@ -132,8 +132,8 @@ kmet/app/
 └── version.clj         — the version string and the source-run marker
 ```
 
-Each row names its own file (`tools.clj`, `sessions.clj`, `extensions.clj`,
-`agents.clj`, …): a row is a `srce` plugin whose `apply` provides its service,
+Each row names its own file (`sessions.clj`, `extensions.clj`, `agents.clj`,
+`world.clj`, …): a row is a `srce` plugin whose `apply` provides its service,
 and `registries.clj` is the router behind them. How the rows are composed is
 § Composition below; [`new-app.md`](../new-app.md) keeps the design record and
 the items that did not ship.
@@ -245,7 +245,7 @@ schema-validated at load).
 |---|---|---|
 | `:world` | `{:config …}` — catalogs, models layer, settings, themes and extension flags as loaded | `kmet.app.world/plugin` (`:defer`, root only) |
 | `:llm` | `{:send-message (fn [opts])}` | `kmet.app.llm/plugin`; builtin `kmet.ai.llm/send-message` |
-| `:tools` | a `Registry` handle (tag + name) | `kmet.app.tools/plugin`; each tool row registers through it |
+| `:tools` | a `Registry` handle (tag + name) | `kmet.app.registries/tools`; each tool row registers through it |
 | `:commands` `:prompts` `:skills` | a `Registry` handle each | `kmet.app.registries/{commands,prompts,skills}` |
 | `:events` | the event vocabulary registry | `kmet.app.events/plugin` |
 | `:systemPrompt` | ordered sections assembled over `:skills` | `kmet.app.system-prompt/plugin` |
@@ -363,7 +363,7 @@ remote session usable without a prompt per call.
 
 ## Tools and the script sandbox
 
-The tool layer is `kmet.app.tools`: one record per tool, mounted as a row
+The tool layer is `kmet.app.tools.*`: one record per tool, mounted as a row
 (`:tool/read`, `:tool/bash`, …) and dispatched through the `:tools` service. Two
 things are worth knowing before changing a tool.
 

@@ -4,7 +4,7 @@
 
    Each registry is a `kmet.app.registry/Registry` handle over an atom,
    installed by one `provide!` into the app scope, and mutated through that
-   handle afterwards (`kmet.app.tools`' rule: installation is the provide, and a
+   handle afterwards (the registry row's rule: installation is the provide, and a
    plugin adding a command never re-provides). They stay **separate services**
    rather than one `:registries` key because their consumers differ — the model
    sees `:tools`, the slash parser `:commands`, the prompt builder `:prompts` —

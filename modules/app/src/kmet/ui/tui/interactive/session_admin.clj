@@ -12,7 +12,6 @@
             [kmet.app.session.core :as session]
             [kmet.app.session.export :as session-export]
             [kmet.app.session.lifecycle :as lifecycle]
-            [kmet.app.session.summary :as summary]
             [kmet.app.session.runtime :as runtime]
             [kmet.ui.tui.chat-history :as chat-history]
             [kmet.ui.tui.bash-execution :as be]
@@ -590,7 +589,7 @@
     (start-branch-summary-render-driver! (:tui cs) done)
     (future
       (try
-        (deliver done (summary/generate-branch-summary
+        (deliver done (runtime/generate-branch-summary
                        (:engine cs) (:entries-to-summarize prep) custom-instructions
                        abort-atom replace-instructions?))
         (catch Throwable e

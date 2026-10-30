@@ -5,14 +5,13 @@
   (:require [clojure.test :refer [deftest is testing]]
             [kmet.app.registry :as registry]
             [kmet.app.registries :as registries]
-            [kmet.app.tools :as tools]
             [kmet.srce.core :as srce]))
 
 (defn- mounted
   "The root ctx with every registry row mounted."
   []
   (let [ctx (srce/root)]
-    (doseq [row [tools/plugin registries/commands registries/prompts registries/skills]]
+    (doseq [row [registries/tools registries/commands registries/prompts registries/skills]]
       (srce/plugin! ctx row))
     ctx))
 
@@ -48,7 +47,5 @@
     (srce/dispose! fiber)
     (is (nil? (srce/get ctx :commands)) "the provide! entry was the row's effect")))
 
-(deftest the-tools-row-is-the-shared-shape
-  (is (= (:name registries/tools) (:name tools/plugin))
-      "kmet.app.tools is the same declaration under its own name")
+(deftest a-row-builds-a-fresh-handle
   (is (not (identical? (registries/service) (registries/service)))))

@@ -37,7 +37,7 @@ its layers; this page is what the build ships.
 | `:world` | `kmet.app.world/plugin` |  | `world` |  | defer |
 | `:extensions` | `kmet.app.extensions/plugin` |  |  |  |  |
 | `:events` | `kmet.app.events/plugin` |  | `events` |  |  |
-| `:tools` | `kmet.app.tools/plugin` |  | `tools` |  |  |
+| `:tools` | `kmet.app.registries/tools` |  | `tools` |  |  |
 | `:tool/read` | `kmet.app.tools.read/plugin` | `tools` |  |  |  |
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
@@ -74,7 +74,7 @@ its layers; this page is what the build ships.
 | `:world` | `kmet.app.world/plugin` |  | `world` |  | defer |
 | `:extensions` | `kmet.app.extensions/plugin` |  |  |  |  |
 | `:events` | `kmet.app.events/plugin` |  | `events` |  |  |
-| `:tools` | `kmet.app.tools/plugin` |  | `tools` |  |  |
+| `:tools` | `kmet.app.registries/tools` |  | `tools` |  |  |
 | `:tool/read` | `kmet.app.tools.read/plugin` | `tools` |  |  |  |
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
@@ -105,7 +105,7 @@ its layers; this page is what the build ships.
 | `:world` | `kmet.app.world/plugin` |  | `world` |  | defer |
 | `:extensions` | `kmet.app.extensions/plugin` |  |  |  |  |
 | `:events` | `kmet.app.events/plugin` |  | `events` |  |  |
-| `:tools` | `kmet.app.tools/plugin` |  | `tools` |  |  |
+| `:tools` | `kmet.app.registries/tools` |  | `tools` |  |  |
 | `:tool/read` | `kmet.app.tools.read/plugin` | `tools` |  |  |  |
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
@@ -136,7 +136,7 @@ its layers; this page is what the build ships.
 | `:world` | `kmet.app.world/plugin` |  | `world` |  | defer |
 | `:extensions` | `kmet.app.extensions/plugin` |  |  |  |  |
 | `:events` | `kmet.app.events/plugin` |  | `events` |  |  |
-| `:tools` | `kmet.app.tools/plugin` |  | `tools` |  |  |
+| `:tools` | `kmet.app.registries/tools` |  | `tools` |  |  |
 | `:tool/read` | `kmet.app.tools.read/plugin` | `tools` |  |  |  |
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
@@ -168,7 +168,7 @@ its layers; this page is what the build ships.
 | `:world` | `kmet.app.world/plugin` |  | `world` |  | defer |
 | `:extensions` | `kmet.app.extensions/plugin` |  |  |  |  |
 | `:events` | `kmet.app.events/plugin` |  | `events` |  |  |
-| `:tools` | `kmet.app.tools/plugin` |  | `tools` |  |  |
+| `:tools` | `kmet.app.registries/tools` |  | `tools` |  |  |
 | `:tool/read` | `kmet.app.tools.read/plugin` | `tools` |  |  |  |
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
@@ -199,7 +199,7 @@ its layers; this page is what the build ships.
 | `:world` | `kmet.app.world/plugin` |  | `world` |  | defer |
 | `:extensions` | `kmet.app.extensions/plugin` |  |  |  |  |
 | `:events` | `kmet.app.events/plugin` |  | `events` |  |  |
-| `:tools` | `kmet.app.tools/plugin` |  | `tools` |  |  |
+| `:tools` | `kmet.app.registries/tools` |  | `tools` |  |  |
 | `:tool/read` | `kmet.app.tools.read/plugin` | `tools` |  |  |  |
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
@@ -229,7 +229,7 @@ its layers; this page is what the build ships.
 | `:world` | `kmet.app.world/plugin` |  | `world` |  | defer |
 | `:extensions` | `kmet.app.extensions/plugin` |  |  |  |  |
 | `:events` | `kmet.app.events/plugin` |  | `events` |  |  |
-| `:tools` | `kmet.app.tools/plugin` |  | `tools` |  |  |
+| `:tools` | `kmet.app.registries/tools` |  | `tools` |  |  |
 | `:tool/read` | `kmet.app.tools.read/plugin` | `tools` |  |  |  |
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
