@@ -546,8 +546,10 @@ errored or aborted response, where it precedes `:agent-end`) and
 `:agent-before-settle` once before the prompt settles — carry the boundary
 state alongside `:entries []` / `:continue false`: the projected context
 (`:context-entries` / `:context-messages`, plus `:llm-messages`, the
-projection after compaction/branch summaries are flattened to user messages
-— pi: `BoundaryContextPreview`), `:pending-messages` and `:can-continue`.
+projection through `kmet.app.loop.message/to-llm-messages` — pi's
+`convertToLlm`, the same function the request applies: bash executions,
+custom messages and the summary roles flattened to user messages — pi:
+`BoundaryContextPreview`), `:pending-messages` and `:can-continue`.
 `:turn-end` additionally carries `:message-entry-id` (the persisted entry the
 turn's assistant message became) and `:tool-result-entry-ids` (the turn's
 tool results' entry ids, in call order) — the ids an edit draft can target

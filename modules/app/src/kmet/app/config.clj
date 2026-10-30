@@ -127,7 +127,7 @@
 
 ;; load-config (above) applies the merged :http-transport and the shell
 ;; settings to their runtime knobs; the accessors live with the others below.
-(declare get-http-transport get-shell-path get-shell-command-prefix)
+(declare get-agent-dir get-http-transport get-shell-path get-shell-command-prefix)
 
 (defn- resolve-path
   "Resolve a path value relative to its scope dir. ~ and absolute paths pass
@@ -237,11 +237,11 @@
    defaults < user < project, with nested maps merged key-by-key (pi: project
    settings override global, nested objects merge). AGENT-DIR pins the scope
    dir for the global settings file, auth.edn, and models.edn
-   (KMET_CODING_AGENT_DIR sandboxing); nil resolves via auth/resolve-agent-dir.
+   (KMET_CODING_AGENT_DIR sandboxing); nil resolves via get-agent-dir.
    Warns once per retired :*-dir key present in a settings file.
    Returns merged map."
   [& {:keys [no-env? no-settings? agent-dir]}]
-  (let [agent-dir (or agent-dir (auth/resolve-agent-dir))
+  (let [agent-dir (or agent-dir (get-agent-dir))
         user-config (when-not no-settings? (load-edn-file (str (fs/path agent-dir "settings.edn"))))
         project-config (when-not no-settings? (load-edn-file ".kmet/settings.edn"))
         _ (auth/load-auth! agent-dir)
@@ -294,13 +294,28 @@
 (defn get-session-dir [config]
   (expand-path (:session-dir config)))
 
+(def ^:private agent-dir-env-var
+  "Env var overriding the agent dir (pi: ENV_AGENT_DIR =
+   <APP>_CODING_AGENT_DIR)."
+  "KMET_CODING_AGENT_DIR")
+
 (defn get-agent-dir
-  "The global agent directory. Defaults to ~/.kmet/agent; honors the
-   KMET_CODING_AGENT_DIR env override (pi: getAgentDir + ENV_AGENT_DIR).
-   Delegates to auth/resolve-agent-dir — auth owns the root so ai
-   namespaces (which must not require kmet.app.config) share it."
+  "The global agent directory — the state root the app owns and hands to the
+   layers below it: `kmet.ai` takes it as an argument (it resolves no default
+   of its own), the extension api carries it as `:agent-dir`, and the packages,
+   keybindings, themes and project context sit under it. Defaults to
+   ~/.kmet/agent; the KMET_CODING_AGENT_DIR override wins when set and
+   non-blank (pi: getAgentDir + ENV_AGENT_DIR). A `~`-leading override expands
+   against home; a relative one passes through (callers resolve it against the
+   cwd).
+
+   Pure: env + home, no config atom, so the world's load can call it before
+   `init!`."
   []
-  (auth/resolve-agent-dir))
+  (let [s (some-> (getenv agent-dir-env-var) str/trim)]
+    (if (seq s)
+      (expand-path s)
+      (str (fs/path (fs/home) ".kmet" "agent")))))
 
 ;; ─── Settings persistence (pi: SettingsManager setters) ───────────────────
 ;; The config module reads settings.edn at load; these fns persist individual
@@ -804,12 +819,12 @@
 (defn init!
   "Load config. Returns the loaded config map. Call once at startup.
    AGENT-DIR pins the scope dir (KMET_CODING_AGENT_DIR sandboxing); nil
-   resolves via auth/resolve-agent-dir. Themes are NOT loaded here — the
+   resolves via get-agent-dir. Themes are NOT loaded here — the
    unified resolution (packages/load-themes!) loads them with the other
    resources, so settings toggles apply."
   ([] (init! nil))
   ([agent-dir]
-   (let [agent-dir (or agent-dir (auth/resolve-agent-dir))
+   (let [agent-dir (or agent-dir (get-agent-dir))
          config (load-config :agent-dir agent-dir)]
      (fs/create-dirs (get-session-dir config))
      config)))

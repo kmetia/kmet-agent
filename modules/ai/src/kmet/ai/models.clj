@@ -252,10 +252,8 @@
   "User-level provider catalog cache, written by `kmet --generate-models`
    (the same pipeline as `bb generate-models`). load-catalogs! prefers it
    over the bundled catalogs when it is strictly newer (fresh-model-cache).
-   Bindable for tests; nil (the default) resolves via
-   default-models-cache-dir — ~/.kmet/agent/models-cache, or AGENT-DIR/
-   models-cache when load-catalogs! pins a scope dir (KMET_CODING_AGENT_DIR
-   sandboxing)."
+   Bindable for tests. nil (the default) defers to the agent-dir cache
+   load-catalogs! is given; with no agent dir there is no cache."
   nil)
 
 (def ^:dynamic *use-models-cache*
@@ -365,12 +363,11 @@
            (catch Exception _ nil)))))
 
 (defn default-models-cache-dir
-  "The default user-level model catalog cache dir (<agent-dir>/models-cache).
-   `kmet --generate-models` writes it; load-catalogs! reads it. AGENT-DIR
-   pins the scope dir (KMET_CODING_AGENT_DIR sandboxing); nil resolves via
-   cfg/get-agent-dir."
-  ([] (default-models-cache-dir nil))
-  ([agent-dir] (str (fs/path (or agent-dir (auth/resolve-agent-dir)) "models-cache"))))
+  "The user-level model catalog cache dir (<agent-dir>/models-cache).
+   `kmet --generate-models` writes it; load-catalogs! reads it. AGENT-DIR is
+   the host's root (kmet.app.config/get-agent-dir); kmet.ai resolves none."
+  [agent-dir]
+  (auth/agent-dir-path agent-dir "models-cache"))
 
 (defn fresh-model-cache
   "*models-cache-dir (defaulting to the agent-dir cache) when usable: it
@@ -379,17 +376,16 @@
    that ships newer model data wins over a stale cache until
    `kmet --generate-models` refreshes it (pi remote-catalog semantics: the
    persisted overlay applies only over older locally generated data).
-   AGENT-DIR pins the default's scope dir (KMET_CODING_AGENT_DIR
-   sandboxing); nil resolves via cfg/get-agent-dir. nil otherwise."
-  ([] (fresh-model-cache nil))
-  ([agent-dir]
-   (when *use-models-cache*
-     (let [dir (or *models-cache-dir* (default-models-cache-dir agent-dir))
-           cache-gen (dir-generation dir)]
-       (when cache-gen
-         (when-let [bundled (catalog-generation)]
-           (when (pos? (compare cache-gen bundled))
-             dir)))))))
+   AGENT-DIR is the host's root; nil means no user root, so no cache. nil
+   otherwise."
+  [agent-dir]
+  (when *use-models-cache*
+    (when-let [dir (or *models-cache-dir*
+                       (some-> agent-dir default-models-cache-dir))]
+      (when-let [cache-gen (dir-generation dir)]
+        (let [bundled (catalog-generation)]
+          (when (and bundled (pos? (compare cache-gen bundled)))
+            dir))))))
 
 (defn- load-dir-providers
   "Provider map from catalog EDN files directly under DIR (throws on an
@@ -433,27 +429,25 @@
    mutates its builtins map) and installs the auth config-key source
    (models.edn / extension :api-key), so auth resolution reflects composed
    providers. Returns the providers map. Call once at startup (pi registers
-   its generated providers at creation). AGENT-DIR pins the models-cache
-   default's scope dir (KMET_CODING_AGENT_DIR sandboxing); nil resolves via
-   cfg/get-agent-dir."
-  ([] (load-catalogs! nil))
-  ([agent-dir]
-   (auth/set-config-key-source! (fn [provider-id] (:api-key (get-provider provider-id))))
-   (auth/set-oauth-source! (fn [provider-id] (:oauth (get-provider provider-id))))
-   (let [providers
-         (or (when-let [cache (fresh-model-cache agent-dir)]
-               (catalog-cache/try-cached announced-cache cache
-                                         "Models: using cached catalogs from"
-                                         load-dir-providers
-                                         "Warning: ignoring unusable model catalog cache:"))
-             (do (reset! announced-cache nil)
-                 (load-bundled-providers)))
-         providers (into {}
-                         (for [[pid p] providers]
-                           [pid (assoc p :oauth (builtin-oauth p))]))]
-     (reset! builtins-atom providers)
-     (reset! providers-atom providers)
-     providers)))
+   its generated providers at creation). AGENT-DIR is the host's root
+   (kmet.app.config/get-agent-dir); nil reads the bundled catalogs only."
+  [agent-dir]
+  (auth/set-config-key-source! (fn [provider-id] (:api-key (get-provider provider-id))))
+  (auth/set-oauth-source! (fn [provider-id] (:oauth (get-provider provider-id))))
+  (let [providers
+        (or (when-let [cache (fresh-model-cache agent-dir)]
+              (catalog-cache/try-cached announced-cache cache
+                                        "Models: using cached catalogs from"
+                                        load-dir-providers
+                                        "Warning: ignoring unusable model catalog cache:"))
+            (do (reset! announced-cache nil)
+                (load-bundled-providers)))
+        providers (into {}
+                        (for [[pid p] providers]
+                          [pid (assoc p :oauth (builtin-oauth p))]))]
+    (reset! builtins-atom providers)
+    (reset! providers-atom providers)
+    providers))
 
 ;; ─── Provider composition (pi: ModelRuntime rebuildProviders /           ──
 ;;    recomposeProvider / registerProvider / registerNativeProvider /        ──
@@ -778,14 +772,13 @@
    per-provider composition errors fall back to the built-in for that
    provider (a config-only provider that fails to compose is dropped).
    Registers the auth config-key source (models.edn/extension :api-key), so
-   auth resolution and availability reflect configured keys. AGENT-DIR pins
-   the global file's scope dir and the models-cache default
-   (KMET_CODING_AGENT_DIR sandboxing); nil resolves via cfg/get-agent-dir."
-  ([] (load-models-config! nil))
-  ([agent-dir]
-   (load-catalogs! agent-dir)
-   (model-config/load-config! agent-dir)
-   (recompose-all!)))
+   auth resolution and availability reflect configured keys. AGENT-DIR is
+   the host's root (kmet.app.config/get-agent-dir): the global models.edn's
+   scope dir and the models-cache default."
+  [agent-dir]
+  (load-catalogs! agent-dir)
+  (model-config/load-config! agent-dir)
+  (recompose-all!))
 
 (defn get-model-config-error
   "models.edn load + composition error string (pi ModelRuntime.getError):
@@ -877,3 +870,25 @@
   [model thinking]
   (let [clamped (clamp-thinking-level model (or thinking :off))]
     (when-not (= :off clamped) clamped)))
+
+;; ─── Thinking budgets (pi: adjustMaxTokensForThinking) ────────────────────
+;; Model metadata: the wire caps max_tokens with these and the compaction stage
+;; sizes its summary request with the same number.
+
+(def thinking-budgets
+  "pi adjustMaxTokensForThinking defaultBudgets (minimal/low/medium/high)."
+  {:minimal 1024 :low 2048 :medium 8192 :high 16384})
+
+(defn clamp-reasoning
+  "pi clampReasoning: xhigh/max collapse to high, the levels a budget-based
+   thinking config knows; every other level (and nil) passes through."
+  [effort]
+  (if (contains? #{:xhigh :max} effort) :high effort))
+
+(defn thinking-budget-for
+  "Thinking-token budget of session LEVEL on MODEL (pi
+   thinkingBudgetForLevel): 0 when thinking is off or the model does not
+   reason; an unsupported level clamps to the model's highest, and
+   xhigh/max use the high budget (pi clampReasoning)."
+  [model level]
+  (get thinking-budgets (clamp-reasoning (effective-effort model level)) 0))

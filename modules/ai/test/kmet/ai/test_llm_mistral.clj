@@ -36,8 +36,7 @@
                :thinking "reasoning here"
                :tool-calls [{:id "tool-1" :name "read" :arguments {:path "/x"}}]}
               {:role :tool :content [{:content "done" :tool_use_id "tool-1"}]
-               :tool-name "read"}
-              {:role :bash :content [{:content ""}] :command "ls" :output "a\nb" :exit-code 0}]]
+               :tool-name "read"}]]
     (t/is (= [{:role "system" :content "sys"}
               {:role "user" :content [{:type "text" :text "hi"}]}
               {:role "assistant"
@@ -46,8 +45,7 @@
                :tool_calls [{:id "abc123xyz" :type "function"
                              :function {:name "read" :arguments "{\"path\":\"/x\"}"} :index 0}]}
               {:role "tool" :tool_call_id "abc123xyz" :name "read"
-               :content [{:type "text" :text "done"}]}
-              {:role "user" :content "Ran `ls`\n```\na\nb\n```"}]
+               :content [{:type "text" :text "done"}]}]
              (@#'mistral/mistral-messages msgs (mistral-model) normalize)))))
 
 (t/deftest test-mistral-messages-images

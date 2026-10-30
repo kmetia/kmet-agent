@@ -44,10 +44,12 @@
   ([opts ctx]
    ;; Provider/model registry — loads the committed catalogs (pi registers its
    ;; generated providers at startup), then the models.edn user config layer
-   ;; (custom providers + overrides; errors surface as warnings)
-   (models/load-catalogs!)
-   (image-models/load-image-catalogs!)
-   (models/load-models-config!)
+   ;; (custom providers + overrides; errors surface as warnings). The agent
+   ;; dir is the host's: kmet.ai takes it as an argument.
+   (let [agent-dir (cfg/get-agent-dir)]
+     (models/load-catalogs! agent-dir)
+     (image-models/load-image-catalogs! agent-dir)
+     (models/load-models-config! agent-dir))
    (when-let [err (models/get-model-config-error)]
      (binding [*out* *err*]
        (println "Warning: models.edn:" err)))

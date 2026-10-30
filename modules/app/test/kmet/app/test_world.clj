@@ -17,9 +17,11 @@
         ctx (srce/root {:name :app})
         prev (root/reset-root!)]
     (try
-      (with-redefs [models/load-catalogs! #(swap! calls conj :catalogs)
-                    image-models/load-image-catalogs! #(swap! calls conj :image-catalogs)
-                    models/load-models-config! #(swap! calls conj :models-config)
+      ;; the loaders take the agent dir the world passes them (the host's
+      ;; root); the stub records the call and ignores the argument
+      (with-redefs [models/load-catalogs! (fn [_] (swap! calls conj :catalogs))
+                    image-models/load-image-catalogs! (fn [_] (swap! calls conj :image-catalogs))
+                    models/load-models-config! (fn [_] (swap! calls conj :models-config))
                     models/get-model-config-error (constantly nil)
                     cfg/init! (fn [] (swap! calls conj :config) {:model "x"})
                     packages/resolve-theme-paths (constantly ["/t.edn"])

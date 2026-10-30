@@ -8,7 +8,7 @@
    [kmet.ai.auth :as auth]
    [kmet.libs.dynamic-value :as dynamic-value]
    [kmet.libs.json :as json]
-   [kmet.libs.http :as lib-http]
+   [kmet.ai.message :as message]
    [kmet.ai.models :as models]
    [kmet.ai.usage :as usage]
    [kmet.ai.constrained-sampling :as cs]
@@ -34,10 +34,6 @@
 ;; Moved into kmet.libs.http (the single HTTP boundary owns the transport
 ;; error contract); re-exported here so every caller gets the stable
 ;; retryable error tokens regardless of transport.
-
-(def network-exception-classes lib-http/network-exception-classes)
-(def http2-stream-reset-regex lib-http/http2-stream-reset-regex)
-(def transport-error-message lib-http/transport-error-message)
 
 (defn effective-total-timeout-ms
   "Resolve the total transport timeout: an explicit non-positive value
@@ -128,51 +124,6 @@
     (cond-> merged
       (:auth-header provider) (assoc "Authorization" (str "Bearer " api-key)))))
 
-(defn content-text
-  "Extract plain text from a message content block vector.
-   A block has {:type :text :text \"...\"} or {:type \"text\" :text \"...\"}."
-  [content]
-  (str/join (for [b content
-                  :when (or (= (:type b) :text)
-                            (= (:type b) "text"))]
-              (:text b))))
-
-(defn- edited-bash-text
-  "The text an append-only context edit installed on a bash entry — a text
-   block vector (see kmet.app.session.core/append-context-edit!). nil for an
-   un-edited entry (kmet derives the text from :command/:output where pi's
-   tool messages carry content) and for legacy entries carrying some other
-   block shape."
-  [content]
-  (when (and (vector? content)
-             (some #(contains? #{:text "text"} (:type %)) content))
-    (content-text content)))
-
-(defn bash-execution-text
-  "Bash result entry → LLM text (pi: bashExecutionToText). A text block vector
-   installed by a context edit wins over the derived command text."
-  [{:keys [command output exit-code cancelled truncated full-output-path content]}]
-  (if-some [edited (edited-bash-text content)]
-    edited
-    (let [output (or output "")
-          base (str "Ran `" command "`\n"
-                    (if (seq output)
-                      (str "```\n" output "\n```")
-                      "(no output)"))]
-      (str base
-           (when cancelled "\n\n(command cancelled)")
-           (when (and (not cancelled) (some? exit-code) (not (zero? exit-code)))
-             (str "\n\nCommand exited with code " exit-code))
-           (when (and truncated full-output-path)
-             (str "\n\n[Output truncated. Full output: " full-output-path "]"))))))
-
-(defn image-block?
-  "True if a content block is an image block (kmet canonical
-   {:type :image :data base64 :mime-type str}, matching pi's read tool
-   {type: \"image\", data, mimeType} format)."
-  [b]
-  (or (= (:type b) :image) (= (:type b) "image")))
-
 (defn copilot-vision-input?
   "pi hasCopilotVisionInput: any user or tool-result message carries image
    content (Copilot-Vision-Request header)."
@@ -180,7 +131,7 @@
   (boolean
    (some (fn [m]
            (case (name (:role m))
-             "user" (some image-block? (:content m))
+             "user" (some message/image-block? (:content m))
              "tool" (seq (:images m))
              false))
          messages)))
@@ -203,14 +154,14 @@
    string when there are no image blocks (backward compat); with image blocks
    returns an array of text/image_url blocks (OpenAI vision format)."
   [content]
-  (if (some image-block? content)
+  (if (some message/image-block? content)
     (into []
           (for [b content]
-            (if (image-block? b)
+            (if (message/image-block? b)
               {:type "image_url"
                :image_url {:url (str "data:" (:mime-type b) ";base64," (:data b))}}
               {:type "text" :text (or (:text b) "")})))
-    (content-text content)))
+    (message/content-text content)))
 
 (defn tool-result-content
   "OpenAI tool result content: the text from the tool_result block, plus
@@ -273,9 +224,10 @@
      :family target}))
 
 (defn openai-messages
-  "Map agent messages to OpenAI chat-completion messages.
-   Bash entries become user messages (pi: convertToLlm bashExecution);
-   excluded ones are dropped. TARGET and MODEL-ID identify the request's
+  "Map wire messages to OpenAI chat-completion messages. The caller has
+   already converted agent roles (pi: convertToLlm, kmet.app.loop.message/
+   to-llm-messages), so every role here is a provider role. TARGET and
+   MODEL-ID identify the request's
    target (see message-target: an account alias keeps its own provenance id
    while its base provider's request shaping applies); an assistant message's
    :thinking is echoed back as reasoning_content only when the message was
@@ -293,9 +245,6 @@
                         thinking (when (same-origin? m provider model-id)
                                    (str/trim (or (:thinking m) "")))]
                     (case role
-                      "bash"
-                      (when-not (:exclude-from-context? m)
-                        {:role "user" :content (bash-execution-text m)})
                       "tool"
                       {:role "tool"
                        :tool_call_id (normalize-openai-tool-call-id
@@ -303,7 +252,7 @@
                                       family)
                        :content (tool-result-content m)}
                       "assistant"
-                      (let [text (content-text (:content m))
+                      (let [text (message/content-text (:content m))
                             has-tc (seq (:tool-calls m))
                             msg (cond-> {:role "assistant"}
                                   (seq text) (assoc :content text)
@@ -325,9 +274,6 @@
                         (when (or (seq text) has-tc)
                           (cond-> msg
                             (seq thinking) (assoc :reasoning_content thinking))))
-                      ;; custom messages (pi: convertToLlm custom→user)
-                      "custom"
-                      {:role "user" :content (openai-content (:content m))}
                       {:role role
                        :content (openai-content (:content m))}))))
           messages)))
@@ -357,9 +303,6 @@
                                      fill
                                      "")]
                     (case role
-                      "bash"
-                      (when-not (:exclude-from-context? m)
-                        {:role "user" :content (bash-execution-text m)})
                       "tool"
                       {:role "tool"
                        :tool_call_id (normalize-openai-tool-call-id
@@ -367,7 +310,7 @@
                                       family)
                        :content (tool-result-content m)}
                       "assistant"
-                      (let [text (content-text (:content m))
+                      (let [text (message/content-text (:content m))
                             has-tc (seq (:tool-calls m))
                             msg (cond-> {:role "assistant"}
                                   (seq text) (assoc :content text)
@@ -386,10 +329,6 @@
                         (when (or (seq text) has-tc)
                           ;; deepseek thinking mode requires reasoning_content on assistant messages
                           (assoc msg :reasoning_content thinking)))
-                      ;; custom messages (pi: convertToLlm custom→user)
-                      "custom"
-                      {:role "user"
-                       :content (openai-content (:content m))}
                       {:role role
                        :content (openai-content (:content m))}))))
           messages)))
@@ -676,25 +615,10 @@
         :string-thinking (openai-thinking-params-string-thinking model effort)
         (openai-thinking-params-generic model effort effort?)))))
 
-(def thinking-budgets
-  "pi adjustMaxTokensForThinking defaultBudgets (minimal/low/medium/high)."
-  {:minimal 1024 :low 2048 :medium 8192 :high 16384})
-
-(def min-answer-tokens 1024)
-
-(defn clamp-reasoning
-  "pi clampReasoning: xhigh/max collapse to high, the levels a budget-based
-   thinking config knows; every other level (and nil) passes through."
-  [effort]
-  (if (contains? #{:xhigh :max} effort) :high effort))
-
-(defn thinking-budget-for
-  "Thinking-token budget of session LEVEL on MODEL (pi
-   thinkingBudgetForLevel): 0 when thinking is off or the model does not
-   reason; an unsupported level clamps to the model's highest, and
-   xhigh/max use the high budget (pi clampReasoning)."
-  [model level]
-  (get thinking-budgets (clamp-reasoning (models/effective-effort model level)) 0))
+(def min-answer-tokens
+  "Answer tokens kept outside the anthropic thinking budget (pi
+   adjustMaxTokensForThinking's MIN_ANSWER_TOKENS)."
+  1024)
 
 (defn anthropic-adaptive-effort
   "pi mapThinkingLevelToEffort: the adaptive output_config effort — the
@@ -722,8 +646,8 @@
       {:thinking {:type "adaptive" :display "summarized"}
        :output_config {:effort (anthropic-adaptive-effort model effort)}
        :max-tokens (or (:max-tokens model) 4096)}
-      (let [level (clamp-reasoning effort)
-            budget (get thinking-budgets level 0)
+      (let [level (models/clamp-reasoning effort)
+            budget (get models/thinking-budgets level 0)
             max-tokens (or (:max-tokens model) 4096)
             budget (min budget (max 0 (- max-tokens min-answer-tokens)))]
         {:thinking {:type "enabled" :budget_tokens budget :display "summarized"}

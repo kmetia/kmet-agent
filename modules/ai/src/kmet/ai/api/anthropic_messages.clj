@@ -7,7 +7,9 @@
    [kmet.ai.api.sse :as sse]
    [clojure.string :as str]
    [kmet.ai.models :as models]
-   [kmet.ai.api.shared :refer [anthropic-thinking bash-execution-text copilot-dynamic-headers endpoint-url image-block? on-payload request-headers tool->anthropic-schema effective-total-timeout-ms headers-timeout-ms transport-error-message usage-with-cost]]))
+   [kmet.libs.http :refer [transport-error-message]]
+   [kmet.ai.message :refer [image-block?]]
+   [kmet.ai.api.shared :refer [anthropic-thinking copilot-dynamic-headers endpoint-url on-payload request-headers tool->anthropic-schema effective-total-timeout-ms headers-timeout-ms usage-with-cost]]))
 
 (def default-anthropic-version "2023-06-01")
 
@@ -101,9 +103,6 @@
                  (let [role (name (:role m))]
                    (case role
                      "system" nil
-                     "bash"
-                     (when-not (:exclude-from-context? m)
-                       {:role "user" :content (bash-execution-text m)})
                      "tool"
                      (let [tool-use-id (anthropic-normalize-tool-call-id
                                         (-> m :content first :tool_use_id))]
@@ -112,11 +111,6 @@
                                            :tool_use_id tool-use-id
                                            :content (anthropic-tool-result-content m)}
                                     (:is-error m) (assoc :is_error true))]})
-                     ;; custom messages (pi: convertToLlm custom→user)
-                     "custom"
-                     (let [content (anthropic-content (:content m))]
-                       (when-not (blank-content? content)
-                         {:role "user" :content content}))
                      ;; pi convertMessages: blank text blocks are dropped from
                      ;; outgoing requests and a message left without sendable
                      ;; content is skipped entirely — Anthropic rejects empty

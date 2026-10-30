@@ -13,7 +13,7 @@
    drop-incomplete-tool-calls repairs a corrupted conversation (tool calls
    without their results, or orphaned results) before it reaches a provider."
   (:require [clojure.string :as str]
-            [kmet.ai.api.shared :as shared]))
+            [kmet.ai.message :as ai-message]))
 
 (defn user-message
   "Build a user message map. text — string; images — optional vector of
@@ -77,7 +77,7 @@
   [content]
   (let [placeholder {:type :text :text blocked-image-placeholder}]
     (reduce (fn [acc b]
-              (let [b (if (shared/image-block? b) placeholder b)]
+              (let [b (if (ai-message/image-block? b) placeholder b)]
                 (if (and (= b placeholder) (= (peek acc) placeholder))
                   acc
                   (conj acc b))))
@@ -175,3 +175,82 @@
                         m)
                       :else m))))
           messages)))
+
+;; ─── convertToLlm ─────────────────────────────────────────────────────────
+;; The roles the agent context carries and a provider must not see. Applied per
+;; request (kmet.app.llm hands this to kmet.ai.llm as :convert-to-llm, after the
+;; :on-context hook) and again for the boundary preview — one function, two
+;; readers.
+
+(def ^:private compaction-summary-prefix
+  "pi: COMPACTION_SUMMARY_PREFIX — the compacted-history preamble and
+   <summary> tag a compactionSummary message is wrapped in at the wire."
+  "The conversation history before this point was compacted into the following summary:\n\n<summary>\n")
+
+(def ^:private compaction-summary-suffix "\n</summary>")
+
+(def ^:private branch-summary-prefix
+  "pi: BRANCH_SUMMARY_PREFIX."
+  "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n")
+
+(def ^:private branch-summary-suffix "\n</summary>")
+
+(defn bash-entry-text
+  "A bash session entry as the text a provider sees (pi: bashExecutionToText).
+   A text block vector installed by a context edit wins over the derived
+   command text (see kmet.app.session.core/append-context-edit!); an
+   un-edited entry derives it from :command/:output where pi's tool messages
+   already carry content."
+  [{:keys [command output exit-code cancelled truncated full-output-path content]}]
+  (if-some [edited (when (and (vector? content)
+                              (some #(contains? #{:text "text"} (:type %)) content))
+                     (ai-message/content-text content))]
+    edited
+    (let [output (or output "")
+          base (str "Ran `" command "`\n"
+                    (if (seq output)
+                      (str "```\n" output "\n```")
+                      "(no output)"))]
+      (str base
+           (when cancelled "\n\n(command cancelled)")
+           (when (and (not cancelled) (some? exit-code) (not (zero? exit-code)))
+             (str "\n\nCommand exited with code " exit-code))
+           (when (and truncated full-output-path)
+             (str "\n\n[Output truncated. Full output: " full-output-path "]"))))))
+
+(defn to-llm-messages
+  "pi: convertToLlm — the roles the agent context carries and a provider must
+   not see, flattened into provider messages: bash executions and custom
+   messages become user messages (an excluded bash execution is dropped), and
+   compaction/branch-summary messages become user messages carrying their
+   wrapped summary text. Every other role passes through.
+
+   The conversion happens per request, so the agent context (and the TUI) keeps
+   the roles and an extension's :context hook still sees them; only the payload
+   is flattened. Image blocking stays app-side and provider-independent
+   (block-message-images), and the wire builders shape the result for their
+   provider."
+  [messages]
+  (into []
+        (keep (fn [m]
+                (case (:role m)
+                  :bash
+                  (when-not (:exclude-from-context? m)
+                    {:role :user
+                     :content [{:type :text :text (bash-entry-text m)}]})
+                  (:custom :custom-message)
+                  {:role :user :content (normalize-content (:content m))}
+                  :compaction
+                  {:role :user
+                   :content [{:type :text
+                              :text (str compaction-summary-prefix
+                                         (:summary m "")
+                                         compaction-summary-suffix)}]}
+                  :branch-summary
+                  {:role :user
+                   :content [{:type :text
+                              :text (str branch-summary-prefix
+                                         (:summary m "")
+                                         branch-summary-suffix)}]}
+                  m)))
+        messages))

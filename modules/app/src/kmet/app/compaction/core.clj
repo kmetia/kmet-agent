@@ -6,7 +6,7 @@
    Session replacement happens in kmet.app.session.core (compact-with-summary!,
    the append-only entry constructor), orchestration in
    kmet.app.compaction.stage. Depends on session/project-entries for the
-   projected cut point and kmet.ai.api.shared for the bash/custom wire text
+   projected cut point and kmet.app.loop.message for the bash/custom wire text
    (pi: compaction.ts imports buildSessionContext from session-manager and
    convertToLlm from the message converters).
 
@@ -15,7 +15,7 @@
    dedicated turn-prefix prompt and merges two summaries)."
   (:require [clojure.string :as str]
             [clojure.edn :as edn]
-            [kmet.ai.api.shared :as shared]
+            [kmet.app.loop.message :as message]
             [kmet.app.session.core :as session]
             [kmet.ai.usage :as usage]))
 
@@ -24,9 +24,10 @@
 
 ;; ─── Token estimation (pi: estimateTokens) ─────────────────────────────────
 
-(defn- content-text
-  "Plain text of a content string or block vector (tool_result blocks carry
-   their text in :content)."
+(defn- entry-text
+  "Plain text of a session entry's content: a raw string, or the :text blocks
+   of a block vector (tool_result blocks carry theirs in :content). Distinct
+   from kmet.ai.message/content-text, which reads a wire message's blocks."
   [content]
   (if (string? content)
     content
@@ -295,13 +296,13 @@
   (str/join "\n\n"
             (keep (fn [e]
                     (case (:role e)
-                      :user (let [t (content-text (:content e))]
+                      :user (let [t (entry-text (:content e))]
                               (when (seq t) (str "[User]: " t)))
                       :assistant
                       (let [thinking (str/join "\n"
                                                (for [b (:content e) :when (= :thinking (:type b))]
                                                  (:thinking b)))
-                            text (content-text (:content e))
+                            text (entry-text (:content e))
                             tcs (:tool-calls e)
                             parts (cond-> []
                                     (seq thinking) (conj (str "[Assistant thinking]: " thinking))
@@ -309,7 +310,7 @@
                                     (seq tcs) (conj (str "[Assistant tool calls]: "
                                                          (str/join "; " (map tool-call-str tcs)))))]
                         (when (seq parts) (str/join "\n" parts)))
-                      :tool (let [t (content-text (:content e))]
+                      :tool (let [t (entry-text (:content e))]
                               (when (seq t)
                                 (str "[Tool result]: " (truncate-for-summary t))))
                       ;; bash results and custom messages become user messages
@@ -317,10 +318,10 @@
                       ;; serialize the same text so it is not lost to a later
                       ;; compaction
                       :bash (when-not (:exclude-from-context? e)
-                              (let [t (str/trim (shared/bash-execution-text e))]
+                              (let [t (str/trim (message/bash-entry-text e))]
                                 (when (seq t) (str "[User]: " t))))
                       (:custom :custom-message)
-                      (let [t (str/trim (content-text (:content e)))]
+                      (let [t (str/trim (entry-text (:content e)))]
                         (when (seq t) (str "[User]: " t)))
                       ;; compaction/branch_summary entries project to user
                       ;; messages in context — serialize their summary text so

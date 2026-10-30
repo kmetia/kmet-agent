@@ -319,8 +319,9 @@
                         toolResultEntryIds), plus the boundary state: :context-entries /
                         :context-messages / :llm-messages (the session projection, so a handler
                         can read the transcript or pick an edit target without touching the
-                        session — pi: BoundaryContextPreview; :llm-messages is the
-                        provider-agnostic part of pi's convertToLlm), :pending-messages (the
+                        session — pi: BoundaryContextPreview; :llm-messages is pi's
+                        convertToLlm, the same function the request applies),
+                        :pending-messages (the
                         queued batches the next attempt would start
                         from, plus custom messages deferred while streaming — pi:
                         _getPendingBoundaryMessages), :can-continue, :entries [] and :continue

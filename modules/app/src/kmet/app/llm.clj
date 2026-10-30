@@ -8,6 +8,14 @@
    a state outside a composition (a test, a hand-built run) falls back to the
    library.
 
+   The conversion is not part of that value: `send-message` attaches the app's
+   convertToLlm to every request as `:convert-to-llm`
+   (`kmet.app.loop.message/to-llm-messages`), so the run keeps its roles,
+   `kmet.ai` applies it after the `:on-context` hook (pi's emitContext →
+   convertToLlm order), and a replacing implementation receives the option
+   rather than having to know the roles. The boundary preview reads the same
+   function — one conversion, two readers.
+
    Per-call, not per-agent: the provider, model, thinking level and endpoints
    already ride the call's opts and the agent state, so the service carries no
    selection state and a mounted implementation never has to track it. The
@@ -15,6 +23,7 @@
    provider through `register-model-provider!` — this seam is the request, not
    the registry."
   (:require [kmet.ai.llm :as llm]
+            [kmet.app.loop.message :as message]
             [kmet.srce.core :as srce]))
 
 (def builtin
@@ -32,9 +41,11 @@
 (defn send-message
   "Send OPTS as one streaming request and return the future that completes when
    the stream ends — `kmet.ai.llm/send-message`'s contract, through whatever the
-   agent's composition mounted."
+   agent's composition mounted, with the app's provider-neutral message view
+   attached."
   [agent opts]
-  ((:send-message (impl agent)) opts))
+  ((:send-message (impl agent))
+   (assoc opts :convert-to-llm message/to-llm-messages)))
 
 ;; ─── The row ─────────────────────────────────────────────────────────────
 

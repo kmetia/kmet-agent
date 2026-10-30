@@ -17,8 +17,11 @@
         path (str agent-dir "/auth.edn")]
     (fs/create-dirs agent-dir)
     (try
-      (with-redefs [auth/resolve-agent-dir (fn [] agent-dir)
-                    auth/auth-atom (atom {})]
+      ;; both cells are process-wide: redefining them (with-redefs restores
+      ;; on exit) keeps one suite's temp root out of the next
+      (with-redefs [auth/auth-atom (atom {})
+                    auth/auth-root (atom nil)]
+        (auth/load-auth! agent-dir)
         (f path))
       (finally (fs/delete-tree agent-dir)))))
 
@@ -165,13 +168,13 @@
         (t/is (= "sk-1" (auth/resolve-api-key :deepseek))))
       (t/testing "load-auth! treats non-map content as empty"
         (spit path "[1 2 3]\n")
-        (t/is (= {} (auth/load-auth!)))))))
+        (t/is (= {} (auth/load-auth! (str (fs/parent path)))))))))
 
 (t/deftest test-load-auth!
   (with-auth-file
     (fn [path]
       (spit path "{:opencode-go {:key \"ok-1\"}}\n")
-      (t/is (= {:opencode-go {:key "ok-1"}} (auth/load-auth!)))
+      (t/is (= {:opencode-go {:key "ok-1"}} (auth/load-auth! (str (fs/parent path)))))
       (t/is (= "ok-1" (auth/resolve-api-key :opencode-go))))))
 
 (t/deftest test-auth-file-pretty-format

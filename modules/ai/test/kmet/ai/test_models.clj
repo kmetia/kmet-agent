@@ -97,7 +97,7 @@
 ;; ─── Catalog loading ───────────────────────────────────────────────────────
 
 (t/deftest test-load-catalogs
-  (let [providers (m/load-catalogs!)]
+  (let [providers (m/load-catalogs! nil)]
     (t/is (map? providers))
     (t/is (= #{:opencode-go :opencode :deepseek :github-copilot :openai :xai
                :openai-codex :azure-openai-responses :anthropic :google :groq
@@ -197,7 +197,7 @@
   ;; model) — this fast-suite test samples one model per provider for the
   ;; registry integration aspects (Model records + get-model reachability)
   ;; instead of iterating all 1058 models.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [providers (m/get-providers)
         sampled (mapv (fn [p] (first (:models p))) providers)
         api-set #{:openai-completions :openai-responses
@@ -270,7 +270,7 @@
 ;; ─── get-available (auth check = auth/configured?, Phase 3) ───────────────
 
 (t/deftest test-get-available
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (t/testing "no keys → nothing available"
     (with-redefs [auth/configured? (fn [_] false)]
       (t/is (empty? (m/get-available)))))
@@ -297,7 +297,7 @@
 ;; ─── Config interop ────────────────────────────────────────────────────────
 
 (t/deftest test-resolve-config-model
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (t/testing ":model setting wins"
     (t/is (= "custom" (m/resolve-config-model {:provider :opencode-go
                                                :model "custom"}))))
@@ -367,7 +367,7 @@
 ;; ─── models.edn composition (pi: ModelRuntime.rebuildProviders) ────────────
 
 (t/deftest test-load-models-config!
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [tmp (str (fs/absolutize (fs/file "target" (str "test-models-config-" (System/currentTimeMillis)))))
         agent-dir (str tmp "/agent")
         global (str agent-dir "/models.edn")
@@ -420,10 +420,10 @@
           (t/is (= "lit-1" (m/resolve-config-model {:provider :my-literal})))))
       (finally
         (fs/delete-tree tmp)
-        (m/load-catalogs!)))))
+        (m/load-catalogs! nil)))))
 
 (t/deftest test-load-models-config-error-keeps-builtins
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [tmp (str (fs/absolutize (fs/file "target" (str "test-models-config-err-" (System/currentTimeMillis)))))
         path (str tmp "/models.edn")]
     (fs/create-dirs tmp)
@@ -448,13 +448,13 @@
         (t/is (some? (m/get-model :deepseek "deepseek-flash")) "builtin models kept"))
       (finally
         (fs/delete-tree tmp)
-        (m/load-catalogs!)))))
+        (m/load-catalogs! nil)))))
 
 (t/deftest test-load-models-config-reload-stacking
   ;; Repeated load-models-config! (startup + /reload) must compose over the
   ;; pristine builtins, never over already-composed providers: a removed
   ;; provider disappears and a changed override replaces the old one.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [tmp (str (fs/absolutize (fs/file "target" (str "test-models-reload-" (System/currentTimeMillis)))))
         path (str tmp "/models.edn")]
     (fs/create-dirs tmp)
@@ -480,12 +480,12 @@
         (t/is (= 41 (count (m/get-providers))) "registry back to builtin count"))
       (finally
         (fs/delete-tree tmp)
-        (m/load-catalogs!)))))
+        (m/load-catalogs! nil)))))
 
 (t/deftest test-composed-models-are-records
   ;; Registry contract: get-models returns Model records. Composed custom
   ;; models (plain maps from model-from-json) normalize to records.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [tmp (str (fs/absolutize (fs/file "target" (str "test-models-records-" (System/currentTimeMillis)))))
         path (str tmp "/models.edn")]
     (fs/create-dirs tmp)
@@ -502,7 +502,7 @@
             "custom models are Model records like builtin ones")
       (finally
         (fs/delete-tree tmp)
-        (m/load-catalogs!)))))
+        (m/load-catalogs! nil)))))
 
 ;; ─── Phase 7: extension provider registration (pi ModelRuntime) ───────────
 
@@ -515,7 +515,7 @@
                  :context-window 1000 :max-tokens 100}))
 
 (t/deftest test-register-provider-config!
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (m/clear-extension-providers!)
   (try
     (t/testing "config-only extension provider composes + registers"
@@ -561,10 +561,10 @@
             "builtin restored"))
     (finally
       (m/clear-extension-providers!)
-      (m/load-catalogs!))))
+      (m/load-catalogs! nil))))
 
 (t/deftest test-register-native-provider!
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (m/clear-extension-providers!)
   (try
     (t/testing "full Provider record registers as-is"
@@ -602,10 +602,10 @@
       (t/is (= 43 (count (m/get-providers))) "builtins + 2 extension providers"))
     (finally
       (m/clear-extension-providers!)
-      (m/load-catalogs!))))
+      (m/load-catalogs! nil))))
 
 (t/deftest test-extension-facade
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (m/clear-extension-providers!)
   (try
     (m/register-provider-config! :facade-ext
@@ -649,11 +649,11 @@
                      (m/get-api-key-and-headers (m/get-model :keyless "k1"))))))))
     (finally
       (m/clear-extension-providers!)
-      (m/load-catalogs!))))
+      (m/load-catalogs! nil))))
 
 (t/deftest test-extension-over-models-edn-layer
   ;; 3 layers: builtin < models.edn < extension (pi composeModelProvider)
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (m/clear-extension-providers!)
   (let [tmp (str (fs/absolutize (fs/file "target" (str "test-ext-models-edn-" (System/currentTimeMillis)))))
         path (str tmp "/models.edn")]
@@ -676,12 +676,12 @@
       (finally
         (fs/delete-tree tmp)
         (m/clear-extension-providers!)
-        (m/load-catalogs!)))))
+        (m/load-catalogs! nil)))))
 
 (t/deftest test-facade-header-errors-and-native-key
   ;; pi getApiKeyAndHeaders: unresolvable configured headers → ok:false with
   ;; the message; native provider api-keys count as configured.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (m/clear-extension-providers!)
   (try
     (with-redefs [auth/auth-atom (atom {})
@@ -715,7 +715,7 @@
                  (m/get-api-key-and-headers (m/get-model :native-key "nk1"))))))
     (finally
       (m/clear-extension-providers!)
-      (m/load-catalogs!))))
+      (m/load-catalogs! nil))))
 
 (t/deftest test-fresh-cache-wins
   (let [dir (str (fs/create-temp-dir {:dir "target" :prefix "model-cache-test-"}))
@@ -740,13 +740,13 @@
                 *err* (java.io.StringWriter.)
                 m/*use-models-cache* true
                 m/*models-cache-dir* dir]
-        (t/is (= dir (m/fresh-model-cache)))
-        (let [providers (m/load-catalogs!)]
+        (t/is (= dir (m/fresh-model-cache nil)))
+        (let [providers (m/load-catalogs! nil)]
           (t/is (= #{:scratchcache} (set (keys providers))))
           (t/is (= "Scratch Cache" (:name (m/get-provider :scratchcache))))))
       (finally
         (fs/delete-tree dir)
-        (m/load-catalogs!)))))
+        (m/load-catalogs! nil)))))
 
 (t/deftest test-stale-or-incomplete-cache-ignored
   (let [dir (str (fs/create-temp-dir {:dir "target" :prefix "model-cache-test-"}))
@@ -765,15 +765,15 @@
       (write-cache {:manifest true :generated-at "2000-01-01T00:00:00Z"})
       (binding [m/*use-models-cache* true
                 m/*models-cache-dir* dir]
-        (t/is (nil? (m/fresh-model-cache)) "stale generation ignored")
-        (t/is (contains? (m/load-catalogs!) :deepseek) "bundled catalogs win"))
+        (t/is (nil? (m/fresh-model-cache nil)) "stale generation ignored")
+        (t/is (contains? (m/load-catalogs! nil) :deepseek) "bundled catalogs win"))
       (write-cache {:manifest false})
       (binding [m/*use-models-cache* true
                 m/*models-cache-dir* dir]
-        (t/is (nil? (m/fresh-model-cache)) "generation without manifest ignored"))
+        (t/is (nil? (m/fresh-model-cache nil)) "generation without manifest ignored"))
       (finally
         (fs/delete-tree dir)
-        (m/load-catalogs!)))))
+        (m/load-catalogs! nil)))))
 
 (t/deftest test-unusable-cache-falls-back-to-bundled
   (let [dir (str (fs/create-temp-dir {:dir "target" :prefix "model-cache-test-"}))]
@@ -788,17 +788,17 @@
                 *err* (java.io.StringWriter.)
                 m/*use-models-cache* true
                 m/*models-cache-dir* dir]
-        (let [providers (m/load-catalogs!)]
+        (let [providers (m/load-catalogs! nil)]
           (t/is (nil? (get providers :scratchcache)))
           (t/is (contains? providers :deepseek) "bundled catalogs win")))
       (finally
         (fs/delete-tree dir)
-        (m/load-catalogs!)))))
+        (m/load-catalogs! nil)))))
 
 ;; ─── Account aliases (models.edn :accounts) ────────────────────────────────
 
 (t/deftest test-account-aliases
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [tmp (str (fs/absolutize (fs/file "target" (str "test-accounts-" (System/currentTimeMillis)))))
         path (str tmp "/models.edn")]
     (fs/create-dirs tmp)
@@ -907,4 +907,4 @@
         (with-redefs [fs/cwd (fn [] (str tmp "/project"))]
           (model-config/load-config! (str tmp "/empty")))
         (fs/delete-tree tmp)
-        (m/load-catalogs!)))))
+        (m/load-catalogs! nil)))))

@@ -1,11 +1,11 @@
 (ns kmet.ai.message
-  "Malli schemas for provider messages and their content blocks.
-
-   This namespace is a boundary aid: messages cross
-   the session-file and (eventually) wire boundaries, so their shape is
-   described here rather than ad hoc in every caller. Converters remain in
-   the loop and providers; this schema only validates."
-  (:require [malli.core :as m]
+  "Provider message and content-block shapes: the malli schemas and the two
+   readers a block shape needs. Messages cross the session-file and wire
+   boundaries, so their shape is described here rather than ad hoc in every
+   caller; the converters stay with their callers (kmet.app.loop.message) and
+   the providers."
+  (:require [clojure.string :as str]
+            [malli.core :as m]
             [malli.error :as me]))
 
 (def TextBlock
@@ -74,3 +74,21 @@
 (defn explain-message
   [m]
   (me/humanize (m/explain Message m)))
+
+;; ─── Block readers ─────────────────────────────────────────────────────────
+
+(defn content-text
+  "Extract plain text from a message content block vector.
+   A block has {:type :text :text \"...\"} or {:type \"text\" :text \"...\"}."
+  [content]
+  (str/join (for [b content
+                  :when (or (= (:type b) :text)
+                            (= (:type b) "text"))]
+              (:text b))))
+
+(defn image-block?
+  "True if a content block is an image block (kmet canonical
+   {:type :image :data base64 :mime-type str}, matching pi's read tool
+   {type: \"image\", data, mimeType} format)."
+  [b]
+  (or (= (:type b) :image) (= (:type b) "image")))

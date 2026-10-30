@@ -26,8 +26,8 @@
             [kmet.app.loop.stages :as loop-stages]
             [kmet.app.session.core :as session]
             [kmet.app.extensions.core :as extensions]
-            [kmet.ai.api.shared :as shared]
             [kmet.ai.models :as models]
+            [kmet.libs.http :as libs-http]
             [kmet.app.config :as cfg]))
 
 (defn reset-compaction-blocked!
@@ -155,7 +155,7 @@
         ;; throws).
         (if @signal
           (partial :aborted)
-          (partial :error (shared/transport-error-message e))))
+          (partial :error (libs-http/transport-error-message e))))
       (finally
         (doseq [s signals]
           (when s (remove-watch s watch-key)))))))
@@ -180,14 +180,14 @@
   "The summarization call's output cap (pi: generateSummaryWithUsage's
    maxTokens plus adjustMaxTokensForThinking): floor(0.8 * SETTINGS'
    :reserve-tokens) for the summary text, plus the session's thinking
-   budget when MODEL reasons (shared/thinking-budget-for), bounded by
+   budget when MODEL reasons (models/thinking-budget-for), bounded by
    MODEL's own maximum output. Reasoning tokens count against the same
    ceiling, so without the allowance a deep-thinking session spends the
    summary's budget on reasoning and generation stops `length` — an
    incomplete summary the caller rejects."
   [settings model thinking]
   (let [base (long (Math/floor (* 0.8 (:reserve-tokens settings))))
-        cap (+ base (shared/thinking-budget-for model thinking))]
+        cap (+ base (models/thinking-budget-for model thinking))]
     (min cap (or (:max-tokens model) cap))))
 
 (defn stage-retry-policy

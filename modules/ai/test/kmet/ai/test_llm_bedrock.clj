@@ -196,7 +196,7 @@
   ;; Full send-message → SigV4-signed ConverseStream request → binary
   ;; event-stream response → events/usage path, over a local socket (the
   ;; AWS example keys make the signature deterministic).
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (with-redefs [aws-sigv4/getenv (fn [k] (case k "AWS_ACCESS_KEY_ID" "AKIDEXAMPLE"
                                                "AWS_SECRET_ACCESS_KEY" "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY"
                                                nil))]
@@ -302,7 +302,7 @@
 (t/deftest ^:slow test-llm-mistral-stream-end-to-end
   ;; Full send-message → Mistral chat-completions request (normalized
   ;; tool-call ids, x-affinity, prompt_cache_key) → SSE response → events.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [ss (java.net.ServerSocket. 0)
         port (.getLocalPort ss)
         request-body (atom nil)
@@ -401,7 +401,7 @@
   ;; → Google SSE response → events/usage. The twin of the vertex e2e below:
   ;; google-request's success path previously had no end-to-end coverage
   ;; (only its payload helpers were unit-tested).
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [ss (java.net.ServerSocket. 0)
         port (.getLocalPort ss)
         request-url (atom nil)
@@ -486,7 +486,7 @@
 (t/deftest ^:slow test-llm-vertex-stream-end-to-end
   ;; Full send-message → Vertex request (project/location URL, x-goog-api-key)
   ;; → Google SSE response → events.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [ss (java.net.ServerSocket. 0)
         port (.getLocalPort ss)
         request-url (atom nil)
@@ -566,7 +566,7 @@
   ;; pi: compaction caps the summarization output at 0.8 * reserveTokens —
   ;; the per-call :max-tokens opt must reach every API builder via the
   ;; model record.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [request (atom nil)]
     (with-redefs [auth/resolve-provider-auth (fn [_] {:api-key "test-key"})
                   responses/responses-request
@@ -583,7 +583,7 @@
           "the catalog model record is untouched")))
 
 (t/deftest test-llm-max-tokens-absent-keeps-model-value
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [request (atom nil)]
     (with-redefs [auth/resolve-provider-auth (fn [_] {:api-key "test-key"})
                   responses/responses-request

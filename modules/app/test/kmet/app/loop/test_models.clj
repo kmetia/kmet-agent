@@ -228,7 +228,7 @@
   ;; loop forwards provider/model plus only the agent-level overrides.
   ;; Providers without a catalog entry are unknown; overrides win over the
   ;; model.
-  (models/load-catalogs!)
+  (models/load-catalogs! nil)
   (let [sent (atom nil)]
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message

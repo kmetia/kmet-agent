@@ -5,7 +5,8 @@
    [kmet.ai.http :as ai-http]
    [kmet.ai.api.sse :as sse]
    [kmet.ai.models :as models]
-   [kmet.ai.api.shared :refer [copilot-dynamic-headers endpoint-url max-tokens-key openai-messages openai-messages-with-reasoning openai-thinking-params resolved-openai-compat on-payload request-headers responses-events-handler tool->openai-schema effective-total-timeout-ms headers-timeout-ms transport-error-message]]))
+   [kmet.libs.http :refer [transport-error-message]]
+   [kmet.ai.api.shared :refer [copilot-dynamic-headers endpoint-url max-tokens-key openai-messages openai-messages-with-reasoning openai-thinking-params resolved-openai-compat on-payload request-headers responses-events-handler tool->openai-schema effective-total-timeout-ms headers-timeout-ms]]))
 
 (defn openai-payload
   "Request body for an openai-completions request (pi buildParams):

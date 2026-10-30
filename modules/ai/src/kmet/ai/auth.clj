@@ -107,35 +107,35 @@
 
 (defonce ^:private auth-atom (atom default-auth))
 
-(def ^:private agent-dir-env-var
-  "Env var overriding the agent dir (pi: ENV_AGENT_DIR =
-   <APP>_CODING_AGENT_DIR)."
-  "KMET_CODING_AGENT_DIR")
+;; The agent dir this namespace's store lives in. Set by load-auth! — the host
+;; names the root (`kmet.app.config/get-agent-dir`); this library never resolves
+;; one. The writers below persist to it, so they need it to have been loaded.
+(defonce ^:private auth-root (atom nil))
 
-(defn default-agent-dir
-  "The default agent dir (~/.kmet/agent), home-expanded — used when the
-   override env var is absent or blank."
-  []
-  (str (fs/path (System/getProperty "user.home") ".kmet" "agent")))
-
-(defn resolve-agent-dir
-  "Resolve the agent dir: the KMET_CODING_AGENT_DIR override when set and
-   non-blank, else the default. A ~-leading override expands against
-   user.home; relative overrides pass through (callers resolve against
-   the cwd)."
-  []
-  (let [s (some-> (getenv agent-dir-env-var) str/trim)]
-    (if (seq s)
-      (if (str/starts-with? s "~")
-        (str (System/getProperty "user.home") (subs s 1))
-        s)
-      (default-agent-dir))))
+(defn agent-dir-path
+  "SEGMENTS under the host's agent dir — the state root kmet.ai reads and
+   writes; the host names it (`kmet.app.config/get-agent-dir`), the library
+   invents none. Throws on a nil AGENT-DIR."
+  [agent-dir & segments]
+  (when-not agent-dir
+    (throw (ex-info (str "kmet.ai: the agent dir is required —"
+                         " pass the host's (kmet.app.config/get-agent-dir)")
+                    {:type :kmet.ai/no-agent-dir})))
+  (str (apply fs/path agent-dir segments)))
 
 (defn auth-file-path
-  "Global auth file (<agent-dir>/auth.edn). AGENT-DIR pins the scope dir
-   (KMET_CODING_AGENT_DIR sandboxing); nil resolves via resolve-agent-dir."
-  ([] (auth-file-path nil))
-  ([agent-dir] (str (fs/path (or agent-dir (resolve-agent-dir)) "auth.edn"))))
+  "Global auth file (<agent-dir>/auth.edn) under the host's agent dir."
+  [agent-dir]
+  (agent-dir-path agent-dir "auth.edn"))
+
+(defn- store-path
+  "The auth file the loaded store lives in; throws when no `load-auth!` ran,
+   so a write can never invent a path."
+  []
+  (if-let [root @auth-root]
+    (auth-file-path root)
+    (throw (ex-info "kmet.ai.auth: no auth file — call (load-auth! <agent-dir>) first"
+                    {:type :kmet.ai/no-auth-root}))))
 
 (defn valid-credential?
   "Validate an auth.edn entry (pi auth-storage parse: non-object entries
@@ -161,14 +161,18 @@
         (or (nil? (:key credential)) (string? (:key credential)))))))
 
 (defn load-auth!
-  "Load auth.edn into the auth atom; returns the auth map. Called at startup
-   (config/load-config); /login and /logout refresh the atom directly.
-   AGENT-DIR pins the scope dir (KMET_CODING_AGENT_DIR sandboxing)."
-  ([] (load-auth! nil))
-  ([agent-dir]
-   (let [auth (cred/read-edn-map (auth-file-path agent-dir) valid-credential?)]
-     (reset! auth-atom (or auth {}))
-     (or auth {}))))
+  "Load <agent-dir>/auth.edn into the auth atom and remember AGENT-DIR as the
+   store's root (the writers persist to it); returns the auth map. Called at
+   startup (config/load-config); /login and /logout refresh the atom directly
+   after their own write. AGENT-DIR is the host's (cfg/get-agent-dir); it is
+   validated before it is recorded, so a rejected root leaves the store as it
+   was."
+  [agent-dir]
+  (let [path (auth-file-path agent-dir)
+        auth (cred/read-edn-map path valid-credential?)]
+    (reset! auth-root (str agent-dir))
+    (reset! auth-atom (or auth {}))
+    (or auth {})))
 
 (defn get-credentials
   "The current auth map (auth.edn content, as loaded)."
@@ -180,7 +184,7 @@
    file lock — read-modify-write is serialized, so concurrent writers can't
    lose each other's updates (pi: SettingsStorage.withLock)."
   [f]
-  (let [updated (cred/update-edn-map! (auth-file-path) f valid-credential?)]
+  (let [updated (cred/update-edn-map! (store-path) f valid-credential?)]
     (reset! auth-atom updated)
     updated))
 

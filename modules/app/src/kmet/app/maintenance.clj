@@ -12,6 +12,7 @@
             [kmet.ai.image-models :as image-models]
             [kmet.ai.model-gen :as model-gen]
             [kmet.ai.models :as models]
+            [kmet.app.config :as cfg]
             [kmet.libs.fuzzy :as fuzzy]))
 
 (defn generate-models!
@@ -21,7 +22,8 @@
    that throws prints kmet1's `Error:` line and counts as a failure; nothing
    here loads the world or a registry."
   []
-  (let [run (fn [generate target]
+  (let [agent-dir (cfg/get-agent-dir)
+        run (fn [generate target]
               (try (:ok (generate target))
                    (catch Exception e
                      (binding [*out* *err*]
@@ -29,10 +31,10 @@
                      false)))
         models-ok (run model-gen/generate-and-write!
                        (or models/*models-cache-dir*
-                           (models/default-models-cache-dir)))
+                           (models/default-models-cache-dir agent-dir)))
         images-ok (run image-gen/generate-and-write!
                        (or image-models/*image-models-cache-dir*
-                           (image-models/default-image-models-cache-dir)))]
+                           (image-models/default-image-models-cache-dir agent-dir)))]
     (if (and models-ok images-ok) 0 1)))
 
 (defn- format-token-count

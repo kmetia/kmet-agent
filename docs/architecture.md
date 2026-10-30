@@ -262,6 +262,13 @@ schema-validated at load).
 | `:ui` | the capability service (`kmet.app.ui`) | `kmet.ui.headless/plugin`, `kmet.ui.tui/provider-plugin` |
 | `:extensions` | no service: the row binds the host's services (registry handle, ctx, resource ops, owner sweep) and publishes `process-handle` | `kmet.app.extensions/plugin` |
 
+The `:llm` value stays one operation: `kmet.app.llm/send-message` attaches the
+app's convertToLlm (`kmet.app.loop.message/to-llm-messages`) to each request as
+`:convert-to-llm`, so the conversion is the app's, `kmet.ai` is handed
+provider-neutral messages after the context hook (pi's emitContext →
+convertToLlm order), and a replacing row receives the option rather than having
+to know the roles.
+
 `:models`, `:config` and `:auth` stay libraries on purpose: the model catalog
 is files, credentials are read before a ctx exists, and a provider is registered
 with `register-model-provider!` — a registry concern, not the request.
@@ -572,7 +579,15 @@ inspection contract (`srce.md` §4): a catch-all label makes the line useless.
   (`kmet.hikap.alias`). `kmet.tui.*` and `kmet.tk.*` are backends over
   it — they pass their backend map in, the engine never requires them.
 - `kmet.ai.*` is a standalone provider/auth library and depends only on
-  `kmet.libs.*` plus standard/third-party code.
+  `kmet.libs.*` plus standard/third-party code. It knows no agent-context
+  role: the app's convertToLlm arrives as the `:convert-to-llm` option and the
+  dispatcher applies it after the context hook. It names no state root of its
+  own: the agent dir (`KMET_CODING_AGENT_DIR`, else `~/.kmet/agent`) is the
+  app's — `kmet.app.config/get-agent-dir` — and arrives as an argument at
+  every `kmet.ai` entry point. The one remembered copy is
+  `kmet.ai.auth/load-auth!`'s, because the credential writers are reached from
+  `resolve-api-key` (an OAuth refresh), which carries no dir; they throw
+  `:kmet.ai/no-auth-root` rather than invent one.
 - `kmet.tui.*` is the generic UI layer (the terminal backend for
   `kmet.hikap.core`). It may depend on `kmet.libs.*`, `kmet.reakt.*` and
   `kmet.hikap.*`, never on app, LLM, or session concepts.
@@ -787,7 +802,7 @@ document are:
 |---|---|
 | `kmet.test-module-deps` | ranks stay strictly downward; a module's `deps.edn` is its `src` edge list in both directions |
 | `kmet.test-modules-manifest` | `modules.edn`, `bb.edn` `:paths`, `deps.edn`'s embed list and the packagers name the same trees |
-| `kmet.test-seam-requires` | a namespace requires no module above its own rank; `kmet.ai`/`kmet.libs` never reach up |
+| `kmet.test-seam-requires` | a namespace requires no module above its own rank; `kmet.ai`/`kmet.libs` never reach up, `kmet.ai` names no `KMET_*` env var (the agent dir arrives as an argument), and the app names only the `kmet.ai` surface — never a wire builder |
 | `kmet.test-layer-guard` | the business tree never requires the front ends (UI, TUI, Tk, a mode row); a front end reaches the runtime, not the loop or the retired engine |
 | `kmet.test-front-end-policy` | a front end names the process's resource policy and expansion chain where it wires a run; the TUI reads a handle, not the engine |
 | `kmet.test-no-global-node` | the retired process node and store names appear nowhere |

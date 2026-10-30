@@ -15,7 +15,7 @@
 
 (t/deftest test-llm-unknown-model
   ;; a catalog provider with an unknown model id → error (pi: unknown model)
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [errors (atom [])]
     @(llm/send-message {:provider :opencode-go
                         :model "no-such-model"
@@ -24,7 +24,7 @@
     (t/is (= ["Unknown model: opencode-go/no-such-model"] @errors))))
 
 (t/deftest test-llm-unknown-provider
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [errors (atom [])]
     @(llm/send-message {:provider :unknown
                         :api-key "test"
@@ -40,7 +40,7 @@
 (t/deftest test-llm-auth-base-url-keeps-api-endpoint
   ;; pi auth.baseUrl replaces the model base URL, not the complete endpoint.
   ;; The API builder must therefore remain responsible for appending /responses.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [request (atom nil)]
     (with-redefs [auth/resolve-provider-auth
                   (fn [_] {:api-key "test-key"
@@ -278,27 +278,27 @@
 (t/deftest test-thinking-budget-for
   (let [model (tmodel)
         extended (tmodel :tlm {:xhigh "xhigh" :max "max"})]
-    (t/is (= 1024 (@#'shared/thinking-budget-for model :minimal)))
-    (t/is (= 2048 (@#'shared/thinking-budget-for model :low)))
-    (t/is (= 8192 (@#'shared/thinking-budget-for model :medium)))
-    (t/is (= 16384 (@#'shared/thinking-budget-for model :high)))
-    (t/is (= 16384 (@#'shared/thinking-budget-for extended :xhigh))
+    (t/is (= 1024 (m/thinking-budget-for model :minimal)))
+    (t/is (= 2048 (m/thinking-budget-for model :low)))
+    (t/is (= 8192 (m/thinking-budget-for model :medium)))
+    (t/is (= 16384 (m/thinking-budget-for model :high)))
+    (t/is (= 16384 (m/thinking-budget-for extended :xhigh))
           "xhigh collapses to the high budget (pi clampReasoning)")
-    (t/is (= 16384 (@#'shared/thinking-budget-for extended :max))
+    (t/is (= 16384 (m/thinking-budget-for extended :max))
           "max collapses to the high budget (pi clampReasoning)")
-    (t/is (= 16384 (@#'shared/thinking-budget-for model :xhigh))
+    (t/is (= 16384 (m/thinking-budget-for model :xhigh))
           "an unsupported level first clamps to the highest supported one")
-    (t/is (= 0 (@#'shared/thinking-budget-for model :off)))
-    (t/is (= 0 (@#'shared/thinking-budget-for model nil)))
-    (t/is (= 0 (@#'shared/thinking-budget-for (tmodel :reasoning false) :high))
+    (t/is (= 0 (m/thinking-budget-for model :off)))
+    (t/is (= 0 (m/thinking-budget-for model nil)))
+    (t/is (= 0 (m/thinking-budget-for (tmodel :reasoning false) :high))
           "a non-reasoning model has no thinking budget")))
 
 (t/deftest test-clamp-reasoning
-  (t/is (= :high (@#'shared/clamp-reasoning :xhigh)))
-  (t/is (= :high (@#'shared/clamp-reasoning :max)))
-  (t/is (= :medium (@#'shared/clamp-reasoning :medium)))
-  (t/is (= :off (@#'shared/clamp-reasoning :off)))
-  (t/is (nil? (@#'shared/clamp-reasoning nil))
+  (t/is (= :high (m/clamp-reasoning :xhigh)))
+  (t/is (= :high (m/clamp-reasoning :max)))
+  (t/is (= :medium (m/clamp-reasoning :medium)))
+  (t/is (= :off (m/clamp-reasoning :off)))
+  (t/is (nil? (m/clamp-reasoning nil))
         "nil passes through (pi clampReasoning)"))
 
 (t/deftest test-google-thinking-config
@@ -561,7 +561,7 @@
           "same-model reasoning still round-trips"))
   ;; the shipped commandcode catalog carries the compat (commandcode-overrides
   ;; must survive a regeneration)
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   ;; Only the live stealth id can be asserted here: the endpoint retired the
   ;; cat-jam alias when Beam was unveiled, so the generated catalog drops it
   ;; (process-commandcode ships what the endpoint lists). The ref and the
@@ -577,7 +577,7 @@
   ;; pi: requiresReasoningContentOnAssistantMessages gates reasoning_content
   ;; on assistant messages — carried by deepseek/opencode-go deepseek-v4
   ;; models, absent elsewhere.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (t/is (true? (:requires-reasoning-content-on-assistant-messages
                 (:compat (m/get-model :deepseek "deepseek-flash")))))
   (t/is (true? (:requires-reasoning-content-on-assistant-messages

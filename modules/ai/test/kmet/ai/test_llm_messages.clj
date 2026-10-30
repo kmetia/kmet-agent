@@ -1,12 +1,17 @@
 (ns kmet.ai.test-llm-messages
-  "Message conversion for the wire: image blocks to provider parts, bash results
-   (pi: convertToLlm bashExecution), and per-message cost attachment."
+  "Message conversion for the wire: image blocks to provider parts, and the
+   agent roles the app flattens first (kmet.app.loop.message/to-llm-messages,
+   pi: convertToLlm — bash executions and custom messages reach a builder as
+   user messages)."
   (:require [clojure.test :as t]
             [clojure.string :as str]
+            [kmet.app.loop.message :as message]
             [kmet.app.retry :as retry]
+            [kmet.libs.http :as libs-http]
             [kmet.ai.api.shared :as shared]
             [kmet.ai.api.anthropic-messages :as anthropic]
             [kmet.ai.api.google-generative-ai :as google]
+            [kmet.ai.api.openai-responses :as responses]
             [kmet.ai.models :as m]))
 
 ;; ─── Image block conversion ───────────────────────────────────────────────
@@ -111,9 +116,10 @@
 (t/deftest test-llm-custom-role-maps-to-user
   ;; G10: custom messages (from custom_message entries) are sent as user
   ;; messages (pi: convertToLlm custom→user)
-  (let [msgs [{:role :custom
-               :custom-type :note
-               :content [{:type :text :text "hello from an extension"}]}]
+  (let [msgs (message/to-llm-messages
+              [{:role :custom
+                :custom-type :note
+                :content [{:type :text :text "hello from an extension"}]}])
         openai (@#'shared/openai-messages msgs)
         openai-reasoning (@#'shared/openai-messages-with-reasoning msgs)
         anthropic (@#'anthropic/anthropic-messages msgs)
@@ -128,9 +134,22 @@
           "google content preserved"))
   ;; string content is normalized by the context projection (context-messages),
   ;; but the converters accept string content via the shared content helpers
-  (let [msgs [{:role :custom :custom-type :note :content "plain string"}]
+  (let [msgs (message/to-llm-messages
+              [{:role :custom :custom-type :note :content "plain string"}])
         openai (@#'shared/openai-messages msgs)]
-    (t/is (= "user" (:role (first openai))))))
+    (t/is (= "user" (:role (first openai)))))
+  (t/testing "custom content keeps its images once it is a user message"
+    (let [content (fn [c] (:content (first (message/to-llm-messages
+                                            [{:role :custom :custom-type :note :content c}]))))
+          parts (responses/responses-user-content
+                 (content [{:type :text :text "look"}
+                           {:type :image :data "AA" :mime-type "image/png"}]))]
+      (t/is (= ["input_text" "input_image"] (mapv :type parts))
+            "the responses builder shapes them like any user image")
+      (t/is (= "data:image/png;base64,AA" (:image_url (second parts))))
+      (t/is (= [{:type "input_text" :text "look"}]
+               (responses/responses-user-content (content "look")))
+            "text-only custom content still collapses to one input_text"))))
 
 (t/deftest test-llm-tool-result-images-conversion
   (let [msgs [{:role :tool
@@ -257,10 +276,11 @@
 ;; ─── Bash result conversion (pi: convertToLlm bashExecution) ──────────────
 
 (t/deftest test-llm-bash-conversion
-  (let [msgs [{:role :bash :command "git st" :output "clean\n" :exit-code 0
-               :exclude-from-context? false}
-              {:role :bash :command "git st" :output "clean\n" :exit-code 0
-               :exclude-from-context? true}]
+  (let [msgs (message/to-llm-messages
+              [{:role :bash :command "git st" :output "clean\n" :exit-code 0
+                :exclude-from-context? false}
+               {:role :bash :command "git st" :output "clean\n" :exit-code 0
+                :exclude-from-context? true}])
         openai (@#'shared/openai-messages msgs)
         reasoning (@#'shared/openai-messages-with-reasoning msgs)
         anthropic (@#'anthropic/anthropic-messages msgs)]
@@ -273,9 +293,10 @@
 
 (t/deftest test-llm-bash-conversion-format
   ;; pi: bashExecutionToText shape — output block, exit code, truncation note
-  (let [msgs [{:role :bash :command "false" :output "" :exit-code 1
-               :exclude-from-context? false
-               :truncated true :full-output-path "/tmp/out"}]
+  (let [msgs (message/to-llm-messages
+              [{:role :bash :command "false" :output "" :exit-code 1
+                :exclude-from-context? false
+                :truncated true :full-output-path "/tmp/out"}])
         openai (@#'shared/openai-messages msgs)
         text (:content (first openai))]
     (t/is (str/includes? text "Ran `false`"))
@@ -284,8 +305,9 @@
     (t/is (str/includes? text "[Output truncated. Full output: /tmp/out]"))))
 
 (t/deftest test-llm-bash-cancelled-no-exit-code
-  (let [msgs [{:role :bash :command "sleep 10" :output "" :exit-code nil
-               :cancelled true :exclude-from-context? false}]
+  (let [msgs (message/to-llm-messages
+              [{:role :bash :command "sleep 10" :output "" :exit-code nil
+                :cancelled true :exclude-from-context? false}])
         openai (@#'shared/openai-messages msgs)
         text (:content (first openai))]
     (t/is (str/includes? text "(command cancelled)"))
@@ -296,7 +318,7 @@
   ;; nil message — transport-error-message must still mark it retryable
   ;; (pi: undici always reports transport failures as "fetch failed"), or
   ;; auto-retry on network errors silently dies.
-  (let [te @#'shared/transport-error-message]
+  (let [te @#'libs-http/transport-error-message]
     (t/is (= "network error: ConnectException"
              (te (java.net.ConnectException. nil))))
     (t/is (= "network error: request timed out"
@@ -370,7 +392,7 @@
 ;; ─── Per-message cost attachment (Phase 5) ────────────────────────────────
 
 (t/deftest test-usage-with-cost
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [model (m/get-model :deepseek "deepseek-v4-pro")
         norm {:input 800 :output 500 :cache-read 200 :cache-write 0}]
     (t/testing "provider-native usage gains the pi-shaped :cost breakdown"

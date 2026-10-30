@@ -239,10 +239,9 @@
   "User-level image-model catalog cache dir, written by
    `kmet --generate-models` (the same generator as `bb generate-models`).
    load-image-catalogs! prefers it over the bundled catalog when it is
-   strictly newer (fresh-image-model-cache). Bindable for tests; nil (the
-   default) resolves via default-image-models-cache-dir —
-   ~/.kmet/agent/image-models-cache, or AGENT-DIR/image-models-cache when
-   load-image-catalogs! pins a scope dir (KMET_CODING_AGENT_DIR sandboxing)."
+   strictly newer (fresh-image-model-cache). Bindable for tests. nil (the
+   default) defers to the agent-dir cache load-image-catalogs! is given;
+   with no agent dir there is no cache."
   nil)
 
 (def ^:dynamic *use-image-models-cache*
@@ -252,12 +251,12 @@
   true)
 
 (defn default-image-models-cache-dir
-  "The default user-level image-model catalog cache dir
+  "The user-level image-model catalog cache dir
    (<agent-dir>/image-models-cache). `kmet --generate-models` writes it;
-   load-image-catalogs! reads it. AGENT-DIR pins the scope dir
-   (KMET_CODING_AGENT_DIR sandboxing); nil resolves via cfg/get-agent-dir."
-  ([] (default-image-models-cache-dir nil))
-  ([agent-dir] (str (fs/path (or agent-dir (auth/resolve-agent-dir)) "image-models-cache"))))
+   load-image-catalogs! reads it. AGENT-DIR is the host's root
+   (kmet.app.config/get-agent-dir); kmet.ai resolves none."
+  [agent-dir]
+  (auth/agent-dir-path agent-dir "image-models-cache"))
 
 (defn- bundled-image-catalog
   "The bundled image-model catalog blob, nil when the resource is missing or
@@ -278,22 +277,20 @@
    file path when usable: it must exist and carry a :generated-at timestamp
    strictly newer than the bundled catalog's — so an upgrade that ships
    newer data wins over a stale cache until `kmet --generate-models`
-   refreshes it. AGENT-DIR pins the default's scope dir
-   (KMET_CODING_AGENT_DIR sandboxing); nil resolves via cfg/get-agent-dir.
-   nil otherwise."
-  ([] (fresh-image-model-cache nil))
-  ([agent-dir]
-   (when *use-image-models-cache*
-     (let [f (fs/file (or *image-models-cache-dir*
-                          (default-image-models-cache-dir agent-dir))
-                      "image-models.edn")]
-       (when (fs/exists? f)
-         (let [cache-gen (try (:generated-at (read-catalog-file (str f)))
-                              (catch Exception _ nil))
-               bundled-gen (:generated-at (bundled-image-catalog))]
-           (when (and cache-gen bundled-gen
-                      (pos? (compare cache-gen bundled-gen)))
-             (str f))))))))
+   refreshes it. AGENT-DIR is the host's root; nil means no user root, so
+   no cache. nil otherwise."
+  [agent-dir]
+  (when *use-image-models-cache*
+    (when-let [dir (or *image-models-cache-dir*
+                       (some-> agent-dir default-image-models-cache-dir))]
+      (let [f (fs/file dir "image-models.edn")]
+        (when (fs/exists? f)
+          (let [cache-gen (try (:generated-at (read-catalog-file (str f)))
+                               (catch Exception _ nil))
+                bundled-gen (:generated-at (bundled-image-catalog))]
+            (when (and cache-gen bundled-gen
+                       (pos? (compare cache-gen bundled-gen)))
+              (str f))))))))
 
 ;; load-image-catalogs! runs on every startup/reload — announce a newly
 ;; adopted cache source only on the transition, not on every reload.
@@ -305,27 +302,25 @@
    written by `kmet --generate-models`) when strictly newer than the bundled
    data, else the bundled resource — falling back to the bundled data with a
    warning when a present-but-unusable cache fails to load. Also ensures the
-   builtin :openrouter-images wire api is registered. AGENT-DIR pins the
-   cache default's scope dir (KMET_CODING_AGENT_DIR sandboxing); nil
-   resolves via cfg/get-agent-dir."
-  ([] (load-image-catalogs! nil))
-  ([agent-dir]
-   (register-images-api-provider! :openrouter-images generate-openrouter-images)
-   (clear-providers!)
-   (let [data (or (when-let [cache (fresh-image-model-cache agent-dir)]
-                    (catalog-cache/try-cached announced-image-cache cache
-                                              "Image models: using cached catalog from"
-                                              read-catalog-file
-                                              "Warning: ignoring unusable image-model cache:"))
-                  (do (reset! announced-image-cache nil)
-                      (bundled-image-catalog)))
-         provider-info (:provider data)]
-     (when data
-       (when-not (and (map? data) (map? provider-info) (map? (:models data)))
-         (throw (ex-info "Invalid image-model catalog" {:type :images-invalid-catalog})))
-       (register-provider!
-        (map->ImagesProvider {:id (:id provider-info)
-                              :name (:name provider-info)
-                              :models (mapv (fn [[id m]] (validate-model-entry id m))
-                                            (:models data))}))))
-   nil))
+   builtin :openrouter-images wire api is registered. AGENT-DIR is the host's
+   root (kmet.app.config/get-agent-dir); nil reads the bundled catalog only."
+  [agent-dir]
+  (register-images-api-provider! :openrouter-images generate-openrouter-images)
+  (clear-providers!)
+  (let [data (or (when-let [cache (fresh-image-model-cache agent-dir)]
+                   (catalog-cache/try-cached announced-image-cache cache
+                                             "Image models: using cached catalog from"
+                                             read-catalog-file
+                                             "Warning: ignoring unusable image-model cache:"))
+                 (do (reset! announced-image-cache nil)
+                     (bundled-image-catalog)))
+        provider-info (:provider data)]
+    (when data
+      (when-not (and (map? data) (map? provider-info) (map? (:models data)))
+        (throw (ex-info "Invalid image-model catalog" {:type :images-invalid-catalog})))
+      (register-provider!
+       (map->ImagesProvider {:id (:id provider-info)
+                             :name (:name provider-info)
+                             :models (mapv (fn [[id m]] (validate-model-entry id m))
+                                           (:models data))}))))
+  nil)

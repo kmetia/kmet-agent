@@ -7,7 +7,9 @@
    [clojure.string :as str]
    [kmet.ai.constrained-sampling :as cs]
    [kmet.ai.models :as models]
-   [kmet.ai.api.shared :refer [bash-execution-text content-text copilot-dynamic-headers endpoint-url image-block? on-payload request-headers responses-events-handler effective-total-timeout-ms headers-timeout-ms transport-error-message]]))
+   [kmet.libs.http :refer [transport-error-message]]
+   [kmet.ai.message :refer [content-text image-block?]]
+   [kmet.ai.api.shared :refer [copilot-dynamic-headers endpoint-url on-payload request-headers responses-events-handler effective-total-timeout-ms headers-timeout-ms]]))
 
 (defn normalize-id-part
   "pi normalizeIdPart: sanitize a tool-call id to [a-zA-Z0-9_-], cap at 64
@@ -80,11 +82,6 @@
    pairing validation)."
   [model m msg-idx]
   (case (name (:role m))
-    "bash"
-    (when-not (:exclude-from-context? m)
-      [{:role "user"
-        :content [{:type "input_text" :text (bash-execution-text m)}]}])
-
     "tool"
     [{:type "function_call_output"
       :call_id (normalize-id-part (first (str/split (-> m :content first :tool_use_id) #"\|")))
@@ -110,11 +107,6 @@
                                      :arguments (json/generate-string (:arguments tc))}
                               item-id (assoc :id item-id))))))]
       (when (seq blocks) blocks))
-
-    ;; custom messages (pi: convertToLlm custom→user)
-    "custom"
-    [{:role "user"
-      :content [{:type "input_text" :text (content-text (:content m))}]}]
 
     [{:role "user" :content (responses-user-content (:content m))}]))
 

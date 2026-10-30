@@ -6,7 +6,9 @@
    [kmet.ai.api.sse :as sse]
    [clojure.string :as str]
    [kmet.ai.constrained-sampling :as cs]
-   [kmet.ai.api.shared :refer [bash-execution-text content-text endpoint-url google-supports-strict-tool-sampling? image-block? on-payload request-headers tool->google-schema effective-total-timeout-ms headers-timeout-ms transport-error-message usage-with-cost]]))
+   [kmet.libs.http :refer [transport-error-message]]
+   [kmet.ai.message :refer [content-text image-block?]]
+   [kmet.ai.api.shared :refer [endpoint-url google-supports-strict-tool-sampling? on-payload request-headers tool->google-schema effective-total-timeout-ms headers-timeout-ms usage-with-cost]]))
 
 (defn google-requires-tool-call-id?
   [model-id]
@@ -33,9 +35,6 @@
      [(into []
             (keep (fn [m]
                     (case (name (:role m))
-                      "bash"
-                      (when-not (:exclude-from-context? m)
-                        {:role "user" :parts [{:text (bash-execution-text m)}]})
                       "tool"
                       (let [r (first (:content m))
                             text (or (:content r) "")

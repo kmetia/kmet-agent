@@ -175,7 +175,7 @@
     (t/is (= {:effort "high" :summary "auto"} (:reasoning payload)))))
 
 (t/deftest test-llm-codex-invalid-token-reports-error
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [errors (atom [])]
     @(llm/send-message {:provider :openai-codex
                         :api-key "not-a-jwt"
@@ -185,7 +185,7 @@
           "an invalid codex token reports via on-error (never hangs the loop)")))
 
 (t/deftest test-llm-azure-missing-config-reports-error
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [errors (atom [])]
     ;; the config is resolved inside the request future, so the env redef
     ;; must stay active until the future completes
@@ -203,7 +203,7 @@
   ;; conversion error must still reach on-error (the future completes) instead
   ;; of being swallowed and hanging the caller. The deref stays inside the
   ;; redef scope — the future's payload build runs after send-message returns.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [errors (atom [])]
     (with-redefs [anthropic/anthropic-messages
                   (fn [& _] (throw (ex-info "bad anthropic message shape" {})))]
@@ -220,7 +220,7 @@
           "a payload-build error reports via on-error (never hangs the loop)")))
 
 (t/deftest test-llm-google-payload-error-reports
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [errors (atom [])]
     (with-redefs [google/google-messages
                   (fn [& _] (throw (ex-info "bad google message shape" {})))]
@@ -239,7 +239,7 @@
 (t/deftest test-llm-vertex-adc-token-error-reports
   ;; the ADC token fetch happens while the request future builds the request:
   ;; a token-endpoint failure must reach on-error, not hang the caller
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [errors (atom [])]
     (with-redefs [auth/resolve-provider-auth (fn [_] {})
                   auth/ambient-configured? (fn [_] true)
@@ -402,7 +402,7 @@
   ;; updating. The terminal done must be deferred until the whole stream is
   ;; consumed (pi resolves its stream only after the final chunk), so the
   ;; trailing usage chunk is dispatched before on-done fires.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [dir (str "target/test-llm-trailing-usage-" (System/currentTimeMillis))
         sess (session/create-session dir)
         ss (java.net.ServerSocket. 0)
@@ -452,7 +452,7 @@
 ;; ─── OpenAI Responses end-to-end (mock server) ────────────────────────────
 
 (t/deftest ^:slow test-llm-responses-stream-end-to-end
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [ss (java.net.ServerSocket. 0)
         port (.getLocalPort ss)
         request-body (atom nil)
@@ -833,7 +833,7 @@
         (.close ss)))))
 
 (t/deftest ^:slow test-llm-copilot-responses-end-to-end
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [shipped (m/get-provider :github-copilot)
         _ (t/is (some? shipped) "the catalog still has the copilot provider")
         model (m/map->Model
@@ -865,7 +865,7 @@
 ;; ─── Codex + Azure responses end-to-end (mock server) ─────────────────────
 
 (t/deftest ^:slow test-llm-codex-responses-end-to-end
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [token (test-jwt "acc-1")
         ss (java.net.ServerSocket. 0)
         port (.getLocalPort ss)
@@ -954,7 +954,7 @@
         (.close ss)))))
 
 (t/deftest ^:slow test-llm-azure-responses-end-to-end
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [ss (java.net.ServerSocket. 0)
         port (.getLocalPort ss)
         request-line (atom nil)

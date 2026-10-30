@@ -740,7 +740,7 @@
               reasons at the session's thinking level, a branch summary sends
               none and caps its output at 4096 tokens (pi:
               createSummarizationOptions / branch-summarization.ts)"
-    (models/load-catalogs!)
+    (models/load-catalogs! nil)
     (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
           sess (session/create-session (str dir))
           seen (atom [])
@@ -797,7 +797,7 @@
   ;; the exact "provider/modelId" entry resolves before the ordinary settings
   ;; and the resolved map rides the preparation (pi: preparation.settings)
   ;; into the summarization cap.
-  (models/load-catalogs!)
+  (models/load-catalogs! nil)
   (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})]
     (try
       (t/testing "a matching entry drives the prep and the summarization cap"
@@ -1059,7 +1059,7 @@
 (t/deftest test-loop-branch-summary-failure-reports-the-cause
   (t/testing "a failed branch summarization returns pi's error shape (pi:
               BranchSummaryResult.error — `Branch summarization failed: …`)"
-    (models/load-catalogs!)
+    (models/load-catalogs! nil)
     (let [agent (support/make-agent-state :provider :opencode-go
                                           :model "deepseek-v4-flash")]
       (swap! (:cfg agent) assoc :max-retries 0)
@@ -1088,7 +1088,7 @@
                 "an already-aborted call never reaches the provider")))))
   (t/testing "an empty response yields the preamble alone (pi prepends it to
               contentText)"
-    (models/load-catalogs!)
+    (models/load-catalogs! nil)
     (let [agent (support/make-agent-state :provider :opencode-go
                                           :model "deepseek-v4-flash")]
       (with-redefs [cfg/get-api-key (fn [_] "test-key")

@@ -230,22 +230,25 @@
       (finally (fs/delete-tree sandbox)))))
 
 (t/deftest test-agent-dir-override
-  (t/testing "default is ~/.kmet/agent"
+  (t/testing "the app owns the root: default is ~/.kmet/agent"
     ;; env stubbed so the assertions hold on hosts that set the override
-    (with-redefs [auth/getenv (fn [_] nil)]
-      (t/is (str/ends-with? (slash (auth/resolve-agent-dir)) "/.kmet/agent"))
-      (t/is (= (auth/resolve-agent-dir) (cfg/get-agent-dir)))))
+    (with-redefs [cfg/getenv (fn [_] nil)]
+      (t/is (str/ends-with? (slash (cfg/get-agent-dir)) "/.kmet/agent"))))
   (t/testing "KMET_CODING_AGENT_DIR wins; blanks fall back"
-    (with-redefs [auth/getenv (fn [_] nil)]
-      (t/is (str/ends-with? (slash (auth/resolve-agent-dir)) "/.kmet/agent")))
-    (with-redefs [auth/getenv (fn [_] "/sandbox/agent")]
-      (t/is (= "/sandbox/agent" (auth/resolve-agent-dir)))
-      (t/is (= "/sandbox/agent/auth.edn" (slash (auth/auth-file-path))))
+    (with-redefs [cfg/getenv (fn [_] nil)]
+      (t/is (str/ends-with? (slash (cfg/get-agent-dir)) "/.kmet/agent")))
+    (with-redefs [cfg/getenv (fn [_] "/sandbox/agent")]
+      (t/is (= "/sandbox/agent" (cfg/get-agent-dir)))
+      ;; kmet.ai takes the root as an argument, it never resolves one
+      (t/is (= "/sandbox/agent/auth.edn"
+               (slash (auth/auth-file-path (cfg/get-agent-dir)))))
       (t/is (= "/sandbox/agent/settings.edn" (slash (cfg/global-settings-path)))))
-    (with-redefs [auth/getenv (fn [_] "   ")]
-      (t/is (str/ends-with? (slash (auth/resolve-agent-dir)) "/.kmet/agent")))
-    (with-redefs [auth/getenv (fn [_] "~/custom")]
-      (t/is (str/starts-with? (auth/resolve-agent-dir) (System/getProperty "user.home"))))))
+    (with-redefs [cfg/getenv (fn [_] "   ")]
+      (t/is (str/ends-with? (slash (cfg/get-agent-dir)) "/.kmet/agent")))
+    (with-redefs [cfg/getenv (fn [_] "~/custom")]
+      ;; expand-path keeps the leading ~ in the suffix, so the expectation is
+      ;; the fold, not a platform-built path
+      (t/is (str/ends-with? (slash (cfg/get-agent-dir)) "/custom")))))
 
 (t/deftest test-retired-dir-keys-warn
   (t/testing "retired :*-dir keys warn with the replacement entry"

@@ -1,10 +1,11 @@
 (ns kmet.app.llm.test-contract
   "The `:llm` contract (kmet.app.llm): one request operation, resolved through
-   the agent's composition with the library as the fallback, and the row that
-   provides it."
+   the agent's composition with the library as the fallback, carrying the app's
+   convertToLlm for the request, and the row that provides it."
   (:require [clojure.test :as t :refer [deftest is testing]]
             [kmet.ai.llm :as ai]
             [kmet.app.llm :as llm]
+            [kmet.app.loop.message :as message]
             [kmet.srce.core :as srce]))
 
 (deftest a-state-outside-a-composition-reaches-the-library
@@ -14,8 +15,10 @@
     (with-redefs [ai/send-message (fn [opts] (swap! calls conj opts) :sent)]
       (is (= :sent (llm/send-message {:ctx nil} {:model "m" :messages []}))
           "the builtin answers")
-      (is (= [{:model "m" :messages []}] @calls)
-          "and it is the library var, not a capture"))))
+      (is (= [{:model "m" :messages [] :convert-to-llm message/to-llm-messages}]
+             @calls)
+          "and it is the library var, not a capture, carrying the app's
+           convertToLlm for the request"))))
 
 (deftest a-mounted-implementation-is-what-a-run-reaches
   (let [ctx (srce/root)
@@ -25,7 +28,10 @@
     (srce/provide! ctx :llm mounted)
     (is (= :replaced (llm/send-message agent {:model "m" :messages []}))
         "the caller reaches the mounted request fn, not the library")
-    (is (= [{:model "m" :messages []}] @seen) "with the opts it was given")))
+    (is (= [{:model "m" :messages [] :convert-to-llm message/to-llm-messages}]
+           @seen)
+        "a replacing implementation gets the conversion as an option; the
+         service value stays one operation")))
 
 (deftest the-row-provides-the-builtin-and-takes-no-config
   (let [world (srce/root)]

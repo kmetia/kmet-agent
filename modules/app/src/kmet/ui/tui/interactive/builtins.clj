@@ -667,7 +667,7 @@
               ext-results (extension-rows/reload-all!)
               _ (th/load-theme-paths! (packages/resolve-theme-paths))
               ;; pi: model-runtime.refresh — recompose providers from models.edn
-              _ (models/load-models-config!)
+              _ (models/load-models-config! (cfg/get-agent-dir))
               ;; pi: resourceLoader.reload (skills, prompts)
               _ (skills/clear-skills!)
               _ (prompts/clear-prompt-templates!)

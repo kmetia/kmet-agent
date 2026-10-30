@@ -10,7 +10,8 @@
    [clojure.string :as str]
    [kmet.ai.constrained-sampling :as cs]
    [kmet.ai.api.google-generative-ai :refer [google-messages google-thinking-config]]
-   [kmet.ai.api.shared :refer [getenv google-supports-strict-tool-sampling? on-payload request-headers responses-events-handler tool->google-schema effective-total-timeout-ms headers-timeout-ms transport-error-message]]))
+   [kmet.libs.http :refer [transport-error-message]]
+   [kmet.ai.api.shared :refer [getenv google-supports-strict-tool-sampling? on-payload request-headers responses-events-handler tool->google-schema effective-total-timeout-ms headers-timeout-ms]]))
 
 (def vertex-base-url
   "The Vertex endpoint template (pi VERTEX_BASE_URL — the SDK substitutes

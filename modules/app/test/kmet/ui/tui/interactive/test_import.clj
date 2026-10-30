@@ -534,7 +534,7 @@
   (testing "/scoped-models opens the selector with session scoped models, then
             settings :enabled-models patterns, else nil (all enabled)"
     (commands/clear-commands!)
-    (m/load-catalogs!)
+    (m/load-catalogs! nil)
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [handle (hs/new-handle)
           ag (runtime/agent-state handle)
@@ -578,7 +578,7 @@
   (testing "selector edits write the session scoped list and clear on all-enabled"
     (support/install-app-keybindings!)
     (commands/clear-commands!)
-    (m/load-catalogs!)
+    (m/load-catalogs! nil)
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [handle (hs/new-handle)
           ag (runtime/agent-state handle)
@@ -644,7 +644,7 @@
             session level and persists to settings"
     (support/install-app-keybindings!)
     (commands/clear-commands!)
-    (m/load-catalogs!)
+    (m/load-catalogs! nil)
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [handle (hs/new-handle)
           ag (runtime/agent-state handle)
@@ -679,7 +679,7 @@
             (pi: block-images, ungated — unlike the terminal image rows)"
     (support/install-app-keybindings!)
     (commands/clear-commands!)
-    (m/load-catalogs!)
+    (m/load-catalogs! nil)
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [handle (hs/new-handle)
           ag (runtime/agent-state handle)
@@ -713,7 +713,7 @@
   (testing "/settings retry rows apply live to the agent and persist"
     (support/install-app-keybindings!)
     (commands/clear-commands!)
-    (m/load-catalogs!)
+    (m/load-catalogs! nil)
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [handle (hs/new-handle)
           ag (runtime/agent-state handle)
@@ -782,7 +782,7 @@
             (platform → curl → platform) and persists"
     (support/install-app-keybindings!)
     (commands/clear-commands!)
-    (m/load-catalogs!)
+    (m/load-catalogs! nil)
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [handle (hs/new-handle)
           cs (hs/core-state handle {:config cfg/default-config

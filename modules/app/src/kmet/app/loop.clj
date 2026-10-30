@@ -43,7 +43,7 @@
    (`kmet.app.compaction`; the builtin is `kmet.app.compaction.stage`).
 
    Model requests go through the `:llm` service (kmet.app.llm), the `:llm` row
-   providing kmet.ai.llm/send-message; model management lives in
+   providing kmet.ai.llm/send-message behind it; model management lives in
    kmet.app.loop.state (set-scoped-models!,
    cycle-model!, the thinking-level setters).
 
@@ -71,7 +71,6 @@
             [kmet.app.loop.tool-exec :as tool-exec]
             [kmet.app.loop.state :as state]
             [kmet.app.loop.message :as message]
-            [kmet.ai.llm :as llm]
             [kmet.app.loop-guard :as loop-guard]
             [kmet.app.retry :as retry]
             [kmet.app.runtime :as runtime]
@@ -301,11 +300,10 @@
 
 (defn- boundary-context
   "pi's BoundaryContextPreview (pi: _buildBoundaryContext): the projected
-   context entries and messages, and the provider-agnostic llm view
-   (compaction/branch-summary messages flattened to user messages). kmet's
-   remaining wire conversion — bash/custom roles, excluded bash, image
-   blocking — is provider-specific and runs inside call-llm, so
-   :llm-messages is the shared part pi's convertToLlm performs. Computed
+   context entries and messages, and the provider-agnostic llm view — the
+   agent's messages through the app's convertToLlm
+   (kmet.app.loop.message/to-llm-messages), the same function the `:llm`
+   request applies after the context hook. Computed
    once per boundary dispatch: a handler's own drafted entries are not
    applied to it (pi rebuilds the preview per handler with the accumulated
    drafts)."
@@ -315,7 +313,7 @@
           messages (vec (mapcat :messages entries))]
       {:context-entries entries
        :context-messages messages
-       :llm-messages (llm/convert-summary-messages messages)})))
+       :llm-messages (message/to-llm-messages messages)})))
 
 (defn- tool-result-entry-ids
   "Session entry ids of the persisted results for TOOL-CALL-IDS, in call

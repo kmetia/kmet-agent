@@ -6,7 +6,8 @@
    [kmet.ai.api.sse :as sse]
    [clojure.string :as str]
    [kmet.ai.api.openai-responses :refer [responses-payload]]
-   [kmet.ai.api.shared :refer [getenv on-payload request-headers responses-events-handler effective-total-timeout-ms headers-timeout-ms transport-error-message]]))
+   [kmet.libs.http :refer [transport-error-message]]
+   [kmet.ai.api.shared :refer [getenv on-payload request-headers responses-events-handler effective-total-timeout-ms headers-timeout-ms]]))
 
 (defn normalize-azure-base-url
   "pi normalizeAzureBaseUrl: Azure hosts (.openai.azure.com /

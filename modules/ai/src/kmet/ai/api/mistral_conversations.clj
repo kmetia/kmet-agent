@@ -7,7 +7,9 @@
    [clojure.string :as str]
    [kmet.ai.hash :as hash]
    [kmet.ai.constrained-sampling :as cs]
-   [kmet.ai.api.shared :refer [bash-execution-text content-text endpoint-url image-block? on-payload request-headers responses-events-handler effective-total-timeout-ms headers-timeout-ms transport-error-message]]))
+   [kmet.libs.http :refer [transport-error-message]]
+   [kmet.ai.message :refer [content-text image-block?]]
+   [kmet.ai.api.shared :refer [endpoint-url on-payload request-headers responses-events-handler effective-total-timeout-ms headers-timeout-ms]]))
 
 (def mistral-tool-call-id-length 9)
 
@@ -75,9 +77,6 @@
           (keep (fn [m]
                   (let [role (name (:role m))]
                     (case role
-                      "bash"
-                      (when-not (:exclude-from-context? m)
-                        {:role "user" :content (bash-execution-text m)})
                       "system"
                       {:role "system" :content (content-text (:content m))}
                       "tool"

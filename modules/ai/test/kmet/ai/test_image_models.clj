@@ -19,7 +19,7 @@
 ;; ─── Catalog loading + offline validation ──────────────────────────────────
 
 (t/deftest test-image-catalog-loads
-  (im/load-image-catalogs!)
+  (im/load-image-catalogs! nil)
   (let [providers (im/get-providers)
         models (im/get-models)]
     (t/is (= [:openrouter] (mapv :id providers)))
@@ -119,12 +119,12 @@
                 *err* (java.io.StringWriter.)
                 im/*use-image-models-cache* true
                 im/*image-models-cache-dir* dir]
-        (t/is (= (str (fs/path dir "image-models.edn")) (im/fresh-image-model-cache)))
-        (im/load-image-catalogs!)
+        (t/is (= (str (fs/path dir "image-models.edn")) (im/fresh-image-model-cache nil)))
+        (im/load-image-catalogs! nil)
         (t/is (= ["cache-model"] (mapv :id (im/get-models)))))
       (finally
         (fs/delete-tree dir)
-        (im/load-image-catalogs!)))))
+        (im/load-image-catalogs! nil)))))
 
 (t/deftest test-image-cache-stale-or-broken-ignored
   (let [dir (str (fs/create-temp-dir {:dir "target" :prefix "image-cache-test-"}))]
@@ -133,8 +133,8 @@
       (binding [*out* (java.io.StringWriter.)
                 im/*use-image-models-cache* true
                 im/*image-models-cache-dir* dir]
-        (t/is (nil? (im/fresh-image-model-cache)) "stale generation ignored")
-        (im/load-image-catalogs!)
+        (t/is (nil? (im/fresh-image-model-cache nil)) "stale generation ignored")
+        (im/load-image-catalogs! nil)
         (t/is (not-any? #(= "cache-model" (:id %)) (im/get-models))
               "bundled catalog wins"))
       (spit (str (fs/path dir "image-models.edn")) "{{{ not edn")
@@ -142,13 +142,13 @@
                 *err* (java.io.StringWriter.)
                 im/*use-image-models-cache* true
                 im/*image-models-cache-dir* dir]
-        (t/is (nil? (im/fresh-image-model-cache)))
-        (im/load-image-catalogs!)
+        (t/is (nil? (im/fresh-image-model-cache nil)))
+        (im/load-image-catalogs! nil)
         (t/is (some #(= :openrouter (:id %)) (im/get-providers))
               "bundled catalog still loads"))
       (finally
         (fs/delete-tree dir)
-        (im/load-image-catalogs!)))))
+        (im/load-image-catalogs! nil)))))
 
 ;; ─── Registry semantics ────────────────────────────────────────────────────
 
@@ -217,7 +217,7 @@
         (t/is (zero? (:total-tokens u)))))))
 
 (t/deftest test-generate-images-wire
-  (im/load-image-catalogs!)
+  (im/load-image-catalogs! nil)
   (let [model (im/get-model :openrouter "openrouter/auto")
         context {:input [{:type :text :text "a red cube"}
                          {:type :image :mime-type "image/png" :data "BASE64"}]}
@@ -261,7 +261,7 @@
 ;; ─── generate-images contract (never throws) ───────────────────────────────
 
 (t/deftest test-generate-images-errors
-  (im/load-image-catalogs!)
+  (im/load-image-catalogs! nil)
   (let [model (im/get-model :openrouter "openrouter/auto")]
     (testing "unknown provider → :error"
       (let [r (im/generate-images (assoc model :provider :nope) {:input []})]

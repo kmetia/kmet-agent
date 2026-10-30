@@ -51,6 +51,43 @@
             :when (seq up)]
       (is false (str f " (" ns ") must not require the app layer, found: " (vec up))))))
 
+(t/deftest ai-names-no-app-state-root
+  (testing "kmet.ai takes the agent dir as an argument: the KMET_* env namespace
+            (the agent-dir override, the settings/provider knobs) is the app's,
+            so a library namespace that names one has started owning the host's
+            state root again — see kmet.app.config/get-agent-dir"
+    (doseq [f (source-files ["modules/ai/src"])
+            :let [named (->> (re-seq #"KMET_[A-Z_]+" (slurp f))
+                             (map first)
+                             distinct
+                             sort)]
+            :when (seq named)]
+      (is false (str f " names " (vec named) " — pass the agent dir instead")))))
+
+(def ^:private app-visible-ai
+  "The kmet.ai namespaces an app (or ui) namespace may require: the request
+   behind `:llm`, the catalog and its generators, credentials, usage tallies,
+   and the message shapes. The wire layer (kmet.ai.api.*, kmet.ai.wires) and
+   the slot helper are the library's own — the app reaches a provider through
+   the dispatcher, never by naming a builder."
+  '#{kmet.ai.auth kmet.ai.image-model-gen kmet.ai.image-models kmet.ai.llm
+     kmet.ai.message kmet.ai.model-config kmet.ai.model-gen kmet.ai.models
+     kmet.ai.usage})
+
+(t/deftest app-names-only-the-ai-surface
+  ;; the mirror of ai-never-reaches-up: kmet.ai stays a library by the edges the
+  ;; app does not make, so a new wire helper belongs behind a named function in
+  ;; the surface set above, not in an app namespace's :require
+  (doseq [f (source-files ["modules/app/src"])
+          :let [{:keys [ns requires]} (ns-info f)
+                outside (remove app-visible-ai
+                                (filter #(str/starts-with? (str %) "kmet.ai")
+                                        requires))]
+          :when (seq outside)]
+    (is false (str f " (" ns ") requires " (vec outside)
+                   " — the app names only the kmet.ai surface; a wire builder"
+                   " is reached through kmet.ai.llm, not required"))))
+
 (t/deftest wire-builders-are-leaf-entries
   (testing "a wire module is named by kmet.ai.wires alone — the dispatcher never grows a dispatch
             (wire-to-wire requires are composition: azure/vertex/codex reuse the

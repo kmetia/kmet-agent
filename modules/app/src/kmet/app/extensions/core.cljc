@@ -95,7 +95,7 @@
 ;; ─── Provider-event bridges (pi: context / context_with_system /
 ;; ─── before_provider_request / before_provider_headers /
 ;; ─── after_provider_response) ──────────────────────────────────────────
-;; The ai layer exposes injectable hooks (kmet.ai.api.shared) — it cannot
+;; The ai layer takes its hooks as kmet.ai.llm/send-message options — it cannot
 ;; depend on kmet.agent (the event bus). These bridges translate bus events
 ;; into hook results. The bus returns the LAST non-nil handler result;
 ;; pi chains handler results (each handler sees the previous one's

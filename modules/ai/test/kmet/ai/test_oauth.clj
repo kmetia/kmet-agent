@@ -381,8 +381,11 @@
         path (str agent-dir "/auth.edn")]
     (fs/create-dirs agent-dir)
     (try
-      (with-redefs [auth/resolve-agent-dir (fn [] agent-dir)
-                    auth/auth-atom (atom {})]
+      ;; both cells are process-wide: redefining them (with-redefs restores
+      ;; on exit) keeps one suite's temp root out of the next
+      (with-redefs [auth/auth-atom (atom {})
+                    auth/auth-root (atom nil)]
+        (auth/load-auth! agent-dir)
         (f path))
       (finally (fs/delete-tree agent-dir)))))
 
@@ -432,13 +435,13 @@
                                   {:type :oauth :access "a" :refresh "r"
                                    :expires 1234567890123})
       (testing "load-auth! keeps the oauth entry"
-        (auth/load-auth!)
+        (auth/load-auth! (str (fs/parent path)))
         (t/is (= "a" (get-in (auth/get-credentials) [:github-copilot :access]))))
       (testing "invalid entries are dropped on load"
         (spit path (pr-str {:github-copilot {:type :oauth :access "a" :refresh "r"
                                              :expires 1234567890123}
                             :bad {:type :oauth :access "a"}}))
-        (auth/load-auth!)
+        (auth/load-auth! (str (fs/parent path)))
         (t/is (= #{:github-copilot} (set (keys (auth/get-credentials)))))))))
 
 ;; ─── Credential resolution + refresh on expiry (pi resolveStoredOAuth) ─────
@@ -512,7 +515,7 @@
                   "stored credential preserved for retry (pi)")))))))
 
 (t/deftest test-resolve-oauth-no-oauth-auth
-  (models/load-catalogs!)
+  (models/load-catalogs! nil)
   (with-auth-file
     (fn [_]
       (with-oauth-source
@@ -531,7 +534,7 @@
                 "auth status agrees with configured?"))))))
 
 (t/deftest test-configured-oauth
-  (models/load-catalogs!)
+  (models/load-catalogs! nil)
   (with-auth-file
     (fn [_]
       (let [fake (test-oauth-auth)]
@@ -579,7 +582,7 @@
 ;; ─── Copilot available-model-ids filtering (pi filterModels) ───────────────
 
 (t/deftest test-available-model-ids-filtering
-  (models/load-catalogs!)
+  (models/load-catalogs! nil)
   (let [p (models/get-provider :github-copilot)
         all (count (:models p))]
     (with-redefs [auth/get-credentials (fn [] {})
@@ -607,7 +610,7 @@
 ;; ─── /login auth-type selection (pi showLoginAuthTypeSelector) ─────────────
 
 (t/deftest test-login-provider-options
-  (models/load-catalogs!)
+  (models/load-catalogs! nil)
   (let [options ((var interactive-auth/login-provider-options))]
     (testing "one entry per offered auth type, sorted by display name"
       (t/is (= options (sort-by :name options))))
@@ -621,7 +624,7 @@
       (t/is (every? #(contains? % :status) options)))))
 
 (t/deftest test-find-login-provider-options
-  (models/load-catalogs!)
+  (models/load-catalogs! nil)
   (let [find (var interactive-auth/find-login-provider-options)]
     (testing "exact id match"
       (t/is (= ["deepseek"] (mapv :id (find "deepseek")))))
@@ -638,7 +641,7 @@
 
 (t/deftest test-login-command-auth-type-selection
   (commands/clear-commands!)
-  (models/load-catalogs!)
+  (models/load-catalogs! nil)
   ((var builtins/register-builtin-commands!) cfg/default-config)
   (let [started (atom nil)
         sel-ref (atom nil)
@@ -669,7 +672,7 @@
 
 (t/deftest test-login-command-reference-resolution
   (commands/clear-commands!)
-  (models/load-catalogs!)
+  (models/load-catalogs! nil)
   ((var builtins/register-builtin-commands!) cfg/default-config)
   (let [started (atom nil)
         sel-ref (atom nil)
@@ -701,7 +704,7 @@
 
 (t/deftest test-logout-removes-oauth-credential
   (commands/clear-commands!)
-  (models/load-catalogs!)
+  (models/load-catalogs! nil)
   ((var builtins/register-builtin-commands!) cfg/default-config)
   (with-auth-file
     (fn [_]
@@ -1081,7 +1084,7 @@
         (t/is (= "or-code" (first @exchanged)))))))
 
 (t/deftest test-builtin-oauth-providers
-  (models/load-catalogs!)
+  (models/load-catalogs! nil)
   (doseq [id [:github-copilot :openai-codex :anthropic :openrouter]]
     (t/is (some? (:oauth (models/get-provider id)))
           (str (name id) " carries an OAuthAuth")))

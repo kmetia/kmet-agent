@@ -17,6 +17,7 @@
             [kmet.ai.auth :as auth]
             [kmet.ai.model-config :as model-config]
             [kmet.ai.models :as models]
+            [kmet.app.config :as cfg]
             [kmet.ui.tui.interactive.state :as state]))
 
 ;; ─── Login/logout (pi getLoginProviderOptions / showLoginAuthTypeSelector /
@@ -132,7 +133,7 @@
                                                   {:role :assistant
                                                    :content (str "Logged in to " (:name provider)
                                                                  ". Credentials saved to "
-                                                                 (auth/auth-file-path) ".")})
+                                                                 (auth/auth-file-path (cfg/get-agent-dir)) ".")})
           (when (and (:session (:engine cs)) (:footer-comp cs) (:footer-provider cs))
             (state/update-footer! cs)))
         (catch Exception e
@@ -170,7 +171,7 @@
                                                         {:role :assistant
                                                          :content (str "Saved API key for " (:name p)
                                                                        ". Credentials saved to "
-                                                                       (auth/auth-file-path) ".")})
+                                                                       (auth/auth-file-path (cfg/get-agent-dir)) ".")})
                 (when (and (:session (:engine cs)) (:footer-comp cs) (:footer-provider cs))
                   (state/update-footer! cs)))
             (chat-history/show-warning! (:chat-history cs)
@@ -389,8 +390,8 @@
    warning and returns nil on failure."
   [cs alias-id base]
   (try
-    (model-config/add-account! alias-id {:provider (:id base)})
-    (models/load-models-config!)
+    (model-config/add-account! alias-id {:provider (:id base)} (cfg/get-agent-dir))
+    (models/load-models-config! (cfg/get-agent-dir))
     (if-let [p (models/get-provider alias-id)]
       (do
         (chat-history/chat-history-add-message!

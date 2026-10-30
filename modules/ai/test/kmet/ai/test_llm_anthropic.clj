@@ -29,7 +29,7 @@
                (@#'anthropic/anthropic-auth-headers :github-copilot "k"))))))
 
 (t/deftest ^:slow test-llm-anthropic-bearer-only
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (m/clear-extension-providers!)
   (try
     (m/register-provider-config! :anthropic
@@ -52,14 +52,14 @@
                 "reaches the request (fails on the network, not on auth)"))))
     (finally
       (m/clear-extension-providers!)
-      (m/load-catalogs!))))
+      (m/load-catalogs! nil))))
 
 (t/deftest test-llm-anthropic-broken-configured-key-blocks-bearer
   ;; A configured-but-unresolvable models.edn key blocks the whole resolution
   ;; (pi resolveConfigValueOrThrow: rawKey present → inherited env never
   ;; reached) — even with AUTH_TOKEN set, the request must NOT proceed with a
   ;; nil x-api-key.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (m/clear-extension-providers!)
   (try
     (m/register-provider-config! :anthropic
@@ -77,13 +77,13 @@
               "unresolvable configured key wins over AUTH_TOKEN (pi)")))
     (finally
       (m/clear-extension-providers!)
-      (m/load-catalogs!))))
+      (m/load-catalogs! nil))))
 
 (t/deftest ^:slow test-llm-resolves-key-from-auth
   ;; send-message resolves the key itself when the caller passes none (pi
   ;; prepareRequest) — an auth.edn credential lets a bare call proceed
   ;; instead of erroring with an empty Authorization header.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (with-redefs [auth/auth-atom (atom {:opencode-go {:key "file-key"}})
                 auth/getenv (fn [_] nil)]
     (let [errors (atom [])]
@@ -101,7 +101,7 @@
   ;; anthropic wire dropped the block index (and the input_json_delta events
   ;; entirely), so sibling calls collapsed into one and args stayed {} — the
   ;; model saw one-at-a-time execution and adapted to serial tool calls.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [ss (java.net.ServerSocket. 0)
         port (.getLocalPort ss)
         request-body (atom nil)
@@ -197,7 +197,7 @@
 ;; ─── Kimi adaptive thinking e2e (anthropic-messages, forceAdaptiveThinking) ─
 
 (t/deftest ^:slow test-llm-kimi-adaptive-thinking-end-to-end
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [ss (java.net.ServerSocket. 0)
         port (.getLocalPort ss)
         request-body (atom nil)
@@ -258,7 +258,7 @@
         (.close ss)))))
 
 (t/deftest test-llm-cloudflare-missing-env-reports-error
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [errors (atom [])]
     ;; the interpolation runs inside the request future, so the env redef
     ;; must stay active until the future completes

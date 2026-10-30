@@ -6,50 +6,16 @@
    kmet.ai.api.{shared,openai-completions,openai-responses,
    openai-codex-responses,azure-openai-responses,anthropic-messages,
    google-generative-ai,mistral-conversations,google-vertex,
-   bedrock-converse-stream}."
+   bedrock-converse-stream}.
+
+   Message conversion is the caller's: the app hands pi's convertToLlm in as
+   the :convert-to-llm option (kmet.app.loop.message/to-llm-messages), so this
+   namespace never learns what an agent-context role is."
   (:require
    [kmet.ai.auth :as auth]
    [kmet.ai.models :as models]
    [kmet.ai.wires :as wires]
    [kmet.ai.api.shared :refer [ambient-auth-available?]]))
-
-(def ^:private compaction-summary-prefix
-  "pi: COMPACTION_SUMMARY_PREFIX — the compacted-history preamble and
-   <summary> tag a compactionSummary message is wrapped in at the wire."
-  "The conversation history before this point was compacted into the following summary:\n\n<summary>\n")
-
-(def ^:private compaction-summary-suffix "\n</summary>")
-
-(def ^:private branch-summary-prefix
-  "pi: BRANCH_SUMMARY_PREFIX."
-  "The following is a summary of a branch that this conversation came back from:\n\n<summary>\n")
-
-(def ^:private branch-summary-suffix "\n</summary>")
-
-(defn convert-summary-messages
-  "pi: convertToLlm — compaction/branch-summary AgentMessages become user
-   messages carrying their wrapped summary text. The conversion happens per
-   request, so the agent context (and the TUI) keeps the summary roles and
-   the extension context hook still sees them; only the wire payload is
-   flattened. Public for the boundary context preview, which carries the
-   provider-agnostic part of the wire view (kmet's remaining conversion —
-   bash/custom roles, excluded bash, image blocking — is provider-specific
-   and runs inside call-llm)."
-  [messages]
-  (mapv (fn [m]
-          (case (:role m)
-            :compaction {:role :user
-                         :content [{:type :text
-                                    :text (str compaction-summary-prefix
-                                               (:summary m "")
-                                               compaction-summary-suffix)}]}
-            :branch-summary {:role :user
-                             :content [{:type :text
-                                        :text (str branch-summary-prefix
-                                                   (:summary m "")
-                                                   branch-summary-suffix)}]}
-            m))
-        messages))
 
 (defn request-opts
   "Normalize a `send-message` opts map for one call.
@@ -57,9 +23,11 @@
    Provider-event hooks are options, not installed globals (pi: StreamOptions
    carry their hooks per call): the attempt's `:hooks` map — read once by the
    runtime — is merged under any flat `:on-*` key, `:on-context` rewrites
-   `:messages` before the summary conversion (the last non-nil handler result
-   wins, pi: emitContext), and the two request-time hooks are re-packed into
-   the `:hooks` map kmet.ai.http takes. Returns a new map; OPTS is untouched."
+   `:messages` before the caller's conversion (the last non-nil handler result
+   wins, pi: emitContext), `:convert-to-llm` then maps the resulting messages
+   (pi: convertToLlm — the app supplies it; absent means the messages are
+   already wire-shaped), and the two request-time hooks are re-packed into the
+   `:hooks` map kmet.ai.http takes. Returns a new map; OPTS is untouched."
   [opts]
   (let [hooks (merge (:hooks opts)
                      (select-keys opts [:on-context :on-payload :on-headers :on-response]))]
@@ -68,10 +36,8 @@
                ;; the request-time pair the HTTP decorator applies
                :hooks (select-keys hooks [:on-headers :on-response]))
         (update :messages #(if-let [f (:on-context hooks)] (or (f %) %) %))
-        ;; pi: convertToLlm — compaction/branch-summary roles become wrapped
-        ;; user messages at the provider edge (after the context hook, which
-        ;; still sees the role-preserving AgentMessages)
-        (update :messages convert-summary-messages))))
+        ;; pi's order: emitContext, then convertToLlm
+        (update :messages #(if-let [f (:convert-to-llm opts)] (f %) %)))))
 
 (defn send-message
   "Send messages to LLM and receive streaming events via callbacks.
@@ -124,8 +90,12 @@
                      hook keys below (the runtime reads it once per attempt
                      and merges it in; a flat key overrides it).
      :on-context  — (fn [messages]) → replacement messages, nil keeps them
-                     (pi: context event; applied before the summary
-                     conversion, so it still sees the summary roles).
+                     (pi: context event; applied before `:convert-to-llm`).
+     :convert-to-llm — (fn [messages]) → the provider-neutral messages for
+                     the request (pi: convertToLlm), applied after
+                     `:on-context`; the app supplies
+                     kmet.app.loop.message/to-llm-messages. Absent means the
+                     caller's messages are already wire-shaped.
      :on-payload  — (fn [payload]) → replacement request payload, nil keeps
                      it (pi: before_provider_request; each api builder
                      applies it).

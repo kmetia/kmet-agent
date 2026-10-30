@@ -42,7 +42,7 @@
             chars — (first args) would yield the first character)"
     (support/install-app-keybindings!)
     (commands/clear-commands!)
-    (m/load-catalogs!)
+    (m/load-catalogs! nil)
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [saved (atom nil)
           msg (atom nil)

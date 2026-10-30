@@ -17,29 +17,30 @@
 
 (t/deftest test-llm-loaded
   (t/is (fn? llm/send-message))
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (t/is (= 41 (count (m/get-providers))))
   (t/is (fn? m/get-model)))
 
-(t/deftest test-convert-summary-messages
-  ;; pi: convertToLlm — compaction/branch-summary AgentMessages become user
-  ;; messages carrying the wrapped summary text at the wire; other roles
-  ;; pass through untouched
-  (let [convert @#'llm/convert-summary-messages
-        input [{:role :user :content [{:type :text :text "hi"}]}
-               {:role :compaction :summary "SUM" :tokens-before 123}
-               {:role :tool :content [{:type :tool_result :tool_use_id "t1"}]}
-               {:role :branch-summary :summary "BRANCH"}]
-        msgs (convert input)
-        text-of (fn [m] (-> m :content first :text))]
-    (t/is (= [:user :user :tool :user] (mapv :role msgs)))
-    (t/is (= "SUM" (:summary (nth input 1)))
-          "conversion is non-destructive: the input role map keeps its summary")
-    (t/is (str/includes? (text-of (nth msgs 1)) "compacted into the following summary"))
-    (t/is (str/includes? (text-of (nth msgs 1)) "<summary>\nSUM\n</summary>"))
-    (t/is (str/includes? (text-of (nth msgs 3)) "summary of a branch"))
-    (t/is (str/includes? (text-of (nth msgs 3)) "<summary>\nBRANCH\n</summary>"))
-    (t/is (= "hi" (text-of (first msgs))))))
+(t/deftest test-request-opts-applies-the-callers-conversion
+  ;; pi: emitContext then convertToLlm — the hook sees the caller's messages,
+  ;; the converter sees the hook's output, and no caller conversion leaves the
+  ;; messages untouched (kmet.ai knows no agent-context role)
+  (let [seen (atom [])
+        hook (fn [m] (swap! seen conj [:hook (mapv :role m)]) m)
+        convert (fn [m] (swap! seen conj [:converter (mapv :role m)])
+                  (mapv #(if (= :compaction (:role %))
+                           {:role :user :content [{:type :text :text "flat"}]}
+                           %)
+                        m))
+        input [{:role :compaction :summary "S"}]
+        out (llm/request-opts {:messages input
+                               :on-context hook
+                               :convert-to-llm convert})]
+    (t/is (= [[:hook [:compaction]] [:converter [:compaction]]] @seen)
+          "the hook runs first and still sees the role")
+    (t/is (= [:user] (mapv :role (:messages out))))
+    (t/is (= input (:messages (llm/request-opts {:messages input})))
+          "no :convert-to-llm — the messages go through as given")))
 
 (t/deftest test-request-opts-hooks
   (t/testing "the attempt's :hooks map is merged and the context hook rewrites messages"
@@ -69,7 +70,7 @@
 (t/deftest test-unknown-api-type
   ;; An unknown wire reports through the async error channel like every other
   ;; pre-request failure, naming the wires kmet.ai.wires knows.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [err (promise)]
     (llm/send-message {:provider :deepseek
                        :model "deepseek-flash"
@@ -88,7 +89,7 @@
   ;; rewrites the transcript the wire builder receives and the request-time
   ;; pair rides along for kmet.ai.http. The loop and bridge tests cover each
   ;; end structurally — this is the join.
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [request (atom nil)
         seen (atom nil)]
     (with-redefs [auth/resolve-provider-auth (fn [_] {:api-key "test-key"})
@@ -110,29 +111,6 @@
           "the request-time pair reaches the builder's HTTP call")
     (t/is (nil? (:on-context (:hooks @request)))
           "the context hook is consumed here, not forwarded to the builder")))
-
-(t/deftest test-bash-execution-text
-  (t/testing "derived from the entry's command/output (pi: bashExecutionToText)"
-    (let [text (shared/bash-execution-text {:command "ls" :output "a\nb" :exit-code 0})]
-      (t/is (str/includes? text "Ran `ls`"))
-      (t/is (str/includes? text "a\nb")))
-    (t/is (str/includes? (shared/bash-execution-text {:command "ls" :output "o" :exit-code 3})
-                         "Command exited with code 3")
-          "a non-zero exit is reported")
-    (t/is (str/includes? (shared/bash-execution-text {:command "ls" :output "o" :cancelled true})
-                         "(command cancelled)")))
-  (t/testing "an explicit text block vector wins — a context edit's replacement"
-    (t/is (= "replacement"
-             (shared/bash-execution-text {:command "ls" :output "original"
-                                          :content [{:type :text :text "replacement"}]})))
-    (t/is (str/includes? (shared/bash-execution-text
-                          {:command "ls" :content [{:content ""}]})
-                         "Ran `ls`")
-          "other block shapes still derive from the command")
-    (t/is (= "" (shared/bash-execution-text
-                 {:command "ls" :output "original" :content [{:type :text :text ""}]}))
-          "an empty text replacement is still a replacement (the block type,
-           not the emptiness, decides)")))
 
 ;; ─── send-message with no API key ─────────────────────────────────────────
 
@@ -170,7 +148,7 @@
 ;; ─── SSE parsing helpers ──────────────────────────────────────────────────
 
 (t/deftest test-llm-send-message-returns-future
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (let [fut (llm/send-message {:provider :opencode-go :model "deepseek-v4.1-flash"
                                :api-key "test" :on-error (fn [_])})]
     (t/is (future? fut))))
@@ -190,7 +168,7 @@
 ;; ─── Multiple providers ──────────────────────────────────────────────────
 
 (t/deftest test-llm-all-providers-resolve
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   (t/is (= 41 (count (m/get-providers))))
   (doseq [p [:opencode-go :opencode :deepseek :github-copilot :openai :xai
              :openai-codex :azure-openai-responses :anthropic :google :groq
@@ -224,7 +202,7 @@
   (t/is (nil? (shared/headers-timeout-ms nil))))
 
 (t/deftest ^:slow test-llm-request-timeout-follows-idle
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   ;; A server that accepts the request but never responds: the request must
   ;; error via the configured idle timeout (pi: undici bodyTimeout AND
   ;; headersTimeout are both httpIdleTimeoutMs), both when the total deadline
@@ -275,7 +253,7 @@
 
 ;; guards the java.net.http body-stream deadlock
 (t/deftest ^:slow test-llm-body-stall-idle-timeout-completes
-  (m/load-catalogs!)
+  (m/load-catalogs! nil)
   ;; A server that sends response headers then stalls the body: the SSE idle
   ;; timeout must fire and the request future must complete promptly. Before
   ;; the interrupt/join-before-close fix, closing the java.net.http body

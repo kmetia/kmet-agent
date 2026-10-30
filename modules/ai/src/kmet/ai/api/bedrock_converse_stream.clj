@@ -7,7 +7,10 @@
    [clojure.string :as str]
    [kmet.libs.aws-sigv4 :as aws-sigv4]
    [kmet.ai.constrained-sampling :as cs]
-   [kmet.ai.api.shared :refer [anthropic-adaptive-effort bash-execution-text clamp-reasoning content-text getenv image-block? min-answer-tokens on-payload request-headers responses-events-handler thinking-budgets effective-total-timeout-ms headers-timeout-ms transport-error-message]]))
+   [kmet.libs.http :refer [transport-error-message]]
+   [kmet.ai.message :refer [content-text image-block?]]
+   [kmet.ai.models :refer [clamp-reasoning thinking-budgets]]
+   [kmet.ai.api.shared :refer [anthropic-adaptive-effort getenv min-answer-tokens on-payload request-headers responses-events-handler effective-total-timeout-ms headers-timeout-ms]]))
 
 (defn bedrock-is-claude?
   "pi isAnthropicClaudeModel: id/name mention Anthropic Claude (also matches
@@ -97,14 +100,6 @@
                        (bedrock-image-block (:mime-type i) (:data i))))]
     (if (seq blocks) blocks [{:text bedrock-empty-text-placeholder}])))
 
-(defn- bedrock-bash-message
-  "A bash execution's user message, or nil when the execution is excluded from
-   the context."
-  [m]
-  (when-not (:exclude-from-context? m)
-    {:role "user"
-     :content [{:text (bash-execution-text m)}]}))
-
 (defn- bedrock-tool-result-block
   "One tool result as a toolResult block, its id normalized to Bedrock's shape."
   [tr]
@@ -183,22 +178,16 @@
     (if (seq blocks) blocks [{:text bedrock-empty-text-placeholder}])))
 
 (defn- bedrock-conversation
-  "The messages without the system prompt, converted to ConverseStream shape
-   (pi convertMessages): bash executions and user turns, assistant turns, and
-   consecutive tool results merged into one user message. A turn that converts
-   to nothing is dropped."
+  "The wire messages without the system prompt, converted to ConverseStream
+   shape (pi convertMessages): user turns, assistant turns, and consecutive
+   tool results merged into one user message. A turn that converts to nothing
+   is dropped."
   [messages model provider]
   (loop [msgs (remove #(= :system (:role %)) messages)
          out []]
     (if-let [m (first msgs)]
       (let [role (name (:role m))]
         (cond
-          (= role "bash")
-          (recur (rest msgs)
-                 (if-let [message (bedrock-bash-message m)]
-                   (conj out message)
-                   out))
-
           (= role "tool")
           (let [{:keys [count message]} (bedrock-tool-results-message msgs)]
             (recur (drop count msgs) (conj out message)))

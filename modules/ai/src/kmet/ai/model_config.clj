@@ -6,8 +6,8 @@
    merged like settings.edn — kmet deviation from pi's single global
    models.json). One immutable load per startup/reload; a parse or schema
    failure yields an error string and the registry keeps the built-ins.
-   AGENT-DIR pins the global file's scope dir (KMET_CODING_AGENT_DIR
-   sandboxing); nil resolves via cfg/get-agent-dir.
+   AGENT-DIR is the host's state root (kmet.app.config/get-agent-dir): the
+   global file sits under it.
 
    Validation is a manual walker (no TypeBox) producing path-style messages
    ('providers.my-provider.models[0].cost: expected number'), collected
@@ -362,12 +362,11 @@
 
 (defn models-edn-paths
   "Global then project models.edn paths (project overrides global, like
-   settings.edn). AGENT-DIR pins the global file's scope dir
-   (KMET_CODING_AGENT_DIR sandboxing); nil resolves via cfg/get-agent-dir."
-  ([] (models-edn-paths nil))
-  ([agent-dir]
-   [(str (fs/path (or agent-dir (auth/resolve-agent-dir)) "models.edn"))
-    (str (fs/path (fs/cwd) ".kmet" "models.edn"))]))
+   settings.edn). AGENT-DIR is the host's root
+   (kmet.app.config/get-agent-dir): the global file sits under it."
+  [agent-dir]
+  [(auth/agent-dir-path agent-dir "models.edn")
+   (str (fs/path (fs/cwd) ".kmet" "models.edn"))])
 
 (defn- load-config-file
   "Read + parse one models.edn file. Returns {:data map} (missing file →
@@ -407,37 +406,34 @@
    pi loads only the global file). Returns {:providers {provider-id config}
    :accounts {alias-id config} :error str-or-nil}; a parse or schema failure
    yields :error with empty maps (the registry keeps the built-ins).
-   AGENT-DIR pins the global file's scope dir (KMET_CODING_AGENT_DIR
-   sandboxing); nil resolves via cfg/get-agent-dir."
-  ([] (load-config nil))
-  ([agent-dir]
-   (let [paths (models-edn-paths agent-dir)
-         results (mapv load-config-file paths)
-         errors (keep :error results)]
-     (if (seq errors)
-       {:providers {} :accounts {} :error (str/join "\n\n" errors)}
-       (if (not-any? (fn [{:keys [data error]}] (or data error)) results)
-         {:providers {} :accounts {} :error nil}
-         (let [config (reduce (fn [acc {:keys [data]}] (eds/deep-merge acc data)) {} results)]
-           (if-let [errors (seq (validate-config config))]
-             {:providers {}
-              :accounts {}
-              :error (str "Invalid models.edn schema:\n"
-                          (str/join "\n" (map #(str "  - " %) errors))
-                          "\n\nFile: " (str/join ", " paths))}
-             {:providers (normalize-provider-ids (or (:providers config) {}))
-              :accounts (normalize-account-ids (or (:accounts config) {}))
-              :error nil})))))))
+   AGENT-DIR is the host's root (kmet.app.config/get-agent-dir)."
+  [agent-dir]
+  (let [paths (models-edn-paths agent-dir)
+        results (mapv load-config-file paths)
+        errors (keep :error results)]
+    (if (seq errors)
+      {:providers {} :accounts {} :error (str/join "\n\n" errors)}
+      (if (not-any? (fn [{:keys [data error]}] (or data error)) results)
+        {:providers {} :accounts {} :error nil}
+        (let [config (reduce (fn [acc {:keys [data]}] (eds/deep-merge acc data)) {} results)]
+          (if-let [errors (seq (validate-config config))]
+            {:providers {}
+             :accounts {}
+             :error (str "Invalid models.edn schema:\n"
+                         (str/join "\n" (map #(str "  - " %) errors))
+                         "\n\nFile: " (str/join ", " paths))}
+            {:providers (normalize-provider-ids (or (:providers config) {}))
+             :accounts (normalize-account-ids (or (:accounts config) {}))
+             :error nil}))))))
 
 (defn load-config!
   "Load models.edn into the config atom; returns the config map. Called at
-   startup (models/load-models-config!) and from /reload. AGENT-DIR pins the
-   global file's scope dir (KMET_CODING_AGENT_DIR sandboxing)."
-  ([] (load-config! nil))
-  ([agent-dir]
-   (let [config (load-config agent-dir)]
-     (reset! config-atom config)
-     config)))
+   startup (models/load-models-config!) and from /reload. AGENT-DIR is the
+   host's root (kmet.app.config/get-agent-dir)."
+  [agent-dir]
+  (let [config (load-config agent-dir)]
+    (reset! config-atom config)
+    config))
 
 (defn get-providers
   "The loaded models.edn providers map (empty when none or on load error)."
@@ -477,34 +473,32 @@
    touch a models.edn that is not a valid EDN map, so a broken file can never
    be erased. Only the global file is
    written (the project .kmet/models.edn stays hand-managed). Returns the
-   file path. AGENT-DIR pins the global scope dir; nil resolves via
-   cfg/get-agent-dir."
-  ([alias-id account] (add-account! alias-id account nil))
-  ([alias-id account agent-dir]
-   (when-not (writable-account-id? alias-id)
-     (throw (ex-info (str "Account alias id " (pr-str alias-id)
-                          " must be a plain ASCII provider id"
-                          " (letters, digits, '-', '_' or '.', no '/' or whitespace)")
-                     {:type :model-config-invalid :alias alias-id})))
-   (let [path (first (models-edn-paths agent-dir))
-         text (when (fs/exists? path)
-                (try (slurp path) (catch Exception _ nil)))
-         blank? (and text (str/blank? text))
-         base (cond
-                (nil? text) nil
-                blank? {}
-                :else (eds/safe-parse-edn-map text))]
-     (when (and text (not blank?) (nil? base))
-       (throw (ex-info "models.edn is not a valid EDN map; not rewriting it"
-                       {:type :model-config-invalid :file path})))
-     (when (and base (not (or (nil? (:accounts base)) (map? (:accounts base)))))
-       (throw (ex-info ":accounts in models.edn is not a map"
-                       {:type :model-config-invalid :file path})))
-     ;; Write the whole top-level :accounts map: save-edn-setting!'s line
-     ;; surgery preserves comments when the key is appended or on one line.
-     (eds/save-edn-setting! path [:accounts]
-                            (assoc (or (:accounts base) {}) (keyword alias-id) account))
-     path)))
+   file path. AGENT-DIR is the host's root (kmet.app.config/get-agent-dir)."
+  [alias-id account agent-dir]
+  (when-not (writable-account-id? alias-id)
+    (throw (ex-info (str "Account alias id " (pr-str alias-id)
+                         " must be a plain ASCII provider id"
+                         " (letters, digits, '-', '_' or '.', no '/' or whitespace)")
+                    {:type :model-config-invalid :alias alias-id})))
+  (let [path (first (models-edn-paths agent-dir))
+        text (when (fs/exists? path)
+               (try (slurp path) (catch Exception _ nil)))
+        blank? (and text (str/blank? text))
+        base (cond
+               (nil? text) nil
+               blank? {}
+               :else (eds/safe-parse-edn-map text))]
+    (when (and text (not blank?) (nil? base))
+      (throw (ex-info "models.edn is not a valid EDN map; not rewriting it"
+                      {:type :model-config-invalid :file path})))
+    (when (and base (not (or (nil? (:accounts base)) (map? (:accounts base)))))
+      (throw (ex-info ":accounts in models.edn is not a map"
+                      {:type :model-config-invalid :file path})))
+    ;; Write the whole top-level :accounts map: save-edn-setting!'s line
+    ;; surgery preserves comments when the key is appended or on one line.
+    (eds/save-edn-setting! path [:accounts]
+                           (assoc (or (:accounts base) {}) (keyword alias-id) account))
+    path))
 
 (defn get-error
   "models.edn load error string (parse/schema), nil when clean."

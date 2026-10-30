@@ -146,7 +146,7 @@
 
 (t/deftest test-unload-removes-provider-registration
   (extensions/clear-extensions!)
-  (models/load-catalogs!)
+  (models/load-catalogs! nil)
   (models/clear-extension-providers!)
   (let [dir "target/test-ext-prov-unload"]
     (fs/delete-tree dir)

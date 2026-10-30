@@ -171,7 +171,7 @@
     (let [api ((var extensions/create-extension-api)
                {:name "prov-test" :path "target/test-ext-prov.clj"
                 :deregister-fns (atom [])})]
-      (models/load-catalogs!)
+      (models/load-catalogs! nil)
       (models/clear-extension-providers!)
       (try
         (t/is (not (some #(= "ext-1" (:id %)) (extensions/get-all-models))))

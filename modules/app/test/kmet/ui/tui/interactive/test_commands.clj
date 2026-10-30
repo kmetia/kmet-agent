@@ -123,7 +123,7 @@
 (deftest test-model-command-switches-model
   (testing "/model resolves provider/model patterns and switches the agent"
     (commands/clear-commands!)
-    (m/load-catalogs!)
+    (m/load-catalogs! nil)
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [handle (hs/new-handle)
           ag (runtime/agent-state handle)
@@ -169,7 +169,7 @@
             as the settings default — the choice survives a restart (kmet
             deviation: pi's direct command stays session-scoped)"
     (commands/clear-commands!)
-    (m/load-catalogs!)
+    (m/load-catalogs! nil)
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [handle (hs/new-handle)
           ag (runtime/agent-state handle)
@@ -209,7 +209,7 @@
   (testing "bare /thinking mounts the level selector for a reasoning model;
             a model without supported levels gets the cycle status"
     (commands/clear-commands!)
-    (m/load-catalogs!)
+    (m/load-catalogs! nil)
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [status (atom nil)
           sel-ref (atom nil)
@@ -245,7 +245,7 @@
             agent level set + [:thinking] saved to settings (pi Ctrl+S →
             selectThinkingLevel(level, true))"
     (commands/clear-commands!)
-    (m/load-catalogs!)
+    (m/load-catalogs! nil)
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [handle (hs/new-handle)
           ag (runtime/agent-state handle)
