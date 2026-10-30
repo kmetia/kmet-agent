@@ -19,7 +19,7 @@
             [kmet.extension :as ext]
             [kmet.srce.core :as srce]
             [kmet.libs.path :as path]
-            [kmet.agent.ui.tui.tool-renderers :as renderers]))
+            [kmet.ui.tui.tool-renderers :as renderers]))
 
 (def ^:private max-matches
   "Matches shown before the result is marked truncated."

@@ -1,11 +1,11 @@
 (ns kmet.test-retirement
   "Guard: the retired namespace prefix. `kmet.agent.*` was kmet1's, and landing
    11 deleted that module; every remaining module's sources speak their own
-   module's name.
+   module's name. The last survivor, `kmet.agent.ui.tui.tool-renderers`, was
+   renamed to `kmet.ui.tui.tool-renderers` when the project dropped its
+   pre-1.0 extension-ABI compatibility promise, so nothing carries the prefix
+   now and the rule has no exception.
 
-   `kmet.agent.ui.tui.tool-renderers` is the one survivor: shipped extensions
-   require it by that name, so it stays a name rather than a leftover (the ABI
-   proper is `kmet.extension`, outside the prefix and so outside this rule).
    The module list is `modules.edn`'s, so a module added later is scanned
    without an edit here. The require graph has no edge from this file to what
    it scans, so it runs in the full suite."
@@ -14,10 +14,6 @@
             [clojure.string :as str]
             [clojure.test :as t]
             [kmet.tasks.modules :as modules]))
-
-(def ^:private kept
-  "Names starting with the retired prefix that are contracts, not leftovers."
-  #{"kmet.agent.ui.tui.tool-renderers"})
 
 (defn- source-files
   "Every Clojure source file in every module."
@@ -34,12 +30,11 @@
       (when (and (seq? form) (= 'ns (first form)))
         (str (second form))))))
 
-(t/deftest only-the-extensions-renderer-speaks-the-retired-prefix
+(t/deftest no-namespace-speaks-the-retired-prefix
   (let [files (source-files)
         parsed (map (fn [f] [f (declared-ns f)]) files)
         stale (->> parsed
-                   (filter (fn [[_ ns]] (and ns (str/starts-with? ns "kmet.agent.")
-                                             (not (contains? kept ns)))))
+                   (filter (fn [[_ ns]] (and ns (str/starts-with? ns "kmet.agent."))))
                    sort)]
     (t/is (seq files) "no sources scanned — check the module list")
     (t/is (every? (comp some? second) parsed)

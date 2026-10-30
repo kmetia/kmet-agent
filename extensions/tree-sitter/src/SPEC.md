@@ -183,7 +183,7 @@ Guidelines text steers agents away from grep for structure questions
 
 **Implemented** in `render.clj`, aligned with the lsp-adapter renderer's
 conventions: container/text/spacer building, shared path helpers from
-`kmet.agent.ui.tui.tool-renderers` (shorten + OSC-8 hyperlink), the standard
+`kmet.ui.tui.tool-renderers` (shorten + OSC-8 hyperlink), the standard
 "(N more lines, <key> to expand)" collapsed-preview footer, and syntax
 highlighting through `kmet.libs.theme`'s markdown-theme `:highlight-code`
 (language derived from the file extension). Style tokens follow lsp usage:
@@ -241,7 +241,7 @@ All of this lives in one `renderers.clj` namespace inside the extension,
 built from `kmet.tui.components.text` + `kmet.libs.theme` only (shared-by-
 reference libraries, per modules/app/src/kmet/extension.md) — no dependency on host app UI
 namespaces, unlike the clojure extension which reuses
-`kmet.agent.ui.tui.tool-renderers` because its tools are edit-shaped; ours have
+`kmet.ui.tui.tool-renderers` because its tools are edit-shaped; ours have
 custom shapes and own the whole renderer.
 
 ## Non-goals / open items

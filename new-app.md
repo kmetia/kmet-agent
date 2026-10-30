@@ -52,10 +52,11 @@ listing registry; the profile row *is* the selector. `kmet.app.modes` also
 holds `out.clj`, the output helper the wire modes share.
 
 **Namespaces at HEAD.** The app is `kmet.app.*`, the front ends `kmet.ui.*`,
-the kernel `kmet.srce.*`, the extension ABI `kmet.extension`. The one
-`kmet.agent.*` survivor is `kmet.agent.ui.tui.tool-renderers`, kept because
-shipped extensions require it by name; `test/kmet/test_retirement.clj` enforces
-that it stays the only one.
+the kernel `kmet.srce.*`, the extension ABI `kmet.extension`. No namespace
+carries kmet1's `kmet.agent.*` prefix — the last survivor, the tool renderers,
+was renamed to `kmet.ui.tui.tool-renderers` once the extensions ABI stopped
+being a compatibility promise before 1.0 — and `test/kmet/test_retirement.clj`
+enforces that.
 
 **Extensions are plugin-only.** `extension.edn` carries `:name`, `:plugin` and
 `:loader` — never `:inject`, and never an `:entry`/`init` function: `:inject`

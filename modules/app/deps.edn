@@ -7,18 +7,17 @@
  ;; above. babashka/process is the version rule's git describe.
  ;;
  ;; The front end lives here too (it was the `ui` module, rank 3, until it
- ;; merged). `modules/app/src/kmet/ui` holds the TUI's widgets, selectors and
- ;; mode row as `kmet.ui.*`, and the tool renderers keep their pre-rename
- ;; `kmet.agent.ui.*` names because shipped extensions require them by name.
+ ;; merged). `modules/app/src/kmet/ui` holds the TUI's widgets, selectors, tool
+ ;; renderers and mode row as `kmet.ui.*`.
  ;; A namespace prefix no longer marks the module, so the app/front-end split
  ;; is a path rule in test_layer_guard.clj: the business subtree
  ;; (`kmet/app/**`) may not require `kmet.ui.**`, `kmet.tui.**`, `kmet.tk.**`
  ;; or a mode row.
  ;;
- ;; Every namespace here is `kmet.app.*`. The lifts of 4c/4f/5l/7a moved files
- ;; and kept their `kmet.agent.*` names while kmet1 and kmet2 shared a module
- ;; tree; landing 11's pass renamed them with the subtree they belong to, so the
- ;; name follows the module now. The one exception is `kmet.extension`, the
+ ;; The business tree is `kmet.app.*` and the front end is `kmet.ui.*`; the
+ ;; lifts of 4c/4f/5l/7a kept their `kmet.agent.*` names while kmet1 and kmet2
+ ;; shared a module tree, and landing 11 renamed them with the subtree they
+ ;; belong to. The one name outside both prefixes is `kmet.extension`, the
  ;; extension ABI, whose name is its contract.
  ;;
  ;; The session layer (kmet.app.session.*, moved at 4c-i), kmet.app.registry

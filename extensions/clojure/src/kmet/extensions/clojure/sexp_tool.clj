@@ -14,7 +14,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.extensions.clojure.edit-util :as util]
-            [kmet.agent.ui.tui.tool-renderers :as renderers]
+            [kmet.ui.tui.tool-renderers :as renderers]
             [rewrite-clj.node :as n]
             [rewrite-clj.parser :as p]
             [rewrite-clj.zip :as z]))

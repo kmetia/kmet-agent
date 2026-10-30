@@ -28,12 +28,12 @@
      kmet.tui.terminal-native-unix  ;; Jolt/Unix backend (.jolt source)
      kmet.tui.terminal-native-win}) ;; Jolt/Windows backend (.jolt source)
 
-(def ^:private agent-shared-namespaces
+(def ^:private app-shared-namespaces
   "Shared-layer namespaces an extension may require that are not the framework's
-   own: `kmet.app.keybindings` (app's since landing 5, its name unchanged) and
-   `kmet.agent.ui.tui.tool-renderers` (the ui module's, and the one namespace
-   the rename may not touch — shipped extensions write it in their `:require`)."
-  '#{kmet.app.keybindings kmet.agent.ui.tui.tool-renderers})
+   own, both in this module's tree: `kmet.app.keybindings` (the key-hint table)
+   and `kmet.ui.tui.tool-renderers` (the built-in tool renderers an extension's
+   tools render through)."
+  '#{kmet.app.keybindings kmet.ui.tui.tool-renderers})
 
 (defn- library-ns-name
   "The namespace symbol for source file P under DIR, read from its path; PREFIX
@@ -69,19 +69,19 @@
     (let [entries (into (set @#'ext-context/tui-library-namespaces)
                         @#'ext-context/libs-library-namespaces)
           sources (shared-source-namespaces)
-          known (into entries (into host-backend-namespaces agent-shared-namespaces))]
+          known (into entries (into host-backend-namespaces app-shared-namespaces))]
       (t/is (< 60 (count entries)) "the lists are real, not empty")
       (t/is (< 60 (count sources)) "the source scan found the trees")
       (t/is (empty? (remove known sources))
             (str "shared namespaces missing from the lists: "
                  (vec (sort (remove known sources)))))
-      (t/is (empty? (remove (into sources agent-shared-namespaces) entries))
+      (t/is (empty? (remove (into sources app-shared-namespaces) entries))
             (str "stale shared-library list entries: "
-                 (vec (sort (remove (into sources agent-shared-namespaces) entries)))))
+                 (vec (sort (remove (into sources app-shared-namespaces) entries)))))
       (t/is (empty? (filter entries host-backend-namespaces))
             "host backends stay out of the eagerly-required lists")
       (t/is (every? fs/exists? ["modules/app/src/kmet/app/keybindings.clj"
-                                "modules/app/src/kmet/agent/ui/tui/tool_renderers.clj"])
+                                "modules/app/src/kmet/ui/tui/tool_renderers.clj"])
             "the shared-layer list entries have source files"))))
 
 (t/deftest ^:slow ^:bb-only test-packed-clojure-jar-roundtrip

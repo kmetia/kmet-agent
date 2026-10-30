@@ -11,7 +11,7 @@
    [kmet.hikap.component :as component]
    [kmet.ui.tui.subs :as subs]
    [kmet.ui.tui.tool-execution :as te]
-   [kmet.agent.ui.tui.tool-renderers :as renderers]
+   [kmet.ui.tui.tool-renderers :as renderers]
    [kmet.app.tools.bash :as bash]
    [kmet.tui.protocols :as protocols]
    [kmet.tui.components.text :as text]))

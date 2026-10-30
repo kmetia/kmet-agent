@@ -3,8 +3,8 @@
 `kmet.tui.*` is a generic terminal-UI library (a Clojure/Babashka port of
 `@earendil-works/pi-tui`, extended with a Reagent-style component layer).
 It knows nothing about chat, LLMs or sessions — the app layer (`kmet.ui.tui.*`,
-plus the one `kmet.agent.ui.tui.tool-renderers` file shipped extensions require
-by that name) builds on it, and extensions consume the same namespaces.
+the tool renderers included) builds on it, and extensions consume the same
+namespaces.
 
 This document is the authoritative usage and development reference for the
 package: how `kmet.tui.*` works, and how `kmet.ui.tui.*` builds on it. Keep
@@ -1536,9 +1536,9 @@ block that stops being the last one (a closing fence completing) re-renders
 even though its prefix did not change.
 
 Message-like app components live in `kmet.ui.tui.*`, not here — landing 5h
-moved the last selector and 5i the resource config, so `kmet.agent.ui.tui.*`
-holds only `tool_renderers`, the file shipped extensions require by name. This
-layer stays generic: chat history, tool executions, the skill invocation
+moved the last selector, 5i the resource config, and the tool renderers
+followed the same move. This layer stays generic: chat history, tool
+executions, the skill invocation
 message (`skill_message`, which renders a `/skill:name` block as a
 collapsible `[skill] name (ctrl+o to expand)` entry — pi:
 SkillInvocationMessageComponent), and the inline image block

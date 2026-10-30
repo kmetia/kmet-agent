@@ -13,6 +13,11 @@ is the shipped catalog; [`docs/customization.md`](../../../../docs/customization
 covers user-facing setup and discovery. Keep this reference and the authoring
 guide in sync whenever the described behavior changes.
 
+The contract has **no compatibility promise before 1.0**: the names, the
+allowed-namespace list and the `api` keys may change between releases, and the
+in-repo extensions under `extensions/` are updated in the same change
+(`AGENTS.md` § Pre-1.0: the extension ABI is not frozen).
+
 ## The contract
 
 An extension **is a plugin**: its namespace defines a `plugin` var (with
@@ -115,7 +120,7 @@ What an extension may require is a fixed, enforced list:
   `kmet.hikap.*` framework modules, shared by reference with
   the host (there is nothing to reimplement; the authoring guide's
   § Building UI covers the component library).
-- The shared renderer namespaces `kmet.agent.ui.tui.tool-renderers` and
+- The shared renderer namespaces `kmet.ui.tui.tool-renderers` and
   `kmet.app.keybindings`.
 - `clojure.*` and `babashka.*` builtins, and the fixed bundled set below.
 
@@ -370,7 +375,7 @@ disposed when a later pass replaces it — to keep an instance across passes,
 return the same one back (read it from `:last-component` and return it
 unchanged); a renderer that returns a fresh component each pass gets the
 previous one cleaned up automatically. The supported reusable built-in
-renderer vars are in `kmet.agent.ui.tui.tool-renderers`, including
+renderer vars are in `kmet.ui.tui.tool-renderers`, including
 `render-edit-call`, `render-edit-result`, `state-result-nodes` (the tail
 state line), `render-bash-result` (a
 plain-text output body: styled lines, a collapsed line window with an expand
@@ -444,7 +449,7 @@ and keeps the built-in rendering:
                     :env (assoc env "MY_HOOK" "1")})}))
 
 ;; A dedicated name + description gets default rendering (attach
-;; kmet.agent.ui.tui.tool-renderers' render-bash-call/render-bash-result for the
+;; kmet.ui.tui.tool-renderers' render-bash-call/render-bash-result for the
 ;; built-in look — that namespace is shared with extensions).
 (ext/register-tool! api
   (ext/create-bash-tool api

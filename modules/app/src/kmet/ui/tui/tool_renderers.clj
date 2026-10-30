@@ -1,4 +1,4 @@
-(ns kmet.agent.ui.tui.tool-renderers
+(ns kmet.ui.tui.tool-renderers
   "Reusable built-in tool renderers. These functions are also the supported
    host renderer surface for extensions."
   (:require [clojure.string :as str]

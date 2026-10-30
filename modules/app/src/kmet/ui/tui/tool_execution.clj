@@ -20,7 +20,7 @@
             [kmet.tui.components.container :as container]
             [kmet.tui.utils :as utils]
             [kmet.app.tools.util :as tool-util]
-            [kmet.agent.ui.tui.tool-renderers :as renderers]
+            [kmet.ui.tui.tool-renderers :as renderers]
             [kmet.ui.tui.custom-dialog-adapter :as cda]
             [kmet.ui.tui.image-block :as image-block]
             [kmet.tui.components.spacer :as spacer]
@@ -28,7 +28,7 @@
             [kmet.tui.macros :refer [defcomponent]]))
 
 ;; ─── Renderer dispatch ─────────────────────────────────────────────────────
-;; Built-in renderer functions live in kmet.agent.ui.tui.tool-renderers so supported
+;; Built-in renderer functions live in kmet.ui.tui.tool-renderers so supported
 ;; extensions can reuse them directly. One data table keyed by tool name holds
 ;; every built-in per-tool fact (:call / :result renderers, :shell mode); the
 ;; render method resolves custom override → builtin entry → default through a

@@ -717,7 +717,7 @@
                                         "        (throw (ex-info \"archive failed\" {}))))))\n"))]
         (t/is (nil? (:error result)) (str "loaded: " (:error result)))))
     (testing "the whitelisted built-in renderer namespace loads and shares direct vars"
-      (let [result (load "renderer" "(ns good-renderer\n  (:require [kmet.agent.ui.tui.tool-renderers :as renderers]))\n(defn init [_api]\n  (when-not (fn? renderers/render-edit-call)\n    (throw (ex-info \"renderer failed\" {}))))\n")]
+      (let [result (load "renderer" "(ns good-renderer\n  (:require [kmet.ui.tui.tool-renderers :as renderers]))\n(defn init [_api]\n  (when-not (fn? renderers/render-edit-call)\n    (throw (ex-info \"renderer failed\" {}))))\n")]
         (t/is (nil? (:error result)) (str "loaded: " (:error result)))))
     (testing "kmet.libs.http loads and works from SCI (the outbound-HTTP boundary)"
       (let [result (load "http-lib" "(ns good-http-lib\n  (:require [kmet.libs.http :as http]))\n(defn init [api]\n  (when-not (fn? http/request)\n    (throw (ex-info \"http failed\" {}))))\n")]

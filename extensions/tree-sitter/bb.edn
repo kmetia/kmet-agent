@@ -11,7 +11,7 @@
         ;; version-aligned with the root deps.edn.
         org.clojure/data.json {:mvn/version "2.5.2"}
         ;; the module trees require malli at load time
-        ;; (kmet.agent.config-schema), pinned at the root deps.edn version.
+        ;; (kmet.app.config-schema), pinned at the root deps.edn version.
         metosin/malli {:mvn/version "0.20.1"}}
  :tasks
  {test {:doc "Run tree-sitter extension tests (args: namespace symbols; defaults to the offline set)"

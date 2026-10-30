@@ -156,11 +156,6 @@ kmet/ui/
     └── footer.clj, dock.clj, theme_controller.clj, *_block.clj
 ```
 
-One file keeps a pre-rename name on purpose:
-`kmet/agent/ui/tui/tool_renderers.clj` — shipped extensions require
-`kmet.agent.ui.tui.tool-renderers` by that name, so the tree carries the old
-prefix at the path a require resolves.
-
 ```
 tasks/kmet/tasks/       — every bb-task implementation (a classpath root, not
                           part of the app): packagers (uberjar/dist/pack-extension),
@@ -817,7 +812,7 @@ document are:
 | `kmet.test-layer-guard` | the business tree never requires the front ends (UI, TUI, Tk, a mode row); a front end reaches the runtime, not the loop or the retired engine |
 | `kmet.test-front-end-policy` | a front end names the process's resource policy and expansion chain where it wires a run; the TUI reads a handle, not the engine |
 | `kmet.test-no-global-node` | the retired process node and store names appear nowhere |
-| `kmet.test-retirement` | no `kmet.agent.*` name but `kmet.agent.ui.tui.tool-renderers` (an extension ABI name) |
+| `kmet.test-retirement` | no namespace carries the retired `kmet.agent.*` prefix |
 | `kmet.test-process-exit-guard` | `System/exit` only in `kmet.app.core/-main` and the two model generators' `-main`s |
 | `kmet.test-time-boundary` | durations use `kmet.libs.concurrent/monotonic-ms`, never the wall clock |
 | `kmet.app.test-process-state` | every remaining process cell has a written reason, checked both directions |

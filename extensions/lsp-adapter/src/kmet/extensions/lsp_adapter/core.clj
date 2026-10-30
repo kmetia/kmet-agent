@@ -122,7 +122,7 @@ errors.")
                        :render-result render/render-lsp-result
                        :title render/title-lsp
                        :execute (fn [args _on-update signal _ctx]
-           ;; Tool contract (kmet.agent.tools.registry): execute returns
+           ;; Tool contract (kmet.app.tools.registry): execute returns
            ;; {:content ...}; :details rides along for the renderer. A bare
            ;; string reaches the after-tool-call chain, whose
            ;; (contains? result :is-error) throws on strings.

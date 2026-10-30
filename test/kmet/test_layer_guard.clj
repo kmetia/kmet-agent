@@ -80,15 +80,13 @@
 
 (def ^:private ui-roots
   "Where the app-UI layer's files are, inside the app module since the `ui`
-   module merged: the `kmet.ui.*` subtree, and the one that kept its
-   `kmet.agent.ui.*` name because shipped extensions require it by that name."
-  ["modules/app/src/kmet/ui"
-   "modules/app/src/kmet/agent/ui"])
+   module merged: the `kmet.ui.*` subtree."
+  ["modules/app/src/kmet/ui"])
 
 (defn- ui-source-files
-  "Every app-UI namespace file, both halves. One layer, so every rule below
-   applies to all of it: the rank guard sees no module edge inside `app`, so a
-   `ui` file reaching `kmet.app.loop` is this rule's job."
+  "Every app-UI namespace file. One layer, so every rule below applies to all
+   of it: the rank guard sees no module edge inside `app`, so a `ui` file
+   reaching `kmet.app.loop` is this rule's job."
   []
   (sort (mapcat source-files-under ui-roots)))
 

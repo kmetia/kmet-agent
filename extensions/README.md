@@ -83,7 +83,7 @@ never ship.
   carry a `deps.edn`, so they may only use `kmet.extension`, `kmet.srce.core`
   plus the shared
   `kmet.tui.*` / `kmet.libs.*` library layers, the shared renderer
-  namespaces (`kmet.agent.ui.tui.tool-renderers`, `kmet.app.keybindings`),
+  namespaces (`kmet.ui.tui.tool-renderers`, `kmet.app.keybindings`),
   `clojure.*` / `babashka.*` builtins and the fixed bundled set
   (rewrite-clj, edamame, clojure.tools.reader, clojure.spec.alpha, cljfmt,
   parinferish — see `modules/app/src/kmet/extension.md` § Bundled extension libraries). They

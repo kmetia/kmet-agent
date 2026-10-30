@@ -1,4 +1,4 @@
-(ns kmet.agent.ui.tui.test-tool-renderers
+(ns kmet.ui.tui.test-tool-renderers
   "Headless tests for the hiccup-compiled built-in tool renderers: the
    element-tree conversions must produce the same visible output the
    imperative builders did (line caps, expand hints, truncation warns,
@@ -8,7 +8,7 @@
             [babashka.fs :as fs]
             [kmet.tui.core :as core]
             [kmet.tui.utils :as utils]
-            [kmet.agent.ui.tui.tool-renderers :as r]
+            [kmet.ui.tui.tool-renderers :as r]
             [kmet.libs.theme :as theme]))
 
 (def ^:private th theme/dark-theme)

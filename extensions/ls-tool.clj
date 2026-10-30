@@ -17,7 +17,7 @@
             [kmet.extension :as ext]
             [kmet.srce.core :as srce]
             [kmet.libs.path :as path]
-            [kmet.agent.ui.tui.tool-renderers :as renderers]))
+            [kmet.ui.tui.tool-renderers :as renderers]))
 
 (defn- execute
   [{:keys [path] :as args} _on-update _signal ctx]

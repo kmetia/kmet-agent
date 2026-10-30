@@ -186,7 +186,7 @@
    built; injected by reference so component and protocol identity is shared.
    Host backends stay out (terminal-jline imports org.jline.*;
    terminal-native-* are Jolt .jolt sources) — the drift guard in
-   kmet.agent.test-extensions keeps this list and the source trees in sync."
+   kmet.app.extensions.test-libs keeps this list and the source trees in sync."
   '[kmet.tui.autocomplete
     kmet.tui.border
     kmet.tui.core
@@ -222,7 +222,7 @@
     kmet.tui.components.text
     kmet.tui.components.v-stack
     kmet.tui.components.truncated-text
-    kmet.agent.ui.tui.tool-renderers
+    kmet.ui.tui.tool-renderers
     kmet.app.keybindings])
 
 (def ^:private libs-library-namespaces
@@ -235,7 +235,7 @@
    reference, never re-evaluated, so any protocols they define keep their
    identity. Host backends stay out (kmet.libs.clipboard-win loads user32.dll
    at namespace load; kmet.libs.host-native is a Jolt .jolt source) — the
-   drift guard in kmet.agent.test-extensions keeps this list and the source
+   drift guard in kmet.app.extensions.test-libs keeps this list and the source
    trees in sync."
   '[kmet.libs.archive
     kmet.libs.clipboard
@@ -500,7 +500,7 @@
    filter) and shared-tui-namespaces both read it."
   [n]
   (or (str/starts-with? n "kmet.tui.")
-      (= n "kmet.agent.ui.tui.tool-renderers")
+      (= n "kmet.ui.tui.tool-renderers")
       (= n "kmet.app.keybindings")))
 
 (def ^:private library-layer-roots
@@ -904,7 +904,7 @@
         ;; (e.g. review/dialogs requiring kmet.tui.macros on second load)
         ;; must validate against what CAN be shared, not what happens to
         ;; be loaded. The load-fn serves kmet.tui.* from the host anyway.
-        (#{"kmet.agent.ui.tui.tool-renderers" "kmet.app.keybindings"} s)
+        (#{"kmet.ui.tui.tool-renderers" "kmet.app.keybindings"} s)
         (when-not (or (contains? tui-namespaces lib)
                       (contains? (set tui-library-namespaces) lib))
           (throw (ex-info
@@ -1170,7 +1170,7 @@
                        " — the loader is host machinery and is not part of the extension contract")
 
                   (or (str/starts-with? (str ns-sym) "kmet.tui.")
-                      (= (str ns-sym) "kmet.agent.ui.tui.tool-renderers")
+                      (= (str ns-sym) "kmet.ui.tui.tool-renderers")
                       (= (str ns-sym) "kmet.app.keybindings"))
                   (str "Extension " ext-name " requires " ns-sym
                        " — the shared TUI/renderer library is shared by reference and was"
@@ -1420,7 +1420,7 @@
                ;; Windows on both hosts now (jolt#1110 fixed the Jolt side),
                ;; while the loader's ns/resource names below are "/"-spelled.
                ;; Verified 2026-10-01 on jolt v0.8.15-46-g005d134b: dropping
-               ;; the replace fails 53 kmet.agent.test-extensions assertions
+               ;; the replace fails 53 kmet.app.extensions.test-libs assertions
                ;; on Jolt/Windows.
                :let [rel (str/replace
                           (str (fs/normalize (fs/relativize root (str f))))

@@ -20,7 +20,7 @@
             [clojure.string :as str]
             [kmet.extension :as ext]
             [kmet.srce.core :as srce]
-            [kmet.agent.ui.tui.tool-renderers :as renderers]
+            [kmet.ui.tui.tool-renderers :as renderers]
             [kmet.libs.process :as process]))
 
 ;; ─── pi constants ──────────────────────────────────────────────────────────

@@ -2,7 +2,7 @@
   "The extension host as a plugin: what a run's hooks resolve through, and the
    process's registry handle.
 
-   The host lives in `modules/app/src/kmet/agent/extensions` and may not
+   The host lives in `modules/app/src/kmet/app/extensions` and may not
    require what owns its registries, so it takes them as a value
    (`kmet.app.extensions.core/bind-services!`): a registry handle for its own
    tags — hooks, renderers, flags, the UI port — and the ctx an extension's

@@ -146,6 +146,31 @@ timestamps, file mtimes, persisted cross-process cache TTLs.
   The layer map is in [`docs/architecture.md`](docs/architecture.md); the
   dispatcher list is in [`modules/tui/src/kmet/tui/tui.md`](modules/tui/src/kmet/tui/tui.md).
 
+### Pre-1.0: the extension ABI is not frozen
+
+The project has not reached 1.0, so the extension ABI carries **no
+compatibility promise**: `kmet.extension`, the shared namespaces an extension
+may require, `extension.edn`, and the allow-list in
+`kmet.app.extensions.context` (which names some of them by literal string).
+Change it whenever the design calls for it.
+
+- **Fix the in-repo consumers in the same change.** Everything under
+  `extensions/` — the bundled set and the single-file tools — is a consumer of
+  the ABI, not an outside party. A rename or a removal updates their sources,
+  tests and build files together with the host.
+- **No compatibility shims.** No alias namespace, no second spelling in the
+  allow-list, no forwarding `def`s for a renamed var. When the last pre-rename
+  name moved (`kmet.agent.ui.tui.tool-renderers` →
+  `kmet.ui.tui.tool-renderers`), its consumers moved with it; a guard is
+  adjusted to state the new rule, never to exempt the old name.
+- **Say it is a break.** A change that a third-party extension would notice is
+  a break, so the commit message body names the surface that moved — the same
+  message rule as any other change, no changelog file.
+
+Update [`modules/app/src/kmet/extension.md`](modules/app/src/kmet/extension.md)
+and [`docs/extensions.md`](docs/extensions.md) in the same change; they are the
+authoritative statement of what an extension may rely on.
+
 ### Complexity is a budget, not a scoreboard
 
 `bb slop` measures both ways a tree erodes: verbosity (clone and rule-flagged
