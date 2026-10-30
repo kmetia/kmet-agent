@@ -433,6 +433,27 @@
           (t/is (= #{[:start :a] [:start :b]} (set (take 2 @log)))
                 "both calls start before either settles"))))))
 
+(t/deftest ^:slow test-run-code-bridge-ignores-sequential
+  ;; the loop honours :execution-mode; a script has no batch and no barrier, so
+  ;; a tool that declares :sequential must not serialize the calls around it
+  (let [log (atom [])]
+    (with-custom-tool {:name "run-code-test-seq"
+                       :label "Sequential"
+                       :description "Declares the loop's exclusive classifier"
+                       :execution-mode :sequential
+                       :execute (fn [args]
+                                  (swap! log conj [:start (:id args)])
+                                  (Thread/sleep 100)
+                                  (swap! log conj [:end (:id args)])
+                                  {:content "ok"})}
+      (fn []
+        (let [r (run (str "(let [a (tools/call \"run-code-test-seq\" {:id :a})"
+                          "      b (tools/call \"run-code-test-seq\" {:id :b})]"
+                          "  @a @b (emit :done))"))]
+          (t/is (= ":done" (:content r)) (:content r))
+          (t/is (= #{[:start :a] [:start :b]} (set (take 2 @log)))
+                "both calls start before either settles: the script has no barrier"))))))
+
 (t/deftest test-run-code-gate
   (let [r (run "(emit @(tools/call \"no-such-tool\" {}))")]
     (t/is (not (:is-error r)))
