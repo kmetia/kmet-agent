@@ -147,8 +147,8 @@ Two things are deliberately not rows:
 - `:models`, `:config` and `:auth` stay libraries: the catalog is files,
   credentials are read before a ctx exists, and a provider is registered with
   `register-model-provider!` — a registry concern, not the request.
-- The tool *executor* is not a seam yet: `run_code` is an ordinary tool with a
-  script bridge and the loop always executes natively (§ Open at HEAD 2).
+- The tool *executor* is not a seam: `run_code` is an ordinary tool with a
+  promise bridge, and the loop executes tools natively.
 
 ## Open at HEAD
 
@@ -173,31 +173,7 @@ not a flag — kernel-shaped, and worth scoping first to leaf rows (`:ext/*`,
 `:restart-required` on every enable, which is dsh's no-HMR behavior and an
 honest place to stop.
 
-### 2. `:toolExecutor` — native and PTC as rows
-
-`run_code` is an ordinary tool with a script bridge and the loop always executes
-tools natively, so the execution strategy is not composable. dsh makes it two
-packages and reserves the name (`run_code` there is the PTC mode's presentation
-transport, not a tool).
-
-The landing: a `:toolExecutor` service whose contract is what
-`kmet.app.tools.invoke` already implements (`prepare` → `execute` → `finish`),
-today's parallel batches as `:bundle/native` (the default), and a
-`:bundle/ptc` row that mounts `run_code` as the only model-facing transport and
-bridges the rest. `select-tools` stays the selection seam, so nothing about tool
-tables, rows or `:default-tools` changes; the reserved-name rule arrives with
-PTC. It waits on a second executor to plug in.
-
-**Measured over the session logs at the time of the change (689 `run_code`
-calls):** 98% never touch the bridge; the 14 that do are all in kmet's own
-sessions — 8 one web fetch, 3 redundant `bash`, 3 probes — and batching is
-absent (one `call-many`, zero `await-all`, zero `pmap`). So PTC is not the
-next executor: what the bridge needs first is a program-shaped result (a
-structured value beside the rendered `:content`), and the unexercised batch
-half is the first thing to retire. `scripts/bench/run_code_adoption.bb`
-reproduces the numbers.
-
-### 3. `permissions/gate` is a call site, not a row
+### 2. `permissions/gate` is a call site, not a row
 
 The loop's pre-tool gate is a function the loop calls
 (`kmet.app.permissions/gate`), not a hook a row installs, so a profile cannot
@@ -205,7 +181,7 @@ replace the gate's *shape* the way it replaces `:retry-policy` or `:loop-guard`.
 The policy and the approvals seam are services; the gate's placement is not
 yet.
 
-### 4. The compaction queue records no fact
+### 3. The compaction queue records no fact
 
 A prompt submitted while a compaction runs lands in the compaction queue, which
 records no fact. Recording at submit time would leave a queue fact the delivery
@@ -213,7 +189,7 @@ never folds, so whether to record at the flush is still open. It is the one name
 residual in the delivery path; every other queue fact is recorded where the
 message is actually delivered (`:on-deliver!`, the handle's `:record?`).
 
-### 5. No per-connection command surface on the server
+### 4. No per-connection command surface on the server
 
 The server serves rpc's command language but has no per-connection command
 surface: it registers the builtins and refuses a slash command by name rather
@@ -222,7 +198,7 @@ per-connection `:ui` port, and the host's single process atom does not provide
 one. Neither is scheduled; the per-agent extension UI port is out for the same
 reason.
 
-### 6. The script sandbox's evaluator, and process isolation
+### 5. The script sandbox's evaluator, and process isolation
 
 `run_code` evaluates on SCI on every host (`docs/architecture.md` § Tools and
 the script sandbox). On Jolt, the native loader's `eval-in` (landed upstream)
@@ -242,7 +218,7 @@ killable. It waits on a measured need (boot cost per call) or a second consumer
 per-call context would also retain one loader per call until the upstream
 eviction fix lands.
 
-### 7. Limits that are part of the design
+### 6. Limits that are part of the design
 
 - **A command handler outside a run reads the process front-end install.** A run
   publishes its surface into the handle's `:front-end` slot and the host reads
@@ -270,6 +246,9 @@ eviction fix lands.
   and two seams, not a restructure.
 - A row flag or service key with no reader, and a second registry beside the
   services (`:registries`, `:modes`, a per-process tool table).
+- A `:bundle/ptc` / a second `:toolExecutor`: the bridge serves 2% of `run_code`
+  calls and no batching, so a second presentation mode has no consumer
+  (`docs/architecture.md` § Tools and the script sandbox).
 - The kernel's own exclusions (JS syntax, the loader/HMR/console packages, the
   plugin market, async stack splicing) are listed in
   [`srce.md`](modules/srce/src/kmet/srce/srce.md).

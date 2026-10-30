@@ -11,7 +11,6 @@
             [kmet.app.tools.run-code :as run-code]
             [kmet.app.tools.util :as tool-util]
             [kmet.libs.host :as host]
-            [kmet.libs.concurrent :as concurrent]
             [kmet.test-utils :as tu]))
 
 (def ^:private reg
@@ -144,60 +143,6 @@
     (t/is (str/includes? (:content r) "timed out"))
     (t/is (= :timeout (get-in r [:details :error])))
     (t/is (= 0.3 (get-in r [:details :timeout])))))
-
-(t/deftest ^:slow test-run-code-await-all-honors-timeout
-  (let [release (promise)
-        finished (atom false)]
-    (with-custom-tool {:name "run-code-test-block"
-                       :label "Block"
-                       :description "Blocks until released"
-                       :execute (fn [_]
-                                  @release
-                                  (reset! finished true)
-                                  {:content "late"})}
-      (fn []
-        (try
-          (let [r (run (str "(tools/await-all (tools/call-many "
-                            "[{:name \"run-code-test-block\" :args {}}]))")
-                       {:timeout 0.2})]
-            (t/is (:is-error r))
-            (t/is (= :timeout (get-in r [:details :error])))
-            ;; The blocked call is still parked on RELEASE: the run observed
-            ;; its deadline instead of waiting for the tool to settle. (A
-            ;; wall-clock bound flakes under load; this is the mechanism.)
-            (t/is (false? @finished)
-                  "await-all observes the deadline without waiting for the tool"))
-          (finally
-            (deliver release true)
-            (Thread/sleep 50)))))))
-
-(t/deftest ^:slow test-run-code-await-all-honors-escape
-  (let [signal (atom false)
-        release (promise)]
-    (with-custom-tool {:name "run-code-test-block"
-                       :label "Block"
-                       :description "Blocks until released"
-                       :execute (fn [_] @release {:content "late"})}
-      (fn []
-        (try
-          (let [started-at (concurrent/monotonic-ms)
-                f (future
-                    (tools/execute-tool
-                     reg
-                     "run_code"
-                     {:code (str "(tools/await-all (tools/call-many "
-                                 "[{:name \"run-code-test-block\" :args {}}]))")}
-                     {:signal signal}))]
-            (Thread/sleep 100)
-            (reset! signal true)
-            (let [r (deref f 3000 nil)]
-              (t/is (some? r))
-              (t/is (:is-error r))
-              (t/is (= :aborted (get-in r [:details :error])))
-              (t/is (< (- (concurrent/monotonic-ms) started-at) 1000))))
-          (finally
-            (deliver release true)
-            (Thread/sleep 50)))))))
 
 (t/deftest ^:slow test-run-code-signal-abort
   (let [signal (atom false)
@@ -350,38 +295,9 @@
         (t/is (= "[true true]" (:content r)))
         (t/is (= 2 (count (get-in r [:details :calls]))))))))
 
-(t/deftest test-run-code-call-many-and-await-all
-  (with-custom-tool {:name "run-code-test-echo"
-                     :label "Echo"
-                     :description "Echo args"
-                     :execute (fn [args] {:content (str "echo-" (:n args))})}
-    (fn []
-      (let [r (run (str "(emit (let [ps (tools/call-many [{:name \"run-code-test-echo\""
-                        " :args {:n 1}} [\"run-code-test-echo\" {:n 2}]])]"
-                        "  (mapv :content (tools/await-all ps))))"))]
-        (t/is (not (:is-error r)) (:content r))
-        (t/is (= "[\"echo-1\" \"echo-2\"]" (:content r)))
-        (t/is (= 2 (count (get-in r [:details :calls]))))
-        (t/is (every? :ok (get-in r [:details :calls])))))))
-
-(t/deftest test-run-code-call-many-validates-before-dispatch
-  (let [ran (atom 0)]
-    (with-custom-tool {:name "run-code-test-echo"
-                       :label "Echo"
-                       :description "Echo args"
-                       :execute (fn [args]
-                                  (swap! ran inc)
-                                  {:content (pr-str args)})}
-      (fn []
-        (let [r (run (str "(tools/call-many [{:name \"run-code-test-echo\""
-                          " :args {:n 1}} 42])"))]
-          (t/is (:is-error r))
-          (t/is (zero? @ran))
-          (t/is (empty? (get-in r [:details :calls]))))))))
-
 (t/deftest test-run-code-fan-out-exceeds-worker-pool
   ;; the bridge drains through a bounded worker pool; a fan-out larger than
-  ;; the pool must still settle every promise (the bridge's submission order)
+  ;; the pool must still settle every promise
   (with-custom-tool {:name "run-code-test-echo"
                      :label "Echo"
                      :description "Echo args"
@@ -497,66 +413,9 @@
               "the killed child never touched the marker"))
       (finally (fs/delete-tree dir)))))
 
-(t/deftest ^:slow test-run-code-sequential-call-runs-alone
-  ;; dsh parity: a call to a :sequential tool waits for everything submitted
-  ;; before it and runs alone, so a script cannot reorder its effects — the
-  ;; parallel read after it starts only once it settles
-  (let [log (atom [])]
-    (with-custom-tool {:name "run-code-test-par"
-                       :label "Parallel"
-                       :description "A parallel-safe tool"
-                       :execute (fn [args]
-                                  (swap! log conj [:start (:id args)])
-                                  (Thread/sleep 30)
-                                  (swap! log conj [:end (:id args)])
-                                  {:content "ok"})}
-      (fn []
-        (with-custom-tool {:name "run-code-test-excl"
-                           :label "Exclusive"
-                           :description "A sequential tool"
-                           :execution-mode :sequential
-                           :execute (fn [args]
-                                      (swap! log conj [:start (:id args)])
-                                      (Thread/sleep 30)
-                                      (swap! log conj [:end (:id args)])
-                                      {:content "ok"})}
-          (fn []
-            (let [r (run (str "(let [a (tools/call \"run-code-test-par\" {:id :a})"
-                              "      e (tools/call \"run-code-test-excl\" {:id :e})"
-                              "      b (tools/call \"run-code-test-par\" {:id :b})]"
-                              "  @a @e @b"
-                              "  (emit :done))"))]
-              (t/is (not (:is-error r)) (:content r))
-              (t/is (= ":done" (:content r)))
-              (let [order @log]
-                (t/is (= [:start :a] (first order)) "the first call starts first")
-                (t/is (< (.indexOf order [:end :a]) (.indexOf order [:start :e]))
-                      "the exclusive call waits for the call before it")
-                (t/is (< (.indexOf order [:end :e]) (.indexOf order [:start :b]))
-                      "a later call waits for the exclusive one")))))))))
-
-(t/deftest ^:slow test-run-code-sequential-calls-keep-submission-order
-  (let [log (atom [])]
-    (with-custom-tool {:name "run-code-test-excl"
-                       :label "Exclusive"
-                       :description "A sequential tool"
-                       :execution-mode :sequential
-                       :execute (fn [args]
-                                  (swap! log conj [:start (:id args)])
-                                  (Thread/sleep 20)
-                                  (swap! log conj [:end (:id args)])
-                                  {:content "ok"})}
-      (fn []
-        (let [r (run (str "(let [a (tools/call \"run-code-test-excl\" {:id 1})"
-                          "      b (tools/call \"run-code-test-excl\" {:id 2})]"
-                          "  @a @b (emit :done))"))]
-          (t/is (= ":done" (:content r)) (:content r))
-          (t/is (= [[:start 1] [:end 1] [:start 2] [:end 2]] @log)
-                "exclusive calls start in submission order, one at a time"))))))
-
 (t/deftest ^:slow test-run-code-parallel-calls-still-overlap
-  ;; the lane must not serialize parallel tools: both calls are in flight
-  ;; before either settles
+  ;; the pool must not serialize calls that do not wait on each other: both
+  ;; calls are in flight before either settles
   (let [log (atom [])]
     (with-custom-tool {:name "run-code-test-par"
                        :label "Parallel"

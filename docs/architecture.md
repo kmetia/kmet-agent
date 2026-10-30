@@ -395,11 +395,10 @@ model-written Clojure in a per-call sandbox with the agent's tools bridged in.
 *Why it exists*: a tool result is re-sent on every later turn, so its token
 cost is paid repeatedly. Measured over the session logs at the time of the
 change (689 `run_code` calls): 98% never touch the bridge — 628 `emit`, 342
-`slurp`, 327 `sh`, 235 regular-expression, 0 `pmap`, 0 futures, 1 `call-many`
-— and the 14 calls that do are all in kmet's own sessions: 8 one web fetch (a
-tool with no local twin), 3 redundant `bash` calls, 3 bridge probes. Its value
-is designed into the description and the emit-only channel, not assumed from
-per-call cost; the batch half has one observed call, and
+`slurp`, 327 `sh`, 235 regular-expression, 0 `pmap`, 0 futures — and the 14
+that do are all in kmet's own sessions: 8 one web fetch (a tool with no local
+twin), 3 redundant `bash` calls, 3 bridge probes. The batch helper had one
+probe and no real use, and is gone;
 `scripts/bench/run_code_adoption.bb` reproduces the numbers.
 
 - **The boundary is the ctx.** The loop hands every call the run's ctx as
@@ -421,16 +420,15 @@ per-call cost; the batch half has one observed call, and
   injected var stays call-local.
 - **The bridge.** `(tools/call name args)` and the four builtin sugars return a
   promise that settles with the record's verbatim result map
-  (`{:content :is-error :details :truncation :images}`); `tools/call-many`
-  validates and submits a batch, and `tools/await-all` derefs it in input order
-  while polling the cancel signal. Calls run on a shared process-wide pool (16
-  daemon workers), and a per-call admission lane gives **submission-order
-  starts** and treats a `:sequential` tool as a barrier — the same
-  `:execution-mode` the loop's own batches honour, so no built-in declares it
-  and the guarantee is for extension/contributed tools. Discovery
-  (`tools/list`, `tools/describe`) is a bridge-local read and never exposes
-  `:execute`; listing carries each tool's name, description and parameter
-  schema, so a script chooses a call without one `describe` per candidate.
+  (`{:content :is-error :details :truncation :images}`). Calls run on a shared
+  process-wide pool (16 daemon workers) with no ordering guarantee between
+  themselves, and a script's call to a tool that declares `:sequential` is not
+  a barrier — that classifier belongs to the loop's own batches. There is no
+  batch helper: a script starts the calls it wants and derefs the promises.
+  Discovery (`tools/list`, `tools/describe`) is a bridge-local read and never
+  exposes `:execute`; listing carries each tool's name, description and
+  parameter schema, so a script chooses a call without one `describe` per
+  candidate.
 - **The callable set** is the loop's `select-tools` result: all tools ∩ the
   agent's enabled set, plus extension-contributed sandbox-only sources, minus
   the exclusions (`run_code` itself, so a bridge submission cannot nest). A
@@ -454,12 +452,12 @@ per-call cost; the batch half has one observed call, and
   bash's semantics); Escape and the script's own abort (timeout/output-limit)
   both feed the bridge's signal, which is the read-only OR of the run's and the
   script's (`kmet.libs.concurrent/or-signal`), so an inner call is cancelled by
-  either. A pool task checks that signal at admission and again after the before
-  hook, so a slow hook cannot start a call past the abort. Per-tool coverage
-  stays cooperative (bash kills its process tree; MCP calls have no signal
-  plumbing), and a host-blocked script is abandoned after a 1.5 s interrupt
-  grace rather than killed — the one accepted limitation of an in-process
-  sandbox, with the process-isolation tier recorded in
+  either. A pool task checks that signal before the call starts and again
+  after the before hook, so a slow hook cannot start a call past the abort.
+  Per-tool coverage stays cooperative (bash kills its process tree; MCP calls
+  have no signal plumbing), and a host-blocked script is abandoned after a
+  1.5 s interrupt grace rather than killed — the one accepted limitation of an
+  in-process sandbox, with the process-isolation tier recorded in
   [`new-app.md`](../new-app.md) § Open at HEAD.
 - **Result shape.** `:details` carries the effective `:timeout`, the measured
   `:elapsed-ms` (wall clock for the whole call, including the grace and the

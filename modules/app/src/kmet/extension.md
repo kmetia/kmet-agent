@@ -765,7 +765,7 @@ before hook (block with `{:block true :reason ...}`, or rewrite with
 `{:args ...}`) and the after hook (override `:content` / `:is-error`). Two
 caveats: an inner call carries a synthetic `:tool-call-id` (but the batch's
 assistant message), and a blocked call's `:terminate` hint rides through to
-the script's result (there is no batch to stop). Inner calls still produce no
+the script's result (a script has no batch to stop). Inner calls still produce no
 tool-execution events and
 no transcript/session entries.
 

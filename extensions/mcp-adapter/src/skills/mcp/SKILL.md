@@ -58,9 +58,9 @@ separate runtime retired into this engine):
 
 ```clojure
 ;; discovery: the cached MCP catalog is in the script's tool surface
-(tools/list)                          ;; every callable name
+(tools/list)                          ;; [{:name :description :parameters} ...]
 (tools/describe "chrome_devtools_take_screenshot")
-;; → {:name :label :description :parameters ...}   (never :execute)
+;; → {:name :description :parameters}   (never :execute)
 
 ;; call: every tools/call returns a promise — deref it, branch on :is-error
 @(tools/call "chrome_devtools_take_screenshot" {:format "png"})
@@ -71,12 +71,6 @@ separate runtime retired into this engine):
       b (tools/call "server_b_query" {:q "y"})]
   (emit (:content @a))
   (emit (:content @b)))
-
-;; shorter ordered batches: call-many submits, await-all waits
-(emit (mapv :content
-            (tools/await-all
-             (tools/call-many [{:name "server_a_query" :args {:q "x"}}
-                               {:name "server_b_query" :args {:q "y"}}]))))
 ```
 
 - MCP tools appear by their prefixed names (`server_toolname`) from the
@@ -90,8 +84,6 @@ separate runtime retired into this engine):
   prints one compact result and returns `nil`. `emit` is the script's only
   reported channel — stdout/stderr and the final value are captured but not
   returned, so pass everything you want the model to see to `emit`.
-  `tools/await-all` waits in input order while observing the script
-  cancellation signal.
 - `timeout` (seconds; omit or 0 = no deadline, like bash) bounds the whole
   script; calls still in
   flight appear in `:details :calls` as `incomplete` with their elapsed

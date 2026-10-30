@@ -74,7 +74,6 @@
 (def ^:private print-level-limit 30)
 (def ^:private update-throttle-ms 100)
 
-(def ^:private await-poll-ms 25)
 (def ^:private capture-poll-ms 25)
 (def ^:private interrupt-grace-ms 1500)
 (def ^:private error-preview-chars 300)
@@ -185,10 +184,10 @@
   "The cancel signal a script's inner calls observe: true when the run's
    cancel signal (Escape) fired or the script itself aborted
    (timeout/output-limit). Read-only (kmet.libs.concurrent/or-signal) — tools
-   poll it (bash's poller kills the process tree), and the bridge checks it at
-   admission, so an aborted script's queued calls never run. A normally
-   finished script leaves it false: its queue still drains (fire-and-forget
-   `tools/call`)."
+   poll it (bash's poller kills the process tree), and the bridge checks it
+   before a call starts and again after the before hook, so an aborted
+   script's queued calls never run. A normally finished script leaves it
+   false: its queue still drains (fire-and-forget `tools/call`)."
   [run-signal abort]
   (concurrent/or-signal run-signal abort))
 
@@ -771,9 +770,9 @@
 (def ^:private bridge-worker-count 16)
 
 (defn- start-bridge-worker!
-  "One pool worker: block on QUEUE, run a task, repeat. A task's own errors
-   are caught by its submitter; a stray throw is logged so the worker
-   survives and the pool keeps its size."
+  "One pool worker: block on QUEUE, run a task, repeat. A task body that
+   throws is logged here so the worker survives and the pool keeps its size;
+   a call's own failures are settled by the pipeline as error results."
   [queue]
   (concurrent/spawn
    (fn []
@@ -809,129 +808,17 @@
       (dotimes [_ bridge-worker-count] (start-bridge-worker! q))
       q)))
 
-;; ─── Submission order ─────────────────────────────────────────────────────
-;;
-;; A script's inner calls START in submission order (dsh parity, see
-;; docs/architecture.md § Tools and the script sandbox): calls to parallel
-;; tools overlap, while a call to a :sequential tool — the same field
-;; kmet.app.loop runs its own batches
-;; by — waits until everything submitted before it has settled and then runs
-;; alone, so a later call cannot overtake it. No built-in tool declares
-;; :sequential (pi's built-ins don't either; mutations are serialized per
-;; path inside write/edit, which kmet does through kmet.app.tools.mutation), so
-;; the barrier is an extension/contributed-tool capability: a script that
-;; needs ordered effects from a parallel tool awaits it. The lane decides
-;; start order only: the shared pool still bounds how many tool calls run at
-;; once.
-
-(defonce ^:private lane-queue (java.util.concurrent.LinkedBlockingQueue.))
-
-(defn- drain-lane
-  "Start every entry LANE may start now: a run of parallel entries, or one
-   exclusive entry alone once every call already in flight has settled. A
-   cancelled run ignores both the barrier and the in-flight count — its
-   remaining calls settle as cancelled at admission without executing, so
-   honoring the count would only pin this run's state on a call that never
-   settles. Returns [LANE STARTED], the entries' effective :exclusive? flag
-   (a cancelled run downgrades an exclusive entry to a counted one)."
-  [lane cancelled?]
-  (if (and (:exclusive? lane) (not cancelled?))
-    [lane []]
-    (loop [lane lane started []]
-      (let [entry (first (:queue lane))]
-        (cond
-          (nil? entry)
-          [lane started]
-
-          (and (:exclusive? entry) (not cancelled?))
-          (if (pos? (:pending lane))
-            [lane started]
-            [(-> lane (update :queue subvec 1) (assoc :exclusive? true))
-             (conj started entry)])
-
-          :else
-          (recur (-> lane (update :queue subvec 1) (update :pending inc))
-                 (conj started (assoc entry :exclusive? false))))))))
-
-(defn- start-lane-entry!
-  "Run one admitted entry on the shared bridge pool; settling reports back to
-   the lane so its next entry may start. The pool worker conveys no dynamic
-   bindings — the entry's closure carries everything the call needs."
-  [lane-id entry]
-  (.offer @bridge-queue
-          (fn []
-            (try
-              ((:run entry))
-              (finally
-                (.offer lane-queue {:kind :settled
-                                    :lane-id lane-id
-                                    :exclusive? (:exclusive? entry)}))))))
-
-(defn- dispatch-lane-item
-  "Apply one lane-queue item — a :submit or a :settled — then start whatever
-   the lanes now allow. Landing on one dispatcher thread is what makes a
-   lane's order private and lock-free."
-  [lanes {:keys [kind lane-id entry exclusive? signal]}]
-  (let [lane (or (get lanes lane-id)
-                 {:queue [] :pending 0 :exclusive? false :signal signal})
-        lane (if (= :submit kind)
-               (update lane :queue conj entry)
-               ;; only a parallel entry was counted in :pending; an exclusive
-               ;; one held the lane itself
-               (if exclusive?
-                 (assoc lane :exclusive? false)
-                 (update lane :pending #(max 0 (dec %)))))
-        cancelled? (boolean (when-let [s (:signal lane)] @s))
-        [lane started] (drain-lane lane cancelled?)]
-    (doseq [entry started] (start-lane-entry! lane-id entry))
-    (if (and (empty? (:queue lane))
-             (or cancelled?
-                 (and (zero? (:pending lane)) (not (:exclusive? lane)))))
-      ;; nothing left to remember for this run — the promise set the script
-      ;; holds is the only remaining trace of its calls. A cancelled run
-      ;; forgets its lane even with a call still in flight: that call can
-      ;; never gate anything again.
-      (dissoc lanes lane-id)
-      (assoc lanes lane-id lane))))
-
-(defonce ^:private lane-dispatcher
-  ;; One process-wide dispatcher (started on the first submission). It never
-  ;; blocks on a lane: an entry whose turn has not come stays queued until a
-  ;; settling task posts :settled, so a script waiting on a barrier cannot
-  ;; stall another run's submissions, and a hung tool stalls only its own
-  ;; lane.
-  (delay
-    (concurrent/spawn
-     (fn []
-       (loop [lanes {}]
-         (let [item (.take lane-queue)]
-           (recur (try
-                    (dispatch-lane-item lanes item)
-                    (catch Throwable t
-                      (debug/log "run_code lane dispatch failed: " t)
-                      lanes)))))))))
-
-(defn- submit-ordered!
-  "Submit ENTRY ({:exclusive? bool :run fn}) to LANE-ID; the dispatcher starts
-   it when its position in the run's submission order allows. SIGNAL is the
-   run's read-only combined cancel view — a lane drops its ordering once it
-   fires."
-  [lane-id signal entry]
-  @lane-dispatcher
-  (.offer lane-queue {:kind :submit :lane-id lane-id :signal signal :entry entry}))
-
 (defn- dispatch!
-  "Gate NAME against the surface, then submit the call to the run's lane and
-   return the promise the script derefs. Unknown/inactive names settle
-   immediately with {:is-error true} and the active list. The lane starts a
-   call in submission order — a call to a :sequential tool waits for the ones
-   before it and runs alone (see the lane above) — and hands it to the shared
-   bridge pool. The pool worker conveys no dynamic bindings, so the bridge
-   passes the run's cancel signal, session env, shell, skill resolver and cwd
-   as the invocation pipeline's :bindings
-   (bash reads *cancel-signal* and *shell*; read/write/edit resolve against
-   *cwd*). The call
-   runs through the shared pipeline (kmet.app.tools.invoke) with the run's
+  "Gate NAME against the surface, submit the call to the shared bridge pool,
+   and return the promise the script derefs. Unknown/inactive names settle
+   immediately with {:is-error true} and the active list. Calls have no
+   ordering guarantee between themselves; they overlap on the shared pool.
+   There is no :sequential barrier inside a script, because that classifier
+   belongs to the loop's own batches. The pool worker conveys no dynamic
+   bindings, so the bridge passes the run's cancel signal, session env, shell,
+   skill resolver and cwd as the invocation pipeline's :bindings (bash reads
+   *cancel-signal* and *shell*; read/write/edit resolve against *cwd*). The
+   call runs through the shared pipeline (kmet.app.tools.invoke) with the run's
    tool hooks (*tool-hooks*): a blocked call settles with the hook's reason
    without executing, and the after hook runs for blocked calls too (loop
    parity). Inner calls carry a synthetic tool-call id and the turn's
@@ -939,7 +826,7 @@
    before hook ran past the abort — is settled as cancelled and never
    executes: the pool queue cannot fire side effects past the deadline."
   [{:keys [surface execute-tool signal ctx cwd session-env-fn shell skill-resolver hooks
-           assistant-message trace on-update lane]} name args]
+           assistant-message trace on-update]} name args]
   (let [name (tool-name name)
         p (promise)]
     (if-not (contains? surface name)
@@ -992,52 +879,11 @@
                                  (assoc :error (preview (:content result)))))
                         (catch Throwable _ nil))
                       (deliver p result))))))]
-        (submit-ordered! lane signal
-                         {:exclusive? (= :sequential (:execution-mode (get surface name)))
-                          :run run})
+        (.offer @bridge-queue run)
         p))))
-
-(defn- call-spec
-  "Normalize one call-many descriptor to [tool-name args]."
-  [spec]
-  (cond
-    (map? spec) [(:name spec) (:args spec)]
-    (sequential? spec) [(first spec) (second spec)]
-    :else (throw (ex-info "call-many expects {:name ... :args ...} or [name args]"
-                          {:type :run-code/invalid-call}))))
-
-(defn- call-many
-  "Validate the complete batch before dispatching any descriptor."
-  [opts calls]
-  (let [calls (mapv call-spec calls)]
-    (mapv (fn [[name args]] (dispatch! opts name args)) calls)))
-
-(defn- abort-await! [abort]
-  (when abort
-    (compare-and-set! abort nil :aborted))
-  (throw (ex-info "run_code aborted while waiting for tool calls"
-                  {:type :run-code/await-aborted
-                   :reason :aborted})))
-
-(defn- await-one
-  "Wait for one tool promise in short polls so script cancellation reaches the interpreter."
-  [signal abort promise]
-  (loop []
-    (if (and signal @signal)
-      (abort-await! abort)
-      (let [value (deref promise await-poll-ms ::await-pending)]
-        (cond
-          (and signal @signal) (abort-await! abort)
-          (not= ::await-pending value) value
-          :else (recur))))))
-
-(defn- await-all [signal abort promises]
-  (mapv (fn [promise] (await-one signal abort promise)) promises))
 
 (defn- bridge-fns [opts]
   {'call (fn [name & [args]] (dispatch! opts name args))
-   'call-many (fn [calls] (call-many opts calls))
-   'await-all (fn [promises] (await-all (:signal opts) (:abort opts) promises))
    'read (fn [& [args]] (dispatch! opts "read" args))
    'write (fn [& [args]] (dispatch! opts "write" args))
    'edit (fn [& [args]] (dispatch! opts "edit" args))
@@ -1237,7 +1083,6 @@
         images (atom [])
         deadline (when timeout-ms (+ started-at timeout-ms))
         trace (atom [])
-        lane (gensym "run_code-lane-")
         emit-state {:emitted emitted
                     :emitted-bytes emitted-bytes
                     :images images
@@ -1247,7 +1092,6 @@
         bridge (bridge-fns {:surface surface
                             :execute-tool execute-tool
                             :signal cancelled
-                            :abort abort
                             :ctx ctx
                             :cwd cwd
                             :session-env-fn session-env-fn
@@ -1256,8 +1100,7 @@
                             :hooks hooks
                             :assistant-message assistant-message
                             :on-update on-update
-                            :trace trace
-                            :lane lane})
+                            :trace trace})
         fork-ctx (sandbox-context (context-namespaces surface cwd bridge writers emit-state)
                                   (interrupt-fn abort signal deadline))
         capture (start-capture on-update abort (:capture-bytes limits))

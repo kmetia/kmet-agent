@@ -73,11 +73,7 @@
 
    "modules/app/src/kmet/app/tools/run_code.cljc"
    {'bridge-queue
-    "The bridge's worker pool — a thread *bound*, not a setting (9b's written decision): the worker count caps concurrent tool executions process-wide, and everything per-run travels in the submission's `:bindings`."
-    'lane-queue
-    "The admission lanes' one FIFO: a submission enters here in call order, a sequential tool's barrier and the in-flight count are read against it, and the entries carry their run's lane and cancel view. One queue per process, because the ordering a tool's `:sequential` promises must hold across runs that share the pool."
-    'lane-dispatcher
-    "The one process-wide dispatcher that drains `lane-queue` (started on the first submission). It never blocks on a lane — a settling task posts `:settled` — so a script waiting on a barrier cannot stall another run's submissions, and a hung tool stalls only its own lane. A second dispatcher would admit the same call twice."}
+    "The bridge's worker pool — a thread *bound*, not a setting (9b's written decision): the worker count caps concurrent tool executions process-wide, and everything per-run travels in the submission's `:bindings`."}
 
    "modules/app/src/kmet/app/tools/mutation.clj"
    {'tails
@@ -137,7 +133,7 @@
 (deftest the-guard-sees-the-trees-it-guards
   (is (every? fs/directory? source-root)
       "every scanned tree exists — the guard cannot silently narrow")
-  (is (= 25 (count (mapcat (fn [[file cells]] (map (fn [n] [file n]) (keys cells)))
+  (is (= 23 (count (mapcat (fn [[file cells]] (map (fn [n] [file n]) (keys cells)))
                            process-cells)))
       "the ledger's own size; a cell added or removed updates the map")
   (testing "the scan finds the cells the ledger lists"

@@ -1,13 +1,12 @@
 #!/usr/bin/env bb
 ;; Measures run_code adoption from kmet EDNL session logs.
 ;;
-;;   bb scripts/analysis/run_code_adoption.bb [sessions-dir]
+;;   bb scripts/bench/run_code_adoption.bb [sessions-dir]
 ;;
 ;; Prints the tool-call mix, how run_code scripts are shaped (sandbox
 ;; primitives vs the tools bridge), where the bridge is used, and the result
 ;; tokens each tool's results cost. The numbers quoted in
-;; docs/architecture.md § Tools and the script sandbox and in
-;; new-app.md § Open at HEAD 2 come from this script.
+;; docs/architecture.md § Tools and the script sandbox come from this script.
 ;;
 ;; The directory defaults to ~/.kmet/sessions. Every line is one EDN entry; a
 ;; line that does not read is counted as bad and skipped, so an older log
@@ -19,7 +18,8 @@
 (def sessions-dir (or (first *command-line-args*) (str (fs/home) "/.kmet/sessions")))
 
 (def script-patterns
-  "What one run_code script uses. :bridge matches a dispatch (call/call-many);
+  "What one run_code script uses. :bridge matches a dispatch; :batch matches
+   the retired call-many/await-all helper (old logs still carry it);
    :discovery is the bridge-local listing."
   {:emit        #"\bemit\b"
    :slurp       #"\bslurp\b"
@@ -28,7 +28,7 @@
    :regex       #"re-seq|re-find"
    :pmap        #"\(pmap "
    :concurrency #"\(future|\(spawn "
-   :call-many   #"call-many|await-all"
+   :batch       #"call-many|await-all"
    :bridge      #"\(tools/(call|await)"
    :discovery   #"\(tools/(list|describe)"})
 
@@ -85,7 +85,7 @@
                    run-code (count run-code-sessions) (pct run-code total)))
   (println (format "  bridge: %d call sites in %d sessions (%.1f%% of calls), batches: %d"
                    (count bridge-sites) (count bridge-sessions)
-                   (pct (count bridge-sites) run-code) (get script :call-many 0)))
+                   (pct (count bridge-sites) run-code) (get script :batch 0)))
   (println "  bridge targets:" (if (seq bridge-tools)
                                  (into (sorted-map) (top bridge-tools 6))
                                  "none"))
