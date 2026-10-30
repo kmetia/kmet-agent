@@ -81,9 +81,9 @@ separate runtime retired into this engine):
   never been connected has no cache entry yet, so connect it once
   (`mcp({connect: "name"})`) before scripting it.
 - Report results with `(emit value)` (also `(sandbox/emit value)`): it
-  prints one compact result and returns `nil`. `emit` is the script's only
-  reported channel — stdout/stderr and the final value are captured but not
-  returned, so pass everything you want the model to see to `emit`.
+  prints one compact result and returns `nil`. `emit` is the curated channel,
+  and a script that emits nothing reports its final value instead;
+  stdout/stderr are captured but not returned.
 - `timeout` (seconds; omit or 0 = no deadline, like bash) bounds the whole
   script; calls still in
   flight appear in `:details :calls` as `incomplete` with their elapsed

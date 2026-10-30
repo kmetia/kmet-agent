@@ -425,10 +425,11 @@
 
 (defn- emit!
   "Append one value to the call's reported output and stream it. `emit` is
-   the script's only result channel: stdout/stderr and the final value are
-   captured but never reported. The buffer is bounded at the capture budget —
-   past it the abort is set to :output-limit and emit throws, so a runaway
-   emit loop cannot grow the buffer without bound. Returns nil."
+   the curated text channel: stdout/stderr are captured but never reported,
+   and a script that emits nothing reports its final value instead
+   (assemble-result). The buffer is bounded at the capture budget — past it
+   the abort is set to :output-limit and emit throws, so a runaway emit loop
+   cannot grow the buffer without bound. Returns nil."
   [{:keys [emitted emitted-bytes on-update abort capture-limit]} v]
   (let [s (format-value v)
         total (swap! emitted-bytes + (bash-out/byte-length s))]
@@ -976,13 +977,14 @@
 
 (defn- assemble-result
   "Build the tool result from the eval outcome and the emitted output. `emit`
-   is the script's only reported text channel — captured stdout/stderr and the
-   final value are intentionally absent — while emitted images travel beside
-   it as the result's :images (the transcript's count line reads
-   :details :images). ABORT-REASON wins when set: a script unwound by the
-   interrupt (however it reports, e.g. a catch that rethrows) cannot outlive
-   its deadline. TIMEOUT-MS nil = no deadline (bash parity) and the result's
-   :timeout is nil; ELAPSED-MS is the measured wall clock."
+   is the curated text channel; when a successful script emitted nothing its
+   final value is reported instead (the REPL rule), while captured stdout and
+   stderr stay absent. Emitted images travel beside the text as the result's
+   :images (the transcript's count line reads :details :images). ABORT-REASON
+   wins when set: a script unwound by the interrupt (however it reports, e.g. a
+   catch that rethrows) cannot outlive its deadline. TIMEOUT-MS nil = no
+   deadline (bash parity) and the result's :timeout is nil; ELAPSED-MS is the
+   measured wall clock."
   [{:keys [res emitted images timeout-ms trace abort-reason elapsed-ms
            output-bytes output-lines capture-bytes]}]
   (let [status (or abort-reason (:status res))
@@ -996,7 +998,15 @@
                      nil)
         parts (cond-> (vec emitted)
                 error-text (conj error-text))
-        body (if (seq parts) (str/join "\n" parts) "(no output)")
+        ;; a silent success reports its final value (the REPL rule); emit is
+        ;; the curated channel, so a non-empty emit never adds it
+        value-text (when (and (empty? parts) (= :ok status) (some? (:value res)))
+                     (try (format-value (:value res))
+                          (catch Throwable _ nil)))
+        body (cond
+               (seq parts) (str/join "\n" parts)
+               value-text value-text
+               :else "(no output)")
         totals {:bytes (bash-out/byte-length body) :lines (text-lines body)}
         {:keys [content truncation]} (bound-content body totals output-bytes output-lines)
         calls @trace]
@@ -1137,7 +1147,7 @@
   (str "Run a Clojure script to work over the environment and report a digest. Use it when the intermediate output would flood the context — scan or transform many files, run a search→read→verify chain, compute counts, matches or a summary — instead of chaining bash cat/head/rg. Use bash for one small command and read for one file.\n\n"
        "Inside the script the local primitives are already there and return values, not rendered text: (slurp path), fs/* (babashka.fs), the bare (sh ...), p/*, json (kmet.libs.json), and (cwd), (env k), (now), (sleep ms), (spawn f).\n\n"
        "Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call \"name\" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe \"name\") returns one tool's declaration.\n\n"
-       "Report with (emit value): strings print raw, other data pr-str, and stdout, stderr and the final value are discarded. (emit-image \"shot.png\") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.\n\n"
+       "Report with (emit value), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (emit-image \"shot.png\") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.\n\n"
        "Sandbox: Clojure; on babashka a full babashka surface, on the JVM the java.lang/java.io/java.util subset. Require clojure.*/babashka.* namespaces or the bundled libs (rewrite-clj, cljfmt, edamame, parinferish); System/java.io.*/Throwable resolve on babashka (Jolt's SCI exposes no class table). Aliases: fs, str/set/edn/walk, json, p, sh, tools, sandbox. :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB."))
 
 (defn title
@@ -1166,7 +1176,7 @@
    :description description
    :prompt-snippet "Script the environment (fs/slurp/sh) and emit a compact digest"
    :prompt-guidelines
-   ["Use run_code when a command's output would flood the context: compute inside the script and (emit) only the digest — counts, matches, the lines that matter — instead of chaining bash cat/head/rg; println and the final value are discarded."
+   ["Use run_code when a command's output would flood the context: compute inside the script and (emit) only the digest — counts, matches, the lines that matter — instead of chaining bash cat/head/rg; println is discarded (emit the digest, or end on the value you want reported)."
     "Inside a script prefer (slurp path), fs/* and the bare (sh ...) for local work over the bash and read tools — they return values, not rendered text — and call a tool only when its result is too large to read (a web fetch, an MCP call), emitting the filtered part: @(tools/call \"name\" args)."
     "When the answer is an image (a screenshot, a chart, a rendered page), attach it with (emit-image path) rather than describing it."]
    :params {:code {:type :string :description "Clojure program body to run"}

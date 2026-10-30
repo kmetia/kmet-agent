@@ -1,7 +1,8 @@
 (ns kmet.app.test-run-code
   "The run_code tool: per-call SCI sandbox with the full babashka namespace/
-   class surface, emit-only output, async tools bridge and deadline behavior
-   (design: docs/architecture.md § Tools and the script sandbox)."
+   class surface, curated output (emit, or a silent success's value), async
+   tools bridge and deadline behavior (design: docs/architecture.md § Tools and
+   the script sandbox)."
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
@@ -105,20 +106,34 @@
     (t/is (:is-error r) (:content r))
     (t/is (str/includes? (:content r) "at most 8 images"))))
 
-(t/deftest test-run-code-emit-is-the-only-output
+(t/deftest test-run-code-emit-output
   (let [r (run "(emit (+ 1 2))")]
     (t/is (not (:is-error r)))
     (t/is (= "3" (:content r)))
-    (t/is (nil? (get-in r [:details :timeout])) "no deadline unless asked"))
-  (t/is (= "(no output)" (:content (run "(+ 1 2)")))
-        "the final value is not reported"))
+    (t/is (nil? (get-in r [:details :timeout])) "no deadline unless asked")))
 
-(t/deftest test-run-code-print-and-return-are-not-reported
-  (let [r (run "(println \"hello\") 42")]
-    (t/is (not (:is-error r)))
-    (t/is (= "(no output)" (:content r))
-          "stdout and the final value stay out of the result"))
+(t/deftest test-run-code-print-not-reported
+  (t/is (= "(no output)" (:content (run "(println \"hello\")")))
+        "println output is captured but not reported, and println returns nil")
   (t/is (= "(no output)" (:content (run "nil")))))
+
+(t/deftest test-run-code-final-value-fallback
+  ;; a silent success reports its final value; emit wins when used
+  (t/is (= "42" (:content (run "(+ 40 2)"))))
+  (t/is (= "plain" (:content (run "\"plain\"")))
+        "a string value prints raw, like emit")
+  (t/is (= "{:a 1}" (:content (run "{:a 1}"))))
+  (t/is (= "42" (:content (run "(println \"hello\") 42")))
+        "stdout stays out while the final value is reported")
+  (t/is (= ":emitted" (:content (run "(emit :emitted) (+ 1 2)")))
+        "emit wins over the final value")
+  (let [r (run "(range)")]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (str/includes? (:content r) "...")
+          "printing bounds a lazy value"))
+  (let [r (run "(apply str (repeat 20000 \"x\"))")]
+    (t/is (= :bytes (get-in r [:truncation :truncated-by]))
+          "a large value meets the same output budget as emit")))
 
 (t/deftest test-run-code-emit-compact-result
   (let [r (run "(sandbox/emit {:count 2 :items [1 2]})")]

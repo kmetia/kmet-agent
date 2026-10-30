@@ -435,11 +435,12 @@ probe and no real use, and is gone;
   never joins the model's table — the mcp-adapter contributes its MCP catalog
   this way (`kmet.app.tools.registry/register-tool-source!`). Listing and
   dispatch therefore cannot drift.
-- **Output is `emit` only.** `(emit v)` (also `sandbox/emit`, and the bare
-  `emit` in the script namespace) is the one reported text channel: strings
-  print raw, other data `pr-str`, and it returns nil. stdout, stderr and the
-  final value are captured for the budget but never reported, so a script that
-  wants the model to see something must emit it. `(emit-image path-or-block)`
+- **Output is `emit` (or a silent script's value).** `(emit v)` (also
+  `sandbox/emit`, and the bare `emit` in the script namespace) is the curated
+  text channel: strings print raw, other data `pr-str`, and it returns nil.
+  A script that emits nothing and finishes normally reports its final value
+  instead (the REPL rule, bounded like emit); stdout and stderr are captured
+  for the budget but never reported. `(emit-image path-or-block)`
   is the second channel, capped at 4 MiB of base64 per image and 8 images per
   call, accepting exactly what `read` accepts. Capture is bounded at 1 MiB
   (exceeding it aborts with `:output-limit`), printing is bounded
@@ -463,8 +464,8 @@ probe and no real use, and is gone;
   capture drain) and the call trace `{:calls [...]}` — one entry per inner
   call, `:incomplete` when a tool ignored the abort. Inner results never enter
   the transcript, the session or the context, and no tool-execution event is
-  emitted for them; the only things the model sees are the emitted text, the
-  images and the result map.
+  emitted for them; the only things the model sees are the emitted text (or a
+  silent success's final value), the images and the result map.
 
 The bridge pool is process-wide **by decision**: it is a bound, not a setting,
 and everything per-run travels in the submission's `:bindings`, so two agents

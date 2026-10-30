@@ -319,7 +319,7 @@ Inside the script the local primitives are already there and return values, not 
 
 Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe "name") returns one tool's declaration.
 
-Report with (emit value): strings print raw, other data pr-str, and stdout, stderr and the final value are discarded. (emit-image "shot.png") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.
+Report with (emit value), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (emit-image "shot.png") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.
 
 Sandbox: Clojure; on babashka a full babashka surface, on the JVM the java.lang/java.io/java.util subset. Require clojure.*/babashka.* namespaces or the bundled libs (rewrite-clj, cljfmt, edamame, parinferish); System/java.io.*/Throwable resolve on babashka (Jolt's SCI exposes no class table). Aliases: fs, str/set/edn/walk, json, p, sh, tools, sandbox. :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB.
 
