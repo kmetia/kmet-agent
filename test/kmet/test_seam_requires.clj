@@ -88,6 +88,24 @@
                    " — the app names only the kmet.ai surface; a wire builder"
                    " is reached through kmet.ai.llm, not required"))))
 
+(def ^:private llm-row-requirers
+  "The one namespace that may require kmet.ai.llm: the `:llm` row's builtin.
+   Every other app namespace reaches a provider through the `:llm` service, so
+   a second require would be a second door to the dispatcher — and around the
+   :convert-to-llm option the row attaches to every request."
+  '#{kmet.app.llm})
+
+(t/deftest only-the-llm-row-requires-the-dispatcher
+  (let [requirers (->> (source-files ["modules/app/src"])
+                       (keep (fn [f]
+                               (let [{:keys [ns requires]} (ns-info f)]
+                                 (when (some #{'kmet.ai.llm} requires) ns))))
+                       set)]
+    (is (= llm-row-requirers requirers)
+        (str "the dispatcher is named by " (vec (sort requirers))
+             " — kmet.app.llm/plugin provides :llm, and that value is the"
+             " app's one way to send a request"))))
+
 (t/deftest wire-builders-are-leaf-entries
   (testing "a wire module is named by kmet.ai.wires alone — the dispatcher never grows a dispatch
             (wire-to-wire requires are composition: azure/vertex/codex reuse the

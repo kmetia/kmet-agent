@@ -579,15 +579,25 @@ inspection contract (`srce.md` §4): a catch-all label makes the line useless.
   (`kmet.hikap.alias`). `kmet.tui.*` and `kmet.tk.*` are backends over
   it — they pass their backend map in, the engine never requires them.
 - `kmet.ai.*` is a standalone provider/auth library and depends only on
-  `kmet.libs.*` plus standard/third-party code. It knows no agent-context
-  role: the app's convertToLlm arrives as the `:convert-to-llm` option and the
-  dispatcher applies it after the context hook. It names no state root of its
-  own: the agent dir (`KMET_CODING_AGENT_DIR`, else `~/.kmet/agent`) is the
-  app's — `kmet.app.config/get-agent-dir` — and arrives as an argument at
-  every `kmet.ai` entry point. The one remembered copy is
-  `kmet.ai.auth/load-auth!`'s, because the credential writers are reached from
-  `resolve-api-key` (an OAuth refresh), which carries no dir; they throw
-  `:kmet.ai/no-auth-root` rather than invent one.
+  `kmet.libs.*` plus standard/third-party code. Exactly one of its namespaces
+  is a plugin row, and it is the transport: `kmet.ai.llm` is required by
+  `kmet.app.llm` alone, which provides `:llm`, so replacing that row swaps
+  every model call. The rest is data the host reads directly — the catalog
+  (`kmet.ai.models`: `get-model`, `get-available`, the thinking levels, the
+  loaders), credentials (`kmet.ai.auth`) and usage tallies
+  (`kmet.ai.usage`). A replacing `:llm` row does not own that data: it returns
+  provider-shaped messages and the app prices them with the same tallies.
+  Extensions never see `kmet.ai`; the catalog reaches them as the `:models`
+  capability map (also `ctx.models`), whose `register-provider!` records the
+  deregister fn so an unload takes the registration with it. It knows no
+  agent-context role: the app's convertToLlm arrives as the `:convert-to-llm`
+  option and the dispatcher applies it after the context hook. It names no
+  state root of its own: the agent dir (`KMET_CODING_AGENT_DIR`, else
+  `~/.kmet/agent`) is the app's — `kmet.app.config/get-agent-dir` — and
+  arrives as an argument at every `kmet.ai` entry point. The one remembered
+  copy is `kmet.ai.auth/load-auth!`'s, because the credential writers are
+  reached from `resolve-api-key` (an OAuth refresh), which carries no dir;
+  they throw `:kmet.ai/no-auth-root` rather than invent one.
 - `kmet.tui.*` is the generic UI layer (the terminal backend for
   `kmet.hikap.core`). It may depend on `kmet.libs.*`, `kmet.reakt.*` and
   `kmet.hikap.*`, never on app, LLM, or session concepts.
