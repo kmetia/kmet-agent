@@ -6,7 +6,8 @@
    point's contract is that a change from another thread is *not applied* until
    the boundary runs (`docs/architecture.md` § Reload and the turn boundary), and that the boundary drains to
    a fixpoint including the kernel's own pass."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [kmet.app.events :as events]
             [kmet.app.packages :as packages]
             [kmet.app.runtime :as runtime]
@@ -312,3 +313,36 @@
           (is (= [:first-start :first-end :second] @seen)
               "and runs once the first is done")))
       (finally (runtime/shutdown! {:ctx ctx})))))
+
+(defn- undoing-row
+  "A row whose disposer hands back HANDLE instead of finishing inline."
+  [handle]
+  {:id :undoing
+   :plugin {:name :probe/undoing
+            :apply (fn [ctx _]
+                     (srce/effect ctx (fn [] (fn [] handle)) :probe/undoing)
+                     nil)}})
+
+(deftest ^:slow shutdown-awaits-a-disposer-that-handed-back-work
+  (let [handle (promise)
+        {:keys [ctx]} (runtime/boot {:rows [(undoing-row handle)]})
+        returned (promise)]
+    (future (deliver returned (runtime/shutdown! {:ctx ctx})))
+    (is (= ::waiting (deref returned 200 ::waiting))
+        "shutdown! waits for the handle the disposer returned")
+    (deliver handle :undone)
+    (is (nil? (deref returned 2000 ::timeout)) "and returns once the teardown settles")))
+
+(deftest shutdown-does-not-block-past-its-budget
+  (let [handle (promise)
+        {:keys [ctx]} (runtime/boot {:rows [(undoing-row handle)]})
+        logged (atom [])]
+    (srce/provide! ctx :logger (fn [level & args] (swap! logged conj (into [level] args))))
+    (with-redefs [runtime/teardown-timeout-ms 0]
+      (is (nil? (runtime/shutdown! {:ctx ctx}))
+          "an undelivered handle expires instead of blocking the exit"))
+    (is (= 1 (count (filter #(= :warn (first %)) @logged)))
+        "and the expiry is reported, not silent")
+    (is (str/includes? (str (first (filter #(= :warn (first %)) @logged)))
+                       "teardown-timeout"))))
+

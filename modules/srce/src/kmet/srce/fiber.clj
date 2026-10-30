@@ -199,7 +199,8 @@
 (defn- fail!
   "A throwing apply/config: mark :failed first (so its own disposers cannot
    register), unwind the partial effects — their provide! disposers free the
-   names — then report."
+   names — then report. Work a disposer hands back here is dropped: a failed
+   mount has no lifetime owner to give the handle to."
   [fiber error]
   (let [{:keys [ctx name]} @fiber]
     (swap! fiber assoc :error error)
@@ -245,13 +246,13 @@
 (defn- unload!
   "Unwind every effect LIFO; the state must already be non-:active. The provide!
    disposers delete their store entries and record their names as changes.
-   Returns the disposers that threw, as `unwind-effects!` reports them."
+   Answers `unwind-effects!`'s report: what threw, and what is still running."
   [fiber]
   (let [{:keys [ctx provides]} @fiber
-        failed (ctx/unwind-effects! fiber)]
+        unwound (ctx/unwind-effects! fiber)]
     (when (seq provides)
       (ctx/record-change! ctx provides))
-    failed))
+    unwound))
 
 (defn- reload!
   "The pass's remount: same fiber, same uid, config re-validated."
@@ -451,40 +452,47 @@
    last. Idempotent. The state flips to :disposed first, so a disposer cannot
    register and `get` already reads nil.
 
-   Answers `{:disposed n :failed [{:label … :error …}]}` — n is 0 for a fiber
-   that was already disposed, and a throwing disposer is logged and listed
-   without stopping the rest. A dispose performed by one of FIBER's disposers
-   reports into this call's run (`unwind-effects!`) and answers an empty list
-   itself."
+   Answers `{:disposed n :failed [{:label … :error …}]
+   :undoing [{:label … :handle p}]}` — n is 0 for a fiber that was already
+   disposed, and a throwing disposer is logged and listed without stopping the
+   rest. `:undoing` is a disposer that returned an unrealized promise: work the
+   kernel will not wait for, reported so the caller that owns the lifetime can.
+   A dispose performed by one of FIBER's disposers reports into this call's run
+   (`unwind-effects!`) and answers empty lists itself."
   [fiber]
   (let [{:keys [ctx]} @fiber]
     (run-owned!
      ctx
      (fn []
        (if (= :disposed (:state @fiber))
-         {:disposed 0 :failed []}
+         {:disposed 0 :failed [] :undoing []}
          (let [fctx (:ctx @fiber)
                _ (set-state! fiber :disposed)
-               failed (unload! fiber)]
+               {:keys [failed undoing]} (unload! fiber)]
            (swap! (:mounted (:kernel ctx))
                   (fn [v] (filterv #(not (identical? % fiber)) v)))
            (when-let [parent (:parent fctx)]
              (swap! (:children parent)
                     (fn [v] (filterv #(not (identical? % fctx)) v))))
            (drop-runtime! ctx fiber)
-           {:disposed 1 :failed failed}))))))
+           {:disposed 1 :failed failed :undoing undoing}))))))
 
 (defn- tally
-  "The aggregate of DISPOSALS: `{:disposed n :failed [...]}`."
+  "The aggregate of DISPOSALS: `{:disposed n :failed [...] :undoing [...]}`."
   [disposals]
   {:disposed (reduce + (map :disposed disposals))
-   :failed (into [] (mapcat :failed) disposals)})
+   :failed (into [] (mapcat :failed) disposals)
+   :undoing (into [] (mapcat :undoing) disposals)})
 
 (defn restart!
   "Dispose FIBER and mount the same source and config again; returns the new
    fiber. A restart allocates a new uid, so dependents remount; a plugin that
    can absorb a config change in place declares `:update` and is changed with
-   `update!` instead. A :failed fiber is retried this way."
+   `update!` instead. A :failed fiber is retried this way.
+
+   The dispose's report is dropped — a restart mounts immediately — so a
+   disposer that hands back in-flight work (`:undoing`) is not awaited here: a
+   caller that restarts one must await it itself."
   [fiber]
   (let [mount-ctx (:ctx @fiber)
         {source :source config :config} @fiber]

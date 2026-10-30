@@ -166,9 +166,15 @@
   "Unmount ID's current record and mount its ENTRY again with the same
    CONFIG; the result map `/reload` reports for it. A failure is reported on
    stderr and answers with the row id, since there is no loaded record to
-   name."
+   name.
+
+   Waits for the outgoing record's release first: an extension whose `shutdown`
+   handed back a promise frees its code asynchronously
+   (`kmet.app.extensions.core/unload-extension!`), and mounting over a
+   half-released instance is the one thing a reload must not do."
   [id {:keys [entry config]}]
-  (unmount! id)
+  (when-let [released (unmount! id)]
+    (extensions/await-release! (str "extension " id) released))
   (try
     (let [record (mount! id entry config)]
       {:extension (:name record) :error nil})

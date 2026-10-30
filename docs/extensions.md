@@ -38,6 +38,11 @@ repo layout it uses), and [rpc.md](rpc.md) (extension UI over RPC).
   nil)
 ```
 
+A `shutdown` that has work to finish asynchronously returns an undelivered
+promise instead of blocking the owner thread: the extension's registrations and
+record still go immediately, and its namespaces and jars are released once the
+promise settles (`kmet.libs.concurrent/after` chains on it).
+
 An extension **is** a plugin: the loader mounts the `plugin` var, `:apply`
 receives the extension's ctx and its capability map, and everything registered
 through `api` belongs to the extension — unload disposes it automatically.

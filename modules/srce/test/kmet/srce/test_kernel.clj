@@ -797,7 +797,55 @@
       (is (= "boom" (ex-message (:error (first failed)))))
       (is (= "boom" (:message (first failed))) "the report carries text, not only the throwable")
       (is (true? @second-ran) "the remaining disposers still ran"))
-    (is (= {:disposed 0 :failed []} (srce/dispose! f)) "a second dispose is a no-op")))
+    (is (= {:disposed 0 :failed [] :undoing []} (srce/dispose! f)) "a second dispose is a no-op")))
+
+(deftest teardown-reports-work-still-running
+  (let [[r] (kernel)
+        pending (promise)
+        delivered (promise)
+        f (srce/plugin! r {:name :probe/undoing
+                           :apply (fn [c _]
+                                    (srce/effect c (fn [] (fn [] pending)) :probe/pending)
+                                    (srce/effect c (fn [] (fn [] delivered)) :probe/delivered)
+                                    (srce/effect c (fn [] (fn [] (atom :value))) :probe/plain)
+                                    nil)})]
+    (deliver delivered :done)
+    (let [{:keys [disposed undoing]} (srce/dispose! f)]
+      (is (= 1 disposed))
+      (is (= [:probe/pending] (mapv :label undoing))
+          "an unrealized promise is in flight; a delivered one and a plain value are not")
+      (is (identical? pending (:handle (first undoing))) "the report carries the handle itself")
+      (is (not (realized? pending)) "the kernel did not wait for it"))
+    (is (= {:disposed 0 :failed [] :undoing []} (srce/dispose! f))
+        "a second dispose is a no-op")))
+
+(deftest in-flight-work-aggregates-and-reports-into-the-outer-run
+  (let [[r] (kernel)
+        inner-p (promise)
+        inner (srce/plugin! r {:name :probe/inner-undoing
+                               :apply (fn [c _]
+                                        (srce/effect c (fn [] (fn [] inner-p)) :probe/inner)
+                                        nil)})
+        outer-p (promise)
+        outer (srce/plugin! r {:name :probe/outer-undoing
+                               :apply (fn [c _]
+                                        (srce/effect c (fn [] (fn [] (srce/dispose! inner)))
+                                                     :probe/outer)
+                                        (srce/effect c (fn [] (fn [] outer-p)) :probe/outer-undo)
+                                        nil)})]
+    (is (= [:probe/outer-undo :probe/inner] (mapv :label (:undoing (srce/dispose! outer))))
+        "a nested dispose reports into the outer run, in unwind order")
+    (is (= {:disposed 0 :failed [] :undoing []} (srce/dispose! inner))
+        "the nested call itself reports nothing pending"))
+  (let [[r] (kernel)
+        a (promise)
+        b (promise)
+        _ (srce/plugin! r {:name :probe/sub-a
+                           :apply (fn [c _] (srce/effect c (fn [] (fn [] a)) :probe/a) nil)})
+        _ (srce/plugin! r {:name :probe/sub-b
+                           :apply (fn [c _] (srce/effect c (fn [] (fn [] b)) :probe/b) nil)})]
+    (is (= [:probe/b :probe/a] (mapv :label (:undoing (srce/dispose-subtree! r))))
+        "a subtree teardown aggregates every handle, children first")))
 
 (deftest a-dispose-inside-a-disposer-reports-into-the-outer-run
   (let [[r] (kernel)
@@ -815,7 +863,7 @@
       (is (= 1 disposed))
       (is (= [:probe/inner] (mapv :label failed))
           "the nested run's failure is the outer call's to report"))
-    (is (= {:disposed 0 :failed []} (srce/dispose! inner)) "already disposed")))
+    (is (= {:disposed 0 :failed [] :undoing []} (srce/dispose! inner)) "already disposed")))
 
 (deftest aggregate-disposals-report-per-fiber-failures
   (let [[r] (kernel)

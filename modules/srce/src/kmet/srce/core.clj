@@ -82,7 +82,9 @@
 
 (def effect
   "Register a reversible effect on the current fiber; returns a single-shot
-   disposer."
+   disposer. A disposer that cannot finish inline returns an undelivered promise
+   instead of blocking: `dispose!` reports it as `:undoing` rather than waiting,
+   and the caller that owns the lifetime awaits it."
   ctx/effect)
 
 (def effects
@@ -138,7 +140,9 @@
 
 (def dispose!
   "Unwind FIBER's effects LIFO and detach it. Idempotent; answers `{:disposed n
-   :failed [{:label … :error …}]}`."
+   :failed [{:label … :error …}] :undoing [{:label … :handle p}]}` — `:undoing`
+   is a disposer that handed back work it could not finish, which the kernel
+   never awaits."
   fiber/dispose!)
 
 (def restart!

@@ -24,6 +24,7 @@
   (:require [clojure.string :as str]
             [kmet.app.events :as events]
             [kmet.app.extensions.rows :as extension-rows]
+            [kmet.libs.concurrent :as concurrent]
             [kmet.srce.core :as srce]))
 
 ;; ── submissions ───────────────────────────────────────────────────────────
@@ -95,6 +96,13 @@
    eight rounds is a churn — report it and return, exactly as the kernel's
    refresh pass does."
   8)
+
+(def teardown-timeout-ms
+  "How long `shutdown!` waits for a disposer that handed back work it could not
+   finish: one budget for the whole subtree, spent in monotonic slices. Zero or
+   a negative value makes the wait immediate, which is what a test that means
+   \"does not block\" needs."
+  5000)
 
 (defn boundary!
   "The turn boundary: run what other threads submitted, then settle the
@@ -305,7 +313,18 @@
                :deferred remaining)))))
 
 (defn shutdown!
-  "Dispose everything `boot` mounted, children first; the ctx is finished."
+  "Dispose everything `boot` mounted, children first, then wait for the disposers
+   that handed back work they could not finish (`dispose!`'s `:undoing`), bounded
+   by `teardown-timeout-ms`. Returns nil.
+
+   This is the one place the app awaits a teardown: at exit nothing else is left
+   to be late for. Expiry is a warning, not a failure — the kernel's rule that a
+   teardown never throws is worth more than a hard deadline, and a disposer that
+   outlives it is a plugin bug the log names."
   [{:keys [ctx]}]
-  (srce/dispose-subtree! ctx)
-  nil)
+  (let [{:keys [undoing]} (srce/dispose-subtree! ctx)
+        expired (set (concurrent/await-all (mapv :handle undoing) teardown-timeout-ms))]
+    (doseq [{:keys [label handle]} undoing
+            :when (contains? expired handle)]
+      (srce/log! ctx :warn ":kmet.app/teardown-timeout" {:label label}))
+    nil))

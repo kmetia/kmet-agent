@@ -269,3 +269,48 @@
   (t/is (= (set (keys registries/registry-tags))
            (into (set extensions/host-tags) registries/resource-tags))
         "host-tags + resource-tags must cover exactly the tags the router holds"))
+
+(t/deftest test-an-async-shutdown-hands-its-release-back
+  ;; An extension may hand its shutdown back as a promise (`concurrent/after`).
+  ;; Everything visible goes now — registrations, rows, fiber, record — because
+  ;; nothing may see a half-unloaded extension; only the code release waits, and
+  ;; the call answers the handle instead of waiting for it. The `:hold` mode
+  ;; never delivers, so "still loaded" is observable without racing the release.
+  (extensions/clear-extensions!)
+  (try
+    (let [result (extensions/load-extension!
+                  "test/fixtures/ext-async-shutdown/async_ext.clj" {:mode :hold})]
+      (t/is (nil? (:error result)) (str "loaded: " (:error result)))
+      (let [record (extensions/loaded-record "async_ext.clj")
+            released (extensions/unload-extension! record)]
+        (t/is (instance? clojure.lang.IPending released) "the release is a handle")
+        (t/is (not (realized? released)) "and the unload did not wait for it")
+        (t/is (some? @(:loader record)) "the code is still loaded")
+        (t/is (empty? (extensions/get-loaded-extensions))
+              "the record left synchronously — nothing sees a half-unloaded extension")
+        (t/is (nil? (commands/find-command "async-ext"))
+              "and its registrations went with it")))
+    (finally (extensions/clear-extensions!))))
+
+(t/deftest test-an-async-shutdown-releases-the-code-once-it-settles
+  (extensions/clear-extensions!)
+  (try
+    (let [result (extensions/load-extension! "test/fixtures/ext-async-shutdown/async_ext.clj")]
+      (t/is (nil? (:error result)) (str "loaded: " (:error result)))
+      (let [record (extensions/loaded-record "async_ext.clj")
+            released (extensions/unload-extension! record)]
+        (t/is (not (identical? ::timeout (deref released 2000 ::timeout)))
+              "the handle settles")
+        (t/is (nil? @(:loader record)) "and the code is released once it does")))
+    (finally (extensions/clear-extensions!))))
+
+(t/deftest test-await-release-is-bounded-and-silent-on-nothing
+  (t/is (nil? (extensions/await-release! "nothing" nil))
+        "a synchronous unload has nothing to wait for")
+  (let [delivered (promise)
+        _ (deliver delivered :released)]
+    (t/is (nil? (extensions/await-release! "delivered" delivered))
+          "a settled handle returns immediately"))
+  (with-redefs [extensions/unload-timeout-ms 0]
+    (t/is (nil? (extensions/await-release! "stuck" (promise)))
+          "an undelivered handle expires into a warning, not a wait")))

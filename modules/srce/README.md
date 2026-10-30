@@ -31,7 +31,9 @@ Three rules make that survivable, and they are what srce is:
   call rather than a convention every subsystem has to remember.
 
 The kernel stays small on purpose: four namespaces, no protocols, no records,
-no dynamic vars, no queue, no clock. What it does not do is listed in
+no queue, no clock — the only dynamic bindings are the two unwind collectors
+(a run's failures and the work a disposer handed back, `srce.md` §4). What it
+does not do is listed in
 [`srce.md`](src/kmet/srce/srce.md) §10 with the mechanism it came from and the
 seam that would make adding it back additive.
 
@@ -337,9 +339,12 @@ is the kernel's: it also carries `:parent`, `:runtime`, `:plugin` and `:epoch`.
   or shape error keeps failing, a transient one recovers.
 - `(srce/dispose! fiber)` unwinds everything and detaches the mount. It is
   idempotent and answers `{:disposed n :failed [{:label … :error … :message
-  …}]}` — a throwing disposer is logged and listed (throwable and text), and
-  the rest still run. The state flips first, so `get` already reads nil while
-  the disposers run.
+  …}] :undoing [{:label … :handle p}]}` — a throwing disposer is logged and
+  listed (throwable and text), and the rest still run. The state flips first,
+  so `get` already reads nil while the disposers run. A disposer that cannot
+  finish inline returns an *undelivered promise* instead of blocking: it lands
+  in `:undoing`, the kernel never derefs it, and the caller that owns the
+  lifetime waits (the app's `shutdown!`, at exit, with a deadline).
 - `(srce/restart! fiber)` is dispose + mount again; it returns a new fiber with
   a new uid, so dependents remount.
 - `(srce/update! fiber new-config)` changes a config **in place** — same fiber,
@@ -351,7 +356,8 @@ is the kernel's: it also carries `:parent`, `:runtime`, `:plugin` and `:epoch`.
   absorb a change is `restart!`.
 - `(srce/dispose-plugin! ctx source)` ends every fiber of one source.
 - `(srce/dispose-subtree! ctx)` ends every fiber under a ctx, children first.
-  Both answer the same `{:disposed n :failed […]}` aggregate as `dispose!`.
+  Both answer the same `{:disposed n :failed […] :undoing […]}` aggregate as
+  `dispose!`.
 - `(srce/settle! ctx)` applies pending provider changes and answers
   `{:rounds n}` (the fixpoint rounds that call ran).
 - `(srce/runtimes ctx)` lists the plugin runtimes in mount order;

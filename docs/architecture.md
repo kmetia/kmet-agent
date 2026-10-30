@@ -524,6 +524,13 @@ at the turn's closing boundary, never mid-turn.
   boundary is where quiescence is decided — and a teardown that finds work in
   flight cancels it. A remounted dependent is stateless, for the same reason the
   UI upgrade is: its state lives in a service handle, not in `apply`'s closure.
+  A disposer that cannot finish inline hands back an undelivered promise instead
+  of blocking: `dispose!` reports it as `:undoing` and the kernel never derefs
+  it (`srce.md` §4). Two places wait: **exit** — `shutdown!` derefs the
+  subtree's handles against `teardown-timeout-ms` — and the **extension host**,
+  where a wholesale unload and a reload before it remounts wait for the outgoing
+  code's release (`unload-timeout-ms`). Both expire into a warning: the teardown
+  never throws, and nothing else is late for anything.
 
 ## Inspection
 

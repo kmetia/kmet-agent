@@ -235,6 +235,32 @@
                                      :message (or (ex-message error) (str error))}))
   (log! ctx :error "effect disposer threw" error))
 
+(def ^:dynamic *dispose-undoing*
+  "The collector of work a disposer handed back instead of waiting for it: a
+   volatile holding `[{:label … :handle p}]` of unrealized `IPending` values, or
+   nil outside `unwind-effects!`. Reporting it is the kernel's half; awaiting it
+   belongs to the caller that owns the lifetime."
+  nil)
+
+(defn- in-flight?
+  "Did a disposer hand back work it could not finish — an unrealized `IPending`,
+   i.e. a promise nobody has delivered yet?
+
+   `IPending` is the guard, not `IDeref`: an atom is a derefable, but
+   `realized?` is not defined for it on every host (babashka throws, Jolt
+   answers true), so an unguarded `realized?` would turn a disposer that returns
+   an atom into an error. A promise passes the guard on both hosts."
+  [v]
+  (and (instance? clojure.lang.IPending v)
+       (not (realized? v))))
+
+(defn- collect-undoing!
+  "Record the promise a disposer returned, when one is in flight and a run is
+   collecting."
+  [label v]
+  (when (and *dispose-undoing* (in-flight? v))
+    (vswap! *dispose-undoing* conj {:label label :handle v})))
+
 (defn assert-active!
   "Throw :srce/inactive-effect unless FIBER is :active. This is the closed-store
    guard: only an active fiber may register."
@@ -250,6 +276,11 @@
    disposer(s) it returns — one, a seq, or nil — unwind LIFO, on the returned
    single-shot disposer or when the fiber unloads. Requires an :active fiber;
    the disposer reports its last result (the removal status `on` needs).
+
+   An effect can hand work back instead of finishing (a promise nobody delivered
+   — `unwind-effects!`), and then at most one handle per effect travels: the
+   last-result rule applies to that too, so an effect registering several
+   disposers names the one that runs last.
 
    A disposer run early (a registration deregistered before its fiber unloads)
    also drops its entry from the fiber's `:effects`, so `effects` lists what is
@@ -286,10 +317,12 @@
         undo))))
 
 (defn- drain-effects!
-  "Run FIBER's effects LIFO and empty the list; the state is already non-:active."
+  "Run FIBER's effects LIFO and empty the list; the state is already non-:active.
+   A disposer's return value is its report: an unrealized `IPending` is work
+   still running, which the run collects for its caller instead of waiting."
   [fiber]
-  (doseq [{:keys [undo]} (rseq (:effects @fiber))]
-    (undo))
+  (doseq [{:keys [label undo]} (rseq (:effects @fiber))]
+    (collect-undoing! label (undo)))
   (swap! fiber assoc :effects []))
 
 (defn rollback-effects!
@@ -300,22 +333,29 @@
   (let [effects (:effects @fiber)
         mark (min mark (count effects))]
     (swap! fiber assoc :effects (vec (subvec effects 0 mark)))
-    (doseq [{:keys [undo]} (rseq (subvec effects mark))]
-      (undo))
+    (doseq [{:keys [label undo]} (rseq (subvec effects mark))]
+      (collect-undoing! label (undo)))
     nil))
 
 (defn unwind-effects!
   "Run every effect LIFO and empty the list. The caller must already have set a
-   non-:active state, so a disposer cannot register. Returns what threw, as
-   `[{:label … :error … :message …}]` in unwind order — each failure was logged
-   as it ran and the remaining disposers still ran.
+   non-:active state, so a disposer cannot register. Answers
+
+     {:failed  [{:label … :error … :message …}]  ; what threw, unwind order
+      :undoing [{:label … :handle p}]}           ; work still running
+
+   — each failure was logged as it ran and the remaining disposers still ran,
+   and an `:undoing` handle is an unrealized `IPending` a disposer returned
+   instead of blocking. The kernel never derefs one.
 
    The outermost unwind collects: a `dispose!` performed *by* a disposer
-   contributes its failures to that caller's report, and the nested call answers
-   an empty one (its failures are already in the outer run's)."
+   contributes its failures and its in-flight work to that caller's report, and
+   the nested call answers empty ones (they are already in the outer run's)."
   [fiber]
   (if *dispose-failures*
-    (do (drain-effects! fiber) [])
-    (binding [*dispose-failures* (volatile! [])]
+    (do (drain-effects! fiber) {:failed [] :undoing []})
+    (binding [*dispose-failures* (volatile! [])
+              *dispose-undoing* (volatile! [])]
       (drain-effects! fiber)
-      @*dispose-failures*)))
+      {:failed @*dispose-failures*
+       :undoing @*dispose-undoing*})))

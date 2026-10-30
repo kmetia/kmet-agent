@@ -26,7 +26,12 @@ with the extension's ctx and a map of runtime-bound capabilities — register
 everything there. The map's `:inject` decides when the mount activates.
 Optionally define `(defn shutdown [api])` for teardown — it runs on
 unload/reload, and **everything the extension registered is automatically
-unregistered** afterwards.
+unregistered** afterwards. A `shutdown` that cannot finish inline returns an
+*undelivered promise* instead of blocking: the registrations, the rows, the
+fiber and the record still go immediately (nothing ever sees a half-unloaded
+extension), and only the extension's own code — its namespaces and jars, which
+a running `shutdown` may still be executing from — is released when the promise
+settles. `kmet.libs.concurrent/after` is the chain for it.
 
 A composition can mount an installed extension as a row (`:ext/<id>`, see
 [`docs/profiles.md`](../../../../docs/profiles.md#extensions-as-rows)); the
@@ -185,7 +190,7 @@ driven directly (from another extension or a REPL):
 | Operation | Function | Effect |
 |---|---|---|
 | Load | `kmet.app.extensions.core/load-extension!` (path) | load one file or manifest dir; returns `{:extension name :error nil :loader-kind :sci\|:jolt :pending bool}`, `{:extension nil :error msg}` on failure, or `{:extension name :skipped true :reason :unsupported-loader …}` when the host offers none of the declared backends |
-| Unload | `kmet.app.extensions.core/unload-extension!` (record) | run `shutdown`, dispose the extension's registrations, remove namespaces |
+| Unload | `kmet.app.extensions.core/unload-extension!` (record) | run `shutdown`, dispose the extension's registrations, then — once an asynchronous `shutdown` settles — release its namespaces and jars; answers the release handle when there is one |
 | Reload | `kmet.app.extensions.rows/reload-all!` (mounted rows); `kmet.app.extensions.core/reload-extensions!` (dirs) | unload and load again every row-owned extension with its config; the core dirs variant unloads all and reloads from the given container dirs |
 | List | `kmet.app.extensions.core/get-loaded-extensions` | `[{:name .. :path .. :loader-kind .. :fiber-state ..}]` |
 

@@ -10,6 +10,9 @@
    - `bounded-queue`/`offer!`/`take-dropped!` — the same hand-off when the
      producer may not wait: a wire's fan-out drops its oldest record under
      pressure and tells the consumer how many it lost
+   - `after`/`await-all` — the awaitable pair: chain work behind a promise a
+     caller will not block on, and spend one bounded deadline waiting for a
+     batch of them (a teardown that hands its last step back)
 
    Extensions run in isolated SCI contexts where `future`/`pmap`/`pcalls`
    are not available — SCI is a pure interpreter with no bundled
@@ -212,6 +215,30 @@
         (do (deref (:signal state))
             (recur))))))
 
+(defn after
+  "Run F once V settles, and answer what to wait on. V is nil (or any value that
+   is not a promise): run F now, on this thread, and answer its value — the
+   synchronous path, unchanged. V is an `IPending`: run F on a daemon thread
+   after V delivers and answer a new promise of F's value.
+
+   This is the chain an asynchronous teardown needs: the step that must not run
+   under a running shutdown goes in F, and the value it answers is the handle
+   the caller waits on. A throw inside F is logged and answers nil — this is
+   cleanup, not a failure path, and an undelivered handle would hang the
+   waiter. A promise nobody ever delivers parks its thread; it is a daemon, and
+   the waiters have their own deadlines (`await-all`)."
+  [v f]
+  (if (instance? clojure.lang.IPending v)
+    (let [done (promise)]
+      (spawn (fn []
+               (deref v)
+               (deliver done (try (f)
+                                  (catch Throwable t
+                                    (log/log! "chained teardown failed" t)
+                                    nil)))))
+      done)
+    (f)))
+
 (defn monotonic-ms
   "Elapsed-time milliseconds — the only clock for durations and deadlines:
    timeouts, sleep slices, backoff, idle reaping, elapsed counters.
@@ -234,3 +261,24 @@
    moved."
   []
   (quot (System/nanoTime) 1000000))
+
+(defn await-all
+  "Deref every awaitable in HANDLES against one deadline of TIMEOUT-MS from now,
+   spent on `monotonic-ms`. Answers the handles that did not settle in time —
+   empty when they all did. A non-positive TIMEOUT-MS waits for nothing: only
+   handles that are already delivered settle.
+
+   One deadline for the batch, not one per handle: a teardown's patience is the
+   whole teardown's, so a stuck first handle cannot starve the rest and silently
+   extend the budget."
+  [handles timeout-ms]
+  (let [deadline (+ (monotonic-ms) timeout-ms)]
+    (reduce (fn [expired handle]
+              ;; a zero slice still reads a delivered handle: the deadline bounds
+              ;; the wait, not the answer
+              (let [left (max 0 (- deadline (monotonic-ms)))]
+                (if (identical? ::timeout (deref handle left ::timeout))
+                  (conj expired handle)
+                  expired)))
+            []
+            handles)))

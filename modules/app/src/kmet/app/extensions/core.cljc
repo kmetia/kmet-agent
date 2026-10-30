@@ -81,6 +81,7 @@
             [kmet.app.config :as cfg]
             [kmet.app.debug :as debug]
             [kmet.hikap.alias :as alias]
+            [kmet.libs.concurrent :as concurrent]
             [kmet.libs.host :as host]
             [kmet.loader.core :as loader]
             ;; Jolt only: pulls the fixed bundled extension set into the
@@ -1730,6 +1731,92 @@
   [name]
   (some #(when (= name (:name %)) %) @extensions))
 
+(def unload-timeout-ms
+  "How long a wholesale unload waits for an extension whose `shutdown` handed
+   back a promise (`unload-extension!`). A reload loads the same artifacts right
+   after, so it must not overlap the outgoing instance's release; expiry is a
+   warning, because the alternative is a UI that hangs on a stuck extension.
+   `kmet.app.runtime/teardown-timeout-ms` is the process-exit counterpart."
+  5000)
+
+(defn- release-libs!
+  "Release an unloaded extension's code: its loader's namespaces, then the jars
+   it was loaded from. Runs after the extension's own `shutdown` has settled —
+   an extension still running it is executing code from those jars — and
+   therefore on **the thread that delivered the handle**, not the owner's: an
+   extension whose shutdown is asynchronous is the one case where the host
+   touches its loader off the owner thread."
+  [ext]
+  (when-let [l @(:loader ext)]
+    (loader/unload! l))
+  (reset! (:loader ext) nil)
+  (when-let [jar-files (:jar-files ext)]
+    #?(:jolt (reset! jar-files {})
+       :default (let [jars @jar-files]
+                  (doseq [[_ jf] jars]
+                    (try (.close ^java.io.Closeable jf) (catch Exception _)))
+                  (reset! jar-files {}))))
+  (reset! (:jars ext) [])
+  nil)
+
+(defn- release-registrations!
+  "Drop everything an extension registered and its place in the tree: the
+   deregister fns it recorded, one sweep per tag it registered under, the rows it
+   mounted, its plugin fiber, and its record. This half is synchronous by
+   contract — nothing may ever see a half-unloaded extension — and only the code
+   release (`release-libs!`) may wait for its own shutdown."
+  [ext]
+  ;; the outside-registry fns first: a handler still subscribed while the
+  ;; registry entries go would see a half-unloaded extension
+  (registry/dispose-deregisters! @(:deregister-fns ext))
+  ;; then one sweep per tag the extension registered under (4c-ii moved the
+  ;; registries into the app's services, so there is no tree to dispose):
+  ;; the host's own tags here, the resource registries through the binding
+  (let [owner (extension-owner (:name ext))]
+    (doseq [tag host-tags]
+      (registry/deregister-owner! (handle) tag owner))
+    (when-let [sweep (:deregister-owner! (services))]
+      (sweep owner)))
+  ;; the rows the extension mounted are children of its ctx: dispose them
+  ;; first, so a service a row provided is gone before the extension's namespaces
+  (doseq [fiber (rseq (deref (:rows ext)))]
+    (srce/dispose! fiber))
+  (reset! (:rows ext) [])
+  ;; a plugin-mounted extension is a fiber: disposing it unwinds the effects
+  ;; the kernel holds and drops it from the tree, pending or active
+  (when-let [fiber @(:fiber ext)]
+    (srce/dispose! fiber))
+  ;; the record leaves with the registrations, not with the code: a record still
+  ;; listed would be "loaded" to every reader while it is not
+  (swap! extensions (fn [exts] (remove #(identical? % ext) exts)))
+  nil)
+
+(defn- stop!
+  "Run EXT's own `shutdown`, if it initialized. Answers what the extension
+   returned — a promise when its teardown is asynchronous, nil otherwise. A
+   throwing shutdown is reported on stderr and answers nil: teardown never
+   escapes as an exception, and the unload goes on."
+  [ext]
+  (when (and @(:initialized? ext) @(:entry-ns ext))
+    (when-let [shutdown (extension-var ext @(:entry-ns ext) 'shutdown)]
+      (try ((loader-aware ext (deref shutdown)) @(:api ext))
+           (catch Exception e
+             (binding [*out* *err*]
+               (println "Warning: extension shutdown error:" (ex-message e)))
+             nil)))))
+
+(defn await-release!
+  "Wait for a release handle (`unload-extension!`'s answer, or nil when the
+   unload was synchronous) against `unload-timeout-ms`, naming WHAT when it does
+   not settle. Bounded on purpose: a stuck extension must not hang a reload or an
+   exit, and the warning is the only thing such a hang can be."
+  [what handle]
+  (when (and handle (seq (concurrent/await-all [handle] unload-timeout-ms)))
+    (binding [*out* *err*]
+      (println "Warning:" what "did not finish releasing its code in"
+               unload-timeout-ms "ms")))
+  nil)
+
 (defn unload-extension!
   "Unload an extension in two steps: shutdown (if it initialized), then
    dispose what it registered — the deregister fns it recorded (aliases,
@@ -1741,53 +1828,30 @@
    isolated context goes: namespaces and jars become unreachable, nothing
    global is touched. Expects the Extension record (from the registry /
    reload-extensions!); nil is a no-op — the load result map carries only its
-   :extension name, and (deref nil) would otherwise surface as a cryptic NPE."
+   :extension name, and (deref nil) would otherwise surface as a cryptic NPE.
+
+   A `shutdown` that hands back an undelivered promise defers the **release**
+   (`release-libs!`) until it settles, and the call answers that handle; a
+   synchronous shutdown answers nil. Everything else stays synchronous
+   (`release-registrations!`), so nothing ever sees a half-unloaded extension:
+   the registrations, the rows, the fiber and the record go now, and only the
+   code the extension may still be running from waits. A caller that must not
+   overlap the two instances awaits the handle (`unload-all-extensions!`,
+   `kmet.app.extensions.rows/unmount!`); a composition row hands it to the
+   kernel's disposer report instead (`kmet.app.runtime/shutdown!`)."
   [ext]
   (when ext
-    (when (and @(:initialized? ext) @(:entry-ns ext))
-      (when-let [shutdown (extension-var ext @(:entry-ns ext) 'shutdown)]
-        (try ((loader-aware ext (deref shutdown)) @(:api ext))
-             (catch Exception e
-               (binding [*out* *err*]
-                 (println "Warning: extension shutdown error:" (ex-message e)))))))
-    ;; the outside-registry fns first: a handler still subscribed while the
-    ;; registry entries go would see a half-unloaded extension
-    (registry/dispose-deregisters! @(:deregister-fns ext))
-    ;; then one sweep per tag the extension registered under (4c-ii moved the
-    ;; registries into the app's services, so there is no tree to dispose):
-    ;; the host's own tags here, the resource registries through the binding
-    (let [owner (extension-owner (:name ext))]
-      (doseq [tag host-tags]
-        (registry/deregister-owner! (handle) tag owner))
-      (when-let [sweep (:deregister-owner! (services))]
-        (sweep owner)))
-    ;; the rows the extension mounted are children of its ctx: dispose them
-    ;; first, so a service a row provided is gone before the extension's namespaces
-    (doseq [fiber (rseq (deref (:rows ext)))]
-      (srce/dispose! fiber))
-    (reset! (:rows ext) [])
-    ;; a plugin-mounted extension is a fiber: disposing it unwinds the effects
-    ;; the kernel holds and drops it from the tree, pending or active
-    (when-let [fiber @(:fiber ext)]
-      (srce/dispose! fiber))
-    (when-let [l @(:loader ext)]
-      (loader/unload! l))
-    (reset! (:loader ext) nil)
-    (when-let [jar-files (:jar-files ext)]
-      #?(:jolt (reset! jar-files {})
-         :default (let [jars @jar-files]
-                    (doseq [[_ jf] jars]
-                      (try (.close ^java.io.Closeable jf) (catch Exception _)))
-                    (reset! jar-files {}))))
-    (reset! (:jars ext) [])
-    (swap! extensions (fn [exts] (remove #(identical? % ext) exts)))
-    nil))
+    (let [stopping (stop! ext)]
+      (release-registrations! ext)
+      (concurrent/after stopping #(release-libs! ext)))))
 
 (defn unload-all-extensions!
-  "Unload every loaded extension (reverse order)."
+  "Unload every loaded extension (reverse order), waiting for each release that
+   ran asynchronously — bounded by `unload-timeout-ms`, because the caller loads
+   the same artifacts right after."
   []
   (doseq [ext (reverse @extensions)]
-    (unload-extension! ext))
+    (await-release! (str "extension " (:name ext)) (unload-extension! ext)))
   nil)
 
 (defn extension-api

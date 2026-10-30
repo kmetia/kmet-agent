@@ -141,3 +141,39 @@
     (is (= {:value concurrent/closed :dropped 0}
            (concurrent/take-dropped! q))
         "and the closed marker is the value, as on the unbounded queue")))
+
+(deftest after-runs-f-now-when-there-is-nothing-to-wait-for
+  (let [ran (atom false)]
+    (is (= :done (concurrent/after nil (fn [] (reset! ran true) :done))))
+    (is (true? @ran) "a nil handle runs F on this thread, unchanged")
+    (is (= :now (concurrent/after :a-value (fn [] :now)))
+        "a value that is not a promise is not waited for either")))
+
+(deftest after-chains-behind-a-promise
+  (let [settled (promise)
+        ran (atom false)
+        chained (concurrent/after settled (fn [] (reset! ran true) :released))]
+    (is (not (realized? chained)) "the answer is a new handle")
+    (is (false? @ran) "F has not run before the handle settles")
+    (deliver settled :stopped)
+    (is (= :released (deref chained 2000 :timeout)))
+    (is (true? @ran))))
+
+(deftest after-answers-nil-when-the-chained-step-throws
+  ;; a chained teardown is cleanup: an undelivered handle would hang its waiter
+  (let [settled (promise)
+        chained (concurrent/after settled (fn [] (throw (ex-info "boom" {}))))]
+    (deliver settled :stopped)
+    (is (nil? (deref chained 2000 :timeout)))))
+
+(deftest await-all-spends-one-deadline-on-the-batch
+  (let [a (promise)
+        b (promise)
+        c (promise)]
+    (deliver a :a)
+    (deliver c :c)
+    (is (= [b] (concurrent/await-all [a b c] 0))
+        "a zero budget settles only what is already delivered")
+    (is (= [] (concurrent/await-all [a c] 100)))
+    (deliver b :b)
+    (is (= [] (concurrent/await-all [a b c] 100)) "and everything once it settles")))

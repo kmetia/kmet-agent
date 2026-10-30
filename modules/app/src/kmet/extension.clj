@@ -27,7 +27,8 @@
    with `kmet.srce.core/defplugin` (or a plain map). The kernel mounts it —
    pending until its declared `:inject` services exist — and `:apply` is the
    body: register everything through `api`. A namespace may also define
-     (defn shutdown [api])     — optional; teardown on unload/reload
+     (defn shutdown [api])     — optional; teardown on unload/reload, and a
+                                 promise answers when it could not finish inline
    api is a map of runtime-bound capabilities. The wrapper fns in this
    namespace take api as their first argument and dispatch to the runtime
    implementation, so extensions never require kmet internals.

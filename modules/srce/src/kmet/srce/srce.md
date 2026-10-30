@@ -118,7 +118,7 @@ not a set of modules whose callers each pick their own:
 (srce/runtime ctx web-search)            ; the runtime, or nil
 (srce/runtime? ctx web-search)           ; is a runtime mounted for this source?
 (srce/runtimes ctx)                      ; [runtime …], mount order
-(srce/dispose! fiber)                    ; effects LIFO → {:disposed :failed}
+(srce/dispose! fiber)                    ; effects LIFO → {:disposed :failed :undoing}
 (srce/restart! fiber)                    ; dispose then mount again → a new fiber
 (srce/update! fiber cfg)                 ; config change in place (needs :update)
 (srce/dispose-plugin! ctx web-search)    ; every fiber of one source
@@ -435,6 +435,21 @@ are the accessor:
   `:message` its rendered text. The outermost unwind collects: a dispose
   performed *by* a disposer contributes to its caller's report and answers an
   empty one itself.
+- **A disposer that cannot finish inline hands its work back.** The report's
+  third key is `:undoing [{:label … :handle p}]`: a disposer returned an
+  *unrealized* `IPending` — a promise nobody has delivered — instead of blocking
+  the owner thread. The marker is `IPending` and not `IDeref`, because
+  `realized?` is not defined for every derefable on every host (an atom throws on
+  babashka and answers true on Jolt), and the kernel **never derefs the handle**:
+  it reports it, and the caller that owns the lifetime awaits it (§8).
+  `dispose!` on an already-`:disposed` fiber answers empty lists for all three
+  keys.
+- **A teardown that outlives its fiber is the caller's problem, by design.**
+  `restart!` and a pass reload remount immediately, so neither awaits an
+  `:undoing` handle: a plugin that hands work back must be one whose next mount
+  does not collide with the old instance, or its caller must await before
+  restarting it. Nothing enforces that — the rule is the plugin's, and the one
+  caller that awaits (`kmet.app.runtime/shutdown!`, §8) ends a lifetime.
 - **A failed fiber is a state, not an exception.** `apply` throws → the fiber is
   marked `:failed` with `:error e` **first**, so an effect or `provide!` from
   inside its own disposers throws `:srce/inactive-effect`; then its partial effects
@@ -481,7 +496,8 @@ release), and the **plugin** (`dispose-plugin!`, every fiber of one source).
 The root fiber's disposal is an ordinary disposal: it unwinds every root effect,
 so the app tree is gone and the app remounts the tree to restart. It never tears
 down the process, and there is no implicit restart — `dispose!` answers
-`{:disposed 0 :failed []}` on a second call instead of restarting anything.
+`{:disposed 0 :failed [] :undoing []}` on a second call instead of restarting
+anything.
 
 ## 5. Events
 
@@ -765,7 +781,8 @@ an awaitable queue. The light kernel answers with a rule:
   so there is nothing in flight to drain. The turn-boundary quiesce is the
   loop's own awaitable (`:agents`' `when-idle`), not a kernel primitive.
 - **Async teardown is the plugin's own promise**, awaited by the app at the
-  boundary. The kernel never awaits a disposer.
+  boundary. The kernel never awaits a disposer; it may report one as `:undoing`
+  for the caller to await (§4).
 
 Alternatives, and why not:
 
@@ -906,6 +923,7 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
 | `fiber.store` / `.inertia` | `:provides` (§4) / — | deferred (the listing fields are on the record instead) |
 | `fiber.ctx` / `.parent` / `.runtime` | `:ctx` / `:parent` / `:runtime` | keep |
 | `fiber.effect(body, label)` | `srce/effect` | keep |
+| `AsyncDisposable` (a disposer returning a promise) | `dispose!`'s `:undoing` — reported, never awaited | keep (reports only) |
 | `fiber.getEffects()` | `srce/effects` | keep |
 | `fiber.await()` | — | deferred |
 | `fiber.restart()` | `srce/restart!` (dispose + mount) | keep |
@@ -1011,8 +1029,12 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
   when it throws; a hook that provides a new name reloading a dependent; and a
   teardown reporting the disposer that threw (with its label, its throwable and
   its message) while the rest still ran, a dispose performed by a disposer
-  reporting into the outer run, `dispose!` answering `{:disposed 0 :failed []}`
-  a second time, and `dispose-subtree!` aggregating the same shape; and a
+  reporting into the outer run, `dispose!` answering `{:disposed 0 :failed []
+  :undoing []}` a second time, and `dispose-subtree!` aggregating the same
+  shape; a disposer returning an undelivered promise reported as `:undoing`
+  (the kernel does not deref it, a delivered promise and a plain value are not
+  reported), in-flight work from a nested dispose landing in the outer run, and
+  a subtree teardown aggregating every handle; and a
   non-fn `:update` rejected as `:srce/bad-plugin`.
 - srce self-containment: `kmet.srce.*` may require only rank-0 code
   (`kmet.libs.*`, `kmet.loader.*`, `kmet.reakt.*`) and third-party code — no
@@ -1027,7 +1049,8 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
 
 | Question | Recommendation |
 |---|---|
-| **Synchronous `apply`** — the one cut that is not additive | yes. Reversing it changes `plugin!`'s return from a fiber to an awaitable, so every caller. Async work is the plugin's own promise |
+| **Synchronous `apply`** — the one cut that is not additive | yes. A thenable fiber would be ignore-able (Cordis's shape: `Fiber & PromiseLike<Fiber>`), so the cost is not the signature but the `:loading` state and the resume path behind it — a queue and an owner thread the app already has once. Async work is the plugin's own promise |
+| Who awaits a disposer that declared in-flight work | settled at HEAD: the caller that owns the lifetime (`kmet.app.runtime/shutdown!`), with one private timeout; the kernel reports it as `:undoing` and never waits. A report raised inside a submitted thunk is not visible to `boundary!` — and a restart or a pass reload does not wait either |
 | `get` on a name provided by a non-active fiber | nil, one `get`, no `strict` flag |
 | `(:tools ctx)` through `ILookup` | not ported. `srce/get` is explicit; destructuring and `contains?` stay honest about nil |
 | One provider per name: realm-level or visibility-level | visibility (per ctx store + the walk). A realm-level store is Cordis's shape: it needs a realm-key symbol table (the labels §10 defers) and makes a sibling provider throw mid-tree. Two siblings may provide the same name — `isolate` is how a subtree gets its own |
@@ -1155,7 +1178,9 @@ require cycle.
   then emits `:srce/failure`.
 - **`dispose!`** flips to `:disposed` first, unwinds, detaches from `:mounted`,
   drops the runtime when its last fiber is gone, and settles.
-- **No protocols, records, multimethods or dynamic vars.** One macro
+- **No protocols, records, multimethods or user-facing dynamic bindings.** Two
+  dynamic vars collect an unwind's report — `*dispose-failures*` and
+  `*dispose-undoing*` — and are bound only inside `unwind-effects!`. One macro
   (`defplugin`), three `compare-and-set!`s (the pass flag, each effect's
   single-shot flag, the change-set drain), no Java interop, no awaitable, no
   clock, no queue.
