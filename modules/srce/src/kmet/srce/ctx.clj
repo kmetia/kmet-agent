@@ -242,9 +242,10 @@
    belongs to the caller that owns the lifetime."
   nil)
 
-(defn- in-flight?
-  "Did a disposer hand back work it could not finish — an unrealized `IPending`,
-   i.e. a promise nobody has delivered yet?
+(defn in-flight?
+  "Is V work that is still running — an unrealized `IPending`, i.e. a promise
+   nobody has delivered yet? This is the marker a plugin body returns to say its
+   setup is asynchronous, and a disposer returns to say its teardown is.
 
    `IPending` is the guard, not `IDeref`: an atom is a derefable, but
    `realized?` is not defined for it on every host (babashka throws, Jolt
@@ -262,11 +263,12 @@
     (vswap! *dispose-undoing* conj {:label label :handle v})))
 
 (defn assert-active!
-  "Throw :srce/inactive-effect unless FIBER is :active. This is the closed-store
-   guard: only an active fiber may register."
+  "Throw :srce/inactive-effect unless FIBER may register: `:active`, or
+   `:starting` — a setup body registers while its own setup is still running.
+   This is the closed-store guard: a disposer is never in either state."
   [fiber]
   (let [state (:state @fiber)]
-    (when-not (= :active state)
+    (when-not (contains? #{:active :starting} state)
       (throw (ex-info "fiber is not active"
                       {:type :srce/inactive-effect :state state}))))
   nil)
@@ -274,7 +276,8 @@
 (defn effect
   "Register a reversible effect on the current fiber: F runs now and the
    disposer(s) it returns — one, a seq, or nil — unwind LIFO, on the returned
-   single-shot disposer or when the fiber unloads. Requires an :active fiber;
+   single-shot disposer or when the fiber unloads. Requires a registering fiber
+   (`assert-active!`: `:active`, or `:starting` while its own setup runs);
    the disposer reports its last result (the removal status `on` needs).
 
    An effect can hand work back instead of finishing (a promise nobody delivered
@@ -286,11 +289,8 @@
    also drops its entry from the fiber's `:effects`, so `effects` lists what is
    installed rather than what was ever installed."
   [ctx f & [label]]
-  (let [fiber (:fiber ctx)
-        state (:state @fiber)]
-    (when-not (= :active state)
-      (throw (ex-info "cannot create an effect on an inactive fiber"
-                      {:type :srce/inactive-effect :state state})))
+  (let [fiber (:fiber ctx)]
+    (assert-active! fiber)
     (let [undos (atom [])
           live? (atom true)]
       (letfn [(undo []

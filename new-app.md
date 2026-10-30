@@ -121,16 +121,17 @@ These are load-bearing and not obvious from the code:
 - **The kernel's vocabulary follows Cordis** (`ctx.get`, `ctx.extend`,
   `ctx.provide`, `ctx.isolate`); the Clojure core shadowing is a host artifact
   confined to the kernel's own namespaces.
-- **A teardown may hand work back; setup may not.** The undo side is
-  asynchronous by *report*, not by state: a disposer that cannot finish inline
-  returns an undelivered promise, `dispose!` answers it as
-  `:undoing [{:label :handle}]`, and the lifetime's owner waits — `shutdown!` at
-  exit, the extension host for an async `shutdown` (only its code release is
-  deferred; registrations and the record still go immediately), a reload before
-  it remounts. The kernel never derefs one. Async *setup* stays declined:
-  `:loading`/`:unloading`, `fiber.await` and a kernel-owned drain need a resume
-  path the app already implements once, as its submission queue
-  (`srce.md` §8, §10, §13).
+- **A teardown and a setup may both hand work back; the kernel still never
+  waits.** A disposer that cannot finish inline returns an undelivered promise,
+  `dispose!` answers it as `:undoing [{:label :handle}]`, and the lifetime's
+  owner awaits — `shutdown!` at exit, the extension host for an async `shutdown`
+  (only its code release is deferred; registrations and the record still go
+  immediately), a reload before it remounts. A body that cannot finish inline
+  returns one too: the fiber is `:starting` with its names invisible and the
+  handle on `:setup`, and the pass decides when it settles (`srce.md` §4). What
+  stays declined is the state machine behind `:loading`/`:unloading`,
+  `fiber.await` and a kernel-owned drain — they need a resume path the app
+  already implements once, as its submission queue (`srce.md` §8, §10).
 
 ## Everything is a plugin: the rows that are not
 

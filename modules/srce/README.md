@@ -250,8 +250,17 @@ fiber unloads:
   still run.
 
 Registrations require an `:active` fiber (`:srce/inactive-effect` otherwise),
-including a registration attempted from inside a disposer. Register from
+including a registration attempted from inside a disposer — a `:starting` fiber
+may register too, because its body is what is running. Register from
 `:apply`, not from teardown.
+
+A body that hands back an undelivered promise is an **asynchronous setup**: the
+fiber stays `:starting`, nothing it provides is visible (`available?` requires
+`:active`), dependents stay `:pending`, and the handle rides on the record as
+`:setup` for whoever awaits it (`boot`, against `startup-timeout-ms`). The
+owner's next `(srce/settle! ctx)` advances a fiber whose setup has settled —
+nothing pokes the kernel when a promise is delivered, and a worker does not
+settle it (`settle!` runs plugin code). The kernel itself never waits.
 
 ### Events
 

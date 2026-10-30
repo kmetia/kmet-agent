@@ -104,6 +104,13 @@
    \"does not block\" needs."
   5000)
 
+(def startup-timeout-ms
+  "How long a mount waits for a plugin whose `apply` handed back a promise
+   (the fiber's `:setup`). A row that has not settled by then is a boot error,
+   not a hang — `inactive-rows` shows it as `:starting`. One budget for the
+   whole boot, and `teardown-timeout-ms` is the exit counterpart."
+  5000)
+
 (defn boundary!
   "The turn boundary: run what other threads submitted, then settle the
    kernel's provider changes, repeating while submissions arrive. Returns
@@ -166,15 +173,35 @@
                            (pr-str source))
                       {:type :kmet.app/bad-row :row row})))))
 
+(defn await-setups!
+  "Wait for the row setups that ran asynchronously and re-settle, so the caller
+   sees decided fibers. A setup that starts another one (a dependent's own
+   `apply`) is waited for in the next round, and every round spends what is left
+   of one `startup-timeout-ms` budget. Expiry is the caller's to report: the
+   fiber is still `:starting` and `inactive-rows` names it."
+  [ctx]
+  (let [deadline (+ (concurrent/monotonic-ms) startup-timeout-ms)]
+    (loop [round 0]
+      (let [handles (into [] (keep :setup) (srce/fibers ctx))]
+        (when (and (seq handles) (< round max-rounds))
+          (concurrent/await-all handles (max 0 (- deadline (concurrent/monotonic-ms))))
+          (srce/settle! ctx)
+          (recur (inc round))))))
+  nil)
+
 (defn mount-rows!
-  "Mount ROWS under CTX and return one fiber per row, in composition order.
+  "Mount ROWS under CTX and return one fiber per row, in composition order —
+   mounted, settled, and with any asynchronous setup awaited, so every caller
+   reads decided fibers (`inactive-rows`, `check-mounts!`).
 
    `boot` is this on a fresh root; a **preset** is this on an agent's child ctx
    (`kmet.app.presets`). The mount point, not the row shape, is what a profile
-   and a preset differ in — one composition language, two places to compose.
-   Nothing settles here: the caller does, and then asks `inactive-rows`."
+   and a preset differ in — one composition language, two places to compose."
   [ctx rows]
-  (mapv (fn [row] (srce/plugin! ctx (row-source row) (:config row))) rows))
+  (let [fibers (mapv (fn [row] (srce/plugin! ctx (row-source row) (:config row))) rows)]
+    (srce/settle! ctx)
+    (await-setups! ctx)
+    fibers))
 
 (defn inactive-rows
   "ROWS whose fiber is not `:active` after the mounts settled, as plain data:
@@ -210,9 +237,11 @@
   "`<row id> (<error message>)` for an inactive row, or the bare id when it
    failed without a message. The row's own error is the actionable half — a
    boot message that only named the row left the reason in a log line the
-   operator has to find."
-  [{:keys [id error]}]
-  (let [msg (when (instance? Exception error) (ex-message error))]
+   operator has to find. A `:starting` row is named as an unsettled setup: it
+   has no error, and \"not active\" alone would not say what was still running."
+  [{:keys [id error state]}]
+  (let [msg (or (when (instance? Exception error) (ex-message error))
+                (when (= :starting state) "setup did not settle"))]
     (if msg (str (pr-str id) " (" msg ")") (pr-str id))))
 
 (defn- check-mounts!
@@ -278,7 +307,6 @@
          deferred (filterv defer? rows)
          mounted (into [] (remove defer?) rows)
          fibers (mount-rows! ctx mounted)
-         _ (srce/settle! ctx)
          failed (check-mounts! ctx mounted fibers fibers diagnose?)
          _ (events/declare-mounted! fibers)]
      {:ctx ctx :fibers fibers :rows (count mounted) :deferred deferred
@@ -303,7 +331,6 @@
       (let [remaining (filterv (complement pick?) deferred)
             rows (mapv transform chosen)
             mounted (mount-rows! ctx rows)
-            _ (srce/settle! ctx)
             all-fibers (into (vec fibers) mounted)
             _ (check-mounts! ctx rows mounted all-fibers false)
             _ (events/declare-mounted! mounted)]

@@ -631,7 +631,8 @@
     (srce/on r :srce/status (fn [ev] (swap! statuses conj (:to ev))))
     (srce/on r :srce/service (fn [ev] (swap! services conj [(:name ev) (:value ev)])))
     (let [f (srce/plugin! r #'demo-plugin)]
-      (is (= [:pending :active] @statuses))
+      (is (= [:pending :starting :active] @statuses)
+          "every mount passes through :starting while its body runs")
       (srce/dispose! f)
       (is (= :disposed (last @statuses)))
       (is (= :active (:state @(:fiber r)))))
@@ -846,6 +847,79 @@
                            :apply (fn [c _] (srce/effect c (fn [] (fn [] b)) :probe/b) nil)})]
     (is (= [:probe/b :probe/a] (mapv :label (:undoing (srce/dispose-subtree! r))))
         "a subtree teardown aggregates every handle, children first")))
+
+(deftest an-async-apply-holds-the-fiber-at-starting
+  (let [[r] (kernel)
+        setup (promise)
+        f (srce/plugin! r {:name :probe/async
+                           :apply (fn [c _]
+                                    (srce/provide! c :probe/async-svc {:v 1} {:in (:parent c)})
+                                    setup)})]
+    (is (= :starting (:state (srce/fiber-info f))) "the promise keeps the mount in flight")
+    (is (identical? setup (:setup (srce/fiber-info f))) "the handle is on the record")
+    (is (nil? (srce/get r :probe/async-svc)) "and its names are invisible meanwhile")
+    (deliver setup :ready)
+    (srce/settle! r)
+    (is (= :active (:state (srce/fiber-info f))))
+    (is (nil? (:setup (srce/fiber-info f))) "the handle is cleared")
+    (is (= {:v 1} (srce/get r :probe/async-svc)))))
+
+(deftest a-dependent-waits-for-an-async-setup
+  (let [[r] (kernel)
+        setup (promise)
+        _ (srce/plugin! r {:name :probe/async-src
+                           :apply (fn [c _]
+                                    (srce/provide! c :probe/async-x true {:in (:parent c)})
+                                    setup)})
+        dep (srce/plugin! r {:name :probe/async-dep
+                             :inject [:probe/async-x]
+                             :apply (fn [_ _] nil)})]
+    (is (= :pending (:state (srce/fiber-info dep))))
+    (deliver setup nil)
+    (srce/settle! r)
+    (is (= :active (:state (srce/fiber-info dep)))
+        "the pass re-checks it once the provider is active")))
+
+(deftest a-delivered-throwable-fails-an-async-setup
+  (let [[r] (kernel)
+        setup (promise)
+        f (srce/plugin! r {:name :probe/async-fail
+                           :apply (fn [c _]
+                                    (srce/provide! c :probe/async-failed true {:in (:parent c)})
+                                    setup)})]
+    (deliver setup (ex-info "nope" {:type :probe}))
+    (srce/settle! r)
+    (is (= :failed (:state (srce/fiber-info f))))
+    (is (nil? (srce/get r :probe/async-failed)) "its names are freed")))
+
+(deftest a-provider-change-during-setup-reloads-on-delivery
+  ;; A's provider disappears while B's setup runs: B is not reloaded mid-setup
+  ;; (a body cannot be interrupted), and its delivery re-decides, so it reloads
+  ;; and waits again.
+  (let [[r] (kernel)
+        a (srce/plugin! r {:name :probe/async-provider
+                           :apply (fn [c _]
+                                    (srce/provide! c :probe/async-dep-x true {:in (:parent c)}))})
+        setup (promise)
+        b (srce/plugin! r {:name :probe/async-consumer
+                           :inject [:probe/async-dep-x]
+                           :apply (fn [_ _] setup)})]
+    (is (= :starting (:state (srce/fiber-info b))))
+    (srce/dispose! a)
+    (is (= :starting (:state (srce/fiber-info b))) "not reloaded mid-setup")
+    (deliver setup nil)
+    (srce/settle! r)
+    (is (= :pending (:state (srce/fiber-info b)))
+        "the delivery reloads it, and it now waits for the name again")))
+
+(deftest a-disposed-fiber-ignores-its-late-setup
+  (let [[r] (kernel)
+        setup (promise)
+        f (srce/plugin! r {:name :probe/async-disposed :apply (fn [_ _] setup)})]
+    (is (= 1 (:disposed (srce/dispose! f))))
+    (deliver setup :late)
+    (srce/settle! r)
+    (is (= :disposed (:state (srce/fiber-info f))) "a settled setup after disposal decides nothing")))
 
 (deftest a-dispose-inside-a-disposer-reports-into-the-outer-run
   (let [[r] (kernel)

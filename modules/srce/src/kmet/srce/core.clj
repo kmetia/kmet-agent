@@ -93,7 +93,8 @@
 
 (def fiber-info
   "FIBER as a plain map (identity, lifecycle, inject/provides/waiting-for, effect
-   labels, its ctx) — what inspection and reconciliation read instead of the
+   labels, its ctx, and `:setup` — the promise an asynchronous `apply` handed
+   back, nil otherwise) — what inspection and reconciliation read instead of the
    record."
   fiber/fiber-info)
 
@@ -114,7 +115,9 @@
   fiber/normalize-inject)
 
 (def plugin!
-  "Mount SOURCE as a new fiber under CTX with CONFIG."
+  "Mount SOURCE as a new fiber under CTX with CONFIG. The fiber is `:pending`
+   until its inject is satisfied, `:starting` while its body (or the setup it
+   handed back) runs, `:active` after — see `settle!`."
   fiber/plugin!)
 
 (def inject!
@@ -134,8 +137,9 @@
   fiber/runtimes)
 
 (def settle!
-  "Run any pending provider change to a fixpoint; answers `{:rounds n}` for the
-   fixpoint rounds this call ran."
+  "Run any pending provider change to a fixpoint and advance every `:starting`
+   fiber whose setup has settled; answers `{:rounds n}` for the fixpoint rounds
+   this call ran."
   fiber/settle!)
 
 (def dispose!

@@ -346,3 +346,33 @@
     (is (str/includes? (str (first (filter #(= :warn (first %)) @logged)))
                        "teardown-timeout"))))
 
+(defn- async-row
+  "A row whose plugin finishes its setup asynchronously: `apply` provides and
+   hands back SETUP, so the fiber stays `:starting` until it is delivered."
+  [setup]
+  {:id :async
+   :plugin {:name :probe/async-row
+            :apply (fn [ctx _]
+                     (srce/provide! ctx :probe/async-row-svc :ready {:in (:parent ctx)})
+                     setup)}})
+
+(deftest boot-waits-for-an-asynchronous-row
+  (let [setup (promise)
+        deliverer (future (deliver setup :ready))
+        {:keys [ctx fibers]} (runtime/boot {:rows [(async-row setup)]})]
+    (try
+      (is (= :active (:state @(first fibers))) "the boot waited for the setup")
+      (is (= :ready (srce/get ctx :probe/async-row-svc))
+          "and its name is readable afterwards")
+      (finally
+        @deliverer
+        (runtime/shutdown! {:ctx ctx})))))
+
+(deftest boot-fails-when-a-setup-never-settles
+  (with-redefs [runtime/startup-timeout-ms 0]
+    (let [e (try (runtime/boot {:rows [(async-row (promise))]})
+                 nil
+                 (catch Exception e e))]
+      (is (= :kmet.app/boot-failed (:type (ex-data e))))
+      (is (str/includes? (ex-message e) "setup did not settle")
+          "the row is named with what was still running"))))

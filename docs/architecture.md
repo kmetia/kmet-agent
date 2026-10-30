@@ -531,6 +531,14 @@ at the turn's closing boundary, never mid-turn.
   where a wholesale unload and a reload before it remounts wait for the outgoing
   code's release (`unload-timeout-ms`). Both expire into a warning: the teardown
   never throws, and nothing else is late for anything.
+- **A setup may be asynchronous too, and the mount is what waits.** A row whose
+  `apply` returns a promise stays `:starting` (its names invisible, dependent
+  rows `:pending`), and `runtime/mount-rows!` awaits the `:setup` handles
+  against `startup-timeout-ms` before returning — so `boot`, a deferred row and
+  `presets/mount!` all see decided fibers without repeating the wait. A row
+  still `:starting` after that is a `:kmet.app/boot-failed` naming the setup
+  that did not settle, not a hang. The kernel still awaits nothing — the
+  owner's next `settle!` is what advances a delivered setup.
 
 ## Inspection
 

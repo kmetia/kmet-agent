@@ -46,6 +46,9 @@ promise settles (`kmet.libs.concurrent/after` chains on it).
 An extension **is** a plugin: the loader mounts the `plugin` var, `:apply`
 receives the extension's ctx and its capability map, and everything registered
 through `api` belongs to the extension — unload disposes it automatically.
+`:apply` may also return an undelivered promise when its setup cannot finish
+inline: the mount stays `:starting`, what it provides is invisible until it
+settles, and the boot waits for it (`startup-timeout-ms`).
 `:inject` lives in the same map, so a mount waits for the services it names.
 That is also the **single-file** form; a directory or jar extension names the
 same var in `extension.edn` (see

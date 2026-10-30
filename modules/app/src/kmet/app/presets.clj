@@ -61,7 +61,6 @@
    (let [{:keys [rows]} (profile/compose [(profile/bundle table preset-name)])
          _ (check-extension-rows! preset-name rows)
          fibers (runtime/mount-rows! ctx rows)]
-     (srce/settle! ctx)
      (if-let [failed (seq (runtime/inactive-rows rows fibers))]
        (do
          ;; a preset is a set: half of it is not this preset. `create!`'s

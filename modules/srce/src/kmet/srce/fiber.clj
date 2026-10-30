@@ -203,18 +203,24 @@
    mount has no lifetime owner to give the handle to."
   [fiber error]
   (let [{:keys [ctx name]} @fiber]
-    (swap! fiber assoc :error error)
+    (swap! fiber assoc :error error :setup nil)
     (set-state! fiber :failed)
     (ctx/unwind-effects! fiber)
     (event/emit! ctx :srce/failure {:fiber fiber :error error})
     (ctx/log! ctx :error "plugin failed" name error)
     nil))
 
+(declare advance!)
+
 (defn- activate!
   "Satisfied? run apply with the resolved config; otherwise stay :pending with
    the required names it waits for (an optional :inject never holds it). The
-   state is set before the plugin body runs, so the body may provide and
-   register. apply's return value is its first effect."
+   fiber is `:starting` while the body runs, so the body may provide and register
+   (the guard allows it) while its names stay invisible until `:active`.
+
+   The body's return value decides the rest: an undelivered promise keeps the
+   fiber `:starting` until the handle settles (`advance!`), anything else makes
+   it active now, and a non-nil value is the mount's first effect."
   [fiber]
   (let [{:keys [ctx inject plugin config]} @fiber
         epoch (providers ctx inject)
@@ -233,12 +239,16 @@
           (let [cfg (if-let [validate (:config plugin)]
                       (validate config)
                       config)]
-            (swap! fiber assoc :error nil :resolved cfg)
-            (set-state! fiber :active)
+            (swap! fiber assoc :error nil :resolved cfg :setup nil)
+            (set-state! fiber :starting)
             (let [result ((:apply plugin) ctx cfg)]
-              (when (some? result)
-                (ctx/effect ctx (constantly result) (str "apply " (:name @fiber)))))
-            (check-provides! fiber))
+              (if (ctx/in-flight? result)
+                ;; an asynchronous setup: the handle rides on the record for
+                ;; whoever awaits it, and `advance!` decides once it settles
+                (swap! fiber assoc :setup result)
+                (do (when (some? result)
+                      (ctx/effect ctx (constantly result) (str "apply " (:name @fiber))))
+                    (advance! fiber nil)))))
           (catch Throwable t
             (fail! fiber t)))))
     fiber))
@@ -262,12 +272,50 @@
   (unload! fiber)
   (activate! fiber))
 
+(defn- advance!
+  "Decide a `:starting` fiber once its setup settled. A fiber already `:disposed`
+   is left alone; a delivered throwable (or a throwing `deref`, which is how a
+   `future` reports) is a failed mount; a provider set that changed while the
+   body ran is a reload — the same comparison `refresh!` makes, which is why no
+   `:reload-pending?` flag is needed; otherwise the mount is `:active` and its
+   declared `:provide` is checked."
+  [fiber value]
+  (let [{:keys [ctx inject epoch state]} @fiber]
+    (cond
+      (= :disposed state) nil
+
+      (instance? Throwable value) (fail! fiber value)
+
+      :else
+      (let [next-epoch (providers ctx inject)]
+        (if (not= next-epoch epoch)
+          (reload! fiber next-epoch)
+          (do (swap! fiber assoc :setup nil)
+              (set-state! fiber :active)
+              (check-provides! fiber))))))
+  nil)
+
+(defn- advance-ready!
+  "Advance every `:starting` fiber whose setup handle has settled — a throwing
+   `deref` (a `future`) settles it as its throwable. A pass always looks, because
+   nothing pokes the kernel when a promise is delivered: the owner's next
+   `settle!` — the app's turn boundary — is what notices it. A worker never
+   settles the kernel itself (`settle!` runs plugin code, §8)."
+  [ctx]
+  (doseq [fiber @(:mounted (:kernel ctx))]
+    (let [{:keys [state setup]} @fiber]
+      (when (and (= :starting state) setup (realized? setup))
+        (advance! fiber (try (deref setup) (catch Throwable t t)))))))
+
 (defn- refresh!
   "One fiber, one decision: an unchanged provider set is a no-op (so a :failed
-   fiber is never retried by the pass); a changed one reloads."
+   fiber is never retried by the pass); a changed one reloads. A `:starting`
+   fiber is never reloaded — its body cannot be interrupted, and unwinding under
+   it would make its own registration throw `:srce/inactive-effect`; its
+   delivery re-decides instead (`advance!`)."
   [fiber]
   (let [{:keys [ctx inject state epoch]} @fiber]
-    (when-not (= :disposed state)
+    (when-not (contains? #{:disposed :starting} state)
       (let [next-epoch (providers ctx inject)]
         (when (not= next-epoch epoch)
           (reload! fiber next-epoch)))))
@@ -293,6 +341,7 @@
   (let [{:keys [mounted changes]} (:kernel ctx)]
     (loop [round 0]
       (let [names (take-changes! changes)
+            _ (advance-ready! ctx)
             candidates (filterv (fn [fiber]
                                   (let [{:keys [inject state]} @fiber]
                                     (and (not= :disposed state)
@@ -333,9 +382,10 @@
       (f))))
 
 (defn settle!
-  "Run any pending provider change to a fixpoint. Idempotent; the app calls it
-   at the turn boundary and after every cross-thread submission. When it returns
-   and no other thread owns the pass, :changes is empty.
+  "Run any pending provider change to a fixpoint, and advance every `:starting`
+   fiber whose setup handle has settled. Idempotent; the app calls it at the
+   turn boundary and after every cross-thread submission. When it returns and no
+   other thread owns the pass, :changes is empty.
 
    Answers `{:rounds n}` for the fixpoint rounds *this* call ran; a call that
    loses the pass to another thread runs none and answers `{:rounds 0}` — its
@@ -405,7 +455,9 @@
 (defn plugin!
   "Mount SOURCE (a var, a plugin map, or a keyword for the :resolver) as a new
    fiber under CTX with CONFIG. Returns the fiber atom. The plugin body runs
-   only when its inject is satisfied; otherwise the fiber is :pending."
+   only when its inject is satisfied; otherwise the fiber is :pending. A body
+   that hands back an undelivered promise leaves the fiber :starting until the
+   handle settles — see `settle!` and `fiber-info`'s `:setup`."
   ([ctx source]
    (plugin! ctx source nil))
   ([ctx source config]
@@ -581,13 +633,15 @@
 
 (defn fiber-info
   "FIBER's record as a map: identity, lifecycle, declared and live facts, the
-   effect labels and the mount's child ctx. What app code reads — `fibers` is
-   the same for a whole root — so a record field the kernel adds stays the
-   kernel's. `@fiber` remains the record itself, for tests and kernel code."
+   effect labels, the mount's child ctx and its setup handle (`:setup` — an
+   async `apply`'s promise, which a caller may await; nil otherwise). What app
+   code reads — `fibers` is the same for a whole root — so a record field the
+   kernel adds stays the kernel's. `@fiber` remains the record itself, for tests
+   and kernel code."
   [fiber]
   (let [record @fiber]
     (-> (select-keys record [:uid :name :source :config :state :error :inject
-                             :events :provides :waiting-for :ctx])
+                             :events :provides :waiting-for :ctx :setup])
         (assoc :effects (mapv :label (:effects record))))))
 
 (defn fibers

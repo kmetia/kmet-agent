@@ -164,3 +164,23 @@
         (is (= :kmet.app/preset-extension-row (:type (ex-data e))))
         (is (= :ext/x (get-in (ex-data e) [:row :id]))))
       (finally (srce/dispose-subtree! ctx)))))
+
+(deftest ^:slow a-preset-row-with-an-async-setup-is-waited-for
+  ;; A preset is mounted onto a ctx its caller keeps, so it must not report a
+  ;; row as failed while that row is still starting: `mount!` waits for the
+  ;; setup handle the way the boot does.
+  (let [ctx (srce/root {:name :app})
+        setup (promise)
+        table {:bundles {:bundle/async
+                         {:rows [{:id :slow
+                                  :plugin {:name :probe/slow-row
+                                           :apply (fn [_ctx _]
+                                                    (future (Thread/sleep 50)
+                                                            (deliver setup :ready))
+                                                    setup)}}]}}
+               :profiles {}}]
+    (try
+      (let [{:keys [fibers]} (presets/mount! ctx table :bundle/async)]
+        (is (= 1 (count fibers)))
+        (is (= :active (:state @(first fibers))) "the preset waited for the setup"))
+      (finally (srce/dispose-subtree! ctx)))))

@@ -371,7 +371,8 @@ queue and an awaitable.
 ## 4. Fibers and effects
 
 A fiber is one mount of one plugin source. States: **`:pending`** (waiting for
-inject), **`:active`**, **`:failed`** (a throwing `apply` or config), and
+inject), **`:starting`** (its body is running, or the setup it handed back is),
+**`:active`**, **`:failed`** (a throwing `apply`, config or setup), and
 `:disposed` (the record stays for inspection; the uid stays too — nothing
 depends on uid reuse).
 
@@ -450,6 +451,18 @@ are the accessor:
   does not collide with the old instance, or its caller must await before
   restarting it. Nothing enforces that — the rule is the plugin's, and the one
   caller that awaits (`kmet.app.runtime/shutdown!`, §8) ends a lifetime.
+- **An `apply` that hands back a promise is an asynchronous setup.** The body
+  runs with the fiber `:starting`, so it may still provide and register; its
+  names stay invisible (`available?` requires `:active`), and the handle it
+  returned is kept on the record as `:setup` for a caller to await. The pass
+  decides once it settles (`settle!`, which also advances it): a delivered
+  throwable fails the mount, a provider set that changed meanwhile is a reload —
+  the comparison `refresh!` already makes — otherwise `:active`. A `:starting`
+  fiber is never reloaded, because a body cannot be interrupted and unwinding
+  under it would make its own registration throw `:srce/inactive-effect` (a body
+  whose fiber was disposed while it ran has every later registration refused the
+  same way, and its handle is never looked at again). Nothing in the kernel
+  waits: `boot` awaits `:setup` against `startup-timeout-ms`.
 - **A failed fiber is a state, not an exception.** `apply` throws → the fiber is
   marked `:failed` with `:error e` **first**, so an effect or `provide!` from
   inside its own disposers throws `:srce/inactive-effect`; then its partial effects
@@ -651,7 +664,8 @@ a name only identically (a boot-time check), and the vocabulary accessors read
 the declaring namespace's own map — so nothing may dispatch through a
 projection. The kernel's own event names are three —
 `:srce/status` (fiber state transition, `{:fiber f :from s :to s}`, emitted on
-the mounting ctx), `:srce/service` (a provider installed/removed,
+the mounting ctx — every mount passes through `:starting`, so a listener sees
+that pair before `:active`), `:srce/service` (a provider installed/removed,
 `{:name n :value v}`, emitted on the providing ctx), `:srce/failure` (`apply`
 threw, `{:fiber f :error e}`) — Cordis's nine `internal/*` events collapsed to
 the three with a consumer. `kmet.app.events/event-types` is rank 2, so it can never
@@ -860,7 +874,7 @@ grows a keyword or a key, not a new shape.
 | 9 `internal/*` events, `internal/listener` claiming | `events.ts` | 3 have a consumer (§5); the rest are debug/inspection plumbing with none | new names on the existing emit |
 | `parallel` / `serial` | `events.ts` | awaited, so they need the app's awaitable — the kernel has none (§8), and the app's submission queue is a drain, not an awaitable | `kmet.app.events` over `srce/listeners` once something needs them (`bail` and `waterfall` landed there: §5) |
 | Lazy config resolution, `{:schema :transform}` | `config.ts` | `apply` validates its own map; a validator fn composes | `:config` accepting a schema map |
-| Fiber lifecycle beyond 4 states (`:loading` `:unloading`, `inertia`, epoch drop-rule) | `fiber.ts` | one thread makes the race unrepresentable | states on `:state`; the epoch is the provider set |
+| Fiber lifecycle beyond 5 states (`:unloading`, `inertia`, epoch drop-rule) | `fiber.ts` | one thread makes the race unrepresentable | `:starting` landed (§4) — the state, not `:unloading`/`inertia`; the epoch stays the provider set |
 | `fiber.store` snapshot, `fiber.await`, `assert-active!` | `fiber.ts` | sync: there is nothing to await; the per-fiber facts the listing needs are `:provides`/`:inject`/`:waiting-for` on the record (§4), not a store snapshot | derived from `:state` and the record's own keys |
 | awaitable, drain owner, `drain-await` | (kmet2 addition) | a queue and a thread to serialize what the app already serializes | the optimistic pass flag + `settle!` (§3) are the replacement; an awaitable, if ever needed, is the app's |
 | `DisposableList`, `EffectMeta` labels, `utils.ts` traceable | `utils.ts` | a vector and a map cover it | `:label` on `effect` is already accepted |
@@ -918,7 +932,7 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
 
 | Cordis | srce | light |
 |---|---|---|
-| `FiberState` (6 states) | `:pending :active :failed :disposed` | keep (reduced) |
+| `FiberState` (6 states) | `:pending :starting :active :failed :disposed` | keep (reduced) |
 | `fiber.uid` / `.name` / `.config` / `.state` / `.error` | same, plus `:inject` / `:provides` / `:waiting-for` (§4) | keep |
 | `fiber.store` / `.inertia` | `:provides` (§4) / — | deferred (the listing fields are on the record instead) |
 | `fiber.ctx` / `.parent` / `.runtime` | `:ctx` / `:parent` / `:runtime` | keep |
@@ -993,7 +1007,7 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
 
 ## 12. Gates
 
-- 60 contract tests (237 assertions) — one per bullet in §2–§8 that can fail,
+- 68 contract tests (264 assertions) — one per bullet in §2–§8 that can fail,
   one per `keep` row of §11, table-driven where the rows are uniform. The behaviors: realm
   resolution and the boundary, including two **siblings** under one realm
   providing the same name (nearest visible wins, no throw — §3); duplicate
@@ -1005,6 +1019,11 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
   own fiber); effect LIFO within and across effects; a throwing disposer still
   runs the rest; `:srce/inactive-effect`, including a registration from **inside a
   disposer**; `restart!` replaces the uid and is the retry for a failed fiber;
+  an asynchronous `apply` (an undelivered promise holds the fiber `:starting`
+  with its names invisible and the handle on `:setup`, a dependent stays
+  `:pending` until the pass sees it settle, a delivered throwable fails the
+  mount and frees the names, a provider change during setup reloads it on
+  delivery instead of mid-setup, and a disposed fiber ignores its late setup);
   `dispose-plugin!` ends every fiber and drops the runtime; `:failed` on a
   throwing `apply` unwinds the effects it registered and frees the names it
   provided, with dependents `:pending`; `{:in ancestor}` providing into a
@@ -1049,7 +1068,8 @@ The conformance suite is written from §3–§8 and this table's `keep` rows.
 
 | Question | Recommendation |
 |---|---|
-| **Synchronous `apply`** — the one cut that is not additive | yes. A thenable fiber would be ignore-able (Cordis's shape: `Fiber & PromiseLike<Fiber>`), so the cost is not the signature but the `:loading` state and the resume path behind it — a queue and an owner thread the app already has once. Async work is the plugin's own promise |
+| **Asynchronous `apply`** | landed, and additive: a body that hands back an undelivered `IPending` holds the fiber `:starting`, so `plugin!` still returns a fiber and a caller that does not care awaits nothing. A synchronous body never sees the state, and the kernel never waits — `:reload-pending?`, `:unloading` and the epoch drop rule are not needed, because the pass's provider-set comparison is the drop rule |
+| Does `apply` get to be asynchronous? | yes, landed: return an undelivered `IPending`; `:starting` until it settles, then `:active`, `reload!` or `fail!` from the same provider-set comparison the pass makes, and `refresh!` skips `:starting` (a body cannot be interrupted). No `:reload-pending?` flag — the delivery re-decides; the kernel still awaits nothing (`boot` does, against `startup-timeout-ms`) |
 | Who awaits a disposer that declared in-flight work | settled at HEAD: the caller that owns the lifetime (`kmet.app.runtime/shutdown!`), with one private timeout; the kernel reports it as `:undoing` and never waits. A report raised inside a submitted thunk is not visible to `boundary!` — and a restart or a pass reload does not wait either |
 | `get` on a name provided by a non-active fiber | nil, one `get`, no `strict` flag |
 | `(:tools ctx)` through `ILookup` | not ported. `srce/get` is explicit; destructuring and `contains?` stay honest about nil |
