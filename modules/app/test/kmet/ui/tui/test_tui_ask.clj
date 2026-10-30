@@ -111,6 +111,11 @@
                                          :args {:command "echo hi"}
                                          :reason "ask before every call"}))
           "the policy's reason stays under the call")
+      (is (= "Allow bash?\n$ echo hi\n42"
+             (interactive/ask-title ctx {:tool-name "bash"
+                                         :args {:command "echo hi"}
+                                         :reason 42}))
+          "a non-string reason is stringified, not thrown")
       (is (= "Allow read?\nread README.md"
              (interactive/ask-title ctx {:tool-name "read"
                                          :args {:path "README.md"}}))

@@ -278,7 +278,9 @@
    because the transcript block is behind the dialog and may be scrolled out of
    the visible window — a human approves what they can see."
   [ctx request]
-  (let [reason (:reason request)
+  ;; the reason is stringified: a policy's `:reason` is contractually a string,
+  ;; but a broken one must degrade the line, not throw the question away
+  (let [reason (str (:reason request))
         tool (when-let [tools (srce/get ctx :tools)]
                (tool-registry/get-tool tools (:tool-name request)))
         call (when tool (tool-util/title-body (:title tool) (:args request)))]
