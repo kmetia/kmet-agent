@@ -27,6 +27,16 @@ reproduced. They are the writer and reader halves of one defect — non-BMP
 characters cannot cross Jolt's JSON boundary intact in either direction — and
 neither is fixed or tagged yet.
 
+Filing: [`#1466`](https://github.com/jolt-lang/jolt/issues/1466),
+[`#1467`](https://github.com/jolt-lang/jolt/issues/1467),
+[`#1468`](https://github.com/jolt-lang/jolt/issues/1468) and
+[`#1469`](https://github.com/jolt-lang/jolt/issues/1469) were filed 2026-10-31
+against the installed `v0.8.23-232-g94da94fc` dev build, where all four
+reproduced. `#1466` and `#1469` are loading behavior (`*file*` and
+`jolt.loader`), `#1467`/`#1468` are `java.nio.file`/`java.net.URI`
+conformance; none is fixed or tagged yet. Each entry's "Remove with the fix"
+names the kmet code that goes when the ticket's fix is tagged.
+
 ## Live issues
 
 ### [jolt#1031](https://github.com/jolt-lang/jolt/issues/1031) — SCI host-protocol support on Jolt
@@ -143,4 +153,104 @@ narrow fix, if taken before upstream lands, is a `:jolt`-only pre-pass in
 `kmet.libs.json` that recombines surrogate escape pairs while tracking escaped
 backslashes; it duplicates parsing logic at the seam and goes away with the
 reader fix.
+
+### [jolt#1466](https://github.com/jolt-lang/jolt/issues/1466) — `*file*` is root-relative, and the requirer's on a warm artifact cache
+
+Inside a namespace loaded by `require`, `*file*` is not that namespace's source
+path. From source it is the location the loader found — the namespace's name
+below its root (`demo2/one.clj`), where the reference's `Compiler.load` binds
+the absolute path. On a warm AOT cache it is not the namespace's file at all:
+the compiled entrance (`ldr-load-body`'s artifact branch →
+`ldr-with-compiled-ns-vars` → `jolt-with-ns-load-vars`) pushes only
+`*warn-on-reflection*`, `*assert*` and `*unchecked-math*`, not
+`*file*`/`*source-path*`, so the forms run with the *requiring* file's binding.
+A top-level `(def file *file*)` therefore answers the absolute path on
+babashka/the JVM, `demo2/one.clj` on the first Jolt run and the requiring
+script's path on every run after it; purging the cache entry brings the first
+value back. Silent in both cases — and `clojure.test` reads `*file*` for its
+file reporting, so test locations name the requirer.
+
+Impact (kmet): the extension test helpers derived their extension root from
+`*file*`; on a warm cache they pointed at `$HOME` and every fixture path
+missed. Workaround (kmet): both extension test utils locate their root by
+searching the checkout for their own file instead of trusting `*file*`. Remove
+with the fix: `this-file` and `extension-root` in
+`extensions/mcp-adapter/test/kmet/extensions/mcp_adapter/test_util.clj` and
+`extensions/lsp-adapter/test/kmet/extensions/lsp_adapter/test_util.clj` go, and
+`extension-dir` derives from `*file*` again. The `scripts/*.bb` fixtures are
+unaffected either way — bb binds `*file*` as the JVM does. The entry retires
+when a tag binds `*file*` to the source path on both entrances.
+
+### [jolt#1467](https://github.com/jolt-lang/jolt/issues/1467) — `Path#toUri` answers `File#toURI`'s shape
+
+`Path#toUri` produces what `File#toURI` produces: `file:/x/plain.clj` (no
+authority) and `file:/x/ünï%20cödé.clj` (non-ASCII left raw), where the
+reference answers `file:///x/plain.clj` and
+`file:///x/%C3%BCn%C3%AF%20c%C3%B6d%C3%A9.clj` — empty authority and the path
+percent-encoded as UTF-8 bytes, which is what the JVM's `UnixUriUtils.toUri`
+builds. `getPath` and `getRawPath` agree between the hosts, so only the string
+form differs. The 0.8.9 entry "`Path.toUri` … builds the same object [as
+`File.toURI`]" matches this build — the fix landed as stated, and the reference's
+`Path.toUri` is not `File.toURI`'s shape.
+
+Impact (kmet): the lsp-adapter's round-trip test compared `(str (.toUri p))`
+against `path->uri`. Workaround (kmet): that test's oracle is host-conditional
+now (`kmet.extensions.lsp-adapter.lsp-test/path-uri-round-trip`, the
+`host/jolt?` branch — the `host` require exists only for it). Remove with the
+fix: drop the branch, keep the equality assertion, and drop the `host` require
+with it. `path->uri` itself is not a workaround for this and stays: it is
+hand-built because the extension's sci sandbox cannot call Path methods at all.
+The entry retires when a tag matches the reference on both hosts.
+
+### [jolt#1468](https://github.com/jolt-lang/jolt/issues/1468) — `URI#toASCIIString` leaves non-ASCII unencoded
+
+`toASCIIString` is the method whose contract is "the content of this URI as a
+US-ASCII string" and the only correct way to put a URI on a wire; on Jolt it
+answers the same string as `toString` — non-ASCII is never percent-encoded, in
+any component. `(java.net.URI. "file" nil "/x/ünï cödé.clj" nil)` gives
+`file:/x/ünï%20cödé.clj` from both methods, where the reference gives
+`file:/x/%C3%BCn%C3%AF%20c%C3%B6d%C3%A9.clj` from `toASCIIString`; a URI built by
+parsing (`http://exämple.com/päth?q=ü#frä`) behaves the same in host, path, query
+and fragment. The ASCII-illegal set is escaped at construction (`%20`), so the
+URI is not entirely unencoded — the non-ASCII class simply never is. RFC 3986
+permits only ASCII in a URI, so anything persisted or transmitted (an LSP
+`textDocument.uri`, a JSON field, an HTTP request line) carries characters the
+protocol says cannot occur; `toURL` is no way around it (it keeps the raw form
+on the reference too).
+
+Impact (kmet): none yet — the one place kmet builds a file URI
+(`kmet.extensions.lsp-adapter.lsp/path->uri`) percent-encodes by hand for the
+sandbox reason above, and nothing in the tree calls `toASCIIString`. Remove with
+the fix: nothing today — the entry is a heads-up; if a consumer starts
+hand-encoding a URI for this reason before a tag lands, that encoder goes with
+it. The entry retires when a tag encodes.
+
+### [jolt#1469](https://github.com/jolt-lang/jolt/issues/1469) — `unload!` leaves the namespaces it unmapped in `*loaded-libs*`
+
+`unload!` unmaps the namespaces a loader owned (it counts them:
+`:released {:namespaces n}`) but the runtime's loaded mark survives, so `require`
+answers "already loaded" for a namespace `find-ns` answers nil for: a plain
+`require` is a silent no-op, and `(require ns :reload)` re-reads the entry
+namespace only — its dependencies stay marked and never load, so it comes back
+with aliases to namespaces that have no vars (`Unknown class <dep>` on the first
+call, or `No such namespace: <dep>` where the dependency resolves at compile
+time). The loader docstring notes the mark surviving `remove-ns` for the
+*eviction* case and promises `:reload` restores the name; after an unload the
+namespaces are unmapped and their cells unreachable, so that does not hold, and
+the result is the state `host/chez/loader.ss` names as a defect elsewhere —
+"wedged loaded-but-empty for the life of the process and every later require of
+it no-op'd".
+
+Impact (kmet): whenever an extension's sources are also on the host classpath
+(tests, development), unloading it leaves the host's copies marked loaded but
+unmapped, and no later `require` brings them back. Found when the
+shipped-extensions check unloaded every extension in the test process and left
+the extension suites holding unbound namespace vars. Workaround (kmet): that
+check runs in a child host process
+(`kmet.app.extensions.test-session/test-shipped-extensions-load-from-src`, now
+`^:slow`). Remove with the fix: the check goes back to loading and unloading the
+shipped extensions in-process — `shipped-check-probe` and
+`shipped-check-results` go, with the `clojure.edn`/`babashka.process` requires
+they added, and the var loses `^:slow`. The entry retires when a tag clears the
+marks (or ships a documented `forget!`).
 
