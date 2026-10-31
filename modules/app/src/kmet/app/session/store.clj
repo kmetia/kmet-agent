@@ -139,8 +139,13 @@
 
 (defn session-dir-for-cwd
   "Session directory for a cwd under a base sessions dir: BASE/<--cwd-->/
-   (pi: default layout sessions/<--cwd-->/)."
+   (pi: default layout sessions/<--cwd-->/). A blank BASE is refused: the
+   encoded name would be a relative path, created under the process cwd
+   instead of a sessions dir."
   [base-dir cwd]
+  (when (str/blank? (str base-dir))
+    (throw (ex-info "a session directory needs a base sessions dir"
+                    {:type :kmet.app/no-session-dir :cwd (str cwd)})))
   (str (fs/path base-dir (encode-cwd cwd))))
 
 ;; ─── CRUD ───────────────────────────────────────────────────────────────────

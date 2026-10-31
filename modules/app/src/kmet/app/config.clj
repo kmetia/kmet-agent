@@ -291,8 +291,16 @@
 (defn get-model [config]
   (:model config))
 
-(defn get-session-dir [config]
-  (expand-path (:session-dir config)))
+(defn get-session-dir
+  "The base sessions directory: the config's :session-dir, or the default when
+   the key is absent, nil or blank. A blank value is not a path — `(fs/path \"\"
+   NAME)` drops the base and yields a relative NAME, so a run would create its
+   sessions under whatever the process cwd happens to be."
+  [config]
+  (let [dir (:session-dir config)]
+    (expand-path (if (str/blank? (str dir))
+                   (:session-dir default-config)
+                   dir))))
 
 (def ^:private agent-dir-env-var
   "Env var overriding the agent dir (pi: ENV_AGENT_DIR =

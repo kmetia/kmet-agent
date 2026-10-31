@@ -89,6 +89,15 @@
     (t/is (str/starts-with? dir home))
     (t/is (str/ends-with? dir "/.kmet/sessions"))))
 
+(t/deftest test-get-session-dir-falls-back-when-absent-or-blank
+  ;; a blank value is not a path: `(fs/path "" NAME)` yields a relative NAME,
+  ;; so the run would create its sessions under the process cwd
+  (let [default (cfg/get-session-dir cfg/default-config)]
+    (t/is (= default (cfg/get-session-dir (dissoc cfg/default-config :session-dir))))
+    (t/is (= default (cfg/get-session-dir (assoc cfg/default-config :session-dir nil))))
+    (t/is (= default (cfg/get-session-dir (assoc cfg/default-config :session-dir ""))))
+    (t/is (= default (cfg/get-session-dir {})))))
+
 ;; ─── Shell settings (pi: shellPath / shellCommandPrefix) ──────────────────
 
 (t/deftest test-get-shell-path

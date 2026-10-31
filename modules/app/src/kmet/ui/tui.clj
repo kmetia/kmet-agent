@@ -108,9 +108,12 @@
                       {:type :kmet.app/no-world})))
     ;; the app scope: the row's own ctx is a mount site, and every lookup the
     ;; run makes (:tools, :sessions, :skills) walks up from the scope it was
-    ;; given
-    (future (run-tui! (:parent ctx) config on-result))
-    nil))
+    ;; given. The function is resolved here, while the mount is running, so the
+    ;; future starts what the mount saw: a redefinition in force around the
+    ;; mount (`with-redefs` in a test) covers the hand-off, never a later one.
+    (let [run run-tui!]
+      (future (run (:parent ctx) config on-result))
+      nil)))
 
 (def provider
   "The terminal `:ui` provider. Dialogs are answered by the running TUI; there

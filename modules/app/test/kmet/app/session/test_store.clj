@@ -176,6 +176,14 @@
   (t/is (= "--C--Users-dev--" (s/encode-cwd "C:\\Users\\dev")))
   (t/is (= "--a-b--" (s/encode-cwd "a/b"))))
 
+(t/deftest test-session-dir-for-cwd-needs-a-base
+  ;; a blank base makes the encoded name a relative path, so the directory would
+  ;; be created under the process cwd instead of a sessions dir
+  (t/is (= "/base/--home-proj--" (s/session-dir-for-cwd "/base" "/home/proj")))
+  (doseq [base [nil ""]]
+    (t/is (thrown-with-msg? Exception #"base sessions dir"
+                            (s/session-dir-for-cwd base "/home/proj")))))
+
 ;; ─── Regression: corrupted entries ────────────────────────────────────────
 
 (t/deftest test-session-load-with-corrupt-entry

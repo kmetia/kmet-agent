@@ -74,10 +74,16 @@
   ;; disposer. The kernel reads an unrealized IPending return as an asynchronous
   ;; setup, so handing the future back left the row `:starting` and the boot
   ;; failed with "setup did not settle".
-  (let [root (srce/root {:name :app})]
+  (let [root (srce/root {:name :app})
+        started (promise)]
     (try
-      (is (nil? (with-redefs-fn {#'tui/run-tui! (fn [_ _ _] nil)}
+      (is (nil? (with-redefs-fn {#'tui/run-tui! (fn [_ _ _] (deliver started true))}
                   #((:apply tui/plugin) root {:on-result (fn [_] nil) :config {}}))))
+      ;; the mount resolves the function it hands the future, so the stub is the
+      ;; one that runs: a real run over a bare config would place a run in a cwd
+      ;; sessions dir and die on the services this root does not have
+      (is (true? (deref started 2000 ::timeout))
+          "the run was handed off through the function the mount resolved")
       (finally (srce/dispose-subtree! root)))))
 
 (deftest the-invocations-run-flags-reach-kmet1s-run
