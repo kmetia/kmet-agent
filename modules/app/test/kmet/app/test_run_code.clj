@@ -609,6 +609,17 @@
     (t/is (str/includes? (:content r) "cannot load namespace")
           "the sandbox's own boundary error, not SCI's generic one")))
 
+(t/deftest test-run-code-namespace-discovery
+  ;; the sandbox is self-describing: all-ns lists its surface, ns-publics its vars
+  (let [r (run (str "(emit [(contains? (set (map str (all-ns))) \"babashka.fs\")"
+                    "        (contains? (set (map str (all-ns))) \"cljfmt.core\")"
+                    "        (contains? (set (map str (all-ns))) \"kmet.libs.json\")"
+                    "        (contains? (set (map str (all-ns))) \"kmet.app.tools.registry\")"
+                    "        (pos? (count (ns-publics 'babashka.fs)))])"))]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (= "[true true true false true]" (:content r))
+          "the host surface is visible; the app's own namespaces are not")))
+
 (t/deftest test-run-code-context-isolation
   (let [r (run "(def leaked 42) (defn tally [] 1) (emit leaked)")]
     (t/is (not (:is-error r)))

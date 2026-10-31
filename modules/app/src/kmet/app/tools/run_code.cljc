@@ -1145,10 +1145,10 @@
 
 (def ^:private description
   (str "Run a Clojure script to work over the environment and report a digest. Use it when the intermediate output would flood the context — scan or transform many files, run a search→read→verify chain, compute counts, matches or a summary — instead of chaining bash cat/head/rg. Use bash for one small command and read for one file.\n\n"
-       "Inside the script the local primitives are already there and return values, not rendered text: (slurp path), fs/* (babashka.fs), the bare (sh ...), p/*, json (kmet.libs.json), and (cwd), (env k), (now), (sleep ms), (spawn f).\n\n"
+       "Inside the script the local primitives are already there and return values, not rendered text: (slurp path), fs/* (babashka.fs), the bare (sh ...), p/*, json, and (cwd), (env k), (now), (sleep ms), (spawn f).\n\n"
        "Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call \"name\" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe \"name\") returns one tool's declaration.\n\n"
        "Report with (emit value), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (emit-image \"shot.png\") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.\n\n"
-       "Sandbox: Clojure; on babashka a full babashka surface, on the JVM the java.lang/java.io/java.util subset. Require clojure.*/babashka.* namespaces or the bundled libs (rewrite-clj, cljfmt, edamame, parinferish); System/java.io.*/Throwable resolve on babashka (Jolt's SCI exposes no class table). Aliases: fs, str/set/edn/walk, json, p, sh, tools, sandbox. :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB."))
+       "Sandbox: Clojure; on babashka a full babashka surface, on the JVM the java.lang/java.io/java.util subset. Require clojure.*/babashka.* namespaces or the bundled libs (rewrite-clj, cljfmt, edamame, parinferish); System/java.io.*/Throwable resolve on babashka (Jolt's SCI exposes no class table). Aliases: fs, str/set/edn/walk, json, p, sh, tools, sandbox. Discover the surface with (all-ns) and a namespace's vars with (ns-publics 'babashka.fs). :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB."))
 
 (defn title
   "Quiet one-liner body for the run_code tool: `run $ ` and the first
@@ -1176,7 +1176,8 @@
    :description description
    :prompt-snippet "Script the environment (fs/slurp/sh) and emit a compact digest"
    :prompt-guidelines
-   ["Use run_code when a command's output would flood the context: compute inside the script and (emit) only the digest — counts, matches, the lines that matter — instead of chaining bash cat/head/rg; println is discarded (emit the digest, or end on the value you want reported)."
+   ["Use run_code for Clojure — including one-liners — instead of writing bb -e/bb -f scripts through bash, unless the code needs the project classpath or its tests."
+    "Use run_code when a command's output would flood the context: compute inside the script and (emit) only the digest — counts, matches, the lines that matter — instead of chaining bash cat/head/rg; println is discarded (emit the digest, or end on the value you want reported)."
     "Inside a script prefer (slurp path), fs/* and the bare (sh ...) for local work over the bash and read tools — they return values, not rendered text — and call a tool only when its result is too large to read (a web fetch, an MCP call), emitting the filtered part: @(tools/call \"name\" args)."
     "When the answer is an image (a screenshot, a chart, a rendered page), attach it with (emit-image path) rather than describing it."]
    :params {:code {:type :string :description "Clojure program body to run"}
