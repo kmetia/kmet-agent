@@ -99,7 +99,11 @@
             (is (= "discovered" (get-in cfg [:mcp-servers "theirs" :command])))))))))
 
 (deftest agent-dir-defaults
-  (let [orig @#'config/agent-dir-atom]
+  ;; the prior value is restored through the same public pair the test sets
+  ;; it with: the atom is private, and reaching for it through the var would
+  ;; read whichever copy of this namespace is current rather than the one
+  ;; `set-agent-dir!` wrote (a reloaded namespace has its own atom)
+  (let [orig (config/agent-dir)]
     (try
       (config/set-agent-dir! "/tmp/agent-dir-fixture")
       (is (= (str (fs/path "/tmp/agent-dir-fixture" "mcp.edn"))
@@ -108,9 +112,7 @@
         (is (= (str (fs/path "/work" ".kmet" "mcp.edn"))
                (config/project-config-path "/work"))))
       (finally
-        (if (some? orig)
-          (config/set-agent-dir! orig)
-          (reset! @#'config/agent-dir-atom nil))))))
+        (config/set-agent-dir! orig)))))
 
 ;; ─── Template ─────────────────────────────────────────────────────────────
 

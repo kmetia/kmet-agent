@@ -1,8 +1,9 @@
 #!/usr/bin/env bb
 ;; Minimal content-length-framed LSP server for lsp-adapter validation.
-;; Self-contained except for kmet.libs.json (located via *file* — the client
-;; runs it with its cwd set to the workspace root, where repo-relative
-;; classpaths don't resolve, but the script path is absolute).
+;; Self-contained except for kmet.libs.json, whose source roots it adds from
+;; the checkout it lives in (the client runs it with its cwd set to the
+;; workspace root, where repo-relative classpaths do not resolve — the script
+;; path is absolute, and the app's sources live under modules/<module>/src).
 ;;
 ;; Exercises the client: initialize handshake, a server->client
 ;; workspace/configuration probe whose reply writes the marker file passed
@@ -13,9 +14,10 @@
 ;; Run: bb scripts/fake-lsp-server.bb <marker-path>
 (require '[babashka.fs :as fs]
          '[babashka.classpath :as bcp])
-(let [src (str (fs/normalize (fs/path (fs/parent *file*) ".." ".." ".." "src")))]
-  (when (fs/directory? src)
-    (bcp/add-classpath src)))
+(let [root (fs/path (fs/parent *file*) ".." ".." "..")]
+  (doseq [dir (fs/glob root "modules/*/src")]
+    (when (fs/directory? dir)
+      (bcp/add-classpath (str dir)))))
 (require '[kmet.libs.json :as json]
          '[clojure.string :as str])
 

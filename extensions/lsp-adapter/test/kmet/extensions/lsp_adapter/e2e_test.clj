@@ -20,11 +20,8 @@
     (spit (str dir "/sample.txt") "line zero\nline one\n")
     {:dir dir
      :sample (str dir "/sample.txt")
-     ;; the fake needs kmet.libs.json on its classpath; it inherits the
-     ;; parent's, which a checkout run gets from bb.edn/deps.edn
-     :cfg {:servers {"fake" (assoc (tu/fake-entry)
-                                   :env {"BABASHKA_CLASSPATH"
-                                         (System/getProperty "java.class.path")})}}
+     ;; the fake locates the sources it needs from its own checkout
+     :cfg {:servers {"fake" (tu/fake-entry)}}
      :marker (str dir "/config-marker")
      :marker-arg marker}))
 

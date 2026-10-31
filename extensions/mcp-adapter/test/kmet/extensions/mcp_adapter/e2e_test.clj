@@ -14,15 +14,12 @@
             [kmet.extensions.mcp-adapter.metadata :as metadata]
             [kmet.extensions.mcp-adapter.test-util :as tu]))
 
-(defn- classpath []
-  (System/getProperty "java.class.path"))
-
 (defn- stdio-entry [& args]
+  ;; the fixture locates the sources it needs from its own checkout, so the
+  ;; child needs no classpath from this host
   {:command "bb"
    :args (into [(tu/fixture "fake-mcp-server.bb")] args)
-   :lifecycle :lazy
-   ;; the fixture requires kmet.libs.json (data.json)
-   :env {"BABASHKA_CLASSPATH" (classpath)}})
+   :lifecycle :lazy})
 
 (defn- mcp-call [state params]
   ((get-in @state [:tools "mcp" :execute]) params))

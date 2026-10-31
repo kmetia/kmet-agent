@@ -23,10 +23,9 @@
                            on-update (assoc :on-update on-update))))
 
 (defn- fake-config [fake-stdio & [settings]]
+  ;; the fake server locates the sources it needs from its own checkout
   {:settings (or settings {})
-   :mcp-servers {"fake" {:command "bb" :args [fake-stdio]
-                         :env {"BABASHKA_CLASSPATH"
-                               (System/getProperty "java.class.path")}}}})
+   :mcp-servers {"fake" {:command "bb" :args [fake-stdio]}}})
 
 (deftest ^:slow run-code-sandbox-bridge
   (tu/with-agent-dir
@@ -51,12 +50,12 @@
               (is (false? (:is-error r)) (:content r))))
 
           (testing "the sandbox sees the MCP catalog and never the script tool"
-            (let [r (script-exec reg "(emit (let [names (tools/list)] [(boolean (some #{\"fake_echo\"} names)) (boolean (some #{\"script\"} names))]))")]
+            (let [r (script-exec reg "(emit (let [names (mapv :name (tools/list))] [(boolean (some #{\"fake_echo\"} names)) (boolean (some #{\"script\"} names))]))")]
               (is (= "[true false]" (:content r)))))
 
           (testing "tools/describe carries the schema without :execute"
-            (let [r (script-exec reg "(emit (let [d (tools/describe \"fake_echo\")] [(:name d) (:label d) (contains? d :execute) (str/includes? (pr-str (:parameters d)) \"message\")]))")]
-              (is (= "[\"fake_echo\" \"MCP: echo\" false true]" (:content r)))))
+            (let [r (script-exec reg "(emit (let [d (tools/describe \"fake_echo\")] [(:name d) (:description d) (contains? d :execute) (str/includes? (pr-str (:parameters d)) \"message\")]))")]
+              (is (= "[\"fake_echo\" \"Echo the message back\" false true]" (:content r)))))
 
           (testing "tools/call reaches the server"
             (let [r (script-exec reg "(emit @(tools/call \"fake_echo\" {:message \"hi from script\"}))")]
@@ -74,8 +73,8 @@
               (is (str/includes? (:content r) "not active"))))
 
           (testing "the host registry wins a name collision"
-            (let [r (script-exec reg "(emit (:label (tools/describe \"read\")))")]
-              (is (= "Read file" (:content r)))))
+            (let [r (script-exec reg "(emit (:name (tools/describe \"read\")))")]
+              (is (= "read" (:content r)))))
 
           (testing "only emit is reported, not stdout or the return value"
             (let [r (script-exec reg "(println \"captured\") (+ 1 2) (emit :emitted)")]

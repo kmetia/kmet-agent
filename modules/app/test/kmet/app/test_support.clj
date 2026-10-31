@@ -33,6 +33,18 @@
         {:keys [code err]} (run-main-into args out)]
     {:code code :out (str out) :err err}))
 
+(defn run-main-isolated
+  "`run-main` with the entry's ambient composition layers dropped.
+
+   For a test whose subject is the entry's own rows: the agent-dir and project
+   patch.edn this machine has would otherwise mount the developer's extension
+   rows into the test process — an extension load per boot, and on Jolt the
+   native loader evicts the classpath namespaces the rest of the suite links
+   against. A test that exercises the layers stubs `cfg/patch-paths` itself."
+  [args]
+  (with-redefs [cfg/patch-paths (fn [] [])]
+    (run-main args)))
+
 (defn wait-until
   "Poll PRED every 5ms until it is true or TIMEOUT-MS (default 5s) pass, then
    answer whether it became true. For a test waiting on another thread's work:
@@ -87,7 +99,12 @@
    writing where it started and the next run neither deletes that directory nor
    shares one with it. The directory is also bound for F, whose own assertions
    read it through `sessions-dir` — the binding is not how the run learns it,
-   because a mode's threads are not all created under this one."
+   because a mode's threads are not all created under this one.
+
+   The entry's ambient composition layers are dropped (`patch-paths` empty):
+   the run would otherwise mount whatever extension rows the agent dir's or the
+   checkout's own `.kmet/patch.edn` names, which is the developer's machine,
+   not the test — and each of those rows is an extension load per boot."
   [send-message f]
   (let [dir (str (fs/path "target" "test-modes" (str (random-uuid))))
         settings (settings dir)]
@@ -95,6 +112,7 @@
     (binding [*sessions-dir* dir]
       (with-redefs [cfg/load-config (fn [& _] settings)
                     cfg/get-api-key (fn [_] "test-key")
+                    cfg/patch-paths (fn [] [])
                     llm/send-message send-message]
         (f)))))
 

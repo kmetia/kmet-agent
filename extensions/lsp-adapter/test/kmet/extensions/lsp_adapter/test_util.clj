@@ -9,13 +9,33 @@
             [kmet.tui.core :as core]
             [kmet.extensions.lsp-adapter.runtime :as runtime]))
 
+(def ^:private this-file
+  "This file's path below the extension root."
+  "test/kmet/extensions/lsp_adapter/test_util.clj")
+
+(defn- extension-root
+  "The extension root that holds THIS-FILE, found from the file's own
+   location where the host reports a full path (babashka, the JVM — five
+   parents up), else from the checkout: Jolt answers `*file*` relative to the
+   namespace's own source root, so its parents are no way back to the
+   extension. The search covers a run from an extension's own directory (its
+   `bb test`) and one from the repo root (the repo runner)."
+  []
+  (let [candidates (concat (take 8 (iterate fs/parent (fs/absolutize (or *file* this-file))))
+                           [(fs/cwd)]
+                           (when (fs/directory? "extensions") (fs/list-dir "extensions")))]
+    (or (some->> candidates
+                 (filter #(fs/exists? (fs/path % this-file)))
+                 first
+                 fs/absolutize
+                 str)
+        (throw (ex-info (str "cannot locate the extension root for " this-file)
+                        {:type ::no-extension-root})))))
+
 (def extension-dir
   "The extension root, derived from this file's own location
    (<ext>/test/kmet/extensions/lsp_adapter/test_util.clj)."
-  (-> (or *file* "test/kmet/extensions/lsp_adapter/test_util.clj")
-      fs/absolutize
-      fs/parent fs/parent fs/parent fs/parent fs/parent
-      str))
+  (extension-root))
 
 (defn fixture
   "Absolute path to a fixture under scripts/."

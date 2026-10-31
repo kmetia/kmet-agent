@@ -313,10 +313,11 @@
 
 (def ^:private jolt-ns-timeout-ms
   "Per-namespace cap for the Jolt engine. Jolt runs are slower and burstier
-   than babashka's (a loaded device has pushed real namespaces past 20 s), so
-   the cap absorbs the real work while still reporting and moving past a hung
-   namespace."
-  60000)
+   than babashka's — the subprocess suites (mcp-adapter's client and e2e
+   suites spawn a fixture per case) legitimately run past 50 s here, and a
+   loaded device stretches them further — so the cap absorbs the real work
+   while still reporting and moving past a hung namespace."
+  180000)
 
 (defn- run-ns-vars-jolt
   "Run the selected vars of one namespace on jolt. Jolt's clojure.test port

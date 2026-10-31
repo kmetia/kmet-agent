@@ -5,7 +5,9 @@
   (:require [clojure.test :as t :refer [testing]]
             [clojure.string :as str]
             [clojure.java.io :as io]
+            [clojure.edn :as edn]
             [babashka.fs :as fs]
+            [babashka.process :as p]
             [kmet.extension :as ext]
             [kmet.libs.host :as host]
             [kmet.app.events :as events]
@@ -659,42 +661,91 @@
         (t/is (nil? (prompts/get-prompt-template "selfreg-tpl")) "unload removes the template")
         (fs/delete-tree dir)))))
 
-(t/deftest test-shipped-extensions-load-from-src
-  ;; the repo's own extensions restructured to src/-as-artifact-root
-  ;; Every shipped src/ dir loads through the real runtime.
+(def ^:private shipped-extension-srcs
+  "The repo's own extensions, src/-as-artifact-root — every one of them loads
+   through the real runtime (see `test-shipped-extensions-load-from-src`)."
+  ["extensions/clojure/src"
+   "extensions/lsp-adapter/src"
+   "extensions/mcp-adapter/src"
+   "extensions/review/src"
+   "extensions/tree-sitter/src"])
+
+(def ^:private shipped-check-probe
+  "The child process behind `test-shipped-extensions-load-from-src`: load each
+   path through the real runtime over a bare extension host, then print one EDN
+   line per load result and a last line with the tools and skills it left live."
+  "(require '[kmet.app.extensions.core :as extensions]
+             '[kmet.app.registries :as registries]
+             '[kmet.app.registry :as registry]
+             '[kmet.app.skills :as skills]
+             '[kmet.app.tools.registry :as tools-registry]
+             '[kmet.srce.core :as srce])
+(let [handle (registry/atom-registry)
+      ctx (srce/root {:name :shipped-extensions-check})
+      base (extensions/host-binding)]
+  (registry/publish-process-handle! handle)
+  (extensions/bind-services! (fn [] (registries/host-services handle ctx)))
+  (extensions/clear-extensions!)
+  (doseq [path %s]
+    (let [r (extensions/load-extension! path)]
+      (println (pr-str {:path path :error (:error r) :loader-kind (:loader-kind r)}))))
+  (println (pr-str {:tools (into {} (map (fn [n] [n (some? (tools-registry/get-tool handle n))]))
+                                 [\"lsp\" \"mcp\" \"clojure_edit\"])
+                    :skills (into {} (map (fn [n] [n (some? (skills/get-skill n))]))
+                                  [\"mcp\" \"clojure-edit\"])}))
+  (extensions/unload-all-extensions!)
+  (extensions/bind-services! base))")
+
+(defn- shipped-check-results
+  "Load the shipped extensions in a fresh process and return the per-load
+   result maps plus the tools/skills summary.
+
+   Out of process on purpose: Jolt's native loader gives an extension private
+   copies of its namespaces — it evicts any installed version before
+   evaluating and unmaps its own on unload, while the classpath copies the rest
+   of this suite links against keep their cells. Loading them here would take
+   those cells with it, and a `with-redefs` (how every extension test redirects
+   a path) would no longer reach the code under test."
+  []
+  (let [script (str "target/test-shipped-extensions-" (System/nanoTime) ".clj")
+        out (str script ".out")]
+    (spit script (format shipped-check-probe (pr-str shipped-extension-srcs)))
+    (try
+      (let [proc (p/process (if (host/jolt?) ["jolt" script] ["bb" script])
+                            {:in :discard :out out :err :inherit})
+            {:keys [exit]} (p/check proc)]
+        (t/is (zero? exit))
+        (let [lines (str/split-lines (slurp out))
+              [summary & results] (reverse (mapv edn/read-string lines))]
+          (t/is (map? summary))
+          {:summary summary
+           :results (into {} (map (juxt :path identity) results))}))
+      (finally (fs/delete-tree script) (fs/delete-tree out)))))
+
+(t/deftest ^:slow test-shipped-extensions-load-from-src
+  ;; the repo's own extensions restructured to src/-as-artifact-root: every
+  ;; shipped src/ dir loads through the real runtime.
   ;; The shipped manifests declare :loader — lsp/mcp/review/tree-sitter
   ;; [:jolt :sci], clojure [:sci :jolt]: Jolt picks its native loader when
-  ;; :jolt is declared whatever the order, bb the SCI backend.
+  ;; :jolt is declared, whatever the order.
   ;;
-  ;; The clojure extension loads and its tools work on both hosts too: its
+  ;; The clojure extension loads and its tools work on both hosts: its
   ;; rewrite-clj/edamame deps are declared for Jolt (bb's closure drops the
   ;; Maven jars for its bundled ports), and the classpath loader's
   ;; syntax-quote misresolution — which poisoned rewrite-clj's generated fns
   ;; with `<ns>/custom-zipper?` — is fixed by jolt PR #1075.
-  (extensions/clear-extensions!)
-  (let [shipped ["extensions/clojure/src"
-                 "extensions/lsp-adapter/src"
-                 "extensions/mcp-adapter/src"
-                 "extensions/review/src"
-                 "extensions/tree-sitter/src"]]
-    (doseq [path shipped]
-      (let [result (extensions/load-extension! path)]
-        (t/is (nil? (:error result)) (str path " loaded: " (:error result)))
-        (t/is (contains? #{:sci :jolt} (:loader-kind result))
-              (str path " selected a backend (declares :loader)")))))
-  (testing "tools + skills from the shipped extensions are live"
-    (t/is (some? (tools-registry/get-tool (registry/current) "lsp")))
-    (t/is (some? (tools-registry/get-tool (registry/current) "mcp")))
-    (t/is (some? (skills/get-skill "mcp")))
-    (t/is (some? (tools-registry/get-tool (registry/current) "clojure_edit")))
-    (t/is (some? (skills/get-skill "clojure-edit"))))
-  (testing "extension skills disclose from memory"
-    (t/is (str/includes? (skills/expand-skill-command "/skill:mcp") "mcp"))
-    (t/is (str/includes? (skills/expand-skill-command "/skill:clojure-edit")
-                         "clojure_edit")))
-  (extensions/unload-all-extensions!)
-  (skills/clear-skills!)
-  (prompts/clear-prompt-templates!))
+  (let [{:keys [summary results]} (shipped-check-results)]
+    (doseq [path shipped-extension-srcs]
+      (let [{:keys [error loader-kind]} (get results path)]
+        (t/is (nil? error) (str path " loaded: " error))
+        (t/is (contains? #{:sci :jolt} loader-kind)
+              (str path " selected a backend (declares :loader)"))))
+    (testing "tools + skills from the shipped extensions are live"
+      (t/is (true? (get-in summary [:tools "lsp"])))
+      (t/is (true? (get-in summary [:tools "mcp"])))
+      (t/is (true? (get-in summary [:skills "mcp"])))
+      (t/is (true? (get-in summary [:tools "clojure_edit"])))
+      (t/is (true? (get-in summary [:skills "clojure-edit"]))))))
 
 (t/deftest test-manifest-loader-declaration
   ;; the manifest :loader declaration + host selection: :sci on babashka,

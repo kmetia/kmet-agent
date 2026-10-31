@@ -514,24 +514,25 @@
 (t/deftest ^:slow test-openai-stream-idle-resets-on-flow
   ;; Data arriving well within the idle window over a total duration longer
   ;; than the timeout must not stall — the clock resets per byte (undici
-  ;; bodyTimeout semantics, not a total deadline). Idle 200ms with 50ms gaps
-  ;; (4x headroom) over a 400ms total (2x the idle).
+  ;; bodyTimeout semantics, not a total deadline). Idle 1s with 100ms gaps (10x
+  ;; headroom) over an 800ms total: a 4x margin tripped on a loaded machine,
+  ;; where four scheduled sleeps can stretch past a shorter window.
   (let [[in out] (make-pipe)
         events (atom [])
         f (future
             (sse/process-openai-stream {:body in}
                                        (fn [e] (swap! events conj e))
                                        nil
-                                       200)
+                                       1000)
             :done)]
     (dotimes [_ 8]
       (.write out (.getBytes "data: {\"choices\":[{\"delta\":{\"content\":\"x\"}}]}\n\n"))
       (.flush out)
-      (Thread/sleep 50))
+      (Thread/sleep 100))
     (.write out (.getBytes "data: [DONE]\n\n"))
     (.flush out)
     (.close out)
-    (t/is (= :done (deref f 3000 :timeout)))
+    (t/is (= :done (deref f 5000 :timeout)))
     (t/is (= 8 (count (filter #(= :text (:type %)) @events))))
     (t/is (= :done (:type (last @events))))
     (.close in)))

@@ -6,6 +6,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [kmet.libs.host :as host]
             [kmet.libs.jsonrpc :as jrpc]
             [kmet.extensions.lsp-adapter.lsp :as lsp]
             [kmet.extensions.lsp-adapter.test-util :as tu]))
@@ -20,7 +21,13 @@
   (let [paths (map #(str (fs/absolutize %)) hostile-samples)]
     (testing "path->uri matches java.nio's Path#toUri on every sample"
       (doseq [p paths]
-        (is (= (str (.toUri (fs/path p))) (lsp/path->uri p)) p)))
+        (if (host/jolt?)
+          ;; Jolt's Path#toUri renders `file:/x` and leaves non-ASCII
+          ;; literal; path->uri answers the JDK/RFC 8089 form (`file:///x`,
+          ;; percent-encoded) the round-trip and encoding cases below pin, so
+          ;; the host renderer is no oracle here
+          (is (str/starts-with? (lsp/path->uri p) "file:///") p)
+          (is (= (str (.toUri (fs/path p))) (lsp/path->uri p)) p))))
     (testing "uri->path inverts path->uri"
       (doseq [p paths]
         (is (= p (lsp/uri->path (lsp/path->uri p))) p)))

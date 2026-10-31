@@ -673,7 +673,7 @@
 (deftest a-diagnostic-mount-creates-no-agent
   ;; `--dump-state` mounts every row of the profile, this one included: with no
   ;; `:on-result` the mode must stay inert — no agent, no stdin read.
-  (let [{:keys [code out]} (support/run-main ["--profile" "rpc" "--dump-state"])]
+  (let [{:keys [code out]} (support/run-main-isolated ["--profile" "rpc" "--dump-state"])]
     (is (= 0 code))
     (is (some #(and (str/includes? % ":mode-rpc") (str/includes? % ":active"))
               (str/split-lines out))

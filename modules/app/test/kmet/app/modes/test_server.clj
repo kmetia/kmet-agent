@@ -461,7 +461,7 @@
   ;; `--dump-state` mounts every row of the profile, this one included: a
   ;; diagnostic mount hands the mode no `:on-result`, so it stays inert and the
   ;; dump proves the row composes without opening a socket.
-  (let [{:keys [code out]} (support/run-main ["--profile" "server" "--dump-state"])]
+  (let [{:keys [code out]} (support/run-main-isolated ["--profile" "server" "--dump-state"])]
     (is (= 0 code))
     (is (some #(and (str/includes? % ":mode-server") (str/includes? % ":active"))
               (str/split-lines out))

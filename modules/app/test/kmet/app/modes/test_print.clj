@@ -42,7 +42,7 @@
   ;; `--dump-state` mounts every row of the profile, this one included — a
   ;; diagnostic mount hands the mode no `:on-result`, so it stays inert and the
   ;; dump proves the row composes without printing anything or blocking.
-  (let [{:keys [code out]} (support/run-main ["--profile" "print" "--dump-state"])]
+  (let [{:keys [code out]} (support/run-main-isolated ["--profile" "print" "--dump-state"])]
     (is (= 0 code))
     (is (some #(and (str/includes? % ":mode-print") (str/includes? % ":active"))
               (str/split-lines out))
