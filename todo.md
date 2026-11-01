@@ -204,7 +204,7 @@ Files: `modules/ai/src/kmet/ai/api/openai_responses.clj`.
 Done when: the explicit-mode model sends `prompt_cache_options` and no
 `prompt_cache_retention`.
 
-#### P5 — one tool ranker, and a deferred exposure for tool sources
+#### P5 — pi's exposure semantics, one ranker, and a deferred source
 
 Independent of P0–P4 and, unlike them, not a wire change: it touches the tool
 registry. It replaces an earlier "defer MCP tool schemas" idea that turned out
@@ -215,9 +215,17 @@ N servers already cost one schema and `mcp search` already exists. What is
 missing is that the ranker only serves MCP, and that no source's tools can ever
 be declared.
 
+Reference: pi's `ToolExposure` (five values,
+`packages/coding-agent/src/core/extensions/types.ts:536`) and its built-in
+`tool_search` (`packages/coding-agent/src/extensions/tool-search/tool.ts`).
+kmet adopts pi's semantics and pi's names, and adds one value (`:sandbox`) for
+the contributed-source behaviour it already has.
+
 Files: `modules/app/src/kmet/app/tools/registry.clj`,
 `modules/app/src/kmet/app/loop/state.clj`,
+`modules/app/src/kmet/app/tools/run_code.cljc` (the callable surface),
 a new `modules/app/src/kmet/app/tools/search.clj`,
+`modules/app/src/kmet/app/session/context.clj` (the deferred-source listing),
 `extensions/mcp-adapter/src/kmet/extensions/mcp_adapter/search.clj`,
 `modules/app/src/kmet/extension.clj`.
 
@@ -227,43 +235,91 @@ a new `modules/app/src/kmet/app/tools/search.clj`,
    `:contributed`, so contributed tools are sandbox-only and no extension has
    ever contributed one. Give the registration an option map instead of being
    implicitly sandbox-only:
-   `{:exposure :sandbox}` (today's behaviour) | `{:exposure :deferred}`
-   (searchable, promotable). One key on a function with no in-repo consumer, so
-   the ABI rule costs nothing here.
-2. **Two exposure values on the tool record.** `:exposure :direct` (default,
-   absent = direct so every `make-tool` call and extension is unchanged) or
-   `:deferred`. Not pi's five-way taxonomy: `:hidden` is what `:enabled-tools`
-   exclusion already is, `:codemode` has no referent (kmet's script surface *is*
-   the declared set, `run_code.cljc:100-101`), and `:model-only` has no
-   referent either.
-3. **One derivation, both consumers.**
-   `advertised = (selection ∩ direct) ∪ (loaded ∩ selection)`, where `selection`
-   is the existing `:enabled-tools` / `:default-tools` resolution and `loaded` is
-   a per-session ordered set of promoted names recorded as a session entry
-   (invisible to the wire), so resume, `/tree`, fork and replay all see the same
-   advertised set. `loaded ∩ selection` means disabling a loaded tool hides it
-   without clearing the load. The wire list and the `run_code` surface must keep
-   resolving through one function — that is the invariant `select-tools`
-   already states.
+   `{:exposure :sandbox}` (today's behaviour: callable, never declared;
+   searchable once `tool_search` is active) | `{:exposure :deferred}` (callable
+   and searchable, so the source's tools join the model-facing table and
+   `:enabled-tools` / `:default-tools` resolve over them like any registered
+   tool). One key on a function with no in-repo consumer, so the ABI rule costs
+   nothing here.
+2. **Four exposure values on the tool record, with pi's meanings.** `:exposure`
+   on a tool record is one of:
+   - `:direct` (default, absent = direct, so every `make-tool` call and
+     extension is unchanged) — declared and callable;
+   - `:deferred` — callable, not declared, searchable; a `tool_search` match
+     declares it on the next request;
+   - `:model-only` — declared, never callable from `run_code` (pi's
+     `model-only`; pi's own `tool_search` is one, `tool.ts:320`, because kmet's
+     `run_code` can otherwise call any declared tool);
+   - `:sandbox` — callable, not declared (today's contributed sources; pi's
+     `codemode` exposure). `:sandbox` tools are searchable when `tool_search`
+     is active, as pi's `codemode` ones are (`isSearchable`,
+     `tool.ts:280-282`), but they do not by themselves cause `tool_search` to
+     be declared.
+
+   `:hidden` stays out: kmet can unregister a tool and exclude it with
+   `:enabled-tools`, and pi needs `hidden` only because it cannot unregister
+   (`docs/extensions.md` § Tool Exposure).
+3. **Callable and declared are two derivations, not one.** pi's `ToolLoadout`
+   carries `declared` and `callable` separately (`types.ts:571-583`), and a
+   `codemode` script reaches tools that were never declared
+   (`docs/mcp.md:228`). kmet's current invariant — the wire list and the
+   `run_code` surface resolve through one function — is exactly what would make
+   a deferred tool uncallable until loaded. Split it:
+   - `callable = (selection − model-only) ∪ contributed :sandbox sources` —
+     the `run_code` surface, passed through `*enabled-tools-fn*`
+     (`loop.clj:1113`);
+   - `declared = (selection ∩ (direct ∪ model-only)) ∪ (loaded ∩ selection)` —
+     the wire list, from `active-tools-for` (`state.clj:467`).
+
+   `selection` is the existing `:enabled-tools` / `:default-tools` resolution;
+   `loaded` is a per-session ordered set of promoted names recorded as a
+   session entry (invisible to the wire), so resume, `/tree`, fork and replay
+   all see the same declared set. `loaded ⊆ selection`: disabling a loaded tool
+   hides it without clearing the load, and re-enabling restores it.
 4. **Move the ranker into the app.** `mcp_adapter/search.clj` is already a
    general ranker (weighted `{:name 12 :original-name 10 :server 8
    :description 5 :keywords 5}`, regex mode, paging) that happens to read one
-   metadata cache. Add `kmet.app.tools.search`: documents built from any tool
-   map (`:name`, `:description`, `:parameters` property names and
-   descriptions) plus an optional extra-text map; rank, page, render. The MCP
-   adapter keeps the cache, `:search-keywords`, server names and its output
-   shape, and calls the shared ranker.
-5. **One app-level `tool_search`, `:direct`.** Ranks across direct + deferred
-   tools of every source, returns matches, and promotes a `:deferred` match
-   into `loaded` so the next request declares it. Cap the result count (pi: 8);
-   loading everything defeats the purpose. Declare it only when at least one
-   deferred tool is registered — a loader that can never help is pure cost.
+   metadata cache. Add `kmet.app.tools.search`: documents built the way pi
+   builds them (`tool.ts:20-40`, `:119-129`: name, description, `:parameters`
+   property names and descriptions, namespace text) from any tool map plus an
+   optional extra-text map; rank, page, render. The MCP adapter keeps the
+   cache, `:search-keywords`, server names and its output shape, and calls the
+   shared ranker. Deliberate deviation: pi scores with BM25
+   (`tool.ts:288-302`), kmet keeps its weighted scorer so `mcp search`'s output
+   and arguments do not change; the ranker's *contract* (candidates, limit,
+   document fields) is pi's.
+5. **One `tool_search`, shaped like pi's.** `{query, limit?}` — one call that
+   ranks the not-declared searchable surface (`:deferred` tools, plus `:sandbox`
+   ones when `tool_search` is declared; pi's candidates are
+   `isSearchable(exposure) && !active`, `tool.ts:288-302`), loads **every**
+   returned match (default 8, `DEFAULT_TOOL_SEARCH_LIMIT`), and replies in pi's
+   shape: `Loaded N tools. They are available from your next call:` then
+   `- name: first line`, with the loaded names in the result details
+   (`tool.ts:328-334`). No `query`/`select` split and no summaries-only mode.
+   The tool's own description is static (`tool.ts:305-308`), so registering a
+   source never rewrites it; it carries pi's snippet ("Search for tools that
+   are not loaded yet and load the matches"), is registered `:model-only` (pi:
+   `exposure: "model-only"`, `tool.ts:320`), and is declared only when at least
+   one `:deferred` tool exists — the rule pi's MCP extension uses
+   (`docs/mcp.md:206`), which one `:sandbox` source alone cannot meet.
 6. **Keep the MCP proxy.** Promotion *adds* a declared schema; `mcp` still needs
    `describe`/`call`/`list`/resources for everything never promoted, and
    `mcp search` stays useful for inspecting without loading. `mcp search` and
    `mcp describe` read the metadata cache only and never spawn a server;
    invocation connects at call time, so a promoted tool is safe to declare
    before its server has ever launched.
+7. **Let the model see what is deferred.** pi lists MCP servers in an
+   `mcp_servers` system-prompt section — exposure and one line per source — and
+   when it changes it *appends the new section as a message* instead of
+   rewriting the declarations (`docs/mcp.md:204-210`). Without a listing the
+   model must search blind for a capability it cannot name. kmet: append a
+   `:custom-message` entry (`session/context.clj:140-152`, written by
+   `append-custom-message-entry!`, `store.clj:456`, and projected as a
+   user-role message) naming each deferred source, its one-line description,
+   and that its tools are callable from `run_code` and declared after
+   `tool_search`. Write it when the set of sources or their descriptions
+   changes, never on a promotion. Never rebuild the leading system message for
+   a source connecting; that is a full prefix miss.
 
 Deferred to P6: pi's message-anchored tool changes (`tool_addition` /
 `tool_removal` + the placeholder). Until then a promotion changes the tools
@@ -271,9 +327,13 @@ array and costs one full prefix miss on that turn — cheaper than carrying ever
 schema in every prompt, which is the alternative it replaces.
 
 Done when: a source registered with `:exposure :deferred` contributes nothing
-to the wire until `tool_search` promotes it; a direct tool and every existing
-extension are byte-identical in the request; `mcp search` and `tool_search` rank
-through the same function; a promotion survives resume and a fork.
+to the wire until `tool_search` promotes it but is callable from `run_code`
+throughout; a `:model-only` tool is declared and not callable from `run_code`;
+a direct tool and every existing extension are byte-identical in the request;
+`mcp search` and `tool_search` rank through the same function; `tool_search`
+loads every match it returns and replies with pi's text; a deferred source is
+named in an appended `:custom-message` and the leading system prompt is
+unchanged; a promotion survives resume and a fork.
 
 #### P6 — mid-conversation tool changes without a full re-prefill
 
@@ -285,51 +345,81 @@ Two reasons, one about the cache and one about fidelity:
   `tools → system → messages`), so *any* change to the declared set invalidates
   the **whole** prompt, not just the tail.
 - **Fidelity.** kmet computes the tool list per request from the live registry
-  and the live selection (`state/active-tools`, `state.clj:472-489`) and records
+  and the live selection (`state/active-tools`, `state.clj:481-491`) and records
   neither, so a resumed session can advertise a different set than the run it
   resumes — silently. pi records the change in the transcript, so `/tree`,
   resume and fork replay what was actually sent.
 
 Files: `session/schema.clj`, `session/context.clj`,
 `ai/api/anthropic_messages.clj`, `ai/api/openai_responses.clj`,
-`ai/model_gen.clj` + `ai/edn_writer.clj`, `loop/state.clj`, `loop/driver.clj`.
+`ai/api/openai_completions.clj`, `ai/model_gen.clj` + `ai/edn_writer.clj`,
+`loop/state.clj`, `loop/driver.clj`.
 
-1. **Record the advertised set as session state.** A `:tool-change` role
-   (`{:role :tool-change :added [names] :removed [names]}`), appended by the one
-   place that changes the set (`set-active-tools!`, `apply-default-tools!`, a P5
-   promotion, an extension mount/unmount), projecting to nothing
-   (`context-messages`' default `[]`) and skipped by the chat replay exactly
-   like the `:turn-start` marker. The *current* advertised set is then a fold
-   over the branch, the same shape as `derive-context-settings`
-   (`session/context.clj:9-23`).
-2. **wire — anthropic.** Declare the tools once, on the first request; express
-   later deltas as `tool_addition` / `tool_removal` **content blocks** (pi
-   `anthropic-messages.ts:1354-1393`) under the `inline-tools-2026-09-15` beta
-   (pi `:1149`), and put the never-visible placeholder in the tools array from
-   the first request (pi `:214`, `:1262`): *"Anthropic adds hidden prompt
-   scaffolding for mid-conversation tool changes; declaring this placeholder
-   from the first request keeps that scaffolding in the cached prefix …
-   measured: full miss without it."*
-3. **wire — openai-responses.** The same job with message-anchored
-   `additional_tools` items where supported, else native `tool_search`
-   (additions only), else declare the whole list — pi's ladder in
-   `getResponsesToolSupport` (`openai-responses-shared.ts:169-173`):
-   `"changes" | "additions" | "none"`, with `defer_loading: true` on
-   search-delivered tools.
-4. **compat.** Read the keys instead of hardcoding, and add them where kmet has
-   none today: `:supports-mid-convo-system-messages` and
-   `:supports-mid-convo-tool-changes` enter `model_gen` + `edn_writer` the way
-   `:supports-tool-search` / `:supports-additional-tools` already do. kmet's
-   catalog carries neither of the mid-convo keys at all.
-5. **The floor, stated.** A provider supporting none of the modes re-declares
+1. **Record the advertised set as session state, declarations included.** A
+   `:tool-change` role `{:role :tool-change :added [declared] :removed [names]}`,
+   where a `declared` item is the wire declaration
+   `{:name :description :parameters}` — pi's `SystemMessage.toolsAdded` is
+   `Tool[]`, complete definitions (`packages/ai/src/types.ts:572-575`), and
+   `toolsRemoved` is references. The runtime map (`:execute`, `:streams?`, …)
+   stays in the registry. Appended by the one place that changes the set
+   (`set-active-tools!`, `apply-default-tools!`, a P5 promotion, an extension
+   mount/unmount), projecting to nothing (`context-messages`' default `[]`) and
+   skipped by the chat replay exactly like the `:turn-start` marker. The
+   *current* advertised set is a fold over the branch by name (pi:
+   `getDeclaredTools`, `utils/transcript.ts:170-177`), so a re-added name
+   replaces its earlier definition; the registry can no longer change what a
+   resumed session says it was sent.
+2. **wire — anthropic.** Declare the tools once, on the first request, when the
+   model has both mid-conversation capabilities **and** at least one initial
+   tool (`supportsMidConvoSystemMessages && supportsMidConvoToolChanges &&
+   initialTools.length > 0`, `anthropic-messages.ts:1194-1196`; with no initial
+   tool the current list is sent top-level). Under those conditions put the
+   never-visible placeholder after the last initial tool, which carries the
+   cache breakpoint (`:1259-1265`, definition at `:215-218`), and send the
+   `inline-tools-2026-09-15` beta (`:205`, pushed at `:1149`). Later deltas are
+   `tool_addition` / `tool_removal` **content blocks** carrying the definition
+   by value (`:1354-1393`).
+3. **wire — openai-responses.** pi's ladder in `getResponsesToolSupport`
+   (`openai-responses-shared.ts:167-174`): `"changes" | "additions" | "none"`.
+   `"changes"` (`supportsMidConvoSystemMessages && supportsAdditionalTools`)
+   sends `additional_tools` items and, because a removal cannot be native,
+   announces removals as text and restates the still-unavailable tools before
+   later additions (`renderIncrementalToolsNotice`, `:182-190`). `"additions"`
+   (`supportsToolSearch`) synthesizes a `tool_search_call` +
+   `tool_search_output` pair with `defer_loading: true` (`:257-277`, `:456`,
+   `:469`). `"none"` sends the current list top-level.
+4. **wire — openai-completions (Kimi).** pi's third row: with
+   `supportsMidConvoSystemMessages && supportsMidConvoToolAdditions`, additions
+   ride as a `system` message carrying `tools` (`openai-completions.ts:797-801`,
+   `:1236-1245`); otherwise the current list. kmet's generated catalog already
+   carries `:deferred-tools-mode :kimi` on five rows
+   (`fireworks.edn:425,451,477`, `moonshotai*.edn`) with no consumer — use that
+   key for the mode rather than adding a second spelling.
+5. **compat.** Read the keys instead of hardcoding, and add them where kmet has
+   none today: `:supports-mid-convo-system-messages`,
+   `:supports-mid-convo-tool-changes` (anthropic) and
+   `:supports-mid-convo-tool-additions` (chat completions) enter `model_gen` +
+   `edn_writer` the way `:supports-tool-search` / `:supports-additional-tools`
+   already do (`edn_writer.clj:32`). kmet's catalog carries none of the three
+   mid-convo keys at all.
+6. **The floor, stated.** A provider supporting none of the modes re-declares
    the array and pays the full miss — today's behaviour everywhere, so it is a
    fallback rather than a regression, and the record from step 1 still fixes
    the fidelity half.
+7. **Not adopted: `prepareLoadout`.** pi can also rewrite a declared tool's
+   description and hide declarations of *active* tools while keeping them
+   callable (`ToolLoadoutChanges`, `types.ts:585-598`; `prepareLoadout`,
+   `:658`). That is where pi's core/deferred *presentation* lives. kmet has no
+   such hook and this plan does not add one: `:deferred` is the
+   declaration-level mechanism, and `system_prompt.clj:168` remains the
+   presentation. A samizdat-style summary block would need this hook first.
 
 Done when: a tools toggle or a promotion sends the delta instead of the array,
 the request is byte-identical to the previous one up to the delta point, a
-resumed or forked session advertises the recorded set rather than the current
-registry, and an unsupported provider degrades to today's full re-declaration.
+resumed or forked session replays the recorded declarations rather than the
+current registry, the Kimi wire anchors additions as a `system` message, an
+anthropic request with no initial tool falls back to the top-level list, and an
+unsupported provider degrades to today's full re-declaration.
 
 ### Test plan
 
@@ -351,11 +441,20 @@ Pure builders, no network, no `^:slow`:
   from the same messages are `pr-str`-equal, so a marker cannot leak
   per-round churn.
 - P5, registry: a source registered with `:exposure :deferred` contributes
-  nothing to `active-tools`; a `:sandbox` source keeps today's behaviour; a
-  promotion adds the tool for the next request; `:enabled-tools` disabling a
-  loaded tool hides it without clearing the load, and re-enabling restores it
-  with no second search; a `:direct` tool and every existing extension render
-  byte-identical to today.
+  nothing to `active-tools` but its tools stay callable from `run_code`; a
+  `:sandbox` source keeps today's behaviour; `:model-only` is declared and not
+  callable from `run_code`; a promotion adds the tool for the next request;
+  `:enabled-tools` disabling a loaded tool hides it without clearing the load,
+  and re-enabling restores it with no second search; a `:direct` tool and every
+  existing extension render byte-identical to today.
+- P5, tool_search: loads every match it returns, caps at 8 by default, replies
+  in pi's `Loaded N tools. … - name: first line` shape with `details.loaded`,
+  never ranks an already-declared tool, is declared only when a `:deferred`
+  tool exists, and its own description is byte-identical before and after a
+  source registers.
+- P5, listing: registering, changing or unregistering a deferred source appends
+  one `:custom-message` entry naming the source and never rewrites the leading
+  system prompt; a promotion appends none.
 - P5, ranker: one function serves Tool maps and the MCP metadata cache — a
   name match outranks a description match at the current weights, regex mode
   and paging behave, a tool with no `:description` does not throw, and
@@ -365,13 +464,20 @@ Pure builders, no network, no `^:slow`:
   set; a fork made before it does not.
 - P6, delta: two requests that differ only by a tool change send an unchanged
   tools array — the delta rides as `tool_addition` / `tool_removal` blocks on
-  anthropic (with `inline-tools-2026-09-15` in `anthropic-beta`) and as an
-  `additional_tools` item on responses; the placeholder is present from the
-  first request when the wire supports native changes and absent otherwise.
+  anthropic (with `inline-tools-2026-09-15` in `anthropic-beta`), as an
+  `additional_tools` item plus the incremental notice on responses, and as a
+  `system` message carrying `tools` on Kimi completions; the placeholder is
+  present from the first request when the wire supports native changes **and**
+  the initial tool list is non-empty, and absent otherwise.
+- P6, responses modes: `"changes"` restates the still-unavailable tools after
+  an addition and announces removals as text; `"additions"` emits a
+  `tool_search_call` + `tool_search_output` pair with `defer_loading: true`;
+  `"none"` sends the current list top-level.
 - P6, fidelity: `:tool-change` entries project to no wire message and no chat
-  row; folding the branch yields the advertised set; resume replays it and a
-  fork taken before a change keeps the older set; an unsupported provider
-  re-declares the array, byte-identical to today.
+  row; folding the branch yields the advertised set, definitions included; a
+  registry schema change after the entry does not alter the replayed request;
+  resume replays it and a fork taken before a change keeps the older set; an
+  unsupported provider re-declares the array, byte-identical to today.
 
 Run: `bb test-changed`, `bb lint-changed`, `bb format-check-changed`.
 
@@ -412,6 +518,42 @@ stays the override that compaction already uses for `:none`.
 answers `:send-session-affinity-headers` / `:session-affinity-format`, and the
 wire already makes the `request-headers` call, so the headers cost nothing
 extra. Default OpenRouter-only, as pi's `getAnthropicCompat:230` has it.
+
+**D4 — exposure follows pi, including `:model-only` (decided: correcting the
+earlier two-value claim).** The tool record carries
+`:direct | :deferred | :model-only | :sandbox` with pi's meanings
+(`ToolExposure`, `types.ts:536`); `:hidden` is unregistration/exclusion in
+kmet. `:model-only` is not academic: kmet's `run_code` can call any declared
+tool, and pi registers `tool_search` as `exposure: "model-only"`
+(`tool.ts:320`) — as `:direct` a script could call it and change the wire
+mid-script. `:sandbox` is pi's `codemode`: callable, undeclared, searchable
+once `tool_search` is active.
+
+**D5 — `tool_search` is pi's, not samizdat's (decided).** One `{query, limit?}`
+call that ranks **and** loads every match (default 8), replies `Loaded N
+tools. …` with one line per tool and `details.loaded`, and has a static
+description (`tool.ts:305-334`). No `query`/`select` split and no
+summaries-only mode. Candidates are the not-declared searchable tools
+(`tool.ts:288-302`); the tool is declared only when a `:deferred` tool exists,
+matching the MCP extension's activation rule (`docs/mcp.md:206`), not merely
+a `:sandbox` source.
+
+**D6 — declarations are recorded by value (decided).** `:tool-change :added`
+carries `{:name :description :parameters}`; `:removed` carries names. pi records
+`Tool[]` and replays definitions, so a schema change between sessions cannot
+silently alter what a resumed request sends (`types.ts:572-575`,
+`getDeclaredTools`). The runtime `:execute` fn and friends never enter the
+session entry.
+
+**D7 — the deferred-source listing is an appended entry (decided).** kmet has no
+mid-conversation system-message role, so the listing is a `:custom-message`
+entry projected as a user-role message (`session/context.clj:140-152`), not a
+system-prompt rebuild. It names a source and one line, not its tools.
+
+**D8 — the Kimi row is in scope (decided).** P6 covers three wires, not two:
+anthropic, responses and `openai-completions`. `:deferred-tools-mode :kimi` is
+already in the generated data; the missing compat key is
+`:supports-mid-convo-tool-additions`.
 
 ### Verification beyond tests
 
