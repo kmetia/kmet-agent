@@ -54,14 +54,20 @@
    itself requires one."
   [component]
   (when-let [a (component-cache-atom component)]
-    (or (::watch-key (meta a))
-        (let [k (keyword (gensym "track!"))]
-          ;; alter-meta! is atomic, and the fn preserves a key another thread
-          ;; already installed — both allocators converge on the first key
-          ;; (an unconditional assoc would let a later writer overwrite it
-          ;; after an earlier reader had already returned it)
-          (alter-meta! a (fn [m] (if (::watch-key m) m (assoc m ::watch-key k))))
-          (::watch-key (meta a))))))
+    (if-some [k (::watch-key (meta a))]
+      k
+      ;; The lock, not alter-meta!'s rmw alone, is what makes allocators
+      ;; converge: alter-meta! keeps a key another thread installed, but the
+      ;; read that follows it is not ordered after that thread's write on
+      ;; every host (Jolt's meta field is not volatile), so two threads could
+      ;; each return their own freshly minted key — one of them watching under
+      ;; a key nobody else can unwatch. Allocation runs once per component; the
+      ;; monitor costs nothing on the render path.
+      (locking a
+        (or (::watch-key (meta a))
+            (let [k (keyword (gensym "track!"))]
+              (alter-meta! a assoc ::watch-key k)
+              k))))))
 
 (defn- existing-tracker-key
   "The key already allocated for COMPONENT's cache atom, or nil. Never
