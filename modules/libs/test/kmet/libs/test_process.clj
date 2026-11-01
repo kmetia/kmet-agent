@@ -9,10 +9,11 @@
             [clojure.java.io :as io]
             [clojure.test :as t]
             [kmet.libs.concurrent :as concurrent]
-            [kmet.libs.process :as process]))
+            [kmet.libs.process :as process]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- temp-dir []
-  (let [dir (str (fs/absolutize (str "target/test-process-" (System/nanoTime))))]
+  (let [dir (str (fs/absolutize (test-tmp/temp-dir! "test-process-")))]
     (fs/create-dirs dir)
     dir))
 

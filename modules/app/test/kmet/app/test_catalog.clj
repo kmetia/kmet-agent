@@ -4,7 +4,8 @@
   (:require [babashka.fs :as fs]
             [clojure.test :refer [deftest is testing]]
             [kmet.app.catalog :as catalog]
-            [kmet.app.packages :as packages]))
+            [kmet.app.packages :as packages]
+            [kmet.test-tmp :as test-tmp]))
 
 (def not-a-plugin
   "A var a row can name that is not a plugin map."
@@ -36,7 +37,7 @@
   "Run F with the installed set replaced by one single-file extension, so
    resolution never reads the developer's real extensions."
   [f]
-  (let [dir "target/test-catalog-ext"
+  (let [dir (test-tmp/temp-dir! "test-catalog-ext-")
         path (str dir "/probe_ext.clj")]
     (fs/delete-tree dir)
     (fs/create-dirs dir)

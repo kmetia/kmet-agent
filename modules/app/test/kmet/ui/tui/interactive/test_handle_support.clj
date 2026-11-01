@@ -26,7 +26,8 @@
             [kmet.ui.tui.footer-data-provider :as fdp]
             [kmet.ui.tui.interactive :as inter]
             [kmet.ui.tui.pending-messages :as pending-messages]
-            [kmet.ui.tui.status-indicator :as status-indicator]))
+            [kmet.ui.tui.status-indicator :as status-indicator]
+            [kmet.test-tmp :as test-tmp]))
 
 (def ^:private booted
   "The composition the `with-boot` fixture installed; nil outside it."
@@ -38,7 +39,7 @@
    session directory, so a test that boots twice does not have the first
    boot's sessions deleted with the second's."
   []
-  (let [dir (str "target/test-handle-" (System/nanoTime))]
+  (let [dir (test-tmp/temp-dir! "test-handle-")]
     (fs/create-dirs dir)
     (assoc (runtime-app/boot (core/compose-config {:profile :tui}) {})
            ::sessions-dir dir)))

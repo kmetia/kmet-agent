@@ -7,7 +7,6 @@
    rename panel flow, and select/cancel wiring."
   (:require [clojure.string :as str]
             [clojure.test :as t]
-            [babashka.fs :as fs]
             [kmet.app.keybindings :as kb]
             [kmet.ui.tui.session-selector :as ss]
             [kmet.hikap.core :as engine]
@@ -15,7 +14,8 @@
             [kmet.hikap.component :as component]
             [kmet.tui.protocols :as protocols]
             [kmet.tui.utils :as u]
-            [kmet.libs.concurrent :as concurrent]))
+            [kmet.libs.concurrent :as concurrent]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- now-ms [] (System/currentTimeMillis))
 
@@ -48,7 +48,7 @@
    too, or ctrl+d/ctrl+r silently match nothing when the namespace runs
    alone."
   []
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-session-selector-keybindings")))]
+  (let [dir (test-tmp/temp-dir! "test-session-selector-keybindings-")]
     (tui-kb/set-global-keybindings! (kb/create-agent-keybindings-manager dir))))
 
 (defn- new-sel

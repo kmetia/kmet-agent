@@ -8,10 +8,11 @@
             [clojure.test :refer [deftest is testing]]
             [kmet.app.config :as cfg]
             [kmet.app.extensions.layers :as layers]
-            [kmet.app.profile :as profile]))
+            [kmet.app.profile :as profile]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- tmp-dir []
-  (str (fs/create-temp-dir {:dir (System/getenv "TMPDIR")})))
+  (test-tmp/temp-dir! "test-"))
 
 (defn- with-layers
   "Run F with the two layer paths in a fresh temp dir: F gets the paths."

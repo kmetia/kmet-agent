@@ -5,7 +5,8 @@
             [babashka.fs :as fs]
             [kmet.app.config :as cfg]
             [kmet.libs.terminal-image :as timg]
-            [kmet.libs.theme :as theme]))
+            [kmet.libs.theme :as theme]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; ─── Theme record ──────────────────────────────────────────────────────────
 
@@ -328,7 +329,7 @@
     {:name theme-name :colors colors}))
 
 (t/deftest test-load-themes-from-dir
-  (let [tmp-dir (str "target/test-themes-" (System/currentTimeMillis))]
+  (let [tmp-dir (test-tmp/temp-dir! "test-themes-")]
     (io/make-parents (str tmp-dir "/test.edn"))
     ;; Write a valid (complete) theme file
     (spit (str tmp-dir "/test.edn") (pr-str (complete-theme-edn "test")))
@@ -344,7 +345,7 @@
 (t/deftest test-load-themes-from-dir-rejects-partial
   (t/testing "a theme missing required tokens fails with the sorted list
               (pi: Missing required color tokens)"
-    (let [tmp-dir (str "target/test-themes-partial-" (System/currentTimeMillis))
+    (let [tmp-dir (test-tmp/temp-dir! "test-themes-partial-")
           out (java.io.StringWriter.)]
       (io/make-parents (str tmp-dir "/partial.edn"))
       (spit (str tmp-dir "/partial.edn") "{:name \"partial\" :text \"#000000\"}")

@@ -9,7 +9,8 @@
             [kmet.ai.auth :as auth]
             [kmet.ai.image-model-gen :as gen-image-models]
             [kmet.ai.image-models :as im]
-            [kmet.libs.http :as http]))
+            [kmet.libs.http :as http]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- validate-committed!
   "Run the generator's offline validation over the committed catalog."
@@ -69,7 +70,7 @@
     (t/is (thrown? Exception (gen-image-models/parse-openrouter-image-models {})))))
 
 (t/deftest test-generate-and-write-writes-and-skips-unchanged
-  (let [dir (str (fs/create-temp-dir {:dir "target" :prefix "image-gen-test-"}))
+  (let [dir (test-tmp/temp-dir! "image-gen-test-")
         models [{:id "m1" :name "M1" :api :openrouter-images :provider :openrouter
                  :base-url "https://openrouter.ai/api/v1"
                  :input [:text] :output [:image]
@@ -87,7 +88,7 @@
         (fs/delete-tree dir)))))
 
 (t/deftest test-generate-and-write-fails-on-empty
-  (let [dir (str (fs/create-temp-dir {:dir "target" :prefix "image-gen-test-"}))]
+  (let [dir (test-tmp/temp-dir! "image-gen-test-")]
     (try
       (with-redefs [gen-image-models/fetch-openrouter-image-models (fn [] [])]
         (t/is (false? (:ok (gen-image-models/generate-and-write! dir)))))
@@ -112,7 +113,7 @@
                                          :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}}}})))
 
 (t/deftest test-image-cache-wins-when-fresh
-  (let [dir (str (fs/create-temp-dir {:dir "target" :prefix "image-cache-test-"}))]
+  (let [dir (test-tmp/temp-dir! "image-cache-test-")]
     (try
       (write-image-cache! dir "2999-01-01T00:00:00Z")
       (binding [*out* (java.io.StringWriter.)
@@ -127,7 +128,7 @@
         (im/load-image-catalogs! nil)))))
 
 (t/deftest test-image-cache-stale-or-broken-ignored
-  (let [dir (str (fs/create-temp-dir {:dir "target" :prefix "image-cache-test-"}))]
+  (let [dir (test-tmp/temp-dir! "image-cache-test-")]
     (try
       (write-image-cache! dir "2000-01-01T00:00:00Z")
       (binding [*out* (java.io.StringWriter.)

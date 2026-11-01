@@ -10,7 +10,8 @@
             [kmet.tui.utils :as u]
             [kmet.tui.keybindings :as kb]
             [kmet.app.keybindings :as app-kb]
-            [babashka.fs :as fs]))
+            [babashka.fs :as fs]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; Raw key sequences matching what parse-key expects
 (def ^:const K-LEFT "\u001b[D")
@@ -802,9 +803,7 @@
 
 ;; ─── Autocomplete ──────────────────────────────────────────────────────────
 
-(def ^:private ac-test-dir (str (or (System/getenv "TMPDIR")
-                                    (System/getProperty "user.home"))
-                                "/kmet-editor-ac-test"))
+(def ^:private ac-test-dir (test-tmp/temp-dir! "kmet-editor-ac-"))
 
 (defn- with-ac-files
   [f]

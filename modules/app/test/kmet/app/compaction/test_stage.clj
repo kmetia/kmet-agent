@@ -7,14 +7,15 @@
             [babashka.fs :as fs]
             [kmet.app.compaction.stage :as stage]
             [kmet.app.loop :as loop]
-            [kmet.app.session.core :as session]))
+            [kmet.app.session.core :as session]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- with-session-agent
   "Run F with a fresh session and an agent over it that keeps a tiny recent
    tail, so any real history offers something to summarize."
   [f]
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))]
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)]
     (try
       (f sess (loop/make-agent-state :session sess :keep-recent-tokens 5))
       (finally

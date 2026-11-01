@@ -36,7 +36,8 @@
             [kmet.app.config :as cfg]
             [kmet.app.extensions.core :as extensions]
             [kmet.ui.tui.interactive.test-handle-support :as hs]
-            [kmet.ui.tui.interactive.test-support :as support]))
+            [kmet.ui.tui.interactive.test-support :as support]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; The interactive builtins register the app's whole slash registry; clear it
 ;; so a later namespace never sees the tree filled by this one.
@@ -107,7 +108,7 @@
     (support/install-app-keybindings!)
     ((var builtins/register-builtin-commands!) cfg/default-config)
     (let [cmd (commands/find-command "import")
-          dir (str (fs/absolutize (str "target/test-import-errors-" (System/currentTimeMillis))))]
+          dir (test-tmp/temp-dir! "test-import-errors-")]
       (t/is (some? cmd) "registered — /import is no longer a placeholder")
       (t/is (= "Import and resume a session from a file" (:description cmd)))
       (t/is (= "<path>" (:argument-hint cmd)))
@@ -150,7 +151,7 @@
     (commands/clear-commands!)
     (support/install-app-keybindings!)
     ((var builtins/register-builtin-commands!) cfg/default-config)
-    (let [dir (str (fs/absolutize (str "target/test-import-flow-" (System/currentTimeMillis))))
+    (let [dir (test-tmp/temp-dir! "test-import-flow-")
           foreign (str dir "/foreign-project")]
       (try
         (fs/create-dirs foreign)
@@ -211,7 +212,7 @@
   (testing "pi: a session switch (kmet -c at launch, /resume, /import)
             recreates the runtime from settings — the outgoing session's
             runtime tool selection must not leak into the resumed one"
-    (let [dir (str (fs/absolutize (str "target/test-switch-tools-" (System/currentTimeMillis))))]
+    (let [dir (test-tmp/temp-dir! "test-switch-tools-")]
       (try
         (let [outgoing (session/create-session (str dir "/out"))
               _ (append-message! outgoing "hello")
@@ -250,7 +251,7 @@
             handler runs outside a run and must act on the session the user
             chose, and a mode whose runtime moved without an install would
             leave the old session reachable"
-    (let [dir (str (fs/absolutize (str "target/test-install-session-" (System/currentTimeMillis))))]
+    (let [dir (test-tmp/temp-dir! "test-install-session-")]
       (try
         (let [outgoing (session/create-session (str dir "/out"))
               _ (append-message! outgoing "hello")
@@ -273,7 +274,7 @@
     (commands/clear-commands!)
     (support/install-app-keybindings!)
     ((var builtins/register-builtin-commands!) cfg/default-config)
-    (let [dir (str (fs/absolutize (str "target/test-import-cancel-" (System/currentTimeMillis))))]
+    (let [dir (test-tmp/temp-dir! "test-import-cancel-")]
       (try
         (let [src (session/create-session (str dir "/src"))]
           (append-message! src "question")
@@ -329,7 +330,7 @@
     (commands/clear-commands!)
     (support/install-app-keybindings!)
     ((var builtins/register-builtin-commands!) cfg/default-config)
-    (let [dir (str (fs/absolutize (str "target/test-import-gone-cwd-" (System/currentTimeMillis))))
+    (let [dir (test-tmp/temp-dir! "test-import-gone-cwd-")
           gone (str dir "/gone-project")]
       (try
         (let [src (session/create-session (str dir "/src") {:cwd gone})]
@@ -361,7 +362,7 @@
     (commands/clear-commands!)
     (support/install-app-keybindings!)
     ((var builtins/register-builtin-commands!) cfg/default-config)
-    (let [dir (str (fs/absolutize (str "target/test-export-cwd-" (System/currentTimeMillis))))
+    (let [dir (test-tmp/temp-dir! "test-export-cwd-")
           project (str dir "/project")]
       (try
         (fs/create-dirs project)
@@ -405,8 +406,7 @@
     (commands/clear-commands!)
     (support/install-app-keybindings!)
     ((var builtins/register-builtin-commands!) cfg/default-config)
-    (let [dir (str (fs/absolutize (str "target/test-mid-turn-guards-"
-                                       (System/currentTimeMillis))))]
+    (let [dir (test-tmp/temp-dir! "test-mid-turn-guards-")]
       (try
         (let [ch (chat-history/make-chat-history)
               cs (hs/core-state (hs/handle-with {:session (session/create-session dir)})
@@ -425,8 +425,7 @@
             the editor dock (pi: showExtensionSelector / showExtensionEditor),
             not as floating overlays — the old overlay path rendered over the
             chat when the tree closed and the document shrank"
-    (let [dir (str (fs/absolutize (str "target/test-tree-summary-dock-"
-                                       (System/currentTimeMillis))))
+    (let [dir (test-tmp/temp-dir! "test-tree-summary-dock-")
           sel-ref (atom nil)]
       (try
         (let [sess (session/create-session dir)
@@ -460,8 +459,7 @@
 (deftest test-tree-summarize-prompt-skip-prompt-setting
   (testing "branchSummary.skipPrompt skips the question and defaults to no
             summary (pi: getBranchSummarySkipPrompt)"
-    (let [dir (str (fs/absolutize (str "target/test-tree-skip-prompt-"
-                                       (System/currentTimeMillis))))
+    (let [dir (test-tmp/temp-dir! "test-tree-skip-prompt-")
           settings-file (str dir "/settings.edn")
           sel-ref (atom nil)
           navigated (atom nil)]
@@ -518,7 +516,7 @@
   (testing "a session whose recorded cwd differs only in spelling (trailing
             slash) leaves the runtime cwd and the prompt alone — the
             comparison is spelling-insensitive"
-    (let [dir (str (fs/absolutize (str "target/test-cwd-spelling-" (System/currentTimeMillis))))
+    (let [dir (test-tmp/temp-dir! "test-cwd-spelling-")
           project (str dir "/project")
           spelled (str project "/")]
       (try

@@ -5,11 +5,10 @@
             [clojure.string :as str]
             [kmet.libs.host :as host]
             [kmet.tui.autocomplete :as ac]
-            [babashka.fs :as fs]))
+            [babashka.fs :as fs]
+            [kmet.test-tmp :as test-tmp]))
 
-(def ^:private test-dir (str (or (System/getenv "TMPDIR")
-                                 (System/getProperty "user.home"))
-                             "/kmet-autocomplete-test"))
+(def ^:private test-dir (test-tmp/temp-dir! "kmet-autocomplete-"))
 
 (defn- with-temp-dir
   [f]

@@ -7,7 +7,8 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [kmet.tui.core :as core]
-            [kmet.extensions.lsp-adapter.runtime :as runtime]))
+            [kmet.extensions.lsp-adapter.runtime :as runtime]
+            [kmet.test-tmp :as test-tmp]))
 
 (def ^:private this-file
   "This file's path below the extension root."
@@ -43,13 +44,10 @@
   (str (fs/path extension-dir "scripts" name)))
 
 (defn temp-dir!
-  "A fresh temp dir. TMPDIR first (Termux has no /tmp), then the JVM
-   tmpdir; the repo is never touched."
+  "A fresh directory under the test run's scratch root (kmet.test-tmp), which
+   the runner deletes when the run ends."
   [prefix]
-  (let [root (or (System/getenv "TMPDIR") (System/getProperty "java.io.tmpdir"))
-        dir (str (fs/path root (str "kmet-lsp-" prefix "-" (System/nanoTime))))]
-    (fs/create-dirs dir)
-    dir))
+  (test-tmp/temp-dir! (str "kmet-lsp-" prefix "-")))
 
 (defn delete-tree!
   [dir]

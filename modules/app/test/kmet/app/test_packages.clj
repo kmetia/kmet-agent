@@ -12,10 +12,11 @@
             [kmet.app.skills :as skills]
             [kmet.app.config :as cfg]
             [kmet.libs.theme :as theme]
-            [kmet.test-utils :as tu :refer [slash spit-plugin]]))
+            [kmet.test-utils :as tu :refer [slash spit-plugin]]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- tmp-dir []
-  (str (fs/create-temp-dir {:dir (System/getenv "TMPDIR")})))
+  (test-tmp/temp-dir! "test-"))
 
 (defn- make-package
   "A conventional kmet package directory: extensions/, skills/ (a SKILL.md

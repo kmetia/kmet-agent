@@ -4,15 +4,15 @@
    and skip. The loader's own tests live with it in modules/app; this one
    stays with the host, because it asserts the wiring of a kmet1 flag and
    goes away with kmet1."
-  (:require [babashka.fs :as fs]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :as t]
             [kmet.app.debug :as debug]
             [kmet.app.session.core :as s]
-            [kmet.app.session.store :as store]))
+            [kmet.app.session.store :as store]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- scratch []
-  (str (fs/create-temp-dir {:dir (System/getenv "TMPDIR")})))
+  (test-tmp/temp-dir! "test-"))
 
 (defn- captured-stderr
   "Run F with stderr captured; `[result text]` — the cases that assert a

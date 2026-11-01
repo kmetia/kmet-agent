@@ -9,9 +9,10 @@
             [kmet.app.extensions.core :as extensions]
             [kmet.app.extensions.rows :as rows]
             [kmet.app.packages :as packages]
-            [kmet.app.runtime :as runtime]))
+            [kmet.app.runtime :as runtime]
+            [kmet.test-tmp :as test-tmp]))
 
-(def ^:private dir "target/test-extension-rows")
+(def ^:private dir (test-tmp/temp-dir! "test-extension-rows-"))
 
 (defn- write-extension!
   "Write single-file extension FILE under DIR and return its path."

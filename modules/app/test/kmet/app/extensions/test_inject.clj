@@ -8,7 +8,8 @@
             [clojure.test :as t :refer [testing]]
             [kmet.app.extensions.core :as extensions]
             [kmet.srce.core :as srce]
-            [kmet.app.test-support :as support]))
+            [kmet.app.test-support :as support]
+            [kmet.test-tmp :as test-tmp]))
 ;; the plugin mounts under the composition's ctx, so the namespace boots one
 (t/use-fixtures :once support/with-composition)
 
@@ -192,7 +193,7 @@
   (let [name "defplugin-ext"
         stem (str/replace name "-" "_")
         entry-ns (str stem ".main")
-        dir "target/test-ext-defplugin"
+        dir (test-tmp/temp-dir! "test-ext-defplugin-")
         file (str dir "/" stem "/main.clj")]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/" stem))
@@ -228,7 +229,7 @@
     (doseq [[name plugin-form]
             [["plugin-unqualified" "plugin"]
              ["plugin-string" "\"main.clj\""]]]
-      (let [dir (extension-dir! (str "target/test-ext-" name) name
+      (let [dir (extension-dir! (str (test-tmp/temp-dir! "test-ext-") "-" name) name
                                 :manifest (str "{:name \"" name "\" :plugin "
                                                plugin-form " :loader [:sci]}\n")
                                 :body hook-body)]

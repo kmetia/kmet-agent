@@ -12,7 +12,8 @@
             [kmet.app.loop :as loop]
             [kmet.app.config :as cfg]
             [kmet.app.events :as events]
-            [kmet.app.loop.test-support :as support]))
+            [kmet.app.loop.test-support :as support]
+            [kmet.test-tmp :as test-tmp]))
 
 (t/use-fixtures :each support/with-host)
 
@@ -189,7 +190,7 @@
   ;; projection is installed as the request context, so an append-only edit
   ;; appended straight to the session — no loop rebuild after it — still
   ;; reaches the request
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-request-projection")))
+  (let [dir (test-tmp/temp-dir! "test-loop-request-projection-")
         requests (atom [])
         calls (atom 0)
         sess (session/create-session dir)
@@ -225,7 +226,7 @@
   ;; holds (extensions/append-custom-message! persists the entry, then calls
   ;; the sink); the request install rebuilds the context from the session, so
   ;; the injected message must survive that rebuild
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-request-custom")))
+  (let [dir (test-tmp/temp-dir! "test-loop-request-custom-")
         requests (atom [])
         calls (atom 0)
         sess (session/create-session dir)

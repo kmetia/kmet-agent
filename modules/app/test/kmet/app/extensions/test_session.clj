@@ -21,7 +21,8 @@
             [kmet.app.test-support :as support]
             [kmet.test-utils :refer [spit-plugin]]
             [kmet.libs.theme :as theme]
-            [kmet.app.tools.registry :as tools-registry]))
+            [kmet.app.tools.registry :as tools-registry]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; The extension host is the composition's: boot one for the namespace.
 (t/use-fixtures :once support/with-composition)
@@ -29,7 +30,7 @@
 ;; ─── Session facades through the api ──────────────────────────────────────
 
 (t/deftest test-session-api-facades
-  (let [dir (str "target/test-ext-sess-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-ext-sess-")
         sess (session/create-session dir)]
     (extensions/set-session! sess)
     (try
@@ -190,7 +191,7 @@
     ;; no runtime capabilities bound: the sink fallback is the runtime-less
     ;; path (kmet.app.test-ui-port covers the engine-backed path)
     (extensions/unbind-extensions!)
-    (let [dir (str "target/test-ext-send-" (System/currentTimeMillis))
+    (let [dir (test-tmp/temp-dir! "test-ext-send-")
           sess (session/create-session dir)]
       (extensions/set-session! sess)
       (try
@@ -316,7 +317,7 @@
 (t/deftest test-resources-discover
   (extensions/clear-extensions!)
   (support/clear-listeners!)
-  (let [dir (str "target/test-ext-resources-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-ext-resources-")
         skill-dir (str dir "/skill")
         prompt-dir (str dir "/prompt")
         theme-dir (str dir "/theme")
@@ -385,7 +386,7 @@
   ;; io/resource, :extension-dir nil, unload clean.
   ;; The space exercises file-URL escaping through jar:file URLs on Jolt.
   (extensions/clear-extensions!)
-  (let [dir "target/test-ext-jar-src"
+  (let [dir (test-tmp/temp-dir! "test-ext-jar-src-")
         jar "target/test ext-jar.jar"]
     (fs/delete-tree dir)
     (fs/delete-if-exists jar)
@@ -459,7 +460,7 @@
           (extensions/unload-all-extensions!)
           (fs/delete-if-exists sci-jar)))
       (testing "sloppy ns (file declares another namespace) fails with an actionable error"
-        (let [sdir "target/test-ext-jar-sloppy-src"
+        (let [sdir (test-tmp/temp-dir! "test-ext-jar-sloppy-src-")
               sjar "target/test-ext-jar-sloppy.jar"]
           (fs/delete-tree sdir)
           (fs/delete-if-exists sjar)
@@ -489,7 +490,7 @@
   ;; dir extensions keep :extension-dir + a working io/resource file-URL
   ;; fallback (same test jar layout, unpacked).
   (extensions/clear-extensions!)
-  (let [dir "target/test-ext-dir-resource"]
+  (let [dir (test-tmp/temp-dir! "test-ext-dir-resource-")]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/dir_ext"))
     (spit (str dir "/extension.edn") "{:name \"dir-ext\" :plugin dir-ext.main/plugin :loader [:sci :jolt]}\n")
@@ -625,7 +626,7 @@
   (extensions/clear-extensions!)
   (skills/clear-skills!)
   (prompts/clear-prompt-templates!)
-  (let [dir "target/test-ext-selfreg"]
+  (let [dir (test-tmp/temp-dir! "test-ext-selfreg-")]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/selfreg"))
     (spit (str dir "/SKILL.md")
@@ -707,7 +708,7 @@
    those cells with it, and a `with-redefs` (how every extension test redirects
    a path) would no longer reach the code under test."
   []
-  (let [script (str "target/test-shipped-extensions-" (System/nanoTime) ".clj")
+  (let [script (test-tmp/temp-file! ".clj")
         out (str script ".out")]
     (spit script (format shipped-check-probe (pr-str shipped-extension-srcs)))
     (try
@@ -753,7 +754,7 @@
   ;; the host offers none of the declared backends.
   (extensions/clear-extensions!)
   (let [mk (fn [name manifest]
-             (let [dir (str "target/test-ext-loader-" name)]
+             (let [dir (str (test-tmp/temp-dir! "test-ext-loader-") "-" name)]
                (fs/delete-tree dir)
                (fs/create-dirs (str dir "/loader_probe"))
                (spit (str dir "/extension.edn") manifest)

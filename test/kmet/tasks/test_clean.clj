@@ -8,7 +8,8 @@
             [babashka.process :as p]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [kmet.tasks.clean :as clean]))
+            [kmet.tasks.clean :as clean]
+            [kmet.test-tmp :as test-tmp]))
 
 (def ^:private artifacts @#'clean/artifacts)
 (def ^:private expand #'clean/expand)
@@ -17,7 +18,7 @@
 (defn- sandbox
   "A scratch project root under target/."
   []
-  (str (fs/create-temp-dir {:dir "target" :prefix "clean-test-"})))
+  (test-tmp/temp-dir! "clean-test-"))
 
 (defn- touch!
   "Create ROOT-relative REL (with parents) holding \"x\"."

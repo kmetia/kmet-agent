@@ -4,7 +4,6 @@
    Enter select / Escape cancel, and the all/scoped Tab toggle."
   (:require [clojure.string :as str]
             [clojure.test :as t]
-            [babashka.fs :as fs]
             [kmet.app.keybindings :as kb]
             [kmet.ui.tui.model-selector :as ms]
             [kmet.ai.models :as models]
@@ -14,7 +13,8 @@
             [kmet.hikap.component :as component]
             [kmet.tui.protocols :as protocols]
             [kmet.libs.theme :as th]
-            [kmet.tui.utils :as u]))
+            [kmet.tui.utils :as u]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- model [provider id]
   (models/map->Model {:id id :name (str "Model " id) :provider provider
@@ -27,7 +27,7 @@
   "Build a selector over p1/a p1/b p2/x; CURRENT is the in-use model (sorted
    first, marked ✓) and may be omitted (defaults to p2/x)."
   [& {:keys [models scoped current search on-select on-cancel]}]
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-model-selector-keybindings")))]
+  (let [dir (test-tmp/temp-dir! "test-model-selector-keybindings-")]
     (tui-kb/set-global-keybindings! (kb/create-agent-keybindings-manager dir)))
   (ms/make-model-selector
    (or models [(model :p1 "a") (model :p1 "b") (model :p2 "x")])

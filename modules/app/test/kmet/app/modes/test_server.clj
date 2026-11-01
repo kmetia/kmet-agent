@@ -18,7 +18,8 @@
             [kmet.app.modes.server :as server-mode]
             [kmet.app.session.core :as session]
             [kmet.app.test-support :as support :refer [with-mode-run]]
-            [kmet.libs.concurrent :as concurrent])
+            [kmet.libs.concurrent :as concurrent]
+            [kmet.test-tmp :as test-tmp])
   (:import [java.net InetSocketAddress Socket]
            [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels Channels SocketChannel]))
@@ -313,7 +314,7 @@
   "A composition layer that mounts the gate for this process: every tool call is
    asked about. The *answer* is the server's business — its approvals row sends
    the question to the client — so the layer only names the policy."
-  "target/test-server-ask-all.edn")
+  (test-tmp/temp-file! ".edn"))
 
 (defn- ask-all!
   "Write the gate's patch layer and answer its path."

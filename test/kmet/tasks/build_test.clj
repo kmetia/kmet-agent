@@ -12,7 +12,8 @@
             [clojure.test :refer [deftest is testing]]
             [kmet.app.version :as version-lib]
             [kmet.tasks.build :as build]
-            [kmet.test-utils :refer [slash]]))
+            [kmet.test-utils :refer [slash]]
+            [kmet.test-tmp :as test-tmp]))
 
 (deftest ^:bb-only platform-for-names-os-and-arch
   (is (= "linux-aarch64" (build/platform-for "linux" "aarch64")))
@@ -73,7 +74,7 @@
                         (build/parse-args ["--wat"]))))
 
 (deftest ^:bb-only pack-artifact-zips-one-folder-with-executable-launcher-and-license
-  (let [dir "target/test-dist-pack"
+  (let [dir (test-tmp/temp-dir! "test-dist-pack-")
         exe (str dir "/kmet")
         launcher (str dir "/kmet.sh")
         zip (str dir "/kmet-1.2.3.zip")]
@@ -99,7 +100,7 @@
 (deftest ^:bb-only pack-artifact-packs-an-explicit-file-set
   ;; the JVM jar's layout — one folder holding the jar, its launchers and the
   ;; LICENSE — goes through the same packer as the single-executable artifacts
-  (let [dir "target/test-dist-pack-files"
+  (let [dir (test-tmp/temp-dir! "test-dist-pack-files-")
         jar (str dir "/kmetc.jar")
         sh (str dir "/kmetc")
         bat (str dir "/kmetc.bat")
@@ -125,7 +126,7 @@
         (fs/delete-tree dir)))))
 
 (deftest ^:bb-only install-artifact-copies-the-executable-into-out
-  (let [dir "target/test-dist-install"
+  (let [dir (test-tmp/temp-dir! "test-dist-install-")
         src "target/test-dist-install-src"
         exe (str src "/kmet")
         launcher (str src "/kmet.sh")]
@@ -280,13 +281,13 @@
       (is (fs/regular-file? out))
       (fs/delete-if-exists out)))
   (testing "rejects a root without extension.edn"
-    (let [dir "target/test-pack-no-manifest"]
+    (let [dir (test-tmp/temp-dir! "test-pack-no-manifest-")]
       (fs/create-dirs dir)
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"no extension.edn"
                             (build/pack-extension! dir "target/test-pack-no.jar")))
       (fs/delete-tree dir)))
   (testing "rejects strict-layout violations"
-    (let [dir "target/test-pack-sloppy"]
+    (let [dir (test-tmp/temp-dir! "test-pack-sloppy-")]
       (fs/create-dirs (str dir "/sloppy"))
       (spit (str dir "/extension.edn") "{:name \"sloppy\" :plugin sloppy.main/plugin :loader [:sci]}")
       (spit (str dir "/sloppy/main.clj") "(ns wrong.place)\n(defn init [api] nil)\n")
@@ -294,7 +295,7 @@
                             (build/pack-extension! dir "target/test-pack-sloppy.jar")))
       (fs/delete-tree dir)))
   (testing "rejects a string :plugin manifest"
-    (let [dir "target/test-pack-strentry"]
+    (let [dir (test-tmp/temp-dir! "test-pack-strentry-")]
       (fs/create-dirs dir)
       (spit (str dir "/extension.edn")
             "{:name \"strentry\" :plugin \"main.clj\" :loader [:sci]}")
@@ -303,7 +304,7 @@
                             (build/pack-extension! dir "target/test-pack-str.jar")))
       (fs/delete-tree dir)))
   (testing "rejects a manifest without :loader and unknown loader kinds"
-    (let [dir "target/test-pack-loader"]
+    (let [dir (test-tmp/temp-dir! "test-pack-loader-")]
       (fs/create-dirs (str dir "/ld"))
       (spit (str dir "/ld/main.clj") "(ns ld.main)\n(defn init [api] nil)\n")
       (spit (str dir "/extension.edn") "{:name \"ld\" :plugin ld.main/plugin}")
@@ -343,7 +344,7 @@
 (deftest ^:bb-only bundle-validator-discovery-is-convention-based
   ;; the completeness scan: top-level .clj files and <name>/src dirs are
   ;; artifacts; READMEs and dirs without src/extension.edn are dev wrappers
-  (let [dir "target/test-bundle-discovery"]
+  (let [dir (test-tmp/temp-dir! "test-bundle-discovery-")]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/one/src"))
     (spit (str dir "/one/src/extension.edn") "{:name \"one\" :plugin one.core/plugin :loader [:sci]}\n")
@@ -356,7 +357,7 @@
 
 (deftest ^:bb-only bundle-validator-rejects
   (testing "a dir artifact whose :loader lacks :sci"
-    (let [dir "target/test-bundle-nosci"]
+    (let [dir (test-tmp/temp-dir! "test-bundle-nosci-")]
       (fs/delete-tree dir)
       (fs/create-dirs (str dir "/bundle/bad"))
       (spit (str dir "/bundle/extension.edn") "{:name \"bad\" :plugin bad.main/plugin :loader [:jolt]}")
@@ -366,7 +367,7 @@
                             (@#'build/validate-bundled-dir! "bad" (str dir "/bundle"))))
       (fs/delete-tree dir)))
   (testing "a dir artifact with a strict-layout violation"
-    (let [dir "target/test-bundle-sloppy"]
+    (let [dir (test-tmp/temp-dir! "test-bundle-sloppy-")]
       (fs/delete-tree dir)
       (fs/create-dirs (str dir "/bundle/sloppy"))
       (spit (str dir "/bundle/extension.edn") "{:name \"sloppy\" :plugin sloppy.main/plugin :loader [:sci]}")
@@ -376,7 +377,7 @@
                             (@#'build/validate-bundled-dir! "sloppy" (str dir "/bundle"))))
       (fs/delete-tree dir)))
   (testing "a deps.edn with :local/root or extra keys"
-    (let [dir "target/test-bundle-deps"]
+    (let [dir (test-tmp/temp-dir! "test-bundle-deps-")]
       (fs/delete-tree dir)
       (fs/create-dirs (str dir "/bundle/lr"))
       (spit (str dir "/bundle/extension.edn") "{:name \"lr\" :plugin lr.main/plugin :loader [:sci]}")
@@ -404,7 +405,7 @@
                             (@#'build/validate-bundled-file! "noplugin" f)))
       (fs/delete-if-exists f)))
   (testing "a dir artifact whose manifest names a var the namespace lacks"
-    (let [dir "target/test-bundle-novar"]
+    (let [dir (test-tmp/temp-dir! "test-bundle-novar-")]
       (fs/delete-tree dir)
       (fs/create-dirs (str dir "/bundle/novar"))
       (spit (str dir "/bundle/extension.edn")

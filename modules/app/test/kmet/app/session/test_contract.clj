@@ -6,16 +6,16 @@
 
    Each backend gets a fresh session directory, so one case's files never leak
    into the next."
-  (:require [babashka.fs :as fs]
-            [clojure.test :refer [deftest is testing]]
+  (:require [clojure.test :refer [deftest is testing]]
             [kmet.app.session.backend :as session-backend]
-            [kmet.app.sessions :as sessions]))
+            [kmet.app.sessions :as sessions]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- backends
   "`[kind backend-value dir]` per backend — the backend, plus the session
    directory its `create!` writes under."
   []
-  (let [dir-of #(str (fs/create-temp-dir {:dir (System/getenv "TMPDIR")}))
+  (let [dir-of #(test-tmp/temp-dir! "test-")
         mem-dir (dir-of)
         ednl-dir (dir-of)]
     [["memory" (sessions/memory-backend) mem-dir]
@@ -101,7 +101,7 @@
   ;; The contract test exercises the backend directly and `kmet.app.test-sessions`
   ;; exercises the service over the memory backend; this composes the two halves
   ;; the way a profile does — `(service (ednl))`, as the `:sessions` row builds it.
-  (let [dir (str (fs/create-temp-dir {:dir (System/getenv "TMPDIR")}))
+  (let [dir (test-tmp/temp-dir! "test-")
         log (sessions/service (session-backend/ednl))
         s ((:create! log) {:dir dir :cwd dir})
         id (:id ((:header log) s))]

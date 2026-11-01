@@ -8,7 +8,8 @@
             [kmet.app.tools.mutation :as mutation]
             [kmet.app.tools.registry :as tools]
             [kmet.app.tools.util :as tool-util]
-            [kmet.test-utils :as tu]))
+            [kmet.test-utils :as tu]
+            [kmet.test-tmp :as test-tmp]))
 
 (def ^:private wait-ms
   "Bound for a deref that should complete on its own — a leaked lock then
@@ -21,7 +22,7 @@
   200)
 
 (defn- temp-dir []
-  (let [dir (str (fs/absolutize (str "target/test-mutation-" (System/nanoTime))))]
+  (let [dir (str (fs/absolutize (test-tmp/temp-dir! "test-mutation-")))]
     (fs/create-dirs dir)
     dir))
 

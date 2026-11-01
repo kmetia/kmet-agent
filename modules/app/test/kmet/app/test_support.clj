@@ -10,7 +10,8 @@
             [kmet.app.runtime :as runtime]
             [kmet.app.session.core :as session]
             [kmet.srce.core :as srce]
-            [kmet.test-utils :as tu]))
+            [kmet.test-utils :as tu]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn run-main-into
   "`main` on ARGS with stdout going to OUT, a writer the caller keeps. A mode
@@ -74,7 +75,7 @@
    lingering run's publish lost its parent directory, or the delete itself hit
    a file the run had just written. `target/` is thrown away by `bb clean`, so
    the directories are left for inspection."
-  "target/test-modes")
+  (test-tmp/temp-dir! "test-modes-"))
 
 (defn sessions-dir
   "The session log directory of the run in progress (see *sessions-dir*)."
@@ -106,9 +107,8 @@
    checkout's own `.kmet/patch.edn` names, which is the developer's machine,
    not the test — and each of those rows is an extension load per boot."
   [send-message f]
-  (let [dir (str (fs/path "target" "test-modes" (str (random-uuid))))
+  (let [dir (test-tmp/temp-dir! "mode-run-")
         settings (settings dir)]
-    (fs/create-dirs dir)
     (binding [*sessions-dir* dir]
       (with-redefs [cfg/load-config (fn [& _] settings)
                     cfg/get-api-key (fn [_] "test-key")
@@ -178,10 +178,9 @@
   ([{:keys [session config cwd]}]
    (let [ctx (composition-ctx)
          agents (srce/get ctx :agents)
-         dir (str (fs/path "target" "test-handles" (str (random-uuid))))
+         dir (test-tmp/temp-dir! "test-handles-")
          sess (or session
-                  (do (fs/create-dirs dir)
-                      (session/create-session dir {:cwd (str (fs/cwd))})))
+                  (session/create-session dir {:cwd (str (fs/cwd))}))
          handle ((:create! agents)
                  ctx
                  {:session sess

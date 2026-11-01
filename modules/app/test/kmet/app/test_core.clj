@@ -13,7 +13,8 @@
             [kmet.app.core :as core]
             [kmet.app.maintenance :as maintenance]
             [kmet.app.test-support :as support]
-            [kmet.app.world :as world]))
+            [kmet.app.world :as world]
+            [kmet.test-tmp :as test-tmp]))
 
 (deftest a-process-start-runs-the-entry
   ;; The model catalog is not loaded here: it is part of the process world,
@@ -54,7 +55,7 @@
   "Write CONTENT to a patch file under target/ (which /tmp-less hosts have)
    and return the path."
   [content]
-  (let [path (str "target/test-app-patch-" (System/nanoTime) ".edn")]
+  (let [path (test-tmp/temp-file! ".edn")]
     (io/make-parents path)
     (spit path content)
     path))
@@ -112,7 +113,7 @@
   ;; place. An unreadable file is a warning and an empty message (the rest of
   ;; the invocation still runs), an empty path is skipped — kmet1's three
   ;; outcomes, word for word.
-  (let [path (str "target/test-at-file-" (System/nanoTime) ".md")]
+  (let [path (test-tmp/temp-file! ".md")]
     (spit path "from the file")
     (try
       (is (= ["from the file"] (:args (core/parse-args [(str "@" path)]))))

@@ -9,7 +9,8 @@
             [babashka.fs :as fs]
             [kmet.app.session.core :as s]
             [kmet.app.session.test-support :as support]
-            [kmet.test-utils :refer [slash]]))
+            [kmet.test-utils :refer [slash]]
+            [kmet.test-tmp :as test-tmp]))
 
 (t/use-fixtures :once support/with-clean-test-dir)
 
@@ -44,7 +45,7 @@
   ;; G4: no file until the first assistant message — user/bash entries
   ;; accumulate in memory; the assistant entry persists header + everything
   ;; in order (pi: _persist)
-  (let [dir (str "target/test-sess-lazy-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-lazy-")
         sess (s/create-session dir)]
     (try
       (t/is (not (fs/exists? (:file sess))) "no file after create")
@@ -68,7 +69,7 @@
 (t/deftest test-session-legacy-file-loads
   ;; Files without a header (pre-G1 format) still load: entries-only, :header
   ;; nil, :id derived from the filename
-  (let [dir (str "target/test-sess-legacy-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-legacy-")
         sess (s/create-session dir)
         file (:file sess)]
     (try
@@ -93,7 +94,7 @@
 (t/deftest test-session-write-round-trips-utf8
   ;; The byte-stream writer behind kmet.libs.fs/publish! is explicitly UTF-8,
   ;; matching the reader; non-ASCII message content survives save + reload.
-  (let [dir (str "target/test-sess-utf8-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-utf8-")
         sess (s/create-session dir)
         text "héllo — ünïcode ✓ 日本語"]
     (try
@@ -252,7 +253,7 @@
 (t/deftest test-session-streaming-load
   ;; G13: load streams in 1 MB chunks — a session larger than one chunk
   ;; round-trips whole, including entries straddling a chunk boundary
-  (let [dir (str "target/test-sess-stream-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-stream-")
         sess (s/create-session dir)
         n 500  ;; ~1.3 MB of lines (500 × 2.6 KB), well past one 1 MB chunk —
               ;; fewer, longer lines keep the same total size with a fraction
@@ -275,7 +276,7 @@
   ;; G13: a partial final line (crashed append) is dropped and the valid
   ;; prefix published atomically — the file on disk is repaired, not just
   ;; skipped-with-warning
-  (let [dir (str "target/test-sess-torn-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-torn-")
         file (str dir "/sess.ednl")]
     (try
       (fs/create-dirs dir)
@@ -299,7 +300,7 @@
 (t/deftest test-session-torn-tail-only-line
   ;; G13: a file consisting solely of a torn line repairs to an empty
   ;; session (no entries, no header)
-  (let [dir (str "target/test-sess-torn-only-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-torn-only-")
         file (str dir "/sess.ednl")]
     (try
       (fs/create-dirs dir)
@@ -314,7 +315,7 @@
   ;; G13: repair drops only the torn tail; malformed middle lines are
   ;; preserved (pi v4: physicalLines.slice — the tail is the unacknowledged
   ;; partial append, middle corruption is skipped-with-warning not erased)
-  (let [dir (str "target/test-sess-torn-mid-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-torn-mid-")
         file (str dir "/sess.ednl")]
     (try
       (fs/create-dirs dir)
@@ -334,7 +335,7 @@
   ;; G13: a valid final line without a trailing newline gets one appended on
   ;; load, so a later append can't glue onto it (pi v4 unterminated-tail
   ;; repair)
-  (let [dir (str "target/test-sess-unterm-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-unterm-")
         file (str dir "/sess.ednl")]
     (try
       (fs/create-dirs dir)
@@ -354,7 +355,7 @@
   ;; G13: streaming decodes UTF-8 incrementally (pi's StringDecoder) — a
   ;; multi-byte character straddling the 1 MB chunk boundary loads intact
   ;; instead of being replaced with U+FFFD
-  (let [dir (str "target/test-sess-utf8-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-utf8-")
         file (str dir "/sess.ednl")
         ;; 漢's 3 bytes span byte 1048575..1048577 — right across the 1 MB
         ;; read boundary
@@ -371,7 +372,7 @@
       (finally (fs/delete-tree dir)))))
 
 (t/deftest test-compact-with-summary
-  (let [dir (str "target/test-sess-cws-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-cws-")
         sess (s/create-session dir)]
     (try
       (doseq [i (range 6)]
@@ -659,7 +660,7 @@
   ;; data as labeled info messages; display=false and :custom state are
   ;; skipped (covered by replay-branch! in interactive mode — here we check
   ;; the projection + branch content survive a round-trip)
-  (let [dir (str "target/test-sess-custom-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-custom-")
         sess (s/create-session dir)]
     (try
       (s/append-entry sess {:role :user :content "q"})

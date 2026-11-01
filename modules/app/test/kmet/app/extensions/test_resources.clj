@@ -15,7 +15,8 @@
             [kmet.app.test-support :as support]
             [kmet.test-utils :refer [spit-plugin]]
             [kmet.app.skills :as skills]
-            [kmet.app.tools.registry :as tools-registry]))
+            [kmet.app.tools.registry :as tools-registry]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; The extension host is the composition's: boot one for the namespace.
 (t/use-fixtures :once support/with-composition)
@@ -148,7 +149,7 @@
   (extensions/clear-extensions!)
   (models/load-catalogs! nil)
   (models/clear-extension-providers!)
-  (let [dir "target/test-ext-prov-unload"]
+  (let [dir (test-tmp/temp-dir! "test-ext-prov-unload-")]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/prov_unload"))
     (spit (str dir "/extension.edn") "{:name \"prov-unload\" :plugin prov-unload.main/plugin :loader [:sci :jolt]}\n")
@@ -233,7 +234,7 @@
   ;; injects the host fns (see build-context-namespaces), so extensions
   ;; can read/write files without babashka.fs workarounds
   (extensions/clear-extensions!)
-  (let [dir "target/test-ext-slurp"]
+  (let [dir (test-tmp/temp-dir! "test-ext-slurp-")]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/slurp_ext"))
     (spit (str dir "/extension.edn") "{:name \"slurp-ext\" :plugin slurp-ext.main/plugin :loader [:sci :jolt]}\n")
@@ -264,7 +265,7 @@
   ;; require has already loaded the real tools.reader, which the native host
   ;; view shares by the same loaded-namespace rule.
   (extensions/clear-extensions!)
-  (let [dir "target/test-ext-tools-reader"]
+  (let [dir (test-tmp/temp-dir! "test-ext-tools-reader-")]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/tr_ext"))
     (spit (str dir "/extension.edn") "{:name \"tr-ext\" :plugin tr-ext.main/plugin :loader [:sci :jolt]}\n")
@@ -295,7 +296,7 @@
   ;; Jolt loads the Maven spec.alpha through its native loader; both hosts
   ;; now run the same fixture cleanup after loading its source.
   (extensions/clear-extensions!)
-  (let [dir "target/test-ext-spec-file-seq"]
+  (let [dir (test-tmp/temp-dir! "test-ext-spec-file-seq-")]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/spec_ext"))
     (fs/create-dirs (str dir "/data"))
@@ -314,7 +315,7 @@
                       "                           :execute (fn [_]\n"
                       "                                      {:content (str (s/valid? ::x 5)\n"
                       "                                                     \" \"\n"
-                      "                                                     (count (file-seq (io/file \"target/test-ext-spec-file-seq/data\"))))})}))\n"))
+                      "                                                     (count (file-seq (io/file \"" dir "/data\"))))})}))\n"))
     (try
       (let [result (extensions/load-extension! dir)]
         (t/is (nil? (:error result)) (str "loaded: " (:error result)))
@@ -357,7 +358,7 @@
   ;; extension libraries) needs no deps.edn: a single-file extension requires
   ;; every third-party member and calls each one — same result on both hosts.
   (extensions/clear-extensions!)
-  (let [dir "target/test-ext-fixed-set"
+  (let [dir (test-tmp/temp-dir! "test-ext-fixed-set-")
         f (str dir "/fixed_set.clj")]
     (fs/delete-tree dir)
     (fs/create-dirs dir)
@@ -405,7 +406,7 @@
   ;; not a bare NullPointerException (the load-fn used to call a nil
   ;; deps-resolver when the extension had no deps.edn)
   (extensions/clear-extensions!)
-  (let [dir "target/test-ext-missing-req"]
+  (let [dir (test-tmp/temp-dir! "test-ext-missing-req-")]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/missing_req"))
     (spit (str dir "/extension.edn") "{:name \"missing-req\" :plugin missing-req.main/plugin :loader [:sci :jolt]}\n")
@@ -452,7 +453,7 @@
 (t/deftest test-load-failure-rolls-back
   (extensions/clear-extensions!)
   (testing "a file without init fails and leaves no trace"
-    (let [dir "target/test-ext-bad"]
+    (let [dir (test-tmp/temp-dir! "test-ext-bad-")]
       (fs/create-dirs dir)
       (spit-plugin (str dir "/bad.clj")
                    "(ns bad-ext)\n(defn not-init [api] nil)\n")
@@ -466,7 +467,7 @@
   ;; before throwing is disposed with the extension's owner —
   ;; no command, tool or skill outlives a failed load.
   (extensions/clear-extensions!)
-  (let [dir "target/test-ext-init-rollback"]
+  (let [dir (test-tmp/temp-dir! "test-ext-init-rollback-")]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/rb_ext"))
     (spit (str dir "/extension.edn")
@@ -502,7 +503,7 @@
   ;; backend keeps its own per-context world (see loader.md §9).
   (when-not (host/jolt?)
     (extensions/clear-extensions!)
-    (let [dir "target/test-ext-fork-iso"]
+    (let [dir (test-tmp/temp-dir! "test-ext-fork-iso-")]
       (fs/delete-tree dir)
       (fs/create-dirs dir)
       (spit-plugin (str dir "/iso_a.clj")
@@ -565,7 +566,7 @@
 (t/deftest test-extension-ctx-events-via-bus
   (testing "sci handlers receive the ctx through the real bus path"
     (extensions/clear-extensions!)
-    (let [dir "target/test-ext-ctx-events"
+    (let [dir (test-tmp/temp-dir! "test-ext-ctx-events-")
           probes (atom [])
           unsub-a (support/on-event :session-info-changed
                                     (fn [ev] (swap! probes conj [:a ev])))
@@ -609,7 +610,7 @@
   ;; assertions ran at namespace load instead of as a test.)
   (testing "extension commands carry :extension-handler for ctx dispatch"
     (extensions/clear-extensions!)
-    (let [dir "target/test-ext-ctx-cmd"]
+    (let [dir (test-tmp/temp-dir! "test-ext-ctx-cmd-")]
       (fs/create-dirs dir)
       (spit-plugin (str dir "/ext.clj")
                    (str "(ns ctx-cmd (:require [kmet.extension :as ext]))\n"
@@ -628,20 +629,21 @@
 
 (t/deftest test-extension-namespace-isolation
   (extensions/clear-extensions!)
-  (let [load (fn [name content]
-               (let [dir (str "target/test-ext-iso-" name)]
-                 (fs/create-dirs dir)
-                 (spit-plugin (str dir "/ext.clj") content)
-                 (let [result (extensions/load-extension! (str dir "/ext.clj"))]
-                   (fs/delete-tree dir)
-                   ;; unload the single-file probe so each testing block starts
-                   ;; clean (bb tolerates same-path reloads; Jolt's runner runs
-                   ;; all vars on one future where residue breaks later vars)
-                   (extensions/unload-all-extensions!)
-                   result)))]
+  (letfn [(load
+            ([name content] (load name content (test-tmp/temp-dir! (str "test-ext-iso-" name "-"))))
+            ([_name content dir]
+             (fs/create-dirs dir)
+             (spit-plugin (str dir "/ext.clj") content)
+             (let [result (extensions/load-extension! (str dir "/ext.clj"))]
+               (fs/delete-tree dir)
+               ;; unload the single-file probe so each testing block starts
+               ;; clean (bb tolerates same-path reloads; Jolt's runner runs
+               ;; all vars on one future where residue breaks later vars)
+               (extensions/unload-all-extensions!)
+               result)))]
     (testing "a manifest-dir extension's own internal namespaces load
               regardless of prefix (strict ns-path lookup)"
-      (let [dir "target/test-ext-internal-ns"]
+      (let [dir (test-tmp/temp-dir! "test-ext-internal-ns-")]
         (fs/create-dirs (str dir "/kmet/extensions/myext"))
         (spit (str dir "/extension.edn")
               "{:name \"internal-ns\" :plugin kmet.extensions.myext.core/plugin :loader [:sci :jolt]}\n")
@@ -701,11 +703,12 @@
       (let [result (load "lib" "(ns good-lib\n  (:require [kmet.libs.host :as host]\n            [kmet.libs.yaml :as yaml]))\n(defn init [api]\n  (let [s (host/runtime-name)]\n    (when-not (string? s)\n      (throw (ex-info \"host failed\" {})))))\n")]
         (t/is (nil? (:error result)) (str "loaded: " (:error result)))))
     (testing "kmet.libs.archive loads from SCI and extracts zips (no ZipFile interop in extensions)"
-      (let [result (load "archive" (str "(ns good-archive\n  (:require [babashka.fs :as fs]\n"
+      (let [dir (test-tmp/temp-dir! "test-ext-archive-")
+            result (load "archive" (str "(ns good-archive\n  (:require [babashka.fs :as fs]\n"
                                         "            [clojure.java.io :as io]\n"
                                         "            [kmet.libs.archive :as archive]))\n"
                                         "(defn init [_api]\n"
-                                        "  (let [tmpdir (or (System/getenv \"TMPDIR\") (System/getProperty \"java.io.tmpdir\"))\n"
+                                        "  (let [tmpdir \"" dir "\"\n"
                                         "        zip (str (fs/path tmpdir \"arc-test.zip\"))\n"
                                         "        out (str (fs/path tmpdir \"arc-out\"))]\n"
                                         "    (with-open [zos (java.util.zip.ZipOutputStream. (io/output-stream zip))]\n"
@@ -714,7 +717,8 @@
                                         "      (.closeEntry zos))\n"
                                         "    (let [extracted (archive/extract-zip! zip out)]\n"
                                         "      (when-not (= \"hi\" (slurp (str (first extracted))))\n"
-                                        "        (throw (ex-info \"archive failed\" {}))))))\n"))]
+                                        "        (throw (ex-info \"archive failed\" {}))))))\n")
+                         dir)]
         (t/is (nil? (:error result)) (str "loaded: " (:error result)))))
     (testing "the whitelisted built-in renderer namespace loads and shares direct vars"
       (let [result (load "renderer" "(ns good-renderer\n  (:require [kmet.ui.tui.tool-renderers :as renderers]))\n(defn init [_api]\n  (when-not (fn? renderers/render-edit-call)\n    (throw (ex-info \"renderer failed\" {}))))\n")]
@@ -730,7 +734,7 @@
 
 (t/deftest ^:slow test-extension-bad-deps-fails-load
   (extensions/clear-extensions!)
-  (let [dir "target/test-ext-bad-deps"]
+  (let [dir (test-tmp/temp-dir! "test-ext-bad-deps-")]
     (fs/create-dirs dir)
     (spit (str dir "/extension.edn") "{:name \"bad-deps\" :plugin bad-deps.main/plugin :loader [:sci :jolt]}\n")
     (spit (str dir "/deps.edn") "{:deps {org.clojure/does-not-exist {:mvn/version \"9.9.9\"}}}\n")
@@ -745,7 +749,7 @@
 
 (t/deftest test-reload-extensions
   (testing "reload-extensions! (container dirs) unloads + reloads"
-    (let [container (str "target/test-ext-container-" (System/currentTimeMillis))]
+    (let [container (test-tmp/temp-dir! "test-ext-container-")]
       (fs/create-dirs container)
       (fs/copy-tree "test/fixtures/ext-single" container)
       (fs/copy-tree "test/fixtures/ext-dir" (str container "/multi-ext"))

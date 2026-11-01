@@ -5,15 +5,15 @@
    the scroll indicator."
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [deftest testing is]]
-            [babashka.fs :as fs]
             [kmet.app.keybindings :as kb]
             [kmet.ui.tui.fork-selector :as fork]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.tui.protocols :as protocols]
-            [kmet.tui.utils :as u]))
+            [kmet.tui.utils :as u]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- install-keybindings! []
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-fork-selector-keybindings")))]
+  (let [dir (test-tmp/temp-dir! "test-fork-selector-keybindings-")]
     (tui-kb/set-global-keybindings! (kb/create-agent-keybindings-manager dir))))
 
 (defn- make-list

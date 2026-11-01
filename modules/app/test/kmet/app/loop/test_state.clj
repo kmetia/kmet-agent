@@ -15,7 +15,8 @@
             [kmet.app.loop :as loop]
             [kmet.app.retry :as retry]
             [kmet.app.events :as events]
-            [kmet.app.loop.test-support :as support]))
+            [kmet.app.loop.test-support :as support]
+            [kmet.test-tmp :as test-tmp]))
 
 (t/use-fixtures
   :each
@@ -136,7 +137,7 @@
 (t/deftest test-loop-restore-session-context
   ;; Restoring a session rebuilds the agent context from the session branch —
   ;; steered and follow-up user messages come back for the next LLM call.
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-restore")))]
+  (let [dir (test-tmp/temp-dir! "test-loop-restore-")]
     (try
       (let [sess (session/create-session dir)]
         (session/append-entry sess {:role :user :content [{:type :text :text "hello"}]})
@@ -175,7 +176,7 @@
 ;; ─── Model/thinking change persistence (G6) ───────────────────────────────
 
 (t/deftest test-loop-set-model-persists-change
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-model-change")))]
+  (let [dir (test-tmp/temp-dir! "test-loop-model-change-")]
     (try
       (let [sess (session/create-session dir)
             agent (support/make-agent-state :session sess
@@ -196,7 +197,7 @@
         (fs/delete-tree dir)))))
 
 (t/deftest test-loop-cycle-model-persists-change
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-cycle-model")))
+  (let [dir (test-tmp/temp-dir! "test-loop-cycle-model-")
         saved (models/get-providers)]
     (models/clear-providers!)
     (models/register-provider! (support/make-test-provider ["a" "b"]))
@@ -222,7 +223,7 @@
         (fs/delete-tree dir)))))
 
 (t/deftest test-loop-set-thinking-level-persists-change
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-thinking-change")))]
+  (let [dir (test-tmp/temp-dir! "test-loop-thinking-change-")]
     (try
       (let [sess (session/create-session dir)
             agent (support/make-agent-state :session sess :thinking :off)]
@@ -245,7 +246,7 @@
   ;; navigation/fork/clone never change the agent's model/thinking; the
   ;; session-derived settings are applied only on session load via
   ;; apply-session-settings!
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-restore-messages-only")))]
+  (let [dir (test-tmp/temp-dir! "test-loop-restore-messages-only-")]
     (try
       (let [sess (session/create-session dir)]
         (session/append-entry sess {:role :user :content [{:type :text :text "hi"}]})
@@ -270,7 +271,7 @@
   ;; A session interrupted mid-tool-batch (process death between the assistant
   ;; tool-call message and its results) resumes without the dangling tool
   ;; calls — restore drops them so the next provider request stays valid.
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-restore-dangling")))]
+  (let [dir (test-tmp/temp-dir! "test-loop-restore-dangling-")]
     (try
       (let [sess (session/create-session dir)]
         (session/append-entry sess {:role :user :content [{:type :text :text "hello"}]})
@@ -299,7 +300,7 @@
   ;; only when a :thinking-level-change entry is on the branch (unrecorded
   ;; settings keep the current level). The auth atom is redirected so the
   ;; real auth.edn is never touched (test_auth pattern).
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-apply-settings")))
+  (let [dir (test-tmp/temp-dir! "test-loop-apply-settings-")
         saved-providers (models/get-providers)
         provider (models/map->Provider
                   {:id :test-prov :name "test"

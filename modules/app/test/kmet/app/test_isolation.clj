@@ -24,7 +24,8 @@
             [kmet.app.runtime :as app-runtime]
             [kmet.app.session.runtime :as runtime]
             [kmet.libs.json :as json]
-            [kmet.srce.core :as srce]))
+            [kmet.srce.core :as srce]
+            [kmet.test-tmp :as test-tmp]))
 
 (def ^:private tmp-root "target/test-isolation-worlds")
 
@@ -33,7 +34,7 @@
    tree. The model is never called — the transport is stubbed."
   {:provider :opencode-go
    :model "deepseek-v4-flash"
-   :session-dir "target/test-isolation-sessions"})
+   :session-dir (test-tmp/temp-dir! "test-isolation-sessions-")})
 
 (defn- world
   "A cwd under the test tree holding MARKER as `marker.txt`. Returns the dir."

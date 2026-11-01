@@ -6,7 +6,8 @@
             [clojure.test :as t]
             [babashka.fs :as fs]
             [kmet.tasks.format :as format]
-            [kmet.test-utils :refer [slash]]))
+            [kmet.test-utils :refer [slash]]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- dir-segments [p]
   (str/split (str p) #"[\\/]"))
@@ -26,9 +27,8 @@
 
 (t/deftest test-cljfmt-runs
   (t/testing "the wrapper resolves cljfmt.tool and checks a file"
-    (let [dir (or (System/getenv "TMPDIR") (System/getProperty "java.io.tmpdir"))
-          f (fs/create-temp-file {:prefix "kmet-fmt-" :suffix ".clj" :dir dir})]
+    (let [f (test-tmp/temp-file! ".clj")]
       (try
-        (spit (str f) "(ns t)\n\n(defn f [x]\n  x)\n")
-        (t/is (nil? (format/format-check! [(str f)])))
+        (spit f "(ns t)\n\n(defn f [x]\n  x)\n")
+        (t/is (nil? (format/format-check! [f])))
         (finally (fs/delete-if-exists f))))))

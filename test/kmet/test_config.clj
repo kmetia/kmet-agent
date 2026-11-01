@@ -8,7 +8,8 @@
             [kmet.app.tools.shell :as shell]
             [kmet.libs.http :as http]
             [kmet.ai.auth :as auth]
-            [kmet.test-utils :refer [slash]]))
+            [kmet.test-utils :refer [slash]]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; ─── Defaults ──────────────────────────────────────────────────────────────
 
@@ -213,7 +214,7 @@
 ;; registry (kmet.ai.models), not from config (covered by test_models).
 
 (t/deftest test-auto-resource-dirs
-  (let [sandbox (str (fs/create-temp-dir {:dir (System/getenv "TMPDIR")}))
+  (let [sandbox (test-tmp/temp-dir! "test-config-")
         agent-dir (str (fs/path sandbox "agent"))
         cwd (str (fs/path sandbox "project"))
         global (fn [type] (str (fs/path agent-dir (name type))))

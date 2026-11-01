@@ -11,10 +11,11 @@
             [kmet.app.packages :as pkgs]
             [kmet.app.config :as cfg]
             [kmet.tasks.build :as build]
-            [kmet.test-utils :refer [slash spit-plugin]]))
+            [kmet.test-utils :refer [slash spit-plugin]]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- tmp-dir []
-  (str (fs/create-temp-dir {:dir (System/getenv "TMPDIR")})))
+  (test-tmp/temp-dir! "test-"))
 
 (defn- with-empty-scopes
   "Run F with the agent dir and project scope pinned to empty temp dirs, so

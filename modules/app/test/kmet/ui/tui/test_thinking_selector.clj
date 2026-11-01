@@ -4,7 +4,6 @@
    cancels, and the search filter (pi ThinkingSelectorComponent)."
   (:require [clojure.string :as str]
             [clojure.test :as t]
-            [babashka.fs :as fs]
             [kmet.app.keybindings :as kb]
             [kmet.ui.tui.thinking-selector :as ts]
             [kmet.tui.core :as core]
@@ -12,13 +11,14 @@
             [kmet.tui.keybindings :as tui-kb]
             [kmet.hikap.component :as component]
             [kmet.tui.protocols :as protocols]
-            [kmet.tui.utils :as u]))
+            [kmet.tui.utils :as u]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- pick
   "Build a selector over off/low/medium/high with global keybindings
    installed. Defaults: current :medium, default :off."
   [& {:keys [levels current default on-select on-persist on-cancel]}]
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-thinking-selector-keybindings")))]
+  (let [dir (test-tmp/temp-dir! "test-thinking-selector-keybindings-")]
     (tui-kb/set-global-keybindings! (kb/create-agent-keybindings-manager dir)))
   (ts/make-thinking-selector
    (or levels [:off :low :medium :high])

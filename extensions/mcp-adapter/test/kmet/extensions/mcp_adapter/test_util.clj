@@ -13,7 +13,8 @@
             [kmet.extensions.mcp-adapter.config :as config]
             [kmet.libs.mcp.client :as mcp-client]
             [kmet.extensions.mcp-adapter.metadata :as metadata]
-            [kmet.tui.core :as core]))
+            [kmet.tui.core :as core]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; ─── Paths ────────────────────────────────────────────────────────────────
 
@@ -51,13 +52,10 @@
   (str (fs/path extension-dir "scripts" name)))
 
 (defn temp-dir!
-  "A fresh temp dir. TMPDIR first (Termux has no /tmp), then the JVM
-   tmpdir; the repo is never touched."
+  "A fresh directory under the test run's scratch root (kmet.test-tmp), which
+   the runner deletes when the run ends."
   [prefix]
-  (let [root (or (System/getenv "TMPDIR") (System/getProperty "java.io.tmpdir"))
-        dir (str (fs/path root (str "kmet-" prefix "-" (System/nanoTime))))]
-    (fs/create-dirs dir)
-    dir))
+  (test-tmp/temp-dir! (str "kmet-" prefix "-")))
 
 (defn delete-file!
   "Remove PATH, ignoring a missing file."

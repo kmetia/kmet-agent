@@ -13,7 +13,8 @@
             [kmet.app.test-support :as app-support]
             [kmet.app.config :as cfg]
             [kmet.srce.core :as srce]
-            [kmet.test-utils :as tu]))
+            [kmet.test-utils :as tu]
+            [kmet.test-tmp :as test-tmp]))
 
 (declare make-test-provider test-ctx)
 
@@ -282,8 +283,8 @@
    an agent collecting its events. F receives {:sess :events :agent}; the
    session directory is removed afterwards."
   [f]
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         events (atom [])
         agent (make-agent-state
                :session sess

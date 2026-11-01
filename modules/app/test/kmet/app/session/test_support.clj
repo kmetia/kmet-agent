@@ -2,17 +2,20 @@
   "Fixtures and helpers shared by the session tests: one scratch sessions dir
    per namespace run, quiet stderr for deliberately corrupt files, and a fast
    repeated-character builder for the large-payload cases."
-  (:require [babashka.fs :as fs]))
+  (:require [babashka.fs :as fs]
+            [kmet.test-tmp :as test-tmp]))
 
 (def test-dir
-  "Scratch sessions dir. Several tests assert per-file counts, so a stale dir
-   would grow the assertion count across runs — the fixture starts clean."
-  "target/test-sessions")
+  "Scratch sessions dir: one directory per run under the test scratch root,
+   removed with it. Several tests assert per-file counts, so a stale dir would
+   grow the assertion count across runs — the fixture starts clean."
+  (test-tmp/temp-dir! "test-sessions-"))
 
 (defn with-clean-test-dir
   "Fixture: start each test namespace from an empty scratch dir."
   [f]
-  (fs/delete-tree test-dir)
+  (test-tmp/delete! test-dir)
+  (fs/create-dirs test-dir)
   (f))
 
 (defn silent-stderr

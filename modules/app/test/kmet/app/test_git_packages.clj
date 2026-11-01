@@ -9,10 +9,11 @@
             [babashka.fs :as fs]
             [babashka.process :as p]
             [kmet.app.git-packages :as git]
-            [kmet.test-utils :refer [slash]]))
+            [kmet.test-utils :refer [slash]]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- tmp-dir []
-  (str (fs/create-temp-dir {:dir (System/getenv "TMPDIR")})))
+  (test-tmp/temp-dir! "test-"))
 
 ;; ─── URL parsing (pi: parseGitUrl) ────────────────────────────────────────
 

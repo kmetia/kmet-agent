@@ -7,7 +7,8 @@
             [kmet.app.tools.registry :as tools]
             [kmet.app.extensions :as row]
             [kmet.app.registries :as registries]
-            [kmet.srce.core :as srce]))
+            [kmet.srce.core :as srce]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- with-restored-host
   "Run F with the host unbound and no process handle published, restoring both
@@ -133,7 +134,7 @@
             ;; the route has to resolve the service per call, not at mount
             ext-fiber (srce/plugin! root row/plugin)
             tools-fiber (srce/plugin! root registries/tools)
-            dir "target/test-ext-tool-route"
+            dir (test-tmp/temp-dir! "test-ext-tool-route-")
             path (str dir "/probe_ext.clj")]
         (try
           (fs/delete-tree dir)

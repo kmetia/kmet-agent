@@ -5,14 +5,15 @@
             [clojure.edn :as edn]
             [clojure.string :as str]
             [babashka.fs :as fs]
-            [kmet.ai.model-config :as mc]))
+            [kmet.ai.model-config :as mc]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- with-models-edn-paths
   "Run F with models.edn redirected to a temp global/project pair.
    AGENT-DIR (the temp agent root) pins every load-config call — no
    with-redefs needed. The project file resolves against the stubbed cwd."
   [f]
-  (let [tmp (str (fs/absolutize (fs/file "target" (str "test-model-config-" (System/currentTimeMillis)))))
+  (let [tmp (test-tmp/temp-dir! "test-model-config-")
         agent-dir (str tmp "/agent")
         global (str agent-dir "/models.edn")
         project (str tmp "/project/.kmet/models.edn")]

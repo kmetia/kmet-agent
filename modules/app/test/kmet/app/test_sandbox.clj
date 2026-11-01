@@ -19,7 +19,8 @@
             [kmet.app.sandbox :as sandbox]
             [kmet.app.tools.registry :as tools]
             [kmet.libs.json :as json]
-            [kmet.srce.core :as srce]))
+            [kmet.srce.core :as srce]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; ─── The value and the realm ──────────────────────────────────────────────
 
@@ -172,7 +173,7 @@
     ((:create! agents) ctx
                        {:config {:provider :opencode-go
                                  :model "deepseek-v4-flash"
-                                 :session-dir "target/test-sandbox-sessions"}
+                                 :session-dir (test-tmp/temp-dir! "test-sandbox-sessions-")}
                         :setup setup})))
 
 (deftest every-agent-carries-a-boundary-and-a-preset-can-narrow-it

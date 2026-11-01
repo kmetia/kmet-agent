@@ -11,7 +11,8 @@
             [kmet.app.skills :as skills]
             [kmet.app.test-support :as support]
             [kmet.test-utils :refer [spit-plugin]]
-            [kmet.app.tools.registry :as tools]))
+            [kmet.app.tools.registry :as tools]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; The extension host is the composition's: boot one for the namespace.
 (t/use-fixtures :once support/with-composition)
@@ -162,7 +163,7 @@
   ;; deregisters — takes them with it. The pending buffers this replaced kept
   ;; a copy the next engine picked up, so an unloaded extension's hook returned.
   (extensions/clear-extensions!)
-  (let [dir "target/test-ext-hook-unload"]
+  (let [dir (test-tmp/temp-dir! "test-ext-hook-unload-")]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/hook_ext"))
     (spit (str dir "/extension.edn")

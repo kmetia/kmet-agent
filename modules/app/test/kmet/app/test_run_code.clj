@@ -12,7 +12,8 @@
             [kmet.app.tools.run-code :as run-code]
             [kmet.app.tools.util :as tool-util]
             [kmet.libs.host :as host]
-            [kmet.test-utils :as tu]))
+            [kmet.test-utils :as tu]
+            [kmet.test-tmp :as test-tmp]))
 
 (def ^:private reg
   "The tool registry these tests drive: one handle for the namespace, since the
@@ -36,7 +37,7 @@
        (finally (tools/unregister-tool-source! reg id))))
 
 (defn- temp-dir []
-  (let [dir (str (fs/absolutize (str "target/test-run-code-" (System/nanoTime))))]
+  (let [dir (str (fs/absolutize (test-tmp/temp-dir! "test-run-code-")))]
     (fs/create-dirs dir)
     dir))
 

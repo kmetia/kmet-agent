@@ -5,7 +5,8 @@
             [clojure.string :as str]
             [babashka.fs :as fs]
             [kmet.app.session.core :as s]
-            [kmet.app.session.test-support :as support]))
+            [kmet.app.session.test-support :as support]
+            [kmet.test-tmp :as test-tmp]))
 
 (t/use-fixtures :once support/with-clean-test-dir)
 
@@ -93,7 +94,7 @@
     (t/is (pos? (s/get-last-activity-ms session)))))
 
 (t/deftest test-usage-totals
-  (let [dir (str "target/test-sess-usage-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-usage-")
         sess (s/create-session dir)]
     (try
       (s/append-entry sess {:role :user :content "hi"})
@@ -115,7 +116,7 @@
   ;; G22 /session: get-session-stats aggregates over ALL entries (pi:
   ;; getSessionStats) — user/assistant counts, tool results (:tool and
   ;; :bash), tool calls from assistant :tool-calls, and usage totals.
-  (let [dir (str "target/test-sess-stats-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-stats-")
         sess (s/create-session dir)]
     (try
       (s/append-entry sess {:role :user :content "q1"})
@@ -152,7 +153,7 @@
 (t/deftest test-last-assistant-text
   ;; G22 /copy: last assistant message with non-empty text on the branch;
   ;; empty (aborted) assistant entries are skipped.
-  (let [dir (str "target/test-sess-last-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-last-")
         sess (s/create-session dir)]
     (try
       (t/is (nil? (s/get-last-assistant-text sess)) "no messages yet")
@@ -170,7 +171,7 @@
   ;; G22 /session cost breakdown (pi: getUsageCostBreakdown) — assistant
   ;; usage attributed to the model active at that point (:model-change),
   ;; compaction/summary usage under "Tools/summaries", sorted by cost desc.
-  (let [dir (str "target/test-sess-breakdown-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-breakdown-")
         sess (s/create-session dir)]
     (try
       (s/append-model-change! sess :anthropic "claude-3")
@@ -196,7 +197,7 @@
   ;; pi parity: assistant entries carry their own :provider/:model provenance
   ;; (add-assistant-message!) and are attributed by it directly; the
   ;; :model-change walk is only the fallback for legacy unstamped entries.
-  (let [dir (str "target/test-sess-breakdown-stamps-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-breakdown-stamps-")
         sess (s/create-session dir)]
     (try
       ;; no :model-change at all — initial-model usage must not be unknown
@@ -215,7 +216,7 @@
         (t/is (== 0.03 (:cost (first b))) "usage and cost sum across both segments"))
       (finally (fs/delete-tree dir))))
   (t/testing "legacy files: no stamp and no switch yet lands under the unknown bucket"
-    (let [dir (str "target/test-sess-breakdown-unknown-" (System/currentTimeMillis))
+    (let [dir (test-tmp/temp-dir! "test-sess-breakdown-unknown-")
           sess (s/create-session dir)]
       (try
         (s/append-entry sess {:role :assistant :content "a"

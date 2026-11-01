@@ -13,10 +13,11 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kmet.libs.mcp.auth :as auth]
-            [kmet.libs.oauth :as oauth]))
+            [kmet.libs.oauth :as oauth]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- temp-dir []
-  (let [dir (str (fs/absolutize (str "target/test-mcp-auth-" (System/nanoTime))))]
+  (let [dir (str (fs/absolutize (test-tmp/temp-dir! "test-mcp-auth-")))]
     (fs/create-dirs dir)
     dir))
 

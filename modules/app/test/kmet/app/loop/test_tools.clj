@@ -15,7 +15,8 @@
             [kmet.app.config :as cfg]
             [kmet.ui.tui.chat-history :as ui]
             [kmet.libs.theme :as th]
-            [kmet.app.loop.test-support :as support]))
+            [kmet.app.loop.test-support :as support]
+            [kmet.test-tmp :as test-tmp]))
 
 (t/use-fixtures
   :each
@@ -574,7 +575,7 @@
 ;; ─── Bash result recording (pi: recordBashResult + _flushPendingBashMessages)
 
 (t/deftest test-loop-add-bash-result-when-idle
-  (let [dir (str (fs/create-temp-dir {:dir (System/getProperty "user.home")}))
+  (let [dir (test-tmp/temp-dir! "sess-")
         sess (session/create-session (str (fs/path dir "s")))
         agent (support/make-agent-state :session sess)]
     (try
@@ -591,7 +592,7 @@
         (fs/delete-tree dir)))))
 
 (t/deftest test-loop-add-bash-result-queued-while-streaming
-  (let [dir (str (fs/create-temp-dir {:dir (System/getProperty "user.home")}))
+  (let [dir (test-tmp/temp-dir! "sess-")
         sess (session/create-session (str (fs/path dir "s")))
         agent (support/make-agent-state :session sess)]
     (try

@@ -17,7 +17,8 @@
             [kmet.ui.tui.chat-history :as ui]
             [kmet.tui.protocols :as protocols]
             [kmet.test-utils :as tu]
-            [kmet.app.loop.test-support :as support]))
+            [kmet.app.loop.test-support :as support]
+            [kmet.test-tmp :as test-tmp]))
 
 (t/use-fixtures :each support/with-host)
 
@@ -26,8 +27,8 @@
 (t/deftest test-loop-overflow-compact-retry
   (let [events (atom [])
         main-call-count (atom 0)
-        dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+        dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         agent (support/make-agent-state
                :on-event (fn [e] (swap! events conj e))
                :session sess
@@ -98,7 +99,7 @@
   ;; a compaction summarizes the projected context: an omitted message is not
   ;; summarized and does not inflate :tokens-before, and a rewritten one is
   ;; summarized with its replacement text
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-compaction-projection")))
+  (let [dir (test-tmp/temp-dir! "test-loop-compaction-projection-")
         prompts (atom [])
         sess (session/create-session dir)
         agent (support/make-agent-state :session sess :keep-recent-tokens 30)]
@@ -147,8 +148,8 @@
   (let [events (atom [])
         errors (atom [])
         main-call-count (atom 0)
-        dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+        dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         agent (support/make-agent-state
                :on-event (fn [e] (swap! events conj e))
                :session sess
@@ -184,9 +185,9 @@
 ;; ─── Threshold, summarization and manual compaction ─────────────────────
 
 (t/deftest test-loop-token-threshold-compaction
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+  (let [dir (test-tmp/temp-dir! "sess-")
         events (atom [])
-        sess (session/create-session (str dir))
+        sess (session/create-session dir)
         agent (support/make-agent-state
                :session sess
                :on-event (fn [e] (swap! events conj e))
@@ -231,13 +232,13 @@
   ;; pi parity: agent_end reports the run's accumulated messages (newMessages
   ;; — agent-loop.ts), not a slice of the live context, so a message the
   ;; compaction dropped is still in the event.
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
+  (let [dir (test-tmp/temp-dir! "sess-")
         events (atom [])
         errors (atom [])
         llm-calls (atom 0)
         compact-calls (atom 0)
         real-compact compact/maybe-compact!
-        sess (session/create-session (str dir))
+        sess (session/create-session dir)
         agent (support/make-agent-state
                :session sess
                :on-event (fn [e] (swap! events conj e))
@@ -329,8 +330,8 @@
   ;; pi: _handlePostAgentRun runs the compaction check after a settled
   ;; attempt, before the queued-message continuation and the pre-settle
   ;; boundary. A threshold compaction never retries the turn.
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         events (atom [])
         agent (support/make-agent-state
                :session sess
@@ -393,8 +394,8 @@
                  (when-let [on-done (:on-done opts)] (on-done :stop))
                  :done))
         compactions (fn [omit?]
-                      (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-                            sess (session/create-session (str dir))
+                      (let [dir (test-tmp/temp-dir! "sess-")
+                            sess (session/create-session dir)
                             events (atom [])
                             agent (support/make-agent-state
                                    :session sess
@@ -425,8 +426,8 @@
   ;; of the prompt: the context is unchanged, so a later check would retry
   ;; the same summarization. Regression for D — without the guard the
   ;; post-run check runs the failing compaction again.
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         events (atom [])
         agent (support/make-agent-state
                :session sess
@@ -470,8 +471,8 @@
 (t/deftest test-loop-compaction-failure-reports-the-cause
   (t/testing "a failed compaction reports the summarization failure with pi's
               per-reason prefix (threshold: `Auto-compaction failed: …`)"
-    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-          sess (session/create-session (str dir))
+    (let [dir (test-tmp/temp-dir! "sess-")
+          sess (session/create-session dir)
           events (atom [])
           agent (support/make-agent-state
                  :session sess
@@ -507,8 +508,8 @@
               "a spent retry budget means one attempt")
         (finally (fs/delete-tree dir)))))
   (t/testing "a manual compaction reports `Compaction failed: …`"
-    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-          sess (session/create-session (str dir))
+    (let [dir (test-tmp/temp-dir! "sess-")
+          sess (session/create-session dir)
           events (atom [])
           agent (support/make-agent-state
                  :session sess
@@ -542,8 +543,8 @@
   ;; an :error result and the compaction still ends with its failure events,
   ;; so the UI never sticks on the compaction indicator (pi: the stream fn
   ;; reports failures, it never throws into the summarization driver).
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         events (atom [])
         agent (support/make-agent-state
                :session sess
@@ -572,8 +573,8 @@
           (t/is (false? @(:compacting? agent)) "the compaction flag is cleared")))
       (finally (fs/delete-tree dir))))
   (t/testing "a throw after the cancel signal fired reports as aborted"
-    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-          sess (session/create-session (str dir))
+    (let [dir (test-tmp/temp-dir! "sess-")
+          sess (session/create-session dir)
           events (atom [])
           agent (support/make-agent-state
                  :session sess
@@ -602,8 +603,8 @@
   ;; compaction_end + session_compact_failed. Without the catch the exception
   ;; escapes the caller (an interactive /compact runs it on a future that
   ;; swallows it) and the UI stays on the compaction indicator forever.
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         events (atom [])
         err-logged (atom nil)
         agent (support/make-agent-state
@@ -633,8 +634,8 @@
 (t/deftest test-loop-summarization-retry
   (t/testing "a transient summarization failure is retried with the
               configured backoff, reporting pi's summarization_retry_* events"
-    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-          sess (session/create-session (str dir))
+    (let [dir (test-tmp/temp-dir! "sess-")
+          sess (session/create-session dir)
           events (atom [])
           attempts (atom 0)
           agent (support/make-agent-state
@@ -687,8 +688,8 @@
   ;; config's budget wins over the run's option — here the option would
   ;; suppress every retry and the ctx allows one (docs/architecture.md, "Reload and the
   ;; turn boundary").
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         events (atom [])
         attempts (atom 0)
         run-ctx (:ctx (support/test-ctx
@@ -741,8 +742,8 @@
               none and caps its output at 4096 tokens (pi:
               createSummarizationOptions / branch-summarization.ts)"
     (models/load-catalogs! nil)
-    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-          sess (session/create-session (str dir))
+    (let [dir (test-tmp/temp-dir! "sess-")
+          sess (session/create-session dir)
           seen (atom [])
           agent (support/make-agent-state
                  :session sess
@@ -798,12 +799,12 @@
   ;; and the resolved map rides the preparation (pi: preparation.settings)
   ;; into the summarization cap.
   (models/load-catalogs! nil)
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})]
+  (let [dir (test-tmp/temp-dir! "sess-")]
     (try
       (t/testing "a matching entry drives the prep and the summarization cap"
         (let [events (atom [])
               seen (atom [])
-              sess (session/create-session (str dir))
+              sess (session/create-session dir)
               agent (support/make-agent-state
                      :session sess
                      :provider :opencode-go
@@ -833,7 +834,7 @@
           (t/is (= 6400 (:max-tokens (first @seen)))
                 "the summary cap uses the override reserve (0.8 * 8000)")))
       (t/testing "a matching entry drives the window threshold"
-        (let [sess (session/create-session (str dir))
+        (let [sess (session/create-session dir)
               agent (support/make-agent-state
                      :session sess
                      :provider :opencode-go
@@ -852,7 +853,7 @@
                          (support/with-summarization-stub #(compact/maybe-compact! agent))))
                 "measured 2050 >= window-reserve 2000 — the override triggers earlier")))
       (t/testing "a non-matching entry leaves the ordinary settings"
-        (let [sess (session/create-session (str dir))
+        (let [sess (session/create-session dir)
               agent (support/make-agent-state
                      :session sess
                      :provider :opencode-go
@@ -1107,8 +1108,8 @@
    result must emit a :context-replaced message vector that rebuilds with
    the tool's name/args and result. Regression: the rebuilt tool box lost
    its title and collapsed/expanded toggle."
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         events (atom [])
         agent (support/make-agent-state
                :session sess
@@ -1174,10 +1175,10 @@
   ;; contextTokens is the measured usage of the latest assistant response.
   ;; Regression: the old entry-count default (400) compacted sessions at
   ;; ~13% context usage — the count trigger is removed entirely.
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})]
+  (let [dir (test-tmp/temp-dir! "sess-")]
     (try
       (t/testing "small measured usage vs window → no compaction, no count trigger"
-        (let [sess (session/create-session (str dir))
+        (let [sess (session/create-session dir)
               agent (support/make-agent-state
                      :session sess
                      :context-window 10000
@@ -1191,7 +1192,7 @@
           (t/is (false? (compact/maybe-compact! agent))
                 "measured 2050 tokens (1500 input + 50 output + 500 cached) vs window-reserve 9000 — no compaction")))
       (t/testing "measured usage within reserve of the window → compaction"
-        (let [sess (session/create-session (str dir))
+        (let [sess (session/create-session dir)
               agent (support/make-agent-state
                      :session sess
                      :context-window 10000
@@ -1206,7 +1207,7 @@
                          (support/with-summarization-stub #(compact/maybe-compact! agent))))
                 "measured 20050 tokens >= window-reserve 9000 → compaction")))
       (t/testing "no window and no explicit thresholds → never compacts"
-        (let [sess (session/create-session (str dir))
+        (let [sess (session/create-session dir)
               agent (support/make-agent-state
                      :session sess
                      :keep-recent-tokens 40)]
@@ -1215,7 +1216,7 @@
           (t/is (false? (compact/maybe-compact! agent))
                 "no count trigger by default (pi: no entry-count compaction)")))
       (t/testing "degenerate windows never trigger the window check"
-        (let [sess (session/create-session (str dir))
+        (let [sess (session/create-session dir)
               agent (support/make-agent-state
                      :session sess
                      :context-window 0
@@ -1227,7 +1228,7 @@
           (t/is (false? (compact/maybe-compact! agent))
                 "window 0 → no window check (pi: contextWindow <= 0 → undefined)")))
       (t/testing "stale kept-tail usage does not re-trigger right after a compaction"
-        (let [sess (session/create-session (str dir))
+        (let [sess (session/create-session dir)
               agent (support/make-agent-state
                      :session sess
                      :context-window 10000
@@ -1250,9 +1251,9 @@
   ;; maybe-compact! must measure the context (compaction + kept tail), not the
   ;; file. Otherwise the token threshold fires every turn after the first
   ;; compaction.
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})]
+  (let [dir (test-tmp/temp-dir! "sess-")]
     (try
-      (let [sess (session/create-session (str dir))
+      (let [sess (session/create-session dir)
             agent (support/make-agent-state
                    :session sess
                    :compact-token-threshold 100
@@ -1272,8 +1273,8 @@
       (finally (fs/delete-tree dir)))))
 
 (t/deftest test-loop-compact-no-op-reports-false
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         agent (support/make-agent-state :session sess)]
     (try
       (doseq [i (range 3)]
@@ -1292,8 +1293,8 @@
               summarization; compaction_start/compaction_end still fire and
               the end carries :aborted true (pi parity); session + context
               untouched, no LLM call"
-    (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-          sess (session/create-session (str dir))
+    (let [dir (test-tmp/temp-dir! "sess-")
+          sess (session/create-session dir)
           events (atom [])
           llm-called? (atom false)
           agent (support/make-agent-state
@@ -1336,8 +1337,8 @@
           (fs/delete-tree dir))))))
 
 (t/deftest test-loop-prepare-next-turn-context-replaces-session
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         agent (support/make-agent-state :session sess)]
     (try
       (reset! (:prepare-next-turn agent)
@@ -1371,8 +1372,8 @@
             "event carries the new conversation"))))
 
 (t/deftest test-loop-compaction-cancelled
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         events (atom [])
         started (promise)
         agent (support/make-agent-state
@@ -1413,8 +1414,8 @@
   ;; only the compaction controllers; only session.abort() aborts the run).
   ;; Regression: the shared run signal killed the turn and latched the UI on
   ;; running-turn?, so escape looked like it could not cancel the compaction.
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         events (atom [])
         started (promise)
         calls (atom 0)
@@ -1498,8 +1499,8 @@
   ;; fresh operation (pi: session.compact aborts the current operation, then
   ;; creates a new AbortController), so it clears the stale signal — the auto
   ;; paths keep it, an Escape at run start must still abort them.
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         agent (support/make-agent-state :session sess :keep-recent-tokens 40)]
     (try
       (doseq [i (range 6)]
@@ -1528,8 +1529,8 @@
         (fs/delete-tree dir)))))
 
 (t/deftest test-loop-compaction-refuses-when-active
-  (let [dir (fs/create-temp-dir {:dir (System/getProperty "user.home")})
-        sess (session/create-session (str dir))
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
         started (promise)
         agent (support/make-agent-state :session sess
                                         :keep-recent-tokens 40)]

@@ -11,7 +11,8 @@
             [kmet.app.permissions :as permissions]
             [kmet.app.presets :as presets]
             [kmet.app.runtime :as runtime]
-            [kmet.srce.core :as srce]))
+            [kmet.srce.core :as srce]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- booted
   "A booted composition with the loop's `:agents` factory live. No mode runs:
@@ -22,7 +23,7 @@
 (def ^:private config
   "What `create!` needs to place a session somewhere disposable, rather than in
    the agent dir a developer's kmet reads."
-  {:session-dir "target/test-presets"})
+  {:session-dir (test-tmp/temp-dir! "test-presets-")})
 
 (def ^:private a-call
   "A tool call the gate can be asked about."

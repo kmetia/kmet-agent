@@ -17,9 +17,10 @@
             [kmet.app.events :as events]
             [kmet.app.runtime :as runtime]
             [kmet.app.test-support :as support]
-            [kmet.srce.core :as srce]))
+            [kmet.srce.core :as srce]
+            [kmet.test-tmp :as test-tmp]))
 
-(def ^:private sessions-dir "target/test-composition-run")
+(def ^:private sessions-dir (test-tmp/temp-dir! "test-composition-run-"))
 
 (def ^:private config
   {:provider :opencode-go

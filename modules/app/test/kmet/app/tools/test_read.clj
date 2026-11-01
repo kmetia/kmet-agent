@@ -6,7 +6,8 @@
   (:require [clojure.test :as t :refer [deftest is testing]]
             [clojure.string :as str]
             [babashka.fs :as fs]
-            [kmet.app.tools.read :as read]))
+            [kmet.app.tools.read :as read]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- read-call
   "Invoke the read tool the way the registry does — the contextual arity,
@@ -44,7 +45,7 @@
 (deftest a-real-file-does-not-consult-the-resolver
   (testing "an on-disk read is the filesystem's; the resolver is only asked when
             nothing exists at the path"
-    (let [dir (str "target/test-read-" (System/nanoTime))
+    (let [dir (test-tmp/temp-dir! "test-read-")
           f (str (fs/path dir "note.txt"))]
       (fs/create-dirs dir)
       (spit f "on disk\n")

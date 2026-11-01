@@ -7,7 +7,8 @@
             [kmet.app.session.core :as s]
             [kmet.ui.tui.footer :as ft]
             [kmet.ui.tui.footer-data-provider :as fdp]
-            [kmet.libs.theme :as theme]))
+            [kmet.libs.theme :as theme]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- strip-ansi [s]
   (clojure.string/replace s #"\u001b\[[0-9;]*[a-zA-Z]" ""))
@@ -204,7 +205,7 @@
 
 (deftest test-session-name
   (testing "session display name renders after the cwd (pi: pwd • name)"
-    (let [dir (str "target/test-footer-name-" (System/currentTimeMillis))
+    (let [dir (test-tmp/temp-dir! "test-footer-name-")
           sess (s/create-session dir)]
       (try
         (s/append-session-info! sess "my project")
@@ -214,7 +215,7 @@
           (is (some #(re-find #"/srv/workspace( \([^)]*\))? • my project" %) plain)))
         (finally (fs/delete-tree dir)))))
   (testing "no name renders the plain cwd line"
-    (let [dir (str "target/test-footer-name-" (System/currentTimeMillis))
+    (let [dir (test-tmp/temp-dir! "test-footer-name-")
           sess (s/create-session dir)]
       (try
         (let [c (make-footer-with-session :session sess :cwd "/srv/workspace")
@@ -238,7 +239,7 @@
 
 (deftest test-cost-display
   (testing "usage cost renders as $X.XXX after the stats (pi: toFixed(3))"
-    (let [dir (str "target/test-footer-cost-" (System/currentTimeMillis))
+    (let [dir (test-tmp/temp-dir! "test-footer-cost-")
           sess (s/create-session dir)]
       (try
         (s/append-entry sess {:role :assistant :content [{:type :text :text "a"}]
@@ -271,7 +272,7 @@
   (testing "in-place session :entries mutation re-renders usage"
     ;; Session records mutate their :entries atom in place — the footer
     ;; tracks the live entry vector, not just the session record ref.
-    (let [dir (str "target/test-footer-reactive-" (System/currentTimeMillis))
+    (let [dir (test-tmp/temp-dir! "test-footer-reactive-")
           sess (s/create-session dir)]
       (try
         (let [c (make-footer-with-session :session sess)

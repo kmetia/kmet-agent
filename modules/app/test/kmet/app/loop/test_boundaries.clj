@@ -14,7 +14,8 @@
             [kmet.app.retry :as retry]
             [kmet.app.config :as cfg]
             [kmet.app.loop.test-support :as support]
-            [kmet.srce.core :as srce]))
+            [kmet.srce.core :as srce]
+            [kmet.test-tmp :as test-tmp]))
 
 (t/use-fixtures :each support/with-host)
 
@@ -177,7 +178,7 @@
   ;; through the session in order, and a custom_message also reaches the live
   ;; context (as a context-only append: pi's newMessages stays the loop's own
   ;; list).
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-turn-end-entries")))
+  (let [dir (test-tmp/temp-dir! "test-loop-turn-end-entries-")
         events (atom [])
         boundaries (atom [])
         calls (atom 0)
@@ -234,7 +235,7 @@
   ;; (messageEntryId / toolResultEntryIds) and _buildBoundaryContext's
   ;; projection preview, so a handler can target an edit without reading the
   ;; session itself
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-turn-end-ids")))
+  (let [dir (test-tmp/temp-dir! "test-loop-turn-end-ids-")
         boundaries (atom [])
         calls (atom 0)
         agent (support/make-agent-state :session (session/create-session dir))]
@@ -322,7 +323,7 @@
   ;; K: kmet.app.session.core/append-context-edit! — the session keeps the raw entry,
   ;; the live context is rebuilt from the projection (pi: appendContextEdit +
   ;; _refreshFinalizedContext)
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-context-edit")))
+  (let [dir (test-tmp/temp-dir! "test-loop-context-edit-")
         calls (atom 0)
         opts (atom [])
         agent (support/make-agent-state :session (session/create-session dir))]
@@ -356,7 +357,7 @@
   ;; a :turn-end handler's context_edit draft is committed through the
   ;; validating session API and rebuilds the live context, so a later request
   ;; no longer carries the omitted message
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-turn-end-edit")))
+  (let [dir (test-tmp/temp-dir! "test-loop-turn-end-edit-")
         calls (atom 0)
         opts (atom [])
         boundaries (atom 0)
@@ -407,7 +408,7 @@
         (fs/delete-tree dir)))))
 
 (t/deftest test-loop-turn-end-boundary-invalid-context-edit-is-dropped
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-turn-end-bad-edit")))
+  (let [dir (test-tmp/temp-dir! "test-loop-turn-end-bad-edit-")
         calls (atom 0)
         opts (atom [])
         warn (java.io.StringWriter.)
@@ -565,7 +566,7 @@
 (t/deftest test-loop-agent-before-settle-carries-the-context-preview
   ;; pi: _buildBoundaryContext — the pre-settle boundary carries the same
   ;; projection preview as :turn-end (BoundaryContextPreview)
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-loop-before-settle-preview")))
+  (let [dir (test-tmp/temp-dir! "test-loop-before-settle-preview-")
         boundaries (atom [])
         calls (atom 0)
         opts (atom [])

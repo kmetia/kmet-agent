@@ -1,4 +1,4 @@
-{:paths ["src" "test"
+{:paths ["src" "test" "../../test"
          "../../modules/reakt/src"
          "../../modules/hikap/src" "../../modules/libs/src"
          "../../modules/tui/src" "../../modules/ai/src"

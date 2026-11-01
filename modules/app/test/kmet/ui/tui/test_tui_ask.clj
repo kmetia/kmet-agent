@@ -17,11 +17,12 @@
             [kmet.srce.core :as srce]
             [kmet.ui.tui :as tui-row]
             [kmet.ui.tui.interactive :as interactive]
-            [kmet.ui.tui.interactive.layout :as layout]))
+            [kmet.ui.tui.interactive.layout :as layout]
+            [kmet.test-tmp :as test-tmp]))
 
 (def ^:private config
   "Where the run's session goes: a disposable dir, never the developer's own."
-  {:session-dir "target/test-tui-ask"})
+  {:session-dir (test-tmp/temp-dir! "test-tui-ask-")})
 
 (defn- mode-row
   "The row `:mode true` marks — the one the entry hands the invocation's input."

@@ -6,17 +6,17 @@
    read the ANSI-stripped rendered lines, not component internals."
   (:require [clojure.string :as str]
             [clojure.test :as t]
-            [babashka.fs :as fs]
             [kmet.app.keybindings :as kb]
             [kmet.ui.tui.auth-selector :as auth-selector]
             [kmet.hikap.core :as engine]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.hikap.component :as component]
             [kmet.tui.protocols :as protocols]
-            [kmet.tui.utils :as u]))
+            [kmet.tui.utils :as u]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- install-keybindings! []
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-auth-selector-keybindings")))]
+  (let [dir (test-tmp/temp-dir! "test-auth-selector-keybindings-")]
     (tui-kb/set-global-keybindings! (kb/create-agent-keybindings-manager dir))))
 
 (defn- entry

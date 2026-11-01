@@ -8,7 +8,8 @@
             [kmet.ai.model-config :as model-config]
             [kmet.ai.auth :as auth]
             [kmet.ai.oauth :as oauth]
-            [kmet.libs.dynamic-value :as dynamic-value]))
+            [kmet.libs.dynamic-value :as dynamic-value]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; ─── Registry semantics (pi: MutableModels) ────────────────────────────────
 
@@ -368,7 +369,7 @@
 
 (t/deftest test-load-models-config!
   (m/load-catalogs! nil)
-  (let [tmp (str (fs/absolutize (fs/file "target" (str "test-models-config-" (System/currentTimeMillis)))))
+  (let [tmp (test-tmp/temp-dir! "test-models-config-")
         agent-dir (str tmp "/agent")
         global (str agent-dir "/models.edn")
         project (str tmp "/project/.kmet/models.edn")]
@@ -424,7 +425,7 @@
 
 (t/deftest test-load-models-config-error-keeps-builtins
   (m/load-catalogs! nil)
-  (let [tmp (str (fs/absolutize (fs/file "target" (str "test-models-config-err-" (System/currentTimeMillis)))))
+  (let [tmp (test-tmp/temp-dir! "test-models-config-err-")
         path (str tmp "/models.edn")]
     (fs/create-dirs tmp)
     (try
@@ -455,7 +456,7 @@
   ;; pristine builtins, never over already-composed providers: a removed
   ;; provider disappears and a changed override replaces the old one.
   (m/load-catalogs! nil)
-  (let [tmp (str (fs/absolutize (fs/file "target" (str "test-models-reload-" (System/currentTimeMillis)))))
+  (let [tmp (test-tmp/temp-dir! "test-models-reload-")
         path (str tmp "/models.edn")]
     (fs/create-dirs tmp)
     (try
@@ -486,7 +487,7 @@
   ;; Registry contract: get-models returns Model records. Composed custom
   ;; models (plain maps from model-from-json) normalize to records.
   (m/load-catalogs! nil)
-  (let [tmp (str (fs/absolutize (fs/file "target" (str "test-models-records-" (System/currentTimeMillis)))))
+  (let [tmp (test-tmp/temp-dir! "test-models-records-")
         path (str tmp "/models.edn")]
     (fs/create-dirs tmp)
     (try
@@ -655,7 +656,7 @@
   ;; 3 layers: builtin < models.edn < extension (pi composeModelProvider)
   (m/load-catalogs! nil)
   (m/clear-extension-providers!)
-  (let [tmp (str (fs/absolutize (fs/file "target" (str "test-ext-models-edn-" (System/currentTimeMillis)))))
+  (let [tmp (test-tmp/temp-dir! "test-ext-models-edn-")
         path (str tmp "/models.edn")]
     (fs/create-dirs tmp)
     (try
@@ -718,7 +719,7 @@
       (m/load-catalogs! nil))))
 
 (t/deftest test-fresh-cache-wins
-  (let [dir (str (fs/create-temp-dir {:dir "target" :prefix "model-cache-test-"}))
+  (let [dir (test-tmp/temp-dir! "model-cache-test-")
         catalog {:schema-version 1
                  :generated-at "2999-01-01T00:00:00Z"
                  :provider {:id :scratchcache :name "Scratch Cache"
@@ -749,7 +750,7 @@
         (m/load-catalogs! nil)))))
 
 (t/deftest test-stale-or-incomplete-cache-ignored
-  (let [dir (str (fs/create-temp-dir {:dir "target" :prefix "model-cache-test-"}))
+  (let [dir (test-tmp/temp-dir! "model-cache-test-")
         write-cache (fn [{:keys [manifest generated-at]}]
                       (fs/delete-tree dir)
                       (fs/create-dirs dir)
@@ -776,7 +777,7 @@
         (m/load-catalogs! nil)))))
 
 (t/deftest test-unusable-cache-falls-back-to-bundled
-  (let [dir (str (fs/create-temp-dir {:dir "target" :prefix "model-cache-test-"}))]
+  (let [dir (test-tmp/temp-dir! "model-cache-test-")]
     (try
       (spit (str dir "/scratchcache.edn") "{{{ not edn")
       (spit (str dir "/manifest.edn")
@@ -799,7 +800,7 @@
 
 (t/deftest test-account-aliases
   (m/load-catalogs! nil)
-  (let [tmp (str (fs/absolutize (fs/file "target" (str "test-accounts-" (System/currentTimeMillis)))))
+  (let [tmp (test-tmp/temp-dir! "test-accounts-")
         path (str tmp "/models.edn")]
     (fs/create-dirs tmp)
     (try

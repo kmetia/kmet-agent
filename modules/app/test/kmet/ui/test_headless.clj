@@ -17,7 +17,8 @@
             [kmet.app.test-support :as support]
             [kmet.app.ui :as ui]
             [kmet.srce.core :as srce]
-            [kmet.ui.headless :as headless]))
+            [kmet.ui.headless :as headless]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; ── the contract ─────────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@
 (defn- scratch-patch!
   "Write CONTENT to a patch file under target/ and return the path."
   [content]
-  (let [path (str "target/test-ui-patch-" (System/nanoTime) ".edn")]
+  (let [path (test-tmp/temp-file! ".edn")]
     (io/make-parents path)
     (spit path content)
     path))

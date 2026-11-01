@@ -18,7 +18,8 @@
                                                        with-mode-run
                                                        with-model-catalog]]
             [kmet.app.world :as world]
-            [kmet.srce.core :as srce]))
+            [kmet.srce.core :as srce]
+            [kmet.test-tmp :as test-tmp]))
 
 (deftest print-mode-runs-a-prompt-and-exits-zero
   (with-mode-run
@@ -214,7 +215,7 @@
 (deftest the-invocations-session-dir-places-the-session
   ;; `--session-dir` is a config override, and the run's session is created from
   ;; that config: the flag moves where this run writes, not the settings' dir.
-  (let [dir "target/test-modes-flag"]
+  (let [dir (test-tmp/temp-dir! "test-modes-flag-")]
     (fs/delete-tree dir)
     (with-mode-run
       (answering "ok")
@@ -229,7 +230,7 @@
 (deftest an-at-file-is-the-message
   ;; the invocation surface's gate: `-p @tasks.md` sends the file's contents, where the
   ;; argument was, so every mode sees text rather than a filename.
-  (let [path (str "target/test-at-file-" (System/nanoTime) ".md")
+  (let [path (test-tmp/temp-file! ".md")
         request (atom nil)]
     (spit path "hello from the file")
     (try

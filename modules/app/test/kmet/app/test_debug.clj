@@ -6,11 +6,11 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [kmet.app.debug :as debug]
-            [kmet.libs.log :as libs-log]))
+            [kmet.libs.log :as libs-log]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- scratch []
-  (str (fs/create-temp-dir
-        {:dir (or (System/getenv "TMPDIR") (System/getProperty "java.io.tmpdir"))})))
+  (test-tmp/temp-dir! "kmet-logs-"))
 
 (defn- error-file [dir] (str (fs/path dir "kmet-error.log")))
 (defn- debug-file [dir] (str (fs/path dir "kmet-debug.log")))

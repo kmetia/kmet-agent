@@ -7,7 +7,8 @@
             [kmet.app.loop.state :as state]
             [kmet.app.loop :as loop]
             [kmet.app.loop.test-support :as support]
-            [kmet.app.config :as cfg]))
+            [kmet.app.config :as cfg]
+            [kmet.test-tmp :as test-tmp]))
 
 (t/use-fixtures :each support/with-host)
 
@@ -195,7 +196,7 @@
   ;; pi parity: a transient failure's partial is persisted to the session
   ;; (message_end → appendMessage) but removed from agent state before the
   ;; retried call (_prepareRetry) — history keeps it, the request doesn't.
-  (let [dir (str "target/test-loop-failed-attempt-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-loop-failed-attempt-")
         events (atom [])
         call-count (atom 0)
         sess (session/create-session dir)
@@ -256,7 +257,7 @@
   ;; stays in raw history but is durably omitted from the model projection —
   ;; the retried request does not re-send it, and a later rebuild cannot
   ;; resurrect it.
-  (let [dir (str "target/test-loop-retry-omits-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-loop-retry-omits-")
         requests (atom [])
         call-count (atom 0)
         sess (session/create-session dir)
@@ -302,7 +303,7 @@
   ;; in; the recovery omission's own rebuild must drop it again *before* the
   ;; retry attempt starts (pi: _omitRecoveryAttempt → _refreshFinalizedContext),
   ;; not merely have the next request's install clean it up
-  (let [dir (str "target/test-loop-retry-omit-rebuild-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-loop-retry-omit-rebuild-")
         requests (atom [])
         call-count (atom 0)
         boundaries (atom 0)
@@ -363,7 +364,7 @@
   ;; pi parity: an abort mid-stream finalizes the partial as a
   ;; stopReason-aborted assistant message persisted to the session (never
   ;; the live context) — history keeps what the model managed to say.
-  (let [dir (str "target/test-loop-aborted-attempt-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-loop-aborted-attempt-")
         events (atom [])
         started (promise)
         sess (session/create-session dir)

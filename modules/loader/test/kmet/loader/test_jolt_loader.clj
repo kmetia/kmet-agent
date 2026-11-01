@@ -9,6 +9,7 @@
    namespace link, the host view the extension contract is built on, unload,
    and the ambient resource path extension code relies on."
   (:require [babashka.fs :as fs]
+            [kmet.test-tmp :as test-tmp]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :as t :refer [deftest]]
@@ -31,11 +32,10 @@
        :status (v 'status)})))
 
 (defn- dir!
+  "A fresh directory for NAME under the test run's scratch root
+   (kmet.test-tmp), removed with the run."
   [name]
-  (let [d (str "target/test-jolt-loader/" name)]
-    (fs/delete-tree d)
-    (fs/create-dirs d)
-    d))
+  (test-tmp/temp-dir! (str "test-jolt-loader-" name "-")))
 
 (defn- threw
   [f]

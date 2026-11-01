@@ -6,7 +6,8 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [kmet.tasks.lint :as lint]))
+            [kmet.tasks.lint :as lint]
+            [kmet.test-tmp :as test-tmp]))
 
 (def ^:private views @#'lint/views)
 (def ^:private bb (first views))
@@ -65,7 +66,7 @@
     (is (= "(def s #{:bb :clj})\n" (@rewrite-features "(def s #{:bb :clj})\n" ":bb" ":clj")))))
 
 (deftest test-projection-predicates
-  (let [dir (fs/create-temp-dir {:dir "." :prefix "lint-probe-"})
+  (let [dir (test-tmp/temp-dir! "lint-probe-")
         path (fn [name content] (let [f (str (fs/file dir name))] (spit f content) f))]
     (try
       (let [joltish (path "cond.cljc" "(ns c)\n#?(:jolt (defn f [] 1) :bb (defn f [] 2))\n")
@@ -141,7 +142,7 @@
   ;; A probe inside the project so the run picks up the project config (the
   ;; babashka view) and the overlay (the jolt view). The unconditional form is
   ;; what both views see, hence the dedupe check.
-  (let [dir (fs/create-temp-dir {:dir "." :prefix "lint-probe-"})
+  (let [dir (test-tmp/temp-dir! "lint-probe-")
         file (str (fs/file dir "probe.cljc"))]
     (try
       (spit file (str "(ns " (fs/file-name dir) ".probe)\n"
@@ -156,9 +157,11 @@
           (is (= 1 (get messages "Unresolved symbol: undefined-shared-sym"))))
         (testing "findings carry the real path (normalized, mirror-free —
                   however the caller spelled it)"
-          ;; repo-relative spells findings with / on every host, fs/normalize
-          ;; with the platform's own separator
-          (is (every? #(= (str/replace (str (fs/normalize file)) "\\" "/")
+          ;; the task reports repo-relative paths (kmet.tasks.lint/repo-relative),
+          ;; so the expected form is the same relativize+normalize+slash
+          (is (every? #(= (str/replace (str (fs/normalize (fs/relativize (fs/cwd)
+                                                                         (fs/absolutize file))))
+                                       "\\" "/")
                           (:filename %))
                       findings)))
         (testing "the summary counts every finding once"

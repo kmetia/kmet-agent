@@ -23,7 +23,8 @@
             [kmet.app.registry :as registry]
             [kmet.srce.core :as srce]
             [kmet.test-utils :as tu]
-            [kmet.app.test-support :as support]))
+            [kmet.app.test-support :as support]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; The composition provides the handle factory, its ctx and the prompt row.
 (clojure.test/use-fixtures :once support/with-composition)
@@ -434,7 +435,7 @@
           (is (= [[{:id "e1"}] "instr" signal true] (subvec @seen 1))))))))
 
 (deftest test-session-directory-helpers
-  (let [dir (str "target/test-session-runtime-dirs-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-session-runtime-dirs-")
         cwd (str (fs/cwd))]
     (try
       (let [sess (session/create-session (rt/ensure-cwd-session-dir dir cwd)

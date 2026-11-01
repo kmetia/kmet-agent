@@ -1010,8 +1010,15 @@
 
 ;; ─── Crash + debug logs (pi: pi-crash.log / PI_DEBUG_REDRAW / PI_TUI_DEBUG)
 
-(defn- log-path [filename]
-  (str (io/file (System/getProperty "user.dir") filename)))
+(defn- log-path
+  "A diagnostic log file's path: the `kmet.log.dir` override (the same
+   property `kmet.app.debug/logs-dir` reads, so a programmatic host — the test
+   runner included — keeps crash and error logs together) else the cwd, where
+   pi writes its pi-crash.log."
+  [filename]
+  (str (io/file (or (System/getProperty "kmet.log.dir")
+                    (System/getProperty "user.dir"))
+                filename)))
 
 (defn- append-log!
   "Append TEXT to a file at PATH, ignoring errors (pi: appendFileSync).
@@ -1047,8 +1054,8 @@
          (when esc (str " esc=" esc)))))
 
 (defn- write-crash-log!
-  "Write all rendered lines + overflow info to kmet-crash.log in the cwd
-   (pi: pi-crash.log)."
+  "Write all rendered lines + overflow info to kmet-crash.log (pi:
+   pi-crash.log), in the cwd unless a `kmet.log.dir` override names one."
   [lines w idx vw]
   (let [path (log-path "kmet-crash.log")
         data (str "Crash at " (java.time.LocalDateTime/now) "\n"
@@ -3128,7 +3135,8 @@
                                       ;; so the caller unwinds and -main reports
                                       ;; the error (pi: the render loop never
                                       ;; crashes silently).
-                                      (try (with-open [w (java.io.FileWriter. "kmet-render-crash.log" true)]
+                                      (try (with-open [w (java.io.FileWriter.
+                                                          (log-path "kmet-render-crash.log") true)]
                                              (.write w (str t "\n" (clojure.string/join "\n" (.getStackTrace t)) "\n")))
                                            (catch Exception _))
                                       (tui-stop tui)))))

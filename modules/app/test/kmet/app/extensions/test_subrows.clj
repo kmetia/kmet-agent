@@ -12,11 +12,12 @@
             [clojure.test :as t :refer [deftest is testing]]
             [kmet.app.extensions.core :as extensions]
             [kmet.app.test-support :as support]
-            [kmet.srce.core :as srce]))
+            [kmet.srce.core :as srce]
+            [kmet.test-tmp :as test-tmp]))
 
 (t/use-fixtures :once support/with-composition)
 
-(def ^:private dir "target/test-ext-subrows")
+(def ^:private dir (test-tmp/temp-dir! "test-ext-subrows-"))
 
 (srce/defplugin store-row
   {:name :probe/store

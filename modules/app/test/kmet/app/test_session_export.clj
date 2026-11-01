@@ -5,9 +5,10 @@
             [babashka.fs :as fs]
             [kmet.app.session.core :as s]
             [kmet.app.session.export :as se]
-            [kmet.test-utils :refer [slash]]))
+            [kmet.test-utils :refer [slash]]
+            [kmet.test-tmp :as test-tmp]))
 
-(def test-dir "target/test-session-export")
+(def test-dir (test-tmp/temp-dir! "test-session-export-"))
 
 (t/use-fixtures :once
   (fn [f]

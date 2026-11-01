@@ -17,7 +17,8 @@
             [kmet.app.modes.rpc :as rpc]
             [kmet.app.test-support :as support :refer [answering
                                                        with-mode-run
-                                                       with-model-catalog]]))
+                                                       with-model-catalog]]
+            [kmet.test-tmp :as test-tmp]))
 
 (def ^:private run-wait-ms
   "How long a run may take to produce the record a test waits for: a cold Jolt
@@ -410,7 +411,7 @@
   ;; flags by name — which is landing 9's resume-by-id.
   ;; a directory under target/: Termux has no /tmp, and a mode test's litter
   ;; belongs where `bb clean` finds it
-  (let [dir (str "target/test-rpc-entries-" (random-uuid))]
+  (let [dir (test-tmp/temp-dir! "test-rpc-entries-")]
     (try
       (let [sess (session/create-session dir)
             append! (fn [role text]
@@ -444,7 +445,7 @@
       (answering "an answer")
       (fn []
         (with-redefs [extensions/install-session! (fn [sess] (swap! installed conj (:id sess)))]
-          (let [other (session/create-session "target/test-modes")
+          (let [other (session/create-session (test-tmp/temp-dir! "test-rpc-modes-"))
                 _ (session/append-entry other {:role :user
                                                :content [{:type :text :text "earlier"}]})
                 _ (session/append-entry other {:role :assistant

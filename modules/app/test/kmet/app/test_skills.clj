@@ -11,7 +11,8 @@
             [kmet.app.tools.tool :as tool]
             [kmet.app.registry :as registry]
             [kmet.srce.core :as srce]
-            [kmet.test-utils :as tu]))
+            [kmet.test-utils :as tu]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; The extension host is the composition's: boot one for the namespace.
 (t/use-fixtures :once support/with-composition)
@@ -155,7 +156,7 @@
 
 (t/deftest test-load-skills-from-dir
   (t/testing "SKILL.md directories are discovered as skill roots"
-    (let [tmp-dir (str "target/test-skills-" (System/currentTimeMillis))
+    (let [tmp-dir (test-tmp/temp-dir! "test-skills-")
           skill-dir (str tmp-dir "/my-skill")
           skill-file (str skill-dir "/SKILL.md")]
       (try
@@ -172,7 +173,7 @@
 
 (t/deftest test-load-skills-flat-md-fallback
   (t/testing "flat .md files load when a dir has no SKILL.md (pi discovery)"
-    (let [tmp-dir (str "target/test-skills-flat-" (System/currentTimeMillis))
+    (let [tmp-dir (test-tmp/temp-dir! "test-skills-flat-")
           f (str tmp-dir "/flat-skill.md")]
       (try
         (io/make-parents f)
@@ -185,7 +186,7 @@
 
 (t/deftest test-load-skills-skips-missing-description
   (t/testing "skills without a description are not loaded (pi validation)"
-    (let [tmp-dir (str "target/test-skills-nodesc-" (System/currentTimeMillis))
+    (let [tmp-dir (test-tmp/temp-dir! "test-skills-nodesc-")
           skill-dir (str tmp-dir "/no-desc-skill")
           skill-file (str skill-dir "/SKILL.md")]
       (try
@@ -199,7 +200,7 @@
 
 (t/deftest test-load-skills-name-fallback
   (t/testing "name falls back to parent dir name when frontmatter has none (pi)"
-    (let [tmp-dir (str "target/test-skills-fallback-" (System/currentTimeMillis))
+    (let [tmp-dir (test-tmp/temp-dir! "test-skills-fallback-")
           skill-dir (str tmp-dir "/fallback-skill")
           skill-file (str skill-dir "/SKILL.md")]
       (try
@@ -213,7 +214,7 @@
 
 (t/deftest test-load-skills-empty-frontmatter
   (t/testing "empty frontmatter (---\n---) does not crash; skill skipped (no description)"
-    (let [tmp-dir (str "target/test-skills-emptyfm-" (System/currentTimeMillis))
+    (let [tmp-dir (test-tmp/temp-dir! "test-skills-emptyfm-")
           skill-dir (str tmp-dir "/empty-fm")
           skill-file (str skill-dir "/SKILL.md")]
       (try
@@ -227,7 +228,7 @@
 
 (t/deftest test-load-skills-nested-metadata
   (t/testing "nested YAML parses into its own structure without polluting top-level fields"
-    (let [tmp-dir (str "target/test-skills-nested-" (System/currentTimeMillis))
+    (let [tmp-dir (test-tmp/temp-dir! "test-skills-nested-")
           skill-dir (str tmp-dir "/nested-meta")
           skill-file (str skill-dir "/SKILL.md")]
       (try
@@ -243,7 +244,7 @@
 
 (t/deftest test-load-skills-collision-first-wins
   (t/testing "same name from two files keeps the first (pi) and reports collision"
-    (let [tmp-dir (str "target/test-skills-collision-" (System/currentTimeMillis))
+    (let [tmp-dir (test-tmp/temp-dir! "test-skills-collision-")
           f1 (str tmp-dir "/dup-one/SKILL.md")
           f2 (str tmp-dir "/dup-two/SKILL.md")]
       (try
@@ -259,7 +260,7 @@
         (finally (fs/delete-tree tmp-dir))))))
 
 (t/deftest test-expand-skill-command
-  (let [tmp-dir (str "target/test-skills-expand-" (System/currentTimeMillis))
+  (let [tmp-dir (test-tmp/temp-dir! "test-skills-expand-")
         skill-dir (str tmp-dir "/expand-target")
         skill-file (str skill-dir "/SKILL.md")]
     (try
@@ -353,7 +354,7 @@
       (t/is (nil? (skills/get-skill "ext-mem")) "deregister removes the skill")))
   (t/testing "first wins on collision with a file skill"
     (skills/clear-skills!)
-    (let [tmp-dir (str "target/test-skills-extcoll-" (System/currentTimeMillis))]
+    (let [tmp-dir (test-tmp/temp-dir! "test-skills-extcoll-")]
       (try
         (io/make-parents (str tmp-dir "/s/SKILL.md"))
         (spit (str tmp-dir "/s/SKILL.md")

@@ -5,7 +5,8 @@
             [clojure.string :as str]
             [kmet.tui.keys :as keys]
             [kmet.tui.keybindings :as tui-kb]
-            [kmet.libs.theme :as theme]))
+            [kmet.libs.theme :as theme]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- temp-agent-dir
   "Create a throwaway agent dir under target/ (with optional keybindings.edn
@@ -13,7 +14,7 @@
   ([]
    (temp-agent-dir nil))
   ([content]
-   (let [dir (str (fs/absolutize (fs/file "target" (str "test-kb-" (System/currentTimeMillis)))))]
+   (let [dir (test-tmp/temp-dir! "test-kb--")]
      (fs/create-dirs dir)
      (when content
        (spit (str dir "/keybindings.edn") content))

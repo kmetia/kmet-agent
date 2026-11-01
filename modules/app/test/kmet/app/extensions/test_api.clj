@@ -14,7 +14,8 @@
             [kmet.app.registries :as registries]
             [kmet.srce.core :as srce]
             [kmet.hikap.alias :as alias]
-            [kmet.libs.theme :as theme]))
+            [kmet.libs.theme :as theme]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; ─── Extension exec (extension api: exec) ────────────────────────────────
 
@@ -22,9 +23,7 @@
   (testing "exec defaults to the runtime cwd (pi: options?.cwd ?? cwd) — the
             injected context's cwd, which a session switch moves; :dir still
             overrides it"
-    (let [base (str (or (System/getenv "TMPDIR")
-                        (System/getProperty "java.io.tmpdir"))
-                    "/kmet-exec-cwd-" (System/currentTimeMillis))
+    (let [base (test-tmp/temp-dir! "kmet-exec-cwd-")
           dir (str base "/runtime")
           other (str base "/override")
           exec-fn #'extensions/exec]

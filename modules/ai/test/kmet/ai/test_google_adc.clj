@@ -7,7 +7,8 @@
             [kmet.libs.json :as json]
             [clojure.string :as str]
             [kmet.ai.google-adc :as adc]
-            [kmet.libs.http :as http]))
+            [kmet.libs.http :as http]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- generate-keypair
   "A fresh RSA keypair (PEM private key like a service-account file)."
@@ -56,7 +57,7 @@
     {:header header :claims claims :valid? (.verify verifier sig)}))
 
 (t/deftest test-adc-service-account-flow
-  (let [tmp (str (fs/absolutize (fs/file "target" (str "test-adc-" (System/currentTimeMillis)))))
+  (let [tmp (test-tmp/temp-dir! "test-adc-")
         email "sa@project.iam.gserviceaccount.com"]
     (fs/create-dirs tmp)
     (let [cred (service-account-cred email)
@@ -97,7 +98,7 @@
           (fs/delete-tree tmp))))))
 
 (t/deftest test-adc-authorized-user-flow
-  (let [tmp (str (fs/absolutize (fs/file "target" (str "test-adc-user-" (System/currentTimeMillis)))))
+  (let [tmp (test-tmp/temp-dir! "test-adc-user-")
         path (str tmp "/credentials.json")]
     (fs/create-dirs tmp)
     (try
@@ -121,7 +122,7 @@
 
 (t/deftest test-adc-credentials-path
   (t/testing "GOOGLE_APPLICATION_CREDENTIALS wins when it exists"
-    (let [tmp (str (fs/absolutize (fs/file "target" (str "test-adc-path-" (System/currentTimeMillis)))))
+    (let [tmp (test-tmp/temp-dir! "test-adc-path-")
           path (str tmp "/sa.json")]
       (fs/create-dirs tmp)
       (spit path "{}")

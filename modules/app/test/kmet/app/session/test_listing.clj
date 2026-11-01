@@ -8,7 +8,8 @@
             [kmet.app.session.listing :as listing]
             [kmet.app.session.core :as s]
             [kmet.app.session.test-support :as support]
-            [kmet.test-utils :refer [slash]]))
+            [kmet.test-utils :refer [slash]]
+            [kmet.test-tmp :as test-tmp]))
 
 (t/use-fixtures :once support/with-clean-test-dir)
 
@@ -29,7 +30,7 @@
   ;; G2: sessions live in <base>/<--cwd-->/; list-sessions on the base walks
   ;; the cwd subdirs (pi: listAll), a cwd dir lists flat, and legacy flat
   ;; files in the base stay visible (no regression on upgrade)
-  (let [dir (str "target/test-sess-cwd-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-cwd-")
         cwd-a (s/session-dir-for-cwd dir "/home/user/proj-a")
         cwd-b (s/session-dir-for-cwd dir "/home/user/proj-b")
         sa (s/create-session cwd-a)
@@ -49,7 +50,7 @@
   ;; G23/continue: pi findMostRecentSession — header-based discovery in the
   ;; cwd dir, scoped by header :cwd; legacy headerless files and other-cwd
   ;; sessions excluded, no fallback
-  (let [dir (str "target/test-sess-mrs-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-mrs-")
         cwd-a (s/session-dir-for-cwd dir "/home/user/proj-a")
         cwd-b (s/session-dir-for-cwd dir "/home/user/proj-b")
         sa1 (s/create-session cwd-a {:cwd "/home/user/proj-a"})
@@ -85,7 +86,7 @@
   ;; G13: the bounded header scan is chunked (4 KB) and line-oriented — a
   ;; header larger than one chunk (big :cwd) is assembled across chunk
   ;; boundaries and still discovered
-  (let [dir (str "target/test-sess-hdr-chunk-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-hdr-chunk-")
         cwd-dir (s/session-dir-for-cwd dir "/home/user/proj")
         big-cwd (str "/home/user/" (apply str (repeat 20000 "d")))
         sess (s/create-session cwd-dir {:cwd big-cwd})
@@ -101,7 +102,7 @@
   ;; G13: the header scan is bounded at 1 MB (pi:
   ;; MAX_SESSION_HEADER_SCAN_BYTES) — a file whose header line exceeds the
   ;; limit is treated as headerless, never read to the end
-  (let [dir (str "target/test-sess-hdr-limit-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-hdr-limit-")
         cwd-dir (s/session-dir-for-cwd dir "/home/user/proj")
         big-cwd (str "/home/user/" (support/pad-string 1100000 \d))
         sess (s/create-session cwd-dir {:cwd big-cwd})
@@ -126,7 +127,7 @@
   ;; explicit clears, messageCount = message entries only, firstMessage =
   ;; first user message, modified = latest message activity, cwd + parent
   ;; path from the header.
-  (let [dir (str "target/test-sess-buildinfo-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-buildinfo-")
         sess (s/create-session dir {:cwd "/home/user/proj"
                                     :parent-session "/old/parent.ednl"})]
     (try
@@ -151,7 +152,7 @@
 (t/deftest test-session-build-info-headerless
   ;; G15: legacy headerless files yield nil info (pi: buildSessionInfo
   ;; returns null when the first parseable entry isn't a session header)
-  (let [dir (str "target/test-sess-buildinfo-hl-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-buildinfo-hl-")
         f (str dir "/legacy.ednl")]
     (try
       (fs/create-dirs dir)
@@ -162,7 +163,7 @@
 
 (t/deftest test-session-build-info-name-cleared
   ;; G15: latest session_info wins, incl. explicit clears → nil name
-  (let [dir (str "target/test-sess-buildinfo-clear-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-buildinfo-clear-")
         sess (s/create-session dir)]
     (try
       (s/append-entry sess {:role :assistant :content "a"})
@@ -174,7 +175,7 @@
 (t/deftest test-session-build-info-modified
   ;; G15: modified = latest message activity time (pi: buildSessionInfo),
   ;; not the file mtime
-  (let [dir (str "target/test-sess-buildinfo-mod-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-buildinfo-mod-")
         sess (s/create-session dir)]
     (try
       (s/append-entry sess {:role :assistant :content "a"})
@@ -192,7 +193,7 @@
   ;; G15: list-sessions-info streams per-file infos (buildSessionInfo) with
   ;; a progress callback carrying partial snapshots, walks cwd subdirs,
   ;; excludes legacy headerless files, newest modified first
-  (let [dir (str "target/test-sess-listinfo-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-listinfo-")
         cwd-a (s/session-dir-for-cwd dir "/home/user/proj-a")
         cwd-b (s/session-dir-for-cwd dir "/home/user/proj-b")
         sa (s/create-session cwd-a)
@@ -234,7 +235,7 @@
   ;; :stop? ends a listing early: no new files are scheduled, the sessions
   ;; loaded so far are returned, and the rest are never read (closing the
   ;; resume overlay must stop an in-flight scan)
-  (let [dir (str "target/test-sess-listinfo-stop-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-listinfo-stop-")
         stop? (atom false)
         loaded-count (atom 0)]
     (try
@@ -256,7 +257,7 @@
 (t/deftest test-session-list-sessions-info-empty-dir
   ;; a real directory with no session files reports nothing and never fires
   ;; progress (the empty listing short-circuits before the scan)
-  (let [dir (str "target/test-sess-listinfo-empty-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-listinfo-empty-")
         progress (atom [])]
     (try
       (fs/create-dirs dir)
@@ -270,7 +271,7 @@
 (t/deftest test-session-list-sessions-info-headerless-only
   ;; when every file is headerless the listing is empty and its snapshots
   ;; are empty too — progress still reports each file
-  (let [dir (str "target/test-sess-listinfo-headerless-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-listinfo-headerless-")
         progress (atom [])]
     (try
       (fs/create-dirs dir)
@@ -293,7 +294,7 @@
 (t/deftest test-session-list-sessions-info-publish-every
   ;; :publish-every controls only the snapshot cadence: progress still
   ;; fires per file, and the first and last updates always carry a snapshot
-  (let [dir (str "target/test-sess-listinfo-cadence-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-listinfo-cadence-")
         progress (atom [])]
     (try
       (dotimes [i 12]
@@ -316,7 +317,7 @@
 (t/deftest test-session-list-sessions-info-stop-before-start
   ;; an already-true stop predicate prevents every file read and every
   ;; progress update
-  (let [dir (str "target/test-sess-listinfo-prestop-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-listinfo-prestop-")
         progress (atom [])]
     (try
       (let [sess (s/create-session dir)]
@@ -332,7 +333,7 @@
 (t/deftest test-session-file-candidates-order
   ;; discovery streams newest-first by mtime, file name descending as the
   ;; tiebreak (pi: candidate stats sort)
-  (let [dir (str "target/test-sess-candidates-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-sess-candidates-")
         t0 1700000000000
         mk (fn [name mtime]
              (let [f (str dir "/" name)]

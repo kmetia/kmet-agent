@@ -17,7 +17,8 @@
             [kmet.libs.theme :as theme]
             [kmet.app.test-support :as support]
             [kmet.test-utils :refer [spit-plugin]]
-            [kmet.app.tools.registry :as tools-registry]))
+            [kmet.app.tools.registry :as tools-registry]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; The extension host is the composition's: boot one for the namespace.
 (t/use-fixtures :once support/with-composition)
@@ -26,7 +27,7 @@
 
 (t/deftest a-single-file-without-a-plugin-is-a-load-error
   ;; a single file has no manifest to name the var, so the namespace defines it
-  (let [dir "target/test-ext-no-plugin"
+  (let [dir (test-tmp/temp-dir! "test-ext-no-plugin-")
         f (str dir "/noplugin_ext.clj")]
     (fs/delete-tree dir)
     (fs/create-dirs dir)
@@ -92,7 +93,7 @@
   ;; per registration. Only what lives outside the tree —
   ;; here an event subscription — stays on the extension's own list.
   (extensions/clear-extensions!)
-  (let [dir "target/test-ext-owned-registrations"]
+  (let [dir (test-tmp/temp-dir! "test-ext-owned-registrations-")]
     (fs/delete-tree dir)
     (fs/create-dirs (str dir "/owned_ext"))
     (spit (str dir "/extension.edn")
@@ -151,7 +152,7 @@
   ;; unsubscriber is what records on the extension and unload runs it
   ;; (tracked is the outside-the-tree half).
   (extensions/clear-extensions!)
-  (let [dir "target/test-ext-terminal-input"
+  (let [dir (test-tmp/temp-dir! "test-ext-terminal-input-")
         handlers (atom [])
         unsubscribed (atom [])]
     (fs/delete-tree dir)
@@ -181,7 +182,7 @@
   ;; set) and unload takes the skills, prompts and themes with it.
   (extensions/clear-extensions!)
   (support/clear-listeners!)
-  (let [dir "target/test-ext-resource-owner"
+  (let [dir (test-tmp/temp-dir! "test-ext-resource-owner-")
         skill-dir (str dir "/skills")
         prompt-dir (str dir "/prompts")
         theme-dir (str dir "/themes")

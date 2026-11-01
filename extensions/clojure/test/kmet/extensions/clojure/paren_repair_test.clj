@@ -5,11 +5,14 @@
   (:require [clojure.test :as t :refer [deftest testing is]]
             [clojure.string :as str]
             [babashka.fs :as fs]
-            [kmet.extensions.clojure.paren-repair :as paren-repair]))
+            [kmet.extensions.clojure.paren-repair :as paren-repair]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; ─── Helpers ───────────────────────────────────────────────────────────────
 
-(def ^:private test-dir "target/paren-repair-tests")
+(def ^:private test-dir
+  "Scratch files under the test run's root (kmet.test-tmp), removed with it."
+  (test-tmp/temp-dir! "paren-repair-tests-"))
 
 (defn- ensure-test-dir! []
   (fs/create-dirs test-dir))
@@ -35,7 +38,7 @@
     (is (str/includes? (:content result) "file_path"))))
 
 (deftest ^:bb-only test-nonexistent-file
-  (let [result (paren-repair/execute {:file_path "target/paren-repair-tests/does-not-exist.clj"})]
+  (let [result (paren-repair/execute {:file_path (str test-dir "/does-not-exist.clj")})]
     (is (:is-error result))
     (is (str/includes? (:content result) "does not exist"))))
 

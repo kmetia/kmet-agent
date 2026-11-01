@@ -8,7 +8,8 @@
   (:require [clojure.test :as t]
             [babashka.fs :as fs]
             [clojure.string :as str]
-            [kmet.ai.aws-sigv4 :as aws]))
+            [kmet.ai.aws-sigv4 :as aws]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- hex->bytes
   "Parse lowercase hex into a byte array (portable replacement for
@@ -107,7 +108,7 @@
 ;; ─── Ambient credential resolution ─────────────────────────────────────────
 
 (t/deftest test-profile-credentials
-  (let [tmp (str (fs/absolutize (fs/file "target" (str "test-aws-creds-" (System/currentTimeMillis)))))
+  (let [tmp (test-tmp/temp-dir! "test-aws-creds-")
         path (str tmp "/credentials")]
     (fs/create-dirs tmp)
     (try

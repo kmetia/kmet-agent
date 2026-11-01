@@ -8,7 +8,8 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kmet.tasks.build :as build]
-            [kmet.tasks.build-jolt :as jbuild]))
+            [kmet.tasks.build-jolt :as jbuild]
+            [kmet.test-tmp :as test-tmp]))
 
 (deftest platform-for-is-the-shared-host-vocabulary
   ;; kmet.tasks.build/platform-for: the babashka packager stamps the same
@@ -92,7 +93,7 @@
       (is (seq (get-in by-name [lib-name key])) lib-name))))
 
 (deftest generated-scheme-proves-natives-were-static
-  (let [dir "target/test-jolt-static-natives"
+  (let [dir (test-tmp/temp-dir! "test-jolt-static-natives-")
         bin (str dir "/kmet.exe")
         flat (str dir "/kmet.exe.build/flat.ss")
         verify #'jbuild/verify-static-native-build!
@@ -221,7 +222,7 @@
               (str (@#'jbuild/scratch-bin "linux-amd64" "dev" {:test? true}))))))
 
 (deftest assemble-copies-the-compiled-binary-to-its-artifact-path
-  (let [dir "target/test-jolt-assemble"
+  (let [dir (test-tmp/temp-dir! "test-jolt-assemble-")
         bin (str (fs/path dir "scratch" "kmetj"))
         artifact (str (fs/path dir "staged" "kmetj"))]
     (fs/delete-tree dir)
@@ -263,7 +264,7 @@
   ;; the Termux launcher is only for glibc-linked artifacts; a jolt linked
   ;; with the bionic cc runs directly and must not get one (a stale launcher
   ;; from an earlier glibc build of the same path is removed)
-  (let [dir "target/test-jolt-launcher"
+  (let [dir (test-tmp/temp-dir! "test-jolt-launcher-")
         glibc (str dir "/glibc.bin")
         bionic (str dir "/bionic.bin")
         launcher (str dir "/bionic.bin.sh")]
@@ -291,7 +292,7 @@
       (finally (fs/delete-tree dir)))))
 
 (deftest smoke-agent-dir-enables-a-native-bundled-extension
-  (let [dir (str "target/test-jolt-smoke-agent-" (System/currentTimeMillis))]
+  (let [dir (test-tmp/temp-dir! "test-jolt-smoke-agent-")]
     (fs/delete-tree dir)
     (try
       (let [agent-dir (@#'jbuild/prepare-smoke-agent-dir dir)

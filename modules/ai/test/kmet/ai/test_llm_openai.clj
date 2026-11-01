@@ -22,7 +22,8 @@
             [kmet.app.config :as cfg]
             [kmet.ai.model-gen :as model-gen]
             [kmet.ai.models :as m]
-            [kmet.app.tools.tool :as tools]))
+            [kmet.app.tools.tool :as tools]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; ─── OpenAI Codex + Azure responses (shared processor, new URL + auth) ────
 
@@ -403,7 +404,7 @@
   ;; consumed (pi resolves its stream only after the final chunk), so the
   ;; trailing usage chunk is dispatched before on-done fires.
   (m/load-catalogs! nil)
-  (let [dir (str "target/test-llm-trailing-usage-" (System/currentTimeMillis))
+  (let [dir (test-tmp/temp-dir! "test-llm-trailing-usage-")
         sess (session/create-session dir)
         ss (java.net.ServerSocket. 0)
         port (.getLocalPort ss)

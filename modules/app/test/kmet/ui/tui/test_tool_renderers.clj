@@ -9,7 +9,8 @@
             [kmet.tui.core :as core]
             [kmet.tui.utils :as utils]
             [kmet.ui.tui.tool-renderers :as r]
-            [kmet.libs.theme :as theme]))
+            [kmet.libs.theme :as theme]
+            [kmet.test-tmp :as test-tmp]))
 
 (def ^:private th theme/dark-theme)
 
@@ -303,7 +304,7 @@
             cwd — the edit tool resolves there (resolve-tool-path), so the
             preview must too, or a switched session previews the launch
             directory's file (or reports File not found)"
-    (let [dir (str (fs/absolutize (str "target/test-edit-preview-" (System/currentTimeMillis))))]
+    (let [dir (str (fs/absolutize (test-tmp/temp-dir! "test-edit-preview-")))]
       (try
         (fs/create-dirs dir)
         (spit (str dir "/note.txt") "one\n")
@@ -327,8 +328,7 @@
             frame). Replayed sessions hit this — the filesystem preview would
             read today's file and settle one frame later, marking the
             scrollback dirty"
-    (let [dir (str (fs/absolutize (str "target/test-edit-recorded-diff-"
-                                       (System/currentTimeMillis))))]
+    (let [dir (test-tmp/temp-dir! "test-edit-recorded-diff-")]
       (try
         (fs/create-dirs dir)
         ;; the current file would preview a lowercase "two"
@@ -363,8 +363,7 @@
             filesystem preview: it could only re-derive the failure, and a
             replayed call would read a file from today's worktree. The error
             then renders on the result side (no preview error to dedup)"
-    (let [dir (str (fs/absolutize (str "target/test-edit-errored-preview-"
-                                       (System/currentTimeMillis))))]
+    (let [dir (test-tmp/temp-dir! "test-edit-errored-preview-")]
       (try
         (fs/create-dirs dir)
         ;; today's file would preview a lowercase "two"

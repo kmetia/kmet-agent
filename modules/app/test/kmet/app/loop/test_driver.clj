@@ -27,13 +27,14 @@
             [kmet.app.test-support :as support]
             [kmet.app.registry :as registry]
             [kmet.app.tools.read :as read-tool]
-            [kmet.srce.core :as srce]))
+            [kmet.srce.core :as srce]
+            [kmet.test-tmp :as test-tmp]))
 
 (def ^:private sessions-dir
   "Where the test composition keeps its session logs: a real EDNL backend, not
    the in-process one — the loop appends to the session it is handed, so a
    log it can write is part of what the driver needs."
-  "target/test-driver-sessions")
+  (test-tmp/temp-dir! "test-driver-sessions-"))
 
 (defn- persistence-row []
   {:name :sessionPersistence

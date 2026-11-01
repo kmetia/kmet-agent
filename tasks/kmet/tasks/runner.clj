@@ -45,7 +45,8 @@
   (:require [clojure.string :as str]
             [clojure.test :as t]
             [kmet.libs.host :as host]
-            [kmet.tasks.modules :as modules]))
+            [kmet.tasks.modules :as modules]
+            [kmet.test-tmp :as test-tmp]))
 
 (def jolt?
   "True when running under the jolt host (its clojure.test port differs from
@@ -494,14 +495,15 @@
     (run-and-summarize {:vars vars :unloaded unloaded} false)))
 
 (defn- isolate-diagnostics!
-  "Point the app's diagnostics logs at target/test-logs for this run: a test
-   that reports an unhandled error must not append to the checkout's `logs/`.
-   `kmet.app.debug` reads the system property before its own defaults, so no
-   app namespace has to load here. A host that cannot set a property keeps
-   the default."
+  "Point the app's diagnostics logs into this run's scratch root
+   (kmet.test-tmp): a test that reports an unhandled error must not append to
+   the checkout's `logs/`, and the run's cleanup removes what it wrote.
+   `kmet.app.debug` and the TUI's crash/debug logs read the system property
+   before their own defaults, so no app namespace has to load here. A host
+   that cannot set a property keeps the default."
   []
   (try
-    (System/setProperty "kmet.log.dir" "target/test-logs")
+    (System/setProperty "kmet.log.dir" (str (test-tmp/root) "/logs"))
     (catch Throwable _ nil)))
 
 (defn run-changed!
@@ -541,9 +543,12 @@
    JVM; var filters ignore bb-only too, so an explicit request runs and
    reports the underlying ::bb-only error."
   [slow? & args]
-  (isolate-diagnostics!)
-  (let [slow? (slow-flag slow?)
-        args (vec args)]
-    (if (= "--changed" (first args))
-      (run-changed! slow?)
-      (run-and-summarize (select-vars slow? (seq args)) (empty? args)))))
+  (test-tmp/begin-run!)
+  (try
+    (isolate-diagnostics!)
+    (let [slow? (slow-flag slow?)
+          args (vec args)]
+      (if (= "--changed" (first args))
+        (run-changed! slow?)
+        (run-and-summarize (select-vars slow? (seq args)) (empty? args))))
+    (finally (test-tmp/end-run!))))

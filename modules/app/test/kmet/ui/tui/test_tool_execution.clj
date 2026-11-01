@@ -14,7 +14,21 @@
    [kmet.ui.tui.tool-renderers :as renderers]
    [kmet.app.tools.bash :as bash]
    [kmet.tui.protocols :as protocols]
-   [kmet.tui.components.text :as text]))
+   [kmet.tui.components.text :as text]
+   [kmet.test-tmp :as test-tmp]))
+
+(def ^:private fixture-dir
+  "The files these renderers read live under the run's scratch root
+   (kmet.test-tmp), removed with it — not in the checkout's target/."
+  (test-tmp/temp-dir! "test-tools-"))
+
+(defn- fx
+  "A fixture file named NAME under FIXTURE-DIR, as a path relative to the
+   working directory: the renderers show the path they are handed, and a
+   relative one reads the way the old `target/…` literals did (short enough
+   for a rendered title line)."
+  [name]
+  (str (fs/relativize (fs/cwd) (fs/path fixture-dir name))))
 
 (defn- strip-ansi [s]
   (utils/strip-ansi-codes s))
@@ -106,14 +120,14 @@
 
 ;; ─── Built-in renderers (read / write / edit / bash / run_code) ────────────
 
-(defn- render-tool [& {:keys [name args content is-error expanded? truncation]}]
+(defn- render-tool [& {:keys [name args content is-error expanded? truncation width]}]
   (let [c (te/make-tool-execution :name name :args args :content (or content "")
                                   :is-error (boolean is-error) :expanded? expanded?
                                   :truncation truncation)]
     ;; Pi: interactive mode calls setArgsComplete right after creating the
     ;; component (kmet interactive.clj tool-execution-start handler)
     (te/tool-execution-set-args-complete! c)
-    (mapv strip-ansi (core/render c 60))))
+    (mapv strip-ansi (core/render c (or width 60)))))
 
 (deftest test-read-render-hyperlink-path
   (testing "OSC 8 hyperlinked path stays on one line with contiguous visible text (pi linkPath)"
@@ -173,9 +187,9 @@
 
 (deftest test-edit-render-diff-preview
   (testing "edit call shows numbered diff preview"
-    (spit "target/test-tools-edit-render.txt" "alpha\nbeta\ngamma")
+    (spit (fx "test-tools-edit-render.txt") "alpha\nbeta\ngamma")
     (let [plain (render-tool :name "edit"
-                             :args {:path "target/test-tools-edit-render.txt"
+                             :args {:path (fx "test-tools-edit-render.txt")
                                     :old-text "beta" :new-text "BETA"})]
       (is (some #(re-find #"1 alpha" %) plain))
       (is (some #(re-find #"-2 beta" %) plain))
@@ -186,16 +200,16 @@
   ;; change produced :diff-lines [""] — rendered as a blank box line (a
   ;; "diff with no difference"). It must render without any phantom line.
   (testing "whitespace-only edit preview has no diff lines"
-    (spit "target/test-tools-edit-wsonly.txt" "alpha\nbeta\ngamma\n")
-    (let [plain (render-tool :name "edit"
-                             :args {:path "target/test-tools-edit-wsonly.txt"
+    (spit (fx "test-tools-edit-wsonly.txt") "alpha\nbeta\ngamma\n")
+    (let [plain (render-tool :name "edit" :width 140
+                             :args {:path (fx "test-tools-edit-wsonly.txt")
                                     :old-text "gamma\n" :new-text "gamma"})]
       ;; the box renders the title but no diff lines
-      (is (some #(re-find #"edit target/test-tools-edit-wsonly.txt" %) plain))
+      (is (some #(str/includes? % (str "edit " (fx "test-tools-edit-wsonly.txt"))) plain))
       ;; no -/+ diff lines and no blank diff area
       (is (not-any? #(re-find #"^[ +-]\s*\d" %) plain))
       ;; the only non-title lines are box padding
-      (is (every? #(or (str/includes? % "edit target/test-tools-edit-wsonly.txt")
+      (is (every? #(or (str/includes? % (str "edit " (fx "test-tools-edit-wsonly.txt")))
                        (str/blank? %))
                   plain)))))
 
@@ -204,9 +218,9 @@
   ;; rendered with identical visible text (a "diff with no difference").
   ;; It must be skipped entirely — no -/+ lines for invisible changes.
   (testing "trailing-space-only change renders no -/+ lines"
-    (spit "target/test-tools-edit-tsp.txt" "alpha\nbeta \ngamma\n")
+    (spit (fx "test-tools-edit-tsp.txt") "alpha\nbeta \ngamma\n")
     (let [plain (render-tool :name "edit"
-                             :args {:path "target/test-tools-edit-tsp.txt"
+                             :args {:path (fx "test-tools-edit-tsp.txt")
                                     :old-text "beta " :new-text "beta"})]
       ;; no -/+ lines at all
       (is (not-any? #(re-find #"^[+-]\s*\d" %) plain))
@@ -219,9 +233,9 @@
   ;; into the context branch — the + marker was stripped and new lines
   ;; rendered as unchanged context, hiding the edit from the diff.
   (testing "insertion-only edit renders + lines"
-    (spit "target/test-tools-edit-ins.txt" "alpha\nbeta\ngamma\n")
+    (spit (fx "test-tools-edit-ins.txt") "alpha\nbeta\ngamma\n")
     (let [plain (render-tool :name "edit"
-                             :args {:path "target/test-tools-edit-ins.txt"
+                             :args {:path (fx "test-tools-edit-ins.txt")
                                     :old-text "beta" :new-text "beta\nbeta2\nbeta3"})]
       (is (some #(re-find #"\+3 beta2" %) plain))
       (is (some #(re-find #"\+4 beta3" %) plain))
@@ -232,9 +246,9 @@
 
 (deftest test-edit-render-mixed-and-insertion-regions
   (testing "mixed -/+ region followed by a standalone insertion run"
-    (spit "target/test-tools-edit-mixins.txt" "keep1\nold-a\nnew-x\nnew-y\nkeep2\n")
+    (spit (fx "test-tools-edit-mixins.txt") "keep1\nold-a\nnew-x\nnew-y\nkeep2\n")
     (let [plain (render-tool :name "edit"
-                             :args {:path "target/test-tools-edit-mixins.txt"
+                             :args {:path (fx "test-tools-edit-mixins.txt")
                                     :edits [{:old-text "old-a" :new-text "new-a"}
                                             {:old-text "keep2" :new-text "keep2\nadded"}]})]
       (is (some #(re-find #"-2 old-a" %) plain))
@@ -242,18 +256,19 @@
       (is (some #(re-find #"\+6 added" %) plain)))))
 
 (deftest test-edit-render-custom-name
+  ;; 140 columns keeps the scratch-root path on the title line
   (testing "shared edit renderer uses the supplied tool name"
-    (spit "target/test-tools-edit-render.txt" "alpha")
+    (spit (fx "test-tools-edit-render.txt") "alpha")
     (let [c (te/make-tool-execution
              :name "clojure_edit"
-             :args {:file_path "target/test-tools-edit-render.txt"
+             :args {:file_path (fx "test-tools-edit-render.txt")
                     :form_type "defn"}
              :render-call-fn renderers/render-edit-call
              :render-result-fn renderers/render-edit-result
              :render-shell :self)]
       (te/tool-execution-set-args-complete! c)
-      (is (some #(re-find #"clojure_edit target/test-tools-edit-render.txt" %)
-                (mapv strip-ansi (core/render c 60)))))))
+      (is (some #(str/includes? % (str "clojure_edit " (fx "test-tools-edit-render.txt")))
+                (mapv strip-ansi (core/render c 140)))))))
 
 (deftest test-edit-render-no-status-line
   (testing "self-shell edit body stays pending; a tool without :status has no
@@ -363,19 +378,21 @@
 
 (deftest test-edit-render-edits-array
   (testing "edit preview handles camelCase edits array"
-    (spit "target/test-tools-edit-render.txt" "one two")
+    (spit (fx "test-tools-edit-render.txt") "one two")
     (let [plain (render-tool :name "edit"
-                             :args {:path "target/test-tools-edit-render.txt"
+                             :args {:path (fx "test-tools-edit-render.txt")
                                     :edits [{:oldText "one" :newText "1"}]})]
       (is (some #(re-find #"\+1 1 two" %) plain)))))
 
 (deftest test-edit-render-error-suppressed
   (testing "edit execution error already shown by preview is suppressed (pi dedup)"
-    (spit "target/test-tools-edit-render.txt" "alpha")
+    (spit (fx "test-tools-edit-render.txt") "alpha")
     (let [plain (render-tool :name "edit"
-                             :args {:path "target/test-tools-edit-render.txt"
+                             :args {:path (fx "test-tools-edit-render.txt")
                                     :old-text "zzz" :new-text "x"}
-                             :content "Could not find the exact text in target/test-tools-edit-render.txt. The old text must match exactly including all whitespace and newlines."
+                             :content (str "Could not find the exact text in "
+                                           (fx "test-tools-edit-render.txt")
+                                           ". The old text must match exactly including all whitespace and newlines.")
                              :is-error true)]
       (is (= 1 (count (filter #(re-find #"Could not find the exact text" %) plain)))))))
 
@@ -440,7 +457,7 @@
 
 (deftest test-edit-result-diff-corrects-preview
   (testing "edit result with a different applied diff corrects the cached preview (pi resultDiff fallback)"
-    (let [f "target/test-tools-edit-resultdiff.txt"]
+    (let [f (fx "test-tools-edit-resultdiff.txt")]
       (spit f "alpha\nbeta\ngamma")
       (let [c (te/make-tool-execution
                :name "edit"
@@ -453,7 +470,7 @@
         ;; that differs from the previewed one
         (spit f "alpha\nbeta\ngamma\ndelta")
         (reset! (:content-atom c)
-                "Successfully replaced 1 block(s) in target/test-tools-edit-resultdiff.txt.")
+                (str "Successfully replaced 1 block(s) in " f "."))
         (te/tool-execution-set-error! c false)
         (reset! (:details-atom c)
                 {:diff " 1 alpha\n-2 beta\n+2 BETA\n 3 gamma\n 4 delta"})
@@ -467,43 +484,45 @@
 
 (deftest test-edit-replayed-result-diff
   (testing "replayed edit result (args incomplete, pi restore) shows the applied diff via details"
-    (spit "target/test-tools-edit-replay.txt" "alpha\nBETA\ngamma")
-    (let [c (te/make-tool-execution
-             :name "edit"
-             :args {:path "target/test-tools-edit-replay.txt"
-                    :old-text "beta" :new-text "BETA"}
-             :content "Successfully replaced 1 block(s) in target/test-tools-edit-replay.txt."
-             :details {:diff " 1 alpha\n-2 beta\n+2 BETA\n 3 gamma"})]
-      (te/tool-execution-set-error! c false)
-      ;; first pass: render-result corrects the preview from details
-      (core/render c 60)
-      ;; second pass: the call box shows the applied diff
-      (let [plain (mapv strip-ansi (core/render c 60))]
-        (is (some #(re-find #"\+2 BETA" %) plain))
-        (is (some #(re-find #" 1 alpha" %) plain))))))
+    (let [f (fx "test-tools-edit-replay.txt")]
+      (spit f "alpha\nBETA\ngamma")
+      (let [c (te/make-tool-execution
+               :name "edit"
+               :args {:path f
+                      :old-text "beta" :new-text "BETA"}
+               :content (str "Successfully replaced 1 block(s) in " f ".")
+               :details {:diff " 1 alpha\n-2 beta\n+2 BETA\n 3 gamma"})]
+        (te/tool-execution-set-error! c false)
+        ;; first pass: render-result corrects the preview from details
+        (core/render c 60)
+        ;; second pass: the call box shows the applied diff
+        (let [plain (mapv strip-ansi (core/render c 60))]
+          (is (some #(re-find #"\+2 BETA" %) plain))
+          (is (some #(re-find #" 1 alpha" %) plain)))))))
 
 (deftest test-edit-result-diff-matching-preview-kept
   (testing "edit result matching the preview leaves the call box unchanged (no re-preview)"
-    (spit "target/test-tools-edit-match.txt" "alpha\nbeta\ngamma")
-    (let [c (te/make-tool-execution
-             :name "edit"
-             :args {:path "target/test-tools-edit-match.txt"
-                    :old-text "beta" :new-text "BETA"})]
-      (te/tool-execution-set-args-complete! c)
-      (let [before (mapv strip-ansi (core/render c 60))]
-        (reset! (:content-atom c)
-                "Successfully replaced 1 block(s) in target/test-tools-edit-match.txt.")
-        (te/tool-execution-set-error! c false)
-        (reset! (:details-atom c)
-                {:diff " 1 alpha\n-2 beta\n+2 BETA\n 3 gamma"})
-        (let [after2 (mapv strip-ansi (core/render c 60))]
-          ;; identical diff: no correction, no stale-file error
-          (is (= before after2))
-          (is (not-any? #(re-find #"Could not find old-text" %) after2)))))))
+    (let [f (fx "test-tools-edit-match.txt")]
+      (spit f "alpha\nbeta\ngamma")
+      (let [c (te/make-tool-execution
+               :name "edit"
+               :args {:path f
+                      :old-text "beta" :new-text "BETA"})]
+        (te/tool-execution-set-args-complete! c)
+        (let [before (mapv strip-ansi (core/render c 60))]
+          (reset! (:content-atom c)
+                  (str "Successfully replaced 1 block(s) in " f "."))
+          (te/tool-execution-set-error! c false)
+          (reset! (:details-atom c)
+                  {:diff " 1 alpha\n-2 beta\n+2 BETA\n 3 gamma"})
+          (let [after2 (mapv strip-ansi (core/render c 60))]
+            ;; identical diff: no correction, no stale-file error
+            (is (= before after2))
+            (is (not-any? #(re-find #"Could not find old-text" %) after2))))))))
 
 (deftest test-edit-preview-cached-after-edit
   (testing "edit call keeps the original preview after the file was edited (pi caches per args)"
-    (let [f "target/test-tools-edit-cache.txt"]
+    (let [f (fx "test-tools-edit-cache.txt")]
       (spit f "alpha\nbeta\ngamma")
       (let [c (te/make-tool-execution
                :name "edit"
@@ -524,10 +543,10 @@
 
 (deftest test-edit-render-pending-when-args-incomplete
   (testing "edit call shows pending box (no diff) until args are complete (pi argsComplete)"
-    (spit "target/test-tools-edit-pending.txt" "alpha")
+    (spit (fx "test-tools-edit-pending.txt") "alpha")
     (let [c (te/make-tool-execution
              :name "edit"
-             :args {:path "target/test-tools-edit-pending.txt"
+             :args {:path (fx "test-tools-edit-pending.txt")
                     :old-text "alpha" :new-text "ALPHA"})
       ;; args-complete is false here — no preview yet
           plain (mapv strip-ansi (core/render c 60))]

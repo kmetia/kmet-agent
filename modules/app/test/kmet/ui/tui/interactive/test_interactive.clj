@@ -57,7 +57,8 @@
             [clojure.string :as str]
             [kmet.app.session.runtime :as runtime]
             [kmet.ui.tui.interactive.test-handle-support :as hs]
-            [kmet.test-utils :as tu]))
+            [kmet.test-utils :as tu]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; The tests that install the interactive builtins leave the app's slash
 ;; registry filled; clear the process-global registrations between tests.
@@ -208,8 +209,7 @@
                                     :footer-provider (fdp/make-footer-data-provider
                                                       :cwd-atom (atom (str (fs/cwd)))
                                                       :session (session/create-session
-                                                                (str "target/test-agent-start-"
-                                                                     (System/currentTimeMillis))))})
+                                                                (test-tmp/temp-dir! "test-agent-start-")))})
                     :pending-tool-comps (atom {}))
           h ((var layout/make-agent-event-handler)
              {:chat-history (:chat-history cs)
@@ -408,7 +408,7 @@
 
 (deftest share-completion-requests-frame-after-message
   (testing "the async share reply requests a frame after appending its chat message"
-    (let [dir (str (fs/create-temp-dir {:prefix "test-share-render-" :dir "target"}))
+    (let [dir (test-tmp/temp-dir! "test-share-render-")
           sess (session/create-session dir)
           render-requested? (atom false)
           request-message-counts (atom [])
@@ -444,7 +444,7 @@
 
 (deftest custom-entry-sink-requests-frame-after-append
   (testing "a rendered custom entry requests a frame after appending to chat"
-    (let [dir (str (fs/create-temp-dir {:prefix "test-entry-render-" :dir "target"}))
+    (let [dir (test-tmp/temp-dir! "test-entry-render-")
           sess (session/create-session dir)
           render-requested? (atom false)
           request-message-counts (atom [])
@@ -489,7 +489,7 @@
             pi-faithful :tool-name key, so every tool rendered as \"tool\"
             through the default renderer — no bash call line, full output
             with no collapsing"
-    (let [sess-dir (str "target/test-interactive-replay-tools-" (System/currentTimeMillis))
+    (let [sess-dir (test-tmp/temp-dir! "test-interactive-replay-tools-")
           sess (session/create-session sess-dir)]
       (try
         (session/append-entry sess {:role :user :content "run the tests"})
@@ -542,7 +542,7 @@
             entry's blocks to text, so the image blocks ride the message's
             :images and the image element renders (regression: resume showed
             text only while the live path rendered the images)"
-    (let [sess-dir (str "target/test-interactive-replay-images-" (System/currentTimeMillis))
+    (let [sess-dir (test-tmp/temp-dir! "test-interactive-replay-images-")
           sess (session/create-session sess-dir)]
       (try
         (session/append-entry sess
@@ -576,7 +576,7 @@
             bubble for it, while the omitted message stays in the transcript
             (pi: context_edit is a settings entry; the edit affects the model
             projection only — raw history, replay and the UI keep the target)"
-    (let [sess-dir (str "target/test-interactive-replay-context-edit-" (System/currentTimeMillis))
+    (let [sess-dir (test-tmp/temp-dir! "test-interactive-replay-context-edit-")
           sess (session/create-session sess-dir)]
       (try
         (let [u (session/append-entry sess {:role :user :content "ask"})]
@@ -597,7 +597,7 @@
             failure text instead of waiting for a result that never came
             (pi: renderInitialMessages updateResult error for stopReason
             error/aborted messages)"
-    (let [sess-dir (str "target/test-interactive-replay-errored-" (System/currentTimeMillis))
+    (let [sess-dir (test-tmp/temp-dir! "test-interactive-replay-errored-")
           sess (session/create-session sess-dir)]
       (try
         (session/append-entry sess {:role :user :content "go"})
@@ -624,7 +624,7 @@
   (testing "an aborted assistant entry's dangling tool calls render as
             aborted rather than pending (pi: \"Operation aborted\" on
             restore of stopReason-aborted messages)"
-    (let [sess-dir (str "target/test-interactive-replay-aborted-" (System/currentTimeMillis))
+    (let [sess-dir (test-tmp/temp-dir! "test-interactive-replay-aborted-")
           sess (session/create-session sess-dir)]
       (try
         (session/append-entry sess {:role :user :content "go"})
@@ -668,7 +668,7 @@
 (deftest replay-branch-restores-unpaired-tool-images
   (testing "an unpaired tool result (no matching call — legacy sessions,
             extension tools) keeps its image blocks on replay"
-    (let [sess-dir (str "target/test-interactive-replay-orphan-" (System/currentTimeMillis))
+    (let [sess-dir (test-tmp/temp-dir! "test-interactive-replay-orphan-")
           sess (session/create-session sess-dir)]
       (try
         (session/append-entry sess {:role :assistant
@@ -700,7 +700,7 @@
   (testing "!/!! entries replay as COMPLETED bash components (pi:
             addMessageToChat case bashExecution): command + output + exit
             status, no spinner driver, no fabricated duration"
-    (let [sess-dir (str "target/test-interactive-replay-bash-" (System/currentTimeMillis))
+    (let [sess-dir (test-tmp/temp-dir! "test-interactive-replay-bash-")
           sess (session/create-session sess-dir)]
       (try
         (session/append-entry sess {:role :user :content "run it"})
@@ -738,7 +738,7 @@
   (testing "resume replays buildContextEntries (pi: renderInitialMessages):
             summarized history is not re-rendered, and the compaction
             renders as the dedicated collapsible summary component"
-    (let [sess-dir (str "target/test-interactive-replay-compaction-" (System/currentTimeMillis))
+    (let [sess-dir (test-tmp/temp-dir! "test-interactive-replay-compaction-")
           sess (session/create-session sess-dir)]
       (try
         (dotimes [i 4]
@@ -816,7 +816,7 @@
           dereg-comp (extensions/register-entry-renderer! (extensions/extension-owner "test-entry-comp")
                                                           "comp-entry" (fn [_] component))]
       (try
-        (let [sess-dir (str "target/test-interactive-entry-rdr-" (System/currentTimeMillis))
+        (let [sess-dir (test-tmp/temp-dir! "test-interactive-entry-rdr-")
               sess (session/create-session sess-dir)]
           (try
             (session/append-entry sess {:role :user :content "q"})
@@ -896,7 +896,7 @@
 (deftest replay-branch-renders-a-branch-summary-box
   (testing "a branch_summary entry replays as the dedicated collapsible
             branch component (pi: BranchSummaryMessageComponent)"
-    (let [sess-dir (str "target/test-interactive-replay-branch-sum-" (System/currentTimeMillis))
+    (let [sess-dir (test-tmp/temp-dir! "test-interactive-replay-branch-sum-")
           sess (session/create-session sess-dir)]
       (try
         (session/append-entry sess {:role :user :content "q"})
@@ -1344,7 +1344,7 @@
 
 (deftest session-info-shows-per-tool-usage
   (testing "/session's Tool Results section: per-tool calls + estimated result tokens, highest first, with a TOTAL (tool-result attribution)"
-    (let [sess-dir (str "target/test-interactive-session-info-" (System/currentTimeMillis))
+    (let [sess-dir (test-tmp/temp-dir! "test-interactive-session-info-")
           sess (session/create-session sess-dir)
           pad (fn [n] (apply str (repeat n \a)))]
       (session/append-entry sess {:role :user :content "hi"})

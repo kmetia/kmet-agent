@@ -3,7 +3,8 @@
             [babashka.fs :as fs]
             [babashka.process :as proc]
             [kmet.app.session.core :as session]
-            [kmet.ui.tui.footer-data-provider :as fdp]))
+            [kmet.ui.tui.footer-data-provider :as fdp]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- with-session
   "Create a session in target/ and run f, cleaning up the dir after."
@@ -44,9 +45,7 @@
   (testing "resolve-git-branch runs git in CWD, not the process cwd — before
             the cwd was threaded through, both dirs answered with a branch
             of the launch directory's repository"
-    (let [base (str (or (System/getenv "TMPDIR")
-                        (System/getProperty "java.io.tmpdir"))
-                    "/kmet-fdp-git-" (System/currentTimeMillis))
+    (let [base (test-tmp/temp-dir! "kmet-fdp-git-")
           repo (str base "/repo")
           plain (str base "/plain")
           git-in (fn [dir & args]

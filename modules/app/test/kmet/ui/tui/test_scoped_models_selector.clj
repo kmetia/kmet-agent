@@ -4,7 +4,6 @@
    search filter, cancel)."
   (:require [clojure.string :as str]
             [clojure.test :as t]
-            [babashka.fs :as fs]
             [kmet.app.keybindings :as kb]
             [kmet.ui.tui.scoped-models-selector :as sms]
             [kmet.ai.models :as models]
@@ -12,7 +11,8 @@
             [kmet.tui.keybindings :as tui-kb]
             [kmet.hikap.component :as component]
             [kmet.tui.protocols :as protocols]
-            [kmet.tui.utils :as u]))
+            [kmet.tui.utils :as u]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- model [provider id]
   (models/map->Model {:id id :name (str "Model " id) :provider provider
@@ -24,7 +24,7 @@
 (defn- pick
   "Build a selector over p1/a p1/b p2/x with global keybindings installed."
   [enabled-ids & {:keys [on-change on-persist on-cancel]}]
-  (let [dir (str (fs/create-dirs (fs/path "target" "test-sms-keybindings")))]
+  (let [dir (test-tmp/temp-dir! "test-sms-keybindings-")]
     (tui-kb/set-global-keybindings! (kb/create-agent-keybindings-manager dir)))
   (sms/make-scoped-models-selector
    [(model :p1 "a") (model :p1 "b") (model :p2 "x")]
@@ -243,7 +243,7 @@
   ;; "Cost: free", unavailable rows render the name line only
   (let [priced (assoc (model :p1 "a")
                       :cost {:input 0.44 :output 1.5 :cache-read 0.11 :cache-write 3.3})
-        dir (str (fs/create-dirs (fs/path "target" "test-sms-keybindings")))
+        dir (test-tmp/temp-dir! "test-sms-keybindings-")
         _ (tui-kb/set-global-keybindings! (kb/create-agent-keybindings-manager dir))
         sel (sms/make-scoped-models-selector
              [priced (model :p1 "b") (model :p2 "x")]

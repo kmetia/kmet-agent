@@ -7,13 +7,13 @@
             [kmet.ui.tui.external-editor :as external-editor]
             [kmet.ui.tui.footer-data-provider :as fdp]
             [kmet.tui.components.editor :as editor]
-            [kmet.tui.core :as tui]))
+            [kmet.tui.core :as tui]
+            [kmet.test-tmp :as test-tmp]))
 
 (deftest test-external-editor-spawns-in-the-runtime-cwd
   (testing "the editor process gets the footer provider's cwd as :dir; a cs
             without one falls back to the process cwd"
-    (let [project (str (fs/absolutize (str "target/test-external-editor-"
-                                           (System/currentTimeMillis))))
+    (let [project (test-tmp/temp-dir! "test-external-editor-")
           seen (atom [])
           run (fn [cs]
                 (with-redefs [tui/tui-suspend! (fn [_] nil)

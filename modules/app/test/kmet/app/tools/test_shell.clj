@@ -14,9 +14,10 @@
             [kmet.app.runtime :as app-runtime]
             [kmet.app.tools.bash :as bash]
             [kmet.app.tools.shell :as shell]
-            [kmet.srce.core :as srce]))
+            [kmet.srce.core :as srce]
+            [kmet.test-tmp :as test-tmp]))
 
-(def ^:private sessions-dir "target/test-shell")
+(def ^:private sessions-dir (test-tmp/temp-dir! "test-shell-"))
 
 (def ^:private booted (atom nil))
 

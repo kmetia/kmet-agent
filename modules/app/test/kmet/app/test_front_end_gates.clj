@@ -17,9 +17,10 @@
             [kmet.app.events :as events]
             [kmet.app.runtime :as runtime-app]
             [kmet.app.test-support :as support]
-            [kmet.srce.core :as srce]))
+            [kmet.srce.core :as srce]
+            [kmet.test-tmp :as test-tmp]))
 
-(def ^:private sessions-dir "target/test-front-end-gates")
+(def ^:private sessions-dir (test-tmp/temp-dir! "test-front-end-gates-"))
 
 (def ^:private booted
   "The composition the current test runs against; the fixture owns it."

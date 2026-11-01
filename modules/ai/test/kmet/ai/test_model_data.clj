@@ -16,7 +16,8 @@
             [kmet.ai.model-gen :as mg]
             [kmet.libs.concurrent :as concurrent]
             [kmet.libs.http :as http]
-            [kmet.tasks.generate-models :as gen-models]))
+            [kmet.tasks.generate-models :as gen-models]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- validate-dir
   "Run the generator's offline validation over DIR (defaults to the committed
@@ -36,7 +37,7 @@
 (defn- with-scratch-data
   "Write FILE-CONTENTS into an isolated temp dir, run F with the dir."
   [file-contents f]
-  (let [dir (str (fs/create-temp-dir {:dir "target" :prefix "model-data-test-"}))]
+  (let [dir (test-tmp/temp-dir! "model-data-test-")]
     (doseq [[fname content] file-contents]
       (spit (str dir "/" fname) content))
     (try
@@ -263,7 +264,7 @@
       (t/is (< dt 30000) (str "wrapper must give up at the cap, took " dt "ms")))))
 
 (t/deftest test-write-catalogs-skips-unchanged
-  (let [dir (str (fs/create-temp-dir {:dir "target" :prefix "model-gen-test-"}))
+  (let [dir (test-tmp/temp-dir! "model-gen-test-")
         catalogs {:gen-alpha [(gen-model :gen-alpha "a1")]
                   :gen-beta [(gen-model :gen-beta "b1")]}]
     (try
@@ -300,7 +301,7 @@
         (fs/delete-tree dir)))))
 
 (t/deftest test-write-catalogs-keeps-per-file-timestamps
-  (let [dir (str (fs/create-temp-dir {:dir "target" :prefix "model-gen-test-"}))
+  (let [dir (test-tmp/temp-dir! "model-gen-test-")
         catalogs {:gen-alpha [(gen-model :gen-alpha "a1")]
                   :gen-beta [(gen-model :gen-beta "b1")]}
         gen-at (atom "2026-08-08T00:00:01Z")]

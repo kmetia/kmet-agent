@@ -18,10 +18,11 @@
             [kmet.tui.protocols :as protocols]
             [kmet.libs.theme :as th]
             [kmet.tui.utils :as u]
-            [kmet.test-utils :refer [slash]]))
+            [kmet.test-utils :refer [slash]]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- tmp-dir []
-  (str (fs/create-temp-dir {:dir (System/getenv "TMPDIR")})))
+  (test-tmp/temp-dir! "test-"))
 
 (defn- make-package
   [root]

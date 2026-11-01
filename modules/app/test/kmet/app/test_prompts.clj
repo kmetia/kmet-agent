@@ -6,7 +6,8 @@
             [babashka.fs :as fs]
             [kmet.app.prompts :as prompts]
             [kmet.app.registry :as registry]
-            [kmet.srce.core :as srce]))
+            [kmet.srce.core :as srce]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; The extension host is the composition's: boot one for the namespace.
 (t/use-fixtures :once support/with-composition)
@@ -93,7 +94,7 @@
 ;; ─── Loading (pi: loadTemplatesFromDir / loadTemplateFromFile) ─────────────
 
 (t/deftest test-load-prompt-templates-from-dir
-  (let [tmp-dir (str "target/test-prompts-" (System/currentTimeMillis))
+  (let [tmp-dir (test-tmp/temp-dir! "test-prompts-")
         base (fn [rel] (str tmp-dir "/" rel))]
     (try
       (io/make-parents (base "review.md"))
@@ -122,7 +123,7 @@
       (finally (fs/delete-tree tmp-dir)))))
 
 (t/deftest test-load-prompt-templates-extra-cases
-  (let [tmp-dir (str "target/test-prompts-x-" (System/currentTimeMillis))
+  (let [tmp-dir (test-tmp/temp-dir! "test-prompts-x-")
         base (fn [rel] (str tmp-dir "/" rel))]
     (try
       (io/make-parents (base ".hidden.md"))
@@ -148,7 +149,7 @@
 
 (t/deftest test-load-prompt-templates-desc-fallback
   (t/testing "description falls back to the first non-empty body line"
-    (let [tmp-dir (str "target/test-prompts-desc-" (System/currentTimeMillis))
+    (let [tmp-dir (test-tmp/temp-dir! "test-prompts-desc-")
           long-line (str/join (repeat 80 "x"))]
       (try
         (io/make-parents (str tmp-dir "/plain.md"))
@@ -166,7 +167,7 @@
 
 (t/deftest test-load-prompt-templates-warns-on-unreadable-file
   (prompts/clear-prompt-templates!)
-  (let [tmp-dir (str "target/test-prompts-warn-" (System/currentTimeMillis))
+  (let [tmp-dir (test-tmp/temp-dir! "test-prompts-warn-")
         good (str tmp-dir "/good.md")
         missing (str tmp-dir "/missing.md")
         err (java.io.StringWriter.)]
@@ -185,7 +186,7 @@
 
 (t/deftest test-load-prompt-templates-non-string-frontmatter
   (prompts/clear-prompt-templates!)
-  (let [tmp-dir (str "target/test-prompts-types-" (System/currentTimeMillis))]
+  (let [tmp-dir (test-tmp/temp-dir! "test-prompts-types-")]
     (try
       (io/make-parents (str tmp-dir "/typed.md"))
       (spit (str tmp-dir "/typed.md")
@@ -209,7 +210,7 @@
              (prompts/as-command-maps tpls)))))
 
 (t/deftest test-clear-prompt-templates
-  (let [tmp-dir (str "target/test-prompts-clear-" (System/currentTimeMillis))
+  (let [tmp-dir (test-tmp/temp-dir! "test-prompts-clear-")
         f (str tmp-dir "/clear-me.md")]
     (try
       (io/make-parents f)

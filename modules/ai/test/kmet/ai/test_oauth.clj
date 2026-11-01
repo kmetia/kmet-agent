@@ -21,7 +21,8 @@
             [kmet.ui.tui.interactive.builtins :as builtins]
             [kmet.ui.tui.interactive.auth :as interactive-auth]
             [kmet.test-utils :as tu]
-            [kmet.libs.concurrent :as concurrent]))
+            [kmet.libs.concurrent :as concurrent]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; The /login tests install the interactive builtins on the app tree; clear
 ;; the process-global registrations between tests.
@@ -377,7 +378,7 @@
   "Run F with the agent dir (and thus auth.edn) redirected to a temp dir and
    an empty auth atom; F receives the auth file path."
   [f]
-  (let [agent-dir (str (fs/absolutize (fs/file "target" (str "test-oauth-" (System/currentTimeMillis)))))
+  (let [agent-dir (test-tmp/temp-dir! "test-oauth-")
         path (str agent-dir "/auth.edn")]
     (fs/create-dirs agent-dir)
     (try

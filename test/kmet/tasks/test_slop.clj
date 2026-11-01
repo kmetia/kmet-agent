@@ -6,13 +6,14 @@
             [clojure.string :as str]
             [clojure.test :as t :refer [deftest is]]
             [kmet.tasks.slop :as slop]
-            [kmet.test-utils :refer [slash]]))
+            [kmet.test-utils :refer [slash]]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- make-tree
   "Create a temp tree under target/ from a {relative-path content} map."
   [files]
   (fs/create-dirs "target")
-  (let [dir (fs/create-temp-dir {:dir "target" :prefix "slop-test-"})]
+  (let [dir (test-tmp/temp-dir! "slop-test-")]
     (doseq [[name content] files]
       (let [f (fs/path dir name)]
         (fs/create-dirs (fs/parent f))

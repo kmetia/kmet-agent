@@ -16,10 +16,11 @@
             [kmet.tui.protocols :as protocols]
             [kmet.tui.terminal :as term]
             [kmet.libs.theme :as theme]
-            [kmet.test-utils :refer [slash]]))
+            [kmet.test-utils :refer [slash]]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- tmp-dir []
-  (str (fs/create-temp-dir {:dir (System/getenv "TMPDIR")})))
+  (test-tmp/temp-dir! "test-pkg-"))
 
 (defn- with-isolated-settings
   "Run F with the settings paths pointed at temp dirs."

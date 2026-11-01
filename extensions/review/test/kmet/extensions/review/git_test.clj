@@ -5,7 +5,8 @@
   (:require [babashka.process :as p]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
-            [kmet.extensions.review.git :as g]))
+            [kmet.extensions.review.git :as g]
+            [kmet.test-tmp :as test-tmp]))
 
 ;; -- Helpers ------------------------------------------------------------
 
@@ -26,10 +27,7 @@
   "Create a throwaway git repo with two branches (main, feature) and
    three commits. Returns the directory path."
   []
-  (let [dir (str (or (System/getenv "TMPDIR")
-                     (System/getProperty "java.io.tmpdir"))
-                 "/kmet-review-test-"
-                 (System/nanoTime))]
+  (let [dir (test-tmp/temp-dir! "kmet-review-")]
     (p/sh "mkdir" "-p" dir)
     (p/sh "git" "-C" dir "init" "-q" "-b" "main")
     (p/sh "git" "-C" dir "config" "user.email" "test@test")
@@ -62,15 +60,17 @@
       (is (true? (g/in-git-repo? (exec dir)))))))
 
 (deftest ^:bb-only in-git-repo?-out-of-repo-test
-  ;; Note: babashka.process may walk up the directory tree on some
-  ;; platforms, finding a parent .git. To be safe, we test with a
-  ;; /tmp-style non-repo path that has no parent git.
+  ;; The subject is "no parent repository", so the path cannot come from the
+  ;; run's scratch root (kmet.test-tmp) — that lives inside this checkout,
+  ;; whose own .git a walk up would find. A system temp dir has no parent
+  ;; git; the test removes it itself rather than leaving it behind.
   (let [non-repo (str (or (System/getenv "TMPDIR")
                           (System/getProperty "java.io.tmpdir"))
-                      "/kmet-no-git-"
-                      (System/nanoTime))]
+                      "/kmet-no-git-" (System/nanoTime))]
     (.mkdirs (java.io.File. non-repo))
-    (is (false? (g/in-git-repo? (exec non-repo))))))
+    (try
+      (is (false? (g/in-git-repo? (exec non-repo))))
+      (finally (p/sh "rm" "-rf" non-repo)))))
 
 (deftest ^:bb-only local-branches-test
   (with-test-repo

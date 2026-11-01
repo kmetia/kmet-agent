@@ -7,13 +7,14 @@
             [kmet.ai.auth :as auth]
             [kmet.ai.aws-sigv4 :as aws-sigv4]
             [kmet.ai.google-adc :as google-adc]
-            [kmet.app.config :as cfg]))
+            [kmet.app.config :as cfg]
+            [kmet.test-tmp :as test-tmp]))
 
 (defn- with-auth-file
   "Run F with the agent dir (and thus auth.edn) redirected to a temp dir and
    an empty auth atom; F receives the auth file path."
   [f]
-  (let [agent-dir (str (fs/absolutize (fs/file "target" (str "test-auth-" (System/currentTimeMillis)))))
+  (let [agent-dir (test-tmp/temp-dir! "test-auth-")
         path (str agent-dir "/auth.edn")]
     (fs/create-dirs agent-dir)
     (try
