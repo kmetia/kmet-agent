@@ -36,6 +36,13 @@
    tools render through)."
   '#{kmet.app.keybindings kmet.ui.tui.tool-renderers})
 
+(def ^:private internal-namespaces
+  "Shared-layer namespaces deliberately outside the extension lists because
+   they are the host's own machinery, not a surface an extension renders
+   through: `kmet.tui.frame` is the render loop's one-frame pass — an
+   extension renders components, it does not drive frames."
+  '#{kmet.tui.frame})
+
 (defn- library-ns-name
   "The namespace symbol for source file P under DIR, read from its path; PREFIX
    is prefixed unless it is empty (a module whose tree spans namespaces)."
@@ -70,7 +77,8 @@
     (let [entries (into (set @#'ext-context/tui-library-namespaces)
                         @#'ext-context/libs-library-namespaces)
           sources (shared-source-namespaces)
-          known (into entries (into host-backend-namespaces app-shared-namespaces))]
+          known (into entries (into host-backend-namespaces
+                                    (into app-shared-namespaces internal-namespaces)))]
       (t/is (< 60 (count entries)) "the lists are real, not empty")
       (t/is (< 60 (count sources)) "the source scan found the trees")
       (t/is (empty? (remove known sources))

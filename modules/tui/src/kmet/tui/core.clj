@@ -2013,7 +2013,11 @@
         ;; A rendered frame's output buffer is staged here under the lock
         ;; and written after it is released — a blocked tty must not hold up
         ;; input dispatch (see the write below).
-        pending-write (atom nil)]
+        pending-write (atom nil)
+        ;; The frame asks for a follow-up frame through the loop's request
+        ;; (the scrollback heal); built once, not per frame.
+        request-render (fn ([] (tui-request-render tui))
+                         ([force?] (tui-request-render tui force?)))]
     ;; Make the started record (with the live writer) visible to the input
     ;; path: negotiation / OSC 11 / color-scheme handlers write through
     ;; @(:terminal tui), and the unstarted record's writer is nil — writes
@@ -2121,9 +2125,7 @@
                   :compose compose-document
                   :hardware-cursor-row hardware-cursor-row
                   :previous-viewport-top previous-viewport-top
-                  :request-render (fn
-                                    ([] (tui-request-render tui))
-                                    ([force?] (tui-request-render tui force?)))
+                  :request-render request-render
                   :pending-write pending-write}))))
 
           ;; The frame's buffer leaves the lock with it: the write is the
