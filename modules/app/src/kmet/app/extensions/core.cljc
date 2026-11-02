@@ -1158,8 +1158,6 @@
    process registry reaches every engine, and an owner that binds an agent's
    handle and its own ctx gets a per-agent api. The host holds no handle of
    its own."
-  ([ext] (create-extension-api ext nil nil))
-  ([ext config] (create-extension-api ext config nil))
   ([ext config ctx]
    (let [track (fn [f] (track-deregister! ext f) f)
          name (:name ext)]

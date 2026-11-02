@@ -91,7 +91,8 @@
   (let [dereg-fns (atom [])
         api ((var extensions/create-extension-api)
              {:name "alias-test" :path "target/test-ext-alias.clj"
-              :deregister-fns dereg-fns})
+              :deregister-fns dereg-fns}
+             nil nil)   ;; no mount ctx: this case never touches the tree
         f (fn [_attrs _children] [:text {:padding-x 0 :padding-y 0} "x"])]
     (try
       (let [dereg (ext/register-alias! api :kmet.test/alias-chip f)]
@@ -161,7 +162,8 @@
     (with-redefs [cfg/get-agent-dir (fn [] "/sandbox/agent")]
       (let [api ((var extensions/create-extension-api)
                  {:name "agent-dir-test" :path "target/test-ext-agent-dir.clj"
-                  :deregister-fns (atom [])})]
+                  :deregister-fns (atom [])}
+                 nil nil)]
         (t/is (= "/sandbox/agent" (:agent-dir api)))
         (t/is (= "/sandbox/agent" (ext/get-agent-dir api)))))))
 
@@ -169,7 +171,8 @@
   (testing "api :models register-provider! / unregister-provider! (pi ctx.registerProvider)"
     (let [api ((var extensions/create-extension-api)
                {:name "prov-test" :path "target/test-ext-prov.clj"
-                :deregister-fns (atom [])})]
+                :deregister-fns (atom [])}
+               nil nil)]
       (models/load-catalogs! nil)
       (models/clear-extension-providers!)
       (try
