@@ -297,6 +297,10 @@
                   "transcript re-emitted after the clear — no duplication"))
           (t/is (= 1 (count-occurrences (apply str @(:writes vt)) clear-seq))
                 "the clear sequence appears exactly once (only in the forced frame)")
+          (t/is (= 1 (count-occurrences redraw "alpha"))
+                "the forced frame renders the document once — the stale line memo is not prepended")
+          (t/is (= ["alpha" "beta" "gamma"] (vec @(:previous-lines tui)))
+                "the line memo describes the rebuilt document, not old + new")
           (t/is (= 80 @(:previous-width tui)) "diff state consistent after the forced redraw"))
         (finally
           (stop-loop tui))))))

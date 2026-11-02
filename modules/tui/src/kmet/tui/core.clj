@@ -2526,8 +2526,13 @@
                   (reset! (:previous-height tui) -1)
                   (reset! (:max-lines-rendered tui) 0)
                   (reset! (:previous-kitty-image-ids tui) #{})
-                  ;; line memo: its inputs are gone with the frame
+                  ;; line memo: its inputs are gone with the frame. The
+                  ;; normalized copy goes too: the pass starts from
+                  ;; PREV-OUT and appends whatever PREV-RAW does not cover,
+                  ;; so an empty PREV-RAW would prepend the stale frame to
+                  ;; the rebuilt document.
                   (reset! (:previous-raw-lines tui) [])
+                  (reset! (:previous-normalized-lines tui) [])
                   (reset! (:previous-marks tui) {})
                   (reset! (:previous-repainted? tui) true))
                 ;; Base content: the whole UI is one flat document — the stack
