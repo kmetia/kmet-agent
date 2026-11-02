@@ -496,18 +496,32 @@
      :truncation truncation
      :full-output-path full-output-path}))
 
+(def ^:private settle-grace-ms
+  "Total grace the executor waits for stream data still in flight after the
+   operations complete."
+  1000)
+
+(def ^:private settle-grace-slice-ms
+  "How much of the grace a single growth of the tail buys."
+  100)
+
 (defn- settle-grace!
   "Grace polling for stream data still in flight after the operations complete:
-   wait while the tail keeps growing, each growth buying another 100 ms."
+   wait while the tail keeps growing, each growth buying another slice within
+   one total budget. A command that keeps writing after its operations complete
+   (a tailed log, a spinner) spends the budget and settles — growth cannot
+   extend the wait without a ceiling, or the turn never settles."
   [{:keys [tail-bytes]}]
-  (loop [last-bytes @tail-bytes
-         deadline (+ (concurrent/monotonic-ms) 100)]
-    (when (< (concurrent/monotonic-ms) deadline)
-      (let [current-bytes @tail-bytes]
-        (if (> current-bytes last-bytes)
-          (recur current-bytes (+ (concurrent/monotonic-ms) 100))
-          (do (Thread/sleep 10)
-              (recur last-bytes deadline)))))))
+  (let [cap (+ (concurrent/monotonic-ms) settle-grace-ms)]
+    (loop [last-bytes @tail-bytes
+           deadline (min cap (+ (concurrent/monotonic-ms) settle-grace-slice-ms))]
+      (when (< (concurrent/monotonic-ms) deadline)
+        (let [current-bytes @tail-bytes]
+          (if (> current-bytes last-bytes)
+            (recur current-bytes
+                   (min cap (+ (concurrent/monotonic-ms) settle-grace-slice-ms)))
+            (do (Thread/sleep 10)
+                (recur last-bytes deadline))))))))
 
 (defn- failure-result
   "The call's result when the run threw: the same clean/truncate/persist tail,

@@ -13,7 +13,7 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 | 1 | Stale run clears a new run's `running?` flag | high (concurrency) | **fixed** |
 | 2 | LLM deadline timeout does not abort the request | high (token burn / garbled UI) | **fixed** |
 | 3 | Shell spawn failure reported as success | high (agent misled) | **fixed** |
-| 4 | `settle-grace!` has no ceiling | medium (hang) | verified by reading |
+| 4 | `settle-grace!` has no ceiling | medium (hang) | **fixed** |
 | 5 | `append-entry` mutates memory before the file write | medium (data loss) | **fixed** |
 | 6 | MCP refresh keeps a stale connection after a definition change | medium | **fixed** |
 | 7 | Compaction start is check-then-act | medium (race) | **fixed** |
@@ -95,7 +95,7 @@ Fix: carry `:failed true` from `failure-result` and make `bash.clj` treat it as 
 code as an error (pi's "Command terminated without an exit code"), with no status line when
 the output already carries the failure.
 
-## 4. `settle-grace!` can spin without a ceiling
+## 4. `settle-grace!` can spin without a ceiling — **fixed**
 
 `modules/app/src/kmet/app/tools/bash_executor.clj:496-509`
 
@@ -105,6 +105,10 @@ spinner, a tailed build log) makes the grace loop unbounded, so the turn never s
 
 Fix: cap the total grace (e.g. a single 1 s budget recomputed with `min`), keeping the
 "growth buys another poll" behaviour inside it.
+
+**Fixed:** the grace is one 1 s budget; each growth of the tail buys another 100 ms
+slice, and the deadline is `min` of the extension and the cap. A fake-clock regression
+test grows the tail forever and asserts the wait ends inside the budget.
 
 ## 5. `append-entry` mutates memory before the file write — **fixed**
 
@@ -304,6 +308,6 @@ throw, assert `:stopped?` and the crash log.
 2. Then the concurrency pair with regression tests: 1, 2 — 1 needs the decision in its note
    first, 2 is a small isolated commit.
 3. ~~Then the lifecycle fix with a test asserting empty root after unload: 9.~~ done.
-4. Then robustness: 4, 5, 7, 10, 11, and the TUI guard (13) — plus the TUI `!` path's nil exit
-   code found while fixing 3.
+4. ~~Then robustness: 4, 5, 7, 10, 11, and the TUI guard (13)~~ — 4, 5 and 7 done; 10, 11
+   and 13 remain, plus the TUI `!` path's nil exit code found while fixing 3.
 5. Structural work (14) as its own series, frame extraction first.

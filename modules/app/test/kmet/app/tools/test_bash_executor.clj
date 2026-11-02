@@ -10,6 +10,7 @@
             [clojure.edn :as edn]
             [babashka.fs :as fs]
             [babashka.process :as sh]
+            [kmet.libs.concurrent :as concurrent]
             [kmet.libs.process :as process]
             [kmet.app.tools.bash-executor :as exec]))
 
@@ -174,3 +175,18 @@
                      (exec/create-default-ops
                       :shell-path "/definitely/not/a/shell"))
             "the constructor validates, not the first spawn"))))
+
+(t/deftest settle-grace-is-capped
+  ;; Regression: each growth of the tail bought another 100 ms with no total
+  ;; cap, so a command that kept writing after its operations completed (a
+  ;; tailed log, a spinner) kept the turn from settling. The grace is one
+  ;; budget; growth only spends it. A fake clock keeps the test instant.
+  (let [clock (atom 0)
+        tail (reify clojure.lang.IDeref
+               ;; Grows on every read until the fake clock passes 3000, so an
+               ;; uncapped grace would keep extending its deadline past it.
+               (deref [_] (if (< @clock 3000) (inc @clock) 0)))]
+    (with-redefs [concurrent/monotonic-ms (fn [] (swap! clock + 10))]
+      (#'exec/settle-grace! {:tail-bytes tail}))
+    (t/is (< @clock 1500)
+          (str "the grace ended inside its budget (clock " @clock ")"))))
