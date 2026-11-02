@@ -113,3 +113,24 @@
     (fn [_api _state]
       (is (some? (config/read-config-file (config/global-config-path)))
           "init writes the global template when it is missing"))))
+
+(deftest refresh-applies-a-changed-server-definition
+  ;; /mcp refresh rebuilt :servers by name alone, so an edited
+  ;; :command/:url/:args kept the connection the old definition opened.
+  (let [config {:mcp-servers {"srv" {:command ["node" "old.js"]}}}
+        state (atom {:servers (#'mcp/build-servers config)})
+        old (get-in @state [:servers "srv"])]
+    (reset! (:conn old) ::connected)
+    (reset! (:failed-at old) 12345)
+    (testing "an unchanged definition keeps the live connection and its windows"
+      (let [rebuilt (#'mcp/rebuild-servers state config)]
+        (is (identical? old (get rebuilt "srv")))
+        (is (= ::connected @(get-in rebuilt ["srv" :conn])))))
+    (testing "an edited definition drops the old connection and the failure window"
+      (let [changed (assoc-in config [:mcp-servers "srv" :command] ["node" "new.js"])
+            rebuilt (#'mcp/rebuild-servers state changed)]
+        (is (not (identical? old (get rebuilt "srv"))))
+        (is (nil? @(get-in rebuilt ["srv" :conn])) "the old connection is not reused")
+        (is (nil? @(get-in rebuilt ["srv" :failed-at]))
+            "a fixed server does not inherit the old failure's backoff")
+        (is (= ["node" "new.js"] (get-in rebuilt ["srv" :definition :command])))))))

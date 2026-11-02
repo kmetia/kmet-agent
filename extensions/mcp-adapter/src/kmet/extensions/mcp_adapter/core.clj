@@ -40,43 +40,53 @@
 
 ;; ─── State (§10.1) ────────────────────────────────────────────────────────
 
+(defn- server-state
+  "Fresh per-server state for DEFINITION: {:definition .. :conn atom :error
+   atom :failed-at atom :lock Object :resyncing atom :resync-changes atom
+   :resync-covered atom} — :failed-at records the last connect failure (60s
+   backoff window, pi FAILURE_BACKOFF_MS), :resyncing is the list_changed
+   resync gate, :resync-changes counts notifications (each one gets a
+   generation at dispatch) and :resync-covered is the newest generation a
+   completed resync has listed."
+  [definition]
+  {:definition definition
+   :conn (atom nil)
+   :error (atom nil)
+   :failed-at (atom nil)
+   :lock (Object.)
+   :resyncing (atom false)
+   :resync-changes (atom 0)
+   :resync-covered (atom 0)})
+
 (defn- build-servers
-  "Build the :servers map from config: {name {:definition .. :conn atom
-   :error atom :failed-at atom :lock Object :resyncing atom
-   :resync-changes atom :resync-covered atom}} — :failed-at records the
-   last connect failure (60s backoff window, pi FAILURE_BACKOFF_MS),
-   :resyncing is the list_changed resync gate, :resync-changes counts
-   notifications (each one gets a generation at dispatch) and
-   :resync-covered is the newest generation a completed resync has
-   listed."
+  "Build the :servers map from config: {name (server-state definition)}."
   [config]
   (into {} (map (fn [[name definition]]
-                  [name {:definition definition
-                         :conn (atom nil)
-                         :error (atom nil)
-                         :failed-at (atom nil)
-                         :lock (Object.)
-                         :resyncing (atom false)
-                         :resync-changes (atom 0)
-                         :resync-covered (atom 0)}]))
+                  [name (server-state definition)]))
         (:mcp-servers config)))
 
+(defn- rebuild-server
+  "The :servers entry for one configured server after a config reload: the
+   live entry while its definition is unchanged, a fresh state (and the old
+   connection closed) once it was edited."
+  [state name definition]
+  (let [existing (get (:servers @state) name)]
+    (if (and existing (= (:definition existing) definition))
+      existing
+      (do
+        (when existing
+          (disconnect-server! state name))
+        (server-state definition)))))
+
 (defn- rebuild-servers
-  "Rebuild :servers from a fresh config, preserving conn/error/lock/
-   resync state for servers that persist (used by /mcp refresh)."
+  "Rebuild :servers from a fresh config (used by /mcp refresh and the setup
+   panel's reload): each server goes through `rebuild-server`, so an edited
+   :command, :url or :args drops the connection the old definition opened
+   instead of serving it until a restart."
   [state config]
-  (let [old (:servers @state)]
-    (into {} (map (fn [[name definition]]
-                    [name (assoc (or (get old name)
-                                     {:conn (atom nil)
-                                      :error (atom nil)
-                                      :failed-at (atom nil)
-                                      :lock (Object.)
-                                      :resyncing (atom false)
-                                      :resync-changes (atom 0)
-                                      :resync-covered (atom 0)})
-                                 :definition definition)]))
-          (:mcp-servers config))))
+  (into {} (map (fn [[name definition]]
+                  [name (rebuild-server state name definition)]))
+        (:mcp-servers config)))
 
 (defn- init-state
   "Fresh §10.1 state map over API + CONFIG."
@@ -785,8 +795,8 @@
     (notify-or-print state ctx (str "Usage: /mcp " (if disabled "disable" "enable") " <server>"))))
 
 (defn- handle-refresh
-  "Reload the EDN config: add/remove servers (disconnecting dropped ones),
-   resync tools + prompts, rebuild the description (§10.6)."
+  "Reload the EDN config: add/remove/redefine servers (disconnecting dropped
+   and edited ones), resync tools + prompts, rebuild the description (§10.6)."
   [state ctx]
   (let [config (config/load-config)
         current-names (set (keys (:mcp-servers (:config @state))))]
@@ -1124,7 +1134,7 @@
 
 (defn- reload-config!
   "Reload the EDN config into the live state (used after setup-panel
-   writes) — servers added/removed, tools + prompts resynced."
+   writes) — servers added/removed/redefined, tools + prompts resynced."
   [state]
   (let [config (config/load-config)
         current-names (set (keys (:mcp-servers (:config @state))))]
