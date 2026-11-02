@@ -203,38 +203,46 @@
         :marks prev-marks
         :changed nil}
        (let [marker utils/CURSOR-MARKER
-             ;; strip/normalize/reuse/mark the lines in [a b)
-             scan-range (fn scan-range [a b acc marks fc lc]
-                          (loop [i a, acc acc, marks marks, fc fc, lc lc]
+             ;; strip/normalize/reuse/mark the lines in [a b): a fresh chunk
+             ;; vector plus the marks and the walked range's bounds
+             scan-range (fn scan-range [a b marks fc lc]
+                          (loop [i a, chunk (transient []), marks marks, fc fc, lc lc]
                             (if (< i b)
                               (let [line (nth lines i)]
                                 (if (and (< i prev-count)
                                          (identical? (nth prev-raw i) line))
-                                  (recur (inc i) (conj! acc (nth prev-out i)) marks fc lc)
+                                  (recur (inc i) (conj! chunk (nth prev-out i)) marks fc lc)
                                   (let [idx (clojure.string/index-of line marker)
                                         stripped (if idx
                                                    (clojure.string/replace line marker "")
                                                    line)]
                                     (recur (inc i)
-                                           (conj! acc (utils/normalize-terminal-output stripped))
+                                           (conj! chunk (utils/normalize-terminal-output stripped))
                                            (if idx (assoc marks i idx) marks)
                                            (if (neg? fc) i fc)
                                            i))))
-                              [acc marks fc lc])))
+                              [(persistent! chunk) marks fc lc])))
              [acc marks prefix-first prefix-last]
              (if (and (vector? lines) (vector? prev-raw) (>= n prev-count))
-               ;; The shared prefix in native chunks, then the appended
-               ;; tail (the chunk is empty at and past PREV-COUNT).
-               (loop [a 0, acc (transient []), marks {}, fc -1, lc -1]
-                 (let [b (min prev-count (+ a chunk-lines))]
-                   (if (< a b)
+               ;; The shared prefix in native chunks: an equal chunk stays in
+               ;; place inside PREV-OUT (no copy at all), a differing one is
+               ;; rescanned and assoc'd over its range. The appended tail is
+               ;; scanned once and conj'd on. An unchanged document therefore
+               ;; returns PREV-OUT itself, so the diff scan's `identical?`
+               ;; fast path sees the vector it returned last frame.
+               (loop [a 0, acc prev-out, marks {}, fc -1, lc -1]
+                 (if (< a prev-count)
+                   (let [b (min prev-count (+ a chunk-lines))]
                      (if (= (subvec prev-raw a b) (subvec lines a b))
-                       (recur b (reduce conj! acc (subvec prev-out a b)) marks fc lc)
-                       (let [[acc marks fc lc] (scan-range a b acc marks fc lc)]
-                         (recur b acc marks fc lc)))
-                     (scan-range prev-count n acc marks fc lc))))
-               (scan-range 0 n (transient []) {} -1 -1))
-             out (persistent! acc)
+                       (recur b acc marks fc lc)
+                       (let [[chunk marks fc lc] (scan-range a b marks fc lc)
+                             acc (reduce-kv (fn [v i line] (assoc v (+ a i) line))
+                                            acc chunk)]
+                         (recur b acc marks fc lc))))
+                   (let [[tail marks fc lc] (scan-range prev-count n marks fc lc)]
+                     [(if (seq tail) (into acc tail) acc) marks fc lc])))
+               (scan-range 0 n {} -1 -1))
+             out acc
              ;; A previous marker stays valid exactly while its line's
              ;; content is unchanged; a rescanned line's new status (in
              ;; MARKS) wins.

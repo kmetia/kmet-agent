@@ -203,7 +203,8 @@
     (testing "without the quick hint the chunk pass still proves content-equality"
       (let [{:keys [lines changed]}
             (build prev-raw prev-out prev-marks [(subs "xaaaa" 1) (subs "xbbbb" 1)] 10)]
-        (t/is (not (identical? prev-out lines)) "a fresh vector")
+        (t/is (identical? prev-out lines)
+              "equal chunks are left in place, so the previous vector comes back")
         (t/is (nil? changed) "the chunk compare is content equality")))))
 
 (t/deftest test-build-frame-lines-walks-only-differing-chunks
@@ -217,7 +218,11 @@
         (t/is (= "CHANGED" (nth lines 1500)))))
     (testing "a document equal in every chunk reports no change"
       (let [{:keys [changed]} (build base base {} (mapv identity base) 100)]
-        (t/is (nil? changed))))))
+        (t/is (nil? changed))))
+    (testing "a changed frame builds a new vector and leaves the previous one intact"
+      (let [{:keys [lines]} (build base base {} (assoc base 1500 "CHANGED") 100)]
+        (t/is (not (identical? base lines)) "a new vector")
+        (t/is (= "line-1500" (nth base 1500)) "the previous vector is untouched")))))
 
 (t/deftest test-refine-changed-range
   (let [refine (var core/refine-changed-range)
