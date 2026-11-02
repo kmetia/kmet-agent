@@ -788,6 +788,7 @@
   ;; with backoff and surfaces via on-error when exhausted.
   (let [events (atom [])
         errors (atom [])
+        calls (atom [])
         agent (support/make-agent-state
                :on-event (fn [e] (swap! events conj e))
                :max-retries 1
@@ -799,6 +800,7 @@
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message
                   (fn [opts]
+                    (swap! calls conj opts)
                     ;; stream partials, then never deliver — the deref hits
                     ;; its timeout and the partials must survive it
                     ((:on-text opts) "partial answer")
@@ -820,7 +822,17 @@
       (t/is (= "still reasoning" (:thinking (:message errored)))
             "thinking streamed before the deadline survives the timeout"))
     (t/is (= :idle @(:status agent)) "run settles idle after retries exhausted")
-    (t/is (some #(= :error (:type %)) @events) "terminal :error event emitted")))
+    (t/is (some #(= :error (:type %)) @events) "terminal :error event emitted")
+    (t/testing "the abandoned call is cut, so its stragglers cannot land"
+      ;; Giving up on the promise is not giving up on the request: without the
+      ;; cut the transport keeps streaming, and its deltas land in the buffer
+      ;; the retry has already reset.
+      (let [abandoned (first @calls)]
+        (t/is (true? @(:signal abandoned))
+              "the deadline tripped the call's own stream signal")
+        ((:on-text abandoned) "late text")
+        (t/is (not-any? #(str/includes? (str %) "late text") @events)
+              "a delta arriving after the deadline is dropped")))))
 
 ;; ─── Phase 7b-i: one boundary, one decision ───────────────────────────────
 

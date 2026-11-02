@@ -1371,6 +1371,37 @@
       (t/is (= "replacement" (get-in (last evs) [:messages 0 :content 0 :text]))
             "event carries the new conversation"))))
 
+(t/deftest ^:slow test-a-summarization-deadline-cuts-its-stream
+  ;; The compaction's deref backstop is the same abandon: without a cut the
+  ;; transport keeps reading into buffers the call has already left behind.
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session dir)
+        seen (atom [])
+        agent (support/make-agent-state
+               :session sess
+               :keep-recent-tokens 40
+               :max-retries 1
+               :base-delay-ms 1
+               :auto-compact true
+               :http-idle-timeout-ms 0
+               :http-total-timeout-ms 10)]
+    (try
+      (doseq [i (range 6)]
+        (let [m {:role :user :content [{:type :text :text
+                                        (str "This is message body number " i
+                                             " with plenty of words so the estimated token count "
+                                             "easily exceeds the small test threshold.")}]}]
+          (swap! (:messages agent) conj m)
+          (session/append-entry sess m)))
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    ;; never delivers: the summarization's deadline decides
+                    llm/send-message (fn [opts] (swap! seen conj opts) (promise))]
+        (compact/compact-context! agent nil :threshold))
+      (t/is (seq @seen) "the summarization ran")
+      (t/is (true? @(:signal (first @seen)))
+            "its deadline cut the abandoned stream")
+      (finally (fs/delete-tree dir)))))
+
 (t/deftest test-loop-compaction-cancelled
   (let [dir (test-tmp/temp-dir! "sess-")
         sess (session/create-session dir)

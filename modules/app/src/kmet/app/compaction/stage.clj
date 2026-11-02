@@ -88,7 +88,11 @@
    completeSummarization)."
   [agent messages {:keys [signals thinking max-tokens]}]
   (let [ep (completion/resolve-endpoint agent)
-        signal (apply concurrent/or-signal signals)
+        ;; the backstop deadline's own cut, OR'd into the run's signals: an
+        ;; abandoned stream stops reading instead of collecting into buffers
+        ;; this call has already left behind
+        call-cut (atom false)
+        signal (apply concurrent/or-signal (conj (vec signals) call-cut))
         ;; Whole-request deadline, like a normal call; the deref below uses
         ;; the same value as its backstop when enabled, while an explicitly
         ;; disabled deadline waits for completion or cancellation.
@@ -145,7 +149,9 @@
           (let [result (if (pos? deadline) (deref done deadline :timeout) @done)]
             (if (map? result)
               result
-              (partial :error (str "Stream timed out after " deadline "ms"))))))
+              (do
+                (reset! call-cut true)
+                (partial :error (str "Stream timed out after " deadline "ms")))))))
       (catch Exception e
         ;; A synchronous throw (auth resolution, the context hook, request
         ;; setup) still has to reach the retry driver as a result: the

@@ -594,8 +594,8 @@
 (defn- attempt-call-provider!
   "Issue one request and collect its normalized result (deref fallback
    deadline included). Returns {:request-tools ts :result r}, plus :call —
-   the promise and its partials snapshot — only for the timeout sentinel,
-   the one outcome whose partials are not in the result map."
+   the promise, its partials snapshot and its cut — only for the timeout
+   sentinel, the one outcome whose partials are not in the result map."
   [{:keys [agent text-buf on-text on-thinking]}]
   (let [;; one read per request: the wire list, the declared set and the
         ;; dispatch below all resolve against it
@@ -614,7 +614,17 @@
     (let [result (let [deadline (retry/llm-total-timeout-ms @(:cfg agent))]
                    (retry/normalize-llm-result
                     (if (pos? deadline)
-                      (deref promise deadline :timeout)
+                      (let [r (deref promise deadline :timeout)]
+                        (when (= :timeout r)
+                          ;; the deadline gave up on the promise, not on the
+                          ;; request: cut it and deliver, so the transport
+                          ;; stops reading and the straggler guards trip
+                          ;; instead of appending into the buffer the retry is
+                          ;; about to reset
+                          ((:abort call))
+                          (deliver promise (merge {:cancelled true}
+                                                  ((:partials call)))))
+                        r)
                       @promise)))]
       (reset! (:active-call agent) nil)
       (cond-> {:request-tools request-tools :result result}
@@ -644,7 +654,9 @@
 (defn- attempt-timed-out!
   "The deref fallback deadline fired (the transport's own total deadline
    normally fires first and delivers a retryable :error). Treated as the same
-   retryable timeout error — never a silent hard abort."
+   retryable timeout error — never a silent hard abort. The call itself was
+   already cut where the deadline gave up on it (see
+   `attempt-call-provider!`)."
   [{:keys [agent agent-end on-error] :as attempt} t call]
   (let [err (str "LLM call timed out after "
                  (retry/llm-total-timeout-ms @(:cfg agent)) "ms")

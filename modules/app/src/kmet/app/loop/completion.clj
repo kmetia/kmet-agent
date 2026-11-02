@@ -79,9 +79,10 @@
    :thinking-signature str} — whatever partials arrived before the failure
    (persisted with the errored attempt; pi: a failed stream's partial becomes
    the final message with stopReason \"error\").
-   Returns {:promise p :partials f}: P resolves with the delivered map;
+   Returns {:promise p :partials f :abort g}: P resolves with the delivered map;
    PARTIALS snapshots the buffers for cancel-turn so an aborted stream keeps
-   what arrived before the abort.
+   what arrived before the abort; ABORT cuts the stream for a caller that
+   stopped waiting (the loop's deref deadline).
    Calls on-text for text deltas during streaming.
    Applies the transform-context hook (pi: transformContext) to the conversation
    before the system prompt is prepended, and prefers the per-run
@@ -244,4 +245,8 @@
                   :thinking (str/trim @thinking-buf)
                   :tool-calls (tc-flush)
                   :usage @usage-buf
-                  :thinking-signature @sig-buf})}))
+                  :thinking-signature @sig-buf})
+     ;; the caller's cut for a call it abandons (the loop's deref deadline):
+     ;; the stream transport derefs CALL-SIGNAL on every line (SSE) / before
+     ;; each poll (curl), so tripping it stops the read on the next event
+     :abort (fn [] (reset! guard-trip true))}))
