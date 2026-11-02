@@ -7,6 +7,7 @@
    Each backend gets a fresh session directory, so one case's files never leak
    into the next."
   (:require [clojure.test :refer [deftest is testing]]
+            [babashka.fs :as fs]
             [kmet.app.session.backend :as session-backend]
             [kmet.app.sessions :as sessions]
             [kmet.test-tmp :as test-tmp]))
@@ -94,7 +95,11 @@
       (let [s ((:create! backend) {:dir dir :cwd dir})]
         ((:append! backend) s assistant-entry)
         (is (= 1 (count ((:paths backend) dir))))
-        (is (nil? ((:delete! backend) s)) "delete reports nothing, it just deletes")
+        ;; no trash CLI: the policy falls back to unlink, so the test neither
+        ;; spawns a subprocess nor leaves files in the developer's trash
+        (is (nil? (with-redefs [fs/which (fn [_] nil)]
+                    ((:delete! backend) s)))
+            "delete reports nothing, it just deletes")
         (is (= [] ((:paths backend) dir)) "the session is gone from the listing")))))
 
 (deftest the-log-works-over-the-ednl-backend
@@ -114,7 +119,8 @@
       (is (= 1 (count ((:entries log) loaded))))
       (is (identical? loaded ((:get log) id))
           "resuming replaces the index's handle with the loaded one"))
-    ((:delete! log) s)
+    (with-redefs [fs/which (fn [_] nil)]
+      ((:delete! log) s))
     (is (= [] ((:paths log) dir)))
     (is (nil? ((:get log) id)) "and the index forgot it")))
 

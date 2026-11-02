@@ -102,10 +102,14 @@
      :paths (:paths backend)
      :append! (:append! backend)
      :entries (:entries backend)
+     ;; The backend's delete runs first: if it throws (the file could not be
+     ;; trashed or unlinked), the session must not vanish from the index while
+     ;; its file is still on disk — the same rule the store's appends follow.
      :delete! (fn [session]
-                (when-let [id (session-id session)]
-                  (swap! by-id dissoc id))
-                ((:delete! backend) session))
+                (let [result ((:delete! backend) session)]
+                  (when-let [id (session-id session)]
+                    (swap! by-id dissoc id))
+                  result))
      :header header}))
 
 (defn- serve

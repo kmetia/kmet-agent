@@ -80,7 +80,7 @@
       (cond
         ;; Up — previous (older) message, wrapping to the newest at the top
         ;; (pi: UserMessageList.handleInput wraps both ends; the shared
-        ;; filter-panel step clamps a stale index and no-ops on an empty list)
+        ;; filter-panel step clamps a stale index first)
         (kb/matches-key kmgr data "tui.select.up")
         (do (fp/select-step! selected-idx-atom :wrap -1 n)
             nil)
