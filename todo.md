@@ -1,18 +1,90 @@
 # Todo
 
-Three tracks. All independent; each is a request/ABI-level change with
-unit-testable surfaces. The context and token tracks that used to close this
-file are dropped — see § Deferred.
+Four tracks, in the order to take them. All independent; each is a
+request/ABI-level change with unit-testable surfaces. The context and token
+tracks that used to close this file are dropped — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| Prompt-caching parity with pi | kmet's wires never ask for prompt caching (except responses/mistral/bedrock), so cache-read sits at 0; the tool ranker serves MCP only, no source's tools can be declared, and a tool-set change re-sends the whole array | P0–P6, decisions closed |
+| **`github-copilot` anthropic auth** | every `github-copilot/claude-*` model fails with `400 missing required Authorization header` — the anthropic wire sends `x-api-key` to an endpoint that only accepts `Authorization: Bearer` | **open — first task** (found while verifying prompt-cache P0) |
+| Prompt-caching parity with pi | kmet's wires never ask for prompt caching (except responses/mistral/bedrock), so cache-read sits at 0; the tool ranker serves MCP only, no source's tools can be declared, and a tool-set change re-sends the whole array | **P0 landed** (anthropic breakpoints + 1h pricing); P1–P6 planned, decisions closed |
 | Around tool hooks | two hand-rolled hook chains + a doubled permission gate; no way to settle a call successfully | decided: **A** — one `:on-tool` around registration |
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | decisions closed (E1–E16); independent |
 
+## `github-copilot`: its anthropic models cannot authenticate
+
+Status: open, diagnosed, fix shape agreed. Small and independent — take it
+before prompt-cache P1.
+
+### What happens
+
+Every `github-copilot/claude-*` model fails on the first request:
+
+```
+400 {"error":{"message":"missing required Authorization header"}}
+```
+
+Copilot's `/v1/messages` is bearer-only. `anthropic-auth-headers`
+(`anthropic_messages.clj:239`) sends `Authorization: Bearer` only when
+`ANTHROPIC_AUTH_TOKEN` won the resolution order; otherwise it sends
+`x-api-key`. The provider carries no `:auth-header` (nothing in `models.edn`
+does), so `shared/request-headers` adds no Bearer either. The token itself is
+fine — it is a subscription token, and every other wire already sends it as a
+bearer (`openai_completions.clj:60`, `openai_responses.clj:235`,
+`openai_codex_responses.clj:62`), which is why copilot's OpenAI models work and
+its Claude models do not.
+
+Confirmed by hand against a live copilot token: the identical request body →
+`400 missing required Authorization header` with `x-api-key`, `200` with
+`Authorization: Bearer` plus the editor headers the wire already sends
+(`Editor-Version`, `Copilot-Integration-Id`; `copilot-dynamic-headers`).
+pi reaches the same endpoint as a bearer token because its oauth `toAuth`
+returns an `OAuthToken` object and `isOAuthToken` routes it to the bearer
+header.
+
+### Why it is not a wire special-case
+
+The distinction pi makes is *where the token came from*, not which provider it
+is: an oauth credential yields a subscription token that every provider's own
+endpoint wants as a bearer. kmet's `resolve-provider-auth` (`auth.clj:328`)
+collapses that distinction away — `resolve-oauth-auth` returns
+`{:api-key … :base-url …}` (`oauth.clj:409`, copilot's `to-auth`), a shape
+indistinguishable from an `auth.edn` API key. The fix restores the marker.
+
+### Steps
+
+1. **Mark the auth.** In `resolve-provider-auth`'s first branch, the
+   oauth-derived result gains `:oauth true`:
+   `(when-let [a (resolve-oauth-auth provider)] (assoc a :oauth true))`.
+   Update its docstring to name the key; it is the only branch that sets it.
+2. **Let the anthropic header builder honour it.** `anthropic-auth-headers`
+   already calls `resolve-provider-auth` itself, so the bearer branch becomes
+   `(or (:bearer resolved) (when (:oauth resolved) (:api-key resolved)))`.
+   No new request option, no threading through `anthropic-request`.
+3. **Check the other oauth providers for the same endpoint.** `openai-codex`
+   and the copilot OpenAI path hardcode Bearer and are unaffected; leave
+   `shared/request-headers`' `:auth-header` alone unless a wire needs it.
+4. **Tests.** `test_auth.clj`: a stored oauth credential resolves with
+   `:oauth true`, and an `auth.edn` key does not. `test_llm_anthropic.clj`:
+   `anthropic-auth-headers` for a provider with an oauth credential →
+   `{"Authorization" "Bearer …"}`, with no `x-api-key`; an API-key provider →
+   `x-api-key` as today; `ANTHROPIC_AUTH_TOKEN` still wins over both.
+5. **Docs.** `docs/providers.md` (or wherever copilot's setup is described)
+   gains nothing: after this, a copilot login works for every enabled model.
+   If the live check is worth keeping, extend `scripts/live_cache_check.bb` —
+   it already takes a provider argument.
+
+Done when: a request to `github-copilot/claude-haiku-5.5` on a live copilot
+account returns a stream (no `400 missing required Authorization header`), the
+unit tests above pass, and no wire sends `x-api-key` for an oauth-derived
+token.
+
 ## Prompt-caching parity with pi
 
-Status: plan, decisions closed — implementation can start at P0.
+Status: plan, decisions closed. **P0 landed and verified against the live API**
+(anthropic breakpoints, the usage merge it uncovered, the 1h cache-write
+pricing, and D2's corrected resolution seam). Next: P1 — after §
+`github-copilot` above, which blocks every copilot Claude model.
 Owner: whoever takes the `:llm` row next.
 Reference implementation: `~/src/cvstree/pi/packages/ai/src/api/` (pi).
 
@@ -63,6 +135,41 @@ the markers pi places.
 ### Tasks
 
 #### P0 — `anthropic-messages`: place markers (biggest win, smallest diff)
+
+**Done, and verified against the live API.** `anthropic-compat`,
+`anthropic-cache-control`, `anthropic-payload` (system + last tool + last user
+block) and `anthropic-affinity-headers` are in; `kmet.ai.usage` carries
+`:cache-write-1h` and `models/calculate-cost` prices it at 2x base input.
+
+Live check — `bb scripts/live_cache_check.bb` (three requests, claude-haiku-4.5,
+~15.6k-token prefix; payload and stream handling are kmet's, only the socket is
+curl):
+
+| round | retention | cache_creation | cache_read | 1h share |
+|---|---|---|---|---|
+| 1, cold prefix | `:short` | 15626 | 0 | 0 |
+| 2, same prefix | `:short` | 14 | **15626** | 0 |
+| 3, cold prefix | `:long` | 15628 | 0 | **15628** |
+
+Round 3's cost came out at 15628 × 2 × input, so the 1h pricing is right too.
+
+Notes from doing it:
+
+- The payload builder takes `model-record` (not `provider-record`) and reads
+  `(:provider model-record)` for the replay context — the same value
+  `(:id provider-record)` carried, and the shape `openai-payload` uses.
+- **The usage gap this found is fixed in the same pass** (pi accumulateUsage):
+  `parse-anthropic-event` now reports `message_delta`'s usage,
+  `merge-anthropic-usage` folds it field-wise over `message_start`'s (a field
+  the delta omits is preserved — proxies drop `input_tokens`, and a gateway may
+  report cache usage only there), and `anthropic-events-handler` emits the
+  merged map once per usage-bearing chunk. Live: two reports per request, the
+  last carrying the delta's real `output_tokens` (4) instead of `message_start`'s
+  placeholder 1.
+- **Found here, tracked separately:** `github-copilot`'s anthropic models
+  cannot authenticate (bearer-only endpoint, `x-api-key` sent). It is an
+  auth-layer change, so it is § 1 at the top of this file rather than a P0
+  follow-up; every `github-copilot/claude-*` model is affected until it lands.
 
 Files: `modules/ai/src/kmet/ai/api/anthropic_messages.clj`,
 `modules/ai/src/kmet/ai/api/shared.clj`.
@@ -488,10 +595,11 @@ Run: `bb test-changed`, `bb lint-changed`, `bb format-check-changed`.
 
 ### Order and size
 
-P0 and P1 are independent and each is a single-file change plus a test.
-Recommended sequence: P0 → P1 → P2 → P4 → P3 (P3 resolves a decided setting via
-`KMET_CACHE_RETENTION`, D2). P2 last-if-busy: it deletes duplication, it does
-not change bytes. P5 is independent of all of them — it touches the tool
+P0 (landed) and P1 are independent and each is a single-file change plus a
+test. Recommended sequence: P1 → P2 → P4 → P3 (P3 resolves a decided setting
+through `KMET_CACHE_RETENTION`, D2 — read it in `kmet.app.config`, never in
+`kmet.ai`, which may not name a host variable). P2 last-if-busy: it deletes
+duplication, it does not change bytes. P5 is independent of all of them — it touches the tool
 registry, not a wire — so it lands whenever, and is the one item whose payoff
 is measured in prompt tokens rather than cache reads. P6 depends on P5 and wants
 P0/P1 landed so the cache it protects is actually being taken. All decisions
@@ -513,11 +621,16 @@ Prerequisite kmet lacks: it drops the 1h split entirely. `models.clj:76` says
 `cache_creation_input_tokens` but not its `:ephemeral_1h_input_tokens` member,
 so a 1h write would be priced at the 5m rate. Landed with P0 (step 8).
 
-**D2 — retention resolution (decided: env now).** Resolve in `kmet.ai.llm`:
-`(or (:cache-retention opts) (getenv "KMET_CACHE_RETENTION") :short)`. No
-per-model or per-provider key — the per-model shape has no consumer, and a
+**D2 — retention resolution (decided: env now; location corrected while landing
+P0).** The environment is read in `kmet.app.config/get-cache-retention` and the
+resolved value arrives as the call's `:cache-retention`;
+`kmet.ai.llm/resolve-cache-retention` only defaults an absent one to `:short`.
+The plan said `kmet.ai.llm` would read the variable, but `test_seam_requires`
+(`ai-names-no-app-state-root`) forbids a `kmet.ai` namespace from naming any
+`KMET_*` variable — host state arrives as an argument — and the guard is right.
+No per-model or per-provider key: the per-model shape has no consumer, and a
 `settings.edn` key can follow if one appears. The per-call `:cache-retention`
-stays the override that compaction already uses for `:none`.
+stays the override compaction uses for `:none`.
 
 **D3 — affinity on anthropic (decided: in P0).** `anthropic-compat` already
 answers `:send-session-affinity-headers` / `:session-affinity-format`, and the
