@@ -145,13 +145,12 @@
       (cond
         ;; Up/k — clamp at the top (pi ExtensionSelectorComponent)
         (or (kb/matches-key kmgr data "tui.select.up") (= data "k"))
-        (do (swap! selected-idx-atom #(max 0 (dec %)))
+        (do (fp/select-step! selected-idx-atom :clamp -1 n)
             nil)
 
         ;; Down/j — clamp at the bottom
         (or (kb/matches-key kmgr data "tui.select.down") (= data "j"))
-        (do (when (pos? n)
-              (swap! selected-idx-atom #(min (dec n) (inc %))))
+        (do (fp/select-step! selected-idx-atom :clamp 1 n)
             nil)
 
         ;; Enter — select (pi tui.select.confirm / "\n"; pi guards on the

@@ -36,6 +36,15 @@
       (= :clamp nav) (max 0 (min (dec n) (+ idx delta)))
       :else (mod (+ idx delta) n))))
 
+(defn select-step!
+  "Apply one navigation step of DELTA (-1 up, 1 down) to the selection in
+   SELECTED-ATOM among N items under NAV (:wrap, or :clamp at the ends) — the
+   shared list navigation for the selectors, so a stale index and an empty
+   list behave the same everywhere (both land in range). Returns nil."
+  [selected-atom nav delta n]
+  (swap! selected-atom #(stepped-selected nav % delta n))
+  nil)
+
 (defn index-of
   "Index of the first item satisfying PRED, or nil."
   [pred items]

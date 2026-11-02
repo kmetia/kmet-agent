@@ -26,6 +26,7 @@
             [kmet.app.session.core :as session]
             [kmet.ui.tui.dock :as dock]
             [kmet.ui.tui.footer-data-provider :as fdp]
+            [kmet.tui.components.filter-panel :as fp]
             [kmet.ui.tui.subs :as s]
             [kmet.app.debug :as debug]
             [kmet.reakt.core :as r]
@@ -574,12 +575,13 @@
                 ((:request-render this))))))))))
 
 (defn- move-selection!
-  "Up/Down/PageUp/PageDown — clamp at the ends, no wrap (pi SessionList)."
+  "Up/Down/PageUp/PageDown — clamp at the ends, no wrap (pi SessionList).
+   The shared filter-panel step clamps a stale index first, so a selection
+   left past a shrunk filter lands on the last row instead of sticking."
   [this delta]
   (let [n (count (:flat @(:state-atom this)))]
-    (when (pos? n)
-      (swap! (:state-atom this)
-             update :selected-idx #(max 0 (min (dec n) (+ % delta)))))))
+    (swap! (:state-atom this)
+           update :selected-idx #(fp/stepped-selected :clamp % delta n))))
 
 (defn- forward-to-search!
   "Everything that isn't a selector key goes to the search input; a changed

@@ -30,6 +30,7 @@
             [kmet.tui.keys :as keys]
             [kmet.tui.keybindings :as tui-kb]
             [kmet.hikap.component :refer [track!]]
+            [kmet.tui.components.filter-panel :as fp]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
             [kmet.libs.theme :as th]
@@ -806,14 +807,14 @@
                           (let [st @state-atom]
                             (some-> (row-at st (:selected-idx st)) :node)))]
       (cond
-        ;; up/down wrap at the ends (pi tui.select.up/down)
+        ;; up/down wrap at the ends (pi tui.select.up/down; the shared
+        ;; filter-panel step clamps a stale index and no-ops on an empty list)
         (or (match "tui.select.up") (match "tui.select.down"))
         (let [dir (if (match "tui.select.up") -1 1)]
           (swap! state-atom
                  (fn [{:keys [filtered selected-idx] :as st}]
-                   (if (seq filtered)
-                     (assoc st :selected-idx (mod (+ selected-idx dir) (count filtered)))
-                     st)))
+                   (assoc st :selected-idx
+                          (fp/stepped-selected :wrap selected-idx dir (count filtered)))))
           nil)
 
         ;; folding / segment jumps (pi foldOrUp/unfoldOrDown)

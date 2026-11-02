@@ -17,6 +17,7 @@
             [kmet.tui.hikap :as h]
             [kmet.tui.keybindings :as kb]
             [kmet.hikap.component :refer [track!]]
+            [kmet.tui.components.filter-panel :as fp]
             [kmet.tui.macros :refer [defcomponent]]
             [kmet.tui.protocols :as protocols]
             [kmet.libs.theme :as theme]
@@ -78,16 +79,15 @@
           n (count @messages-atom)]
       (cond
         ;; Up — previous (older) message, wrapping to the newest at the top
-        ;; (pi: UserMessageList.handleInput wraps both ends)
+        ;; (pi: UserMessageList.handleInput wraps both ends; the shared
+        ;; filter-panel step clamps a stale index and no-ops on an empty list)
         (kb/matches-key kmgr data "tui.select.up")
-        (do (when (pos? n)
-              (swap! selected-idx-atom #(if (zero? %) (dec n) (dec %))))
+        (do (fp/select-step! selected-idx-atom :wrap -1 n)
             nil)
 
         ;; Down — next (newer) message, wrapping to the oldest at the bottom
         (kb/matches-key kmgr data "tui.select.down")
-        (do (when (pos? n)
-              (swap! selected-idx-atom #(if (= % (dec n)) 0 (inc %))))
+        (do (fp/select-step! selected-idx-atom :wrap 1 n)
             nil)
 
         (kb/matches-key kmgr data "tui.select.confirm")
