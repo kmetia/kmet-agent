@@ -153,27 +153,16 @@
                                       ;; (pi: toolOutputExpanded, extended with quiet)
                thinking-hidden-atom  ;; flag: thinking blocks hidden (pi: hideThinkingBlock)
                hidden-label-atom     ;; label shown in place of hidden thinking (pi: hiddenThinkingLabel)
-               lines-cache]          ;; render memo (protocols/concat-cached)
+               lines-cache]          ;; render memo (protocols/cached-lines)
 
   (render [_this width]
-    ;; Every message component renders once per pass (its own cache decides
-    ;; whether that is cheap); the flat transcript is reused while the
-    ;; children return the objects they returned last pass, so an idle
-    ;; transcript costs a pass over the messages and no line copying. The
-    ;; parts sequence carries the group separators too, so a grouping change
-    ;; (a quiet-run break, a banner appearing) is a changed parts sequence
-    ;; and never a stale join.
-    (let [msgs @messages-atom
-          info-lines (when-let [i @info-comp-atom] (protocols/render i width))
-          parts (message-parts msgs width (some? @info-comp-atom) (= :quiet @tools-expanded-atom))
-          parts (if info-lines (into [info-lines] parts) parts)
-          {:keys [lines cache]}
-          (protocols/concat-cached
-           (when lines-cache @lines-cache) [width] parts)]
-      ;; a hit returns the stored memo itself — writing it back is a no-op
-      (when (and lines-cache (not (identical? cache @lines-cache)))
-        (reset! lines-cache cache))
-      lines))
+    ;; every message renders (each at its own cache); the parts — separators
+    ;; included — let an unchanged transcript come back without a copy
+    (let [info-lines (when-let [i @info-comp-atom] (protocols/render i width))
+          parts (message-parts @messages-atom width (some? @info-comp-atom)
+                               (= :quiet @tools-expanded-atom))
+          parts (if info-lines (into [info-lines] parts) parts)]
+      (protocols/cached-lines lines-cache [width] parts)))
 
   (dispose [_this]
     ;; tui-clear/container disposal must cascade into the messages, or a
@@ -309,9 +298,7 @@
   (let [text (content->user-text (:content msg ""))
         ;; parsed once at insertion (with-skill-block); a directly built
         ;; message map is parsed here instead — never per render pass
-        block (if (contains? msg :skill-block)
-                (:skill-block msg)
-                (skill-block/parse text))
+        block (message-skill-block msg)
         ;; live messages carry image blocks inside :content; the session
         ;; replay path attaches them as the message's :images (its content is
         ;; already flattened to text) — accept both

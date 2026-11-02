@@ -8,21 +8,12 @@
 
 (defcomponent Container nil [children lines-cache]
   (render [_this width]
-    ;; Every child renders once per pass (its own cache decides whether that
-    ;; is cheap); the concatenation is reused while the children return the
-    ;; objects they returned last pass, so an unchanged container costs a
-    ;; pass over the children and no line copying. LINES-CACHE keeps the
-    ;; previous pass (protocols/concat-cached): the children's vectors plus
-    ;; the flat result, both already referenced by the children's caches.
-    (let [{:keys [lines cache]}
-          (protocols/concat-cached
-           (when lines-cache @lines-cache)
-           [width]
-           (mapv (fn [c] (protocols/render c width)) @children))]
-      ;; a hit returns the stored memo itself — writing it back is a no-op
-      (when (and lines-cache (not (identical? cache @lines-cache)))
-        (reset! lines-cache cache))
-      lines))
+    ;; children always render (each at its own cache); the concatenation is
+    ;; reused while they return the objects they returned last pass
+    (protocols/cached-lines
+     lines-cache
+     [width]
+     (mapv (fn [c] (protocols/render c width)) @children)))
   ;; pi: no handleInput on containers — input routes via TUI focus
   (invalidate [_this] (doseq [c @children] (protocols/invalidate c)))
   (dispose [_this] (doseq [c @children] (protocols/dispose c))))

@@ -1,7 +1,7 @@
 (ns kmet.tui.test-protocols
   "The line-collection primitives: join-lines, concat-cached and
-   render-all-cached — the memo contract every multi-child component
-   (Container, Box, ChatHistory, the frame's document) builds on."
+   cached-lines — the memo contract every multi-child component (Container,
+   Box, ChatHistory, the frame's document) builds on."
   (:require [clojure.string :as str]
             [clojure.test :as t]
             [kmet.tui.protocols :as protocols]
@@ -82,14 +82,24 @@
   (t/is (= ["a" "b"] (:lines (protocols/concat-cached nil [10] [["a"] ["b"]]))))
   (t/is (= [] (:lines (protocols/concat-cached nil [10] [])))))
 
-(t/deftest test-render-all-cached
-  (let [a (text/make-text "a" 0 0)
-        b (text/make-text "b" 0 0)
-        r1 (protocols/render-all-cached nil [10] [a b] 10)
-        r2 (protocols/render-all-cached (:cache r1) [10] [a b] 10)]
-    (t/is (identical? (:lines r1) (:lines r2))
-          "unchanged children concatenate to the previous vector")
-    (text/text-set! b "B")
-    (let [r3 (protocols/render-all-cached (:cache r2) [10] [a b] 10)]
-      (t/is (not (identical? (:lines r2) (:lines r3))))
-      (t/is (some #(str/includes? % "B") (:lines r3))))))
+(t/deftest test-cached-lines
+  (let [memo (atom nil)]
+    (t/testing "a hit returns the previous vector and does not touch the memo"
+      (let [a (text/make-text "a" 0 0)
+            b (text/make-text "b" 0 0)
+            render #(mapv (fn [c] (protocols/render c 10)) [a b])
+            first-lines (protocols/cached-lines memo [10] (render))
+            writes (atom 0)]
+        (add-watch memo ::count (fn [_ _ _ _] (swap! writes inc)))
+        (try
+          (t/is (identical? first-lines (protocols/cached-lines memo [10] (render))))
+          (t/is (zero? @writes) "a hit writes nothing")
+          (t/testing "a miss writes the new memo once"
+            (text/text-set! b "B")
+            (t/is (some #(str/includes? % "B")
+                        (protocols/cached-lines memo [10] (render))))
+            (t/is (= 1 @writes)))
+          (finally
+            (remove-watch memo ::count)))))
+    (t/testing "no memo atom still renders (it just never memoizes)"
+      (t/is (= ["a"] (protocols/cached-lines nil [10] [["a"]]))))))

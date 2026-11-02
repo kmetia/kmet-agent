@@ -1989,17 +1989,16 @@
   "The frame's raw document: every component at natural height, with the
    visible overlays composited on top (pi: compositeOverlays).
 
-   DOCUMENT-CACHE is the loop's memo (protocols/concat-cached): while the
-   component set returns the line vectors it returned last frame, the
+   DOCUMENT-CACHE is the loop's lines memo (protocols/cached-lines): while
+   the component set returns the line vectors it returned last frame, the
    document is returned as-is — no line copying — and the frame pass's
    unchanged-document fast paths see the vector they saw last frame."
   [document-cache tui w h]
-  (let [{:keys [lines cache]}
-        (protocols/render-all-cached
-         (when document-cache @document-cache) [w] @(:components tui) w)]
-    (when (and document-cache (not (identical? cache @document-cache)))
-      (reset! document-cache cache))
-    (composite-overlays tui lines w h)))
+  (composite-overlays
+   tui
+   (protocols/cached-lines document-cache [w]
+                           (mapv (fn [c] (protocols/render c w)) @(:components tui)))
+   w h))
 
 (defn- run-render-loop!
   "Start the terminal (raw mode) and run the render loop until the TUI is

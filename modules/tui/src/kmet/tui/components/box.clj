@@ -8,21 +8,21 @@
 
 ;; ─── Internal helpers (defined before record to be visible in method bodies) ─
 
-(defn- apply-bg [f line width]
+(defn- apply-bg [bg line width]
   (let [vis (u/visible-width line)
         pad (max 0 (- width vis))
         padded (str line (apply str (repeat pad \space)))]
-    (if f (f padded) padded)))
+    (if bg (bg padded) padded)))
 
 (defn- box-lines
   "The box composition of PARTS: PADDING-Y blank rows, then every child line
-   with LEFT-PAD in front, all padded/colored to WIDTH through BG-FN (nil
+   with LEFT-PAD in front, all padded/colored to WIDTH through BG (nil
    leaves the padding plain)."
-  [parts left-pad bg-fn padding-y width]
-  (let [blank (apply-bg bg-fn "" width)
+  [parts left-pad bg padding-y width]
+  (let [blank (apply-bg bg "" width)
         pad (repeat padding-y blank)
         content (mapcat (fn [part]
-                          (map (fn [line] (apply-bg bg-fn (str left-pad line) width))
+                          (map (fn [line] (apply-bg bg (str left-pad line) width))
                                part))
                         parts)]
     (into [] (concat pad content pad))))
@@ -38,19 +38,14 @@
               padding-y @padding-y-atom
               content-width (max 1 (- width (* 2 padding-x)))
               left-pad (apply str (repeat padding-x \space))
-              bg-fn-val (when-let [f @bg-fn] f)
-              bg-sample (when bg-fn-val (bg-fn-val "test"))
-              r (protocols/concat-cached
-                 @cache
-                 ;; every input of the composition: the geometry and the
-                 ;; background sample (the padding setters no longer need to
-                 ;; drop the memo — a changed value is a changed key)
-                 [width content-width padding-x padding-y bg-sample]
-                 (mapv (fn [c] (protocols/render c content-width)) children)
-                 (fn [parts] (box-lines parts left-pad bg-fn-val padding-y width)))]
-          (when-not (identical? (:cache r) @cache)
-            (reset! cache (:cache r)))
-          (:lines r)))))
+              bg @bg-fn]
+          ;; the key is every input of the composition: the geometry and the
+          ;; background sample the lines are run through
+          (protocols/cached-lines
+           cache
+           [width content-width padding-x padding-y (when bg (bg "test"))]
+           (mapv (fn [c] (protocols/render c content-width)) children)
+           (fn [parts] (box-lines parts left-pad bg padding-y width)))))))
   (invalidate [this]
     (reset! (:cache this) nil)
     (doseq [c @children] (protocols/invalidate c)))

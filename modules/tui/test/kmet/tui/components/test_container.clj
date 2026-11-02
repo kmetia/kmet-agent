@@ -137,20 +137,6 @@
         (let [f4 (core/render c 12)]
           (t/is (not (identical? f2 f4)))
           (t/is (every? #(= 12 (count %)) f4))))))
-  (t/testing "a hit does not rewrite the memo"
-    (let [t1 (text/make-text "a" 0 0)
-          c (container/make-container [t1])
-          writes (atom 0)]
-      (core/render c 10)
-      (add-watch (:lines-cache c) ::count (fn [_ _ _ _] (swap! writes inc)))
-      (try
-        (core/render c 10)
-        (t/is (zero? @writes) "an unchanged pass writes nothing")
-        (text/text-set! t1 "A")
-        (core/render c 10)
-        (t/is (= 1 @writes) "a miss writes the new memo once")
-        (finally
-          (remove-watch (:lines-cache c) ::count)))))
   (t/testing "adding and removing children is never served stale"
     (let [t1 (text/make-text "a" 0 0)
           t2 (text/make-text "b" 0 0)

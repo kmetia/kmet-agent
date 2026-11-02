@@ -25,7 +25,7 @@
 ;;
 ;; Phase attribution wraps the loop's own functions with timers
 ;; (alter-var-root): kmet.tui.core/compose-document (the flat document:
-;; protocols/render-all-cached plus the overlay composite),
+;; protocols/cached-lines plus the overlay composite),
 ;; kmet.tui.frame/{build-frame-lines,composite-flashes} and the virtual
 ;; terminal's write-output. The compose wrapper also emits the frame opener
 ;; (:compose-start, before the document is touched), because the overlay
