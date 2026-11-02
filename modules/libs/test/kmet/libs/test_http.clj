@@ -715,9 +715,7 @@
         body (proxy [java.io.InputStream] []
                (read
                  ([]
-                  (if (>= @served limit)
-                    (throw (ex-info "read past the cap" {:type :over-read}))
-                    (do (swap! served inc) (int \a))))
+                  (throw (ex-info "unused arity" {})))
                  ([buf] (throw (ex-info "unused arity" {})))
                  ([buf off len]
                   (if (>= @served limit)

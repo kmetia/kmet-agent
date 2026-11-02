@@ -1,7 +1,7 @@
 (ns kmet.app.session.test-listing
   "On-disk discovery: list-sessions and the session-info projection,
    cwd-encoded directories, candidate ordering, delete, and import."
-  (:require [clojure.test :as t :refer [testing]]
+  (:require [clojure.test :as t]
             [clojure.string :as str]
             [clojure.java.io :as io]
             [babashka.fs :as fs]
@@ -372,19 +372,19 @@
 (t/deftest test-session-delete-policy
   (let [dir (test-tmp/temp-dir! "sess-del-")]
     (try
-      (testing "no trash CLI: the file is unlinked"
+      (t/testing "no trash CLI: the file is unlinked"
         (let [f (str (fs/path dir "s.ednl"))]
           (spit f "x")
           (with-redefs [fs/which (fn [_] nil)]
             (t/is (= {:ok true :method :unlink} (s/delete-session-file f))))
           (t/is (not (fs/exists? f)))))
-      (testing "a file already gone is a success (a concurrent delete wins)"
+      (t/testing "a file already gone is a success (a concurrent delete wins)"
         (let [missing (str (fs/path dir "gone.ednl"))]
-          (with-redefs [fs/which (fn [_] nil)]
-            (t/is (= {:ok true :method :unlink} (s/delete-session-file missing))))
-          (with-redefs [fs/which (fn [_] "/usr/bin/trash")]
-            (t/is (= {:ok true :method :trash} (s/delete-session-file missing))))))
-      (testing "a trash failure falls back to the unlink error"
+          (doseq [[which method] [[nil :unlink] ["/usr/bin/trash" :trash]]]
+            (with-redefs [fs/which (fn [_] which)]
+              (t/is (= {:ok true :method method}
+                       (s/delete-session-file missing)))))))
+      (t/testing "a trash failure falls back to the unlink error"
         (let [f (str (fs/path dir "locked.ednl"))]
           (spit f "x")
           (with-redefs [fs/which (fn [_] "/usr/bin/trash")

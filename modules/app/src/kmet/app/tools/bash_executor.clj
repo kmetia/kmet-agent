@@ -512,14 +512,15 @@
    (a tailed log, a spinner) spends the budget and settles — growth cannot
    extend the wait without a ceiling, or the turn never settles."
   [{:keys [tail-bytes]}]
-  (let [cap (+ (concurrent/monotonic-ms) settle-grace-ms)]
+  (let [cap (+ (concurrent/monotonic-ms) settle-grace-ms)
+        ;; a growth buys another slice, never past the cap
+        extend (fn [now] (min cap (+ now settle-grace-slice-ms)))]
     (loop [last-bytes @tail-bytes
-           deadline (min cap (+ (concurrent/monotonic-ms) settle-grace-slice-ms))]
+           deadline (extend (concurrent/monotonic-ms))]
       (when (< (concurrent/monotonic-ms) deadline)
         (let [current-bytes @tail-bytes]
           (if (> current-bytes last-bytes)
-            (recur current-bytes
-                   (min cap (+ (concurrent/monotonic-ms) settle-grace-slice-ms)))
+            (recur current-bytes (extend (concurrent/monotonic-ms)))
             (do (Thread/sleep 10)
                 (recur last-bytes deadline))))))))
 

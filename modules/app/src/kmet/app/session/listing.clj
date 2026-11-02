@@ -358,6 +358,28 @@
             prefix (some #(when (str/starts-with? (:id %) arg) (:path %)) infos)]
         (or exact prefix)))))
 
+(defn- trash-error-hint
+  "The first line of the trash CLI's stderr (capped) for a failed delete."
+  [stderr]
+  (when-let [line (first (str/split-lines (str/trim (str stderr))))]
+    (when (seq line)
+      (str "trash: " (subs line 0 (min 200 (count line)))))))
+
+(defn- unlink-session-file
+  "Permanently delete PATH. A file already gone is a success (a concurrent
+   delete wins); a failure carries HINT when one explains it."
+  [path hint]
+  (if-not (fs/exists? path)
+    {:ok true :method :unlink}
+    (try
+      (fs/delete path)
+      {:ok true :method :unlink}
+      (catch Exception e
+        {:ok false :method :unlink
+         :error (if hint
+                  (str (ex-message e) " (" hint ")")
+                  (ex-message e))}))))
+
 (defn delete-session-file
   "Delete the session FILE at PATH, trying the `trash` CLI first and falling
    back to permanent deletion (pi: deleteSessionFile). The one deletion
@@ -366,30 +388,16 @@
    Returns {:ok bool :method :trash|:unlink :error str?}; a file already gone
    is a success (a concurrent delete wins)."
   [path]
-  (let [unlink (fn [hint]
-                 (if-not (fs/exists? path)
-                   {:ok true :method :unlink}
-                   (try
-                     (fs/delete path)
-                     {:ok true :method :unlink}
-                     (catch Exception e
-                       {:ok false :method :unlink
-                        :error (if hint
-                                 (str (ex-message e) " (" hint ")")
-                                 (ex-message e))}))))
-        trash-error-hint (fn [stderr]
-                           (when-let [line (first (str/split-lines (str/trim (str stderr))))]
-                             (when (seq line)
-                               (str "trash: " (subs line 0 (min 200 (count line)))))))]
-    (if (fs/which "trash")
-      (let [args (if (str/starts-with? path "-") ["--" path] [path])
-            result (try @(proc/process (into ["trash"] args)
-                                       {:out :string :err :string})
-                        (catch Exception _ nil))]
-        (if (or (and result (zero? (:exit result))) (not (fs/exists? path)))
-          {:ok true :method :trash}
-          (unlink (some-> result :err trash-error-hint))))
-      (unlink nil))))
+  (if-not (fs/which "trash")
+    (unlink-session-file path nil)
+    (let [args (if (str/starts-with? path "-") ["--" path] [path])
+          result (try @(proc/process (into ["trash"] args)
+                                     {:out :string :err :string})
+                      (catch Exception _ nil))]
+      (if (or (and result (zero? (:exit result)))
+              (not (fs/exists? path)))
+        {:ok true :method :trash}
+        (unlink-session-file path (some-> result :err trash-error-hint))))))
 
 (defn delete-session!
   "Delete a session file with the shared policy (trash first, unlink

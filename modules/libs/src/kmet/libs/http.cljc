@@ -220,6 +220,16 @@
 
 (def ^:private max-error-body-chars 2000)
 
+(defn- read-capped
+  "At most LIMIT chars from READER — the rest of the stream is never read."
+  [reader limit]
+  (let [buf (char-array limit)]
+    (loop [off 0]
+      (let [n (if (< off limit) (.read reader buf off (- limit off)) -1)]
+        (if (neg? n)
+          (String. buf 0 off)
+          (recur (+ off n)))))))
+
 (defn- error-body-text
   "The response body as a bounded string for error messages: a string body
    passes through (the caller caps it); an unconsumed InputStream (babashka
@@ -232,15 +242,7 @@
     (string? body) body
     (instance? java.io.InputStream body)
     (try (with-open [r (java.io.InputStreamReader. body "UTF-8")]
-           (let [limit (inc max-error-body-chars)
-                 buf (char-array limit)]
-             (loop [off 0]
-               (if (>= off limit)
-                 (String. buf 0 off)
-                 (let [n (.read r buf off (- limit off))]
-                   (if (neg? n)
-                     (String. buf 0 off)
-                     (recur (+ off n))))))))
+           (read-capped r (inc max-error-body-chars)))
          (catch Exception _ nil))
     :else nil))
 

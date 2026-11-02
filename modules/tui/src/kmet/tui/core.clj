@@ -240,7 +240,9 @@
                                             acc chunk)]
                          (recur b acc marks fc lc))))
                    (let [[tail marks fc lc] (scan-range prev-count n marks fc lc)]
-                     [(if (seq tail) (into acc tail) acc) marks fc lc])))
+                     ;; reduce, not into: an empty tail returns ACC itself, so
+                     ;; an unchanged document keeps its vector identity
+                     [(reduce conj acc tail) marks fc lc])))
                (scan-range 0 n {} -1 -1))
              out acc
              ;; A previous marker stays valid exactly while its line's

@@ -353,8 +353,7 @@
                           :exit-code exit-code
                           :status (cond
                                     cancelled? :cancelled
-                                    (nil? exit-code) :error
-                                    (not= exit-code 0) :error
+                                    (or (nil? exit-code) (not= exit-code 0)) :error
                                     :else :complete))
              truncation (assoc :truncation truncation)
              full-output-path (assoc :full-output-path full-output-path))))
