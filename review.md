@@ -25,8 +25,8 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 | 13 | `tui-resume!` bypasses the render-crash guard | high (silent hang) | **fixed** |
 | 14+ | Structural: frame copying, render loop size, duplicated policies | low (maintainability) | verified by reading |
 
-Findings 1, 2, 3, 6, 8 and 9 are fixed (one commit each, each with a regression test); 12 is dropped.
-The rest stand as written.
+Findings 1–13 are fixed (one commit each, each with a regression test); 12 is dropped.
+Of finding 14's structural list the small items are done and three stand (see §14).
 
 ---
 
@@ -284,36 +284,38 @@ a run without an exit code is `:error` and shows `(no exit code)`.
 
 ## 14. Structure and hot paths
 
-- **Frame rebuild copies the whole document** (`modules/tui/src/kmet/tui/core.clj:225-226`):
-  the equal-chunk path is `(reduce conj! acc (subvec prev-out a b))` — one `conj!` per line —
-  while the docstring promises whole-chunk reuse. `assoc` the walked range, `conj` the appended
-  tail, `subvec` a shrink; an unchanged frame can then return the same vector.
+Four of the small items are done; the three structural ones stand.
+
+- ~~**Frame rebuild copies the whole document**~~ **fixed** (`core.clj:225-226`): the pass now
+  starts from the previous output vector, `assoc`s only the differing chunks, `conj`s the
+  appended tail, and returns the previous vector itself when nothing changed (so the diff
+  scan's `identical?` fast path sees it).
 - **The flat document is rebuilt at every container level**: `Container.render` is
   `(protocols/render-all @children width)` with no cache (`modules/tui/src/kmet/tui/components/container.clj:9-11`),
   and the layout nests chat → chat-container → document-container → TUI. A `[width
   child-identity] → lines` cache makes unchanged containers return their previous vector.
-  In the same path, quiet mode re-parses every user message's content with `skill-block/parse`
-  on each pass — compute it once at insertion.
+  Open design question: a pure identity cache is stale as soon as a reactive child re-derives,
+  so the cache has to be invalidated from the frame hook (`component/set-frame-hook!`) or it
+  belongs on the reaction, not the container. In the same path, quiet mode re-parses every
+  user message's content with `skill-block/parse` on each pass — compute it once at insertion.
 - **`run-render-loop!` is ~720 lines** with eight closures over the whole frame (ends at
   `core.clj:3114`), testable only through private-var binding or a fake terminal. Extract a
   `kmet.tui.frame` namespace with `build-frame`/`diff-frame`/`emit-frame` over an explicit
   frame-state map; leave terminal lifecycle, timers, locks and negotiation in the loop.
 - **Frame state is ~17 independent atoms** updated field by field (`core.clj:284-311`,
   force-redraw at 2506-2516, commit at 2994-3016): one `:frame` atom holding a previous-frame
-  map removes the two lists that must stay in sync.
-- **Two session-deletion policies**: the TUI selector's default tries `trash` then unlink
-  (`session_selector.clj:266-290, 938-939`), the session service deletes permanently
-  (`session/listing.clj:360-364`, exposed as backend `:delete!`). Move the policy into the
-  service and default the selector to it.
-- **List navigation is hand-rolled in four selectors** (`session_selector.clj:837-847`,
-  `fork_selector.clj:82-100`, `auth_selector.clj:147-168`, `resource_config.clj:751-776`) with
-  small divergences; `filter_panel.clj` already owns the behaviour. Extract a shared
-  `handle-list-navigation`.
+  map removes the two lists that must stay in sync. Natural once the extraction lands.
+- ~~**Two session-deletion policies**~~ **fixed**: `session/listing.clj` owns the policy
+  (`delete-session-file`: trash then unlink), `delete-session!` calls it and reports a failed
+  delete instead of dropping it, and the selector defaults to it.
+- ~~**List navigation is hand-rolled in four selectors**~~ **fixed**: `filter_panel/select-step!`
+  is the one policy (`:wrap` or `:clamp`, stale index clamped first); the fork, auth, tree and
+  session selectors call it. `resource_config` keeps its own step — it walks a row tree and
+  skips non-item rows, which is not list navigation.
 - **Duplicated MCP reload**: `mcp start-server!` and `mcp/server-mcp-list.clj` carry the same
-  path twice.
-- **`(System/getenv "TERMUX_VERSION")` runs on every frame** (`core.clj:2563`) — hoist to a
-  `def`; the environment cannot change in-process.
-- **Dead code**: `center-offset` (`list_screen.clj:31`) has no callers.
+  path twice. Neither name exists in this tree — needs re-locating before it can be worked.
+- ~~**`(System/getenv "TERMUX_VERSION")` runs on every frame**~~ **fixed**: `termux-host?`.
+- ~~**Dead code**: `center-offset`~~ **fixed**: removed.
 - **The dispatch lock is process-global** (`core.clj:1450-1490`) while every other piece of TUI
   state is per-instance: create it in `create-tui` and read it from the record.
 
@@ -322,9 +324,11 @@ a run without an exit code is `:error` and shows `(no exit code)`.
 ## Suggested order of work
 
 1. ~~Small and testable, one commit each: 3, 7, 8, 6, 5.~~ all done.
-2. Then the concurrency pair with regression tests: 1, 2 — 1 needs the decision in its note
-   first, 2 is a small isolated commit.
+2. ~~Then the concurrency pair with regression tests: 1, 2~~ done.
 3. ~~Then the lifecycle fix with a test asserting empty root after unload: 9.~~ done.
-4. ~~Then robustness: 4, 5, 7, 10, 11, and the TUI guard (13)~~ — 4, 5, 7, 10 and 11 done;
-   13 remains, plus the TUI `!` path's nil exit code found while fixing 3.
-5. Structural work (14) as its own series, frame extraction first.
+4. ~~Then robustness: 4, 10, 11, and the TUI guard (13), plus the TUI `!` path's nil exit
+   code~~ all done, 7 and 5 with item 1.
+5. Structural work (14) as its own series: the small items are done (frame chunk reuse,
+   deletion policy, list navigation, per-frame `getenv`, dead code). Left: frame extraction
+   (first), then the container cache on top of it, then the frame-state atom, then the
+   per-instance lock; re-locate the MCP reload duplication.
