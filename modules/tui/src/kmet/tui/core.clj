@@ -140,6 +140,12 @@
    on bb)."
   1024)
 
+(def ^:private termux-host?
+  "True on Termux ($TERMUX_VERSION marks it). Resolved once: the environment
+   cannot change inside a process, and the frame path used to read it on every
+   render."
+  (boolean (System/getenv "TERMUX_VERSION")))
+
 (defn- build-frame-lines
   "Build one frame's document: strip every CURSOR-MARKER, normalize each
    line, reuse PREV-OUT for lines unchanged since PREV-RAW, and report the
@@ -2560,7 +2566,6 @@
                       prev-count (count prev)
                       width-changed (and (not (zero? prev-w)) (not= prev-w w))
                       height-changed (and (not (zero? prev-h)) (not= prev-h h))
-                      termux? (boolean (System/getenv "TERMUX_VERSION"))
                       first-render? (and (empty? prev)
                                          (not width-changed)
                                          (not height-changed))
@@ -2969,7 +2974,7 @@
                     width-changed
                     (do (log-redraw! (str "terminal width changed (" prev-w " -> " w ")"))
                         (do-full-redraw true))
-                    (and height-changed (not termux?))
+                    (and height-changed (not termux-host?))
                     (do (log-redraw! (str "terminal height changed (" prev-h " -> " h ")"))
                         (do-full-redraw true))
                     (and @(:clear-on-shrink? tui)
