@@ -20,7 +20,7 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 | 8 | Pending-bash flush can duplicate entries | medium (data) | **fixed** |
 | 9 | Extensions leak root-ctx services/plugins on unload | high (leak) | **fixed** |
 | 10 | Unbounded error-body read | low/medium (memory) | **fixed** |
-| 11 | Keyring secret in argv | low/medium (exposure) | verified by reading |
+| 11 | Keyring secret in argv | low/medium (exposure) | **fixed** (Windows; macOS documented) |
 | 12 | `run_code` sandbox exposes `future`/`future-call` | — | **dropped** (not a finding) |
 | 13 | `tui-resume!` bypasses the render-crash guard | high (silent hang) | verified by reading |
 | 14+ | Structural: frame copying, render loop size, duplicated policies | low (maintainability) | verified by reading |
@@ -232,7 +232,7 @@ Fix: read at most `max+1` chars from the stream, then truncate.
 caller's cap. A regression test feeds a stream that throws past 5000 bytes and asserts the
 message is the capped body — the old `slurp` read to the throw and produced nothing.
 
-## 11. Keyring secret in the process argument list
+## 11. Keyring secret in the process argument list — **fixed**
 
 `modules/libs/src/kmet/libs/mcp/auth.clj:416-432`
 
@@ -243,6 +243,12 @@ credential is in an argv for the lifetime of the call, readable by any same-user
 
 Fix: keep the Linux shape; for macOS/Windows use a 0600 temp file or sealed per-user store, or
 document the exposure explicitly if the platforms offer no alternative.
+
+**Fixed:** the Windows branch feeds the whole PowerShell script on stdin (`-Command -`), so
+neither the script nor the payload is in the argv. macOS's `security` tool accepts `-w` only
+as an argument and offers no stdin path, so that exposure is documented on `keyring-write!`
+rather than papered over. A regression test simulates the Windows tool and asserts the
+payload rides stdin.
 
 ## 12. `run_code` sandbox exposes thread-spawning primitives — **dropped**
 
@@ -313,6 +319,6 @@ throw, assert `:stopped?` and the crash log.
 2. Then the concurrency pair with regression tests: 1, 2 — 1 needs the decision in its note
    first, 2 is a small isolated commit.
 3. ~~Then the lifecycle fix with a test asserting empty root after unload: 9.~~ done.
-4. ~~Then robustness: 4, 5, 7, 10, 11, and the TUI guard (13)~~ — 4, 5, 7 and 10 done;
-   11 and 13 remain, plus the TUI `!` path's nil exit code found while fixing 3.
+4. ~~Then robustness: 4, 5, 7, 10, 11, and the TUI guard (13)~~ — 4, 5, 7, 10 and 11 done;
+   13 remains, plus the TUI `!` path's nil exit code found while fixing 3.
 5. Structural work (14) as its own series, frame extraction first.

@@ -832,3 +832,26 @@
         (auth/logout! "srv")
         (reset-storage!)
         (fs/delete-tree dir)))))
+
+;; ─── Keyring argv exposure (Windows branch) ──────────────────────────────
+
+(deftest keyring-write-keeps-the-secret-out-of-the-argv
+  ;; The Windows keyring writes through a PowerShell script that carries the
+  ;; payload; the script is fed on stdin (`-Command -`) so neither it nor the
+  ;; secret appears in the process argument list.
+  (let [calls (atom [])]
+    (with-redefs-fn {(var auth/keyring-tool)
+                     (fn [] ["pwsh" "-NoProfile" "-NonInteractive" "-Command" "-"])
+                     (var auth/run-tool)
+                     (fn [argv & [stdin]]
+                       (swap! calls conj {:argv argv :stdin stdin})
+                       {:ok true})}
+      (fn []
+        (is (true? (#'auth/keyring-write! "srv" {:secret "hunter2"})))
+        (is (= 1 (count @calls)))
+        (let [{:keys [argv stdin]} (first @calls)]
+          (is (not-any? #(str/includes? (str %) "hunter2") argv)
+              "the payload is not in the argv")
+          (is (= "-" (peek argv)) "the script is read from stdin")
+          (is (str/includes? stdin "hunter2")
+              "the payload rides the script on stdin"))))))

@@ -259,7 +259,8 @@
 (defn- keyring-tool
   "The platform keyring tool as an argv vector, or nil when unavailable:
    macOS security, Linux secret-tool, Windows PowerShell (Credential
-   Manager P/Invoke). Termux has none."
+   Manager P/Invoke, the script on stdin via `-Command -` so neither it nor
+   its payload lands in the argv). Termux has none."
   []
   (cond
     (System/getenv "TERMUX_VERSION") nil
@@ -267,8 +268,8 @@
     (if (fs/which "security") ["security"] nil)
     (str/includes? (str/lower-case (System/getProperty "os.name" "")) "win")
     (cond
-      (fs/which "powershell.exe") ["powershell.exe" "-NoProfile" "-NonInteractive" "-Command"]
-      (fs/which "pwsh") ["pwsh" "-NoProfile" "-NonInteractive" "-Command"]
+      (fs/which "powershell.exe") ["powershell.exe" "-NoProfile" "-NonInteractive" "-Command" "-"]
+      (fs/which "pwsh") ["pwsh" "-NoProfile" "-NonInteractive" "-Command" "-"]
       :else nil)
     :else (if (fs/which "secret-tool") ["secret-tool"] nil)))
 
@@ -369,9 +370,11 @@
        "}else{[KmetCred]::CredDelete($t,1,0)|Out-Null}"))
 
 (defn- windows-cred-script
-  "The full PowerShell -Command body for an operation (read/write/delete)
-   on TARGET with optional PAYLOAD (variables inlined — PowerShell -Command
-   does not pass $args reliably across versions). Cached base body."
+  "The full PowerShell body for an operation (read/write/delete) on TARGET
+   with optional PAYLOAD (variables inlined — PowerShell -Command does not
+   pass $args reliably across versions). The caller feeds this on stdin
+   (`-Command -`), so the script and its payload stay out of the argv.
+   Cached base body."
   [op target & [payload]]
   (str "$op=" (shell-quote op) ";$t=" (shell-quote target)
        ";$p=" (if payload (shell-quote payload) "$null") ";"
@@ -405,14 +408,20 @@
               (read-edn-from-string secret)))))
 
       :else
-      (let [r (run-tool (conj tool (windows-cred-script "read" (account-for name))))]
+      (let [r (run-tool tool (windows-cred-script "read" (account-for name)))]
         (when (:ok r)
           (let [secret (str/trim (:out r))]
             (when (seq secret)
               (read-edn-from-string secret))))))))
 
 (defn- keyring-write!
-  "Store the ENTRY for NAME in the OS keyring. Returns true on success."
+  "Store the ENTRY for NAME in the OS keyring. Returns true on success.
+
+   The payload stays out of the argv where the platform allows it: Linux
+   passes it on stdin to secret-tool, Windows feeds the whole script on
+   stdin to PowerShell. macOS's security tool accepts the secret only as
+   `-w <payload>`, so there it is visible in the process argument list for
+   the lifetime of the call (readable by any same-user process)."
   [name entry]
   (let [tool (keyring-tool)
         payload (pr-str entry)]
@@ -428,7 +437,7 @@
                      payload))
 
       :else
-      (:ok (run-tool (conj tool (windows-cred-script "write" (account-for name) payload)))))))
+      (:ok (run-tool tool (windows-cred-script "write" (account-for name) payload))))))
 
 (defn- keyring-clear!
   "Delete the stored entry for NAME. Missing entries are not an error."
@@ -445,7 +454,7 @@
                         "account" (account-for name)))
 
         :else
-        (run-tool (conj tool (windows-cred-script "delete" (account-for name)))))))
+        (run-tool tool (windows-cred-script "delete" (account-for name))))))
   nil)
 
 ;; ─── backend dispatch ─────────────────────────────────────────────────────
