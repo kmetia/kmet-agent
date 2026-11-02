@@ -6,16 +6,36 @@
   (:require [kmet.tui.protocols :as protocols]
             [kmet.tui.macros :refer [defcomponent]]))
 
-(defcomponent Container nil [children]
+(defcomponent Container nil [children lines-cache]
   (render [_this width]
-    (protocols/render-all @children width))
+    ;; Every child renders once per pass (its own cache decides whether that
+    ;; is cheap); the concatenation is reused while the children return the
+    ;; objects they returned last pass, so an unchanged container costs a
+    ;; pass over the children and no line copying. LINES-CACHE keeps the
+    ;; previous pass (protocols/concat-cached): the children's vectors plus
+    ;; the flat result, both already referenced by the children's caches.
+    (let [{:keys [lines cache]}
+          (protocols/concat-cached
+           (when lines-cache @lines-cache)
+           [width]
+           (mapv (fn [c] (protocols/render c width)) @children))]
+      (when lines-cache (reset! lines-cache cache))
+      lines))
   ;; pi: no handleInput on containers — input routes via TUI focus
   (invalidate [_this] (doseq [c @children] (protocols/invalidate c)))
   (dispose [_this] (doseq [c @children] (protocols/dispose c))))
 
 (defn make-container
-  ([] (map->Container {:children (atom [])}))
-  ([children] (map->Container {:children (atom (vec children))})))
+  ([] (map->Container {:children (atom []) :lines-cache (atom nil)}))
+  ([children] (map->Container {:children (atom (vec children))
+                               :lines-cache (atom nil)})))
+
+(defn- drop-lines-cache!
+  "Forget the render memo, so the dropped children's line vectors are not
+   retained until the next render (their components are gone)."
+  [c]
+  (when-let [cache (:lines-cache c)]
+    (reset! cache nil)))
 
 (defn container-add-child [c child] (swap! (:children c) conj child))
 (defn container-remove-child [c child]
@@ -45,7 +65,10 @@
                         []
                         @(:children c))]
     (reset! (:children c) children)
+    (drop-lines-cache! c)
     (doseq [old dropped]
       (protocols/dispose old))))
 
-(defn container-clear [c] (reset! (:children c) []))
+(defn container-clear [c]
+  (reset! (:children c) [])
+  (drop-lines-cache! c))

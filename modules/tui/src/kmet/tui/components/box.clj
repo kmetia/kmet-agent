@@ -8,41 +8,48 @@
 
 ;; ─── Internal helpers (defined before record to be visible in method bodies) ─
 
-(defn- apply-bg [{:keys [bg-fn]} line width]
+(defn- apply-bg [f line width]
   (let [vis (u/visible-width line)
         pad (max 0 (- width vis))
         padded (str line (apply str (repeat pad \space)))]
-    (if-let [f @bg-fn] (f padded) padded)))
+    (if f (f padded) padded)))
+
+(defn- box-lines
+  "The box composition of PARTS: PADDING-Y blank rows, then every child line
+   with LEFT-PAD in front, all padded/colored to WIDTH through BG-FN (nil
+   leaves the padding plain)."
+  [parts left-pad bg-fn padding-y width]
+  (let [blank (apply-bg bg-fn "" width)
+        pad (repeat padding-y blank)
+        content (mapcat (fn [part]
+                          (map (fn [line] (apply-bg bg-fn (str left-pad line) width))
+                               part))
+                        parts)]
+    (into [] (concat pad content pad))))
 
 ;; ─── Box record ─────────────────────────────────────────────────────────────
 
 (defcomponent Box nil [children padding-x-atom padding-y-atom bg-fn cache]
-  (render [this width]
-    (if (empty? @children)
-      []
-      (let [padding-x @padding-x-atom
-            padding-y @padding-y-atom
-            content-width (max 1 (- width (* 2 padding-x)))
-            left-pad (apply str (repeat padding-x \space))
-            child-lines (mapcat (fn [c]
-                                  (map #(str left-pad %) (protocols/render c content-width)))
-                                @children)
-            bg-fn-val (when-let [f @bg-fn] f)
-            bg-sample (when bg-fn-val (bg-fn-val "test"))
-            cached @cache]
-        (if (and cached
-                 (= (:width cached) width)
-                 (= (:bg-sample cached) bg-sample)
-                 (= (:child-lines cached) child-lines))
-          (:lines cached)
-          (let [result (into []
-                             (concat
-                              (repeat padding-y (apply-bg this "" width))
-                              (map #(apply-bg this % width) child-lines)
-                              (repeat padding-y (apply-bg this "" width))))]
-            (reset! cache {:width width :bg-sample bg-sample
-                           :child-lines child-lines :lines result})
-            result)))))
+  (render [_this width]
+    (let [children @children]
+      (if (empty? children)
+        (do (reset! cache nil) [])
+        (let [padding-x @padding-x-atom
+              padding-y @padding-y-atom
+              content-width (max 1 (- width (* 2 padding-x)))
+              left-pad (apply str (repeat padding-x \space))
+              bg-fn-val (when-let [f @bg-fn] f)
+              bg-sample (when bg-fn-val (bg-fn-val "test"))
+              r (protocols/concat-cached
+                 @cache
+                 ;; every input of the composition: the geometry and the
+                 ;; background sample (the padding setters no longer need to
+                 ;; drop the memo — a changed value is a changed key)
+                 [width content-width padding-x padding-y bg-sample]
+                 (mapv (fn [c] (protocols/render c content-width)) children)
+                 (fn [parts] (box-lines parts left-pad bg-fn-val padding-y width)))]
+          (reset! cache (:cache r))
+          (:lines r)))))
   (invalidate [this]
     (reset! (:cache this) nil)
     (doseq [c @children] (protocols/invalidate c)))
@@ -76,9 +83,10 @@
   (reset! (:bg-fn box) bg-fn)
   (reset! (:cache box) nil))
 
-;; Padding is render input (the cache key does not include it — the setters
-;; reset the cache), live so the hiccup :box tag can patch a changed
-;; :padding-x/:padding-y prop in place instead of ignoring it (§2.3).
+;; Padding and background are render inputs and live, so the hiccup :box tag
+;; can patch a changed :padding-x/:padding-y prop in place (§2.3). Both are
+;; part of the composition's cache key, so a change is a miss on its own; the
+;; setters still drop the memo, like every other mutation on the box.
 (defn box-set-padding-x!
   "No-op when unchanged, so a caller may sync the padding every pass (the
    chat history's output pad follows one shared atom) without dropping the

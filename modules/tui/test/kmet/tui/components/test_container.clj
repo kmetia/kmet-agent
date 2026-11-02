@@ -119,3 +119,43 @@
           cont (container/make-container [t1])]
       (container/container-replace-children! cont [nil])
       (t/is (= 1 (count @(:children cont)))))))
+(t/deftest test-container-reuses-unchanged-lines
+  (t/testing "an idle container returns the vector it returned last pass"
+    (let [t1 (text/make-text "a" 0 0)
+          t2 (text/make-text "b" 0 0)
+          c (container/make-container [t1 t2])
+          f1 (core/render c 10)
+          f2 (core/render c 10)]
+      (t/is (= ["a" "b"] (mapv str/trim f2)))
+      (t/is (identical? f1 f2) "no line copying while the children are unchanged")
+      (t/testing "a re-derived child invalidates the reused vector"
+        (text/text-set! t1 "A")
+        (let [f3 (core/render c 10)]
+          (t/is (not (identical? f2 f3)))
+          (t/is (= ["A" "b"] (mapv str/trim f3)))))
+      (t/testing "a width change rebuilds at the new width"
+        (let [f4 (core/render c 12)]
+          (t/is (not (identical? f2 f4)))
+          (t/is (every? #(= 12 (count %)) f4))))))
+  (t/testing "adding and removing children is never served stale"
+    (let [t1 (text/make-text "a" 0 0)
+          t2 (text/make-text "b" 0 0)
+          c (container/make-container [t1])]
+      (core/render c 10)
+      (container/container-add-child c t2)
+      (t/is (= ["a" "b"] (mapv str/trim (core/render c 10))))
+      (container/container-remove-child c t1)
+      (t/is (= ["b"] (mapv str/trim (core/render c 10)))))))
+
+(t/deftest test-container-clearing-drops-the-lines-memo
+  (let [t1 (text/make-text "a" 0 0)
+        c (container/make-container [t1])]
+    (core/render c 10)
+    (t/is (some? @(:lines-cache c)) "a render memoizes the children's lines")
+    (container/container-clear c)
+    (t/is (nil? @(:lines-cache c)) "the dropped children's lines are not retained")
+    (container/container-add-child c t1)
+    (core/render c 10)
+    (t/is (some? @(:lines-cache c)))
+    (container/container-replace-children! c [])
+    (t/is (nil? @(:lines-cache c)))))

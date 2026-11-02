@@ -10,8 +10,10 @@
             [kmet.libs.terminal-image :as img]
             [kmet.tui.keys :as keys]
             [kmet.tui.terminal :as term]
+            [kmet.tui.components.container :as container]
             [kmet.tui.components.editor :as editor]
             [kmet.tui.components.input :as input]
+            [kmet.tui.components.text :as text]
             [kmet.tui.utils :as utils]))
 
 (defn- leaf
@@ -1363,3 +1365,28 @@
       (t/is (= "one\ntwo\n" (slurp path)))
       (finally
         (fs/delete-if-exists f)))))
+
+(t/deftest test-compose-document-reuses-an-unchanged-document
+  (let [tui (core/create-tui nil)
+        t1 (text/make-text "alpha" 0 0)
+        cache (atom nil)
+        compose (fn [w] (#'core/compose-document cache tui w 10))]
+    (core/tui-add-child tui (container/make-container [t1]))
+    (testing "an unchanged component tree composes to the same vector"
+      (let [f1 (compose 20)
+            f2 (compose 20)]
+        (t/is (some #(str/includes? % "alpha") f1))
+        (t/is (identical? f1 f2)
+              "the document is carried over, so the frame pass sees its own vector")))
+    (testing "a changed component is never served stale"
+      (let [f2 (compose 20)]
+        (text/text-set! t1 "beta")
+        (let [f3 (compose 20)]
+          (t/is (not (identical? f2 f3)))
+          (t/is (some #(str/includes? % "beta") f3))
+          (t/is (not-any? #(str/includes? % "alpha") f3)))))
+    (testing "a width change rebuilds at the new width"
+      (let [f3 (compose 20)
+            f4 (compose 24)]
+        (t/is (not (identical? f3 f4)))
+        (t/is (every? #(= 24 (count %)) f4))))))

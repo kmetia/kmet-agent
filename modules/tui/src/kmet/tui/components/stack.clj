@@ -1,10 +1,10 @@
 (ns kmet.tui.components.stack
-  "Stack layout support: the render-loop vertical layout (render-stack) and
-   the flexbox-style sizing allocation shared by HStack/VStack (pi: stack.ts).
-   render-stack renders every component at its natural height — the layout
-   is a single flat document, like pi's main-screen model: when the total
-   exceeds the terminal height the render loop scrolls it natively into the
-   terminal scrollback, keeping the viewport pinned to the document end."
+  "Flexbox-style stack layout: child management and the sizing allocation
+   shared by HStack/VStack (pi: stack.ts). The TUI's own document is a flat
+   stack too — every component at its natural height, like pi's main-screen
+   model: when the total exceeds the terminal height the render loop scrolls
+   it natively into the terminal scrollback, keeping the viewport pinned to
+   the document end (kmet.tui.core/compose-document)."
   (:require [kmet.tui.protocols :as protocols]
             [kmet.libs.host :as host]))
 
@@ -178,13 +178,3 @@
   "Dispose every child (a stack's IComponent dispose)."
   [stack]
   (doseq [e @(:entries-atom stack)] (protocols/dispose (entry-component e))))
-
-;; ─── Render-loop vertical layout ───────────────────────────────────────────
-
-(defn render-stack
-  "Render a vertical stack of COMPONENTS at WIDTH: every component renders
-   at its natural height (pi: Container render). Returns a flat vector of
-   lines — the document may exceed the terminal height; the render loop
-   scrolls the overflow into the native terminal scrollback."
-  [components width]
-  (protocols/render-all components width))

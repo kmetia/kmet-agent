@@ -18,8 +18,7 @@
             [kmet.tui.utils :as utils]
             [kmet.libs.terminal-image :as img]
             [kmet.tui.components.editor :as editor]
-            [kmet.tui.components.alt-screen-flash :as alt-screen-flash]
-            [kmet.tui.components.stack :as stack]))
+            [kmet.tui.components.alt-screen-flash :as alt-screen-flash]))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Protocol re-exports
@@ -1988,9 +1987,18 @@
 
 (defn- compose-document
   "The frame's raw document: every component at natural height, with the
-   visible overlays composited on top (pi: compositeOverlays)."
-  [tui w h]
-  (composite-overlays tui (stack/render-stack @(:components tui) w) w h))
+   visible overlays composited on top (pi: compositeOverlays).
+
+   DOCUMENT-CACHE is the loop's memo (protocols/concat-cached): while the
+   component set returns the line vectors it returned last frame, the
+   document is returned as-is — no line copying — and the frame pass's
+   unchanged-document fast paths see the vector they saw last frame."
+  [document-cache tui w h]
+  (let [{:keys [lines cache]}
+        (protocols/render-all-cached
+         (when document-cache @document-cache) [w] @(:components tui) w)]
+    (when document-cache (reset! document-cache cache))
+    (composite-overlays tui lines w h)))
 
 (defn- run-render-loop!
   "Start the terminal (raw mode) and run the render loop until the TUI is
@@ -2014,6 +2022,12 @@
         ;; and written after it is released — a blocked tty must not hold up
         ;; input dispatch (see the write below).
         pending-write (atom nil)
+        ;; The composed document's memo, per loop run: an unchanged component
+        ;; tree returns the previous document vector instead of copying it
+        ;; (see compose-document). A resume starts a fresh loop, so the memo
+        ;; is rebuilt — a cold memo only costs one frame's join.
+        document-cache (atom nil)
+        compose (fn [tui w h] (compose-document document-cache tui w h))
         ;; The frame asks for a follow-up frame through the loop's request
         ;; (the scrollback heal); built once, not per frame.
         request-render (fn ([] (tui-request-render tui))
@@ -2122,7 +2136,7 @@
                  tui
                  {:width w
                   :height h
-                  :compose compose-document
+                  :compose compose
                   :hardware-cursor-row hardware-cursor-row
                   :previous-viewport-top previous-viewport-top
                   :request-render request-render

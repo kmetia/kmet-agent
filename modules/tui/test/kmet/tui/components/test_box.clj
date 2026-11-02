@@ -79,3 +79,34 @@
     (box/box-add-child b t1)
     (let [_ (core/render b 6)]
       (t/is (pos? @bg-calls)))))
+
+(t/deftest test-box-reuses-unchanged-lines
+  (t/testing "an idle box returns the vector it returned last pass"
+    (let [t1 (text/make-text "hi" 0 0)
+          b (box/make-box 1 1 nil)]
+      (box/box-add-child b t1)
+      (let [f1 (core/render b 8)
+            f2 (core/render b 8)]
+        (t/is (= 3 (count f2)))
+        (t/is (identical? f1 f2) "no line copying while the child is unchanged")
+        (t/testing "a re-derived child invalidates the composition"
+          (text/text-set! t1 "yo")
+          (let [f3 (core/render b 8)]
+            (t/is (not (identical? f2 f3)))
+            (t/is (.contains (second f3) "yo"))))
+        (t/testing "a background change invalidates it"
+          (box/box-set-bg-fn b (fn [s] (str "[" s "]")))
+          (let [f4 (core/render b 8)]
+            (t/is (not (identical? f2 f4)))
+            (t/is (.contains (first f4) "[")))
+          (box/box-set-bg-fn b nil))))))
+
+(t/deftest test-box-empty-drops-the-memo
+  (let [t1 (text/make-text "hi" 0 0)
+        b (box/make-box 1 1 nil)]
+    (box/box-add-child b t1)
+    (core/render b 8)
+    (t/is (some? @(:cache b)))
+    (box/box-clear b)
+    (t/is (nil? @(:cache b)) "an emptied box retains no composition")
+    (t/is (= [] (core/render b 8)))))

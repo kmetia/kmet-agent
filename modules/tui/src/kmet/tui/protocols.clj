@@ -18,24 +18,82 @@
                    defcomponent) MUST include this method — there is no
                    universal default under SCI."))
 
+(defn join-lines
+  "Concatenate PARTS — each a sequence of lines — into one line vector. The
+   transient reduce is the frame path's shared form: this flattens a whole
+   document (tens of thousands of lines) per pass, where the old
+   (vec (mapcat …)) spent real allocation/GC on lazy seqs. A single part is
+   returned as-is when it is already a vector, so a one-child container
+   copies nothing."
+  [parts]
+  (let [parts (if (vector? parts) parts (vec parts))]
+    (if (= 1 (count parts))
+      (let [p (nth parts 0)]
+        (if (vector? p) p (vec p)))
+      (persistent!
+       (reduce (fn [acc p] (reduce conj! acc p))
+               (transient [])
+               parts)))))
+
 (defn render-all
   "Render each component in COMPONENTS and concatenate the lines into one
-   vector. The transient reduce is the frame path's shared form: this
-   concatenates a whole document (tens of thousands of lines) per pass,
-   where the old (vec (mapcat …)) spent real allocation/GC on lazy seqs.
-   ELEM, when given, names the key holding the component in item maps (the
-   reconciler's {:c …} shape) — a direct get, so the caller need not
-   allocate a mapped-components seq."
+   vector (join-lines). ELEM, when given, names the key holding the
+   component in item maps (the reconciler's {:c …} shape) — a direct get,
+   so the caller need not allocate a mapped-components seq."
   ([components width]
-   (persistent!
-    (reduce (fn [acc c] (reduce conj! acc (render c width)))
-            (transient [])
-            components)))
+   (join-lines (mapv (fn [c] (render c width)) components)))
   ([items width elem]
-   (persistent!
-    (reduce (fn [acc it] (reduce conj! acc (render (get it elem) width)))
-            (transient [])
-            items))))
+   (join-lines (mapv (fn [it] (render (get it elem) width)) items))))
+
+(defn concat-cached
+  "Flatten PARTS — child line vectors, in render order — into one line
+   vector, reusing PREV's result when nothing the assembly depends on
+   changed.
+
+   PREV is the :cache value this function returned last pass (nil on the
+   first pass); the caller stores it. KEY carries every input of the
+   assembly besides PARTS (the width, mode flags, a background sample) and
+   is compared with =. A hit needs KEY = the previous KEY and every part
+   identical? to the part it replaced; it returns the previous vector
+   ITSELF, so a caller above sees an unchanged object and can reuse its own
+   assembly too.
+
+   Correctness rests on KEY and PARTS together describing the assembly: the
+   identity check only decides whether the concatenation can be skipped, so
+   a child that re-derives (returning a fresh vector) is a miss, never a
+   stale result. A container whose assembly is more than this join passes
+   JOIN-FN (built from PARTS on a miss) and puts whatever JOIN-FN reads
+   besides PARTS into KEY. A container that inserts separator lines should
+   list them as parts (one shared, identity-stable vector) rather than
+   inside JOIN-FN — then a changed separator is a changed parts sequence.
+
+   Returns {:lines <vector> :cache <next PREV>}. Holds one reference per
+   part and one line vector, the same objects the result already
+   references, so an unchanged document costs no per-frame allocation."
+  ([prev key parts] (concat-cached prev key parts join-lines))
+  ([prev key parts join-fn]
+   (let [parts (if (vector? parts) parts (vec parts))
+         n (count parts)]
+     (if (and prev
+              (= key (:key prev))
+              (= n (count (:parts prev)))
+              (loop [i 0]
+                (if (>= i n)
+                  true
+                  (if (identical? (nth parts i) (nth (:parts prev) i))
+                    (recur (inc i))
+                    false))))
+       {:lines (:lines prev) :cache prev}
+       (let [lines (join-fn parts)]
+         {:lines lines :cache {:key key :parts parts :lines lines}})))))
+
+(defn render-all-cached
+  "Render COMPONENTS at WIDTH into one line vector through concat-cached:
+   every component still renders once per call (its own cache decides
+   whether that is cheap), and the concatenation is skipped when the whole
+   set returns the objects it returned last pass."
+  [prev key components width]
+  (concat-cached prev key (mapv (fn [c] (render c width)) components)))
 
 (defn dispose-component!
   "Dispose a value of any shape: a defcomponent record, a reify, a

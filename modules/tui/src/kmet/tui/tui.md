@@ -772,6 +772,21 @@ requesting renders).
   must render fresh every pass), and focused input widgets (editor/input).
   A child's internal state affecting output means the parent must deref it
   too.
+- **Transparent parents flatten with `protocols/concat-cached`**, not
+  `render-all`: the children still render once per pass, but while each
+  returns the object it returned last pass the parent hands back its
+  previous line vector (identity, so the parent's parent hits too). Its key
+  carries every assembly input besides the children (width, padding, a
+  background sample) and a hit also needs part identity, so a child that
+  re-derives is a miss — there is no invalidation protocol to get wrong. A
+  parent that inserts separator lines lists them as parts (one shared
+  vector) so an order change is a changed parts sequence. The memo is held
+  on the instance (`:lines-cache` / `:cache` atom) and dropped by the
+  destructive paths (`container-clear`/`replace-children!`,
+  `chat-history-clear!`, an emptied Box) so a dropped child's line vectors
+  are not retained. `Box`'s join is the padding/background pass, passed as
+  the join fn; `Container`, `ChatHistory` and the frame's document compose
+  are plain joins.
 
 ### 3.3 Derived state — `kmet.hikap.core/compute`
 
@@ -1699,6 +1714,20 @@ The repository capture helpers are:
   re-runs — render a tree twice with no state change between passes;
   invocation counters (§11) must stay flat. This pins the memoization
   contract (reactions + caches + equality no-ops).
+- **Idle-frame invariant**: an unchanged component tree renders to the
+  *identical* line vector — a transparent parent's `concat-cached` hit and
+  a `track!` cache hit both return the previous object, so the frame's
+  document compose comes back `identical?` and the frame pass takes its
+  unchanged-document fast paths. A component that concatenates lines must
+  therefore return its previous vector when its inputs are unchanged; a
+  component that cannot prove that may return a fresh vector (a miss, never
+  stale — the memo's correctness rests on its key, not on the identity
+  check). Assert `(identical? (render c w) (render c w))` for a memoized
+  component and its *content* change after a state change; test the memo's
+  key completeness for anything the assembly reads besides the children
+  (`test-quiet-regrouping-updates-a-memoized-transcript` is the reference
+  case: a live message map gains `:tool-calls?` and the following
+  message's grouping changes).
 - **Timers are pumped, not slept on** (§6.1): a test drives
   `timers/pump!` by hand instead of waiting for a real interval, so timer
   assertions are deterministic. Clean up with `timers/cancel-all!` in a

@@ -5,8 +5,8 @@
    Children may be bare components or stack entry maps
    {:component c :visible (fn [viewport] bool) :basis/:grow/:shrink
    :min-size/:max-size} — the sizing options are accepted for parity with
-   pi; the height distribution itself is done by the host layout
-   (stack/render-stack in the TUI render loop). Like pi, a VStack does not
+   pi; the height distribution itself is done by the host layout (the
+   render loop's document compose). Like pi, a VStack does not
    receive input — the TUI dispatches keys to the focused leaf component
    only."
   (:require [kmet.tui.protocols :as protocols]
