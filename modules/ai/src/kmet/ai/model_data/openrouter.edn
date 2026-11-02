@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-02T16:04:31Z"
+ :generated-at "2026-11-02T16:35:36Z"
  :provider {:id :openrouter
             :name "OpenRouter"
             :env-vars ["OPENROUTER_API_KEY"]
@@ -1735,7 +1735,7 @@
                          :minimal "MINIMAL"
                          :off nil}
     :input [:text :image]
-    :cost {:input 0.093 :output 0.28 :cache-read 0.047 :cache-write 0}
+    :cost {:input 0.065 :output 0.195 :cache-read 0.033 :cache-write 0}
     :context-window 262144
     :max-tokens 32768
     :compat {:supports-developer-role false
@@ -4470,9 +4470,9 @@
                          :off nil
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.03 :output 0.13 :cache-read 0.03 :cache-write 0}
+    :cost {:input 0.018 :output 0.09 :cache-read 0.009 :cache-write 0}
     :context-window 131072
-    :max-tokens 117964
+    :max-tokens 32768
     :compat {:thinking-format :openrouter :supports-strict-mode true}}
    "openai/gpt-oss-20b:batch"
    {:id "openai/gpt-oss-20b:batch"

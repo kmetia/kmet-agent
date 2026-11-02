@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-17T12:16:46Z"
+ :generated-at "2026-11-02T16:00:52Z"
  :provider {:id :openrouter :name "OpenRouter"}
  :models
  {"black-forest-labs/flux-3-image"
@@ -542,6 +542,15 @@
    :input [:text :image]
    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
    :output [:image]}
+  "sourceful/riverflow-v2.6-pro"
+  {:id "sourceful/riverflow-v2.6-pro"
+   :name "Sourceful: Riverflow V2.6 Pro"
+   :provider :openrouter
+   :api :openrouter-images
+   :base-url "https://openrouter.ai/api/v1"
+   :input [:text :image]
+   :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+   :output [:image]}
   "tencent/hy-image-v3.5-preview"
   {:id "tencent/hy-image-v3.5-preview"
    :name "Tencent: Hy Image 3.5 Preview"
@@ -554,15 +563,6 @@
   "x-ai/grok-imagine-image-2.0"
   {:id "x-ai/grok-imagine-image-2.0"
    :name "xAI: Grok Imagine Image 2.0"
-   :provider :openrouter
-   :api :openrouter-images
-   :base-url "https://openrouter.ai/api/v1"
-   :input [:text :image]
-   :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
-   :output [:image]}
-  "x-ai/grok-imagine-image-quality"
-  {:id "x-ai/grok-imagine-image-quality"
-   :name "SpaceXAI: Grok Imagine Image Quality"
    :provider :openrouter
    :api :openrouter-images
    :base-url "https://openrouter.ai/api/v1"
