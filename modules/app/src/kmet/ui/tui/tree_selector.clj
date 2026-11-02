@@ -207,8 +207,7 @@
           :custom (th/fg theme :dim (str "[custom: " (name (:custom-type entry :custom)) "]"))
           :context-edit (th/fg theme :dim (session/context-edit-label entry))
           :label (th/fg theme :dim (str "[label: " (or (:label entry) "(cleared)") "]"))
-          :turn-start (th/fg theme :dim
-                             (str "── turn " (or turn-number "?") " ──"))
+          :turn-start (th/fg theme :dim (str "── turn " turn-number " ──"))
           :session_info (let [nm (str (:name entry))]
                           (th/fg theme :dim
                                  (if (seq nm)
@@ -329,25 +328,6 @@
   (letfn [(walk [acc n]
             (reduce walk (assoc acc (:id n) (:parent-id n)) (:children n)))]
     (reduce walk {} nodes)))
-
-(defn- turn-ordinals
-  "{id turn-number} over a whole tree: how many :turn-start markers lie on the
-   entry's own root → entry path, the entry included. Computed from position,
-   never stored (T3), so two branches forked from one turn both read the same
-   number and each branch's next marker reads one more. FLAT must be a DFS
-   order (a parent's ordinal is known before its children's)."
-  [flat parent-lookup]
-  (let [role-by-id (into {} (map (fn [f] [(get-in f [:node :id])
-                                          (get-in f [:node :role])])
-                                 flat))]
-    (reduce (fn [acc f]
-              (let [id (get-in f [:node :id])]
-                (if id
-                  (assoc acc id (+ (get acc (get parent-lookup id) 0)
-                                   (if (= :turn-start (get role-by-id id)) 1 0)))
-                  acc)))
-            {}
-            flat)))
 
 (defn- child-indent
   "pi's indentation rule: branching parents shift children +1, the first
@@ -1014,6 +994,38 @@
 
 ;; ─── Construction ───────────────────────────────────────────────────────────
 
+(defn- turn-ordinals
+  "{id turn-number}: the :turn-start markers on the entry's own root → entry
+   path, itself included — computed from position, never stored (T3), so two
+   branches forked from one turn read the same number. FLAT must be a DFS
+   order (a parent's ordinal is known before its children's)."
+  [flat parent-lookup]
+  (reduce (fn [acc f]
+            (let [id (get-in f [:node :id])
+                  parent (get parent-lookup id)]
+              (if id
+                (assoc acc id (+ (get acc parent 0)
+                                 (if (= :turn-start (get-in f [:node :role])) 1 0)))
+                acc)))
+          {}
+          flat))
+
+(defn- derive-tree-state
+  "The tree-derived state a list reads: rows, real parent links, the active
+   path, turn ordinals and the tool-call map (pi: the constructor's tree
+   state)."
+  [tree leaf-id]
+  (let [tree (attach-parent-ids tree)
+        parent-lookup (collect-parents tree)
+        active (active-path-set parent-lookup leaf-id)
+        flat (flatten-tree* tree active (> (count tree) 1))]
+    {:tree tree
+     :flat flat
+     :parent-lookup parent-lookup
+     :active-path active
+     :turn-ordinals (turn-ordinals flat parent-lookup)
+     :tool-calls (collect-tool-calls tree)}))
+
 (defn make-tree-list
   "Create the tree list over TREE (pi TreeList constructor): flattens with
    pi's visual rules and lands the selection on INITIAL-SELECTED-ID ?? the
@@ -1023,27 +1035,18 @@
    terminal resize."
   [tree & {:keys [leaf-id max-visible-lines size-ref initial-filter-mode
                   initial-selected-id on-select on-cancel on-copy on-label-edit]}]
-  (let [tree (attach-parent-ids tree)
-        parent-lookup (collect-parents tree)
-        active (active-path-set parent-lookup leaf-id)
-        flat (flatten-tree* tree active (> (count tree) 1))
-        base {:tree tree
-              :flat flat
-              :parent-lookup parent-lookup
-              :turn-ordinals (turn-ordinals flat parent-lookup)
-              :active-path active
-              :tool-calls (collect-tool-calls tree)
-              :leaf-id leaf-id
-              :mode (or initial-filter-mode :default)
-              :query ""
-              :folded #{}
-              :filtered []
-              :visible-parent {}
-              :visible-children {}
-              :multiple-roots? false
-              :selected-idx 0
-              :last-selected-id initial-selected-id
-              :show-label-timestamps false}
+  (let [base (merge (derive-tree-state tree leaf-id)
+                    {:leaf-id leaf-id
+                     :mode (or initial-filter-mode :default)
+                     :query ""
+                     :folded #{}
+                     :filtered []
+                     :visible-parent {}
+                     :visible-children {}
+                     :multiple-roots? false
+                     :selected-idx 0
+                     :last-selected-id initial-selected-id
+                     :show-label-timestamps false})
         tl (map->TreeList {:state-atom (atom base)
                            :max-visible-lines (long (max 5 (or max-visible-lines 10)))
                            :size-ref size-ref
@@ -1062,17 +1065,7 @@
   [tl tree]
   (swap! (:state-atom tl)
          (fn [{:keys [leaf-id] :as st}]
-           (let [tree (attach-parent-ids tree)
-                 parent-lookup (collect-parents tree)
-                 active (active-path-set parent-lookup leaf-id)
-                 flat (flatten-tree* tree active (> (count tree) 1))]
-             (assoc st
-                    :tree tree
-                    :flat flat
-                    :parent-lookup parent-lookup
-                    :turn-ordinals (turn-ordinals flat parent-lookup)
-                    :active-path active
-                    :tool-calls (collect-tool-calls tree)))))
+           (merge st (derive-tree-state tree leaf-id))))
   (refilter! tl))
 
 ;; ─── Chrome lines (pi: SearchLine / TreeHelp child components) ──────────────

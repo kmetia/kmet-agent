@@ -322,19 +322,14 @@ Be precise and concise in your responses."}}]
   msg)
 
 (defn begin-turn!
-  "Record a turn boundary in the session before the entries it opens. REASON is
-   :prompt for a typed prompt and :continue for a prompt with no message
-   (`/continue`) or an agent.continue — an attempt a queued message or an
-   actionable boundary started. Steering and follow-up injections join the live
-   turn and write none. Returns the marker entry, or nil when the agent has no
-   session. The turn-id is branch-safe identity (a fork keeps it); the ordinal
-   callers display is computed from position, never stored.
+  "Record a turn boundary before the entries it opens: :prompt for a typed
+   prompt, :continue for a prompt with no message (`/continue`) or an
+   agent.continue. Steering and follow-up injections join the live turn and
+   write none. Returns the marker entry, or nil when the agent has no session.
 
-   The marker and the user message are two appends, not one atomic pair:
-   append-entry serializes each, so a concurrent append (a label, an extension
-   entry) can land between them. The tree reads the marker's position, not its
-   adjacency, so the window is accepted rather than closed with a combined
-   append."
+   The marker and its user message are two appends (append-entry serializes
+   each), so a concurrent append can land between them; the tree reads the
+   marker's position, not its adjacency."
   [agent reason]
   (when-let [sess (:session agent)]
     (session/append-entry sess {:role :turn-start
