@@ -22,7 +22,7 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 | 10 | Unbounded error-body read | low/medium (memory) | **fixed** |
 | 11 | Keyring secret in argv | low/medium (exposure) | **fixed** (Windows; macOS documented) |
 | 12 | `run_code` sandbox exposes `future`/`future-call` | — | **dropped** (not a finding) |
-| 13 | `tui-resume!` bypasses the render-crash guard | high (silent hang) | verified by reading |
+| 13 | `tui-resume!` bypasses the render-crash guard | high (silent hang) | **fixed** |
 | 14+ | Structural: frame copying, render loop size, duplicated policies | low (maintainability) | verified by reading |
 
 Findings 1, 2, 3, 6, 8 and 9 are fixed (one commit each, each with a regression test); 12 is dropped.
@@ -263,7 +263,7 @@ resolves `java.lang.Thread`, `System`, `Runtime` and every `babashka.*` namespac
 included), so `future` is no escalation — the tool's own docstrings state that host-native code
 is not interruptible.
 
-## 13. `tui-resume!` bypasses the render-crash guard, so a crash hangs the app
+## 13. `tui-resume!` bypasses the render-crash guard, so a crash hangs the app — **fixed**
 
 `modules/tui/src/kmet/tui/core.clj:3079-3083, 3129-3142, 3145-3150, 3191`
 
@@ -275,6 +275,12 @@ in the render body restores the terminal, writes no log, and the process sleeps 
 
 Fix: one `launch-render-loop!` helper used by both entry points. Test: resume, make a component
 throw, assert `:stopped?` and the crash log.
+
+**Fixed:** `launch-render-loop!` owns the launch, the crash log and the stop, and both
+`tui-start` and `tui-resume!` go through it. A regression test resumes a TUI whose render loop
+throws and asserts the future ends, `:stopped?` is set and the stack is in
+`kmet-render-crash.log`. The TUI `!` path's nil exit code found while fixing 3 is fixed too:
+a run without an exit code is `:error` and shows `(no exit code)`.
 
 ## 14. Structure and hot paths
 
