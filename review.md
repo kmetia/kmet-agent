@@ -14,7 +14,7 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 | 2 | LLM deadline timeout does not abort the request | high (token burn / garbled UI) | **fixed** |
 | 3 | Shell spawn failure reported as success | high (agent misled) | **fixed** |
 | 4 | `settle-grace!` has no ceiling | medium (hang) | verified by reading |
-| 5 | `append-entry` mutates memory before the file write | medium (data loss) | verified by reading |
+| 5 | `append-entry` mutates memory before the file write | medium (data loss) | **fixed** |
 | 6 | MCP refresh keeps a stale connection after a definition change | medium | **fixed** |
 | 7 | Compaction start is check-then-act | medium (race) | **fixed** |
 | 8 | Pending-bash flush can duplicate entries | medium (data) | **fixed** |
@@ -106,7 +106,7 @@ spinner, a tailed build log) makes the grace loop unbounded, so the turn never s
 Fix: cap the total grace (e.g. a single 1 s budget recomputed with `min`), keeping the
 "growth buys another poll" behaviour inside it.
 
-## 5. `append-entry` mutates memory before the file write
+## 5. `append-entry` mutates memory before the file write — **fixed**
 
 `modules/app/src/kmet/app/session/store.clj:360-381`
 
@@ -117,6 +117,11 @@ two paths disagree about the invariant.
 
 Fix: `build-entry` needs only the current entries and leaf, so build first, append to the file,
 *then* `swap!`/`reset!`. Return the entry only when the write succeeded.
+
+**Fixed:** the append writes first (the line, or the whole file on the lazy-creation path) and
+moves the session atom after; `persist-if-needed!` now takes the branch as it will be, so the
+first assistant entry can still publish a file. A regression test makes both writes throw and
+asserts memory, the leaf and the file are untouched.
 
 ## 6. MCP `/mcp refresh` keeps a stale connection after a definition change — **fixed**
 
@@ -295,7 +300,7 @@ throw, assert `:stopped?` and the crash log.
 
 ## Suggested order of work
 
-1. ~~Small and testable, one commit each: 3, 7, 8, 6, 5.~~ 3, 7, 8 and 6 done; 5 remains.
+1. ~~Small and testable, one commit each: 3, 7, 8, 6, 5.~~ all done.
 2. Then the concurrency pair with regression tests: 1, 2 — 1 needs the decision in its note
    first, 2 is a small isolated commit.
 3. ~~Then the lifecycle fix with a test asserting empty root after unload: 9.~~ done.

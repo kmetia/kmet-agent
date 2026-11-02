@@ -9,6 +9,7 @@
             [babashka.fs :as fs]
             [kmet.app.session.core :as s]
             [kmet.app.session.test-support :as support]
+            [kmet.libs.fs :as kfs]
             [kmet.test-utils :refer [slash]]
             [kmet.test-tmp :as test-tmp]))
 
@@ -90,6 +91,33 @@
     (t/is (= :user (:role entry)))
     (t/is (= 1 (count @(:entries session))))
     (t/is (string? @(:leaf-id session)))))
+
+(t/deftest test-append-entry-leaves-memory-alone-when-the-write-fails
+  ;; The append writes the file before it moves the session atom, so a failed
+  ;; append (disk full, EIO) leaves the session exactly where it was instead
+  ;; of ahead of its file — the next boot reads the last durable line and the
+  ;; in-memory branch keeps chaining from it.
+  (let [session (s/create-session support/test-dir)
+        _ (s/append-entry session {:role :assistant :content [{:type :text :text "boot"}]})
+        entries @(:entries session)
+        leaf @(:leaf-id session)
+        file (:file session)
+        text (slurp (io/file file))]
+    (with-redefs [kfs/append-line! (fn [& _] (throw (ex-info "disk full" {:type :eio})))]
+      (t/is (thrown? Exception (s/append-entry session {:role :user :content "late"}))))
+    (t/is (= entries @(:entries session)) "memory did not move past the failed write")
+    (t/is (= leaf @(:leaf-id session)) "the leaf is unchanged")
+    (t/is (= text (slurp (io/file file))) "the file is unchanged"))
+  ;; The lazy-creation path publishes the whole file instead of appending; a
+  ;; failed publication must leave the first entry unappended too.
+  (let [session (s/create-session support/test-dir)]
+    (with-redefs [kfs/publish! (fn [& _] (throw (ex-info "disk full" {:type :eio})))]
+      (t/is (thrown? Exception
+                     (s/append-entry session {:role :assistant
+                                              :content [{:type :text :text "hi"}]}))))
+    (t/is (empty? @(:entries session)) "the unpublished entry is not in memory")
+    (t/is (nil? @(:leaf-id session)) "the leaf is unchanged")
+    (t/is (not (fs/exists? (:file session))) "no file was created")))
 
 (t/deftest test-session-write-round-trips-utf8
   ;; The byte-stream writer behind kmet.libs.fs/publish! is explicitly UTF-8,

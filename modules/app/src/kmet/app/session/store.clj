@@ -101,12 +101,13 @@
 (defn- persist-if-needed!
   "Lazy file creation (pi: _persist — G4): write the file the first time the
    branch contains an assistant message; before that, entries accumulate in
-   memory only and no file exists on disk. No-op once the file exists.
-   Callers must hold the session lock."
-  [session]
+   memory only and no file exists on disk. ENTRIES is the branch as it will
+   be after the pending append — the write happens before the session atom
+   moves. No-op once the file exists. Callers must hold the session lock."
+  [session entries]
   (when (and (not (fs/exists? (:file session)))
-             (some #(= :assistant (:role %)) @(:entries session)))
-    (publish-file! session @(:entries session))))
+             (some #(= :assistant (:role %)) entries))
+    (publish-file! session entries)))
 
 (defn write-entries!
   "Atomically replace the session file's contents and in-memory state (pi:
@@ -364,20 +365,26 @@
    orphaned sibling entries.
 
    Tool-result entries get an estimated :result-tokens stamped onto them
-   (see tool-usage; `/session` reports the per-tool totals)."
+   (see tool-usage; `/session` reports the per-tool totals).
+
+   The file write comes first: a failed append (disk full, EIO) leaves the
+   session atom untouched instead of ahead of the file, and the entry is only
+   returned once its line is durable."
   [session entry]
   (with-session-lock session
-    (let [entry (build-entry @(:entries session) @(:leaf-id session) entry)
+    (let [entries @(:entries session)
+          entry (build-entry entries @(:leaf-id session) entry)
           entry (if (and (= :tool (:role entry))
                          (not (contains? entry :result-tokens)))
                   (assoc entry :result-tokens (estimate-result-tokens entry))
                   entry)
+          entries (conj entries entry)
           file (:file session)]
-      (swap! (:entries session) conj entry)
-      (reset! (:leaf-id session) (:id entry))
       (if (fs/exists? file)
         (kfs/append-line! file (prn-str entry))
-        (persist-if-needed! session))
+        (persist-if-needed! session entries))
+      (reset! (:entries session) entries)
+      (reset! (:leaf-id session) (:id entry))
       entry)))
 
 (defn replace-entries!
