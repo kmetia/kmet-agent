@@ -7,7 +7,9 @@
    chooses."
   (:require [clojure.test :as t]
             [clojure.string :as str]
+            [clojure.edn :as edn]
             [babashka.fs :as fs]
+            [babashka.process :as sh]
             [kmet.libs.process :as process]
             [kmet.app.tools.bash-executor :as exec]))
 
@@ -25,6 +27,20 @@
     (spit path "#!/bin/sh\nprintf '%s\\n' \"$@\"\n")
     (fs/set-posix-file-permissions path "rwxr-xr-x")
     path))
+
+(def ^:private spill-survival-probe
+  "Child process for the spill-survival case: run one truncating command and
+   report the footer path, whether it still exists at exit, and its line count.
+   `bb` inherits this project's classpath through bb.edn."
+  (str/join
+   "\n"
+   ["(require '[babashka.fs :as fs] '[clojure.string :as str]"
+    "         '[kmet.app.tools.bash-executor :as exec])"
+    "(let [{:keys [full-output-path]}"
+    "      (exec/execute-bash {:command \"seq 1 200\" :max-lines 5})]"
+    "  (println (pr-str {:path full-output-path"
+    "                    :exists (fs/exists? full-output-path)"
+    "                    :lines (count (str/split-lines (str/trim (slurp full-output-path))))})))"]))
 
 ;; Every case below drives a real shell with POSIX commands (/bin/sh, sleep,
 ;; seq, $VAR redirection), so the namespace registers none of them on Windows.
@@ -128,6 +144,29 @@
           (t/is (some? path))
           (t/is (= expected (slurp path)) "no duplicated chunk at the switch")
           (fs/delete path)))))
+
+  (t/deftest ^:slow spill-file-survives-the-producing-process
+    (t/testing "the footer's path resolves after the process that wrote it exits
+            (pi's output-files.ts never unlinks; delete-on-exit was kmet-only)"
+      (let [script (fs/create-temp-file {:prefix "kmet-spill-probe-"
+                                         :suffix ".clj"
+                                         :dir (doto "target" fs/create-dirs)})
+            out (str script ".out")]
+        (try
+          (spit (str script) spill-survival-probe)
+          (let [{:keys [exit]} (sh/check
+                                (sh/process ["bb" (str script)]
+                                            {:in :discard :out out :err :inherit}))
+                {:keys [path exists lines]}
+                (edn/read-string (last (str/split-lines (slurp out))))]
+            (t/is (zero? exit))
+            (t/is exists "the child saw the spill file while it ran")
+            (t/is (fs/exists? path) "and the path still resolves after it exited")
+            (t/is (= 200 lines) "with the whole output in it")
+            (fs/delete-if-exists path))
+          (finally
+            (fs/delete-if-exists script)
+            (fs/delete-if-exists out))))))
 
   (t/deftest ^:slow custom-shell-path-must-exist
     (t/testing "create-default-ops refuses a missing custom shell up front"

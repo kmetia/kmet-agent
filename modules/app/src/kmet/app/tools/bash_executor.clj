@@ -38,14 +38,15 @@
 (defn- create-temp-file
   "Create the spill file for a truncated output (pi: createOutputFileStream).
    PREFIX names the tool's spill file, defaulting to TEMP-FILE-PREFIX
-   (pi: OutputAccumulator tempFilePrefix)."
+   (pi: OutputAccumulator tempFilePrefix). The file outlives this process: pi
+   never deletes its output files, and a footer naming a deleted path is worse
+   than the OS's own temp cleanup."
   [prefix]
   (let [tmp-dir (or (System/getenv "TMPDIR")
                     (System/getProperty "java.io.tmpdir"))
         tmp (fs/create-temp-file {:prefix (or prefix TEMP-FILE-PREFIX)
                                   :suffix TEMP-FILE-SUFFIX
                                   :dir tmp-dir})]
-    (fs/delete-on-exit tmp)
     (str (fs/canonicalize tmp))))
 
 (defn- find-bash-on-path []
