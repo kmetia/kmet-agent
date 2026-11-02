@@ -108,7 +108,8 @@
                                     :cost {:input 0.001 :output 0.0
                                            :cache-read 0.0 :cache-write 0.0
                                            :total 0.001}}})
-      (t/is (= {:input 124 :output 6 :cache-read 6 :cache-write 0 :cost 0.001}
+      (t/is (= {:input 124 :output 6 :cache-read 6 :cache-write 0 :cache-write-1h 0
+                :cost 0.001}
                (s/usage-totals sess)))
       (finally (fs/delete-tree dir)))))
 

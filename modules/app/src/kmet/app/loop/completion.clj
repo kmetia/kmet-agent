@@ -155,6 +155,7 @@
       ;; on every received byte.
                        :total-timeout-ms (retry/llm-total-timeout-ms @(:cfg agent))
                        :thinking @(:thinking agent)
+                       :cache-retention (cfg/get-cache-retention)
                        :session-id (some-> (:session agent) :id)
                        :on-text (fn [t]
                  ;; Suppress stragglers after the promise resolved (e.g. the

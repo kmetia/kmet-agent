@@ -9,7 +9,8 @@ Settings are loaded from:
 
 1. `~/.kmet/agent/settings.edn` — user-wide settings
 2. `.kmet/settings.edn` — project-local overrides
-3. Environment variables: `KMET_PROVIDER`, `KMET_MODEL`
+3. Environment variables: `KMET_PROVIDER`, `KMET_MODEL`,
+   `KMET_CACHE_RETENTION` (see [Prompt caching](#prompt-caching))
 
 With the default paths, global settings live in
 `~/.kmet/agent/settings.edn`, credentials entered with `/login` live in
@@ -215,6 +216,26 @@ per-byte idle timeout or the response-start deadline.
 `/reload` re-reads settings, reloads extensions/skills/prompts/themes, re-discovers
 context files, and rebuilds the system prompt (pi: `session.reload`). It refuses
 while a response is streaming.
+
+## Prompt caching
+
+Every request asks the provider to cache its prefix, so a repeated
+conversation re-reads from the cache instead of re-billing the whole
+prompt. What is sent depends on the wire: `anthropic-messages` places
+`cache_control` breakpoints on the system block, the last tool and the last
+user block (three of Anthropic's four); `openai-responses` sends
+`prompt_cache_key`; the retained cache window is 5 minutes by default.
+
+`KMET_CACHE_RETENTION` changes that host-wide. `long` asks for the longer
+retention where the model supports it (`ttl: "1h"` on Anthropic,
+`prompt_cache_retention: "24h"` on `openai-responses`); an Anthropic
+1-hour cache write is priced at twice the base input rate. `none` turns
+caching off — no markers, no cache key, no session-affinity headers.
+Compaction summaries always ask for `none`: they are read once.
+
+The cache half of the accounting was already there — `cache_read` and
+`cache_write` tokens and their cost — so `/cost`, the footer and the
+session totals show what the cache actually saved.
 
 ## Context compaction
 

@@ -73,17 +73,19 @@
     record-or-id
     (or (:base-provider record-or-id) (:provider record-or-id) (:id record-or-id))))
 
-;; ─── Cost (pi: models.ts calculateCost, minus cacheWrite1h) ─────────────────
+;; ─── Cost (pi: models.ts calculateCost, incl. the 1h cache-write share) ─────
 
 (defn calculate-cost
   "USD cost of a normalized usage map ({:input :output :cache-read
-   :cache-write} — e.g. usage/entry-usage (kmet.ai.usage) output (whose :input already
-   excludes cache tokens, so cached tokens are never double-priced) at the
-   model's $/M rates. Returns the pi-shaped breakdown map
-   {:input :output :cache-read :cache-write :total}. Models with zero rates
-   yield zero cost. Called at response time (llm) so each message is priced
-   with the model that produced it, keeping totals correct across model
-   switches.
+   :cache-write :cache-write-1h} — e.g. usage/entry-usage (kmet.ai.usage)
+   output, whose :input already excludes cache tokens, so cached tokens are
+   never double-priced) at the model's $/M rates. The :cache-write-1h share is
+   priced at 2x base input (Anthropic's 1h cache TTL, pi calculateCost), the
+   rest of :cache-write at the model's cache-write rate. Returns the
+   pi-shaped breakdown map {:input :output :cache-read :cache-write :total}.
+   Models with zero rates yield zero cost. Called at response time (llm) so
+   each message is priced with the model that produced it, keeping totals
+   correct across model switches.
 
    Cost tiers (pi ModelCost.tiers): a tier supplies a complete alternate
    rate set applied to the whole request when total input usage
@@ -91,7 +93,8 @@
    highest matching threshold wins (openai gpt-5.x long-context pricing)."
   [model usage]
   (let [{tokens-in :input tokens-out :output
-         tokens-cr :cache-read tokens-cw :cache-write} usage
+         tokens-cr :cache-read tokens-cw :cache-write
+         tokens-cw-1h :cache-write-1h} usage
         total-in (+ (long (or tokens-in 0))
                     (long (or tokens-cr 0))
                     (long (or tokens-cw 0)))
@@ -107,7 +110,14 @@
         cost-in (f tokens-in rate-in)
         cost-out (f tokens-out rate-out)
         cost-cr (f tokens-cr rate-cr)
-        cost-cw (f tokens-cw rate-cw)]
+        ;; Anthropic charges 2x base input for the 1h cache-write share; the
+        ;; rest of :cache-write takes the configured cache-write rate
+        ;; (pi calculateCost: cacheWrite * short + input * 2 * long)
+        cw-1h (max 0 (min (long (or tokens-cw-1h 0)) (long (or tokens-cw 0))))
+        cost-cw (/ (+ (* (double (- (long (or tokens-cw 0)) cw-1h))
+                         (double (or rate-cw 0)))
+                      (* (double cw-1h) (double (or rate-in 0)) 2.0))
+                   1000000.0)]
     {:input cost-in :output cost-out :cache-read cost-cr :cache-write cost-cw
      :total (+ cost-in cost-out cost-cr cost-cw)}))
 

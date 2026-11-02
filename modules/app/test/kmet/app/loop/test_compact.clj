@@ -42,13 +42,15 @@
                       (future
                         (if (seq (:tools opts))
                           ;; main agent call
-                          (case (swap! main-call-count inc)
-                            1 (when-let [on-error (:on-error opts)]
-                                (on-error "prompt is too long: 500000 tokens > 200000 maximum"))
-                            (do (when-let [on-text (:on-text opts)]
-                                  (on-text "recovered"))
-                                (when-let [on-done (:on-done opts)]
-                                  (on-done :stop))))
+                          (do (t/is (= :short (:cache-retention opts))
+                                    "a normal request carries the host retention (here pi's default)")
+                              (case (swap! main-call-count inc)
+                                1 (when-let [on-error (:on-error opts)]
+                                    (on-error "prompt is too long: 500000 tokens > 200000 maximum"))
+                                (do (when-let [on-text (:on-text opts)]
+                                      (on-text "recovered"))
+                                    (when-let [on-done (:on-done opts)]
+                                      (on-done :stop)))))
                           ;; summarization call (no tools)
                           (do (t/is (= :none (:cache-retention opts))
                                     "compaction summaries disable prompt caching (pi)")
@@ -65,7 +67,8 @@
           @(loop/run-agent-turn agent {:message "hi" :on-error (fn [_])})))
       (t/is (= 2 @main-call-count) "overflow triggers one compaction then a retry")
       (t/is (some #(and (= :compaction (:role %))
-                        (= {:input 80 :output 10 :cache-read 20 :cache-write 0 :cost 0.001}
+                        (= {:input 80 :output 10 :cache-read 20 :cache-write 0
+                            :cache-write-1h 0 :cost 0.001}
                            (usage/entry-usage (:usage %))))
                   @(:entries sess))
             "summarization usage is recorded on the compaction entry (pi: CompactionEntry.usage)")
@@ -901,7 +904,8 @@
                 "the result names the first kept entry")
           (t/is (pos? (:tokens-before result)))
           (t/is (pos? (:estimated-tokens-after result)))
-          (t/is (= {:input 100 :output 10 :cache-read 0 :cache-write 0 :cost 0.001}
+          (t/is (= {:input 100 :output 10 :cache-read 0 :cache-write 0 :cache-write-1h 0
+                    :cost 0.001}
                    (usage/entry-usage (:usage result))))
           (t/is (false? (:from-extension end))
                 "a kmet-generated summary is not from an extension")

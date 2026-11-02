@@ -613,6 +613,19 @@
 
 ;; ─── Compaction token settings (pi: getCompactionSettings) ───────────────
 
+(defn get-cache-retention
+  "Prompt-cache retention for every provider request (pi
+   resolveCacheRetention): :long when KMET_CACHE_RETENTION reads \"long\",
+   :none when it reads \"none\", else :short. kmet accepts :none in the
+   environment as well as pi's :long — keeping caching on is the safe default,
+   switching it off host-wide is the other thing an operator asks for. A
+   per-call :cache-retention still wins (compaction summaries pass :none)."
+  []
+  (case (getenv "KMET_CACHE_RETENTION")
+    "long" :long
+    "none" :none
+    :short))
+
 (def ^:private compaction-token-defaults
   "pi: DEFAULT_COMPACTION_TOKEN_SETTINGS."
   {:reserve-tokens 16384 :keep-recent-tokens 20000})

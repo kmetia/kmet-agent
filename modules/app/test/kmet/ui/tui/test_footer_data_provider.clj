@@ -111,7 +111,8 @@
                                                    :total 0.0031}}})
         (let [p (fdp/make-footer-data-provider :session sess)
               totals (fdp/fdp-usage-totals p)]
-          (is (= {:input 270 :output 60 :cache-read 80 :cache-write 10 :cost 0.0031}
+          (is (= {:input 270 :output 60 :cache-read 80 :cache-write 10
+                  :cache-write-1h 0 :cost 0.0031}
                  totals)))))))
 
 (deftest test-context-tokens
@@ -188,7 +189,8 @@
                                                   :cost {:total 0.01}}})
           (let [p (fdp/make-footer-data-provider :session sess)
                 totals (fdp/fdp-usage-totals p)]
-            (is (= {:input 370 :output 120 :cache-read 230 :cache-write 0 :cost 0.015}
+            (is (= {:input 370 :output 120 :cache-read 230 :cache-write 0
+                    :cache-write-1h 0 :cost 0.015}
                    totals)
                 "assistant (70+20+30) + compaction (300+100+200) usage summed"))))))
   (testing "compaction usage is not post-compaction assistant usage"

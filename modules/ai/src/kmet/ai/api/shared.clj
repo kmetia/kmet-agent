@@ -376,9 +376,12 @@
   (or (contains? #{"moonshotai" "moonshotai-cn"} provider)
       (str/includes? url "api.moonshot.")))
 
-(defn- openrouter-provider? [provider url]
+(defn openrouter-provider?
+  "OpenRouter by provider family id or base URL (pi: provider === \"openrouter\"
+   || baseUrl.includes(\"openrouter.ai\")); shared by the compat detectors."
+  [provider url]
   (or (= provider "openrouter")
-      (str/includes? url "openrouter.ai")))
+      (str/includes? (or url "") "openrouter.ai")))
 
 (defn- cloudflare-workers-provider? [provider url]
   (or (= provider "cloudflare-workers-ai")

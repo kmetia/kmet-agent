@@ -365,6 +365,26 @@
           (t/is (= 0.000909 (:input (m/calculate-cost tiered {:input 101 :output 0
                                                               :cache-read 0 :cache-write 0})))))))))
 
+(t/deftest test-calculate-cost-1h-cache-write
+  ;; pi anthropic-cache-write-1h-cost.test.ts: 600k written at the 5m rate
+  ;; (6.25/Mtok) + 400k at 2x input (10/Mtok) = 7.75
+  (let [model (m/map->Model {:id "claude-opus-4-8" :name "Opus"
+                             :provider :anthropic :api :anthropic-messages
+                             :base-url "https://api.anthropic.com" :reasoning true
+                             :input [:text]
+                             :cost {:input 5.0 :output 25.0 :cache-read 0.5 :cache-write 6.25}
+                             :context-window 200000 :max-tokens 4096})]
+    (t/is (= 7.75 (:cache-write (m/calculate-cost model {:input 100 :output 5 :cache-read 0
+                                                         :cache-write 1000000
+                                                         :cache-write-1h 400000}))))
+    (t/is (= 6.25 (:cache-write (m/calculate-cost model {:input 100 :output 5 :cache-read 0
+                                                         :cache-write 1000000})))
+          "no 1h share → the whole write takes the model's cache-write rate")
+    (t/is (= 10.0 (:cache-write (m/calculate-cost model {:input 100 :output 5 :cache-read 0
+                                                         :cache-write 1000000
+                                                         :cache-write-1h 2000000})))
+          "a 1h share larger than the total is clamped to it, never overcharged")))
+
 ;; ─── models.edn composition (pi: ModelRuntime.rebuildProviders) ────────────
 
 (t/deftest test-load-models-config!

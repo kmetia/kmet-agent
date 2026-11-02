@@ -673,7 +673,7 @@
       (let [h (@#'anthropic/anthropic-request-headers
                (assoc model :id "claude-sonnet-4.6" :api :anthropic-messages)
                provider "sk-test" nil
-               [{:role :user :content [{:type :text :text "hi"}]}])]
+               [{:role :user :content [{:type :text :text "hi"}]}] :short)]
         (t/is (= "user" (get h "X-Initiator")))
         (t/is (= "conversation-edits" (get h "Openai-Intent")))
         (t/is (= "2023-06-01" (get h "anthropic-version")))
@@ -682,7 +682,7 @@
       (let [h (@#'anthropic/anthropic-request-headers
                {:id "claude-sonnet-4.6" :provider :anthropic :api :anthropic-messages}
                {:id :anthropic :name "Anthropic"} "sk-test" nil
-               [{:role :user :content [{:type :text :text "hi"}]}])]
+               [{:role :user :content [{:type :text :text "hi"}]}] :short)]
         (t/is (nil? (get h "X-Initiator")))))
     (t/testing "an account alias keeps its base provider's copilot shaping"
       (let [alias (assoc model :provider :github-copilot#work

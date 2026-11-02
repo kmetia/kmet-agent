@@ -92,7 +92,9 @@
 (defn parse-anthropic-event
   "Parse an Anthropic messages SSE (event-name, data) pair into a kmet event
    map: :text, :thinking, :signature, :tool-call, :tool-call-args,
-   :message-delta, :done, :ping, :content-block-start, or :unknown."
+   :message-delta, :done, :ping, :content-block-start, or :unknown.
+   :usage rides on message_start (initial counts) and message_delta (final
+   counts) — the wire merges the two (pi accumulateUsage)."
   [event data]
   (case event
     "message_start"
@@ -140,6 +142,9 @@
             reason (get-in d [:delta :stop_reason])
             refusal-explanation (get-in d [:delta :stop_details :explanation])]
         (cond-> {:type :message-delta}
+          ;; the stream's final token counts ride here (message_start carries
+          ;; the initial ones); pi merges the two field-wise
+          (:usage d) (assoc :usage (:usage d))
           reason (assoc :stop-reason
                         (case reason
                           ("end_turn" "stop_sequence" "pause_turn") :stop

@@ -388,7 +388,12 @@
            (sse/parse-anthropic-event
             "message_delta"
             "{\"type\":\"message_delta\",\"delta\":{}}"))
-        "no stop_reason → no :stop-reason key"))
+        "no stop_reason → no :stop-reason key")
+  (t/is (= {:type :message-delta :stop-reason :stop :usage {:output_tokens 250}}
+           (sse/parse-anthropic-event
+            "message_delta"
+            "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":250}}"))
+        "the stream's final counts ride on message_delta (pi merges start + delta)"))
 
 (t/deftest test-anthropic-stream-folds-message-delta-stop-reason
   ;; The terminal :done (message_stop) reports the accurate stop reason

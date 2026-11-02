@@ -17,6 +17,14 @@
    [kmet.ai.wires :as wires]
    [kmet.ai.api.shared :refer [ambient-auth-available?]]))
 
+(defn resolve-cache-retention
+  "pi resolveCacheRetention (anthropic-messages.ts:75-82): the caller's
+   :cache-retention when given, else :short. The host resolves its own knob
+   (kmet.app.config/get-cache-retention) and passes it in here, so this
+   library never reads the environment."
+  [opts]
+  (or (:cache-retention opts) :short))
+
 (defn request-opts
   "Normalize a `send-message` opts map for one call.
 
@@ -74,9 +82,14 @@
                      curl --max-time semantics); nil follows the idle timeout,
                      non-positive disables the total deadline
      :cache-retention — :short (default) | :long | :none — prompt-cache
-                     params for openai-responses (pi CacheRetention; :none
-                     disables the cache key + affinity headers — compaction
-                     summaries pass it); ignored by the other apis
+                     params and cache_control breakpoints (pi
+                     CacheRetention); :none disables them along with the
+                     cache key and affinity headers (compaction summaries
+                     pass it). Defaults to :short — the host's setting is
+                     resolved above this layer and arrives here
+                     (kmet.app.config/get-cache-retention). Honoured by
+                     anthropic-messages, openai-responses, mistral and
+                     bedrock
      :max-tokens  — per-call output token cap; overrides the model's
                      configured :max-tokens for this request (pi caps the
                      compaction summary output at 0.8 * reserveTokens)
@@ -84,8 +97,11 @@
      :on-tool-call — (fn [{:keys [id name arguments]}])
      :on-done     — (fn [stop-reason])
      :on-error    — (fn [message])
-     :on-usage    — (fn [usage-map]) — provider-native usage from the final
-                     stream chunk.
+     :on-usage    — (fn [usage-map]) — provider-native usage, called once per
+                     usage-bearing chunk and last-wins: a wire whose counts
+                     arrive in more than one chunk (anthropic: message_start,
+                     then message_delta) merges them before each call, so the
+                     last map is the whole response's.
      :hooks       — the provider-event bridge for this call, as the four
                      hook keys below (the runtime reads it once per attempt
                      and merges it in; a flat key overrides it).
@@ -159,7 +175,8 @@
             (try
               ((wires/request-fn api)
                (assoc opts :model-record m :provider-record p
-                      :effort effort :api-key api-key))
+                      :effort effort :api-key api-key
+                      :cache-retention (resolve-cache-retention opts)))
               (catch Throwable e
                 (if (= ::wires/unknown-api-type (:cause (ex-data e)))
                   ;; An unknown wire reports through the async error channel

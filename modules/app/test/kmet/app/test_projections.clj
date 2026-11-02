@@ -115,7 +115,8 @@
     (append! f {:role :user :content "q"})
     (append! f (assistant :usage {:prompt_tokens 100 :completion_tokens 10}))
     (append! f (assistant :usage {:input_tokens 30 :output_tokens 5}))
-    (is (= {:input 130 :output 15 :cache-read 0 :cache-write 0 :cost 0.0}
+    (is (= {:input 130 :output 15 :cache-read 0 :cache-write 0 :cache-write-1h 0
+            :cost 0.0}
            (:tokens ((:project projections) session))))
     (is (= (stats/usage-totals session)
            (:tokens ((:project projections) session)))
