@@ -86,6 +86,18 @@
     (let [lines (protocols/render c 40)]
       (t/is (some #(clojure.string/includes? % "cancelled") lines) "cancelled status shown"))))
 
+(t/deftest test-bash-execution-render-failed-without-an-exit-code
+  ;; A command that never produced an exit code (spawn failure, a throw) is an
+  ;; error, not a success — the model already sees :is-error, and the user's
+  ;; transcript must not read as a clean run either.
+  (let [c (be/make-bash-execution :command "nope" :exclude-from-context? false)]
+    (be/bash-execution-set-complete! c nil false)
+    (let [lines (protocols/render c 40)]
+      (t/is (some #(clojure.string/includes? % "(no exit code)") lines)
+            "the failed status is shown")
+      (t/is (not-any? #(clojure.string/includes? % "(exit nil)") lines)))
+    (protocols/dispose c)))
+
 (t/deftest test-bash-execution-frame-driver
   (t/testing "shared-bucket frame driver (spinner/default-interval-ms) runs while :running; completion cancels it"
     (let [c (be/make-bash-execution :command "sleep 1")

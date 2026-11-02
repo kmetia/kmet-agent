@@ -77,7 +77,12 @@
                         (theme/fg t :muted ")"))))
           exit-part (case status
                       :cancelled (theme/fg t :warning "(cancelled)")
-                      :error (theme/fg t :error (str "(exit " exit-code ")"))
+                      :error (theme/fg t :error
+                                       (if (some? exit-code)
+                                         (str "(exit " exit-code ")")
+                                        ;; a spawn failure or a throw has no
+                                        ;; exit code — it still failed
+                                         "(no exit code)"))
                       nil)
           elapsed-ms (max 0 (- ended-at started-at))
           duration (when-not replayed?
@@ -334,7 +339,9 @@
   "Mark the bash command as complete.
    Stops the spinner, records exit code and duration.
 
-   exit-code     — int or nil (nil if cancelled)
+   exit-code     — int or nil; nil means the command never produced one
+                   (spawn failure, a throw), which is an error unless it was
+                   cancelled
    cancelled?    — boolean
    :truncation   — {:total-lines int :shown-lines int ...} or nil
    :full-output-path — string or nil"
@@ -346,7 +353,8 @@
                           :exit-code exit-code
                           :status (cond
                                     cancelled? :cancelled
-                                    (and exit-code (not= exit-code 0)) :error
+                                    (nil? exit-code) :error
+                                    (not= exit-code 0) :error
                                     :else :complete))
              truncation (assoc :truncation truncation)
              full-output-path (assoc :full-output-path full-output-path))))
