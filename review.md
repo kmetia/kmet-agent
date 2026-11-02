@@ -11,7 +11,7 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 | # | Finding | Severity | Status |
 |---|---------|----------|--------|
 | 1 | Stale run clears a new run's `running?` flag | high (concurrency) | verified by reading |
-| 2 | LLM deadline timeout does not abort the request | high (token burn / garbled UI) | verified by reading |
+| 2 | LLM deadline timeout does not abort the request | high (token burn / garbled UI) | **fixed** |
 | 3 | Shell spawn failure reported as success | high (agent misled) | **fixed** |
 | 4 | `settle-grace!` has no ceiling | medium (hang) | verified by reading |
 | 5 | `append-entry` mutates memory before the file write | medium (data loss) | verified by reading |
@@ -25,8 +25,8 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 | 13 | `tui-resume!` bypasses the render-crash guard | high (silent hang) | verified by reading |
 | 14+ | Structural: frame copying, render loop size, duplicated policies | low (maintainability) | verified by reading |
 
-Findings 3, 6, 8 and 9 are fixed (one commit each, each with a regression test); 12 is dropped.
-The rest stand as written, with 1 and 2 next.
+Findings 2, 3, 6, 8 and 9 are fixed (one commit each, each with a regression test); 12 is dropped.
+The rest stand as written, with 1 next.
 
 ---
 
@@ -51,7 +51,7 @@ and add a separate `:cancelling?`.
 Test: start a run, cancel it, submit immediately, assert `:status` stays `:running` and the
 first run's settle does not clear it.
 
-## 2. LLM per-call deadline returns `:timeout` without aborting the request
+## 2. LLM per-call deadline returns `:timeout` without aborting the request — **fixed**
 
 `modules/app/src/kmet/app/loop.clj:614-621`, `modules/app/src/kmet/app/loop/completion.clj:150-176`
 
@@ -68,6 +68,10 @@ promise, which is what correctly stops the stream — that is the model to copy.
 Fix: `call-llm` should return the call with a per-call abort (it already returns `:partials`);
 on the deref timeout call it, then deliver `{:cancelled true :timeout true}` so the straggler
 guard trips immediately and partials are preserved.
+
+**Fixed:** `call-llm` returns an `:abort` that trips the call's own stream signal, and the
+deadline path cuts the call before delivering the promise, so the transport stops reading and
+the straggler guards trip; the compaction summarization's backstop got the same cut.
 
 ## 3. A shell that fails to spawn is reported as success — **fixed**
 
