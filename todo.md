@@ -260,6 +260,10 @@ a new `modules/app/src/kmet/app/tools/search.clj`,
    `:hidden` stays out: kmet can unregister a tool and exclude it with
    `:enabled-tools`, and pi needs `hidden` only because it cannot unregister
    (`docs/extensions.md` § Tool Exposure).
+
+   Exposure is not user-settable: an override belongs to the source, never to
+   per-tool settings (§ Tools: cross-session selection in both scopes) — a
+   project exposure override could make a `:sandbox` tool un-disableable.
 3. **Callable and declared are two derivations, not one.** pi's `ToolLoadout`
    carries `declared` and `callable` separately (`types.ts:571-583`), and a
    `codemode` script reaches tools that were never declared
@@ -562,6 +566,140 @@ On a real session against Anthropic with `-message` logging on, confirm the
 second round's usage chunk reports `cache_read_input_tokens > 0` for all but
 the newest message. That is the only assertion that proves the markers are
 accepted; everything above proves they are sent.
+
+## Tools: cross-session selection in both scopes
+
+Depends on nothing in the prompt-caching section, but shares its tool-registry
+files; exposure (§ P5) stays out of it deliberately.
+
+### Why
+
+`/tools` (bundled `tools` extension) records its selection in the session's
+branch only — nothing survives into a new session — and `kmet config`'s `Tools`
+group writes `:default-tools`, which reaches **built-ins only**
+(`default-tool-exclusions` subtracts from `builtin-tool-names`,
+`registry.clj:328-336`; `docs/configuration.md:144-146`). The one decision users
+actually make here — "extension tool X stays off for this project" — has no
+home. Add `:enabled-tools` as the config spelling of the runtime slot that
+already exists, and give `/tools` the discovery plus a scope target.
+
+### Decisions
+
+- **`:enabled-tools` is absolute selection over all live tools**;
+  `:default-tools` stays the built-in-only, pi-parity key. Precedence already
+  exists: `active-tools-for` prefers `enabled` (`state.clj:472-489`), so
+  `:enabled-tools` wins and `:default-tools` is the fallback — no new rule.
+- **Deltas, not snapshots.** `+name`/`-name` against everything mounted, so a
+  tool that appears later defaults on and an MCP catalog that connects late is
+  not silently dropped.
+- **Two scopes, one per-row model**: global on/off, project
+  load/unload/inherit (the `kmet config` vocabulary,
+  `resource_config.clj:231-244`). No tab bar — a scope line with the target
+  file plus per-row provenance; Tab switches, same as `kmet config` (`:23`,
+  `:700-706`).
+- **Exposure stays out.** It is a source-level property (P5), and a
+  project-scope exposure override would make a `:sandbox` tool un-disableable
+  (`callable = … ∪ sandbox`).
+- **`/tools` discovers, `kmet config` reviews.** The config screen never loads
+  plugins (`tools/config.clj:58-60`), so it sees only built-ins and names
+  already in settings; `/tools` runs with the live registry and is the only
+  place a first delta can be authored.
+
+### Steps
+
+**S1 — config and resolution (no UI).**
+
+- `kmet.app.config`: generalize `merge-default-tools` → `merge-tool-entries`
+  (one rule for both keys); update its call sites (`load-config` `:264-278`,
+  `tools/config.clj:97`) and tests. No alias, no shim.
+- `load-config`: apply the same special-case to `:enabled-tools`; add
+  `get-enabled-tools` beside `get-default-tools` (`:465-471`).
+- `kmet.app.tools.registry`: generalize `resolve-default-tools` →
+  `resolve-selection [entries base-names]`; keep `resolve-default-tools` as the
+  built-in call and add `resolve-enabled-tools` over live names. The `[]` =
+  empty-selection branch (`:314-317`) already has the right meaning for both.
+- `loop.driver`: resolve `:enabled-tools` beside `:121`, thread through
+  `prompt-options` (`:85-93`) and `agent-state` (`:127`, `:147`).
+
+Done when a config with no `:enabled-tools` produces a byte-identical request,
+and one with `:enabled-tools` wins over `:default-tools`.
+
+**S2 — extension ABI (two functions).**
+
+- `kmet.app.tools.config` implements, `kmet.extension` exposes:
+  - `(ext/tool-selection api)` → `{:scope • :entries {:global […] :project
+    […]} :enabled #{…} :origin {name :global|:project|:session|:default}}`,
+    one call for the dialog;
+  - `(ext/set-tool-enabled! api name enabled {:scope :global|:project})`,
+    `enabled` nil = inherit.
+- Reuse `modifier-style?` (`tools/config.clj:120-126`) and the delta logic of
+  `apply-builtin-tool-project-override!` (`:148-161`) — one writer, shared with
+  `kmet config`.
+- Default scope: project when `.kmet/` exists, else global — `run-config!`'s
+  rule (`config_command.clj:26-27`).
+- Wire into the extension API map; the allowed-namespace list in
+  `context.cljc` is **unchanged** (no app internal is exposed).
+
+**S3 — `/tools`.**
+
+- Scope line in the header (target file + per-scope counts), Tab to flip; rows
+  carry a provenance suffix (`global`, `project`, `session`, `default`).
+- Toggle = runtime + branch entry, as today
+  (`extensions/tools.clj:39-43,66-95`); `s` persists the selection as a delta
+  through `set-tool-enabled!`, so nothing is written to a settings file without
+  an explicit act.
+- Headless path unchanged (`ui-notify`, `:97-107`).
+
+**S4 — `kmet config` review surface.**
+
+- `builtin-tool-items` (`:73-105`) → `tool-items`: built-in rows keep
+  `:default-tools`; names in `:enabled-tools` (either scope) that are not
+  built-ins get rows that write/clear the delta, shown even though the tool
+  cannot be resolved statically. Default-on extension tools remain invisible
+  here — the documented limit.
+- `toggle-selected!` (`resource_config.clj:588-615`) gains the
+  `:enabled-tools` branch.
+- No plugin loading; `mounted-tool-names` (`:45-73`) unchanged.
+
+**S5 — docs.**
+
+- `docs/configuration.md:140-196` — `:enabled-tools`, both scopes, the delta
+  rule, precedence; fix the `/reload` sentence at `:194-196` (it contradicts
+  `builtins.clj:676-679`).
+- `docs/pi-alignment.md:261` (settings parity; CLI flags still the gap) and
+  `:56` (no project trust — note the fail-closed argument).
+- `modules/app/src/kmet/extension.md` + `docs/extensions.md` (the two new ABI
+  functions, a stated break), `extensions/README.md` and the `tools.clj`
+  docstring.
+
+### Test plan
+
+There is no direct coverage of selection resolution today
+(`merge-default-tools`/`resolve-default-tools` appear only in
+`test_resource_config.clj` and `interactive/test_import.clj`; `active-tools-for`
+has none), so:
+
+- new `modules/app/test/kmet/app/test_tool_selection.clj`: scope merge (project
+  modifier list amends, plain list replaces), `[]` = none, `:enabled-tools` over
+  `:default-tools`, unknown names select nothing, resolution over live names
+  including an extension/MCP name.
+- `modules/app/test/kmet/ui/tui/test_resource_config.clj`: an `:enabled-tools`
+  name that is not built-in renders a row; undo clears the entry; a built-in row
+  still writes `:default-tools`.
+- `modules/app/test/kmet/app/test_bundled_extensions.clj`: the `tools` artifact
+  still validates after the ABI and dialog change.
+- ABI: project write lands in `.kmet/settings.edn` as a delta; `tool-selection`
+  reports the right `:origin` per scope; global keeps modifier shape.
+- Gates: `bb test-changed`, `bb lint-changed`, `bb format-check-changed`.
+
+### Done when
+
+An extension tool turned off in project scope stays off in a fresh session in
+that repo and on in another; `/tools` shows where each row's state comes from
+and which file Tab will write; a built-in's toggle still writes
+`:default-tools`; a config without `:enabled-tools` sends the same request bytes
+as today; `kmet config` can undo a delta `/tools` wrote without loading a
+plugin.
 
 ## Around tool hooks: pre/post → one filter
 
