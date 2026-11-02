@@ -28,12 +28,6 @@
   (when (and (pos? n) (or (pos? start) (< end n)))
     (str "  (" (inc (max 0 (min (dec n) (or selected 0)))) "/" n ")")))
 
-(defn center-offset
-  "How many rows to put above the selection when centering a window of
-   `visible` rows (i.e. (quot visible 2))."
-  [visible]
-  (quot (max 1 visible) 2))
-
 (defn clamp
   "Clamp X to [lo hi]."
   [x lo hi]
