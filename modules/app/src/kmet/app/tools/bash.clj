@@ -133,7 +133,8 @@
                                  (send-update))
                      :max-lines bash-out/DEFAULT-MAX-LINES
                      :max-bytes bash-out/DEFAULT-MAX-BYTES})
-            {:keys [output exit-code cancelled truncated truncation full-output-path timed-out]} result
+            {:keys [output exit-code cancelled truncated truncation full-output-path
+                    timed-out failed]} result
             ;; Pi: [Showing lines X-Y of Z. Full output: path] footer for the LLM
             ;; (stripped from the TUI display by the bash render-result, which
             ;; shows the truncation warning instead)
@@ -153,13 +154,19 @@
           ;; Pi: appendStatus — only adds \n\n separator when there is output
           {:content (str (when (seq (str output footer)) (str output footer "\n\n")) "Command aborted")
            :is-error true}
-          (let [is-error (or timed-out (and exit-code (not= exit-code 0)))
+          (let [;; pi: no exit code is an error, never a success — :failed is
+                ;; the executor's throw, and nil is an exit that could not be
+                ;; observed
+                is-error (boolean (or timed-out failed (not= exit-code 0)))
                 ;; Pi: formatOutput — empty successful output shows "(no output)"
                 base (if (and (not is-error) (empty? output)) "(no output)" output)
                 ;; Pi: appendStatus(outputText, status) — status follows the output
                 status (cond
                          timed-out (str "Command timed out after " (or timeout "?") " seconds")
-                         is-error (str "Command exited with code " exit-code)
+                         ;; the failure text already carries the error
+                         failed nil
+                         (nil? exit-code) "Command terminated without an exit code"
+                         (not= 0 exit-code) (str "Command exited with code " exit-code)
                          :else nil)
                 content (if status
                           (str (when (seq (str base footer))

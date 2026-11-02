@@ -83,7 +83,9 @@
     (t/testing "a cwd that does not exist is an error, not a spawn"
       (let [r (execute! {:command "echo hi"
                          :cwd "/definitely/not/a/directory/kmet-test"})]
-        (t/is (str/includes? (str (:output r)) "Working directory does not exist")))))
+        (t/is (str/includes? (str (:output r)) "Working directory does not exist"))
+        (t/is (true? (:failed r)) "flagged, so the tool reports :is-error")
+        (t/is (nil? (:exit-code r))))))
 
   (t/deftest ^:slow spawn-hook-and-env-merge-reach-the-command
     (t/testing "the spawn hook can rewrite the command; env is merged in"

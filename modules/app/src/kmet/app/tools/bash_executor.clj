@@ -510,7 +510,9 @@
 
 (defn- failure-result
   "The call's result when the run threw: the same clean/truncate/persist tail,
-   classified as cancelled, timed out, or an error appended to the output."
+   classified as cancelled, timed out, or :failed — an error appended to the
+   output and the flag the tool turns into :is-error, since a call that never
+   produced an exit code did not succeed."
   [ctx signal e]
   (let [{:keys [content truncated truncation full-output-path]}
         (truncate-and-persist! ctx (clean-tail ctx))
@@ -523,7 +525,10 @@
     (cond
       (and signal @signal) (assoc result :cancelled true)
       (str/includes? (str (ex-message e)) "timeout") (assoc result :timed-out true)
-      :else (assoc result :output (str content "\n\nError: " (ex-message e))))))
+      :else (assoc result
+                   :failed true
+                   :output (str (when (seq content) (str content "\n\n"))
+                                "Error: " (ex-message e))))))
 
 (defn- new-run-state
   "One call's streaming state: the raw chunk log and the rolling tail (whose
