@@ -562,20 +562,24 @@ Be precise and concise in your responses."}}]
 
 (defn flush-pending-bash-messages!
   "Add queued bash results (recorded while the agent was streaming) to the
-   agent context and session (pi: _flushPendingBashMessages). Called by
-   run-agent-turn's finally so every exit path — settle, error, timeout, or
-   cancel — flushes them. Drains entries queued mid-flush via CAS. The
-   context-only append keeps them out of `agent-end :messages` (pi flushes
-   after agent_end)."
+   agent context and session (pi: _flushPendingBashMessages). run-agent-turn's
+   finally calls it on every exit path — settle, error, timeout, or cancel.
+   Each batch is taken and cleared in one `swap-vals!`, so a result recorded
+   mid-flush lands exactly once instead of the whole batch landing twice; the
+   session is read once per flush, so a swap mid-batch cannot split it. The
+   atom reads empty while a taken batch is still being appended: a caller
+   polling it (the session switch's settle wait) watches the queue, not the
+   appends. The context-only append keeps these out of `agent-end :messages`
+   (pi flushes after agent_end)."
   [agent]
-  (loop []
-    (let [pending @(:pending-bash agent)]
-      (when (seq pending)
-        (doseq [entry pending]
-          (append-context-message! agent entry)
-          (when-let [sess (:session agent)]
-            (session/append-entry sess entry)))
-        (when-not (compare-and-set! (:pending-bash agent) pending [])
+  (let [sess (:session agent)]
+    (loop []
+      (let [[pending _] (swap-vals! (:pending-bash agent) (constantly []))]
+        (when (seq pending)
+          (doseq [entry pending]
+            (append-context-message! agent entry)
+            (when sess
+              (session/append-entry sess entry)))
           (recur))))))
 
 (defn add-context-message!

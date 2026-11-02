@@ -612,6 +612,34 @@
       (finally
         (fs/delete-tree dir)))))
 
+(t/deftest test-loop-flush-pending-bash-appends-each-entry-once
+  ;; A result recorded while the flush drains must not make the batch already
+  ;; appended land a second time — the CAS recur re-read the atom holding that
+  ;; batch plus the new entry, so the whole batch was appended again.
+  (let [dir (test-tmp/temp-dir! "sess-")
+        sess (session/create-session (str (fs/path dir "s")))
+        agent (support/make-agent-state :session sess)
+        append! state/append-context-message!
+        injected? (atom false)]
+    (try
+      (reset! (:status agent) :thinking)
+      (state/add-bash-result! agent "first" {:output "one\n" :exit-code 0} false)
+      (with-redefs [state/append-context-message!
+                    (fn [ag entry]
+                      (append! ag entry)
+                      ;; a second result arrives mid-flush: still streaming, so
+                      ;; it queues behind the batch being drained
+                      (when (compare-and-set! injected? false true)
+                        (state/add-bash-result! ag "second" {:output "two\n" :exit-code 0} false)))]
+        (state/flush-pending-bash-messages! agent))
+      (t/is (= ["first" "second"]
+               (mapv :command (state/get-context agent)))
+            "each queued result appears exactly once, in order")
+      (t/is (= 2 (count @(:entries sess))) "and is persisted once")
+      (t/is (empty? @(:pending-bash agent)))
+      (finally
+        (fs/delete-tree dir)))))
+
 (t/deftest test-loop-add-bash-result-excluded
   (let [agent (support/make-agent-state)]
     (state/add-bash-result! agent "ls" {:output "x" :exit-code 0} true)
