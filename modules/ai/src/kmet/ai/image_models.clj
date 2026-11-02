@@ -80,8 +80,8 @@
 
 (defn get-auth
   "Resolved request auth for an image provider (pi ImagesModels.getAuth):
-   {:api-key str} (+ :base-url for oauth credentials), or nil when the
-   provider is unconfigured. Reuses kmet.ai.auth."
+   {:api-key str} (+ :base-url and :oauth true for oauth credentials), or nil
+   when the provider is unconfigured. Reuses kmet.ai.auth."
   [provider-id]
   (auth/resolve-provider-auth provider-id))
 

@@ -9,10 +9,10 @@
 ;;   3. cold prefix, :long         → the 1h TTL is accepted
 ;;                                   (cache_creation.ephemeral_1h_input_tokens > 0)
 ;;
-;; Transport is curl: babashka's trust store may lack the host's CA chain, and a
-;; subscription provider (github-copilot) authenticates its anthropic endpoint
-;; as Authorization: Bearer where this wire sends x-api-key. Both are transport
-;; concerns — the payload and the event handling under test are kmet's.
+;; Transport is curl: babashka's trust store may lack the host's CA chain. The
+;; auth header still comes from the wire's own builder (anthropic-auth-headers),
+;; so a subscription provider's bearer routing is exercised rather than assumed;
+;; the payload and the event handling under test are kmet's too.
 ;;
 ;;   bb scripts/live_cache_check.bb [provider] [model-id]
 (require '[kmet.ai.api.anthropic-messages :as anthropic]
@@ -34,6 +34,11 @@
                (do (println "Unknown model:" provider model-id) (System/exit 1))))
 (def base-url (:base-url model))
 (def access (:api-key (auth/resolve-provider-auth provider)))
+;; derived from the wire's builder, not hardcoded: a regression in the oauth
+;; bearer routing (todo.md § github-copilot) fails this check
+(def auth-args
+  (into [] (mapcat (fn [[k v]] ["-H" (str k ": " v)]))
+        (anthropic/anthropic-auth-headers provider access)))
 
 ;; a nonce per run keeps the prefix cold, so the first round really writes
 (defn- prefix [nonce]
@@ -56,16 +61,16 @@
         out-file "target/live-cache-check.sse"
         _ (spit out-file "")
         {:keys [exit err]}
-        (shell/sh "curl" "-sS" "--max-time" "180"
-                  "-H" (str "Authorization: Bearer " access)
-                  "-H" "Editor-Version: vscode/1.107.0"
-                  "-H" "Copilot-Integration-Id: vscode-chat"
-                  "-H" "content-type: application/json"
-                  "-H" "anthropic-version: 2023-06-01"
-                  "-H" "accept: text/event-stream"
-                  "-d" (json/generate-string payload)
-                  "-o" out-file
-                  (str base-url "/v1/messages"))
+        (apply shell/sh "curl" "-sS" "--max-time" "180"
+               (concat auth-args
+                       ["-H" "Editor-Version: vscode/1.107.0"
+                        "-H" "Copilot-Integration-Id: vscode-chat"
+                        "-H" "content-type: application/json"
+                        "-H" "anthropic-version: 2023-06-01"
+                        "-H" "accept: text/event-stream"
+                        "-d" (json/generate-string payload)
+                        "-o" out-file
+                        (str base-url "/v1/messages")]))
         seen (atom [])
         text (atom "")
         handle (anthropic/anthropic-events-handler

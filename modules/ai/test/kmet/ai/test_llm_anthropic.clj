@@ -28,6 +28,27 @@
       (t/is (= {"x-api-key" "k"}
                (@#'anthropic/anthropic-auth-headers :github-copilot "k"))))))
 
+(t/deftest test-anthropic-auth-headers-oauth
+  ;; An oauth-derived credential (Copilot) is a subscription token: Copilot's
+  ;; /v1/messages is bearer-only, so the :oauth marker routes it to
+  ;; Authorization: Bearer instead of x-api-key.
+  (let [prev @#'auth/oauth-source]
+    (try
+      (auth/set-oauth-source!
+       (fn [_]
+         {:to-auth (fn [cred] {:api-key (:access cred)
+                               :base-url "https://api.individual.githubcopilot.com"})}))
+      (with-redefs [auth/auth-atom
+                    (atom {:github-copilot
+                           {:type :oauth :access "sub-token" :refresh "r"
+                            ;; far future: a refresh would write the real auth.edn
+                            :expires 9999999999999}})
+                    auth/getenv (fn [_] nil)]
+        (t/testing "an oauth credential → Authorization: Bearer, no x-api-key"
+          (t/is (= {"Authorization" "Bearer sub-token"}
+                   (@#'anthropic/anthropic-auth-headers :github-copilot "sub-token")))))
+      (finally (auth/set-oauth-source! prev)))))
+
 (t/deftest ^:slow test-llm-anthropic-bearer-only
   (m/load-catalogs! nil)
   (m/clear-extension-providers!)

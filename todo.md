@@ -6,85 +6,35 @@ tracks that used to close this file are dropped — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| **`github-copilot` anthropic auth** | every `github-copilot/claude-*` model fails with `400 missing required Authorization header` — the anthropic wire sends `x-api-key` to an endpoint that only accepts `Authorization: Bearer` | **open — first task** (found while verifying prompt-cache P0) |
+| **`github-copilot` anthropic auth** | every `github-copilot/claude-*` model failed with `400 missing required Authorization header` — the anthropic wire sent `x-api-key` to an endpoint that only accepts `Authorization: Bearer` | **landed** (oauth marker → Bearer; verified live) |
 | Prompt-caching parity with pi | kmet's wires never ask for prompt caching (except responses/mistral/bedrock), so cache-read sits at 0; the tool ranker serves MCP only, no source's tools can be declared, and a tool-set change re-sends the whole array | **P0 landed** (anthropic breakpoints + 1h pricing); P1–P6 planned, decisions closed |
 | Around tool hooks | two hand-rolled hook chains + a doubled permission gate; no way to settle a call successfully | decided: **A** — one `:on-tool` around registration |
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | decisions closed (E1–E16); independent |
 
 ## `github-copilot`: its anthropic models cannot authenticate
 
-Status: open, diagnosed, fix shape agreed. Small and independent — take it
-before prompt-cache P1.
+**Landed and verified live.** Every `github-copilot/claude-*` model failed with
+`400 missing required Authorization header`: the anthropic wire sent
+`x-api-key` to Copilot's bearer-only `/v1/messages`. `resolve-provider-auth`'s
+oauth branch now carries `:oauth true`, and `anthropic-auth-headers` sends
+`Authorization: Bearer` for that marker (`auth.clj` + `anthropic_messages.clj`).
+The distinction is where the token came from, not which provider it is: pi
+routes Copilot's anthropic requests to Bearer in its client builder and detects
+Anthropic's `sk-ant-oat` oauth tokens by string; kmet knows the credential's
+origin, so the marker is provenance-based and covers any oauth login on this
+wire.
 
-### What happens
-
-Every `github-copilot/claude-*` model fails on the first request:
-
-```
-400 {"error":{"message":"missing required Authorization header"}}
-```
-
-Copilot's `/v1/messages` is bearer-only. `anthropic-auth-headers`
-(`anthropic_messages.clj:239`) sends `Authorization: Bearer` only when
-`ANTHROPIC_AUTH_TOKEN` won the resolution order; otherwise it sends
-`x-api-key`. The provider carries no `:auth-header` (nothing in `models.edn`
-does), so `shared/request-headers` adds no Bearer either. The token itself is
-fine — it is a subscription token, and every other wire already sends it as a
-bearer (`openai_completions.clj:60`, `openai_responses.clj:235`,
-`openai_codex_responses.clj:62`), which is why copilot's OpenAI models work and
-its Claude models do not.
-
-Confirmed by hand against a live copilot token: the identical request body →
-`400 missing required Authorization header` with `x-api-key`, `200` with
-`Authorization: Bearer` plus the editor headers the wire already sends
-(`Editor-Version`, `Copilot-Integration-Id`; `copilot-dynamic-headers`).
-pi reaches the same endpoint as a bearer token because its oauth `toAuth`
-returns an `OAuthToken` object and `isOAuthToken` routes it to the bearer
-header.
-
-### Why it is not a wire special-case
-
-The distinction pi makes is *where the token came from*, not which provider it
-is: an oauth credential yields a subscription token that every provider's own
-endpoint wants as a bearer. kmet's `resolve-provider-auth` (`auth.clj:328`)
-collapses that distinction away — `resolve-oauth-auth` returns
-`{:api-key … :base-url …}` (`oauth.clj:409`, copilot's `to-auth`), a shape
-indistinguishable from an `auth.edn` API key. The fix restores the marker.
-
-### Steps
-
-1. **Mark the auth.** In `resolve-provider-auth`'s first branch, the
-   oauth-derived result gains `:oauth true`:
-   `(when-let [a (resolve-oauth-auth provider)] (assoc a :oauth true))`.
-   Update its docstring to name the key; it is the only branch that sets it.
-2. **Let the anthropic header builder honour it.** `anthropic-auth-headers`
-   already calls `resolve-provider-auth` itself, so the bearer branch becomes
-   `(or (:bearer resolved) (when (:oauth resolved) (:api-key resolved)))`.
-   No new request option, no threading through `anthropic-request`.
-3. **Check the other oauth providers for the same endpoint.** `openai-codex`
-   and the copilot OpenAI path hardcode Bearer and are unaffected; leave
-   `shared/request-headers`' `:auth-header` alone unless a wire needs it.
-4. **Tests.** `test_auth.clj`: a stored oauth credential resolves with
-   `:oauth true`, and an `auth.edn` key does not. `test_llm_anthropic.clj`:
-   `anthropic-auth-headers` for a provider with an oauth credential →
-   `{"Authorization" "Bearer …"}`, with no `x-api-key`; an API-key provider →
-   `x-api-key` as today; `ANTHROPIC_AUTH_TOKEN` still wins over both.
-5. **Docs.** `docs/providers.md` (or wherever copilot's setup is described)
-   gains nothing: after this, a copilot login works for every enabled model.
-   If the live check is worth keeping, extend `scripts/live_cache_check.bb` —
-   it already takes a provider argument.
-
-Done when: a request to `github-copilot/claude-haiku-5.5` on a live copilot
-account returns a stream (no `400 missing required Authorization header`), the
-unit tests above pass, and no wire sends `x-api-key` for an oauth-derived
-token.
+Verified: `github-copilot/claude-haiku-4.5` streams through `llm/send-message`
+(previously the 400), and the same raw request returns 200 with
+`Authorization: Bearer` where `x-api-key` returns 400. Tests pin the marker
+(`test_auth.clj`), the bearer header (`test_llm_anthropic.clj`) and the
+resolution shape (`test_oauth.clj`).
 
 ## Prompt-caching parity with pi
 
 Status: plan, decisions closed. **P0 landed and verified against the live API**
 (anthropic breakpoints, the usage merge it uncovered, the 1h cache-write
-pricing, and D2's corrected resolution seam). Next: P1 — after §
-`github-copilot` above, which blocks every copilot Claude model.
+pricing, and D2's corrected resolution seam). Next: P1.
 Owner: whoever takes the `:llm` row next.
 Reference implementation: `~/src/cvstree/pi/packages/ai/src/api/` (pi).
 
@@ -166,10 +116,9 @@ Notes from doing it:
   merged map once per usage-bearing chunk. Live: two reports per request, the
   last carrying the delta's real `output_tokens` (4) instead of `message_start`'s
   placeholder 1.
-- **Found here, tracked separately:** `github-copilot`'s anthropic models
-  cannot authenticate (bearer-only endpoint, `x-api-key` sent). It is an
-  auth-layer change, so it is § 1 at the top of this file rather than a P0
-  follow-up; every `github-copilot/claude-*` model is affected until it lands.
+- **Found here, since fixed:** `github-copilot`'s anthropic models could not
+  authenticate (bearer-only endpoint, `x-api-key` sent); see §
+  `github-copilot` above.
 
 Files: `modules/ai/src/kmet/ai/api/anthropic_messages.clj`,
 `modules/ai/src/kmet/ai/api/shared.clj`.

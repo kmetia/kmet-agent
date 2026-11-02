@@ -273,6 +273,38 @@
                   auth/getenv (fn [_] nil)]
       (t/is (nil? (auth/resolve-provider-auth :anthropic))))))
 
+(t/deftest test-resolve-provider-auth-marks-oauth
+  ;; :oauth marks an oauth-derived credential (a subscription token): a wire
+  ;; sends it as Authorization: Bearer even where an API key would be
+  ;; x-api-key (pi isOAuthToken). Copilot's /v1/messages depends on it.
+  (let [prev @#'auth/oauth-source]
+    (try
+      (auth/set-oauth-source!
+       (fn [_]
+         {:to-auth (fn [cred] {:api-key (:access cred)
+                               :base-url "https://api.example.com"})}))
+      (t/testing "a fresh oauth credential resolves with :oauth true"
+        (with-auth-file
+          (fn [_]
+            (auth/set-oauth-credential! :github-copilot
+                                        {:type :oauth :access "sub-token" :refresh "r"
+                                         :expires (+ (System/currentTimeMillis) 3600000)})
+            (t/is (= {:api-key "sub-token" :base-url "https://api.example.com"
+                      :oauth true}
+                     (auth/resolve-provider-auth :github-copilot))))))
+      (t/testing "an auth.edn API key is not marked"
+        (with-auth-file
+          (fn [_]
+            (auth/set-credential! :github-copilot "key")
+            (t/is (= {:api-key "key"}
+                     (auth/resolve-provider-auth :github-copilot)))))
+        (with-auth-file
+          (fn [_]
+            (auth/set-credential! :anthropic "a-key")
+            (t/is (= {:api-key "a-key"}
+                     (auth/resolve-provider-auth :anthropic))))))
+      (finally (auth/set-oauth-source! prev)))))
+
 (t/deftest test-ambient-configured
   (t/testing "amazon-bedrock: any AWS credential source configures the provider"
     (with-redefs [auth/getenv (fn [_] nil)

@@ -462,7 +462,7 @@
                                         {:type :oauth :access "fresh"
                                          :refresh "r"
                                          :expires (+ (System/currentTimeMillis) 3600000)})
-            (t/is (= {:api-key "fresh" :base-url "https://api.example.com"}
+            (t/is (= {:api-key "fresh" :base-url "https://api.example.com" :oauth true}
                      (auth/resolve-provider-auth :github-copilot)))
             (t/is (= 1 @to-auth-calls) "fresh token → no refresh")
             (t/is (= "fresh" (auth/resolve-api-key :github-copilot)))))))))
@@ -486,7 +486,7 @@
                                          :refresh "r"
                                          ;; 1 min left — inside the 5-min window
                                          :expires (+ (System/currentTimeMillis) 60000)})
-            (t/is (= {:api-key "rotated" :base-url "https://api.example.com"}
+            (t/is (= {:api-key "rotated" :base-url "https://api.example.com" :oauth true}
                      (auth/resolve-provider-auth :github-copilot))
                   "expiring token refreshed on resolve")
             (t/is (= 1 @refresh-count) "refresh receives the stored credential")
@@ -494,7 +494,7 @@
                                        [:github-copilot :access]))
                   "rotated credential persisted")
             (testing "double-checked: a second resolve sees the fresh token"
-              (t/is (= {:api-key "rotated" :base-url "https://api.example.com"}
+              (t/is (= {:api-key "rotated" :base-url "https://api.example.com" :oauth true}
                        (auth/resolve-provider-auth :github-copilot)))
               (t/is (= 1 @refresh-count) "no second refresh after rotation"))))))))
 

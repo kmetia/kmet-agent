@@ -238,13 +238,18 @@
 
 (defn anthropic-auth-headers
   "Base auth headers for an anthropic-messages request (pi anthropic provider
-   resolve): the resolved provider auth — when ANTHROPIC_AUTH_TOKEN wins the
-   resolution order (no credential, no configured key) → Authorization:
-   Bearer, else x-api-key with the resolved API key."
+   resolve): a bearer token — ANTHROPIC_AUTH_TOKEN winning the resolution, or
+   an oauth-derived credential (:oauth, a subscription token) → Authorization:
+   Bearer; otherwise x-api-key with the resolved API key. Copilot's
+   /v1/messages is bearer-only, which is why the oauth marker, not the
+   provider id, decides."
   [provider api-key]
-  (if-let [t (:bearer (auth/resolve-provider-auth provider))]
-    {"Authorization" (str "Bearer " t)}
-    {"x-api-key" api-key}))
+  (let [resolved (auth/resolve-provider-auth provider)
+        bearer (or (:bearer resolved)
+                   (when (:oauth resolved) (:api-key resolved)))]
+    (if bearer
+      {"Authorization" (str "Bearer " bearer)}
+      {"x-api-key" api-key})))
 
 (defn- system-prompt-text
   "Extract the system prompt from a kmet message vector. kmet prepends the

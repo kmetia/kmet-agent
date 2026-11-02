@@ -329,16 +329,20 @@
   "Resolved request auth for a provider (pi composeApiKeyAuth.resolve +
    resolveStoredOAuth + the anthropic provider resolve): {:api-key str} for
    the x-api-key paths, {:bearer str} when ANTHROPIC_AUTH_TOKEN wins
-   (anthropic), or {:api-key str :base-url str} for an oauth credential (the
-   base-url is the per-credential endpoint, e.g. Copilot's proxy-ep). Exact
-   pi order: stored oauth credential (refreshed when expiring; a stored
-   oauth credential without a registered OAuthAuth resolves nil and blocks
-   the env fallback) → auth.edn api-key → models.edn/extension configured
-   key (a configured key present but unresolvable blocks the rest, pi
-   resolveConfigValueOrThrow) → ANTHROPIC_AUTH_TOKEN → oauth/api env vars
-   (api-key-env-vars, AUTH_TOKEN skipped). nil when nothing is configured."
+   (anthropic), or {:api-key str :base-url str :oauth true} for an oauth
+   credential (the base-url is the per-credential endpoint, e.g. Copilot's
+   proxy-ep; :oauth marks a subscription token, which a wire sends as
+   `Authorization: Bearer` even where an API key would be x-api-key — pi's
+   isOAuthToken routing). Exact pi order: stored oauth credential (refreshed
+   when expiring; a stored oauth credential without a registered OAuthAuth
+   resolves nil and blocks the env fallback) → auth.edn api-key →
+   models.edn/extension configured key (a configured key present but
+   unresolvable blocks the rest, pi resolveConfigValueOrThrow) →
+   ANTHROPIC_AUTH_TOKEN → oauth/api env vars (api-key-env-vars, AUTH_TOKEN
+   skipped). nil when nothing is configured."
   [provider]
-  (or (resolve-oauth-auth provider)
+  (or (when-let [a (resolve-oauth-auth provider)]
+        (assoc a :oauth true))
       (when-let [k (get-in @auth-atom [provider :key])]
         {:api-key k})
       ;; pi: a stored credential owns the provider — no env fallback when the
