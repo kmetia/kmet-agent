@@ -1,13 +1,19 @@
 # Todo
 
-Three independent tracks. None blocks another; each is a request/ABI-level
+Seven tracks. The first three are independent; the four token tracks at the
+end are ordered among themselves (§ Order across the token tracks), and one of
+them depends on an item of the caching track. Each is a request/ABI-level
 change with unit-testable surfaces.
 
 | track | what it fixes | status |
 |---|---|---|
 | Prompt-caching parity with pi | kmet's wires never ask for prompt caching (except responses/mistral/bedrock), so cache-read sits at 0; the tool ranker serves MCP only, no source's tools can be declared, and a tool-set change re-sends the whole array | P0–P6, decisions closed |
 | Around tool hooks | two hand-rolled hook chains + a doubled permission gate; no way to settle a call successfully | decided: **A** — one `:on-tool` around registration |
-| Eviction as the second context strategy | compaction always pays an LLM call and rewrites history; no deterministic, lossless way to shrink the window | ready; decisions closed |
+| Turn markers in the session and the tree | the log cannot distinguish a steering injection from a typed prompt, and nothing records where a turn begins, so the tree draws no boundary and no turn-granular mechanism can be built on the log | decided; independent, and **R**'s newest-turn boundary |
+| **R** — the tool-result pruner | a tool result is never trimmed after it lands, so compaction condenses a window dominated by old output; `bash` is the only tool that keeps a retrievable copy | decisions closed; after **M** |
+| **M** — the request envelope as one measurement | every estimate counts messages only — not the system prompt (unbounded `AGENTS.md`), the skill catalog or the tool schemas; `:context-window` is stale after a model switch; images are invisible | decisions closed; **land first** |
+| **W** — warm-prefix summarization | the summarization call is a guaranteed cold prefix (fresh system prompt + re-serialized transcript + `:cache-retention :none`), so the largest call a session makes pays full input on the whole history | decisions closed; after **M** and caching **P0/P1** |
+| **S** — per-result retention with a locator | only `bash` spills; `read`'s 50 KiB, `run_code`'s value and every extension result land at full size and stay, and `bash`'s locator points at a file deleted on exit | one decision open (**S6**); after **R** |
 
 ## Prompt-caching parity with pi
 
@@ -54,7 +60,7 @@ the markers pi places.
 
 ### Non-goals
 
-- No new compaction/eviction strategy. This plan only changes request bytes.
+- No new compaction strategy. This plan only changes request bytes.
 - No google explicit `cachedContent` (pi does not do it either).
 - No live-API verification as a gate; the payload builders are pure and the
   assertions belong in unit tests (see § Test plan).
@@ -776,144 +782,34 @@ lists stay in `kmet.app.extensions.core` where they already are, and the tool
 point lives in `kmet.app.loop.tool-exec`. `kmet.libs` is rejected unless a
 non-app caller needs the primitive.
 
-## Eviction as the second context strategy
+## Turn markers in the session and the tree
 
-Status: decisions closed. Every automatic path honours the `:strategy`
-setting; explicit `/compact` and `/evict` and branch summaries are fixed verbs.
-Reference design: nodecode's eviction + recall
-(`~/src/cvstree/nodecode/src/src/engine/context.lisp`,
-`session/recall.lisp`, `engine/working-context.md`).
+Status: decided. Independent of any context strategy — extracted from the
+removed eviction track (§ Order across the token tracks), which needed turn
+boundaries and found the log could not supply them.
 
 ### Why
 
-Compaction is kmet's only way to shrink the window, and it always costs a
-second LLM round trip and always replaces history with a summary. It also
-breaks the prefix it was trying to preserve: the summary sits where the
-prefix sat. A deterministic strategy — cut whole turns, leave an addressable
-stub, keep the log — is cheaper on every axis, and kmet already has every
-piece except two functions.
+The entry stream cannot say where turns begin. `inject-queued-messages!`
+(`loop/state.clj:619-637`) appends a `:user` entry for every steering message
+with nothing on it distinguishing it from a typed prompt. The loop knows; the
+log does not.
 
-### What already exists
+Two consequences, and only the first is cosmetic:
 
-| piece | where | what it buys |
-|---|---|---|
-| the durable entry shape | `compact-with-summary!` (`session/store`), `:first-kept-id` | a strategy-agnostic record: prefix excluded from context, kept in the file |
-| the projection | `session/context.clj:102-119` `context-entries` → `[compaction, ...tail]` | "history excluded from context but stays in the file" is already the semantics |
-| surgical omission | `append-context-edit!` (pi `ContextEditEntry`), `nil` replacement | omit one entry forever, log and transcript untouched, tree renders `[context omit: id]` |
-| the trigger | `maybe-compact!` (`stage.clj:603`) measures the **projected** context, not the file | already correct for an append-only strategy |
-| cache-miss detection | `detect-cache-miss` (`context.clj:251`) | a free "the prefix is already broken" trigger |
-| the funnel | `compact-context!` (`stage.clj:515`) with a `reason` | one place to plug in, three callers already routed |
+- the tree selector has no turn boundary to draw, so a branch's shape reads as
+  an undifferentiated run of entries;
+- no turn-granular mechanism can be built on the log without guessing — a
+  strategy, a per-turn budget, a per-turn report. Inferring "a `:user` entry
+  starts a turn" is wrong for steering injections, which join a live turn.
+  The pruner already needs this boundary to leave the newest turn alone
+  (**R4**).
 
-### The funnel (scope)
+So record it. The format already carries pure state roles (`:model-change`,
+`:thinking-level-change`, `:label`, `:context-edit`) and `context-messages`
+projects unknown roles to `[]`.
 
-| entry point | caller | reason |
-|---|---|---|
-| `maybe-compact!` — proactive before a run | `loop.clj:431,579,901,914` | `:threshold` (`stage.clj:646`) |
-| `compact-for-overflow!` — reactive after a provider overflow | `loop.clj:961` | `:overflow` (`stage.clj:658`) |
-| manual queue — `/compact`, wire `compact` | `session/compaction.clj:36`, `commands/builtins.clj:167` | `:manual` (`stage.clj:554`) |
-
-All three go through `compact-context!`, so all three follow the strategy.
-That is deliberate: an evicting session that hits a provider 400 must not
-suddenly summarize.
-
-**Not affected: branch summaries.** `generate-branch-summary`
-(`stage.clj:245`) is a *sibling*, not a caller — its own prompts
-(`core/prepare-branch-entries`, `core/branch-summary-messages`), its own
-budget, its own callers (TUI tree navigation → `session/runtime.clj:394` ←
-`session_admin.clj:592`), its own entry role `:branch-summary`, which
-`context-entries` treats separately from `:compaction` and which does not move
-the floor. It also uses `stage-retry-policy` and `retry/retry-call!` itself —
-which is why the row must keep them.
-
-### The shape
-
-One selector, four fixed paths. The strategy is a function of the *reason*
-`compact-context!` already receives (`stage.clj:554`) and one setting:
-
-| path | reason | strategy | knob |
-|---|---|---|---|
-| auto-compact, proactive | `:threshold` | **from settings** | `:strategy` in `settings.edn` |
-| overflow, after a provider 400 | `:overflow` | the same setting | `:strategy` in `settings.edn` |
-| `/compact` | `:manual` | always summarize | — |
-| `/evict [percent]` | `:evict` (new) | always evict | the arg, default 50 |
-
-`generate-branch-summary` (`stage.clj:245`) is not in the table: it is a
-sibling function with its own prompts and its own entry role, and it always
-summarizes.
-
-The implementation is the smallest form of a strategy — extract what
-`compact-context!` already does into a `:plan` and a `:body` pair, and pick the
-pair from `(reason, settings)`:
-
-```clojure
-{:plan (fn [{:keys [projection branch window thresholds]}]
-         ;; → {:first-kept-id id :kind :summary|:eviction} or nil
-         )
- :body (fn [planned ctx] → string)}   ; the entry's text
-```
-
-- `:summarize`'s `:plan` keeps pi's cut (`find-projected-cut-point` over
-  `keep-recent-tokens`); its `:body` is the existing `summarization-call` +
-  retry.
-- `:evict`'s `:plan` cuts at turn markers with hysteresis (trigger 0.85 → floor
-  0.50); its `:body` renders a deterministic stub.
-
-`compact-context!` becomes `plan → body → compact-with-summary!`. The
-retry/abort/event machinery stays where it is and is never entered for
-`:evict`, whose `:body` is synchronous.
-
-Plus one operator verb: `/evict [percent]`, default 50, separate from
-`/compact` (`commands/builtins.clj:167`) because it means something different
-to a user. nodecode treats the default percent as an operator-command contract,
-not a tunable.
-
-### Settings
-
-Exactly one new key, modelled on `:auto-compact` — the existing precedent for
-"a compaction behaviour the user owns".
-
-| | |
-|---|---|
-| key | `:strategy` — `:summarize` (default) or `:evict` |
-| scope | `settings.edn` (user, then project, merged by `kmet.app.config`) |
-| read | a field in `get-compaction-settings`' return map (`config.clj:662`), beside `:enabled` / `:reserve-tokens` / `:keep-recent-tokens`, resolved per call |
-| effect | both automatic paths — `:threshold` and `:overflow` — and nothing else |
-| written | `cfg/save-setting!`, like the other settings |
-| shown | one row beside "Auto-compact" (`settings_selector.clj:365`) |
-| gate | unchanged: `:auto-compact false` still means no proactive compaction, whatever `:strategy` says |
-
-`config-schema.clj`'s map is `:closed false` and `:auto-compact` is not in it,
-so a schema clause is optional; the default has to be stated in
-`get-compaction-settings` either way.
-
-**`:summarize` is the default, and it stays it.** Eviction is opt-in, reached
-only by setting `:strategy :evict` or by the explicit `/evict`. This plan does
-not change the default — no measurement, no deprecation, no "promote later"
-step.
-
-Deliberately *not* settings: the 0.85 / 0.50 ratios and the 50% default.
-`/evict [percent]` is the per-invocation knob, and a default an operator can
-reach from the command line does not need a config key. If measurement later
-shows a machine-specific ratio matters, it joins the same
-`get-compaction-settings` map — one place, resolved per call — not a new
-mechanism.
-
-### What it deliberately does not do
-
-No new persistence layer, no change to `context-entries` or
-`append-context-edit!`, no change to `:generate-branch-summary`, no strategy in
-the `:compaction` row's `:config` (the row keeps naming one implementation and
-`impl` keeps answering `builtin`), no second row, no evict-then-summarize
-escalation, no ratio settings. One new entry role is required — see below.
-
-### Recording the turn
-
-Eviction needs to know where turns begin, and the entry stream cannot say:
-`inject-queued-messages!` (`loop/state.clj:619-637`) appends a `:user` entry for
-every steering message with nothing on it distinguishing it from a typed
-prompt. The loop knows; the log does not. So record it — the format already
-carries pure state roles (`:model-change`, `:thinking-level-change`, `:label`,
-`:context-edit`) and `context-messages` projects unknown roles to `[]`.
+### The marker
 
 ```clojure
 {… :role :turn-start
@@ -925,23 +821,23 @@ carries pure state roles (`:model-change`, `:thinking-level-change`, `:label`,
   `:parent-id` = leaf (`session/store.clj:88-89`) chains them. One writer, one
   pair, no second path racing the loop's appends.
 - **Steering and follow-up injections write nothing** while they join the live
-  turn; a `continue` that starts a new run writes one — pi's own semantics
+  turn; a `continue` that starts a new run writes one — pi's own turn semantics
   rather than an approximation of it.
-- **The ordinal is computed from position**, as nodecode computes its turn
-  numbers. A stored counter drifts the moment two branches fork from one turn.
-- **A cut at a marker survives later plans**: `context-entries` keeps
-  `first-kept-id`'s entry (`session/context.clj:102-119`), so the marker stays
-  in the context vector while projecting to nothing — the next eviction still
-  sees where turns begin. Cutting at the user entry loses that.
-- **The unmarked prefix is one immutable turn.** No migration, no heuristic:
-  nothing before the first marker is evictable, and the next prompt writes one.
-- **One surface shows it, two do not.** The tree selector renders it as a
-  separator (`── turn 3 ──`, the ordinal counted from the `:turn-start`
-  ancestors on the path, never stored), so the operator can see turn
-  boundaries where they branch and fold. The chat replay skips it (the
-  transcript is messages) and the projection never sends it. Without the
-  selector clause it would fall through to a `[:turn-start]` row, which is why
-  the clause is not optional.
+- **The ordinal is computed from position.** A stored counter drifts the moment
+  two branches fork from one turn: the tree counts `:turn-start` ancestors on
+  the current path and renders `── turn N ──`.
+- **A compaction cut may land on a marker, and the marker survives it**:
+  `context-entries` keeps `first-kept-id`'s entry (`session/context.clj:102-119`),
+  so a marker at the kept boundary stays in the context vector while projecting
+  to nothing — a later turn-granular caller still sees where turns begin.
+- **The unmarked prefix is one turn.** No migration, no heuristic: nothing
+  before the first marker is a boundary, and the next prompt writes one. A
+  session file written before the role existed loads (the strict pass reports
+  and skips it), so the prefix is simply one long turn.
+- **One surface shows it, two do not.** The tree selector renders the
+  separator; the chat replay skips it (the transcript is messages) and the
+  projection never sends it. Without the selector clause it would fall through
+  to a `[:turn-start]` row, which is why the clause is not optional.
 - **Branching needs no special case.** Markers are ordinary parents, so fork,
   resume and tree navigation carry them; a branch point inside a turn splits
   that turn, which is the correct answer for that branch.
@@ -958,117 +854,681 @@ Cost — one schema clause, one separator, one skip:
 | `session/context.clj:140` | default `[]` | none |
 | `session/stats.clj:175` | `:else "unknown"` bucket | audit so a marker is not counted as a model |
 
-### Decisions
-
-**E1 — the strategy is selectable for automatic compaction only (decided).**
-Explicit `/compact`, explicit `/evict` and branch summaries are fixed verbs;
-the setting decides every automatic path: `:threshold` and `:overflow`. That is
-why this is a selector inside `compact-context!` and not a row swap: six of the
-row's eight operations never differ between strategies, and
-`:generate-branch-summary` must keep summarizing inside whatever row is
-mounted.
-
-**E2 — reason → strategy is code, not configuration (decided).** `:manual` →
-summarize, `:evict` → evict, `:threshold` → the setting, `:overflow` → the
-setting. No `{:reason :strategy}` map, no row config.
-
-**E3 — the recall read ships with the first path that can evict (decided).**
-nodecode pairs eviction with `recall-log` / `recall-entry`; kmet has neither,
-and a stub that says "still on disk" with no way to read it is a lie the model
-cannot act on. So the read lands in the same change as `/evict` and the
-`:strategy` key, and until it exists nothing evicts. Consequence: the plan may
-cut any **completed turn** — not only obviously dead content (completed tool
-output, resolved exploration) — because the model can always get it back.
-
-**E4 — record the turn rather than infer it (decided).** A `:turn-start`
-marker written by the prompt path (§ Recording the turn). The cut predicate
-then collapses to `(= :turn-start (:role e))`, and "never split a tool call
-from its result" becomes a cheap assertion over the chosen boundary instead of
-the primary rule: a marker is only ever written at a prompt boundary, and a
-prompt is only accepted between rounds. `drop-incomplete-tool-calls`
-(`loop/completion.clj`) stays the defensive net it is today, not the
-correctness argument.
-
-**E5 — `:overflow` honours the setting (decided).** A provider 400 under
-`:strategy :evict` evicts, for the same reason auto-compact does: the user
-asked for no summarization on this box, and eviction is at least as effective
-at shrinking the same prefix, since it drops the prefix rather than replacing
-it. The consequence to keep explicit: when the eviction plan finds no legal
-cut, "nothing to compact" stays today's outcome — the turn reports the
-provider error — and there is no summarize fallback to escalate to. Decided
-*against*: always summarizing on overflow (a stronger remedy for a wrong
-estimate) and evict-then-summarize escalation.
-
 ### Steps
 
-1. **Extract `:summarize` with zero behaviour change.** `:plan` and `:body`
-   for today's path, `compact-context!` calling them, still the only strategy.
-   Acceptance: the three compaction paths and the branch-summary tests stay
-   green, byte-identical entry shapes. This step is also what keeps `/compact`
-   and overflow honest while the rest lands.
-2. **Record the turn.** `:turn-start` in `session/schema.clj`, written by the
-   prompt path before the user message; the `session_admin.clj:274` skip
-   clause; the tree selector's `── turn N ──` separator
-   (`tree_selector.clj:169-217`, ordinal counted on the path); the `stats`
-   audit (§ Recording the turn). Prerequisite for step 3 — the plan reads the
-   markers.
-3. **Add the `:evict` pair and the selector.** Marker-aligned `:plan` with
-   hysteresis; `:body` renders the stub (the turns that left, by ordinal, and
-   the fact that they are still on disk). Never touches the newest turn.
-   `compact-context!` picks the pair from `(reason, settings)`.
-4. **A `recall` read** over the branch entries — the read the stub advertises
-   (E3). Lands before anything can evict, so the stub is never a promise the
-   model cannot keep.
-5. **The `:strategy` setting.** `get-compaction-settings` field, default
-   `:summarize`, `save-setting!`, the `settings_selector` row, docs
-   (§ Settings).
-6. **`/evict [percent]`** as the explicit verb, reason `:evict`.
+1. **The role.** `:turn-start` in `session/schema.clj`; `store/append-entry`
+   carries it like the other state roles.
+2. **The writer.** The prompt path writes one before the user message
+   (`:reason :prompt`); the `continue` path writes one when a new run starts
+   (`:reason :continue`); `inject-queued-messages!` writes none.
+3. **The skip.** `session_admin.clj:274`.
+4. **The separator.** `tree_selector.clj:169-217`, ordinal counted on the path.
+5. **The audit.** `session/stats.clj:175`, so a marker never lands in the
+   per-model bucket.
+6. Docs: `docs/architecture.md`'s session-entry list (the roles with no wire
+   projection).
 
 ### Test plan
 
-- `modules/app/test/kmet/app/test_compaction.clj` and the compaction queue
-  tests — unchanged expectations through step 1; they are the regression net
-  for the extraction.
-- New, selector: `(reason, settings)` → pair. `:manual` summarizes whatever the
-  setting says; `:evict` evicts whatever it says; `:threshold` follows it;
-  `:overflow` honours the setting too; `:summarize` stays byte-identical to
-  today for every reason.
-- New, settings: `get-compaction-settings` answers `:strategy :summarize` when
-  the key is absent, and the `:auto-compact` gate is unchanged (false = no
-  proactive compaction regardless of `:strategy`); the selector row persists
-  through `save-setting!`.
-- New, marker (`session/schema.clj` + the three decided sites): a prompt
-  writes exactly one `:turn-start` whose `:parent-id` is the previous leaf and
-  whose next entry is the user message; a steering injection writes none; a
-  `continue` writes one; a marker projects to no wire message, adds no chat
-  row, and renders as `turn N` in the tree selector with N counted from its
-  ancestors (two branches from one turn both read `turn N`, and the next
-  marker on each reads `turn N+1`); a session file written before the role
-  existed still loads (strict pass off) and its unmarked prefix is one
-  immutable turn.
-- New, plan: `:plan` with `:evict` over a scripted branch — cuts only at
-  markers, newest turn retained, hysteresis (one eviction from 0.85 to 0.50,
-  then no further eviction until the trigger is crossed again), and the marker
-  at `:first-kept-id` still present in `context-entries` for the next plan.
-- New, branching: a fork taken mid-turn gives each branch its own marker set;
-  neither branch's plan reaches across the fork point.
-- New: `:body` for `:evict` is deterministic — two calls on the same plan
-  produce byte-identical text, so refolds and cache reasoning hold.
-- New: with `:strategy :evict`, an overflow evicts (no summarize call, no
-  `:summarization-retry-*` events); with `:summarize` it summarizes exactly as
-  today; and a branch summary in the same session still summarizes either way.
-- New: with `:strategy :evict`, an overflow whose plan finds no legal cut
-  leaves the context untouched and the turn reports the provider error — no
-  fallback to summarization.
-- Extensions/gates: `bb test-changed`, `bb lint-changed`,
-  `bb format-check-changed`.
+- A prompt writes exactly one `:turn-start` whose `:parent-id` is the previous
+  leaf and whose next entry is the user message.
+- A steering injection writes none; a `continue` that starts a new run writes
+  one.
+- A marker projects to no wire message (`session/build-context-messages`), adds
+  no chat row, and renders as `turn N` in the tree selector with N counted from
+  its ancestors — two branches from one turn both read `turn N`, and the next
+  marker on each reads `turn N+1`.
+- A session file written before the role existed still loads with the strict
+  pass off and its unmarked prefix behaves as one turn.
+- A compaction or context edit that lands a marker at the kept boundary leaves
+  it in `context-entries`.
+- Stats: two sessions, one with markers, produce identical per-model totals.
 
-### Notes
+Run: `bb test-changed`, `bb lint-changed`, `bb format-check-changed`.
 
-- Cache economics (see the first track): the cut lands in a durable entry, so
-  every later request rebuilds the identical message list — byte-stable between
-  breaks. Hysteresis makes the break one planned event, not a per-round shave.
-  `detect-cache-miss` can gate it to a break that already happened.
-- Do not add the "thin old tool results" refinement (nodecode's
-  `LIVE-RELIEF-PLAN`) up front: it edits history exactly when the cache is
-  warm, and it is the part with the worst cost/benefit. Cut whole turns first.
+### Decisions
+
+**T1 — record the turn rather than infer it.** A `:user` entry is not a turn
+boundary (steering injects one), and `drop-incomplete-tool-calls`
+(`loop/completion.clj`) stays the defensive net it is today, not the
+correctness argument.
+
+**T2 — one writer, chained.** The marker and the user message come from the
+same call, so `:parent-id` chaining is a property of the append, not of a
+second path racing it.
+
+**T3 — the ordinal is computed, never stored.** Position on the current path;
+a stored counter would drift across forks.
+
+**T4 — invisible to the model.** The marker is a log fact for the tree and for
+future turn-granular callers; it is never a wire message and never a chat row.
+
+**T5 — no migration.** An unmarked prefix is one turn; the next prompt starts
+the first real boundary.
+
+## Retaining less: the tool-result pruner (**R**)
+
+Status: plan, decisions closed (R1–R7). Depends on **M** for an honest
+re-measurement.
+Reference: dsh `compaction-tool-result-pruner`
+(`~/src/cvstree/deepseek-harness/packages/compaction/compaction-tool-result-pruner/`).
+
+### Why
+
+kmet's only tool-output policy runs at capture, and only in `bash`:
+`truncate-and-persist!` (`tools/bash_executor.clj:459`) keeps the tail, spills
+the rest to a temp file and appends the footer. Every other result is retained
+whole for the life of the entry:
+
+| result | bound today |
+|---|---|
+| `read` | 2000 lines / 50 KiB per call (`tools/read.clj:375`), then retained — ≈12k tokens for one legitimate call |
+| `run_code` | the *reported* output is tail-bounded (`bash-output/truncate-tail`); the value it returns is not |
+| extension tools | nothing |
+| images on any tool result | nothing, and not even counted (`estimate-tokens`, `compaction/core.clj:54`, counts text blocks) |
+
+Compaction then pays an LLM call whose input is dominated by exactly those
+results, and a summary of a transcript full of dead output is a worse summary.
+
+dsh trims first, with **no model call**, and re-measures: once a trigger
+qualifies, every tool result over 8,192 characters becomes its first 4,096 + a
+`middle pruned` marker + its last 1,024; if that relieves the pressure, the
+summarization call never happens. The full original stays in the log.
+
+### What already exists
+
+| piece | where | what it gives |
+|---|---|---|
+| the replacement mechanism | `session/context.clj:62` `append-context-edit!` (`nil` omits, `{:content …}` rewrites), applied over the whole projection by `project-entries` (`:217`) | an append-only trim that needs no new role and leaves the log, usage totals and the UI untouched |
+| the precedent | `stage.clj:302` `omit-recovery-attempt!` | the exact two-step shape: append the edit, then `state/refresh-context-from-session!` |
+| the tool-block shape | `loop/message.clj:34` `tool-result-message` | `:content [{:type :tool_result :tool_use_id … :content str}]`, plus `:images`, `:truncation`, `:details` |
+| a trim that keeps pairing | `session/context.clj:182` `replace-message-content` | for a `:tool` entry it rewrites only the `:tool_result` block's text — `:tool_use_id`, `:images` and `:details` survive |
+| the unit | `session/store.clj:353` `estimate-result-tokens` — every tool entry is stamped with `:result-tokens` at append (`:369`) | select and report by size with no re-measurement; `/session` already aggregates per tool |
+| the trigger | `stage.clj:603` `maybe-compact!` → `:472` `compact-with-session!` → `:390` `prepare-compaction` | one place to prune, before the cut is chosen |
+| the re-measurement | `compaction/core.clj:129` `projected-context-tokens` | a context edit newer than the usage anchor already forces a pure estimate |
+
+### Shape
+
+1. One pure fn beside `truncate-tail` (`tools/bash_output.clj:121`):
+   `truncate-middle [s {:keys [head tail]}]` → `{:content :trimmed?
+   :chars-before :chars-after}` — head + marker + tail, sliced in Unicode code
+   points, with `head + marker + tail < threshold` part of the accepted
+   configuration so a second pass is a no-op.
+2. `compaction/core.clj` grows `prunable [projected opts]` → the entries to
+   trim, in projection order, skipping entries that already carry a context
+   edit (an omit included), skipping the newest turn, and skipping entries
+   under `:prune-threshold-chars`.
+3. `stage.clj` grows `prune!`, called from `compact-with-session!` **before**
+   `prepare-compaction`, for reasons `:threshold` and `:overflow` only. It
+   appends one `context-edit` per entry, oldest first, stopping as soon as
+   `projected-context-tokens` falls below the resolved trigger (or the list is
+   exhausted), then refreshes the live context and emits one event.
+4. Settings resolved through `get-compaction-settings` (`config.clj:662`), so a
+   per-model override comes free: `:prune-tool-results` (default `true`),
+   `:prune-threshold-chars` `8192`, `:prune-head-chars` `4096`,
+   `:prune-tail-chars` `1024`.
+5. The model-facing marker is one line, and it must not promise what it does
+   not have:
+
+```text
+[... 41,802 characters pruned from the middle of this result]
+```
+
+   Once **S** has landed the marker carries the spill path instead (`full
+   text: <path> — read it with offset/limit`), which is strictly better for
+   the model than re-running the tool. Until then it says only "pruned":
+   naming a path we did not write is the failure dsh names explicitly.
+6. `:tool-results-pruned {:count :chars-before :chars-after :entry-ids}`, and
+   `compact-context!`/`maybe-compact!` answer `:pruned` when the trim alone
+   relieved the pressure — no `:compaction-start` bracket and no summary. All
+   four callers ignore the return value (`loop.clj:431,579,901,914`), so no
+   caller changes.
+
+### Steps
+
+1. `truncate-middle` + tests.
+2. `prunable` + `prune!`, wired into `compact-with-session!`; `:pruned`
+   threaded through `compact-context!` and `maybe-compact!`.
+3. The four settings fields.
+4. The event, plus the `/compact` and `maybe-compact!` reporting.
+5. Docs: `docs/pi-alignment.md` §8 (deviation: pi has no pruner), the
+   compaction section of `docs/architecture.md`, `docs/configuration.md` for
+   the keys.
+
+### Test plan
+
+- `truncate-middle`: ASCII; multibyte (CJK, emoji) boundaries never split; the
+  marker text; the no-growth invariant; a threshold smaller than the marker
+  keeps the original.
+- `prunable`: order, size filter, skips an edited entry, skips the newest
+  turn, honours `:prune-tool-results false`.
+- `prune!`: a 60 KiB `read` result in a scripted session drops the measured
+  pressure below the trigger; `maybe-compact!` answers `:pruned`; no
+  `summarization-call` runs (stub the retry fn and assert it was not called);
+  no `:compaction-start` is emitted.
+- Idempotence: a second `maybe-compact!` in the same prompt appends no second
+  edit.
+- Projection: the pruned entry keeps `:tool_use_id`, `:images`, `:details`;
+  `session/build-context-messages` shows the marker; the raw branch entry is
+  byte-identical (`pr-str` equality) to before the prune.
+- Resume: a resumed session projects the trimmed entry, because the edit is a
+  durable entry.
+- `:manual` never prunes.
+
+Run: `bb test-changed`, `bb lint-changed`, `bb format-check-changed`.
+
+### Pruning is not a relief valve
+
+Pruning runs only when a compaction trigger has **already** qualified — the
+boundary where the prefix is going to be rewritten anyway. It adds no break;
+when it works it *removes* the summary call, and with it the break the summary
+would have caused. **S** never edits history at all: it bounds a result as it
+arrives, when the append already changes the prefix. Neither is a per-round
+shave: no trigger, no write.
+
+The one cost R accepts is that the model cannot read what was dropped — kmet
+has no recall read. The prune notice therefore stays honest (R5), and the
+newest turn is never touched (R4).
+
+### Measured: what actually forces a compaction
+
+288 parseable session files in `~/.kmet/sessions`, 22 with real `:compaction`
+entries, 44 compaction windows, 7.09 M wire chars. Composition of the
+projection **at the moment compaction ran**:
+
+| component | chars | share |
+|---|---|---|
+| assistant thinking (re-sent every request) | 3,299,491 | **47%** |
+| tool results | 1,835,312 | **26%** |
+| tool-call arguments (re-sent every request) | 1,379,831 | **19%** |
+| assistant text | 329,731 | 5% |
+| previous summary | 243,937 | 3% |
+| user text | 2,489 | 0.03% |
+
+Windows run 148–260 KB (≈40–65k chars/4 tokens); per-session mixes vary (one
+session was 91% tool output, another 64%). So R addresses roughly a quarter of
+the pressure at the trigger — it is the cheapest lens, not the largest, and
+this is the number that a "one big result forces a summary" argument would have
+been wrong about.
+
+**Declined: eliding old thinking and old tool-call arguments (R7).** The two
+together are 66% of the same pressure and neither would need a model call, but
+both reference harnesses elide reasoning only when the *producing* model is not
+the target model, never by age: pi drops every thinking block when
+`provider`/`api`/`model` differ and keeps them otherwise
+(`packages/ai/src/api/transform-messages.ts:112-142`), dsh's pi-ai adapter
+matches that rule, and dsh's native DeepSeek adapter replays prior reasoning
+verbatim regardless. Neither rewrites historical tool-call arguments except to
+repair malformed JSON (`{}`). Age-based elision would be a departure from
+**both** harnesses, and it is the one change in this file with no counterpart in
+the reference: R, M, W and S each borrow a dsh technique (tool-result pruner,
+token meter, warm-prefix summary, spill policy), so the rule these tracks
+follow is "borrow from dsh where pi has nothing" — not "invent past both".
+
+Stated plainly, because it bounds what R is worth: R addresses the 26%
+tool-result share only. The 47% thinking and 19% argument shares stay in the
+context, so the number of compactions does not fall — what falls is the amount
+of work each compaction *replaces*, and W makes the summary call itself mostly
+a cache read. The window pressure is reduced only by the summary.
+
+Recorded for whoever revisits it: a `context-edit` cannot clear `:thinking`
+today — `replace-message-content` (`session/context.clj:182`) rewrites only
+`:content` — so any future field-level elision needs its own durable fact, the
+in-flight turn preserved (Anthropic rejects a continuation whose assistant
+message lost its thinking), and `:reasoning-content-fill`
+(`shared.clj:296-331`) for routes that require the field.
+
+### Decisions
+
+**R1 — prune before the cut, never instead of it.** Trim, then re-measure,
+summarize only if still over. The trim is bounded by the trigger, so a
+conversation under no pressure is never edited.
+
+**R2 — `:manual` does not prune.** `/compact` means "summarize now"; a verb
+that silently did something else first is worse than a slightly more
+expensive call.
+
+**R3 — replace through `context-edit`, not a rewrite.** The log, the tree
+view, usage totals and every extension event keep the original bytes; only the
+projection changes. Same mechanism as `omit-recovery-attempt!`, no schema
+change.
+
+**R4 — never prune the newest turn.** kmet has no per-entry notion of "still
+being reasoned about", and a result the model just received is the likeliest
+to be re-read. The boundary is the newest `:turn-start` marker (the
+marker track); until that lands, the last `:user` entry of the projection —
+which over-counts a turn whenever a steering message was injected, so the
+marker is the correct definition and the stopgap is deliberately the wider
+one. The cost of being conservative is one more summarized tail, not a wrong
+answer.
+
+**R5 — the marker never names a path unless a file was written.**
+
+**R6 — head and tail, not tail only.** `truncate-tail` exists because a
+command's answer is at the end; a read's shape and a search's matches are at
+the front. No setting beyond the two sizes.
+
+**R7 — no age-based elision (pi alignment).** Historical `:thinking` and
+tool-call arguments stay in the projection. pi drops reasoning only when the
+producing model differs from the target (`transform-messages.ts:112-142`, and
+kmet mirrors that in `shared.clj:206,276` and `anthropic_messages.clj:120-133`);
+dsh's pi-ai adapter does the same and its native DeepSeek adapter replays it
+verbatim. The 47% / 19% shares in § Measured are the case *against* this
+decision, kept on the record: revisiting it is a deliberate departure from pi,
+not a tuning knob.
+
+## The request envelope as one measurement (**M**)
+
+Status: plan, decisions closed (M1–M5). **Land first.**
+Reference: dsh `token-meter` (`docs/subsystems/token-meter.md` there) and
+`compaction-basic`'s pressure policy.
+
+### Why
+
+Three readers share one name, and only one of them measures a request:
+
+| reader | call | what it counts |
+|---|---|---|
+| `maybe-compact!` (`stage.clj:633`) | `context-tokens` (`compaction/core.clj:97`) | the latest provider anchor (`assistant-usage-tokens`, `:84`) + chars/4 of the messages after it |
+| the footer (`ui/tui/footer_data_provider.clj:171`) | the same | the same |
+| `/compact`'s `:estimated-tokens-after` (`stage.clj:354`) | `estimated-tokens` (`:76`) | messages only |
+
+The anchor is honest: `input + cache-read + cache-write` is what the provider
+reported for the whole request — system prompt and tool schemas included —
+plus its output. Every **estimate** branch is not, and those branches are not
+rare:
+
+- the explicit `:compact-token-threshold` path (`stage.clj:638`);
+- after any context edit — **R**'s prunes included — `projected-context-tokens`
+  (`core.clj:129`) falls back to a whole-projection estimate;
+- after a compaction `context-tokens` answers nil until the next response, so
+  the next figure is the fallback estimate;
+- the footer shows `?/window` until the first response.
+
+What every estimate omits:
+
+- the live system prompt (`state.clj:180`), which carries the project
+  instructions — `system_prompt.clj:74` renders **every** `AGENTS.md` that
+  `project_context.clj:100` found (agent dir, then cwd → root) with **no size
+  bound**;
+- the `<available_skills>` catalog (`system_prompt.clj:39`);
+- the declared tool schemas, sent on every request (`completion.clj:145`);
+- images, on user messages and tool results alike.
+
+Two further facts the same measurement fixes:
+
+- **`:context-window` is captured once**, at state build (`driver.clj:148`).
+  `set-model!` (`state.clj:773`) and `cycle-model!` (`:862`) append a
+  `:model-change` entry and emit, and no path refreshes the window — so after a
+  switch to a smaller model the proactive trigger keeps comparing against the
+  old window and the session finds out from a provider overflow.
+- **an unbounded `AGENTS.md` is a fixed cost on every request.** 200 KiB of
+  instructions ≈ 50k tokens spent before the first message, and no setting can
+  bound it today.
+
+### Shape
+
+One pure function, three callers:
+
+```clojure
+(kmet.app.compaction.core/envelope-tokens
+  {:usage-anchor n-or-nil   ; the provider's measured whole-request total
+   :system str              ; the live system prompt
+   :tools [tool]            ; the declared set, in the wire shape
+   :messages [message]      ; the projected messages
+   :images-n 0})            ; occurrences still on the wire
+```
+
+- **Anchor present → return it.** Never add overhead to a measurement; that is
+  dsh's `baseline.kind: 'usage'` rule and the reason its surface deltas are
+  signed rather than re-added.
+- **No anchor →** `chars/4` over system + each declaration's JSON + message
+  text, plus the image term.
+- Tool cost is the **wire bytes**:
+  `(kmet.libs.json/generate-string (select-keys tool [:name :description :parameters]))`,
+  one per declared tool — not `pr-str`, whose keywords and commas inflate
+  unevenly, because this number decides when to compact.
+- The image term is the heuristic dsh falls back to when a route declares no
+  pricing: `(w*h)/750` when the entry carries dimensions, else a flat 1,100 per
+  occurrence — and **zero** for occurrences the request will strip
+  (`:block-images`, `loop/message.clj:88`). Overestimating is the safe
+  direction.
+- `context-tokens` and `projected-context-tokens` keep their anchor rule and
+  take the same overhead; `envelope-tokens` is the only implementation.
+- Callers: `maybe-compact!`, `fdp-context-tokens`, and `:tokens-before` /
+  `:estimated-tokens-after` on the compaction entry. One number in three
+  places, which is the point.
+- **Model switch:** `set-model!`/`cycle-model!` refresh `:context-window` from
+  the destination record (`models/get-model`). No new compaction path.
+
+### Steps
+
+1. `envelope-tokens` + both estimators delegating to it; switch the footer and
+   `maybe-compact!` in the same change, so no window ever shows two numbers.
+2. Tool cost (one fn over `state/active-tools`, `state.clj:481`) + a test that
+   it follows a tool add/remove.
+3. The image term in `estimate-tokens`.
+4. Window refresh on both switch paths + the test that a smaller window
+   triggers compaction on the next run.
+5. `:context-files-max-bytes` (default `65536`) and the budget in
+   `format-project-context` (`system_prompt.clj:74`): keep the most specific
+   files in list order, truncate the last kept one, drop the rest, render one
+   `Workspace instruction budget …` notice naming what was omitted and
+   truncated. Applies on `/reload` too — that path passes `:context-files`
+   from the same loader (`builtins.clj:692`).
+6. Docs: `docs/configuration.md` (the key), `docs/pi-alignment.md` (deviation:
+   pi does not bound project instructions).
+
+### Test plan
+
+- `envelope-tokens`: an anchor wins unchanged; no anchor adds system + tools +
+  messages; a 60 KiB AGENTS.md moves the number by ≈15k; a large `:parameters`
+  schema moves it; `:block-images` on drops the image term; two calls are
+  `pr-str`-equal.
+- One test over the same projection: the footer figure and `maybe-compact!`'s
+  reading cross the threshold on the same turn.
+- Model switch: after `set-model!` to a model with a smaller `:context-window`,
+  `maybe-compact!` compacts before the next request and `:cfg`'s window equals
+  the destination's.
+- Instruction budget: fitting files render byte-identically; over budget drops
+  the broadest first, truncates the last kept file, and the notice names the
+  paths; an empty chain contributes no frame; `/reload` applies the same
+  budget.
+- `:estimated-tokens-after` equals the envelope of the post-compaction
+  projection.
+
+### Decisions
+
+**M1 — one function, three callers.** A second estimator is how the footer and
+the trigger drift apart.
+
+**M2 — an anchor is never adjusted.** It measures the whole request; adding
+overhead double-counts it.
+
+**M3 — tool cost from the wire shape.** Compaction decisions should be made on
+what the provider bills.
+
+**M4 — no pre-request destination check.** `maybe-compact!` already runs
+immediately before a run; refreshing the window so that trigger sees the
+destination is the whole fix. A per-request check inside `completion.clj`
+would duplicate the abort/retry machinery for a case the pre-run trigger
+covers.
+
+**M5 — one instruction chain, one budget.** dsh splits user-global from project
+because it loads both; kmet has one chain (agent dir + project walk), so one
+`maxBytes` with "drop the broadest first" is the whole rule.
+
+## Warm-prefix summarization (**W**)
+
+Status: plan, decisions closed (W1–W5). Depends on the caching track's **P0**
+and **P1** (the markers) and on **M** (the measurement that proves the saving).
+Reference: dsh `compaction-basic` § "Summarization reuses the provider's warm
+prefix".
+
+### Why
+
+`summarize!` (`stage.clj:206`) builds `core/summarization-messages`
+(`core.clj:437`): a **fresh** fixed `summarization-system-prompt`, plus one
+`user` message whose text is `<conversation>` around
+`serialize-conversation` of the pre-cut messages (`core.clj:417`, `:290`). The
+call also passes `:cache-retention :none` (`stage.clj:135`).
+
+So the largest call a session ever makes is guaranteed to be a **cold
+prefix**: the whole transcript is billed at full input (or cache-write) rate,
+on exactly the sessions where the history is long. kmet already measures the
+damage — `detect-cache-miss` (`session/context.clj:251`) and the `R`/`W`
+columns in the export (`session/export.clj:287`) — and today it is simply
+never spent on the summary.
+
+dsh replays the live system prompt, the last request's tools and the
+shadowed-region messages byte-for-byte and appends only the instruction, so
+the provider's warm prefix is reused up to the instruction; only the
+instruction and the summary output are uncached.
+
+### What already exists
+
+| piece | where | what it gives |
+|---|---|---|
+| the pre-cut messages | `compaction/core.clj:222` `prepare` → `:messages` | exactly the messages about to be shadowed (system messages removed) |
+| the request shape to copy | `loop/completion.clj:113-145` | `[system] + messages` plus `:tools request-tools` — the prefix a normal call sends |
+| the provider anchor | `kmet.ai.llm/send-message` `:cache-retention` | a per-call retention, which the caching track's **P3** resolves once |
+| the proof | `session/context.clj:251` `detect-cache-miss` | a before/after number from a real session |
+| the deviation record | `docs/pi-alignment.md:516` §8 | where a departure from pi is stated |
+
+### Shape
+
+1. **Two lists from one projection.** `prep :messages` stays as the
+   *serializer* input (pi parity — `branch-summary-messages` still needs it).
+   A new `prep :replay-messages` is the same projection sliced at the cut
+   instead of filtered: `system` + `projection[0..cut)`. It must include two
+   things `:messages` drops today:
+   - the previous compaction's summary message (`core.clj:252` skips
+     `:compaction` sources), because that message **is** in the context and a
+     prefix missing it is not a prefix;
+   - any in-history system message, in position (kmet appends none today;
+     keeping them costs one `remove` and protects the invariant if an
+     extension ever adds one).
+2. `summarization-call` gains the shape: `:messages (into [{:role :system …}]
+   replay-messages)` + the instruction as the final `:user` message + `:tools
+   (state/active-tools agent)`. The instruction is the existing prompt text
+   with its `<conversation>` wrapper gone, and **without** the
+   `<previous-summary>` block when the summary already rides the prefix (W2).
+3. Retention becomes the run's effective value instead of `:none` (W3), and
+   the breakpoints land at the **end of the replayed prefix** — system, last
+   tool, last replayed message — never after the instruction, so the read
+   covers the reused bytes and the new tail is the only write.
+4. Branch summaries keep the cold path (`stage.clj:245`
+   `generate-branch-summary`) — they summarize entries the provider never saw,
+   so there is no warm prefix to reuse (W5).
+5. Delete the cold compaction path rather than keeping it behind a flag (W4):
+   the request shape is an ordinary request, so a provider without caching
+   simply pays what it paid before.
+
+### Steps
+
+1. `prepare` returns `:replay-messages` (same projection, different slice) and
+   `:session-before-compact` carries it, so an extension sees both.
+2. `summarize!` builds the replay request; `core/summarization-messages` and
+   `summarization-request` go away; `serialize-conversation` stays (branch
+   summaries use it).
+3. Retention + breakpoint placement, after **P0**/**P1**.
+4. **Narrow the caching track's P3 bullet**: "summarization already does
+   `:none`" becomes "branch summaries do; compaction reuses a prefix and must
+   not" — the P3 rationale was written when the summarization prefix was cold.
+5. `docs/pi-alignment.md` §8 gains the deviation row, with the before/after
+   cache numbers from one real session.
+
+### Test plan
+
+- `:replay-messages`: system first; the previous compaction's message present;
+  a split-turn cut still ends at a legal message boundary; equal to the last
+  request's list minus the retained tail on a scripted conversation.
+- `summarize!` request: one system message, no `<conversation>` wrapper, the
+  instruction last, `:tools` equal to the active set, retention ≠ `:none`.
+- A second compaction: the summary message is in the replayed prefix and the
+  instruction does not restate it.
+- Branch summary unchanged: `:none`, serialized, its own system prompt.
+- Byte stability: two consecutive payload builds from the same messages are
+  `pr-str`-equal up to the instruction, so the breakpoint claim holds.
+- Usage: the compaction entry's `:usage` reports a positive `:cache-read` on a
+  replayed prefix (a stub transport asserting the request carries the same
+  prefix bytes is the unit-level version of this).
+
+### Decisions
+
+**W1 — replay the projection, do not re-serialize.** The serialized
+`<conversation>` is a second, differently-shaped rendering of the same bytes,
+and a prefix match on it is impossible by construction.
+
+**W2 — the previous summary rides the prefix; the update instruction does not
+restate it.** Otherwise the summary is paid twice in one request.
+
+**W3 — breakpoints at the end of the replayed prefix.** pi's placement rule
+(system + last tool + last user message) is written for a request whose last
+user message is the conversation; here it is the instruction, which is the
+part we want uncached.
+
+**W4 — delete the cold compaction path.** No flag, no second spelling; a
+non-caching provider gets the same request shape and pays the same input rate
+it always did.
+
+**W5 — branch summaries stay cold.** They summarize an abandoned branch the
+provider never received, so there is nothing to reuse.
+
+## Per-result retention with a locator (**S**)
+
+Status: plan, one decision open (**S6**: the default budget). Depends on **R**'s
+`truncate-middle`.
+Reference: dsh `spill-policy` + `spill-local` (`docs/subsystems/spill.md`
+there).
+
+### Why
+
+`bash` is the only tool that leaves a retrievable copy, and that copy is a
+`delete-on-exit` temp file (`tools/bash_executor.clj:38` `create-temp-file`:
+`TMPDIR` + `fs/delete-on-exit`), so a resumed session's locator names a dead
+path. Everything else either truncates with no path or has no bound:
+
+| tool | today |
+|---|---|
+| `read` | 2000 lines / 50 KiB + a pagination footer (`tools/read.clj:375`); the model can page, but a 50 KiB first read is already in history |
+| `run_code` | the reported output is tail-bounded; the returned value is not |
+| extension tools | nothing (`tools/invoke.clj:131` `finish-tool-call` may rewrite the result but does not bound it) |
+| `bash` | tail-bounded + a temp-file locator that dies with the process |
+
+dsh applies one per-result budget to text and images alike: over budget, the
+model keeps ordered head/tail halves, the complete text is written to durable
+storage, and the result carries a locator with retrieval guidance. Two rules
+worth copying verbatim: a notice-only result is allowed, and if the notice
+itself cannot fit the budget the **original stays** — never substitute an
+unreadable path.
+
+### Shape
+
+1. A `kmet.app.tools.retention` namespace (pure + `babashka.fs`): `head-tail`
+   (R's `truncate-middle`), `spill!` (write once, return the path) and
+   `notice` (the model-facing text). One implementation, two consumers (R and
+   this policy).
+2. **Path:** `<dir of the session file>/spill/<tool>-<call-id>.txt`. The
+   session file is `(:file sess)` (`session/store.clj:170`) under
+   `~/.kmet/sessions/--cwd--/`, and the loader only reads `*.ednl` entries, so
+   a `spill/` directory beside them is invisible to session listings. Fallback
+   when a session has no file yet: `<agent-dir>/spill/…` (`config.clj:310`).
+   Never `TMPDIR` — Termux has no `/tmp` (AGENTS.md).
+3. **One application point:** a `tool-exec/append-tool-result!` helper used by
+   the three sites that build a `:tool` entry (`tool_exec.clj:226`, `:253`,
+   `loop.clj:564`), where `agent` is in scope. Applied once at entry creation,
+   not in a projection — a policy that runs per projection would re-decide on
+   every request and could not be idempotent.
+4. **Exempt:** `read` (it is the retrieval mechanism and already paginates),
+   `bash` (already bounded at capture; only its file moves — step 5), results
+   already marked spilled in `:details`.
+5. `bash`'s spill file moves under the same durable directory and drops
+   `delete-on-exit`; its footer text comes from `notice`, so the model reads
+   one wording for one idea. (Its streaming spill stays: the file exists
+   because the output was never fully buffered.)
+6. **Images are out of scope** until an attachment store exists: kmet embeds
+   base64 in `:images` (`tools/read.clj:227` `image-block`) and has no path to
+   name. The text budget ships now; the image budget becomes possible with the
+   same storage change **S4** describes.
+7. `:truncation` (`loop/message.clj:34` already carries it, and the TUI
+   renders it) gains `:spill-path`, so a tool card can reveal the file without
+   a new field.
+
+### Steps
+
+1. `retention` namespace: `spill!` + `notice` + a test with a fake session
+   directory.
+2. `append-tool-result!` and the three call sites.
+3. The budget: `:tool-result-max-tokens` (S6) read from the live config at
+   call time (it is not a compaction setting).
+4. Wording: one notice, with retrieval guidance kmet can honour — `read` with
+   `offset`/`limit`, or `grep` through `bash`.
+5. `bash`'s file relocation + the shared footer.
+6. Docs: `docs/pi-alignment.md` deviation, `docs/configuration.md`.
+
+### Test plan
+
+- Under budget: the entry is byte-identical (`pr-str` equality).
+- Over budget: head and tail present, notice within budget, one file written,
+  the path reads back through the `read` tool, and the text shrinks.
+- A notice that cannot fit (tiny budget): the original stays.
+- Spill failure (unwritable dir): `debug/log` a warning and keep the original —
+  never a dead path.
+- Idempotence: an already-spilled result is not spilled twice; the parallel
+  path and the repeat-guard path (`loop.clj:564`) produce the same entry.
+- Resume: the locator still resolves after a process restart.
+- Exempt: `read` and `bash` results pass through the generic policy untouched.
+
+### Decisions
+
+**S1 — durable session-dir spill, never `TMPDIR`.** A locator the model cannot
+use after a restart is worse than no locator.
+
+**S2 — one entry-creation point, not a projection filter.** The policy decides
+once, on the bytes that become the entry.
+
+**S3 — exempt `read`, `bash` and already-spilled results.** `read` is the
+retrieval path; `bash` is bounded at capture; re-spilling a spill is a loop.
+
+**S4 — images wait for an attachment store.** The notice names paths that
+exist; until images have paths, they are not spilled.
+
+**S5 — fail open.** Any storage failure keeps the original text.
+
+**S6 — open: the default budget.** dsh's example is `maxInlineTokens: 12500`,
+chosen for its context windows. kmet's catalog spans 4k–192k windows (most
+commonly 8k–131k), and `:compact-reserve-tokens` alone defaults to 16384 — a
+flat 12,500 would not fit a 16k window, which is why the default should be
+window-relative. Candidates: `(min 12500 (quot (or window 131072) 16))`; or a
+fraction of `contextWindow - reserve`; or a flat 12,500 with a floor that
+disables retention below some window. Needs one measured session before
+choosing; the setting ships either way.
+
+## Order across the token tracks
+
+**M → R → W → S.**
+
+- **M** first: R's re-measurement is a lie without it (the pure-estimate path
+  ignores the system prompt and the schemas, so a pruned history can still
+  overflow), and `/compact`'s reported numbers are wrong today.
+- **R** second: it needs only M plus the existing `context-edit` machinery, and
+  it makes W cheaper as well as rarer (a pruned history is a smaller summary
+  request).
+- **W** third: it needs the caching track's **P0**/**P1** landed, or the
+  replayed prefix carries no breakpoint and the cache is never read. Its
+  payoff is measurable with `detect-cache-miss` and the export's `R` column.
+- **S** last: its payoff is per-call rather than per-turn, and it consumes R's
+  primitive.
+
+Each track is independently shippable: M alone fixes the numbers, R alone
+avoids summaries, W alone cuts the summary call's input, S alone bounds one
+large result.
+
+One cross-track edit is part of these plans, not a follow-up: the caching
+track's **P3** bullet about summarization no longer sending `:cache-retention
+:none` is narrowed to branch summaries (W, step 4).
+
+The **turn-marker** track is independent of all four: it neither reads nor
+changes a projection, and it is what any future turn-granular mechanism would
+build on rather than infer. **R** is its first consumer (the newest-turn
+boundary, **R4**), with the last `:user` entry as a stopgap if R lands first.
+
+The eviction strategy (nodecode's cut-whole-turns + recall) was removed from
+this file after the measurement in § R: the context that forces a compaction is
+47% assistant thinking, 26% tool results and 19% tool-call arguments, so a
+mechanism whose distinctive value is preserving conversation verbatim
+(5% assistant text, 0.03% user text) while dropping turns wholesale was aimed
+at the smallest component, at the largest build cost, and needed a recall read
+that does not exist. The measured facts and the design record stay in git
+history; a future proposal should start from that table.
+
+Age-based elision of that 47% and 19% was declined for pi alignment (**R7**):
+pi and dsh elide reasoning on a model change, never by age. The measurement
+stays next to the decision so the cost of that alignment is not forgotten.
+
+Pi parity note: all four are deviations from pi, which has none of them
+(pi's compaction summarizes a serialized transcript, its tools bound output at
+capture, and it has no request-envelope estimate). Each lands with a row in
+`docs/pi-alignment.md` §8 and a sentence in the commit body naming the
+departure.
