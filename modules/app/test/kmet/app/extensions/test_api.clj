@@ -17,6 +17,12 @@
             [kmet.libs.theme :as theme]
             [kmet.test-tmp :as test-tmp]))
 
+(defn- bare-api
+  "An api built outside a mount: no composition-row config and no ctx, for a
+   case that exercises a process registry rather than the ctx tree."
+  [ext]
+  ((var extensions/create-extension-api) ext nil nil))
+
 ;; ─── Extension exec (extension api: exec) ────────────────────────────────
 
 (t/deftest ^:slow test-exec-runs-in-the-runtime-cwd
@@ -89,10 +95,8 @@
   ;; the alias registry is process-global: unload must remove exactly the
   ;; aliases this extension registered
   (let [dereg-fns (atom [])
-        api ((var extensions/create-extension-api)
-             {:name "alias-test" :path "target/test-ext-alias.clj"
-              :deregister-fns dereg-fns}
-             nil nil)   ;; no mount ctx: this case never touches the tree
+        api (bare-api {:name "alias-test" :path "target/test-ext-alias.clj"
+                       :deregister-fns dereg-fns})
         f (fn [_attrs _children] [:text {:padding-x 0 :padding-y 0} "x"])]
     (try
       (let [dereg (ext/register-alias! api :kmet.test/alias-chip f)]
@@ -160,19 +164,15 @@
 (t/deftest test-extension-api-carries-agent-dir
   (testing "api :agent-dir is the host agent dir (KMET_CODING_AGENT_DIR-aware)"
     (with-redefs [cfg/get-agent-dir (fn [] "/sandbox/agent")]
-      (let [api ((var extensions/create-extension-api)
-                 {:name "agent-dir-test" :path "target/test-ext-agent-dir.clj"
-                  :deregister-fns (atom [])}
-                 nil nil)]
+      (let [api (bare-api {:name "agent-dir-test" :path "target/test-ext-agent-dir.clj"
+                           :deregister-fns (atom [])})]
         (t/is (= "/sandbox/agent" (:agent-dir api)))
         (t/is (= "/sandbox/agent" (ext/get-agent-dir api)))))))
 
 (t/deftest test-extension-provider-registration
   (testing "api :models register-provider! / unregister-provider! (pi ctx.registerProvider)"
-    (let [api ((var extensions/create-extension-api)
-               {:name "prov-test" :path "target/test-ext-prov.clj"
-                :deregister-fns (atom [])}
-               nil nil)]
+    (let [api (bare-api {:name "prov-test" :path "target/test-ext-prov.clj"
+                         :deregister-fns (atom [])})]
       (models/load-catalogs! nil)
       (models/clear-extension-providers!)
       (try

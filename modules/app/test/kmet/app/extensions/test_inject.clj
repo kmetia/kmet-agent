@@ -273,23 +273,25 @@
           (extensions/clear-extensions!)
           (fs/delete-tree dir))))))
 
+(def ^:private ctx-own-body
+  "What an extension mounts on its own ctx: a service there, one published to
+   the app root, and a plugin of its own."
+  "(srce/provide! (:ctx api) :kmet.ctx-test/own :own)
+   (srce/provide! (:ctx api) :kmet.ctx-test/published :published {:in (:app-root api)})
+   (srce/plugin! (:ctx api)
+                 {:name :ext/child
+                  :apply (fn [c _] (srce/provide! c :kmet.ctx-test/child :child) nil)})")
+
 (t/deftest what-an-extension-mounts-on-its-ctx-goes-with-it
-  ;; (:ctx api) is the extension's own mount ctx, so a service it provides and
-  ;; a plugin it mounts there are effects of the extension: unload releases
-  ;; them. Handing out the app root instead leaked both across every reload.
+  ;; (:ctx api) is the extension's own mount ctx, so what it mounts there is an
+  ;; effect of the extension: unload releases it. Handing out the app root
+  ;; instead leaked every mount across every reload.
   (testing "provide! and plugin! on the api ctx unwind with the unload"
     (let [name "ctx-own"
           dir (extension-dir!
                "target/test-ext-ctx-own" name
                :requires "[kmet.extension :as ext] [kmet.srce.core :as srce]"
-               :body (str "(srce/provide! (:ctx api) :kmet.ctx-test/own :own)\n"
-                          "     (srce/provide! (:ctx api) :kmet.ctx-test/published :published"
-                          " {:in (:app-root api)})\n"
-                          "     (srce/plugin! (:ctx api)\n"
-                          "                   {:name :ext/child\n"
-                          "                    :apply (fn [c _]\n"
-                          "                             (srce/provide! c :kmet.ctx-test/child :child)\n"
-                          "                             nil)})"))]
+               :body ctx-own-body)]
       (try
         (let [result (extensions/load-extension! dir)
               root (support/composition-ctx)
