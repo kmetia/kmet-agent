@@ -1,6 +1,6 @@
 # Todo
 
-Four tracks. All independent; each is a request/ABI-level change with
+Three tracks. All independent; each is a request/ABI-level change with
 unit-testable surfaces. The context and token tracks that used to close this
 file are dropped — see § Deferred.
 
@@ -8,7 +8,6 @@ file are dropped — see § Deferred.
 |---|---|---|
 | Prompt-caching parity with pi | kmet's wires never ask for prompt caching (except responses/mistral/bedrock), so cache-read sits at 0; the tool ranker serves MCP only, no source's tools can be declared, and a tool-set change re-sends the whole array | P0–P6, decisions closed |
 | Around tool hooks | two hand-rolled hook chains + a doubled permission gate; no way to settle a call successfully | decided: **A** — one `:on-tool` around registration |
-| Turn markers in the session and the tree | the log cannot distinguish a steering injection from a typed prompt, and nothing records where a turn begins, so the tree draws no boundary and no turn-granular mechanism can be built on the log | decided; independent |
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | decisions closed (E1–E16); independent |
 
 ## Prompt-caching parity with pi
@@ -777,129 +776,6 @@ pure, no deps: `kmet.app.hooks/around` for the primitive. The registration
 lists stay in `kmet.app.extensions.core` where they already are, and the tool
 point lives in `kmet.app.loop.tool-exec`. `kmet.libs` is rejected unless a
 non-app caller needs the primitive.
-
-## Turn markers in the session and the tree
-
-Status: decided. Independent of any context strategy — extracted from the
-dropped context tracks, which needed turn boundaries and found the log could
-not supply them.
-
-### Why
-
-The entry stream cannot say where turns begin. `inject-queued-messages!`
-(`loop/state.clj:619-637`) appends a `:user` entry for every steering message
-with nothing on it distinguishing it from a typed prompt. The loop knows; the
-log does not.
-
-Two consequences, and only the first is cosmetic:
-
-- the tree selector has no turn boundary to draw, so a branch's shape reads as
-  an undifferentiated run of entries;
-- no turn-granular mechanism can be built on the log without guessing — a
-  strategy, a per-turn budget, a per-turn report. Inferring "a `:user` entry
-  starts a turn" is wrong for steering injections, which join a live turn.
-  A future pruner would need this boundary to leave the newest turn alone.
-
-So record it. The format already carries pure state roles (`:model-change`,
-`:thinking-level-change`, `:label`, `:context-edit`) and `context-messages`
-projects unknown roles to `[]`.
-
-### The marker
-
-```clojure
-{… :role :turn-start
-    :turn-id "<uuid>"        ; branch-safe identity — never a counter
-    :reason :prompt | :continue}
-```
-
-- **Written before the user message, by the same writer**, so `append-entry`'s
-  `:parent-id` = leaf (`session/store.clj:88-89`) chains them. One writer, one
-  pair, no second path racing the loop's appends.
-- **Steering and follow-up injections write nothing** while they join the live
-  turn; a `continue` that starts a new run writes one — pi's own turn semantics
-  rather than an approximation of it.
-- **The ordinal is computed from position.** A stored counter drifts the moment
-  two branches fork from one turn: the tree counts `:turn-start` ancestors on
-  the current path and renders `── turn N ──`.
-- **A compaction cut may land on a marker, and the marker survives it**:
-  `context-entries` keeps `first-kept-id`'s entry (`session/context.clj:102-119`),
-  so a marker at the kept boundary stays in the context vector while projecting
-  to nothing — a later turn-granular caller still sees where turns begin.
-- **The unmarked prefix is one turn.** No migration, no heuristic: nothing
-  before the first marker is a boundary, and the next prompt writes one. A
-  session file written before the role existed loads (the strict pass reports
-  and skips it), so the prefix is simply one long turn.
-- **One surface shows it, two do not.** The tree selector renders the
-  separator; the chat replay skips it (the transcript is messages) and the
-  projection never sends it. Without the selector clause it would fall through
-  to a `[:turn-start]` row, which is why the clause is not optional.
-- **Branching needs no special case.** Markers are ordinary parents, so fork,
-  resume and tree navigation carry them; a branch point inside a turn splits
-  that turn, which is the correct answer for that branch.
-
-Cost — one schema clause, one separator, one skip:
-
-| site | today, for an unknown role | action |
-|---|---|---|
-| `session/schema.clj:83` | reported and skipped, strict load pass only (`--debug`) | add the clause |
-| `session_admin.clj:274` | `(replay-plain! cs e)` → marker rendered as a chat row | **skip clause**: the transcript is messages, not markers |
-| `tree_selector.clj:169-217` `entry-display-text` | falls through to the default `[:turn-start]` | **render the `turn N` separator** (decided) |
-| `tree_selector.clj:222` | default `nil`, no copy text | none — a separator is not copyable |
-| `tree_selector.clj:267` | adds nothing to the search haystack | none |
-| `session/context.clj:140` | default `[]` | none |
-| `session/stats.clj:175` | `:else "unknown"` bucket | audit so a marker is not counted as a model |
-
-### Steps
-
-1. **The role.** `:turn-start` in `session/schema.clj`; `store/append-entry`
-   carries it like the other state roles.
-2. **The writer.** The prompt path writes one before the user message
-   (`:reason :prompt`); the `continue` path writes one when a new run starts
-   (`:reason :continue`); `inject-queued-messages!` writes none.
-3. **The skip.** `session_admin.clj:274`.
-4. **The separator.** `tree_selector.clj:169-217`, ordinal counted on the path.
-5. **The audit.** `session/stats.clj:175`, so a marker never lands in the
-   per-model bucket.
-6. Docs: `docs/architecture.md`'s session-entry list (the roles with no wire
-   projection).
-
-### Test plan
-
-- A prompt writes exactly one `:turn-start` whose `:parent-id` is the previous
-  leaf and whose next entry is the user message.
-- A steering injection writes none; a `continue` that starts a new run writes
-  one.
-- A marker projects to no wire message (`session/build-context-messages`), adds
-  no chat row, and renders as `turn N` in the tree selector with N counted from
-  its ancestors — two branches from one turn both read `turn N`, and the next
-  marker on each reads `turn N+1`.
-- A session file written before the role existed still loads with the strict
-  pass off and its unmarked prefix behaves as one turn.
-- A compaction or context edit that lands a marker at the kept boundary leaves
-  it in `context-entries`.
-- Stats: two sessions, one with markers, produce identical per-model totals.
-
-Run: `bb test-changed`, `bb lint-changed`, `bb format-check-changed`.
-
-### Decisions
-
-**T1 — record the turn rather than infer it.** A `:user` entry is not a turn
-boundary (steering injects one), and `drop-incomplete-tool-calls`
-(`loop/completion.clj`) stays the defensive net it is today, not the
-correctness argument.
-
-**T2 — one writer, chained.** The marker and the user message come from the
-same call, so `:parent-id` chaining is a property of the append, not of a
-second path racing it.
-
-**T3 — the ordinal is computed, never stored.** Position on the current path;
-a stored counter would drift across forks.
-
-**T4 — invisible to the model.** The marker is a log fact for the tree and for
-future turn-granular callers; it is never a wire message and never a chat row.
-
-**T5 — no migration.** An unmarked prefix is one turn; the next prompt starts
-the first real boundary.
 
 ## Persistent eval and eval sources
 
