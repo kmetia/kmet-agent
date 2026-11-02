@@ -23,15 +23,16 @@
   "(ext/on-input api (fn [{:keys [text]}] {:action :transform :text (str text \"+injected\")}))")
 
 (def ^:private ns-line
-  "(ns %s\n  (:require [kmet.extension :as ext]))\n")
+  "(ns %s\n  (:require %s))\n")
 
 (defn- extension-dir!
   "Write DIR/extension.edn and DIR/<ns path>.clj for a directory extension
    named NAME: the manifest names its plugin var, INJECT is the plugin map's
    `:inject` form (nil omits the key) and BODY is the `:apply` body, with
-   `api` bound and nil returned. :manifest-extra appends raw text to the
+   `api` bound and nil returned. :requires is the ns form's require vector
+   (default: `kmet.extension`). :manifest-extra appends raw text to the
    manifest, to build the malformed cases; :manifest replaces it outright."
-  [dir name & {:keys [inject body manifest manifest-extra]}]
+  [dir name & {:keys [inject body manifest manifest-extra requires]}]
   (let [stem (str/replace name "-" "_")
         entry-ns (str stem ".main")]
     (fs/delete-tree dir)
@@ -41,7 +42,7 @@
               (str "{:name \"" name "\" :plugin " entry-ns "/plugin"
                    " :loader [:sci]" (or manifest-extra "") "}\n")))
     (spit (str dir "/" stem "/main.clj")
-          (str (format ns-line entry-ns) "\n"
+          (str (format ns-line entry-ns (or requires "[kmet.extension :as ext]")) "\n"
                "(def plugin\n  {:name :ext/" name "\n"
                (when inject (str "   :inject " inject "\n"))
                "   :apply (fn [_ctx api]\n     " body "\n     nil)})\n"))
@@ -268,6 +269,47 @@
         (let [result (extensions/load-extension! dir)]
           (t/is (some? (:error result)) "the load fails")
           (t/is (str/includes? (str (:error result)) ":inject")))
+        (finally
+          (extensions/clear-extensions!)
+          (fs/delete-tree dir))))))
+
+(t/deftest what-an-extension-mounts-on-its-ctx-goes-with-it
+  ;; (:ctx api) is the extension's own mount ctx, so a service it provides and
+  ;; a plugin it mounts there are effects of the extension: unload releases
+  ;; them. Handing out the app root instead leaked both across every reload.
+  (testing "provide! and plugin! on the api ctx unwind with the unload"
+    (let [name "ctx-own"
+          dir (extension-dir!
+               "target/test-ext-ctx-own" name
+               :requires "[kmet.extension :as ext] [kmet.srce.core :as srce]"
+               :body (str "(srce/provide! (:ctx api) :kmet.ctx-test/own :own)\n"
+                          "     (srce/provide! (:ctx api) :kmet.ctx-test/published :published"
+                          " {:in (:app-root api)})\n"
+                          "     (srce/plugin! (:ctx api)\n"
+                          "                   {:name :ext/child\n"
+                          "                    :apply (fn [c _]\n"
+                          "                             (srce/provide! c :kmet.ctx-test/child :child)\n"
+                          "                             nil)})"))]
+      (try
+        (let [result (extensions/load-extension! dir)
+              root (support/composition-ctx)
+              ctx (:ctx (mount-fiber (keyword "ext" name)))]
+          (t/is (nil? (:error result)) (str "loaded: " (:error result)))
+          (t/is (some? ctx) "the mount has its own ctx")
+          (t/is (not (identical? root ctx)) "the api's ctx is not the app root")
+          (t/is (= :own (srce/get ctx :kmet.ctx-test/own)) "provide! lands on it")
+          (t/is (nil? (srce/get root :kmet.ctx-test/own)) "and not on the root")
+          (t/is (= :published (srce/get root :kmet.ctx-test/published))
+                "{:in (:app-root api)} publishes a service app-wide")
+          (t/is (some #(= :ext/child (:name %)) (srce/fibers root))
+                "a plugin the body mounts there is mounted")
+          (extensions/unload-all-extensions!)
+          (t/is (nil? (srce/get root :kmet.ctx-test/published))
+                "the app-wide service unwinds with the extension")
+          (t/is (nil? (srce/get ctx :kmet.ctx-test/own))
+                "the ctx's own service went with the mount")
+          (t/is (not (some #(= :ext/child (:name %)) (srce/fibers root)))
+                "and the plugin the body mounted is disposed too"))
         (finally
           (extensions/clear-extensions!)
           (fs/delete-tree dir))))))

@@ -265,10 +265,13 @@ the wrappers below or directly.
                         ; (a jar has no directory; use io/resource)
 (:config api)           ; the composition row's :config when a profile mounts
                         ; the extension as :ext/<id>; nil otherwise
-(:ctx api)              ; the app root ctx the extension's plugin mounts
-                        ; under — pass it to kmet.srce.core for app-wide
-                        ; `provide!`/`plugin!`; the plugin's own ctx arrives
-                        ; as `:apply`'s first argument
+(:ctx api)              ; the extension's own ctx — the tree its plugin is
+                        ; mounted on (also `:apply`'s first argument). What
+                        ; it mounts here with kmet.srce.core is released on
+                        ; unload; pass {:in (:app-root api)} to provide! for
+                        ; a service the whole app should see
+(:app-root api)         ; the app root ctx — a mount made directly here
+                        ; outlives the extension (unload does not reach it)
 (ext/get-agent-dir api) ; the host agent dir (KMET_CODING_AGENT_DIR-aware;
                         ; pi: getAgentDir) — keep extension state
                         ; (configs, caches) under it

@@ -70,6 +70,9 @@
 ;;   :agent-dir                                          — host agent dir
 ;;     (KMET_CODING_AGENT_DIR-aware; pi: getAgentDir) — extension state
 ;;     (configs, caches) belongs under it
+;;   :ctx :app-root                                      — the ctx tree
+;;     (:ctx is the extension's own mount ctx: what it mounts there is
+;;     released on unload; :app-root is the app root, not released)
 ;;   :register-command! :unregister-command! :get-commands
 ;;   :register-tool! :unregister-tool! :get-all-tools :create-bash-tool
 ;;   :get-active-tools :set-active-tools
@@ -245,6 +248,22 @@
    dir relocates it too."
   [api]
   (:agent-dir api))
+
+(defn ctx
+  "The extension's own ctx — the tree its plugin is mounted on (the same ctx
+   `:apply` receives). Anything mounted here through kmet.srce.core lives and
+   dies with the extension: unload disposes this ctx's subtree. Publish a
+   service the rest of the app should see with provide!'s
+   {:in (app-root api)} option, which keeps that lifetime too."
+  [api]
+  (:ctx api))
+
+(defn app-root
+  "The app root ctx. A mount registered directly here outlives the extension
+   and is not released on unload — use (ctx api), or {:in (app-root api)} on
+   provide!, for an app-wide effect that still unwinds."
+  [api]
+  (:app-root api))
 
 (defn ui
   "The UI capability map (dialogs/status/widgets/editor/theme/...). Calls are

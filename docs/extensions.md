@@ -46,6 +46,10 @@ promise settles (`kmet.libs.concurrent/after` chains on it).
 An extension **is** a plugin: the loader mounts the `plugin` var, `:apply`
 receives the extension's ctx and its capability map, and everything registered
 through `api` belongs to the extension — unload disposes it automatically.
+What the body mounts on that ctx through `kmet.srce.core` belongs to it too
+(a service from `provide!`, a plugin from `plugin!`); `provide!`'s
+`{:in (ext/app-root api)}` option publishes a service app-wide while keeping
+the extension's lifetime.
 `:apply` may also answer `{:srce/setup p}` (a promise) when its setup cannot
 finish inline: the mount stays `:starting`, what it provides is invisible until
 it settles, and the mount waits for it (`startup-timeout-ms`). Every other

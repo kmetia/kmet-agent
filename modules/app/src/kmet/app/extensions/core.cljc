@@ -1145,20 +1145,22 @@
 
 (defn- create-extension-api
   "Build the api map for an extension, with the composition row's CONFIG (nil
-   for a load outside a row). A registration the app owns (commands,
-   tools, tool sources, skills, prompts, hooks, renderers, flags) lands under
-   the extension's own owner path, so unload deregisters it owner by owner; the
-   registrations the host or a library owns (event subscriptions, aliases,
-   shortcuts, model providers, theme removal) record their deregister fn on the
-   extension instead.
+   for a load outside a row) and CTX — the extension's own ctx, the one its
+   plugin is mounted on (nil outside a mount). A registration the app owns
+   (commands, tools, tool sources, skills, prompts, hooks, renderers, flags)
+   lands under the extension's own owner path, so unload deregisters it owner
+   by owner; the registrations the host or a library owns (event
+   subscriptions, aliases, shortcuts, model providers, theme removal) record
+   their deregister fn on the extension instead.
 
    The api resolves through the bound services (see `bind-services!`), so
    what an extension registers is visible to whoever bound them: kmet1's
    process registry reaches every engine, and an owner that binds an agent's
    handle and its own ctx gets a per-agent api. The host holds no handle of
    its own."
-  ([ext] (create-extension-api ext nil))
-  ([ext config]
+  ([ext] (create-extension-api ext nil nil))
+  ([ext config] (create-extension-api ext config nil))
+  ([ext config ctx]
    (let [track (fn [f] (track-deregister! ext f) f)
          name (:name ext)]
      {:extension-name name
@@ -1170,14 +1172,13 @@
       ;; = the file's parent) — nil for jar extensions, which have no
       ;; directory (use io/resource instead)
       :extension-dir (extension-dir-of ext)
-      ;; the ctx this extension's registrations land in (the bound service's
-      ;; ctx) — exposed so an extension can use kmet.srce.core directly
-      ;; (defining plugins, providing services, using the ctx tree) while
-      ;; keeping the host as the srce authority. This is the app root the
-      ;; extension's plugin mounts under — app-wide by construction; the
-      ;; plugin's own ctx is `:apply`'s first argument. nil when no ctx is
-      ;; bound.
-      :ctx (host-ctx)
+      ;; the extension's own ctx, exposed for kmet.srce.core use (providing
+      ;; services, mounting plugins): an entry made here is an effect of the
+      ;; extension's fiber, so unload releases it. :app-root is the app root,
+      ;; for provide!'s {:in …} option when a service is meant to be
+      ;; app-wide; a mount made directly on the root outlives the extension.
+      :ctx ctx
+      :app-root (host-ctx)
       ;; host agent dir (KMET_CODING_AGENT_DIR-aware; pi: getAgentDir) —
       ;; extensions keep their configs/caches under it
       :agent-dir (cfg/get-agent-dir)
@@ -1528,7 +1529,7 @@
                           ;; first effect, and a `reset!`'s boolean is not a
                           ;; disposer (`:srce/bad-effect`)
                           :apply (fn [fctx _config]
-                                   (let [api (create-extension-api ext config)]
+                                   (let [api (create-extension-api ext config fctx)]
                                      (reset! (:api ext) api)
                                      ((loader-aware ext (:apply plugin)) fctx api)
                                      (reset! (:initialized? ext) true)
@@ -1781,15 +1782,14 @@
       (registry/deregister-owner! (handle) tag owner))
     (when-let [sweep (:deregister-owner! (services))]
       (sweep owner)))
-  ;; the rows the extension mounted are children of its ctx: dispose them
-  ;; first, so a service a row provided is gone before the extension's namespaces
-  (doseq [fiber (rseq (deref (:rows ext)))]
-    (srce/dispose! fiber))
-  (reset! (:rows ext) [])
-  ;; a plugin-mounted extension is a fiber: disposing it unwinds the effects
-  ;; the kernel holds and drops it from the tree, pending or active
+  ;; the extension's ctx, and everything mounted under it: its rows, whatever
+  ;; the body mounted there through (:ctx api), and the mount itself —
+  ;; children first, so a service a row provided is gone before the
+  ;; extension's namespaces, and the mount's ctx leaves the tree with its
+  ;; effects unwound (pending or active).
   (when-let [fiber @(:fiber ext)]
-    (srce/dispose! fiber))
+    (srce/dispose-subtree! (:ctx @fiber)))
+  (reset! (:rows ext) [])
   ;; the record leaves with the registrations, not with the code: a record still
   ;; listed would be "loaded" to every reader while it is not
   (swap! extensions (fn [exts] (remove #(identical? % ext) exts)))
