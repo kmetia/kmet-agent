@@ -23,7 +23,7 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 | 11 | Keyring secret in argv | low/medium (exposure) | **fixed** (Windows; macOS documented) |
 | 12 | `run_code` sandbox exposes `future`/`future-call` | — | **dropped** (not a finding) |
 | 13 | `tui-resume!` bypasses the render-crash guard | high (silent hang) | **fixed** |
-| 14+ | Structural: frame copying, render loop size, duplicated policies | low (maintainability) | verified by reading |
+| 14+ | Structural: frame copying, render loop size, duplicated policies | low (maintainability) | **partly fixed** (§14) |
 
 Findings 1–13 are fixed (one commit each, each with a regression test); 12 is dropped.
 Of finding 14's structural list the small items are done and three stand (see §14).
@@ -298,10 +298,14 @@ Four of the small items are done; the three structural ones stand.
   so the cache has to be invalidated from the frame hook (`component/set-frame-hook!`) or it
   belongs on the reaction, not the container. In the same path, quiet mode re-parses every
   user message's content with `skill-block/parse` on each pass — compute it once at insertion.
-- **`run-render-loop!` is ~720 lines** with eight closures over the whole frame (ends at
-  `core.clj:3114`), testable only through private-var binding or a fake terminal. Extract a
-  `kmet.tui.frame` namespace with `build-frame`/`diff-frame`/`emit-frame` over an explicit
-  frame-state map; leave terminal lifecycle, timers, locks and negotiation in the loop.
+- ~~**`run-render-loop!` is ~720 lines**~~ **fixed**: the frame moved to `kmet.tui.frame`
+  (`render-frame!` + the document/diff/emit passes over an explicit frame-state map); the loop
+  is now 193 lines of lifecycle, timers, lock and schedule, and `test_frame` drives one frame
+  on a stub TUI with no terminal. The review asked for three entry points
+  (`build-frame`/`diff-frame`/`emit-frame`); they share the cursor and viewport state the diff
+  mutates, so they landed as one `render-frame!` with the passes inside it — the split was
+  the untested part, not the boundary. `main-diff` (CC 79, 215 lines) is still one local fn
+  inside the pass.
 - **Frame state is ~17 independent atoms** updated field by field (`core.clj:284-311`,
   force-redraw at 2506-2516, commit at 2994-3016): one `:frame` atom holding a previous-frame
   map removes the two lists that must stay in sync. Natural once the extraction lands.
@@ -328,7 +332,7 @@ Four of the small items are done; the three structural ones stand.
 3. ~~Then the lifecycle fix with a test asserting empty root after unload: 9.~~ done.
 4. ~~Then robustness: 4, 10, 11, and the TUI guard (13), plus the TUI `!` path's nil exit
    code~~ all done, 7 and 5 with item 1.
-5. Structural work (14) as its own series: the small items are done (frame chunk reuse,
-   deletion policy, list navigation, per-frame `getenv`, dead code). Left: frame extraction
-   (first), then the container cache on top of it, then the frame-state atom, then the
-   per-instance lock; re-locate the MCP reload duplication.
+5. Structural work (14) as its own series: the small items and the frame extraction are
+   done. Left: the container cache (still needs an invalidation design that survives a
+   reactive child re-deriving — see §14), the frame-state atom, the per-instance lock;
+   re-locate the MCP reload duplication.
