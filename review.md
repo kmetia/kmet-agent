@@ -10,7 +10,7 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 
 | # | Finding | Severity | Status |
 |---|---------|----------|--------|
-| 1 | Stale run clears a new run's `running?` flag | high (concurrency) | verified by reading |
+| 1 | Stale run clears a new run's `running?` flag | high (concurrency) | **fixed** |
 | 2 | LLM deadline timeout does not abort the request | high (token burn / garbled UI) | **fixed** |
 | 3 | Shell spawn failure reported as success | high (agent misled) | **fixed** |
 | 4 | `settle-grace!` has no ceiling | medium (hang) | verified by reading |
@@ -25,12 +25,12 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 | 13 | `tui-resume!` bypasses the render-crash guard | high (silent hang) | verified by reading |
 | 14+ | Structural: frame copying, render loop size, duplicated policies | low (maintainability) | verified by reading |
 
-Findings 2, 3, 6, 8 and 9 are fixed (one commit each, each with a regression test); 12 is dropped.
-The rest stand as written, with 1 next.
+Findings 1, 2, 3, 6, 8 and 9 are fixed (one commit each, each with a regression test); 12 is dropped.
+The rest stand as written.
 
 ---
 
-## 1. A stale run can clear a new run's `running?` flag
+## 1. A stale run can clear a new run's `running?` flag — **fixed**
 
 `modules/app/src/kmet/app/loop/driver.clj:333,449-462`, `modules/app/src/kmet/app/session/lifecycle.clj:123-135`
 
@@ -50,6 +50,12 @@ and add a separate `:cancelling?`.
 
 Test: start a run, cancel it, submit immediately, assert `:status` stays `:running` and the
 first run's settle does not clear it.
+
+**Fixed:** the flag holds the claiming run's token; `start!` claims it, the run releases it
+through a new `:on-settle` callback (after the settle boundary, before `:agent-settled`), and
+`release-turn!` is a CAS so a stale settle cannot clear a newer claim. `cancel-run!` no longer
+drops it — a submission during the abort queues — with a bounded watchdog for a run that never
+settles, and a session switch force-releases one it abandons.
 
 ## 2. LLM per-call deadline returns `:timeout` without aborting the request — **fixed**
 
