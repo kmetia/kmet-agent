@@ -445,6 +445,296 @@
   (reset! (:previous-marks tui) {})
   (reset! (:previous-repainted? tui) true))
 
+(defn- diff-frame!
+  "Emit one frame's difference against the previous frame: find the changed
+   range (HINT from build-frame-lines), decide between an in-place repaint and
+   a full redraw, repaint into SB, and mark the scrollback dirty when the
+   change sits above the window (the heal latch in kmet.tui.core reads that
+   flag). Mutates the running frame's cursor and viewport atoms.
+
+   FRAME carries the frame itself (:tui, :prev/:prev-count, :lines/:new-count,
+   :cursor, :w/:h, the :sb StringBuilder, the :prev-viewport-top,
+   :viewport-top and :hardware-cursor-row atoms, the :kitty-frame-lines
+   volatile and :debug-redraw?) and the emit kit the pass built (:emit!,
+   :emit-line!, :do-full-redraw, :compute-line-diff,
+   :position-hardware-cursor, :log-redraw!)."
+  [{:keys [hint tui prev prev-count lines new-count cursor w h sb
+           viewport-top prev-viewport-top hardware-cursor-row kitty-frame-lines
+           debug-redraw? emit! emit-line! do-full-redraw compute-line-diff
+           position-hardware-cursor log-redraw!]}]
+  (let [max-lines (max new-count prev-count)
+        shared (min new-count prev-count)
+        [first-changed last-changed]
+        (cond
+          (nil? hint) [-1 -1]
+          (= ::scan hint) (let [;; The shared prefix (both vectors present) takes
+                                ;; no per-line bounds branches — only the appended
+                                ;; or removed tail needs the missing-line defaults.
+                                [prefix-first prefix-last]
+                                (loop [i 0, fc -1, lc -1]
+                                  (if (< i shared)
+                                    (let [p (nth prev i)
+                                          l (nth lines i)]
+                                      (if (or (identical? p l) (= p l))
+                                        (recur (inc i) fc lc)
+                                        (recur (inc i) (if (neg? fc) i fc) i)))
+                                    [fc lc]))]
+                            (loop [i shared, fc prefix-first, lc prefix-last]
+                              (if (< i max-lines)
+                                (let [old-line (if (< i prev-count) (nth prev i) "")
+                                      new-line (if (< i new-count) (nth lines i) "")]
+                                  (if (or (identical? old-line new-line)
+                                          (= old-line new-line))
+                                    (recur (inc i) fc lc)
+                                    (recur (inc i) (if (neg? fc) i fc) i)))
+                                [fc lc])))
+          :else (refine-changed-range prev lines hint))
+        appended? (> new-count prev-count)
+        [first-changed last-changed]
+        (if appended?
+          [(if (neg? first-changed) prev-count first-changed)
+           (dec new-count)]
+          [first-changed last-changed])
+        [first-changed last-changed]
+        (if (not (neg? first-changed))
+          (let [[f l lines-have-images?]
+                (expand-changed-range-for-kitty-images
+                 first-changed last-changed prev lines
+                 (boolean (seq @(:previous-kitty-image-ids tui))))]
+            (vreset! kitty-frame-lines lines-have-images?)
+            [f l])
+          (do (vreset! kitty-frame-lines ::unchanged)
+              [first-changed last-changed]))
+        append-start? (and appended?
+                           (= first-changed prev-count)
+                           (pos? first-changed))
+                          ;; A terminal has no addressable scrollback: a
+                          ;; change that starts above the window can only be
+                          ;; repainted from the window top, and the stale
+                          ;; scrollback lines above it stay as they are. Doing
+                          ;; that instead of the destructive full redraw keeps
+                          ;; ESC[3J out of the streaming path — Termux and
+                          ;; Windows Terminal yank the viewport to the top when
+                          ;; it is scrolled up and a clear scrollback arrives
+                          ;; (microsoft/terminal#20370; pi #4506/#6502). A
+                          ;; change *entirely* above the window has nothing
+                          ;; visible to repaint at all. Only the same-height
+                          ;; and growing cases take this path; a shrink whose
+                          ;; visible tail is unchanged takes
+                          ;; shrink-above-window? below (the extra-line
+                          ;; cleanup in the diff renderer needs the change to
+                          ;; have begun inside the window, so a shrink with a
+                          ;; changed tail keeps the full-redraw fallback).
+        scrollback-only-change? (and (not (neg? first-changed))
+                                     (= new-count prev-count)
+                                     (< first-changed @prev-viewport-top)
+                                     (< last-changed @prev-viewport-top)
+                                     (>= new-count @prev-viewport-top))
+                          ;; A shrink whose removed lines are all above the
+                          ;; window paints nothing when the visible tail is
+                          ;; unchanged: the screen already shows exactly those
+                          ;; rows (the same content, the removed count higher
+                          ;; in the document), and a terminal has no
+                          ;; addressable scrollback to clean up. The history
+                          ;; above is stale — mark it dirty like the paths
+                          ;; above and let the app heal at a streaming-free
+                          ;; boundary, instead of a clearing full redraw in
+                          ;; the middle of a stream. The tails are compared
+                          ;; by content: a shrink that also changed what is
+                          ;; visible must still repaint.
+        shrink-above-window? (and (not (neg? first-changed))
+                                  (< new-count prev-count)
+                                  (< first-changed @prev-viewport-top)
+                                  (>= new-count h)
+                                  (>= prev-count h)
+                                  (= (subvec lines (- new-count h) new-count)
+                                     (subvec prev (- prev-count h) prev-count)))
+        viewport-clamp? (and (not scrollback-only-change?)
+                             (not shrink-above-window?)
+                             (not (neg? first-changed))
+                             (< first-changed @prev-viewport-top)
+                             (>= new-count prev-count)
+                             (>= new-count @prev-viewport-top))
+        raw-first-changed first-changed
+        first-changed (if viewport-clamp? @prev-viewport-top raw-first-changed)
+                          ;; Both paths below leave the changed lines above
+                          ;; the window un-repainted (the terminal has no
+                          ;; addressable scrollback), so the history is stale
+                          ;; until a clearing full redraw. Record it; the app
+                          ;; heals at a streaming-free boundary
+                          ;; (tui-heal-scrollback!). The debug log below
+                          ;; names the changed block's edges so a latched
+                          ;; heal can be attributed to its renderer
+                          ;; (KMET_DEBUG_REDRAW=1).
+        _ (when (or scrollback-only-change?
+                    shrink-above-window?
+                    viewport-clamp?)
+            (when debug-redraw?
+              (append-log!
+               (log-path "kmet-debug-render.log")
+               (str "[" (java.time.LocalDateTime/now) "] scrollbackDirty: "
+                    (cond scrollback-only-change? "scrollback-only"
+                          shrink-above-window? "shrink-above-window"
+                          :else "viewport-clamp")
+                    " (frame=" (some-> (:frame-count tui) deref)
+                    ", prev=" prev-count ", new=" new-count
+                    ", height=" h
+                    ", firstChanged=" raw-first-changed
+                    ", lastChanged=" last-changed
+                    ", prevViewportTop=" @prev-viewport-top
+                    (when viewport-clamp?
+                      (str ", clampedTo=" first-changed))
+                    ", alreadyDirty=" (boolean (some-> (:scrollback-dirty? tui) deref))
+                    ")\n"
+                    "  old[first]: " (debug-line-preview (nth prev raw-first-changed nil)) "\n"
+                    "  new[first]: " (debug-line-preview (nth lines raw-first-changed nil)) "\n"
+                    "  old[last]:  " (debug-line-preview (nth prev last-changed nil)) "\n"
+                    "  new[last]:  " (debug-line-preview (nth lines last-changed nil)) "\n")))
+            (reset! (:scrollback-dirty? tui) true))
+        mid-full-redraw! (fn [reason]
+                           (log-redraw! reason)
+                           (reset! sb (StringBuilder.))
+                           (do-full-redraw true))]
+    (cond
+      (neg? first-changed)
+      (do (position-hardware-cursor cursor new-count)
+          (reset! viewport-top @prev-viewport-top))
+
+      scrollback-only-change?
+      (do (log-redraw! (str "firstChanged < viewportTop, scrollback only ("
+                            last-changed " < " @prev-viewport-top
+                            "), no visible change"))
+          (reset! viewport-top @prev-viewport-top))
+
+      shrink-above-window?
+                        ;; the window's top moved up with the document;
+                        ;; the visible content (and the cursor's screen
+                        ;; row) did not, so only the index model shifts
+      (let [removed (- prev-count new-count)]
+        (swap! prev-viewport-top - removed)
+        (swap! hardware-cursor-row - removed)
+        (reset! viewport-top @prev-viewport-top)
+        (position-hardware-cursor cursor new-count))
+
+      (>= first-changed new-count)
+      (if (> prev-count new-count)
+        (let [target-row (max 0 (dec new-count))]
+          (if (< target-row @prev-viewport-top)
+            (mid-full-redraw! (str "deleted lines moved viewport up ("
+                                   target-row " < " @prev-viewport-top ")"))
+            (let [line-diff (compute-line-diff target-row)
+                  extra-lines (- prev-count new-count)]
+              (if (> extra-lines h)
+                (mid-full-redraw! (str "extraLines > height ("
+                                       extra-lines " > " h ")"))
+                (let [clear-start-offset (if (zero? new-count) 0 1)
+                      move-back (max 0 (- (+ extra-lines clear-start-offset) 1))]
+                  (emit! CSI-2026-H)
+                  (emit! (delete-changed-kitty-images
+                          first-changed last-changed prev))
+                  (when (pos? line-diff)
+                    (emit! (str "\u001b[" line-diff "B")))
+                  (when (neg? line-diff)
+                    (emit! (str "\u001b[" (- line-diff) "A")))
+                  (emit! "\r")
+                  (when (and (pos? extra-lines) (pos? clear-start-offset))
+                    (emit! (str "\u001b[" clear-start-offset "B")))
+                  (dotimes [i extra-lines]
+                    (emit! "\r\u001b[2K")
+                    (when (< i (dec extra-lines))
+                      (emit! "\u001b[1B")))
+                  (when (pos? move-back)
+                    (emit! (str "\u001b[" move-back "A")))
+                  (emit! CSI-2026-L)
+                  (reset! hardware-cursor-row target-row)
+                  (position-hardware-cursor cursor new-count)
+                  (reset! viewport-top @prev-viewport-top))))))
+        (do (position-hardware-cursor cursor new-count)
+            (reset! viewport-top @prev-viewport-top)))
+
+                        ;; Reached by any shrink (new content shorter than the
+                        ;; old) whose first change is above the window — the
+                        ;; diff renderer's extra-line cleanup assumes the
+                        ;; change began inside the window, so rebuild the screen
+                        ;; (e.g. compaction replacing the transcript).
+      (< first-changed @prev-viewport-top)
+      (mid-full-redraw! (str "firstChanged < viewportTop ("
+                             first-changed " < " @prev-viewport-top ")"))
+
+      :else
+      (let [prev-viewport-bottom (+ @prev-viewport-top h -1)
+            move-target-row (if append-start? (dec first-changed) first-changed)]
+        (when (> move-target-row prev-viewport-bottom)
+          (let [current-screen-row (max 0 (min (dec h)
+                                               (- @hardware-cursor-row @prev-viewport-top)))
+                move-to-bottom (- (dec h) current-screen-row)
+                scroll (- move-target-row prev-viewport-bottom)]
+            (when (pos? move-to-bottom)
+              (emit! (str "\u001b[" move-to-bottom "B")))
+            (emit! (apply str (repeat scroll "\r\n")))
+            (swap! prev-viewport-top + scroll)
+            (reset! viewport-top @prev-viewport-top)
+            (reset! hardware-cursor-row move-target-row)))
+        (let [line-diff (compute-line-diff move-target-row)
+              render-end (min last-changed (dec new-count))
+              final-cursor-row (volatile! render-end)]
+          (emit! CSI-2026-H)
+          (emit! (delete-changed-kitty-images
+                  first-changed last-changed prev))
+          (when (pos? line-diff)
+            (emit! (str "\u001b[" line-diff "B")))
+          (when (neg? line-diff)
+            (emit! (str "\u001b[" (- line-diff) "A")))
+          (emit! (if append-start? "\r\n" "\r"))
+          (loop [i first-changed]
+            (when (<= i render-end)
+              (when (> i first-changed) (emit! "\r\n"))
+              (let [line (nth lines i)
+                    is-image (img/is-image-line line)
+                    rows (if is-image
+                           (kitty-image-reserved-rows lines i render-end)
+                           1)]
+                (if (> rows 1)
+                  (let [image-start-screen-row (- i @viewport-top)]
+                    (if (or (< image-start-screen-row 0)
+                            (> (+ image-start-screen-row rows) h))
+                      (mid-full-redraw! (str "kitty image pre-clear would scroll ("
+                                             image-start-screen-row " + " rows " > " h ")"))
+                      (do (emit! "\u001b[2K")
+                          (dotimes [_ (dec rows)] (emit! "\r\n\u001b[2K"))
+                          (emit! (str "\u001b[" (dec rows) "A"))
+                          (emit-line! line)
+                          (emit! (str "\u001b[" (dec rows) "B"))
+                          (recur (+ i rows)))))
+                  (do (emit! "\u001b[2K")
+                                        ;; A line wider than the terminal must NEVER kill the app — that
+                                        ;; leaves a frozen frame on screen and a dead reader ("fully
+                                        ;; stuck, had to kill it from the OS"). Log it and truncate the
+                                        ;; line instead so the TUI keeps running; the ANSI-aware slice
+                                        ;; drops the pending SGR/OSC reset, so emit-line! re-appends it.
+                      (let [line (if (and (not is-image)
+                                          (> (utils/visible-width line) w))
+                                   (do (write-crash-log! lines w i (utils/visible-width line))
+                                       (:text (utils/slice-with-width line 0 w :strict? true)))
+                                   line)]
+                        (emit-line! line)
+                        (recur (inc i))))))))
+          (when (> prev-count new-count)
+            (when (< render-end (dec new-count))
+              (emit! (str "\u001b[" (- (dec new-count) render-end) "B"))
+              (vreset! final-cursor-row (dec new-count)))
+            (let [extra-lines (- prev-count new-count)]
+              (dotimes [_ extra-lines]
+                (emit! "\r\n\u001b[2K"))
+              (emit! (str "\u001b[" extra-lines "A"))))
+          (emit! CSI-2026-L)
+          (reset! hardware-cursor-row @final-cursor-row)
+          (swap! (:max-lines-rendered tui) max new-count)
+          (reset! viewport-top
+                  (max @prev-viewport-top
+                       (- @final-cursor-row h -1)))
+          (position-hardware-cursor cursor new-count))))))
+
 (defn render-frame!
   "Render one frame: COMPOSE returns the raw document (the component stack with
    the visible overlays composited), the pass normalizes it, diffs it against
@@ -632,279 +922,7 @@
         ;; means the pass proved the document unchanged (no
         ;; scan needed); ::scan forces the walks below (a flash
         ;; frame: the pass's range describes pre-flash lines).
-        main-diff (fn main-diff [hint]
-                    (let [max-lines (max new-count prev-count)
-                          shared (min new-count prev-count)
-                          [first-changed last-changed]
-                          (cond
-                            (nil? hint) [-1 -1]
-                            (= ::scan hint) (let [;; The shared prefix (both vectors present) takes
-                                                  ;; no per-line bounds branches — only the appended
-                                                  ;; or removed tail needs the missing-line defaults.
-                                                  [prefix-first prefix-last]
-                                                  (loop [i 0, fc -1, lc -1]
-                                                    (if (< i shared)
-                                                      (let [p (nth prev i)
-                                                            l (nth lines i)]
-                                                        (if (or (identical? p l) (= p l))
-                                                          (recur (inc i) fc lc)
-                                                          (recur (inc i) (if (neg? fc) i fc) i)))
-                                                      [fc lc]))]
-                                              (loop [i shared, fc prefix-first, lc prefix-last]
-                                                (if (< i max-lines)
-                                                  (let [old-line (if (< i prev-count) (nth prev i) "")
-                                                        new-line (if (< i new-count) (nth lines i) "")]
-                                                    (if (or (identical? old-line new-line)
-                                                            (= old-line new-line))
-                                                      (recur (inc i) fc lc)
-                                                      (recur (inc i) (if (neg? fc) i fc) i)))
-                                                  [fc lc])))
-                            :else (refine-changed-range prev lines hint))
-                          appended? (> new-count prev-count)
-                          [first-changed last-changed]
-                          (if appended?
-                            [(if (neg? first-changed) prev-count first-changed)
-                             (dec new-count)]
-                            [first-changed last-changed])
-                          [first-changed last-changed]
-                          (if (not (neg? first-changed))
-                            (let [[f l lines-have-images?]
-                                  (expand-changed-range-for-kitty-images
-                                   first-changed last-changed prev lines
-                                   (boolean (seq @(:previous-kitty-image-ids tui))))]
-                              (vreset! kitty-frame-lines lines-have-images?)
-                              [f l])
-                            (do (vreset! kitty-frame-lines ::unchanged)
-                                [first-changed last-changed]))
-                          append-start? (and appended?
-                                             (= first-changed prev-count)
-                                             (pos? first-changed))
-                          ;; A terminal has no addressable scrollback: a
-                          ;; change that starts above the window can only be
-                          ;; repainted from the window top, and the stale
-                          ;; scrollback lines above it stay as they are. Doing
-                          ;; that instead of the destructive full redraw keeps
-                          ;; ESC[3J out of the streaming path — Termux and
-                          ;; Windows Terminal yank the viewport to the top when
-                          ;; it is scrolled up and a clear scrollback arrives
-                          ;; (microsoft/terminal#20370; pi #4506/#6502). A
-                          ;; change *entirely* above the window has nothing
-                          ;; visible to repaint at all. Only the same-height
-                          ;; and growing cases take this path; a shrink whose
-                          ;; visible tail is unchanged takes
-                          ;; shrink-above-window? below (the extra-line
-                          ;; cleanup in the diff renderer needs the change to
-                          ;; have begun inside the window, so a shrink with a
-                          ;; changed tail keeps the full-redraw fallback).
-                          scrollback-only-change? (and (not (neg? first-changed))
-                                                       (= new-count prev-count)
-                                                       (< first-changed @prev-viewport-top)
-                                                       (< last-changed @prev-viewport-top)
-                                                       (>= new-count @prev-viewport-top))
-                          ;; A shrink whose removed lines are all above the
-                          ;; window paints nothing when the visible tail is
-                          ;; unchanged: the screen already shows exactly those
-                          ;; rows (the same content, the removed count higher
-                          ;; in the document), and a terminal has no
-                          ;; addressable scrollback to clean up. The history
-                          ;; above is stale — mark it dirty like the paths
-                          ;; above and let the app heal at a streaming-free
-                          ;; boundary, instead of a clearing full redraw in
-                          ;; the middle of a stream. The tails are compared
-                          ;; by content: a shrink that also changed what is
-                          ;; visible must still repaint.
-                          shrink-above-window? (and (not (neg? first-changed))
-                                                    (< new-count prev-count)
-                                                    (< first-changed @prev-viewport-top)
-                                                    (>= new-count h)
-                                                    (>= prev-count h)
-                                                    (= (subvec lines (- new-count h) new-count)
-                                                       (subvec prev (- prev-count h) prev-count)))
-                          viewport-clamp? (and (not scrollback-only-change?)
-                                               (not shrink-above-window?)
-                                               (not (neg? first-changed))
-                                               (< first-changed @prev-viewport-top)
-                                               (>= new-count prev-count)
-                                               (>= new-count @prev-viewport-top))
-                          raw-first-changed first-changed
-                          first-changed (if viewport-clamp? @prev-viewport-top raw-first-changed)
-                          ;; Both paths below leave the changed lines above
-                          ;; the window un-repainted (the terminal has no
-                          ;; addressable scrollback), so the history is stale
-                          ;; until a clearing full redraw. Record it; the app
-                          ;; heals at a streaming-free boundary
-                          ;; (tui-heal-scrollback!). The debug log below
-                          ;; names the changed block's edges so a latched
-                          ;; heal can be attributed to its renderer
-                          ;; (KMET_DEBUG_REDRAW=1).
-                          _ (when (or scrollback-only-change?
-                                      shrink-above-window?
-                                      viewport-clamp?)
-                              (when debug-redraw?
-                                (append-log!
-                                 (log-path "kmet-debug-render.log")
-                                 (str "[" (java.time.LocalDateTime/now) "] scrollbackDirty: "
-                                      (cond scrollback-only-change? "scrollback-only"
-                                            shrink-above-window? "shrink-above-window"
-                                            :else "viewport-clamp")
-                                      " (frame=" (some-> (:frame-count tui) deref)
-                                      ", prev=" prev-count ", new=" new-count
-                                      ", height=" h
-                                      ", firstChanged=" raw-first-changed
-                                      ", lastChanged=" last-changed
-                                      ", prevViewportTop=" @prev-viewport-top
-                                      (when viewport-clamp?
-                                        (str ", clampedTo=" first-changed))
-                                      ", alreadyDirty=" (boolean (some-> (:scrollback-dirty? tui) deref))
-                                      ")\n"
-                                      "  old[first]: " (debug-line-preview (nth prev raw-first-changed nil)) "\n"
-                                      "  new[first]: " (debug-line-preview (nth lines raw-first-changed nil)) "\n"
-                                      "  old[last]:  " (debug-line-preview (nth prev last-changed nil)) "\n"
-                                      "  new[last]:  " (debug-line-preview (nth lines last-changed nil)) "\n")))
-                              (reset! (:scrollback-dirty? tui) true))
-                          mid-full-redraw! (fn [reason]
-                                             (log-redraw! reason)
-                                             (reset! sb (StringBuilder.))
-                                             (do-full-redraw true))]
-                      (cond
-                        (neg? first-changed)
-                        (do (position-hardware-cursor cursor new-count)
-                            (reset! viewport-top @prev-viewport-top))
-
-                        scrollback-only-change?
-                        (do (log-redraw! (str "firstChanged < viewportTop, scrollback only ("
-                                              last-changed " < " @prev-viewport-top
-                                              "), no visible change"))
-                            (reset! viewport-top @prev-viewport-top))
-
-                        shrink-above-window?
-                        ;; the window's top moved up with the document;
-                        ;; the visible content (and the cursor's screen
-                        ;; row) did not, so only the index model shifts
-                        (let [removed (- prev-count new-count)]
-                          (swap! prev-viewport-top - removed)
-                          (swap! hardware-cursor-row - removed)
-                          (reset! viewport-top @prev-viewport-top)
-                          (position-hardware-cursor cursor new-count))
-
-                        (>= first-changed new-count)
-                        (if (> prev-count new-count)
-                          (let [target-row (max 0 (dec new-count))]
-                            (if (< target-row @prev-viewport-top)
-                              (mid-full-redraw! (str "deleted lines moved viewport up ("
-                                                     target-row " < " @prev-viewport-top ")"))
-                              (let [line-diff (compute-line-diff target-row)
-                                    extra-lines (- prev-count new-count)]
-                                (if (> extra-lines h)
-                                  (mid-full-redraw! (str "extraLines > height ("
-                                                         extra-lines " > " h ")"))
-                                  (let [clear-start-offset (if (zero? new-count) 0 1)
-                                        move-back (max 0 (- (+ extra-lines clear-start-offset) 1))]
-                                    (emit! CSI-2026-H)
-                                    (emit! (delete-changed-kitty-images
-                                            first-changed last-changed prev))
-                                    (when (pos? line-diff)
-                                      (emit! (str "\u001b[" line-diff "B")))
-                                    (when (neg? line-diff)
-                                      (emit! (str "\u001b[" (- line-diff) "A")))
-                                    (emit! "\r")
-                                    (when (and (pos? extra-lines) (pos? clear-start-offset))
-                                      (emit! (str "\u001b[" clear-start-offset "B")))
-                                    (dotimes [i extra-lines]
-                                      (emit! "\r\u001b[2K")
-                                      (when (< i (dec extra-lines))
-                                        (emit! "\u001b[1B")))
-                                    (when (pos? move-back)
-                                      (emit! (str "\u001b[" move-back "A")))
-                                    (emit! CSI-2026-L)
-                                    (reset! hardware-cursor-row target-row)
-                                    (position-hardware-cursor cursor new-count)
-                                    (reset! viewport-top @prev-viewport-top))))))
-                          (do (position-hardware-cursor cursor new-count)
-                              (reset! viewport-top @prev-viewport-top)))
-
-                        ;; Reached by any shrink (new content shorter than the
-                        ;; old) whose first change is above the window — the
-                        ;; diff renderer's extra-line cleanup assumes the
-                        ;; change began inside the window, so rebuild the screen
-                        ;; (e.g. compaction replacing the transcript).
-                        (< first-changed @prev-viewport-top)
-                        (mid-full-redraw! (str "firstChanged < viewportTop ("
-                                               first-changed " < " @prev-viewport-top ")"))
-
-                        :else
-                        (let [prev-viewport-bottom (+ @prev-viewport-top h -1)
-                              move-target-row (if append-start? (dec first-changed) first-changed)]
-                          (when (> move-target-row prev-viewport-bottom)
-                            (let [current-screen-row (max 0 (min (dec h)
-                                                                 (- @hardware-cursor-row @prev-viewport-top)))
-                                  move-to-bottom (- (dec h) current-screen-row)
-                                  scroll (- move-target-row prev-viewport-bottom)]
-                              (when (pos? move-to-bottom)
-                                (emit! (str "\u001b[" move-to-bottom "B")))
-                              (emit! (apply str (repeat scroll "\r\n")))
-                              (swap! prev-viewport-top + scroll)
-                              (reset! viewport-top @prev-viewport-top)
-                              (reset! hardware-cursor-row move-target-row)))
-                          (let [line-diff (compute-line-diff move-target-row)
-                                render-end (min last-changed (dec new-count))
-                                final-cursor-row (volatile! render-end)]
-                            (emit! CSI-2026-H)
-                            (emit! (delete-changed-kitty-images
-                                    first-changed last-changed prev))
-                            (when (pos? line-diff)
-                              (emit! (str "\u001b[" line-diff "B")))
-                            (when (neg? line-diff)
-                              (emit! (str "\u001b[" (- line-diff) "A")))
-                            (emit! (if append-start? "\r\n" "\r"))
-                            (loop [i first-changed]
-                              (when (<= i render-end)
-                                (when (> i first-changed) (emit! "\r\n"))
-                                (let [line (nth lines i)
-                                      is-image (img/is-image-line line)
-                                      rows (if is-image
-                                             (kitty-image-reserved-rows lines i render-end)
-                                             1)]
-                                  (if (> rows 1)
-                                    (let [image-start-screen-row (- i @viewport-top)]
-                                      (if (or (< image-start-screen-row 0)
-                                              (> (+ image-start-screen-row rows) h))
-                                        (mid-full-redraw! (str "kitty image pre-clear would scroll ("
-                                                               image-start-screen-row " + " rows " > " h ")"))
-                                        (do (emit! "\u001b[2K")
-                                            (dotimes [_ (dec rows)] (emit! "\r\n\u001b[2K"))
-                                            (emit! (str "\u001b[" (dec rows) "A"))
-                                            (emit-line! line)
-                                            (emit! (str "\u001b[" (dec rows) "B"))
-                                            (recur (+ i rows)))))
-                                    (do (emit! "\u001b[2K")
-                                        ;; A line wider than the terminal must NEVER kill the app — that
-                                        ;; leaves a frozen frame on screen and a dead reader ("fully
-                                        ;; stuck, had to kill it from the OS"). Log it and truncate the
-                                        ;; line instead so the TUI keeps running; the ANSI-aware slice
-                                        ;; drops the pending SGR/OSC reset, so emit-line! re-appends it.
-                                        (let [line (if (and (not is-image)
-                                                            (> (utils/visible-width line) w))
-                                                     (do (write-crash-log! lines w i (utils/visible-width line))
-                                                         (:text (utils/slice-with-width line 0 w :strict? true)))
-                                                     line)]
-                                          (emit-line! line)
-                                          (recur (inc i))))))))
-                            (when (> prev-count new-count)
-                              (when (< render-end (dec new-count))
-                                (emit! (str "\u001b[" (- (dec new-count) render-end) "B"))
-                                (vreset! final-cursor-row (dec new-count)))
-                              (let [extra-lines (- prev-count new-count)]
-                                (dotimes [_ extra-lines]
-                                  (emit! "\r\n\u001b[2K"))
-                                (emit! (str "\u001b[" extra-lines "A"))))
-                            (emit! CSI-2026-L)
-                            (reset! hardware-cursor-row @final-cursor-row)
-                            (swap! (:max-lines-rendered tui) max new-count)
-                            (reset! viewport-top
-                                    (max @prev-viewport-top
-                                         (- @final-cursor-row h -1)))
-                            (position-hardware-cursor cursor new-count))))))]
+        ]
     (cond
       first-render?
       (do (log-redraw! "first render")
@@ -922,10 +940,31 @@
                             @(:max-lines-rendered tui) ")"))
           (do-full-redraw true))
       :else
-      (main-diff (if (and (not flashed?)
-                          (not @(:previous-flashed? tui)))
-                   (:changed frame)
-                   ::scan)))
+      (diff-frame!
+       {:hint (if (and (not flashed?)
+                       (not @(:previous-flashed? tui)))
+                (:changed frame)
+                ::scan)
+        :tui tui
+        :prev prev
+        :prev-count prev-count
+        :lines lines
+        :new-count new-count
+        :cursor cursor
+        :w w
+        :h h
+        :sb sb
+        :viewport-top viewport-top
+        :prev-viewport-top prev-viewport-top
+        :hardware-cursor-row hardware-cursor-row
+        :kitty-frame-lines kitty-frame-lines
+        :debug-redraw? debug-redraw?
+        :emit! emit!
+        :emit-line! emit-line!
+        :do-full-redraw do-full-redraw
+        :compute-line-diff compute-line-diff
+        :position-hardware-cursor position-hardware-cursor
+        :log-redraw! log-redraw!}))
     (reset! previous-viewport-top @viewport-top)
     (when @(:tui-debug? tui)
       (tui-debug-dump! prev lines (str @sb) w h @viewport-top @hardware-cursor-row))

@@ -1023,7 +1023,7 @@
           previous (System/getProperty "kmet.log.dir")
           tui (core/create-tui (:terminal vt))]
       (try
-        (System/setProperty "kmet.log.dir" (str dir))
+        (System/setProperty "kmet.log.dir" dir)
         (with-redefs-fn {(var core/run-render-loop!)
                          (fn [_] (throw (ex-info "resumed render crashed" {:type :test})))
                          (var term/create-terminal) (fn [] (:terminal vt))}
@@ -1032,7 +1032,7 @@
             (t/is (not= ::timeout (deref @(:render-loop tui) 5000 ::timeout))
                   "the render future ends")
             (t/is (true? @(:stopped? tui)) "the crash stops the TUI")
-            (let [log (io/file (str dir) "kmet-render-crash.log")]
+            (let [log (io/file dir "kmet-render-crash.log")]
               (t/is (.exists log) "the crash is logged")
               (t/is (str/includes? (slurp log) "resumed render crashed")))))
         (finally
