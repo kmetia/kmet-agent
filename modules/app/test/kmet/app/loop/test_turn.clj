@@ -668,6 +668,16 @@
         (t/is (= (:id marker) (:parent-id user))
               "the user message continues the marker")))))
 
+(t/deftest test-loop-continue-prompt-writes-a-turn-marker
+  (t/testing "a prompt with no message is /continue picking an interrupted turn
+              back up: it opens a :continue turn of its own"
+    (let [dir (test-tmp/temp-dir! "test-turn-continue-prompt-")
+          sess (session/create-session dir)
+          agent (support/make-agent-state :session sess)]
+      (support/run-turn-capturing-llm agent {:message "hi"})
+      (support/run-turn-capturing-llm agent {})
+      (t/is (= [:prompt :continue] (mapv :reason (markers sess)))))))
+
 (t/deftest test-loop-steering-writes-no-turn-marker
   (t/testing "a steering injection joins the live turn: no boundary, only the
               prompt's own marker"

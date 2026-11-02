@@ -417,9 +417,13 @@
   ;; Repeat-loop guard is per-run: a legit bash ls x2 in run 1 must not
   ;; count toward a trip in run 2
   (reset! (:loop-guard agent) {:window [] :suppressed 0})
-  (when message
-    (state/begin-turn! agent :prompt)
-    (state/add-user-message! agent message images))
+  (if message
+    (do (state/begin-turn! agent :prompt)
+        (state/add-user-message! agent message images))
+    ;; a prompt with no message is a continue — /continue picking an
+    ;; interrupted turn back up, or a resume that re-runs the existing
+    ;; context — so it opens a turn of its own (`:reason :continue`)
+    (state/begin-turn! agent :continue))
   ;; pi: pending nextTurn messages ride with the prompt, after the user
   ;; message and before before_agent_start's injected messages
   (state/inject-next-turn-messages! agent)

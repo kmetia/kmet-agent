@@ -508,7 +508,8 @@ shape now:
   attempt's message, and a compaction that cuts and counts over the
   projection;
 - a `:turn-start` session entry recording the user-facing turn boundary (a
-  typed prompt or an `agent.continue`) before the entries it opens. pi has no
+  typed prompt, `/continue`, or an `agent.continue`) before the entries it
+  opens. pi has no
   counterpart entry — its `turn_start` is a loop event — so this is a kmet
   addition: the entry carries a branch-safe `:turn-id` and `:reason`
   (`:prompt` / `:continue`), projects to no wire message, renders as

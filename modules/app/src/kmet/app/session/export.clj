@@ -148,12 +148,13 @@
 
 (defn- entry->html
   "Render a single session entry as an HTML <div class=\"entry\"> block.
-   :label entries are skipped (bookkeeping, not conversation content); a
-   :context-edit entry carries its effect in the header (pi: the tree
-   renders [context omit|replace: id])."
+   :label and :turn-start entries are skipped (bookkeeping, not conversation
+   content — the marker is a log fact for the tree, and the export lists
+   messages); a :context-edit entry carries its effect in the header (pi: the
+   tree renders [context omit|replace: id])."
   [e]
   (let [role (:role e)]
-    (when-not (= :label role)
+    (when-not (contains? #{:label :turn-start} role)
       (let [label (role-label role)
             header (cond
                      (= :model-change role)

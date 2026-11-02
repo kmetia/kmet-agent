@@ -205,3 +205,15 @@
       (t/is (str/includes? html "↑100"))
       (t/is (str/includes? html "↓20"))
       (t/is (str/includes? html "Cost: $0.010")))))
+
+(t/deftest test-export-skips-turn-markers
+  ;; a :turn-start marker is a log fact for the tree, not a message: the
+  ;; export lists messages, so no empty role bubble appears
+  (let [sess (make-session)]
+    (s/append-entry sess {:role :turn-start :turn-id "t1" :reason :prompt})
+    (s/append-entry sess {:role :user :content "q"})
+    (s/append-entry sess {:role :assistant :content "a"})
+    (let [html (se/session->html sess)]
+      (t/is (not (str/includes? html "turn-start")))
+      (t/is (str/includes? html "1 user"))
+      (t/is (str/includes? html "1 assistant")))))

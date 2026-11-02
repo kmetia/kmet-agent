@@ -20,5 +20,15 @@
                {:role :tool :id "t" :content "out"}
                {:role :bash :id "b" :command "ls" :exit-code 0}
                {:role :context-edit :id "c" :target-id "x" :replacement nil}
+               {:role :turn-start :id "s" :turn-id "abc" :reason :prompt}
                {:role :custom :id "u" :custom-type "review" :data {:active true}}]]
       (is (ss/validate-entry? e) (pr-str e)))))
+
+(deftest turn-start-role-validates
+  (testing "the strict load pass keeps a turn marker instead of reporting and
+            skipping it as an unknown role"
+    (is (ss/validate-entry? {:role :turn-start :id "t" :parent-id "u"
+                             :turn-id "abc" :reason :prompt}))
+    (is (ss/validate-entry? {:role :turn-start :id "t"}))
+    (is (nil? (ss/explain-entry {:role :turn-start :id "t"
+                                 :turn-id "abc" :reason :continue})))))
