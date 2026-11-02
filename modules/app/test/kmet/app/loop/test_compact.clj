@@ -1587,6 +1587,43 @@
           (t/is (= :aborted (deref fut 2000 ::timeout)))))
       (finally (fs/delete-tree dir)))))
 
+(t/deftest test-loop-compaction-claim-is-atomic
+  ;; Regression: the start was check-then-act (`if @compacting?` … `reset!`
+  ;; further down), so two callers could both pass the test and the loser
+  ;; reset the compaction signal under the winner. The claim is now a CAS: a
+  ;; caller that loses returns false and touches no compaction state.
+  (support/with-compaction-run
+    (fn [{:keys [events agent]}]
+      (let [entered (promise)
+            release (promise)]
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      ;; Block the first caller inside the manual path — after
+                      ;; its claim, before it resets the compaction signal.
+                      ;; Bounded: the old code's loser runs this hook too and
+                      ;; must reach the assertions rather than hang the suite.
+                      state/set-run-signal!
+                      (fn [a v]
+                        (deliver entered true)
+                        (deref release 1000 nil)
+                        (reset! (:signal a) v))
+                      ;; The winner's summarization completes with an empty
+                      ;; summary (appended, like any other), so the winner
+                      ;; finishes on its own.
+                      llm/send-message (fn [opts]
+                                         (future ((:on-done opts) :stop))
+                                         (promise))]
+          (let [fut (future (compact/compact-context! agent nil :manual))]
+            (t/is (true? (deref entered 2000 false)) "the first caller claimed")
+            (t/is (false? (compact/compact-context! agent nil :manual))
+                  "the second caller loses the claim instead of running too")
+            (t/is (true? @(:compacting? agent)) "the claim still holds")
+            (deliver release true)
+            (t/is (true? (deref fut 2000 ::timeout))
+                  "the winner completes its own compaction")
+            (t/is (= 1 (count (filter #(= :compaction-start (:type %)) @events)))
+                  "exactly one compaction started")
+            (t/is (false? @(:compacting? agent)) "the claim is released")))))))
+
 (t/deftest test-loop-compaction-failure-reports-failed
   ;; pi: a summarization failure surfaces via compaction_end errorMessage and
   ;; session_compact_failed — kmet returns :failed (distinct from false =

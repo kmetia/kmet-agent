@@ -16,7 +16,7 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 | 4 | `settle-grace!` has no ceiling | medium (hang) | verified by reading |
 | 5 | `append-entry` mutates memory before the file write | medium (data loss) | verified by reading |
 | 6 | MCP refresh keeps a stale connection after a definition change | medium | **fixed** |
-| 7 | Compaction start is check-then-act | medium (race) | verified by reading |
+| 7 | Compaction start is check-then-act | medium (race) | **fixed** |
 | 8 | Pending-bash flush can duplicate entries | medium (data) | **fixed** |
 | 9 | Extensions leak root-ctx services/plugins on unload | high (leak) | **fixed** |
 | 10 | Unbounded error-body read | low/medium (memory) | verified by reading |
@@ -133,7 +133,7 @@ state map so the server reconnects with the new definition.
 an edited one closes its old connection through `disconnect-server!` and starts fresh, so the
 reload applies and the old failure's backoff window does not carry over.
 
-## 7. Compaction start is check-then-act
+## 7. Compaction start is check-then-act — **fixed**
 
 `modules/app/src/kmet/app/compaction/stage.clj:552-571`
 
@@ -147,6 +147,12 @@ A manual compaction and the automatic check on settle can both pass the test; th
 resets `(:compaction-signal agent)` under the first, so an Escape aimed at one aborts the other
 (or neither). The MCP adapter already does this correctly with a CAS (`state-for`); use the same
 shape here: `(when (compare-and-set! (:compacting? agent) false true) …)`.
+
+**Fixed:** the start is that CAS, taken before any compaction state is touched and
+released by the same `finally` — a caller that loses returns `false` and leaves the
+winner's signal alone. A regression test blocks a manual compaction between its claim
+and its signal reset, then asserts the second caller loses and exactly one
+`:compaction-start` fires.
 
 ## 8. Pending-bash flush can append the same entries twice — **fixed**
 
@@ -289,7 +295,7 @@ throw, assert `:stopped?` and the crash log.
 
 ## Suggested order of work
 
-1. ~~Small and testable, one commit each: 3, 7, 8, 6, 5.~~ 3, 8 and 6 done; 5 and 7 remain.
+1. ~~Small and testable, one commit each: 3, 7, 8, 6, 5.~~ 3, 7, 8 and 6 done; 5 remains.
 2. Then the concurrency pair with regression tests: 1, 2 — 1 needs the decision in its note
    first, 2 is a small isolated commit.
 3. ~~Then the lifecycle fix with a test asserting empty root after unload: 9.~~ done.

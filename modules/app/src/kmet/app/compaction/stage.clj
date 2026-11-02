@@ -555,27 +555,30 @@
    blocks this prompt's automatic checks (see maybe-compact!); the next
    prompt starts fresh."
   [agent & [custom-instructions reason]]
-  (if @(:compacting? agent)
+  ;; The claim is the CAS, not a test followed by a reset: a manual
+  ;; compaction and the automatic check on settle can otherwise both pass
+  ;; the test, and the loser's `reset!` of the compaction signal below would
+  ;; then abort the winner (or neither). The loser returns false instead.
+  (if-not (compare-and-set! (:compacting? agent) false true)
     false
     (let [reason (if custom-instructions :manual (or reason :auto))]
-      ;; A manual compaction is a fresh operation (pi: session.compact aborts
-      ;; the current operation, then creates a new AbortController): clear the
-      ;; run's cancel signal, which a previous Escape leaves set until the
-      ;; next run — a stale true would abort the compaction immediately. The
-      ;; auto paths keep it: an Escape at run start must still abort them.
-      (when (= :manual reason)
-        (state/set-run-signal! agent false))
-      ;; Every compaction starts with a fresh abort state (pi: a new
-      ;; AbortController per run) — the previous compaction's signal must not
-      ;; leak into this one.
-      (reset! (:compaction-signal agent) false)
-      ;; Flag first: the :compaction-start emit is synchronous and shows the
-      ;; UI indicator, so an escape arriving with that indicator must already
-      ;; see the compaction as in progress (pi: the controller is installed
-      ;; before compaction_start fires); the try keeps the flag from leaking
-      ;; when the emit throws.
-      (reset! (:compacting? agent) true)
+      ;; Everything runs under the claim; the finally releases it.
       (try
+        ;; A manual compaction is a fresh operation (pi: session.compact aborts
+        ;; the current operation, then creates a new AbortController): clear the
+        ;; run's cancel signal, which a previous Escape leaves set until the
+        ;; next run — a stale true would abort the compaction immediately. The
+        ;; auto paths keep it: an Escape at run start must still abort them.
+        (when (= :manual reason)
+          (state/set-run-signal! agent false))
+        ;; Every compaction starts with a fresh abort state (pi: a new
+        ;; AbortController per run) — the previous compaction's signal must not
+        ;; leak into this one.
+        (reset! (:compaction-signal agent) false)
+        ;; The :compaction-start emit is synchronous and shows the UI
+        ;; indicator, so an escape arriving with that indicator must already
+        ;; see the compaction as in progress (pi: the controller is installed
+        ;; before compaction_start fires) — the claim above already holds it.
         (state/emit agent {:type :compaction-start :reason reason})
         (let [failure (volatile! nil)
               from-extension (volatile! false)
