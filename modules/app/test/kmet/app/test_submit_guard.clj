@@ -59,8 +59,8 @@
    {"plugin!"
     "Loading an extension mounts it under the host ctx (`mount-plugin!`, reached only from `load-extension!` and its descriptor twin). Its callers are the composition's extension rows (`kmet.app.extensions.rows`), the TUI's `/reload` command (through those rows), and the test fixtures — the thread the entry or the command runs on, the same one that unloads the extension below. A thread that mounts from inside a tool would be the bug this guard is for; none does."
 
-    "dispose!"
-    "Unloading an extension: the record leaves the process registry first, then its fiber unwinds. Its callers are `/reload`'s row reload (`kmet.app.extensions.rows/reload-all!`), a row's disposal effect, the rollback of a load that threw, the process's own shutdown, and tests — all on the thread the command or the entry runs on. A tool thread that unloads would be the bug this guard is for; none does."}})
+    "dispose-subtree!"
+    "Unloading an extension: the record leaves the process registry first, then the extension's own ctx — its rows, whatever its body mounted there, and its fiber — unwinds. Its callers are `/reload`'s row reload (`kmet.app.extensions.rows/reload-all!`), a row's disposal effect, the rollback of a load that threw, the process's own shutdown, and tests — all on the thread the command or the entry runs on. A tool thread that unloads would be the bug this guard is for; none does."}})
 
 (defn- source-files
   "Every Clojure source file under SOURCE-ROOTS, repo-relative and
