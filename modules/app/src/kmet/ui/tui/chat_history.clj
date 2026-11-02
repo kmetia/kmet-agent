@@ -158,8 +158,9 @@
   (render [_this width]
     ;; every message renders (each at its own cache); the parts — separators
     ;; included — let an unchanged transcript come back without a copy
-    (let [info-lines (when-let [i @info-comp-atom] (protocols/render i width))
-          parts (message-parts @messages-atom width (some? @info-comp-atom)
+    (let [info @info-comp-atom
+          info-lines (when info (protocols/render info width))
+          parts (message-parts @messages-atom width (some? info)
                                (= :quiet @tools-expanded-atom))
           parts (if info-lines (into [info-lines] parts) parts)]
       (protocols/cached-lines lines-cache [width] parts)))

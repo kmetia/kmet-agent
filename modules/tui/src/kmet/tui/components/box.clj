@@ -39,11 +39,12 @@
               content-width (max 1 (- width (* 2 padding-x)))
               left-pad (apply str (repeat padding-x \space))
               bg @bg-fn]
-          ;; the key is every input of the composition: the geometry and the
-          ;; background sample the lines are run through
+          ;; the key is every input of the composition: the geometry (the
+          ;; children's content width is derived from it) and the background
+          ;; sample the lines are run through
           (protocols/cached-lines
            cache
-           [width content-width padding-x padding-y (when bg (bg "test"))]
+           [width padding-x padding-y (when bg (bg "test"))]
            (mapv (fn [c] (protocols/render c content-width)) children)
            (fn [parts] (box-lines parts left-pad bg padding-y width)))))))
   (invalidate [this]

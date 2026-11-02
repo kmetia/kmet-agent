@@ -773,7 +773,8 @@ requesting renders).
   A child's internal state affecting output means the parent must deref it
   too.
 - **Transparent parents whose render is just a concatenation flatten with
-  `protocols/concat-cached`**, not `render-all` — `Container`, `Box` (its
+  `protocols/cached-lines`** (the atom-backed form of the pure
+  `concat-cached`), not `render-all` — `Container`, `Box` (its
   padding/background pass as the join fn), `ChatHistory`, and the frame's
   document compose. Stack/scroll components keep `render-all`: their
   assembly is layout, not a join, so there is no key worth caching. The

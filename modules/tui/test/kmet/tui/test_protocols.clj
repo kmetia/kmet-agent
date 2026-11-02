@@ -83,23 +83,23 @@
   (t/is (= [] (:lines (protocols/concat-cached nil [10] [])))))
 
 (t/deftest test-cached-lines
-  (let [memo (atom nil)]
+  (let [memo (atom nil)
+        a (text/make-text "a" 0 0)
+        b (text/make-text "b" 0 0)
+        render #(mapv (fn [c] (protocols/render c 10)) [a b])
+        first-lines (protocols/cached-lines memo [10] (render))
+        writes (atom 0)]
     (t/testing "a hit returns the previous vector and does not touch the memo"
-      (let [a (text/make-text "a" 0 0)
-            b (text/make-text "b" 0 0)
-            render #(mapv (fn [c] (protocols/render c 10)) [a b])
-            first-lines (protocols/cached-lines memo [10] (render))
-            writes (atom 0)]
-        (add-watch memo ::count (fn [_ _ _ _] (swap! writes inc)))
-        (try
-          (t/is (identical? first-lines (protocols/cached-lines memo [10] (render))))
-          (t/is (zero? @writes) "a hit writes nothing")
-          (t/testing "a miss writes the new memo once"
-            (text/text-set! b "B")
-            (t/is (some #(str/includes? % "B")
-                        (protocols/cached-lines memo [10] (render))))
-            (t/is (= 1 @writes)))
-          (finally
-            (remove-watch memo ::count)))))
+      (add-watch memo ::count (fn [_ _ _ _] (swap! writes inc)))
+      (try
+        (t/is (identical? first-lines (protocols/cached-lines memo [10] (render))))
+        (t/is (zero? @writes) "a hit writes nothing")
+        (t/testing "a miss writes the new memo once"
+          (text/text-set! b "B")
+          (t/is (some #(str/includes? % "B")
+                      (protocols/cached-lines memo [10] (render))))
+          (t/is (= 1 @writes)))
+        (finally
+          (remove-watch memo ::count))))
     (t/testing "no memo atom still renders (it just never memoizes)"
       (t/is (= ["a"] (protocols/cached-lines nil [10] [["a"]]))))))

@@ -291,7 +291,8 @@ Four of the small items are done; the three structural ones stand.
   appended tail, and returns the previous vector itself when nothing changed (so the diff
   scan's `identical?` fast path sees it).
 - ~~**The flat document is rebuilt at every container level**~~ **fixed**: children are
-  flattened through `protocols/concat-cached`, a per-instance memo (`Container`'s
+  flattened through `protocols/cached-lines` (the atom-backed `concat-cached`), a
+  per-instance memo (`Container`'s
   `:lines-cache`, `ChatHistoryComponent :lines-cache`, `Box`'s `:cache`, the frame's
   per-run `document-cache`) that hands back the previous line vector — the same object,
   so the parent hits too — while every child returns the object it returned last pass.

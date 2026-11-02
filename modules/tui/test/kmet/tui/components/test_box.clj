@@ -94,6 +94,10 @@
           (let [f3 (core/render b 8)]
             (t/is (not (identical? f2 f3)))
             (t/is (.contains (second f3) "yo"))))
+        (t/testing "a width change rebuilds at the new width"
+          (let [f4 (core/render b 10)]
+            (t/is (not (identical? f2 f4)))
+            (t/is (every? #(= 10 (count %)) f4))))
         (t/testing "a background change invalidates it"
           (box/box-set-bg-fn b (fn [s] (str "[" s "]")))
           (let [f4 (core/render b 8)]

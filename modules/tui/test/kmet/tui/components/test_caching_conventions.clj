@@ -20,7 +20,7 @@
   "Components deliberately without track! caching, keyed by record name.
    :transparent-parent — output depends on children's internal state, which
      track! cannot see; the render walks children (each cached) every pass and
-     flattens with protocols/concat-cached, so an unchanged child set hands
+     flattens with protocols/cached-lines, so an unchanged child set hands
      back the previous line vector (Box memoizes its padding/bg composition
      the same way, with the join as a custom fn).
    :time-animated — output depends on wall-clock time; must render fresh

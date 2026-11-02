@@ -47,13 +47,14 @@
   "True when PREV was built from the same KEY and the same part objects: the
    cache hit that lets concat-cached skip the concatenation."
   [prev key parts]
-  (and prev
-       (= key (:key prev))
-       (= (count parts) (count (:parts prev)))
-       (loop [i 0]
-         (cond (>= i (count parts)) true
-               (identical? (nth parts i) (nth (:parts prev) i)) (recur (inc i))
-               :else false))))
+  (let [n (count parts)]
+    (and prev
+         (= key (:key prev))
+         (= n (count (:parts prev)))
+         (loop [i 0]
+           (cond (>= i n) true
+                 (identical? (nth parts i) (nth (:parts prev) i)) (recur (inc i))
+                 :else false)))))
 
 (defn concat-cached
   "Flatten PARTS — child line vectors, in render order — into one line
@@ -99,9 +100,11 @@
    a component built without one still renders, it just never memoizes."
   ([cache-atom key parts] (cached-lines cache-atom key parts join-lines))
   ([cache-atom key parts join-fn]
-   (let [{:keys [lines cache]} (concat-cached (when cache-atom @cache-atom)
-                                              key parts join-fn)]
-     (when (and cache-atom (not (identical? cache @cache-atom)))
+   (let [prev (when cache-atom @cache-atom)
+         {:keys [lines cache]} (concat-cached prev key parts join-fn)]
+     ;; a hit hands the previous memo back unchanged — that is the only case
+     ;; that writes nothing
+     (when (and cache-atom (not (identical? cache prev)))
        (reset! cache-atom cache))
      lines)))
 
