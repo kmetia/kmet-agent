@@ -3112,6 +3112,28 @@
               (terminal/write-output started "\r\n"))))
         (terminal/show-cursor! started)
         (terminal/stop! started)))))
+
+(defn- launch-render-loop!
+  "Start the render loop in a future under the crash guard both entry points
+   share: a render crash must not leave the app hanging with a dead loop and
+   a dead reader, so the stack goes to kmet-render-crash.log and the TUI
+   stops — the caller unwinds and -main reports the error (pi: the render
+   loop never crashes silently). tui-start and tui-resume! both launch
+   through here; a bare future let a resumed render crash restore the
+   terminal, log nothing, and sleep on :stopped? forever."
+  [tui]
+  (reset! (:render-loop tui)
+          (future
+            (try (run-render-loop! tui)
+                 (catch Throwable t
+                   (try (with-open [w (java.io.FileWriter.
+                                       (log-path "kmet-render-crash.log") true)]
+                          (.write w (str t "\n"
+                                         (clojure.string/join "\n" (.getStackTrace t))
+                                         "\n")))
+                        (catch Exception _))
+                   (tui-stop tui))))))
+
 (defn tui-start
   "Start the TUI: enter raw mode, start the input reader and render loop.
    Blocks the calling thread until tui-stop is called."
@@ -3126,20 +3148,7 @@
   (component/set-frame-hook! #(tui-request-render tui))
   (reakt/set-enqueue-hook! #(when-let [w (:waker tui)] (wake/wake! w)))
   (start-input-reader tui)
-  (reset! (:render-loop tui) (future
-                               (try (run-render-loop! tui)
-                                    (catch Throwable t
-                                      ;; A render crash must not leave the app
-                                      ;; hanging with a dead render loop and a
-                                      ;; dead reader: log the stack, then stop
-                                      ;; so the caller unwinds and -main reports
-                                      ;; the error (pi: the render loop never
-                                      ;; crashes silently).
-                                      (try (with-open [w (java.io.FileWriter.
-                                                          (log-path "kmet-render-crash.log") true)]
-                                             (.write w (str t "\n" (clojure.string/join "\n" (.getStackTrace t)) "\n")))
-                                           (catch Exception _))
-                                      (tui-stop tui)))))
+  (launch-render-loop! tui)
   (tui-request-render tui)
   ;; Block until a final stop is requested
   (loop []
@@ -3188,7 +3197,7 @@
   ;; beforeTerminalStart resets selection state).
   (clear-incomplete-flush! tui)
   (start-input-reader tui)
-  (reset! (:render-loop tui) (future (run-render-loop! tui)))
+  (launch-render-loop! tui)
   (tui-request-render tui true)
   nil)
 

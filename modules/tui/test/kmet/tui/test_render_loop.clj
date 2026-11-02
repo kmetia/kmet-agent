@@ -30,9 +30,12 @@
 
    The render loop is driven headlessly through the private
    run-render-loop!, mirroring pi's VirtualTerminal-based render tests."
-  (:require [clojure.string :as str]
+  (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :as t :refer [deftest testing]]
+            [babashka.fs :as fs]
             [kmet.libs.concurrent :as concurrent]
+            [kmet.test-tmp :as test-tmp]
             [kmet.tui.core :as core]
             [kmet.tui.terminal :as term]
             [kmet.tui.timers :as timers]
@@ -1009,3 +1012,31 @@
             "the loop stamped the frame clock at the frame start")
       (finally
         (stop-loop tui)))))
+
+(deftest ^:slow resume-crash-guard-stops-and-logs
+  (testing "tui-resume! launches the render loop through the same guard as
+            tui-start: a resumed render crash logs its stack and stops the TUI,
+            so the caller unwinds instead of sleeping on :stopped? forever
+            behind a dead loop"
+    (let [vt (make-virtual-terminal)
+          dir (test-tmp/temp-dir! "resume-crash-")
+          previous (System/getProperty "kmet.log.dir")
+          tui (core/create-tui (:terminal vt))]
+      (try
+        (System/setProperty "kmet.log.dir" (str dir))
+        (with-redefs-fn {(var core/run-render-loop!)
+                         (fn [_] (throw (ex-info "resumed render crashed" {:type :test})))
+                         (var term/create-terminal) (fn [] (:terminal vt))}
+          (fn []
+            (core/tui-resume! tui)
+            (t/is (not= ::timeout (deref @(:render-loop tui) 5000 ::timeout))
+                  "the render future ends")
+            (t/is (true? @(:stopped? tui)) "the crash stops the TUI")
+            (let [log (io/file (str dir) "kmet-render-crash.log")]
+              (t/is (.exists log) "the crash is logged")
+              (t/is (str/includes? (slurp log) "resumed render crashed")))))
+        (finally
+          (System/setProperty "kmet.log.dir" (or previous ""))
+          (when-let [f @(:input-reader tui)]
+            (deref f 2000 nil))
+          (fs/delete-tree dir))))))
