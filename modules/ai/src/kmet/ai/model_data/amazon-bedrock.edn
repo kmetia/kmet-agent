@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-27T10:40:46Z"
+ :generated-at "2026-11-02T16:00:51Z"
  :provider {:id :amazon-bedrock
             :name "Amazon Bedrock"
             :env-vars []
@@ -1023,6 +1023,23 @@
     :context-window 1050000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}
+   "global.openai.gpt-6.1-terra"
+   {:id "global.openai.gpt-6.1-terra"
+    :name "GPT-6.1 Terra (Global)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 1
+           :tiers [{:input 2 :input-tokens-above 272000 :output 7.5 :cache-read 0.1 :cache-write 2.5}]
+           :output 5
+           :cache-read 0.05
+           :cache-write 1.25}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true}}
    "global.xai.grok-4.6"
    {:id "global.xai.grok-4.6"
     :name "Grok 4.6 (Global)"
@@ -1722,6 +1739,23 @@
     :context-window 1050000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}
+   "openai.gpt-6.1-terra"
+   {:id "openai.gpt-6.1-terra"
+    :name "GPT-6.1 Terra"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 1.1
+           :tiers [{:input 2.2 :input-tokens-above 272000 :output 8.25 :cache-read 0.11 :cache-write 2.75}]
+           :output 5.5
+           :cache-read 0.055
+           :cache-write 1.375}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true}}
    "openai.gpt-oss-120b"
    {:id "openai.gpt-oss-120b"
     :name "gpt-oss-120b"
@@ -2355,6 +2389,23 @@
            :output 11
            :cache-read 0.11
            :cache-write 2.75}
+    :context-window 1050000
+    :max-tokens 128000
+    :compat {:supports-strict-mode true}}
+   "us.openai.gpt-6.1-terra"
+   {:id "us.openai.gpt-6.1-terra"
+    :name "GPT-6.1 Terra (US)"
+    :provider :amazon-bedrock
+    :api :bedrock-converse-stream
+    :base-url "https://bedrock-runtime.us-east-1.amazonaws.com"
+    :reasoning true
+    :thinking-level-map {:xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 1.1
+           :tiers [{:input 2.2 :input-tokens-above 272000 :output 8.25 :cache-read 0.11 :cache-write 2.75}]
+           :output 5.5
+           :cache-read 0.055
+           :cache-write 1.375}
     :context-window 1050000
     :max-tokens 128000
     :compat {:supports-strict-mode true}}

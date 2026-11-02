@@ -508,6 +508,32 @@
     ;; NVIDIA NIM dropped inkling: OpenRouter still serves it.
     (check "thinkingmachines/inkling" :openrouter "thinkingmachines/inkling")))
 
+(t/deftest test-commandcode-laguna-ref-follows-openrouter-free-retirement
+  "Regression: OpenRouter retired its poolside/laguna-s-2.1:free listing
+   (the 2026-11-02 model bump dropped every poolside id), so the ref warned
+   and the endpoint shipped conservative defaults (:reasoning false, 32768
+   max-tokens). Vercel AI Gateway serves the same weights under the bare id,
+   and its entry carries no :compat of its own, so no endpoint-bound
+   thinking format transfers to the CommandCode route."
+  (let [refs @#'mg/commandcode-canonical-refs
+        catalogs (#'mg/read-catalogs mg/data-dir)
+        cid "poolside/laguna-s-2.1-free"
+        rp :vercel-ai-gateway
+        rid "poolside/laguna-s-2.1"
+        canonical (->> (get catalogs rp) vals (keep #(get % rid)) first)
+        cc (get-in catalogs [:commandcode :openai-completions cid])]
+    (t/is (= [rp rid] (get refs cid))
+          (str cid " must point at " rp " " rid))
+    (t/is (some? canonical)
+          (str "the referenced canonical model must exist (" rp " " rid ")"))
+    (t/is (some? cc) (str cid " must be listed"))
+    (t/is (= true (:reasoning cc))
+          (str cid " must carry thinking support"))
+    (t/is (= (:max-tokens canonical) (:max-tokens cc))
+          (str cid " must carry the canonical max-tokens"))
+    (t/is (= (:input canonical) (:input cc))
+          (str cid " must carry the canonical input modalities"))))
+
 (t/deftest test-commandcode-cat-jam-ref-follows-beam-rename
   "Cat Jam was the stealth codename for reflection's Beam 1.0: OpenCode
    deprecated the cat-jam-free id in favour of beam-free (same limits and

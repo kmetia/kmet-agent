@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-27T10:40:46Z"
+ :generated-at "2026-11-02T16:06:00Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -712,17 +712,6 @@
     :context-window 1000000
     :max-tokens 128000
     :compat {:force-adaptive-thinking true}}
-   "arcee-ai/trinity-large-thinking"
-   {:id "arcee-ai/trinity-large-thinking"
-    :name "Trinity Large Thinking"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning true
-    :input [:text]
-    :cost {:input 0.25 :output 0.8 :cache-read 0.06 :cache-write 0}
-    :context-window 262100
-    :max-tokens 80000}
    "bytedance/seed-1.6"
    {:id "bytedance/seed-1.6"
     :name "Seed 1.6"
@@ -885,7 +874,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.075 :output 0.3 :cache-read 0.0015 :cache-write 0}
+    :cost {:input 0.3 :output 1.2 :cache-read 0.007 :cache-write 0}
     :context-window 1048576
     :max-tokens 32768}
    "deepseek/deepseek-v4.1-flash-1017"
@@ -896,9 +885,9 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 0.075 :output 0.3 :cache-read 0.0015 :cache-write 0}
+    :cost {:input 0.3 :output 1.2 :cache-read 0.007 :cache-write 0}
     :context-window 1048576
-    :max-tokens 1048576}
+    :max-tokens 262144}
    "deepseek/deepseek-v4.1-flash-1017-fast"
    {:id "deepseek/deepseek-v4.1-flash-1017-fast"
     :name "DeepSeek V4.1 Flash 1017 Fast"
@@ -1328,6 +1317,17 @@
     :cost {:input 0.3 :output 0.9 :cache-read 0.06 :cache-write 0}
     :context-window 262144
     :max-tokens 32768}
+   "inclusionai/ling-3.1-flash-1019"
+   {:id "inclusionai/ling-3.1-flash-1019"
+    :name "Ling 3.1 Flash 1019"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text]
+    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :context-window 1000000
+    :max-tokens 262144}
    "interfaze/interfaze-beta"
    {:id "interfaze/interfaze-beta"
     :name "Interfaze Beta"
@@ -1666,8 +1666,8 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text :image]
-    :cost {:input 1.36 :output 4.18 :cache-read 0.14 :cache-write 0}
-    :context-window 524288
+    :cost {:input 0.7 :output 2.1 :cache-read 0.07 :cache-write 0}
+    :context-window 1048576
     :max-tokens 262144}
    "mistral/mistral-medium-3.5"
    {:id "mistral/mistral-medium-3.5"
@@ -2857,6 +2857,17 @@
     :cost {:input 1.1 :output 4.4 :cache-read 0.275 :cache-write 0}
     :context-window 200000
     :max-tokens 100000}
+   "particle/particle-1"
+   {:id "particle/particle-1"
+    :name "Particle-1"
+    :provider :vercel-ai-gateway
+    :api :anthropic-messages
+    :base-url "https://ai-gateway.vercel.sh"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.125 :output 0.5 :cache-read 0.015 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 131072}
    "poolside/laguna-s-2.1"
    {:id "poolside/laguna-s-2.1"
     :name "Laguna S 2.1"
@@ -2868,17 +2879,6 @@
     :cost {:input 0.09 :output 0.18 :cache-read 0.009 :cache-write 0}
     :context-window 1000000
     :max-tokens 131072}
-   "poolside/laguna-s-2.1-free"
-   {:id "poolside/laguna-s-2.1-free"
-    :name "Laguna S 2.1 Free"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning true
-    :input [:text]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
-    :context-window 256000
-    :max-tokens 32768}
    "quiverai/arrow-2"
    {:id "quiverai/arrow-2"
     :name "Arrow 2"
@@ -3415,9 +3415,9 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text]
-    :cost {:input 1.2 :output 4 :cache-read 0.2 :cache-write 0}
+    :cost {:input 1.4 :output 4.4 :cache-read 0.14 :cache-write 0}
     :context-window 1000000
-    :max-tokens 262144}
+    :max-tokens 1000000}
    "zai/glm-5.3-fast"
    {:id "zai/glm-5.3-fast"
     :name "GLM 5.3 Fast"

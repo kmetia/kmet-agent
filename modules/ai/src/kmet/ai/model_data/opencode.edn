@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-27T10:40:46Z"
+ :generated-at "2026-11-02T16:00:51Z"
  :provider {:id :opencode
             :name "OpenCode (Zen)"
             :env-vars ["OPENCODE_API_KEY"]
@@ -719,21 +719,6 @@
     :cost {:input 0.68 :output 2.09 :cache-read 0.07 :cache-write 0}
     :context-window 524288
     :max-tokens 262144
-    :compat {:supports-store false
-             :supports-developer-role false
-             :max-tokens-field :max-tokens
-             :supports-strict-mode true}}
-   "nemotron-3-ultra-free"
-   {:id "nemotron-3-ultra-free"
-    :name "Nemotron 3 Ultra Free"
-    :provider :opencode
-    :api :openai-completions
-    :base-url "https://opencode.ai/zen/v1"
-    :reasoning true
-    :input [:text]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
-    :context-window 1000000
-    :max-tokens 128000
     :compat {:supports-store false
              :supports-developer-role false
              :max-tokens-field :max-tokens

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-27T10:40:46Z"
+ :generated-at "2026-11-02T16:00:51Z"
  :provider {:id :nvidia
             :name "NVIDIA NIM"
             :env-vars ["NVIDIA_API_KEY"]
@@ -366,24 +366,6 @@
     :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
     :context-window 1048576
     :max-tokens 1048576
-    :headers {"NVCF-POLL-SECONDS" "3600"}
-    :compat {:supports-store false
-             :supports-developer-role false
-             :supports-reasoning-effort false
-             :max-tokens-field :max-tokens
-             :supports-long-cache-retention false
-             :supports-strict-mode false}}
-   "z-ai/glm-5.3"
-   {:id "z-ai/glm-5.3"
-    :name "GLM-5.3"
-    :provider :nvidia
-    :api :openai-completions
-    :base-url "https://integrate.api.nvidia.com/v1"
-    :reasoning true
-    :input [:text]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
-    :context-window 1000000
-    :max-tokens 131072
     :headers {"NVCF-POLL-SECONDS" "3600"}
     :compat {:supports-store false
              :supports-developer-role false

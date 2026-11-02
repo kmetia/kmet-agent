@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-20T08:42:39Z"
+ :generated-at "2026-11-02T16:00:51Z"
  :provider {:id :cloudflare-workers-ai
             :name "Cloudflare Workers AI"
             :env-vars ["CLOUDFLARE_API_KEY" "CLOUDFLARE_ACCOUNT_ID"]
@@ -58,7 +58,7 @@
              :send-session-affinity-headers true}}
    "@cf/deepseek-ai/deepseek-v4.1-flash-1017"
    {:id "@cf/deepseek-ai/deepseek-v4.1-flash-1017"
-    :name "Deepseek V4.1 Flash 1017"
+    :name "DeepSeek V4.1 Flash 1017"
     :provider :cloudflare-workers-ai
     :api :openai-completions
     :base-url "https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/v1"

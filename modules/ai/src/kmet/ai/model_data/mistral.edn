@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-27T10:40:46Z"
+ :generated-at "2026-11-02T16:00:51Z"
  :provider {:id :mistral
             :name "Mistral"
             :env-vars ["MISTRAL_API_KEY"]
@@ -28,6 +28,17 @@
     :cost {:input 0.3 :output 0.9 :cache-read 0.03 :cache-write 0}
     :context-window 256000
     :max-tokens 4096}
+   "deepseek-v4-1-flash-1017"
+   {:id "deepseek-v4-1-flash-1017"
+    :name "DeepSeek V4.1 Flash 1017"
+    :provider :mistral
+    :api :mistral-conversations
+    :base-url "https://api.mistral.ai"
+    :reasoning true
+    :input [:text]
+    :cost {:input 0.3 :output 1.2 :cache-read 0.007 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 128000}
    "devstral-2512"
    {:id "devstral-2512"
     :name "Devstral 2"
@@ -179,7 +190,18 @@
     :base-url "https://api.mistral.ai"
     :reasoning true
     :input [:text :image]
-    :cost {:input 1.36 :output 4.18 :cache-read 0.14 :cache-write 0}
+    :cost {:input 0.7 :output 2.1 :cache-read 0.07 :cache-write 0}
+    :context-window 1048576
+    :max-tokens 262144}
+   "mistral-large-4-0-8"
+   {:id "mistral-large-4-0-8"
+    :name "Mistral Large 4.0.8"
+    :provider :mistral
+    :api :mistral-conversations
+    :base-url "https://api.mistral.ai"
+    :reasoning true
+    :input [:text :image]
+    :cost {:input 0.7 :output 2.1 :cache-read 0.07 :cache-write 0}
     :context-window 1048576
     :max-tokens 262144}
    "mistral-large-latest"

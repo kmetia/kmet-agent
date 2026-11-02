@@ -2171,7 +2171,7 @@
    "moonshotai/Kimi-K2.7-Code-Highspeed" [:moonshotai "kimi-k2.7-code-highspeed"]
    "moonshotai/Kimi-K3"                [:moonshotai "kimi-k3"]
    "nvidia/nemotron-3-ultra-550b-a55b" [:nvidia "nvidia/nemotron-3-ultra-550b-a55b"]
-   "poolside/laguna-s-2.1-free"        [:openrouter "poolside/laguna-s-2.1:free"]
+   "poolside/laguna-s-2.1-free"        [:vercel-ai-gateway "poolside/laguna-s-2.1"]
    "Qwen/Qwen3.6-Plus"                 [:qwen-token-plan "qwen3.6-plus"]
    "Qwen/Qwen3.7-Flash"                [:openrouter "qwen/qwen3.7-flash"]
    "Qwen/Qwen3.7-Max"                  [:qwen-token-plan "qwen3.7-max"]
