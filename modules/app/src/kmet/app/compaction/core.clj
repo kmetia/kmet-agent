@@ -172,6 +172,50 @@
   [m]
   (contains? #{:user :bash :compaction :branch-summary :custom} (:role m)))
 
+(defn- intrinsically-visible?
+  "True when ENTRY would project model messages on its own (pi:
+   isIntrinsicallyVisible): a context edit never does, and neither does an
+   entry with no projected messages of its own."
+  [entry]
+  (and (not= :context-edit (:role (:source entry)))
+       (seq (session/context-messages (:source entry)))))
+
+(defn- omitted?
+  "True when ENTRY would project messages but contributes none — a recovered
+   attempt its omission edit hides from context (pi: isOmitted)."
+  [entry]
+  (and (intrinsically-visible? entry) (empty? (:messages entry))))
+
+(defn- recovery-omission-suffix?
+  "True when SUFFIX — the projected entries after a cut — is an omitted
+   assistant attempt plus edits that only omit entries (pi:
+   isRecoveryOmissionSuffix): the model sees none of it, so the input before
+   it was answered by an attempt it never sees. A replacement edit targeting
+   anything else, or any visible entry, makes it false."
+  [suffix]
+  (let [omitted-ids (into #{} (keep #(when (omitted? %) (:id (:source %))) suffix))
+        replaced? (fn [entry]
+                    (let [source (:source entry)]
+                      (and (= :context-edit (:role source))
+                           (some? (:replacement source))
+                           (not (contains? omitted-ids (:target-id source))))))]
+    (and (not-any? replaced? suffix)
+         (some #(and (= :assistant (:role (:source %))) (omitted? %)) suffix)
+         (every? (fn [entry]
+                   (and (not= :compaction (:role (:source entry)))
+                        (or (not (intrinsically-visible? entry))
+                            (omitted? entry))))
+                 suffix))))
+
+(defn- recovery-omission-cut
+  "Advance CUT over a closed recovery-omission suffix (pi: `cutIndex++`), so
+   the input the suffix hides is summarized rather than kept. EXCEEDED? is the
+   budget walk's outcome; without a budget cut there is nothing to advance."
+  [projected cut exceeded?]
+  (if (and exceeded? (recovery-omission-suffix? (subvec projected (inc cut))))
+    (inc cut)
+    cut))
+
 (defn find-projected-cut-point
   "Find the projected entry index to start keeping from (pi:
    findProjectedCutPoint). PROJECTED is a session projection
@@ -180,9 +224,9 @@
    never a cut point, while a rewritten one contributes its replacement.
    Walks backwards from the newest entry accumulating estimated tokens; cuts
    at the closest valid cut point at/after the position where the budget
-   keep-recent-tokens is reached, then walks the cut back over empty
-   projected entries so the kept range does not begin with invisible
-   bookkeeping. Never cuts at a tool result.
+   keep-recent-tokens is reached — the newest candidate when none follows —
+   then advances over a closed recovery-omission suffix and walks the cut back
+   over empty projected entries. Never cuts at a tool result.
    Returns {:first-kept-index i :split-turn? bool}."
   [projected keep-recent-tokens]
   (let [n (count projected)
@@ -199,14 +243,14 @@
         (loop [i (dec n)]
           (when (and (>= i 0) (not @stop))
             (let [tokens (reduce + 0 (map estimate-tokens (:messages (nth projected i))))]
+              ;; pi skips a zero-token entry before its budget check
               (when (pos? tokens)
-                (vswap! acc + tokens))
-              (when (>= @acc keep-recent-tokens)
-                (when-let [c (first (filter #(>= % i) valid))]
-                  (vreset! cut c))
-                (vreset! stop true)))
+                (vswap! acc + tokens)
+                (when (>= @acc keep-recent-tokens)
+                  (vreset! cut (or (first (filter #(>= % i) valid)) (peek valid)))
+                  (vreset! stop true))))
             (recur (dec i))))
-        (let [cut-idx (loop [i @cut]
+        (let [cut-idx (loop [i (recovery-omission-cut projected @cut @stop)]
                         (let [prev (nth projected (dec i) nil)]
                           (if (and (pos? i)
                                    (empty? (:messages prev))
@@ -291,7 +335,10 @@
   "Serialize context messages to text for summarization (pi:
    serializeConversation over convertToLlm's messages): bash results and
    custom messages project to user messages (pi: convertToLlm), so their text
-   survives a later compaction. Tool results are truncated to 2000 chars."
+   survives a later compaction. Tool results are truncated to 2000 chars.
+   Thinking is omitted (pi: replayed thinking is often not in the live
+   context, so including it can make the request larger than the context it
+   summarizes)."
   [entries]
   (str/join "\n\n"
             (keep (fn [e]
@@ -299,13 +346,9 @@
                       :user (let [t (entry-text (:content e))]
                               (when (seq t) (str "[User]: " t)))
                       :assistant
-                      (let [thinking (str/join "\n"
-                                               (for [b (:content e) :when (= :thinking (:type b))]
-                                                 (:thinking b)))
-                            text (entry-text (:content e))
+                      (let [text (entry-text (:content e))
                             tcs (:tool-calls e)
                             parts (cond-> []
-                                    (seq thinking) (conj (str "[Assistant thinking]: " thinking))
                                     (seq text) (conj (str "[Assistant]: " text))
                                     (seq tcs) (conj (str "[Assistant tool calls]: "
                                                          (str/join "; " (map tool-call-str tcs)))))]

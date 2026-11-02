@@ -72,7 +72,54 @@
           cut (core/find-projected-cut-point
                (assoc (projected entries) 1 {:source (second entries) :messages []}) 1)]
       (t/is (= 1 (:first-kept-index cut))
-            "the empty entry is kept rather than summarized — it costs nothing"))))
+            "the empty entry is kept rather than summarized — it costs nothing")))
+  (t/testing "a closed recovery-omission suffix advances the cut past the input
+              it hides (pi: isRecoveryOmissionSuffix)"
+    (let [entries [{:id "u1" :role :user :content (apply str (repeat 400 "a"))}
+                   {:id "a1" :role :assistant :content "failed attempt"}
+                   {:id "e1" :role :context-edit :target-id "a1" :replacement nil}
+                   {:id "m1" :role :custom :custom-type :bookkeeping}]
+          cut (core/find-projected-cut-point
+               (-> (projected entries)
+                   (assoc-in [1 :messages] [])
+                   (assoc-in [2 :messages] [])
+                   (assoc-in [3 :messages] []))
+               1)]
+      (t/is (= 1 (:first-kept-index cut))
+            "the recovered attempt is kept; the input before it is summarized")))
+  (t/testing "metadata after the cut does not move it (pi: only a closed
+              recovery-omission suffix advances the cut)"
+    (let [entries [{:id "u1" :role :user :content "old request"}
+                   {:id "a1" :role :assistant :content "old answer"}
+                   {:id "u2" :role :user :content (apply str (repeat 400 "u"))}
+                   {:id "m1" :role :custom :custom-type :bookkeeping}]
+          cut (core/find-projected-cut-point
+               (assoc (projected entries) 3 {:source (nth entries 3) :messages []})
+               1)]
+      (t/is (= 2 (:first-kept-index cut))
+            "the unsent input stays kept")))
+  (t/testing "a zero-token context is never a budget cut (pi: `continue` skips
+              empty entries before the budget check, so the recovery suffix is
+              not advanced onto)"
+    (let [entries [{:id "u1" :role :user :content ""}
+                   {:id "a1" :role :assistant :content "failed attempt"}
+                   {:id "e1" :role :context-edit :target-id "a1" :replacement nil}]
+          cut (core/find-projected-cut-point
+               (-> (projected entries)
+                   (assoc-in [1 :messages] [])
+                   (assoc-in [2 :messages] []))
+               0)]
+      (t/is (= 0 (:first-kept-index cut)))))
+  (t/testing "no candidate at/after the budget point keeps the newest one
+              (pi: cutPoints.at(-1))"
+    (let [entries [{:role :user :content (apply str (repeat 40 "a"))}
+                   {:role :assistant :content (apply str (repeat 40 "b"))
+                    :tool-calls [{:name "read" :arguments {:path "/x"}}]}
+                   {:role :tool :content [{:type :tool_result
+                                           :content (apply str (repeat 600 "c"))}]}]
+          cut (core/find-projected-cut-point (projected entries) 50)]
+      (t/is (= 1 (:first-kept-index cut))
+            "the huge trailing tool result drags the cut to the newest candidate"))))
 
 ;; ─── Preparation (pi: prepareCompaction) ───────────────────────────────────
 
@@ -185,6 +232,15 @@
       (t/is (str/includes? text "[Assistant]: hi there"))
       (t/is (str/includes? text "read("))
       (t/is (str/includes? text "[Tool result]: result text"))))
+  (t/testing "thinking is omitted (pi: replayed thinking is often not in the
+              live context, so including it can make the request larger than
+              the context it summarizes)"
+    (let [text (core/serialize-conversation
+                [{:role :assistant
+                  :content [{:type :thinking :thinking "hmm"}
+                            {:type :text :text "answer"}]}])]
+      (t/is (str/includes? text "[Assistant]: answer"))
+      (t/is (not (str/includes? text "hmm")))))
   (t/testing "info and excluded bash are skipped"
     (let [text (core/serialize-conversation
                 [{:role :info :content "ignored"}
