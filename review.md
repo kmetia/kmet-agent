@@ -290,14 +290,25 @@ Four of the small items are done; the three structural ones stand.
   starts from the previous output vector, `assoc`s only the differing chunks, `conj`s the
   appended tail, and returns the previous vector itself when nothing changed (so the diff
   scan's `identical?` fast path sees it).
-- **The flat document is rebuilt at every container level**: `Container.render` is
-  `(protocols/render-all @children width)` with no cache (`modules/tui/src/kmet/tui/components/container.clj:9-11`),
-  and the layout nests chat → chat-container → document-container → TUI. A `[width
-  child-identity] → lines` cache makes unchanged containers return their previous vector.
-  Open design question: a pure identity cache is stale as soon as a reactive child re-derives,
-  so the cache has to be invalidated from the frame hook (`component/set-frame-hook!`) or it
-  belongs on the reaction, not the container. In the same path, quiet mode re-parses every
-  user message's content with `skill-block/parse` on each pass — compute it once at insertion.
+- ~~**The flat document is rebuilt at every container level**~~ **fixed**: children are
+  flattened through `protocols/concat-cached`, a per-instance memo (`Container`'s
+  `:lines-cache`, `ChatHistoryComponent :lines-cache`, `Box`'s `:cache`, the frame's
+  per-run `document-cache`) that hands back the previous line vector — the same object,
+  so the parent hits too — while every child returns the object it returned last pass.
+  The key holds the assembly's non-child inputs (`[width]` for a container; geometry and
+  a background sample for a Box), so a re-derived child is a miss: no invalidation hook,
+  no parent link, and no staleness when a reactive child re-derives. Grouping separators
+  are parts (one shared `[""]`), so a quiet-run regrouping can only show up as a changed
+  parts sequence. `Container.render` no longer calls `render-all`, and `join-lines` is
+  the one join (a single part is returned as-is). Measured (Termux/bb, 9k-line
+  transcript, 4 nesting levels): idle compose 3.44 → 1.91 ms, keystroke 4.33 →
+  2.10 ms; the frame pass then sees the identical document and takes its
+  unchanged-document fast paths. Retained cost is one pointer array per memoized level
+  (~8 bytes/line; no line text is copied) and dies with the component or the loop run.
+  The quiet-mode re-parse went with it: `skill-block/parse` ran per user message per
+  pass (105 µs for a 3 KB block — a transcript with a dozen skill invocations burned
+  milliseconds every frame); the parse now happens once in `chat-history-add-message!`
+  and rides the message map as `:skill-block` (stripped by `chat-history-get-messages`).
 - ~~**`run-render-loop!` is ~720 lines**~~ **fixed**: the frame moved to `kmet.tui.frame`
   (`render-frame!` + the document/diff/emit passes over an explicit frame-state map); the loop
   is now 193 lines of lifecycle, timers, lock and schedule, and `test_frame` drives one frame
@@ -333,7 +344,7 @@ Four of the small items are done; the three structural ones stand.
 3. ~~Then the lifecycle fix with a test asserting empty root after unload: 9.~~ done.
 4. ~~Then robustness: 4, 10, 11, and the TUI guard (13), plus the TUI `!` path's nil exit
    code~~ all done, 7 and 5 with item 1.
-5. Structural work (14) as its own series: the small items and the frame extraction are
-   done. Left: the container cache (still needs an invalidation design that survives a
-   reactive child re-deriving — see §14), the frame-state atom, the per-instance lock;
-   re-locate the MCP reload duplication.
+5. Structural work (14) as its own series: the small items, the frame extraction and
+   the lines cache (container/Box/chat-history/document memo plus the quiet-mode parse
+   hoist) are done. Left: the frame-state atom, the per-instance lock; re-locate the
+   MCP reload duplication (`handle-refresh` vs `reload-config!` in the MCP adapter).
