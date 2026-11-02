@@ -1032,6 +1032,11 @@
                  prompt, when it settles (not on cancel or terminal error,
                  and not between the attempts of one prompt)
      :on-error — (fn [error]) error callback
+     :on-settle — (fn []) the prompt's ownership boundary: runs once on every
+                 path (settled, error, abort, a prompt that cannot start),
+                 after the settle boundary and before :agent-settled. The
+                 caller that claimed the run's flag releases it here, so a
+                 handler reading the flag on :agent-settled sees the turn over
 
    Loop structure (mirrors pi):
      attempt: drain follow-up queue → continue inner
@@ -1061,7 +1066,7 @@
    :aborted when the cancel signal fired; a prompt that cannot start also
    settles, with :error).
    Returns: future that completes when the prompt is done."
-  [agent {:keys [message images on-text on-thinking on-done on-error]}]
+  [agent {:keys [message images on-text on-thinking on-done on-error on-settle]}]
   (state/set-run-signal! agent false)
   (let [provider @(:provider agent)
         api-key (completion/resolve-api-key agent)
@@ -1089,6 +1094,7 @@
             (reset! (:last-outcome agent) :error)
             (state/emit agent {:type :error :message reason})
             (settle-boundary! agent)
+            (when on-settle (on-settle))
             (state/emit agent {:type :agent-settled :outcome :error}))
           (future))
       ;; Bind the run's cancel signal for the whole prompt: it conveys into the
@@ -1204,6 +1210,11 @@
                 ;; ended: a fired cancel signal is :aborted, otherwise the
                 ;; last turn's outcome.
                 (settle-boundary! agent)
+                ;; the prompt's ownership boundary: after the drain (a queued
+                ;; submit applies at the boundary, not beside it) and before
+                ;; the settle event (a handler reading the flag must see the
+                ;; turn over)
+                (when on-settle (on-settle))
                 (state/emit agent {:type :agent-settled
                                    :outcome (if @(:signal agent)
                                               :aborted

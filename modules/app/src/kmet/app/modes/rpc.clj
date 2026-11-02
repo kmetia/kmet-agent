@@ -273,15 +273,18 @@
    abort). An idle abort is a no-op: cancel! would drop nothing and report an
    abort that never happened.
 
-   The answer is a read, not a wait. The handle's cancel drops the turn flag
-   on the calling thread, so this mode answers `:idle true` by the time the
-   cancel returns; a front end whose cancel is only a request reports `:idle
-   false`, and the client waits for `:agent-settled` — the same rule a prompt's
-   `:started` follows. A manual compaction is cancelled too, as kmet1's abort
-   did — it is work nobody waits for once the client asks to stop — while the
-   answer's `:idle` speaks for the turn. kmet1 then waited (bounded) for idle;
-   a wait here would be the reader thread's time, which is the one thread an
-   abort must not occupy."
+   The answer is a read, not a wait, and a cancel is a request: the run itself
+   releases the turn flag in its settle path (after the settle boundary,
+   before :agent-settled). An abort of a live run therefore answers whatever
+   the flag reads at that moment — `:idle false` while the run unwinds, `:idle
+   true` when the delivered cancel settled it first — and either way the client
+   waits for `:agent-settled`, the same rule a prompt's `:started` follows. A
+   compaction-only abort answers `:idle true`: no run owns the flag.
+   A manual compaction is cancelled too, as kmet1's abort did — it is work
+   nobody waits for once the client asks to stop — while the answer's `:idle`
+   speaks for the turn. kmet1 then waited (bounded) for idle; a wait here would
+   be the reader thread's time, which is the one thread an abort must not
+   occupy."
   [{:keys [agents handle]} _command]
   (let [working? (or (runtime/turn-running? handle) (runtime/compacting? handle))]
     (when working? ((:cancel! agents) handle {:kind :user}))

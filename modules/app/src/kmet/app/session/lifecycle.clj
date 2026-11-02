@@ -120,42 +120,89 @@
   [ctx event]
   (boolean (:cancel (events/emit! ctx event))))
 
+(def cancel-grace-ms
+  "How long a cancelled run may keep the turn flag before the watchdog releases
+   it. The loop's own waits are signal-aware — the in-flight call is delivered
+   as :cancelled, the backoff polls the signal, bash kills its tree — but a
+   tool whose future ignores the abort blocks the batch await, and an agent
+   wedged on its flag is worse than a logged forced settle."
+  10000)
+
+(defn- watch-cancel!
+  "Release the turn flag of a cancelled run that never settles: poll TOKEN's
+   ownership and give up as soon as the run releases it (or the grace runs
+   out). Only a run that is still the owner is force-released, so a newer run
+   can never be affected."
+  [engine token]
+  (concurrent/spawn
+   (fn []
+     (let [deadline (+ (concurrent/monotonic-ms) cancel-grace-ms)]
+       (loop []
+         (when (and (identical? token (runtime/turn-token engine))
+                    (< (concurrent/monotonic-ms) deadline))
+           (Thread/sleep 50)
+           (recur)))
+       (when (and (identical? token (runtime/turn-token engine))
+                  (runtime/release-turn! engine token))
+         (debug/log "cancelled run did not settle within " cancel-grace-ms
+                    "ms; released its turn flag"))))))
+
 (defn cancel-run!
   "Cancel the in-flight run, if any (pi: abort): abort the loop's turn, which
    delivers its promise as :cancelled, clears the queues with :reason
-   :aborted and settles the run with :outcome :aborted, then drop the turn
-   flag. The flag stays set until the abort returns, so a submission arriving
-   concurrently queues behind the run being cancelled instead of starting a
-   second one over the same agent. Returns nil. Both drivers cancel through
-   this."
+   :aborted and settles the run with :outcome :aborted. The turn flag stays
+   with the run: its :on-settle callback releases it, so a submission arriving
+   during the abort queues behind the run instead of starting a second one
+   over the same agent, and the flag drops exactly when the run has unwound.
+   `watch-cancel!` releases it anyway if the run never gets there. Returns
+   nil. Both drivers cancel through this."
   [engine]
   (agent/cancel-turn (runtime/agent-state engine))
-  (reset! (:turn-running? engine) false)
+  (when-let [token (runtime/turn-token engine)]
+    (watch-cancel! engine token))
   nil)
+
+(def switch-settle-ms
+  "How long a session switch waits for a cancelled run to unwind, its pending
+   bash results to drain and its compaction to finish. On expiry the switch
+   abandons the run: the flag is released here rather than left to the cancel
+   watchdog, so the session it swaps in starts idle (the abandoned run's own
+   settle is then a no-op, and the cancel signal stays set so it cannot start
+   new work)."
+  3000)
 
 (defn- settle-for-switch!
   "Settle an in-flight turn and compaction before a session swap so the
    aborted work persists to the outgoing session and cannot race the swap;
-   waits (bounded, 3s) for the pending bash results to drain and for the
-   compaction to finish. Clears the cancel signal when everything settled."
+   waits (bounded by `switch-settle-ms`) for the cancelled run to unwind, its
+   pending bash results to drain, and the compaction to finish. A run that
+   does not get there is abandoned by the swap. Clears the cancel signal when
+   everything settled."
   [engine]
   (let [ag (runtime/agent-state engine)
         was-running (runtime/turn-running? engine)]
     (when was-running
-      ;; cancel-run! drops the turn flag too: a cancelled run never runs the
-      ;; wrapped :on-done
       (cancel-run! engine))
     (when @(:compacting? ag)
       (reset! (:signal ag) true))
-    (let [deadline (+ (concurrent/monotonic-ms) 3000)]
+    (let [deadline (+ (concurrent/monotonic-ms) switch-settle-ms)]
       (loop []
-        (when (and (or (seq @(:pending-bash ag)) @(:compacting? ag))
+        (when (and (or (runtime/turn-running? engine)
+                       (seq @(:pending-bash ag))
+                       @(:compacting? ag))
                    (< (concurrent/monotonic-ms) deadline))
           (Thread/sleep 10)
           (recur))))
-    (when (and (not @(:compacting? ag))
-               (empty? @(:pending-bash ag)))
-      (reset! (:signal ag) false))
+    (let [settled? (not (runtime/turn-running? engine))]
+      (when (and settled? (not @(:compacting? ag)) (empty? @(:pending-bash ag)))
+        (reset! (:signal ag) false))
+      (when-not settled?
+        ;; the swap abandons the run, so its flag must not outlive it; the
+        ;; signal stays set, so the abandoned run cannot start new work
+        (when-let [token (runtime/turn-token engine)]
+          (runtime/release-turn! engine token)
+          (debug/log "session switch abandoned a run that did not settle within "
+                     switch-settle-ms "ms"))))
     was-running))
 
 (defn new-session!

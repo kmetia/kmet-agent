@@ -18,7 +18,9 @@
             [kmet.ai.models :as models]
             [kmet.app.agents :as agents]
             [kmet.app.extensions :as host]
+            [kmet.app.loop :as loop]
             [kmet.app.loop.driver :as driver]
+            [kmet.app.session.lifecycle :as lifecycle]
             [kmet.app.permissions :as permissions]
             [kmet.app.projections :as projections]
             [kmet.app.registries :as registries]
@@ -263,6 +265,79 @@
           (is (= :idle ((:status agents) handle))
               "and the run has settled")))
       gate)))
+
+(deftest a-cancelled-run-keeps-the-flag-until-it-settles
+  ;; The turn flag belongs to the run: cancel delivers the abort, and the run
+  ;; releases the flag in its :on-settle callback. A submission in between
+  ;; queues instead of starting a second run over the same agent.
+  (let [{:keys [root agents]} (mounted)
+        settle (promise)
+        handle (create! {:root root :agents agents})]
+    (with-redefs [loop/run-agent-turn (fn [_agent {:keys [on-settle]}]
+                                        (deliver settle on-settle)
+                                        (future))]
+      ((:send! agents) handle "first" {:target :next-turn})
+      (is (= :running ((:status agents) handle)))
+      ((:cancel! agents) handle nil)
+      (is (= :running ((:status agents) handle))
+          "a cancelled run keeps the flag until it has unwound")
+      ((:send! agents) handle "second" {:target :next-turn})
+      (is (= ["second"] @(:follow-up (:agent handle)))
+          "a submission during the abort queues behind the dying run")
+      ((deref settle))
+      (is (= :idle ((:status agents) handle))
+          "the run's own settle takes the flag with it"))))
+
+(deftest an-old-runs-settle-cannot-release-a-newer-run
+  ;; The reported defect: a cancelled run's late settle cleared whatever run
+  ;; held the flag next. The claim is a token, so only its owner releases it.
+  (let [{:keys [root agents]} (mounted)
+        settles (atom [])
+        handle (create! {:root root :agents agents})]
+    (with-redefs [loop/run-agent-turn (fn [_agent {:keys [on-settle]}]
+                                        (swap! settles conj on-settle)
+                                        (future))]
+      ((:send! agents) handle "first" {:target :next-turn})
+      ((@settles 0))
+      (is (= :idle ((:status agents) handle)))
+      ((:send! agents) handle "second" {:target :next-turn})
+      (is (= :running ((:status agents) handle)) "a new run claims the flag")
+      ((@settles 0))
+      (is (= :running ((:status agents) handle))
+          "the old run's second settle is a no-op, not a clear"))))
+
+(deftest a-run-releases-its-flag-before-the-settle-event
+  ;; The TUI's teardown and its background-status revival both read the flag
+  ;; from an :agent-settled handler, so the release has to happen first.
+  (let [{:keys [root agents]} (mounted)
+        seen (atom [])
+        handle (create! {:root root :agents agents})
+        unsubscribe (events/on! root :agent-settled
+                                (fn [_] (swap! seen conj ((:status agents) handle))))]
+    (try
+      (with-stubbed-llm
+        (fn [_calls]
+          ((:send! agents) handle "hello" {:target :next-turn})
+          ((:when-idle agents) handle)
+          (is (= [:idle] @seen)
+              "the settle handler already sees the turn as over")))
+      (finally (unsubscribe)))))
+
+(deftest ^:slow a-run-that-never-settles-is-released-anyway
+  ;; A tool whose future ignores the abort blocks the batch await, so the run
+  ;; may never settle. The watchdog releases that run's flag — and only that
+  ;; run's — after the grace.
+  (let [{:keys [root agents]} (mounted)
+        handle (create! {:root root :agents agents})]
+    (with-redefs [loop/run-agent-turn (fn [_agent _opts] (future))
+                  lifecycle/cancel-grace-ms 50]
+      ((:send! agents) handle "first" {:target :next-turn})
+      (is (= :running ((:status agents) handle)))
+      ((:cancel! agents) handle nil)
+      (is (= :running ((:status agents) handle))
+          "the abort alone does not release the flag")
+      (is (support/wait-until #(= :idle ((:status agents) handle)) 2000)
+          "the watchdog does, when the run never gets there"))))
 
 (deftest disposal-cancels-the-run
   (let [{:keys [root agents]} (mounted)

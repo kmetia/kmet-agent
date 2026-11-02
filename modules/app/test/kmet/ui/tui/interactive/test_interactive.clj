@@ -21,6 +21,7 @@
             [kmet.app.events :as events]
             [kmet.app.extensions.rows :as extension-rows]
             [kmet.app.loop.state :as loop-state]
+            [kmet.app.session.lifecycle :as lifecycle]
             [kmet.app.loop :as agent]
             [kmet.app.session.core :as session]
             [kmet.ui.tui.bash-execution :as bash-execution]
@@ -129,10 +130,12 @@
                         :session-shutdown
                         (fn [ev] (swap! shutdown-events conj ev)))]
       (try
-           ;; a live turn: /new settles it and the runtime drops its turn flag
-           ;; (a cancelled run never reaches the wrapped :on-done)
+           ;; a live turn: /new cancels it, and the swap abandons a run that
+           ;; does not settle within the switch's grace — the flag belongs to
+           ;; the run, so the swap and the cancel watchdog are what release it
         (reset! (:turn-running? handle) true)
-        ((var session-admin/handle-new-session) cs)
+        (with-redefs [lifecycle/switch-settle-ms 20]
+          ((var session-admin/handle-new-session) cs))
         (is (false? (runtime/turn-running? handle))
             "/new settles the runtime turn flag")
         (let [ag' (runtime/agent-state handle)

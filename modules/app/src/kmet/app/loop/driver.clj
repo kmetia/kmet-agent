@@ -301,7 +301,11 @@
                                   (when (= :agent-settled (:type ev))
                                     (manual/start-pending-compactions! @engine-ref)))})
         live (atom state)
-        running? (atom false)
+        ;; nil while idle, else the token of the run that owns the flag:
+        ;; the run claims it before starting and releases it in its settle
+        ;; callback, so a cancelled run's late settle cannot clear a newer
+        ;; run's claim (runtime/claim-turn!, release-turn!)
+        running? (atom nil)
         last-run (atom nil)
         disposed? (atom false)
         ;; the front end's value over the agent state: the same field atoms a
@@ -330,7 +334,7 @@
                  :pending-ui (atom {})
                  :run-callbacks (atom nil)})]
     (reset! engine-ref engine)
-    (letfn [(settle! [] (reset! running? false))
+    (letfn [(settle! [token] (runtime/release-turn! engine token))
             (queue! [text target]
               (if (= :next-step target)
                 (loop-state/steer! @live text)
@@ -446,23 +450,26 @@
             ;; agent it is running inside, not the process's last install.
             (start! [text images]
               (boolean
-               (when (compare-and-set! running? false true)
-                 (try
-                   (binding [extensions/*agent-context*
-                             {:session #(runtime/session engine)
-                              :runtime (extension-runtime)
-                              :context extension-context
-                              :front-end (some-> (:front-end engine) deref)}]
-                     (reset! last-run
-                             (loop/run-agent-turn
-                              @live
-                              {:message text
-                               :images images
-                               :on-done (fn [_] (settle!))
-                               :on-error (fn [_] (settle!))})))
-                   (catch Throwable t
-                     (settle!)
-                     (throw t))))))]
+               (let [token (Object.)]
+                 (when (runtime/claim-turn! engine token)
+                   (try
+                     (binding [extensions/*agent-context*
+                               {:session #(runtime/session engine)
+                                :runtime (extension-runtime)
+                                :context extension-context
+                                :front-end (some-> (:front-end engine) deref)}]
+                       (reset! last-run
+                               (loop/run-agent-turn
+                                @live
+                                {:message text
+                                 :images images
+                                 ;; the run's own settle: after the settle
+                                 ;; boundary, before :agent-settled, so a
+                                 ;; handler reading the flag sees the turn over
+                                 :on-settle (fn [] (settle! token))})))
+                     (catch Throwable t
+                       (settle! token)
+                       (throw t)))))))]
       (-> engine
           (assoc
            :id id

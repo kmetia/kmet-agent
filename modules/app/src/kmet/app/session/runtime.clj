@@ -196,14 +196,34 @@
 
 (defn turn-running?
   "True while a prompt started by `prompt!` has not settled. The runtime
-   owns the flag: it is set synchronously by `prompt!` (or a handle's
+   owns the flag: it is claimed synchronously by `prompt!` (or a handle's
    `start!`) so a second submission steers instead of starting a concurrent
-   run, and cleared by `cancel!` and by the settle path — `prompt!`'s wrapped
-   :on-done/:on-error for an engine, a handle's `settle!` before it emits
-   :agent-settled — so a callback interleaved with a background status revival
-   can never see a settled turn as running."
+   run, and released by the run that claimed it — its `:on-settle` callback,
+   which fires after the settle boundary and before :agent-settled — so a
+   callback interleaved with a background status revival can never see a
+   settled turn as running, and no later run can clear an older run's flag."
   [engine]
   (boolean (some-> engine :turn-running? deref)))
+
+(defn turn-token
+  "The token of the run that owns ENGINE's turn flag, or nil while idle."
+  [engine]
+  (some-> engine :turn-running? deref))
+
+(defn claim-turn!
+  "Claim ENGINE's turn flag for TOKEN: true when this call took an idle flag,
+   false when a run already owns it — the claim is what decides which
+   submission starts a run. Idle is any falsey value (nil, or a bare engine's
+   `false`); a claim stores the token, which every reader treats as running."
+  [engine token]
+  (let [[owner _] (swap-vals! (:turn-running? engine) #(or % token))]
+    (not owner)))
+
+(defn release-turn!
+  "Release ENGINE's turn flag when TOKEN still owns it: a cancelled or
+   superseded run cannot clear a newer run's flag. Returns true when released."
+  [engine token]
+  (compare-and-set! (:turn-running? engine) token nil))
 
 (defn queues [engine] (loop-state/queued-messages (agent-state engine)))
 
