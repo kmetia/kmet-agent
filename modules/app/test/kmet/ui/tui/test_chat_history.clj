@@ -10,6 +10,7 @@
             [kmet.ui.tui.bash-execution :as be]
             [kmet.ui.tui.tool-execution :as te]
             [kmet.ui.tui.chat-history :as ch]
+            [kmet.app.skill-block :as skill-block]
             [kmet.test-utils :as tu]))
 
 (defn- history
@@ -1009,3 +1010,67 @@
             (is (some #(re-find #"\[Image: \[image/png\]" %) lines)
                 "the attached image renders")))
         (finally (timg/set-capabilities! prev-caps))))))
+(deftest test-render-reuses-unchanged-transcript-lines
+  (testing "an idle transcript returns the vector it returned last pass"
+    (let [ch (history)]
+      (ch/chat-history-add-message! ch {:role :user :content "hello"})
+      (ch/chat-history-add-message! ch {:role :tool :name "first-tool" :content "a"})
+      (let [f1 (protocols/render ch 40)
+            f2 (protocols/render ch 40)]
+        (is (identical? f1 f2) "no line copying while no message changed"))
+      (testing "a new message is never served stale"
+        (ch/chat-history-add-message! ch {:role :assistant :content "reply"})
+        (let [f3 (protocols/render ch 40)]
+          (is (some #(re-find #"reply" %) f3)))))))
+
+(deftest test-quiet-regrouping-updates-a-memoized-transcript
+  ;; a live message map can gain :tool-calls? without its component's output
+  ;; changing; the grouping of the messages AFTER it changes, so the
+  ;; transcript's line cache must not serve the previous order
+  (testing "a silent tool-call assistant absorbs the following tool into its run"
+    (let [ch (ch/make-chat-history :tool-display-mode :quiet)]
+      (ch/chat-history-add-message! ch {:role :tool :name "first-tool" :content "a"})
+      (ch/chat-history-start-streaming! ch)
+      (ch/chat-history-add-message! ch {:role :tool :name "second-tool" :content "b"})
+      (let [before (plain-lines ch 40)
+            idx (fn [re] (first (keep-indexed #(when (re-find re %2) %1) before)))
+            second-i (idx #"second-tool")]
+        (is (= "" (nth before (dec second-i)))
+            "the run is broken while the assistant has no tool calls"))
+      (ch/chat-history-mark-streaming-tool-calls! ch)
+      (let [after (plain-lines ch 40)
+            idx (fn [re] (first (keep-indexed #(when (re-find re %2) %1) after)))
+            second-i (idx #"second-tool")]
+        (is (not= "" (nth after (dec second-i)))
+            "the run now continues — not the previous, memoized grouping")
+        (is (some #(re-find #"first-tool" %) after))))))
+
+(deftest test-clear-drops-the-lines-memo
+  (let [ch (history)]
+    (ch/chat-history-add-message! ch {:role :user :content "hello"})
+    (protocols/render ch 40)
+    (is (some? @(:lines-cache ch)) "a render memoizes the transcript")
+    (ch/chat-history-clear! ch)
+    (is (nil? @(:lines-cache ch)) "the cleared messages' lines are not retained")))
+
+(deftest test-skill-block-parsed-at-insertion
+  (let [block "<skill name=\"demo\" location=\"/x/SKILL.md\">\nbody here\n</skill>"]
+    (testing "the parse rides on the message map, once, at insertion"
+      (let [ch (history)]
+        (ch/chat-history-add-message! ch {:role :user :content block})
+        (let [m (first @(:messages-atom ch))]
+          (is (= "demo" (:name (:skill-block m))))
+          (is (= "body here" (:content (:skill-block m)))))))
+    (testing "a render pass parses no skill block"
+      (let [ch (history :tool-display-mode :quiet)]
+        (ch/chat-history-add-message! ch {:role :user :content block})
+        (protocols/render ch 40)
+        (let [calls (atom 0)
+              orig skill-block/parse]
+          (with-redefs [skill-block/parse (fn [text] (swap! calls inc) (orig text))]
+            (protocols/render ch 40))
+          (is (zero? @calls)))))
+    (testing "the derived key never reaches the persisted shape"
+      (let [ch (history)]
+        (ch/chat-history-add-message! ch {:role :user :content block})
+        (is (nil? (:skill-block (first (ch/chat-history-get-messages ch)))))))))

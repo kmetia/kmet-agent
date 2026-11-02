@@ -45,6 +45,16 @@
 
 (declare content->user-text)
 
+(defn- message-skill-block
+  "The parsed skill invocation on a message map, or nil. Attached once when
+   a user message enters the transcript (:skill-block, see with-skill-block);
+   a map built directly by a test or an extension is parsed here instead.
+   Never parsed on a render pass: the block is immutable message data."
+  [m]
+  (if (contains? m :skill-block)
+    (:skill-block m)
+    (skill-block/parse (content->user-text (:content m "")))))
+
 (defn- full-skill-block-role?
   "True when a :user message renders as a BARE skill invocation (its
    content parses as a skill block with no trailing user message) — in
@@ -55,8 +65,7 @@
   [m]
   (and (= :user (:role m))
        (boolean
-        (when-let [block (skill-block/parse
-                          (content->user-text (:content m "")))]
+        (when-let [block (message-skill-block m)]
           (empty? (:user-message block))))))
 
 (defn- silent-tool-call-assistant?
@@ -73,17 +82,32 @@
          (and (empty? (str/trim (str text)))
               (empty? (str/trim (str thinking)))))))
 
-(defn- render-messages
-  "Render message components. A user message that follows any earlier
-   content gets a leading blank line (the Spacer(1) the old container
-   model stored explicitly). The info banner counts as earlier content,
-   so the first user message after the banner gets the same separator as
-   subsequent ones — the banner's box padding alone doesn't read as a
-   visible gap between two boxed messages. In quiet mode a tool run
-   renders as bare grouped lines (no per-entry separator of its own),
-   so the separator moves here: a quiet run-opening entry gets the blank
-   line, while continuation lines inside the run render with no separator.
-   A :user message that renders as a bare skill invocation joins the run."
+(def ^:private separator-lines
+  "The blank line that opens a message group — ONE shared object, so a
+   separator is a part whose identity never changes (the transcript's lines
+   cache reads part identity)."
+  [""])
+
+(defn- message-parts
+  "The transcript's parts, in render order: separator-lines (when a message
+   needs a leading blank line) then the message component's own line vector.
+
+   A user message that follows any earlier content gets a leading blank line
+   (the Spacer(1) the old container model stored explicitly). The info banner
+   counts as earlier content, so the first user message after the banner gets
+   the same separator as subsequent ones — the banner's box padding alone
+   doesn't read as a visible gap between two boxed messages. In quiet mode a
+   tool run renders as bare grouped lines (no per-entry separator of its
+   own), so the separator moves here: a quiet run-opening entry gets the
+   blank line, while continuation lines inside the run render with no
+   separator. A :user message that renders as a bare skill invocation joins
+   the run.
+
+   The separator is a PART, not a join rule: the grouping decision then can
+   only change the result by changing the parts sequence, so the transcript's
+   line cache (protocols/concat-cached, keyed on [width]) cannot serve a
+   stale order — including a live message map flipping :tool-calls?, which
+   changes how the NEXT message's run is opened."
   [msgs width banner-present? quiet?]
   (persistent!
    (loop [msgs msgs, seen-any? banner-present?, in-quiet-run? false, acc (transient [])]
@@ -101,10 +125,10 @@
              run-open? (and run-member? (not in-quiet-run?))
              sep? (or (and (= :user (:role m)) seen-any? (not run-member?))
                       run-open?)
-             acc (if sep? (conj! acc "") acc)]
+             acc (if sep? (conj! acc separator-lines) acc)]
          (recur (rest msgs) true
                 (if invisible? in-quiet-run? run-member?)
-                (reduce conj! acc lines)))
+                (conj! acc lines)))
        acc))))
 
 ;; ─── ChatHistoryComponent record ───────────────────────────────────────────
@@ -128,17 +152,26 @@
                tools-expanded-atom   ;; tool display mode: :collapsed | :expanded | :quiet
                                       ;; (pi: toolOutputExpanded, extended with quiet)
                thinking-hidden-atom  ;; flag: thinking blocks hidden (pi: hideThinkingBlock)
-               hidden-label-atom]    ;; label shown in place of hidden thinking (pi: hiddenThinkingLabel)
+               hidden-label-atom     ;; label shown in place of hidden thinking (pi: hiddenThinkingLabel)
+               lines-cache]          ;; render memo (protocols/concat-cached)
 
   (render [_this width]
+    ;; Every message component renders once per pass (its own cache decides
+    ;; whether that is cheap); the flat transcript is reused while the
+    ;; children return the objects they returned last pass, so an idle
+    ;; transcript costs a pass over the messages and no line copying. The
+    ;; parts sequence carries the group separators too, so a grouping change
+    ;; (a quiet-run break, a banner appearing) is a changed parts sequence
+    ;; and never a stale join.
     (let [msgs @messages-atom
           info-lines (when-let [i @info-comp-atom] (protocols/render i width))
-          msg-lines (render-messages msgs width (some? @info-comp-atom) (= :quiet @tools-expanded-atom))]
-      ;; Without a banner (the common case) return the flat message vector
-      ;; directly — copying the whole transcript again here is pure waste.
-      (if (seq info-lines)
-        (into (vec info-lines) msg-lines)
-        msg-lines)))
+          parts (message-parts msgs width (some? @info-comp-atom) (= :quiet @tools-expanded-atom))
+          parts (if info-lines (into [info-lines] parts) parts)
+          {:keys [lines cache]}
+          (protocols/concat-cached
+           (when lines-cache @lines-cache) [width] parts)]
+      (when lines-cache (reset! lines-cache cache))
+      lines))
 
   (dispose [_this]
     ;; tui-clear/container disposal must cascade into the messages, or a
@@ -182,7 +215,8 @@
                               :streaming-atom (atom nil)
                               :tools-expanded-atom (atom (normalize-tool-display-mode tool-display-mode))
                               :thinking-hidden-atom (atom (boolean thinking-hidden))
-                              :hidden-label-atom (atom "Thinking...")}))
+                              :hidden-label-atom (atom "Thinking...")
+                              :lines-cache (atom nil)}))
 
 ;; ─── Adding messages ──────────────────────────────────────────────────────
 
@@ -271,12 +305,17 @@
    SkillInvocationMessageComponent). Attached image blocks render inline."
   [msg output-pad-atom tools-expanded-atom]
   (let [text (content->user-text (:content msg ""))
+        ;; parsed once at insertion (with-skill-block); a directly built
+        ;; message map is parsed here instead — never per render pass
+        block (if (contains? msg :skill-block)
+                (:skill-block msg)
+                (skill-block/parse text))
         ;; live messages carry image blocks inside :content; the session
         ;; replay path attaches them as the message's :images (its content is
         ;; already flattened to text) — accept both
         images (into (vec (:images msg))
                      (image-block/content-images (:content msg)))]
-    (if-let [block (skill-block/parse text)]
+    (if block
       (let [args (:user-message block)]
         (skill-message/make-skill-invocation-message
          :skill-block block
@@ -448,13 +487,24 @@
            msg)
     msg))
 
+(defn- with-skill-block
+  "Attach the parsed skill invocation to a user message ONCE, as it enters
+   the transcript: rendering and quiet-mode run grouping read :skill-block
+   instead of re-parsing the (immutable) content on every pass. Plain user
+   messages get nil, which is what the readers expect — the key's presence
+   is what marks the parse as done."
+  [msg]
+  (if (= :user (:role msg))
+    (assoc msg :skill-block (skill-block/parse (content->user-text (:content msg ""))))
+    msg))
+
 (defn chat-history-add-message!
   "Add a message to the chat history.
    Creates the appropriate component and appends the message map (with its
    :component, plus assistant content atoms) to messages-atom. Returns the
    created component (or nil)."
   [ch msg]
-  (let [msg (with-assistant-data msg)
+  (let [msg (with-skill-block (with-assistant-data msg))
         comp (make-component-for-msg msg (message-context ch))]
     (when comp
       (swap! (:messages-atom ch) conj (assoc msg :component comp)))
@@ -466,7 +516,7 @@
    that belongs above the assistant response. Falls back to appending when
    no streaming message exists. Returns the created component (or nil)."
   [ch msg]
-  (let [msg (with-assistant-data msg)
+  (let [msg (with-skill-block (with-assistant-data msg))
         comp (make-component-for-msg msg (message-context ch))
         streaming @(:streaming-atom ch)]
     (when comp
@@ -783,7 +833,10 @@
     (try (protocols/dispose info) (catch Exception _)))
   (reset! (:messages-atom ch) [])
   (reset! (:info-comp-atom ch) nil)
-  (reset! (:streaming-atom ch) nil))
+  (reset! (:streaming-atom ch) nil)
+  ;; the memo holds the cleared messages' line vectors — drop it with them
+  (when-let [cache (:lines-cache ch)]
+    (reset! cache nil)))
 
 (defn tool-result-call-id
   "The tool-call id a :tool result message answers — the first
@@ -902,9 +955,9 @@
    read directly from messages-atom (no component reverse-engineering).
    Includes the info banner first (its :images carried through); excludes
    bash executions (!! / !), status lines and derived notice lines, which
-   are UI-only, and strips the :component/:streaming? keys plus live
-   assistant content atoms (dereferenced into plain :content/:thinking
-   values)."
+   are UI-only, and strips the :component/:streaming? keys, the derived
+   :skill-block parse, plus live assistant content atoms (dereferenced into
+   plain :content/:thinking values)."
   [ch]
   (->> (concat
         (when-let [info @(:info-comp-atom ch)]
@@ -917,7 +970,8 @@
        ;; deref live assistant content atoms (mid-stream reads); finalized
        ;; and replayed messages carry plain strings already
        (mapv (fn [{:keys [text-atom thinking-atom] :as m}]
-               (cond-> (dissoc m :component :streaming? :text-atom :thinking-atom)
+               (cond-> (dissoc m :component :streaming? :text-atom :thinking-atom
+                               :skill-block)
                  text-atom (assoc :content @text-atom)
                  thinking-atom (assoc :thinking @thinking-atom))))))
 
