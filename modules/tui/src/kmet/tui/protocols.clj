@@ -67,9 +67,11 @@
    list them as parts (one shared, identity-stable vector) rather than
    inside JOIN-FN — then a changed separator is a changed parts sequence.
 
-   Returns {:lines <vector> :cache <next PREV>}. Holds one reference per
-   part and one line vector, the same objects the result already
-   references, so an unchanged document costs no per-frame allocation."
+   Returns {:lines <vector> :cache <next PREV>}. The memo holds one pointer
+   array per part plus the joined vector itself — pointer arrays only, the
+   line strings are shared with the parts and never copied — and a hit
+   returns the stored memo unchanged, so an unchanged document costs no
+   per-frame allocation."
   ([prev key parts] (concat-cached prev key parts join-lines))
   ([prev key parts join-fn]
    (let [parts (if (vector? parts) parts (vec parts))

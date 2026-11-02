@@ -48,7 +48,8 @@
                  [width content-width padding-x padding-y bg-sample]
                  (mapv (fn [c] (protocols/render c content-width)) children)
                  (fn [parts] (box-lines parts left-pad bg-fn-val padding-y width)))]
-          (reset! cache (:cache r))
+          (when-not (identical? (:cache r) @cache)
+            (reset! cache (:cache r)))
           (:lines r)))))
   (invalidate [this]
     (reset! (:cache this) nil)

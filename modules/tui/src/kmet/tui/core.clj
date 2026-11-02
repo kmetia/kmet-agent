@@ -1997,7 +1997,8 @@
   (let [{:keys [lines cache]}
         (protocols/render-all-cached
          (when document-cache @document-cache) [w] @(:components tui) w)]
-    (when document-cache (reset! document-cache cache))
+    (when (and document-cache (not (identical? cache @document-cache)))
+      (reset! document-cache cache))
     (composite-overlays tui lines w h)))
 
 (defn- run-render-loop!

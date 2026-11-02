@@ -170,7 +170,9 @@
           {:keys [lines cache]}
           (protocols/concat-cached
            (when lines-cache @lines-cache) [width] parts)]
-      (when lines-cache (reset! lines-cache cache))
+      ;; a hit returns the stored memo itself — writing it back is a no-op
+      (when (and lines-cache (not (identical? cache @lines-cache)))
+        (reset! lines-cache cache))
       lines))
 
   (dispose [_this]

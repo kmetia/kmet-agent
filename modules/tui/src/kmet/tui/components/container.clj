@@ -19,7 +19,9 @@
            (when lines-cache @lines-cache)
            [width]
            (mapv (fn [c] (protocols/render c width)) @children))]
-      (when lines-cache (reset! lines-cache cache))
+      ;; a hit returns the stored memo itself — writing it back is a no-op
+      (when (and lines-cache (not (identical? cache @lines-cache)))
+        (reset! lines-cache cache))
       lines))
   ;; pi: no handleInput on containers — input routes via TUI focus
   (invalidate [_this] (doseq [c @children] (protocols/invalidate c)))

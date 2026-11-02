@@ -772,10 +772,14 @@ requesting renders).
   must render fresh every pass), and focused input widgets (editor/input).
   A child's internal state affecting output means the parent must deref it
   too.
-- **Transparent parents flatten with `protocols/concat-cached`**, not
-  `render-all`: the children still render once per pass, but while each
-  returns the object it returned last pass the parent hands back its
-  previous line vector (identity, so the parent's parent hits too). Its key
+- **Transparent parents whose render is just a concatenation flatten with
+  `protocols/concat-cached`**, not `render-all` — `Container`, `Box` (its
+  padding/background pass as the join fn), `ChatHistory`, and the frame's
+  document compose. Stack/scroll components keep `render-all`: their
+  assembly is layout, not a join, so there is no key worth caching. The
+  children still render once per pass, but while each returns the object it
+  returned last pass the parent hands back its previous line vector
+  (identity, so the parent's parent hits too). Its key
   carries every assembly input besides the children (width, padding, a
   background sample) and a hit also needs part identity, so a child that
   re-derives is a miss — there is no invalidation protocol to get wrong. A
