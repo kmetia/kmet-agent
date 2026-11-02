@@ -16,9 +16,10 @@
    turns and sits above the UI's module.
 
    The flag discipline is the one rule worth reading twice: `turn-running?` is
-   set synchronously when a prompt starts, so a second submission steers instead
-   of starting a concurrent run — cleared by the driver's cancel and settle
-   paths, never by a reader."
+   claimed synchronously when a prompt starts, so a second submission steers
+   instead of starting a concurrent run, and only the run that claimed it
+   releases it (its `:on-settle`, the cancel watchdog, or a session switch that
+   abandons it) — never a reader, and never a newer run."
   (:require
    [babashka.fs :as fs]
    [kmet.app.compaction :as agent-compact]

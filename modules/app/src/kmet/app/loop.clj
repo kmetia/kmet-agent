@@ -1075,7 +1075,16 @@
   (let [provider @(:provider agent)
         api-key (completion/resolve-api-key agent)
         opts {:on-text on-text :on-thinking on-thinking
-              :on-error on-error}]
+              :on-error on-error}
+        ;; the prompt's ownership boundary, called from the finally and from
+        ;; the prompt that cannot start. A throw must not skip :agent-settled
+        ;; — every front end waits for it (the rule settle-boundary! follows).
+        settle-run! (fn []
+                      (when on-settle
+                        (try (on-settle)
+                             (catch Throwable t
+                               (srce/log! (:ctx agent) :error
+                                          "the run's settle callback failed" t)))))]
     (if (not (or api-key (auth/configured? provider)))
       (do (when message
             ;; The run cannot start, but the submitted message is still shown
@@ -1098,7 +1107,7 @@
             (reset! (:last-outcome agent) :error)
             (state/emit agent {:type :error :message reason})
             (settle-boundary! agent)
-            (when on-settle (on-settle))
+            (settle-run!)
             (state/emit agent {:type :agent-settled :outcome :error}))
           (future))
       ;; Bind the run's cancel signal for the whole prompt: it conveys into the
@@ -1214,11 +1223,10 @@
                 ;; ended: a fired cancel signal is :aborted, otherwise the
                 ;; last turn's outcome.
                 (settle-boundary! agent)
-                ;; the prompt's ownership boundary: after the drain (a queued
-                ;; submit applies at the boundary, not beside it) and before
-                ;; the settle event (a handler reading the flag must see the
-                ;; turn over)
-                (when on-settle (on-settle))
+                ;; after the drain (a queued submit applies at the boundary,
+                ;; not beside it) and before the settle event (a handler
+                ;; reading the flag must see the turn over)
+                (settle-run!)
                 (state/emit agent {:type :agent-settled
                                    :outcome (if @(:signal agent)
                                               :aborted

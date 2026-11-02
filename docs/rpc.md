@@ -118,7 +118,9 @@ persists the drop as an `:aborted` `:queue-update`). Send `clear-queue` first
 if the queued texts matter. A manual compaction is cancelled as well — it is
 work nobody waits for once the client asks to stop — while the answer's
 `:idle` speaks for the turn. The answer is a read of the turn flag, not a wait:
-a cancel that only requests reports `:idle false`, and the client waits for
+the run releases that flag in its own settle path, so aborting a live run
+reports whatever it reads at that moment — `:idle false` while the run unwinds,
+`:idle true` when the cancel settled it first — and the client waits for
 `:agent-settled`.
 
 ### Session

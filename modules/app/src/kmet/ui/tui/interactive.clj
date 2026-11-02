@@ -74,8 +74,8 @@
          (let [running? (runtime/turn-running? engine)]
            (when (or running? (runtime/compacting? engine))
              ((:cancel! engine) nil))
-           ;; the cancel drops the turn flag synchronously, so the run's future
-           ;; is what is waited on, not the flag
+           ;; the run releases the turn flag when it settles, so this waits on
+           ;; its future rather than on the flag
            (when running?
              ;; bounded like the old dispose!: a run whose tool future ignores
              ;; the cancel must not park teardown forever
