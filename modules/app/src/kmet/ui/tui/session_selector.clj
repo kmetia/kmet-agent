@@ -581,7 +581,8 @@
   [this delta]
   (let [n (count (:flat @(:state-atom this)))]
     (swap! (:state-atom this)
-           update :selected-idx #(fp/stepped-selected :clamp % delta n))))
+           update :selected-idx #(fp/stepped-selected :clamp % delta n))
+    nil))
 
 (defn- forward-to-search!
   "Everything that isn't a selector key goes to the search input; a changed
@@ -806,16 +807,16 @@
             (do (start-delete-confirmation! this) nil))
 
           (kb/matches-key kmgr data "tui.select.up")
-          (do (move-selection! this -1) nil)
+          (move-selection! this -1)
 
           (kb/matches-key kmgr data "tui.select.down")
-          (do (move-selection! this 1) nil)
+          (move-selection! this 1)
 
           (kb/matches-key kmgr data "tui.select.pageUp")
-          (do (move-selection! this (- max-visible)) nil)
+          (move-selection! this (- max-visible))
 
           (kb/matches-key kmgr data "tui.select.pageDown")
-          (do (move-selection! this max-visible) nil)
+          (move-selection! this max-visible)
 
           (kb/matches-key kmgr data "tui.select.confirm")
           (do (when-let [info (selected-info this)]

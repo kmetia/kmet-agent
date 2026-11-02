@@ -82,13 +82,11 @@
         ;; (pi: UserMessageList.handleInput wraps both ends; the shared
         ;; filter-panel step clamps a stale index first)
         (kb/matches-key kmgr data "tui.select.up")
-        (do (fp/select-step! selected-idx-atom :wrap -1 n)
-            nil)
+        (fp/select-step! selected-idx-atom :wrap -1 n)
 
         ;; Down — next (newer) message, wrapping to the oldest at the bottom
         (kb/matches-key kmgr data "tui.select.down")
-        (do (fp/select-step! selected-idx-atom :wrap 1 n)
-            nil)
+        (fp/select-step! selected-idx-atom :wrap 1 n)
 
         (kb/matches-key kmgr data "tui.select.confirm")
         (do (when (pos? n)

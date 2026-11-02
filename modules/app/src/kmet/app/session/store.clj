@@ -353,9 +353,18 @@
 
 (defn estimate-result-tokens
   "Estimated tokens (chars/4) of a tool entry's result.
-   Internal — used by append-entry and session.stats."
+   Internal — used by the append's :result-tokens stamp and session.stats."
   [entry]
   (quot (+ (tool-result-chars entry) 3) 4))
+
+(defn- stamp-result-tokens
+  "Stamp a tool-result entry with its estimated :result-tokens unless it
+   already carries one."
+  [entry]
+  (if (and (= :tool (:role entry))
+           (not (contains? entry :result-tokens)))
+    (assoc entry :result-tokens (estimate-result-tokens entry))
+    entry))
 
 (defn append-entry
   "Append an entry to the session atom, persisting it to the file (pi:
@@ -373,11 +382,8 @@
   [session entry]
   (with-session-lock session
     (let [entries @(:entries session)
-          entry (build-entry entries @(:leaf-id session) entry)
-          entry (if (and (= :tool (:role entry))
-                         (not (contains? entry :result-tokens)))
-                  (assoc entry :result-tokens (estimate-result-tokens entry))
-                  entry)
+          entry (-> (build-entry entries @(:leaf-id session) entry)
+                    stamp-result-tokens)
           entries (conj entries entry)
           file (:file session)]
       (if (fs/exists? file)
