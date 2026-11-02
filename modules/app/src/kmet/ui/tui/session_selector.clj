@@ -21,7 +21,6 @@
    the caller performs the restore (pi: the component emits the selection,
    interactive-mode switches the session)."
   (:require [babashka.fs :as fs]
-            [babashka.process :as proc]
             [clojure.string :as str]
             [kmet.app.keybindings :as app-kb]
             [kmet.app.session.core :as session]
@@ -260,36 +259,6 @@
     ""
     (str (apply str (map #(if % "│  " "   ") ancestor-continues))
          (if is-last "└─ " "├─ "))))
-
-;; ─── Deletion (pi: deleteSessionFile — trash CLI, unlink fallback) ─────────
-
-(defn- delete-session-file
-  "Delete a session file, trying the `trash` CLI first and falling back to
-   permanent deletion (pi: deleteSessionFile). Returns {:ok bool :method
-   :trash|:unlink :error str?}."
-  [path]
-  (let [unlink (fn [hint]
-                 (try
-                   (fs/delete path)
-                   {:ok true :method :unlink}
-                   (catch Exception e
-                     {:ok false :method :unlink
-                      :error (if hint
-                               (str (ex-message e) " (" hint ")")
-                               (ex-message e))})))
-        trash-error-hint (fn [stderr]
-                           (when-let [line (first (str/split-lines (str/trim (str stderr))))]
-                             (when (seq line)
-                               (str "trash: " (subs line 0 (min 200 (count line)))))))]
-    (if (fs/which "trash")
-      (let [args (if (str/starts-with? path "-") ["--" path] [path])
-            result (try @(proc/process (into ["trash"] args)
-                                       {:out :string :err :string})
-                        (catch Exception _ nil))]
-        (if (or (and result (zero? (:exit result))) (not (fs/exists? path)))
-          {:ok true :method :trash}
-          (unlink (some-> result :err trash-error-hint))))
-      (unlink nil))))
 
 ;; ─── State helpers ─────────────────────────────────────────────────────────
 
@@ -936,7 +905,7 @@
               :loaders (or loaders {:current (fn [_ _] []) :all (fn [_ _] [])})
               :current-session-file (some-> current-session-file canon-path)
               :rename-session-fn (or rename-session default-rename-session!)
-              :delete-session-fn (or delete-session delete-session-file)
+              :delete-session-fn (or delete-session session/delete-session-file)
               :request-render (or request-render (fn []))
               :on-select-atom (atom on-select)
               :on-cancel-atom (atom on-cancel)

@@ -1,10 +1,11 @@
 (ns kmet.app.session.test-listing
   "On-disk discovery: list-sessions and the session-info projection,
    cwd-encoded directories, candidate ordering, delete, and import."
-  (:require [clojure.test :as t]
+  (:require [clojure.test :as t :refer [testing]]
             [clojure.string :as str]
             [clojure.java.io :as io]
             [babashka.fs :as fs]
+            [babashka.process :as proc]
             [kmet.app.session.listing :as listing]
             [kmet.app.session.core :as s]
             [kmet.app.session.test-support :as support]
@@ -357,12 +358,41 @@
   (t/is (= [] (s/list-sessions-info "nonexistent-dir"))))
 
 (t/deftest test-session-delete
+  ;; The service and the resume selector share one policy (trash first,
+  ;; unlink fallback); -which is stubbed so the test never touches the
+  ;; developer's trash.
   (let [session (s/create-session support/test-dir)
         f (:file session)]
     (s/append-entry session {:role :assistant :content "hi"}) ;; persist (lazy G4)
     (t/is (.exists (io/file f)))
-    (s/delete-session! session)
+    (with-redefs [fs/which (fn [_] nil)]
+      (s/delete-session! session))
     (t/is (not (.exists (io/file f))))))
+
+(t/deftest test-session-delete-policy
+  (let [dir (test-tmp/temp-dir! "sess-del-")]
+    (try
+      (testing "no trash CLI: the file is unlinked"
+        (let [f (str (fs/path dir "s.ednl"))]
+          (spit f "x")
+          (with-redefs [fs/which (fn [_] nil)]
+            (t/is (= {:ok true :method :unlink} (s/delete-session-file f))))
+          (t/is (not (fs/exists? f)))))
+      (testing "a file already gone is a success (a concurrent delete wins)"
+        (let [missing (str (fs/path dir "gone.ednl"))]
+          (with-redefs [fs/which (fn [_] nil)]
+            (t/is (= {:ok true :method :unlink} (s/delete-session-file missing))))
+          (with-redefs [fs/which (fn [_] "/usr/bin/trash")]
+            (t/is (= {:ok true :method :trash} (s/delete-session-file missing))))))
+      (testing "a trash failure falls back to the unlink error"
+        (let [f (str (fs/path dir "locked.ednl"))]
+          (spit f "x")
+          (with-redefs [fs/which (fn [_] "/usr/bin/trash")
+                        proc/process (fn [& _] (throw (ex-info "no trash" {:type :test})))]
+            ;; the trash call throws, the file still exists, so the unlink
+            ;; runs and succeeds
+            (t/is (= {:ok true :method :unlink} (s/delete-session-file f))))))
+      (finally (fs/delete-tree dir)))))
 
 ;; ─── Import (pi: agent-session-runtime importFromJsonl) ───────────────────
 

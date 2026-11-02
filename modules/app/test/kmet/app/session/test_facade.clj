@@ -15,7 +15,8 @@
      branch-with-summary! build-context build-context-messages build-session-info
      build-session-infos clone-session common-ancestor-id compact-with-summary!
      context-edit-label context-entries context-messages copy-imported-session!
-     create-session delete-session! derive-context-settings detect-cache-miss
+     create-session delete-session! delete-session-file
+     derive-context-settings detect-cache-miss
      encode-cwd find-most-recent-session fork-from fork-session
      get-all-custom-entries get-branch get-custom-entries get-entry
      get-first-message get-label get-labels get-last-activity-ms

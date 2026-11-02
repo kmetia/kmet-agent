@@ -44,6 +44,7 @@
 (def build-session-infos listing/build-session-infos)
 (def copy-imported-session! listing/copy-imported-session!)
 (def delete-session! listing/delete-session!)
+(def delete-session-file listing/delete-session-file)
 (def find-most-recent-session listing/find-most-recent-session)
 (def list-sessions listing/list-sessions)
 (def list-sessions-info listing/list-sessions-info)

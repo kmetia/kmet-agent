@@ -4,6 +4,7 @@
    and writes the files directly; entry values and durability live in
    kmet.app.session.store."
   (:require [babashka.fs :as fs]
+            [babashka.process :as proc]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -357,11 +358,50 @@
             prefix (some #(when (str/starts-with? (:id %) arg) (:path %)) infos)]
         (or exact prefix)))))
 
+(defn delete-session-file
+  "Delete the session FILE at PATH, trying the `trash` CLI first and falling
+   back to permanent deletion (pi: deleteSessionFile). The one deletion
+   policy: the session service and the resume selector both call it, so a
+   session trashed from the selector is trashed from `/session` too.
+   Returns {:ok bool :method :trash|:unlink :error str?}; a file already gone
+   is a success (a concurrent delete wins)."
+  [path]
+  (let [unlink (fn [hint]
+                 (if-not (fs/exists? path)
+                   {:ok true :method :unlink}
+                   (try
+                     (fs/delete path)
+                     {:ok true :method :unlink}
+                     (catch Exception e
+                       {:ok false :method :unlink
+                        :error (if hint
+                                 (str (ex-message e) " (" hint ")")
+                                 (ex-message e))}))))
+        trash-error-hint (fn [stderr]
+                           (when-let [line (first (str/split-lines (str/trim (str stderr))))]
+                             (when (seq line)
+                               (str "trash: " (subs line 0 (min 200 (count line)))))))]
+    (if (fs/which "trash")
+      (let [args (if (str/starts-with? path "-") ["--" path] [path])
+            result (try @(proc/process (into ["trash"] args)
+                                       {:out :string :err :string})
+                        (catch Exception _ nil))]
+        (if (or (and result (zero? (:exit result))) (not (fs/exists? path)))
+          {:ok true :method :trash}
+          (unlink (some-> result :err trash-error-hint))))
+      (unlink nil))))
+
 (defn delete-session!
-  "Delete a session file."
+  "Delete a session file with the shared policy (trash first, unlink
+   fallback). Throws when neither worked, so a backend caller cannot report
+   a deletion that did not happen."
   [session]
-  (let [f (:file session)]
-    (when (fs/exists? f) (fs/delete f))))
+  (let [f (:file session)
+        {:keys [ok error]} (delete-session-file f)]
+    (when-not ok
+      (throw (ex-info (str "cannot delete session " f ": " error)
+                      {:type :session-delete/failed :path f})))
+    nil))
 
 ;; ─── Import (pi: agent-session-runtime importFromJsonl) ───────────────────
 
