@@ -222,13 +222,26 @@
 
 (defn- error-body-text
   "The response body as a bounded string for error messages: a string body
-   passes through (capped); an unconsumed InputStream (babashka :as :stream
-   responses) is slurped."
+   passes through (the caller caps it); an unconsumed InputStream (babashka
+   :as :stream responses) is read up to the cap only — a proxy or provider
+   returning a large body on error (an HTML error page, a streaming endpoint
+   misconfigured as JSON) is never buffered whole to build a
+   2000-character message."
   [body]
   (cond
     (string? body) body
     (instance? java.io.InputStream body)
-    (try (slurp body) (catch Exception _ nil))
+    (try (with-open [r (java.io.InputStreamReader. body "UTF-8")]
+           (let [limit (inc max-error-body-chars)
+                 buf (char-array limit)]
+             (loop [off 0]
+               (if (>= off limit)
+                 (String. buf 0 off)
+                 (let [n (.read r buf off (- limit off))]
+                   (if (neg? n)
+                     (String. buf 0 off)
+                     (recur (+ off n))))))))
+         (catch Exception _ nil))
     :else nil))
 
 (defn http-error-message

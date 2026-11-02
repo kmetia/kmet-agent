@@ -19,7 +19,7 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 | 7 | Compaction start is check-then-act | medium (race) | **fixed** |
 | 8 | Pending-bash flush can duplicate entries | medium (data) | **fixed** |
 | 9 | Extensions leak root-ctx services/plugins on unload | high (leak) | **fixed** |
-| 10 | Unbounded error-body read | low/medium (memory) | verified by reading |
+| 10 | Unbounded error-body read | low/medium (memory) | **fixed** |
 | 11 | Keyring secret in argv | low/medium (exposure) | verified by reading |
 | 12 | `run_code` sandbox exposes `future`/`future-call` | — | **dropped** (not a finding) |
 | 13 | `tui-resume!` bypasses the render-crash guard | high (silent hang) | verified by reading |
@@ -217,7 +217,7 @@ root}` pattern for intended app-wide effects.
 documented app-wide form is `(srce/provide! (:ctx api) name value {:in (:app-root api)})`, whose
 entry is an effect of the extension's fiber and unwinds with it.
 
-## 10. Unbounded error-body read
+## 10. Unbounded error-body read — **fixed**
 
 `modules/libs/src/kmet/libs/http.cljc:221-231`
 
@@ -226,6 +226,11 @@ entry is an effect of the extension's fiber and unwinds with it.
 a streaming endpoint misconfigured as JSON) is fully buffered to build a 2000-character message.
 
 Fix: read at most `max+1` chars from the stream, then truncate.
+
+**Fixed:** the stream is read through an `InputStreamReader` into a
+`max-error-body-chars`-sized buffer and stops there; a string body still passes through to the
+caller's cap. A regression test feeds a stream that throws past 5000 bytes and asserts the
+message is the capped body — the old `slurp` read to the throw and produced nothing.
 
 ## 11. Keyring secret in the process argument list
 
@@ -308,6 +313,6 @@ throw, assert `:stopped?` and the crash log.
 2. Then the concurrency pair with regression tests: 1, 2 — 1 needs the decision in its note
    first, 2 is a small isolated commit.
 3. ~~Then the lifecycle fix with a test asserting empty root after unload: 9.~~ done.
-4. ~~Then robustness: 4, 5, 7, 10, 11, and the TUI guard (13)~~ — 4, 5 and 7 done; 10, 11
-   and 13 remain, plus the TUI `!` path's nil exit code found while fixing 3.
+4. ~~Then robustness: 4, 5, 7, 10, 11, and the TUI guard (13)~~ — 4, 5, 7 and 10 done;
+   11 and 13 remain, plus the TUI `!` path's nil exit code found while fixing 3.
 5. Structural work (14) as its own series, frame extraction first.

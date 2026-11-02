@@ -701,3 +701,37 @@
         (t/is (not-any? #(str/includes? (str %) "secret") argv)
               "proxy credentials not in argv"))
       (finally (stop) (close)))))
+
+;; ─── Error-body bounds ────────────────────────────────────────────────────
+
+(t/deftest test-error-body-read-is-bounded
+  ;; The error body is read only up to the message cap: a large error page (a
+  ;; proxy's HTML page, a streaming endpoint misconfigured as JSON) must not be
+  ;; buffered whole to build a 2000-character message. The stream throws past
+  ;; 5000 bytes, so an unbounded read fails outright instead of merely reading
+  ;; more than it needs.
+  (let [served (atom 0)
+        limit 5000
+        body (proxy [java.io.InputStream] []
+               (read
+                 ([]
+                  (if (>= @served limit)
+                    (throw (ex-info "read past the cap" {:type :over-read}))
+                    (do (swap! served inc) (int \a))))
+                 ([buf] (throw (ex-info "unused arity" {})))
+                 ([buf off len]
+                  (if (>= @served limit)
+                    (throw (ex-info "read past the cap" {:type :over-read}))
+                    ;; Small chunks: an unbounded read needs many calls to
+                    ;; reach the throw, a bounded one stops well before it.
+                    (let [n (min len 64 (- limit @served))]
+                      (dotimes [i n]
+                        (aset-byte buf (+ off i) (byte 97)))
+                      (swap! served + n)
+                      n))))
+               (available [] limit)
+               (close [] nil))
+        msg (http/http-error-message (ex-info "boom" {:status 500 :body body}))]
+    (t/is (= "HTTP 500: " (subs msg 0 10)))
+    (t/is (= 2000 (count (subs msg 10))) "the body is capped")
+    (t/is (< @served limit) "the stream was not read to its end")))
