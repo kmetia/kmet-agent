@@ -46,8 +46,9 @@
           (t/is (= 1 (count requests)))
           (t/is (= [:system :user :custom] (mapv :role (first requests)))
                 "the queued message rides after the user message"))
-        (t/is (= [:user :custom-message] (mapv :role (take 2 (session/get-branch sess))))
-              "persisted once, after the user entry")
+        (t/is (= [:turn-start :user :custom-message]
+                 (mapv :role (take 3 (session/get-branch sess))))
+              "persisted once, after the turn marker and the user entry")
         (finally
           (fs/delete-tree dir))))))
 
@@ -201,7 +202,8 @@
         @(loop/run-agent-turn agent {:message "seed"
                                      :on-done (fn [_])
                                      :on-error (fn [_])}))
-      (let [seed-id (:id (first (session/get-branch sess)))]
+      (let [seed-id (:id (first (filter #(= :user (:role %))
+                                        (session/get-branch sess))))]
         (session/append-context-edit! sess seed-id nil)
         (t/is (some #(= "seed" (get-in % [:content 0 :text]))
                     (state/get-context agent))

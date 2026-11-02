@@ -418,6 +418,7 @@
   ;; count toward a trip in run 2
   (reset! (:loop-guard agent) {:window [] :suppressed 0})
   (when message
+    (state/begin-turn! agent :prompt)
     (state/add-user-message! agent message images))
   ;; pi: pending nextTurn messages ride with the prompt, after the user
   ;; message and before before_agent_start's injected messages
@@ -1146,7 +1147,10 @@
                                      (swap! (:run-messages agent) dissoc old))))
                 ;; pi: agent.continue() — the queued batch becomes the next
                 ;; attempt's prompt (steering first, then follow-up, per mode)
-                continue-attempt! (fn [] (state/drain-next-queue! agent) (begin-attempt!))
+                continue-attempt! (fn []
+                                    (state/begin-turn! agent :continue)
+                                    (state/drain-next-queue! agent)
+                                    (begin-attempt!))
                 driver {:agent agent
                         :on-done on-done
                         :on-error on-error

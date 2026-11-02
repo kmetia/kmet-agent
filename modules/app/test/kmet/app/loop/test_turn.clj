@@ -15,7 +15,8 @@
             [kmet.app.loop :as loop]
             [kmet.app.config :as cfg]
             [kmet.app.loop.test-support :as support]
-            [kmet.test-utils :refer [slash]]))
+            [kmet.test-utils :refer [slash]]
+            [kmet.test-tmp :as test-tmp]))
 
 (t/use-fixtures :each support/with-host)
 
@@ -632,3 +633,106 @@
       (t/is (not-any? #(= :image (:type %))
                       (:content (first (filter #(= :user (:role %)) (:messages sent)))))
             "a mid-session toggle applies to the next call (pi reads it per request)"))))
+
+;; ─── Turn markers ─────────────────────────────────────────────────────────
+;; A :turn-start entry records the user-facing turn boundary: written before
+;; the entries it opens, never a wire message, never a chat row. The ordinal
+;; the tree shows is computed from position, so the marker stores only its
+;; branch-safe :turn-id and :reason.
+
+(defn- markers
+  [sess]
+  (filterv #(= :turn-start (:role %)) (session/get-branch sess)))
+
+(t/deftest test-loop-prompt-writes-one-turn-marker
+  (t/testing "a prompt records one turn boundary before its user message,
+              chained from the previous leaf by the same append writer"
+    (let [dir (test-tmp/temp-dir! "test-turn-marker-")
+          sess (session/create-session dir)
+          prior (session/append-entry sess {:role :user :content "earlier"})
+          agent (support/make-agent-state :session sess)]
+      (support/run-turn-capturing-llm agent {:message "hello"})
+      (let [branch (session/get-branch sess)
+            idx (first (keep-indexed (fn [i e] (when (= :turn-start (:role e)) i))
+                                     branch))
+            marker (nth branch idx)
+            user (nth branch (inc idx))]
+        (t/is (= 1 (count (filter #(= :turn-start (:role %)) branch)))
+              "exactly one marker per prompt")
+        (t/is (= :prompt (:reason marker)))
+        (t/is (string? (:turn-id marker)) "a branch-safe id, never a counter")
+        (t/is (= (:id prior) (:parent-id marker))
+              "the marker continues the previous leaf")
+        (t/is (= :user (:role user)))
+        (t/is (= "hello" (get-in user [:content 0 :text])))
+        (t/is (= (:id marker) (:parent-id user))
+              "the user message continues the marker")))))
+
+(t/deftest test-loop-steering-writes-no-turn-marker
+  (t/testing "a steering injection joins the live turn: no boundary, only the
+              prompt's own marker"
+    (let [dir (test-tmp/temp-dir! "test-turn-steer-")
+          sess (session/create-session dir)
+          agent (support/make-agent-state :session sess)
+          calls (atom 0)]
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [opts]
+                      (future
+                        (if (= 1 (swap! calls inc))
+                          (do (when-let [on-tc (:on-tool-call opts)]
+                                (on-tc {:id "tc1" :name "bash" :arguments "{}" :index 0}))
+                              (when-let [on-done (:on-done opts)]
+                                (on-done :tool-calls)))
+                          (when-let [on-done (:on-done opts)]
+                            (on-done :stop)))
+                        :done))
+                    state/execute-tool-for
+                    (fn [_ _ _ _]
+                      (state/steer! agent "steered")
+                      {:content "ok" :is-error false})]
+        @(loop/run-agent-turn agent {:message "first"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (t/is (= 2 @calls) "the steering batch ran in the same attempt")
+      (t/is (= [:prompt] (mapv :reason (markers sess)))
+            "one marker: the steering message did not open a turn"))))
+
+(t/deftest test-loop-continue-writes-a-turn-marker
+  (t/testing "agent.continue — an attempt an :agent-end queue started — records
+              a :continue boundary, distinct from the prompt's"
+    (let [dir (test-tmp/temp-dir! "test-turn-continue-")
+          sess (session/create-session dir)
+          agent (support/make-agent-state :session sess)
+          calls (atom 0)
+          queue-once (atom true)
+          dereg (support/on-event
+                 :agent-end
+                 (fn [_]
+                   (when (compare-and-set! queue-once true false)
+                     (state/steer! agent "again"))))]
+      (try
+        (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                      llm/send-message
+                      (fn [opts]
+                        (future
+                          (when-let [on-text (:on-text opts)]
+                            (on-text (str "response-" (swap! calls inc))))
+                          (when-let [on-done (:on-done opts)]
+                            (on-done :stop))
+                          :done))]
+          @(loop/run-agent-turn agent {:message "hi"
+                                       :on-done (fn [_])
+                                       :on-error (fn [_])}))
+        (finally (dereg)))
+      (t/is (= 2 @calls) "two attempts: the prompt and the continuation")
+      (let [ms (markers sess)]
+        (t/is (= [:prompt :continue] (mapv :reason ms)))
+        (t/is (apply distinct? (map :turn-id ms))
+              "each turn carries its own id")
+        (let [branch (session/get-branch sess)
+              user-after (fn [m]
+                           (let [i (.indexOf ^java.util.List branch m)]
+                             (nth branch (inc i))))]
+          (t/is (= :user (:role (user-after (second ms))))
+                "the continued attempt's drained message is the marker's next entry"))))))

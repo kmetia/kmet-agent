@@ -131,11 +131,12 @@
    convertToLlm). custom_message entries become a :custom-role message
    (sent to the LLM as a user message — pi: convertToLlm custom→user) with
    string content normalized to a text block; :info, :session_info,
-   :model-change, :thinking-level-change, :custom, :label and :context-edit
-   are metadata/state and excluded (a :context-edit entry's effect is applied
-   by build-context-messages, not as a message of its own). Excluded :bash
-   entries are kept here and dropped later by the LLM conversion (pi:
-   convertToLlm filters excludeFromContext)."
+   :model-change, :thinking-level-change, :custom, :label, :turn-start and
+   :context-edit are metadata/state and excluded (a :context-edit entry's
+   effect is applied by build-context-messages, not as a message of its own;
+   a :turn-start marker is a log fact for the tree — the model never sees a
+   turn boundary). Excluded :bash entries are kept here and dropped later by
+   the LLM conversion (pi: convertToLlm filters excludeFromContext)."
   [entry]
   (case (:role entry)
     (:compaction :branch-summary) [entry]

@@ -375,3 +375,47 @@
                    {:role :assistant :usage {:input_tokens 10000 :output_tokens 100
                                              :input_tokens_details {:cached_tokens 0}}}]]
       (t/is (true? (:model-changed (s/detect-cache-miss entries)))))))
+
+;; ─── Turn markers (T1–T5) ───────────────────────────────────────────────────
+
+(t/deftest test-turn-start-projects-to-no-message
+  (t/testing "the marker is a log fact: it stays in the entries the tree reads
+              and projects to nothing at the wire"
+    (let [session (s/create-session support/test-dir)]
+      (s/append-entry session {:role :turn-start :turn-id "t1" :reason :prompt})
+      (s/append-entry session {:role :user :content "q"})
+      (s/append-entry session {:role :assistant :content "a"})
+      (let [ctx (s/build-context session)
+            msgs (mapcat s/context-messages ctx)]
+        (t/is (= 1 (count (filter #(= :turn-start (:role %)) ctx)))
+              "build-context keeps the marker for the tree")
+        (t/is (= 2 (count msgs)))
+        (t/is (not-any? #(= :turn-start (:role %)) msgs))
+        (t/is (empty? (s/context-messages {:role :turn-start :turn-id "t"})))))))
+
+(t/deftest test-compaction-keeps-a-cut-boundary-marker
+  (t/testing "a compaction whose kept boundary is a marker keeps it in the
+              projection, so a later turn-granular caller still sees the
+              boundary while the wire sends no message for it"
+    (let [session (s/create-session support/test-dir)
+          _ (s/append-entry session {:role :user :content "q0"})
+          marker (s/append-entry session {:role :turn-start :turn-id "t1" :reason :prompt})
+          _ (s/append-entry session {:role :user :content "q1"})
+          _ (s/append-entry session {:role :assistant :content "a1"})]
+      (s/compact-with-summary! session "SUM" (:id marker))
+      (let [ctx (s/build-context session)]
+        (t/is (some #(= (:id marker) (:id %)) ctx)
+              "the kept boundary entry survives the cut")
+        (t/is (not-any? #(= :turn-start (:role %))
+                        (mapcat s/context-messages ctx)))))))
+
+(t/deftest test-unmarked-prefix-is-one-turn
+  (t/testing "a file written before the role existed loads unchanged, and its
+              prefix simply has no boundary (no migration, no heuristic)"
+    (let [session (s/create-session support/test-dir)
+          _ (s/append-entry session {:role :user :content "old"})
+          _ (s/append-entry session {:role :assistant :content "reply"})
+          loaded (s/load-session (:file session))]
+      (t/is (= 2 (count @(:entries loaded))))
+      (t/is (not-any? #(= :turn-start (:role %)) @(:entries loaded)))
+      (t/is (= 2 (count (mapcat s/context-messages (s/build-context loaded))))))))

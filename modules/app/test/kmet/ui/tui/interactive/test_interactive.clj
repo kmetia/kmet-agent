@@ -1463,3 +1463,24 @@
                    @requested)]
       (is (pos? (driver true)) "an open gate requests frames")
       (is (zero? (driver false)) "a closed gate suppresses the request"))))
+
+(deftest replay-branch-skips-turn-start-entries
+  (testing "a turn-start marker is a log fact for the tree, not a message: the
+            replay renders no chat row for it while the turns' messages stay"
+    (let [sess-dir (test-tmp/temp-dir! "test-interactive-replay-turn-start-")
+          sess (session/create-session sess-dir)]
+      (try
+        (session/append-entry sess {:role :turn-start :turn-id "t1" :reason :prompt})
+        (session/append-entry sess {:role :user :content "ask"})
+        (session/append-entry sess {:role :assistant
+                                    :content [{:type :text :text "answer"}]})
+        (session/append-entry sess {:role :turn-start :turn-id "t2" :reason :continue})
+        (session/append-entry sess {:role :user :content "again"})
+        (let [loaded (session/load-session (:file sess))
+              ch (chat-history/make-chat-history :tool-fn (tu/tool-fn))
+              cs (inter/map->CoreState {:chat-history ch})]
+          ((var session-admin/replay-branch!) cs loaded)
+          (let [msgs @(:messages-atom ch)]
+            (is (= [:user :assistant :user] (mapv :role msgs))
+                "no marker row; the turns' messages are all there")))
+        (finally (fs/delete-tree sess-dir))))))

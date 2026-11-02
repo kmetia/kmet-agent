@@ -293,6 +293,21 @@
       (t/is (some #(str/includes? % "(0/0)") lines))
       (t/is (some #(str/includes? % "[labeled]") lines)))))
 
+(t/deftest turn-start-markers-render-separators
+  (t/testing "a :turn-start entry is the `── turn N ──` separator, N counted
+              from position on the path, so two branches forked from one turn
+              both read the same number"
+    (let [tree* [(node "t1" :turn-start
+                       :children [(user-node "u1" "one"
+                                             (node "t2a" :turn-start))
+                                  (user-node "u2" "two"
+                                             (node "t2b" :turn-start))])]
+          lines (plain (ts/make-tree-list tree* :leaf-id "t2a" :max-visible-lines 10))]
+      (t/is (= 1 (count (filter #(str/includes? % "── turn 1 ──") lines))))
+      (t/is (= 2 (count (filter #(str/includes? % "── turn 2 ──") lines)))
+            "both branches' next marker reads turn 2")
+      (t/is (some #(str/includes? % "user: one") lines)))))
+
 (t/deftest label-and-timestamp-rendering
   (let [tree* [(node "l" :user :content [{:type :text :text "tagged"}]
                      :label "keep" :label-timestamp "2026-02-14T10:30:00Z")]
@@ -416,14 +431,15 @@
 
 (t/deftest entry-display-text-formats
   (let [theme-current (th/get-current-theme)
-        show (fn [entry] (u/strip-ansi-codes
-                          (#'ts/entry-display-text theme-current {} entry false)))]
+        show (fn [entry]
+               (u/strip-ansi-codes
+                (#'ts/entry-display-text theme-current {} nil entry false)))]
     (t/is (str/includes?
            (show {:role :tool :tool-call-id "t1" :tool-name "read"})
            "[read]"))
     (t/is (str/includes?
            (#'ts/entry-display-text
-            theme-current {"t1" {:name "read" :arguments {:path "/tmp/x"}}}
+            theme-current {"t1" {:name "read" :arguments {:path "/tmp/x"}}} nil
             {:role :tool :tool-call-id "t1" :tool-name "read"} false)
            "[read: /tmp/x]"))
     (t/is (str/includes?
@@ -446,6 +462,17 @@
     (t/is (str/includes? (show {:role :context-edit :target-id "u1"
                                 :replacement {:content "x"}})
                          "[context replace: u1]"))))
+
+(t/deftest turn-start-entries-render-as-separators
+  (let [theme-current (th/get-current-theme)
+        sep (fn [n] (u/strip-ansi-codes
+                     (#'ts/entry-display-text theme-current {} n
+                                              {:role :turn-start :turn-id "t"}
+                                              false)))]
+    (t/is (= "── turn 1 ──" (sep 1)))
+    (t/is (= "── turn 12 ──" (sep 12)))
+    (t/is (nil? (#'ts/copy-entry-text {:role :turn-start :turn-id "t"}))
+          "a separator is not copyable")))
 
 (t/deftest copy-entry-text-extracts
   (t/is (= "cmd" (#'ts/copy-entry-text {:role :bash :command "cmd"})))

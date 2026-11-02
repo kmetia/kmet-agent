@@ -265,3 +265,28 @@
                                                  :tool_use_id "t3"
                                                  :content (support/pad-string 40 \b)}]}])
         (t/is (= {:calls 1 :tokens 10} (get (s/tool-usage rebuilt) "bash")))))))
+
+(t/deftest test-turn-markers-do-not-enter-the-totals
+  (t/testing "a :turn-start marker is not a message: counts, tokens and the
+              per-model breakdown are identical with and without one"
+    (let [dir (test-tmp/temp-dir! "test-sess-turn-marker-")
+          fill (fn [markers?]
+                 (let [sess (s/create-session dir)]
+                   (when markers?
+                     (s/append-entry sess {:role :turn-start :turn-id "t1" :reason :prompt}))
+                   (s/append-entry sess {:role :user :content "q"})
+                   (s/append-entry sess {:role :assistant :content "a"
+                                         :usage {:prompt_tokens 10 :completion_tokens 2
+                                                 :cost {:total 0.001}}})
+                   sess))]
+      (try
+        (let [plain (fill false)
+              marked (fill true)
+              keys [:user-messages :assistant-messages :tool-calls :tool-results
+                    :total-messages :tokens :cost]]
+          (t/is (= (select-keys (s/get-session-stats plain) keys)
+                   (select-keys (s/get-session-stats marked) keys)))
+          (t/is (= (s/usage-breakdown plain) (s/usage-breakdown marked)))
+          (t/is (= [1 1] [(count (filter #(= :user (:role %)) @(:entries plain)))
+                          (count (filter #(= :user (:role %)) @(:entries marked)))])))
+        (finally (fs/delete-tree dir))))))

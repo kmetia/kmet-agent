@@ -294,7 +294,8 @@
    by tool-call id (pi: renderedPendingTools); a result without a matching
    call renders standalone from its own :tool-name; !/!! bash entries replay
    as completed BashExecutionComponents (pi: addMessageToChat case
-   bashExecution).
+   bashExecution). A turn-start marker is a log fact for the tree, not a
+   message: the transcript is messages, so it replays nothing.
 
    The entry shapes themselves are replayed by the replay-*! fns above; this
    fn owns the order: clear, index, then each entry once."
@@ -304,7 +305,8 @@
         [tool-call-ids tool-results-by-id] (index-tool-results entries)]
     (doseq [e entries
             :when (not (contains? #{:session_info :label :model-change
-                                    :thinking-level-change :context-edit} (:role e)))]
+                                    :thinking-level-change :context-edit
+                                    :turn-start} (:role e)))]
       (replay-entry! cs e tool-call-ids tool-results-by-id))))
 
 (defn replay-session!

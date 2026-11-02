@@ -56,6 +56,15 @@
                 [:provider {:optional true} [:or :keyword :string :nil]]
                 [:model {:optional true} [:or :string :nil]]))
 
+(def TurnStartEntry
+  "A turn boundary written into the log before the entries it opens. The
+   `:turn-start` *event* is the inner loop's turn index; this role is the
+   user-facing turn — a typed prompt or an agent.continue — and it projects to
+   no wire message (the model never sees it)."
+  (common-entry :turn-start
+                [:turn-id {:optional true} [:or :string :nil]]
+                [:reason {:optional true} [:or :keyword :string :nil]]))
+
 (def SessionInfoEntry
   (common-entry :session_info
                 [:name {:optional true} [:or :string :nil]]))
@@ -85,6 +94,7 @@
    [:user UserEntry]
    [:tool ToolEntry]
    [:bash BashEntry]
+   [:turn-start TurnStartEntry]
    [:thinking-level-change ThinkingLevelChangeEntry]
    [:model-change ModelChangeEntry]
    [:session_info SessionInfoEntry]

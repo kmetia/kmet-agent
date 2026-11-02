@@ -266,8 +266,11 @@
         (t/is (= [:user :assistant :tool]
                  (mapv :role (:context-messages tool-turn)))
               "the preview carries the projected context messages")
-        (t/is (= (mapv (comp :id :source) (:context-entries tool-turn))
-                 (mapv :id (take 3 branch)))
+        (t/is (= [:turn-start :user :assistant :tool]
+                 (mapv (comp :role :source) (:context-entries tool-turn)))
+              "the preview carries the whole projection, the turn marker included")
+        (t/is (= (mapv :id (take 4 branch))
+                 (mapv (comp :id :source) (:context-entries tool-turn)))
               "the preview entries carry their source session entries (the
                preview was built at the first boundary — before the final
                assistant entry was appended)")
@@ -334,7 +337,7 @@
                                      :on-done (fn [_])
                                      :on-error (fn [_])}))
       (let [branch (session/get-branch (:session agent))
-            user-id (:id (first branch))
+            user-id (:id (first (filter #(= :user (:role %)) branch)))
             before (state/get-context agent)]
         (t/is (= ["run" "first"] (mapv #(get-in % [:content 0 :text]) before)))
         (t/is (= :context-edit (:role (state/append-context-edit! agent user-id nil))))
@@ -369,7 +372,8 @@
         @(loop/run-agent-turn agent {:message "seed"
                                      :on-done (fn [_])
                                      :on-error (fn [_])}))
-      (let [seed-id (:id (first (session/get-branch (:session agent))))]
+      (let [seed-id (:id (first (filter #(= :user (:role %))
+                                        (session/get-branch (:session agent)))))]
         (support/on-event
          :turn-end
          (fn [_]

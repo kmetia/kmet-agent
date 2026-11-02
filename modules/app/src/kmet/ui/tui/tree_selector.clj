@@ -169,8 +169,10 @@
 (defn- entry-display-text
   "pi getEntryDisplayText — colored role prefix + normalized digest; the
    selected row's whole text is bolded. An empty assistant completion shows
-   as muted (aborted)/(error)/(no content) depending on its stop reason."
-  [theme tool-calls entry selected?]
+   as muted (aborted)/(error)/(no content) depending on its stop reason. A
+   :turn-start marker is the separator `── turn N ──`, TURN-NUMBER counted
+   from position on the path."
+  [theme tool-calls turn-number entry selected?]
   (let [result
         (case (:role entry)
           :user (str (th/fg theme :accent "user: ")
@@ -205,6 +207,8 @@
           :custom (th/fg theme :dim (str "[custom: " (name (:custom-type entry :custom)) "]"))
           :context-edit (th/fg theme :dim (session/context-edit-label entry))
           :label (th/fg theme :dim (str "[label: " (or (:label entry) "(cleared)") "]"))
+          :turn-start (th/fg theme :dim
+                             (str "── turn " (or turn-number "?") " ──"))
           :session_info (let [nm (str (:name entry))]
                           (th/fg theme :dim
                                  (if (seq nm)
@@ -325,6 +329,25 @@
   (letfn [(walk [acc n]
             (reduce walk (assoc acc (:id n) (:parent-id n)) (:children n)))]
     (reduce walk {} nodes)))
+
+(defn- turn-ordinals
+  "{id turn-number} over a whole tree: how many :turn-start markers lie on the
+   entry's own root → entry path, the entry included. Computed from position,
+   never stored (T3), so two branches forked from one turn both read the same
+   number and each branch's next marker reads one more. FLAT must be a DFS
+   order (a parent's ordinal is known before its children's)."
+  [flat parent-lookup]
+  (let [role-by-id (into {} (map (fn [f] [(get-in f [:node :id])
+                                          (get-in f [:node :role])])
+                                 flat))]
+    (reduce (fn [acc f]
+              (let [id (get-in f [:node :id])]
+                (if id
+                  (assoc acc id (+ (get acc (get parent-lookup id) 0)
+                                   (if (= :turn-start (get role-by-id id)) 1 0)))
+                  acc)))
+            {}
+            flat)))
 
 (defn- child-indent
   "pi's indentation rule: branching parents shift children +1, the first
@@ -602,7 +625,9 @@
                   (th/fg theme :muted (str (format-label-timestamp (:label-timestamp node)) " ")))
         prefix-part (str (th/dim prefix) fold-marker path-marker)
         cursor (if selected? (th/fg theme :accent "› ") "  ")
-        content (entry-display-text theme tool-calls node selected?)
+        content (entry-display-text theme tool-calls
+                                    (get (:turn-ordinals st) entry-id)
+                                    node selected?)
         body (str prefix-part label-part ts-part content)]
     {:gutter (if selected? (th/bg theme :selected-bg cursor) cursor)
      :body (if selected? (th/bg theme :selected-bg body) body)
@@ -1001,9 +1026,11 @@
   (let [tree (attach-parent-ids tree)
         parent-lookup (collect-parents tree)
         active (active-path-set parent-lookup leaf-id)
+        flat (flatten-tree* tree active (> (count tree) 1))
         base {:tree tree
-              :flat (flatten-tree* tree active (> (count tree) 1))
+              :flat flat
               :parent-lookup parent-lookup
+              :turn-ordinals (turn-ordinals flat parent-lookup)
               :active-path active
               :tool-calls (collect-tool-calls tree)
               :leaf-id leaf-id
@@ -1037,11 +1064,13 @@
          (fn [{:keys [leaf-id] :as st}]
            (let [tree (attach-parent-ids tree)
                  parent-lookup (collect-parents tree)
-                 active (active-path-set parent-lookup leaf-id)]
+                 active (active-path-set parent-lookup leaf-id)
+                 flat (flatten-tree* tree active (> (count tree) 1))]
              (assoc st
                     :tree tree
-                    :flat (flatten-tree* tree active (> (count tree) 1))
+                    :flat flat
                     :parent-lookup parent-lookup
+                    :turn-ordinals (turn-ordinals flat parent-lookup)
                     :active-path active
                     :tool-calls (collect-tool-calls tree)))))
   (refilter! tl))

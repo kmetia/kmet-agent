@@ -321,6 +321,20 @@ Be precise and concise in your responses."}}]
   (record-run-message! agent msg)
   msg)
 
+(defn begin-turn!
+  "Record a turn boundary in the session before the entries it opens. REASON is
+   :prompt for a typed prompt and :continue for agent.continue — an attempt a
+   queued message or an actionable boundary started. Steering and follow-up
+   injections join the live turn and write none. Returns the marker entry, or
+   nil when the agent has no session. The turn-id is branch-safe identity (a
+   fork keeps it); the ordinal callers display is computed from position, never
+   stored."
+  [agent reason]
+  (when-let [sess (:session agent)]
+    (session/append-entry sess {:role :turn-start
+                                :turn-id (str (random-uuid))
+                                :reason reason})))
+
 (defn add-user-message!
   "Add a user message to context and session, emitting :message-start.
    images — optional vector of image content blocks (pi: image attachments)."

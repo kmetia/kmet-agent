@@ -507,6 +507,15 @@ shape now:
 - append-only per-message context edits, durable omission of a recovered
   attempt's message, and a compaction that cuts and counts over the
   projection;
+- a `:turn-start` session entry recording the user-facing turn boundary (a
+  typed prompt or an `agent.continue`) before the entries it opens. pi has no
+  counterpart entry — its `turn_start` is a loop event — so this is a kmet
+  addition: the entry carries a branch-safe `:turn-id` and `:reason`
+  (`:prompt` / `:continue`), projects to no wire message, renders as
+  `── turn N ──` in the tree selector (N counted from position on the branch,
+  never stored), and replays no chat row. Steering and follow-up injections
+  join the live turn and write none; an unmarked prefix is one turn (no
+  migration);
 - `context_with_system` running after `context` over the full transcript.
 
 Residuals are named in the Appendix rows (`ContextEditEntry` /

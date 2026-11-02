@@ -324,7 +324,8 @@
        (fn [_]
          (when (= 1 (swap! boundaries inc))
            {:entries [{:role :context-edit
-                       :target-id (:id (first (session/get-branch sess)))
+                       :target-id (:id (first (filter #(= :user (:role %))
+                                                      (session/get-branch sess))))
                        :replacement {:content [{:type :text :text "rewritten"}]}}]})))
       (with-redefs [cfg/get-api-key (fn [_] "test-key")
                     llm/send-message
