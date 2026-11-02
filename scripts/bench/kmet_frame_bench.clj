@@ -25,9 +25,9 @@
 ;;
 ;; Phase attribution wraps the loop's own functions with timers
 ;; (alter-var-root): kmet.tui.components.stack/render-stack,
-;; kmet.tui.core/{composite-overlays,build-frame-lines,
-;; composite-flashes} and the virtual terminal's
-;; write-output. diff+emit is the residual between the last wrapped phase
+;; kmet.tui.core/composite-overlays,
+;; kmet.tui.frame/{build-frame-lines,composite-flashes} and the virtual
+;; terminal's write-output. diff+emit is the residual between the last wrapped phase
 ;; and the write (a no-change frame writes nothing, so its tail is not
 ;; attributed). Numbers are wall-clock, single-process, means of the
 ;; scenario's frames — the harness perf.md §11.3/§13's tables use.
@@ -43,6 +43,7 @@
             [kmet.tui.components.editor :as editor]
             [kmet.tui.components.stack :as stack]
             [kmet.tui.core :as core]
+            [kmet.tui.frame :as frame]
             [kmet.tui.terminal :as term]))
 
 ;; ─── Virtual terminal (writes recorded; size mutable) ──────────────────────
@@ -81,8 +82,8 @@
 (defn- instrument! []
   (timed-var! :render-stack #'stack/render-stack)
   (timed-var! :overlays #'core/composite-overlays)
-  (timed-var! :lines #'core/build-frame-lines)
-  (timed-var! :flashes #'core/composite-flashes))
+  (timed-var! :lines #'frame/build-frame-lines)
+  (timed-var! :flashes #'frame/composite-flashes))
 
 (def ^:private replay-branch!
   "The private session-admin replay entry (resume populates the chat

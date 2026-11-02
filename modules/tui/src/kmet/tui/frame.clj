@@ -458,7 +458,8 @@
    :hardware-cursor-row and :previous-viewport-top (the loop's atoms: the
    terminal-cursor model persists across frames and survives a resume),
    :request-render (the loop's frame request, used by the scrollback heal) and
-   :pending-write, the atom the staged bytes land in."
+   :pending-write, the atom the frame's StringBuilder lands in (the loop
+   writes it out as a string once the lock is released)."
   [tui {:keys [width height compose hardware-cursor-row previous-viewport-top
                request-render pending-write]}]
   (let [w width
