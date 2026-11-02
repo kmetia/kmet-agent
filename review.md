@@ -304,8 +304,9 @@ Four of the small items are done; the three structural ones stand.
   on a stub TUI with no terminal. The review asked for three entry points
   (`build-frame`/`diff-frame`/`emit-frame`); they share the cursor and viewport state the diff
   mutates, so they landed as one `render-frame!` with the passes inside it — the split was
-  the untested part, not the boundary. `main-diff` (CC 79, 215 lines) is still one local fn
-  inside the pass.
+  the untested part, not the boundary. `main-diff` then came out too: `diff-frame!` (CC 79) is
+  a top-level fn taking the frame values and the emit kit it needs, so the pass is 301 lines
+  instead of 551 — the mass moved, it did not shrink (`bb slop` erosion 0.829).
 - **Frame state is ~17 independent atoms** updated field by field (`core.clj:284-311`,
   force-redraw at 2506-2516, commit at 2994-3016): one `:frame` atom holding a previous-frame
   map removes the two lists that must stay in sync. Natural once the extraction lands.
