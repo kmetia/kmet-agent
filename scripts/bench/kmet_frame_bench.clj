@@ -1,5 +1,5 @@
 ;; Live render-loop frame phases: the hot path the app actually runs —
-;; render-stack → overlays → lines → flashes → diff+emit → write —
+;; compose (document concat + overlays) → lines → flashes → diff+emit → write —
 ;; measured per frame on a real session in a virtual terminal.
 ;;
 ;; Usage:
@@ -24,13 +24,16 @@
 ;; cost is process-level; measure it live (perf.md §1's /proc recipe).
 ;;
 ;; Phase attribution wraps the loop's own functions with timers
-;; (alter-var-root): kmet.tui.components.stack/render-stack,
-;; kmet.tui.core/composite-overlays,
+;; (alter-var-root): kmet.tui.core/compose-document (the flat document:
+;; protocols/render-all-cached plus the overlay composite),
 ;; kmet.tui.frame/{build-frame-lines,composite-flashes} and the virtual
-;; terminal's write-output. diff+emit is the residual between the last wrapped phase
-;; and the write (a no-change frame writes nothing, so its tail is not
-;; attributed). Numbers are wall-clock, single-process, means of the
-;; scenario's frames — the harness perf.md §11.3/§13's tables use.
+;; terminal's write-output. The compose wrapper also emits the frame opener
+;; (:compose-start, before the document is touched), because the overlay
+;; composite it calls records its own phase first. diff+emit is the residual
+;; between the last wrapped phase and the write (a no-change frame writes
+;; nothing, so its tail is not attributed). Numbers are wall-clock,
+;; single-process, means of the scenario's frames — the harness perf.md
+;; §11.3/§13's tables use.
 
 (ns kmet-frame-bench
   (:require [clojure.string :as str]
@@ -41,7 +44,6 @@
             [kmet.ui.tui.interactive :as inter]
             [kmet.test-utils :as tu]
             [kmet.tui.components.editor :as editor]
-            [kmet.tui.components.stack :as stack]
             [kmet.tui.core :as core]
             [kmet.tui.frame :as frame]
             [kmet.tui.terminal :as term]))
@@ -69,19 +71,24 @@
 (defn- timed-var!
   "Rebind VAR to a wrapper recording [:phase t-start t-end] per call.
    The original fn is looked up through the var on every call so the
-   wrapper stays correct if the var is redefined."
-  [phase v]
-  (alter-var-root v (fn [orig]
-                      (fn [& args]
-                        (let [t0 (System/nanoTime)
-                              r (apply orig args)
-                              t1 (System/nanoTime)]
-                          (swap! events conj [phase t0 t1])
-                          r)))))
+   wrapper stays correct if the var is redefined. OPENER, when given, names
+   an event recorded before the body runs (zero-length), so a frame can be
+   opened before a phase the body itself records first."
+  ([phase v] (timed-var! phase v nil))
+  ([phase v opener]
+   (alter-var-root v (fn [orig]
+                       (fn [& args]
+                         (let [t0 (System/nanoTime)
+                               _ (when opener (swap! events conj [opener t0 t0]))
+                               r (apply orig args)
+                               t1 (System/nanoTime)]
+                           (swap! events conj [phase t0 t1])
+                           r))))))
 
 (defn- instrument! []
-  (timed-var! :render-stack #'stack/render-stack)
-  (timed-var! :overlays #'core/composite-overlays)
+  ;; compose-document is private: the loop's closure calls it through the var,
+  ;; so wrapping the var times the whole document compose.
+  (timed-var! :compose (ns-resolve 'kmet.tui.core 'compose-document) :compose-start)
   (timed-var! :lines #'frame/build-frame-lines)
   (timed-var! :flashes #'frame/composite-flashes))
 
@@ -165,7 +172,7 @@
 
 (defn- analyze
   "Turn the flat event log into per-frame maps of phase → µs. A frame opens
-   at each :render-stack event; the residual between the last wrapped phase
+   at each :compose-start event; the residual between the last wrapped phase
    and a :write is :diff+emit. A frame without a write (no-change) is closed
    at the next frame's start with :wrote? false; a frame still in flight
    (no :flashes yet) is dropped."
@@ -179,10 +186,10 @@
     (loop [es (seq evs), cur nil, out []]
       (if-let [[p t0 t1 len] (first es)]
         (case p
-          :render-stack (recur (next es)
-                               {:start t0 :last t1 :wrote? false
-                                :phases {:render-stack (us t0 t1)}}
-                               (flush-frame cur out))
+          :compose-start (recur (next es)
+                                {:start t0 :last t1 :wrote? false
+                                 :phases {}}
+                                (flush-frame cur out))
           :write (recur (next es)
                         (if cur
                           (-> cur
@@ -200,7 +207,7 @@
 (defn- mean [xs] (if (seq xs) (/ (double (reduce + xs)) (count xs)) 0.0))
 (defn- median [xs] (when (seq xs) (let [v (vec (sort xs))] (nth v (quot (count v) 2)))))
 
-(def ^:private phases [:render-stack :overlays :lines :flashes :diff+emit])
+(def ^:private phases [:compose :lines :flashes :diff+emit])
 
 (defn- report [label evs lines]
   (let [fs (analyze evs)
