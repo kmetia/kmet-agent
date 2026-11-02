@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [kmet.libs.concurrent :as concurrent]
             [kmet.tui.core :as core]
+            [kmet.tui.frame :as frame]
             [kmet.reakt.core :as reakt]
             [kmet.tui.terminal-escape :as lib]
             [kmet.libs.terminal-image :as img]
@@ -29,7 +30,7 @@
 
 (t/deftest test-build-frame-lines-strips-every-marker
   (let [marker utils/CURSOR-MARKER
-        build (var core/build-frame-lines)]
+        build (var frame/build-frame-lines)]
     (testing "a marker inside the viewport positions the cursor and is stripped"
       (let [{:keys [lines cursor]} (build ["aaaa" (str "bb" marker "cc")] 10)]
         (t/is (= {:row 1 :col 2} cursor) "the marker's position is reported")
@@ -48,7 +49,7 @@
               "but every marker is stripped from the emitted lines")))))
 
 (t/deftest test-build-frame-lines-normalizes-unchanged-lines
-  (let [build (var core/build-frame-lines)
+  (let [build (var frame/build-frame-lines)
         calls (atom 0)
         norm (fn [s] (swap! calls inc) (str s "!"))]
     (with-redefs [utils/normalize-terminal-output norm]
@@ -78,7 +79,7 @@
 
 (t/deftest test-build-frame-lines-reuses-unchanged-lines
   (let [marker utils/CURSOR-MARKER
-        build (var core/build-frame-lines)
+        build (var frame/build-frame-lines)
         scans (atom 0)
         index-of clojure.string/index-of]
     (with-redefs [clojure.string/index-of
@@ -143,7 +144,7 @@
             (t/is (= {:row 1 :col 2} (:cursor out2)))))))))
 
 (t/deftest test-build-frame-lines-shrink-keeps-a-carried-marker
-  (let [build (var core/build-frame-lines)
+  (let [build (var frame/build-frame-lines)
         marker utils/CURSOR-MARKER
         b (str "bb" marker "cc")]
     (testing "a shrink that removes only a blank line keeps the marker by content"
@@ -160,7 +161,7 @@
         (t/is (nil? cursor))))))
 
 (t/deftest test-build-frame-lines-changed-range
-  (let [build (var core/build-frame-lines)
+  (let [build (var frame/build-frame-lines)
         a "aaaa" b "bbbb" c "cccc"]
     (testing "an appended line is part of the range"
       (let [{:keys [changed]} (build [a b] [a b] {} [a b c] 10)]
@@ -182,7 +183,7 @@
         (t/is (= [0 1] changed))))))
 
 (t/deftest test-build-frame-lines-quick-reuse
-  (let [build (var core/build-frame-lines)
+  (let [build (var frame/build-frame-lines)
         a (subs "xaaaa" 1)
         b (subs "xbbbb" 1)
         prev-raw [a b]
@@ -208,7 +209,7 @@
         (t/is (nil? changed) "the chunk compare is content equality")))))
 
 (t/deftest test-build-frame-lines-walks-only-differing-chunks
-  (let [build (var core/build-frame-lines)
+  (let [build (var frame/build-frame-lines)
         base (mapv #(str "line-" %) (range 2500))]
     (testing "only the chunk holding the change is walked; equal chunks are copied"
       (let [{:keys [lines changed]} (build base base {} (assoc base 1500 "CHANGED") 100)]
@@ -225,7 +226,7 @@
         (t/is (= "line-1500" (nth base 1500)) "the previous vector is untouched")))))
 
 (t/deftest test-refine-changed-range
-  (let [refine (var core/refine-changed-range)
+  (let [refine (var frame/refine-changed-range)
         prev ["a0" "b0" "c0" "d0" "e0"]
         lines ["a0" "b0" "c1" "d0" "e0"]]
     (testing "the range shrinks to the lines whose content differs"
@@ -238,7 +239,7 @@
       (t/is (= [3 3] (refine ["a" "b" "c"] ["a" "b" "c" "d"] [3 3]))))))
 
 (t/deftest test-kitty-expand-gate-skips-the-walks
-  (let [expand (var core/expand-changed-range-for-kitty-images)
+  (let [expand (var frame/expand-changed-range-for-kitty-images)
         image-line (str "\u001b_Ga=T,f=100,i=7;AAAA" "\u001b\\")
         plain (vec (repeat 10 "line"))
         with-image (assoc plain 3 image-line)]
@@ -1355,7 +1356,7 @@
                                 :prefix "kmet-append-log-"
                                 :suffix ".log"})
         path (str f)
-        append! (var core/append-log!)]
+        append! (var frame/append-log!)]
     (try
       (append! path "one\n")
       (append! path "two\n")

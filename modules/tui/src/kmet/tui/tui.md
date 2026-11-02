@@ -118,14 +118,16 @@ End-to-end flow:
 atom change → reaction dirty → queued → frame flush runs it →
    = -gated notify → invalidate + schedule frame → fn bodies re-run →
    tree → compile+reconcile (keyed, per level) → record tree →
-   lines (each record caches) → line diff → terminal bytes
+   lines (each record caches) → normalize + reuse (kmet.tui.frame) →
+   line diff → terminal bytes
 ```
 
 ### Namespaces
 
 | namespace | role |
 |---|---|
-| `kmet.tui.core` | TUI instance: create/start/stop, child list, focus, overlays, input listeners, flash, render loop with line diffing |
+| `kmet.tui.core` | TUI instance: create/start/stop, child list, focus, overlays, input listeners, flash, and the render loop — terminal lifecycle, timers, dispatch lock, frame schedule |
+| `kmet.tui.frame` | one frame: normalize the composed document, reuse unchanged lines, diff against the previous frame, emit the bytes (`render-frame!`), plus the frame-state reset a forced render needs |
 | `kmet.tui.terminal` | backend abstraction: the lean `ITerminal` protocol (raw mode, bounded reads, live size, writes, progress) + shared ANSI verbs, Kitty/query wrappers and drain; `create-terminal` resolves the host backend at runtime |
 | `kmet.tui.terminal-jline` / `kmet.tui.terminal-native-unix` / `kmet.tui.terminal-native-win` | the three backends — JLine on bb/JVM, termios (Unix) / kernel32 console (Windows) FFI over `jolt.ffi` on Jolt; only these namespaces touch platform deps |
 | `kmet.tui.protocols` | `IComponent`, `IFocusable`, `IEditorComponent` |
@@ -1073,6 +1075,16 @@ reactive loop:
   show/hide) and before mutations nothing else tracks yet.
 - The hook runs inside a watch on the mutating thread and must not throw.
 - **Time-driven work uses the timer registry (§6.1)** — not its own thread.
+
+**A frame is `kmet.tui.frame/render-frame!`.** The loop hands it the
+composed document (`compose-document`: the component stack plus visible
+overlays) and the frame state it owns — the live size, the hardware-cursor
+row and viewport-top atoms, the frame-request callback and the write
+buffer. The frame namespace builds the document, normalizes and reuses
+unchanged lines, diffs it against the previous frame and stages the
+bytes; the loop writes them after releasing the lock. Keeping the pass out
+of the loop is what makes it testable on its own: a test builds a stub TUI
+and a document and calls `render-frame!` without a terminal.
 
 **The loop parks when idle.** Frames are painted only when the request flag
 is set, so an idle TUI does no rendering work at all. After a rendered frame
