@@ -94,12 +94,9 @@
    supports long retention. pi sends no extended-cache-ttl beta header with
    it, and neither do we."
   [model-record cache-retention]
-  (let [retention (or cache-retention :short)]
-    (when (not= :none retention)
-      (cond-> {:type "ephemeral"}
-        (and (= :long retention)
-             (:supports-long-cache-retention (anthropic-compat model-record)))
-        (assoc :ttl "1h")))))
+  (shared/cache-control-marker
+   cache-retention
+   (:supports-long-cache-retention (anthropic-compat model-record))))
 
 (def ^:private cache-control-block-types
   "Anthropic content block types that can carry cache_control on the last user
@@ -283,9 +280,8 @@
         schemas (when (seq tools)
                   (mapv #(tool->anthropic-schema % (:supports-strict-tools compat))
                         tools))
-        schemas (if (and tool-cache-control (seq schemas))
-                  (update schemas (dec (count schemas))
-                          assoc :cache_control tool-cache-control)
+        schemas (if tool-cache-control
+                  (shared/mark-last-tool schemas tool-cache-control)
                   schemas)]
     (cond-> {:model model-id
              :max_tokens (:max-tokens thinking (or (:max-tokens model-record) 4096))

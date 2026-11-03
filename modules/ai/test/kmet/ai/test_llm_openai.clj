@@ -612,6 +612,161 @@
   (t/testing "no session id → no headers"
     (t/is (nil? (@#'responses/responses-affinity-headers (responses-model) nil)))))
 
+;; ─── openai-completions prompt caching (pi parity) ─────────────────────────
+
+(defn- completions-model
+  "A minimal openai-completions Model record for payload and header tests."
+  [& [overrides]]
+  (m/map->Model
+   (merge {:id "m1" :name "M1" :provider :custom
+           :api :openai-completions :base-url "https://api.example.com/v1"
+           :reasoning false :input [:text] :max-tokens 4096 :compat nil}
+          overrides)))
+
+(def ^:private cache-tools
+  "Two tools: the anthropic-format marker belongs on the last one only."
+  [{:name "bash" :description "run a command" :parameters {:type "object"}}
+   {:name "read" :description "read a file" :parameters {:type "object"}}])
+
+(defn- cache-conversation
+  "Two rounds with a tool call: system, user, assistant tool call, tool
+   result, final assistant text. The newest conversation message takes the
+   history breakpoint."
+  []
+  [{:role :system :content [{:type :text :text "S"}]}
+   {:role :user :content [{:type :text :text "hi"}]}
+   {:role :assistant :content [{:type :text :text "checking"}]
+    :tool-calls [{:id "c1" :name "bash" :arguments {:cmd "ls"}}]}
+   {:role :tool :content [{:type :tool_result :tool_use_id "c1" :content "out"}]}
+   {:role :assistant :content [{:type :text :text "done"}]}])
+
+(def ^:private completions-anthropic-model
+  "OpenRouter's anthropic/* row: the compat detection the marker tests need."
+  (completions-model {:id "anthropic/claude-sonnet-4.6"
+                      :provider :openrouter
+                      :base-url "https://openrouter.ai/api/v1"}))
+
+(t/deftest test-llm-completions-cache-control
+  (let [model completions-anthropic-model]
+    (t/testing "short (default): markers on the system prompt, the last tool
+               and the last conversation message"
+      (let [payload (@#'completions/openai-payload
+                     model nil (cache-conversation) cache-tools
+                     "anthropic/claude-sonnet-4.6" :short "sess-123")
+            messages (:messages payload)]
+        (t/is (= {:type "ephemeral"}
+                 (get-in messages [0 :content 0 :cache_control]))
+              "the system block carries the marker")
+        (t/is (= {:type "text" :text "done" :cache_control {:type "ephemeral"}}
+                 (get-in messages [4 :content 0]))
+              "a string content is wrapped as a block, like pi")
+        (t/is (= [] (->> (butlast (:tools payload))
+                         (keep :cache_control)
+                         vec))
+              "earlier tools carry no marker")
+        (t/is (= {:type "ephemeral"} (:cache_control (last (:tools payload))))
+              "the last tool carries the marker at the tool level")
+        (t/is (nil? (:prompt_cache_key payload))
+              "a non-openai base url with short retention sends no key")
+        (t/is (nil? (:prompt_cache_retention payload)))))
+    (t/testing "long: ttl 1h on all three breakpoints, 24h retention, key"
+      (let [payload (@#'completions/openai-payload
+                     model nil (cache-conversation) cache-tools
+                     "anthropic/claude-sonnet-4.6" :long "sess-123")]
+        (t/is (= {:type "ephemeral" :ttl "1h"}
+                 (get-in payload [:messages 0 :content 0 :cache_control])))
+        (t/is (= {:type "ephemeral" :ttl "1h"}
+                 (get-in payload [:messages 4 :content 0 :cache_control])))
+        (t/is (= {:type "ephemeral" :ttl "1h"}
+                 (:cache_control (last (:tools payload)))))
+        (t/is (= "24h" (:prompt_cache_retention payload)))
+        (t/is (= "sess-123" (:prompt_cache_key payload))
+              "long retention asks for the key off api.openai.com too")))
+    (t/testing "long without long-retention support: marker without ttl"
+      (let [plain (assoc-in model [:compat :supports-long-cache-retention] false)
+            payload (@#'completions/openai-payload
+                     plain nil (cache-conversation) cache-tools
+                     "anthropic/claude-sonnet-4.6" :long "sess-123")]
+        (t/is (= {:type "ephemeral"}
+                 (get-in payload [:messages 0 :content 0 :cache_control])))
+        (t/is (nil? (:prompt_cache_retention payload)))
+        (t/is (nil? (:prompt_cache_key payload)))))
+    (t/testing ":none strips every marker and key"
+      (let [payload (@#'completions/openai-payload
+                     model nil (cache-conversation) cache-tools
+                     "anthropic/claude-sonnet-4.6" :none "sess-123")]
+        (t/is (not-any? #(str/includes? (pr-str payload) %)
+                        ["cache_control" "prompt_cache"])
+              "no marker and no key")))
+    (t/testing "two builds are byte-identical and leave the caller's messages alone"
+      (let [messages (cache-conversation)
+            build #(@#'completions/openai-payload
+                    model nil messages cache-tools
+                    "anthropic/claude-sonnet-4.6" :short "sess-123")]
+        (t/is (= (pr-str (build)) (pr-str (build)))
+              "a marker cannot leak per-round churn")
+        (t/is (= (cache-conversation) messages)
+              "markers are placed on copies, never on the input")))))
+
+(t/deftest test-llm-completions-prompt-cache-key
+  (let [openai (completions-model {:id "gpt-5.4" :provider :openai
+                                   :base-url "https://api.openai.com/v1"})
+        plain (completions-model)]
+    (t/testing "api.openai.com with caching on: the key, no retention, no markers"
+      (let [payload (@#'completions/openai-payload
+                     openai nil (cache-conversation) [] "gpt-5.4" :short "sess-123")]
+        (t/is (= "sess-123" (:prompt_cache_key payload)))
+        (t/is (nil? (:prompt_cache_retention payload)))
+        (t/is (not (str/includes? (pr-str payload) "cache_control")))))
+    (t/testing "session ids over 64 chars are clamped (pi clampOpenAIPromptCacheKey)"
+      (let [long-id (apply str (repeat 80 "x"))
+            payload (@#'completions/openai-payload
+                     openai nil (cache-conversation) [] "gpt-5.4" :short long-id)]
+        (t/is (= 64 (count (:prompt_cache_key payload))))
+        (t/is (str/starts-with? long-id (:prompt_cache_key payload)))))
+    (t/testing ":none sends no key even on api.openai.com"
+      (let [payload (@#'completions/openai-payload
+                     openai nil (cache-conversation) [] "gpt-5.4" :none "sess-123")]
+        (t/is (nil? (:prompt_cache_key payload)))))
+    (t/testing "a plain compat provider: neither key nor markers"
+      (let [payload (@#'completions/openai-payload
+                     plain nil (cache-conversation) cache-tools "m1" :short "sess-123")]
+        (t/is (nil? (:prompt_cache_key payload)))
+        (t/is (nil? (:prompt_cache_retention payload)))
+        (t/is (not (str/includes? (pr-str payload) "cache_control")))))))
+
+(t/deftest test-llm-completions-affinity-headers
+  (let [openrouter completions-anthropic-model
+        provider {:id :openrouter :name "OpenRouter"}]
+    (t/testing "openrouter format → x-session-id alone"
+      (t/is (= {"x-session-id" "s1"}
+               (@#'completions/completions-affinity-headers openrouter "s1" :short)))
+      (t/is (= "s1"
+               (get (@#'completions/openai-request-headers
+                     openrouter provider "sk" "s1" :short [])
+                    "x-session-id"))))
+    (t/testing "openai format → session_id + x-client-request-id + x-session-affinity"
+      (let [model (completions-model {:compat {:send-session-affinity-headers true}})]
+        (t/is (= {"session_id" "s1" "x-client-request-id" "s1" "x-session-affinity" "s1"}
+                 (@#'completions/completions-affinity-headers model "s1" :short)))
+        (t/is (not= (@#'completions/completions-affinity-headers model "s1" :short)
+                    (@#'responses/responses-affinity-headers model "s1"))
+              "a different set from the responses wire's")))
+    (t/testing "openai-nosession (opencode zen) → x-client-request-id + x-session-affinity"
+      (let [model (completions-model {:compat {:send-session-affinity-headers true
+                                               :session-affinity-format :openai-nosession}})]
+        (t/is (= {"x-client-request-id" "s1" "x-session-affinity" "s1"}
+                 (@#'completions/completions-affinity-headers model "s1" :short)))))
+    (t/testing ":none → no affinity headers even with a session id"
+      (t/is (nil? (@#'completions/completions-affinity-headers openrouter "s1" :none)))
+      (t/is (nil? (get (@#'completions/openai-request-headers
+                        openrouter provider "sk" "s1" :none [])
+                       "x-session-id"))))
+    (t/testing "compat without session affinity → none"
+      (t/is (nil? (@#'completions/completions-affinity-headers (completions-model) "s1" :short))))
+    (t/testing "no session id → none"
+      (t/is (nil? (@#'completions/completions-affinity-headers openrouter nil :short))))))
+
 (t/deftest test-llm-copilot-dynamic-headers
   (t/testing "X-Initiator from the last message role (pi inferCopilotInitiator)"
     (t/is (= {"X-Initiator" "user" "Openai-Intent" "conversation-edits"}
@@ -651,14 +806,14 @@
         provider {:id :github-copilot :name "Copilot"}]
     (t/testing "openai-completions: X-Initiator/Openai-Intent on the wire"
       (let [h (@#'completions/openai-request-headers
-               model provider "sk-test" nil
+               model provider "sk-test" nil :short
                [{:role :user :content [{:type :text :text "hi"}]}])]
         (t/is (= "user" (get h "X-Initiator")))
         (t/is (= "conversation-edits" (get h "Openai-Intent")))
         (t/is (= "Bearer sk-test" (get h "Authorization")))))
     (t/testing "openai-completions: agent + vision follow-up"
       (let [h (@#'completions/openai-request-headers
-               model provider "sk-test" nil
+               model provider "sk-test" nil :short
                [{:role :user :content [{:type :text :text "hi"}]}
                 {:role :tool :content [{:type :tool-result :tool_use_id "t" :content "out"}]
                  :images [{:type :image :data "AA" :mime-type "image/png"}]}])]
@@ -666,7 +821,7 @@
         (t/is (= "true" (get h "Copilot-Vision-Request")))))
     (t/testing "openai-completions: non-copilot providers get no dynamic headers"
       (let [h (@#'completions/openai-request-headers
-               (assoc model :provider :opencode-go) provider "sk-test" nil
+               (assoc model :provider :opencode-go) provider "sk-test" nil :short
                [{:role :user :content [{:type :text :text "hi"}]}])]
         (t/is (nil? (get h "X-Initiator")))))
     (t/testing "anthropic: copilot claude requests carry the dynamic headers"
@@ -688,7 +843,7 @@
       (let [alias (assoc model :provider :github-copilot#work
                          :base-provider :github-copilot)
             h (@#'completions/openai-request-headers
-               alias (assoc provider :id :github-copilot#work) "sk-test" nil
+               alias (assoc provider :id :github-copilot#work) "sk-test" nil :short
                [{:role :user :content [{:type :text :text "hi"}]}])]
         (t/is (= :github-copilot (m/provider-family alias)))
         (t/is (= "user" (get h "X-Initiator")))

@@ -482,8 +482,7 @@
      ;; every assistant message when no same-model reasoning exists. "" for
      ;; the DeepSeek/opencode-go fill; endpoints that turn the field into a
      ;; thinking block reject an empty one, so their models set a non-empty
-     ;; placeholder here. The default is present so an explicit compat value
-     ;; survives the key-wise merge above.
+     ;; placeholder here.
      :reasoning-content-fill ""
      :thinking-format (cond
                         deepseek? :deepseek
@@ -498,15 +497,19 @@
      :supports-strict-mode false
      :cache-control-format (when (and openrouter? (str/starts-with? id-str "anthropic/"))
                              :anthropic)
-     :send-session-affinity-headers false
+     ;; pi detectCompat: OpenRouter asks for the session-affinity headers
+     :send-session-affinity-headers openrouter?
      :session-affinity-format (if openrouter? :openrouter :openai)
      :supports-long-cache-retention (not (or together? cf-workers? cf-gateway? nvidia? ant-ling?))}))
 
 (defn resolved-openai-compat
-  "pi getCompat: the model's explicit :compat overlaid key-wise on
+  "pi getCompat: the model's explicit :compat overlaid on
    detect-openai-compat — an explicit non-nil value wins, nil/absent falls
-   back to the detected default (pi's ?? merge). The single source of compat
-   truth for the openai-completions request builders.
+   back to the detected default (pi's ?? merge). Every explicit key survives,
+   including the ones detection does not name (a per-wire key such as
+   :supports-explicit-prompt-cache-mode or :supports-cache-control-on-tools),
+   so a wire can read its own compat key from here without a detection entry.
+   The single source of compat truth for the wire request builders.
 
    One deliberate exception to pure key-wise merge: an explicit
    :thinking-format :deepseek pins a model to the DeepSeek thinking-mode
@@ -517,14 +520,118 @@
    from the format unless the compat sets the flag explicitly."
   [model]
   (let [explicit (:compat model)
-        merged (into {}
-                     (map (fn [[k detected]]
-                            [k (let [v (get explicit k)] (if (nil? v) detected v))]))
-                     (detect-openai-compat model))]
+        merged (merge (detect-openai-compat model)
+                      (into {} (remove (comp nil? val)) explicit))]
     (cond-> merged
       (and (= :deepseek (:thinking-format merged))
            (nil? (get explicit :requires-reasoning-content-on-assistant-messages)))
       (assoc :requires-reasoning-content-on-assistant-messages true))))
+
+;; ─── Prompt caching (pi: openai-prompt-cache.ts) ──────────────────────────
+
+(defn clamp-prompt-cache-key
+  "pi clampOpenAIPromptCacheKey: session ids longer than 64 characters are
+   truncated (OpenAI's prompt_cache_key limit)."
+  [session-id]
+  (when session-id
+    (let [chars (count session-id)]
+      (if (<= chars 64) session-id (subs session-id 0 64)))))
+
+(defn cache-control-marker
+  "pi getCacheControl / getCompatCacheControl: the cache_control marker for
+   CACHE-RETENTION (:short by default, :long or :none) — nil for :none,
+   otherwise {:type \"ephemeral\"}, plus :ttl \"1h\" on :long when
+   LONG-SUPPORTED?. The two wires differ in the gate (anthropic compat vs
+   :cache-control-format), not in the marker."
+  [cache-retention long-supported?]
+  (let [retention (or cache-retention :short)]
+    (when (not= :none retention)
+      (cond-> {:type "ephemeral"}
+        (and (= :long retention) long-supported?)
+        (assoc :ttl "1h")))))
+
+(defn openai-compat-cache-control
+  "pi getCompatCacheControl (openai-completions.ts:1062): the marker an
+   OpenAI-compatible endpoint takes when its compat declares
+   :cache-control-format :anthropic — nil otherwise."
+  [compat cache-retention]
+  (when (= :anthropic (:cache-control-format compat))
+    (cache-control-marker cache-retention (:supports-long-cache-retention compat))))
+
+(def ^:private instruction-roles
+  "Roles carrying the system prompt on an openai wire (pi marks the first of
+   them: system or developer)."
+  #{"system" "developer"})
+
+(def ^:private conversation-roles
+  "Roles carrying conversation history on an openai wire (pi marks the newest
+   of them)."
+  #{"user" "assistant" "tool"})
+
+(defn- mark-text-content
+  "pi addCacheControlToTextContent: CONTENT with CACHE-CONTROL on its text — a
+   plain string is wrapped as a one-block text vector (the marker rides a
+   block), an array's last text block is marked in place. nil when CONTENT
+   cannot carry a marker (empty content, or no text block)."
+  [content cache-control]
+  (cond
+    (string? content)
+    (when (seq content)
+      [{:type "text" :text content :cache_control cache-control}])
+
+    (vector? content)
+    (when-let [i (last (keep-indexed #(when (= "text" (:type %2)) %1) content))]
+      (assoc-in content [i :cache_control] cache-control))))
+
+(defn- mark-instruction-message
+  "pi addCacheControlToSystemPrompt: mark the first system/developer message,
+   whether or not it can carry a marker (pi stops at the first one either
+   way)."
+  [messages cache-control]
+  (if-let [i (first (keep-indexed #(when (contains? instruction-roles (:role %2)) %1)
+                                  messages))]
+    (let [message (nth messages i)
+          content (mark-text-content (:content message) cache-control)]
+      (if content
+        (assoc messages i (assoc message :content content))
+        messages))
+    messages))
+
+(defn- mark-last-conversation-message
+  "pi addCacheControlToLastConversationMessage: mark the newest message of a
+   conversation role that can carry a marker."
+  [messages cache-control]
+  (loop [i (dec (count messages))]
+    (if (neg? i)
+      messages
+      (let [{:keys [role content] :as m} (nth messages i)
+            marked (when (contains? conversation-roles role)
+                     (mark-text-content content cache-control))]
+        (if marked
+          (assoc messages i (assoc m :content marked))
+          (recur (dec i)))))))
+
+(defn mark-last-tool
+  "pi addCacheControlToLastTool: place CACHE-CONTROL on the last tool
+   declaration — both wires' tool objects carry the marker at the top level
+   (the anthropic wire's schema and the openai function wrapper). TOOLS
+   passes through when there are none."
+  [tools cache-control]
+  (if (seq tools)
+    (update tools (dec (count tools)) assoc :cache_control cache-control)
+    tools))
+
+(defn apply-anthropic-cache-control
+  "pi applyAnthropicCacheControl (openai-completions.ts:1074-1103): the
+   anthropic-format OpenAI-compatible endpoints (OpenRouter anthropic/*)
+   accept the same cache_control breakpoints — the system prompt's text, the
+   last tool, and the last user/assistant/tool message. Returns
+   {:messages m :tools t}."
+  [messages tools cache-control]
+  {:messages (-> messages
+                 (mark-instruction-message cache-control)
+                 (mark-last-conversation-message cache-control))
+   :tools (mark-last-tool tools cache-control)})
 
 (defn- openai-thinking-params-openrouter [model effort]
   (cond-> {}

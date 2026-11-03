@@ -9,7 +9,7 @@
    [kmet.ai.models :as models]
    [kmet.libs.http :refer [transport-error-message]]
    [kmet.ai.message :refer [content-text image-block?]]
-   [kmet.ai.api.shared :refer [copilot-dynamic-headers endpoint-url on-payload request-headers responses-events-handler effective-total-timeout-ms headers-timeout-ms]]))
+   [kmet.ai.api.shared :refer [clamp-prompt-cache-key copilot-dynamic-headers endpoint-url on-payload request-headers responses-events-handler effective-total-timeout-ms headers-timeout-ms]]))
 
 (defn normalize-id-part
   "pi normalizeIdPart: sanitize a tool-call id to [a-zA-Z0-9_-], cap at 64
@@ -166,14 +166,6 @@
         :openai {"session_id" session-id "x-client-request-id" session-id}
         ;; :openai-nosession — no session_id header (opencode zen)
         {"x-client-request-id" session-id}))))
-
-(defn clamp-prompt-cache-key
-  "pi clampOpenAIPromptCacheKey: session ids longer than 64 chars are
-   truncated (OpenAI's prompt_cache_key limit)."
-  [session-id]
-  (when session-id
-    (let [chars (count session-id)]
-      (if (<= chars 64) session-id (subs session-id 0 64)))))
 
 (defn responses-payload
   "Request body for an openai-responses request (pi buildParams):

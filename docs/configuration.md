@@ -26,8 +26,8 @@ Example `~/.kmet/agent/settings.edn`:
  :model "deepseek-v4.1-flash"
  :theme "dark"
  :thinking :off
- :thinking-mode :visible        ; thinking blocks: :visible (default), :stream-last (the live
-                                ; block's tail while the model thinks, the hidden label once it ends), :hidden
+ :thinking-mode :visible        ; thinking blocks: :visible (default), :stream-last (the label above the live
+                                ; block's tail while the model thinks, the label alone once it ends), :hidden
  :session-dir "~/.kmet/sessions"
  :http-idle-timeout-ms 120000   ; LLM stream idle timeout in ms; 0 disables idle timeout
  :http-transport :platform      ; :platform (default) = babashka.http-client on both hosts,
@@ -226,14 +226,18 @@ conversation re-reads from the cache instead of re-billing the whole
 prompt. What is sent depends on the wire: `anthropic-messages` places
 `cache_control` breakpoints on the system block, the last tool and the last
 user block (three of Anthropic's four); `openai-responses` sends
-`prompt_cache_key`; the retained cache window is 5 minutes by default.
+`prompt_cache_key`; `openai-completions` sends `prompt_cache_key` on
+`api.openai.com` and, for OpenRouter's `anthropic/*` models, the same three
+`cache_control` breakpoints in the Anthropic wire format; the retained cache
+window is 5 minutes by default.
 
 `KMET_CACHE_RETENTION` changes that host-wide. `long` asks for the longer
-retention where the model supports it (`ttl: "1h"` on Anthropic,
-`prompt_cache_retention: "24h"` on `openai-responses`); an Anthropic
-1-hour cache write is priced at twice the base input rate. `none` turns
-caching off — no markers, no cache key, no session-affinity headers.
-Compaction summaries always ask for `none`: they are read once.
+retention where the model supports it (`ttl: "1h"` on the Anthropic wires
+and OpenRouter's anthropic-format models, `prompt_cache_retention: "24h"` on
+`openai-responses` and `openai-completions`); an Anthropic 1-hour cache write
+is priced at twice the base input rate. `none` turns caching off — no
+markers, no cache key, no session-affinity headers. Compaction summaries
+always ask for `none`: they are read once.
 
 The cache half of the accounting was already there — `cache_read` and
 `cache_write` tokens and their cost — so `/cost`, the footer and the

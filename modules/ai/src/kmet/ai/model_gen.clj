@@ -1025,7 +1025,8 @@
 (defn- process-fireworks
   "pi processFireworksModels: glm-5p2 + kimi-k3 → openai-completions, the
    rest → anthropic-messages (the Anthropic-compatible API; the
-   session-affinity/eager-streaming compat keys are data-only in kmet)."
+   eager-streaming compat key is data-only in kmet — the cache ones are read
+   by their wires)."
   [data]
   (let [anthropic-compat (array-map :send-session-affinity-headers true
                                     :supports-eager-tool-input-streaming false

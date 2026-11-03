@@ -376,7 +376,9 @@
             "strict tools are opt-in: capable models carry an explicit catalog compat")
       (t/is (true? (:supports-store d)))
       (t/is (true? (:supports-reasoning-effort d)))
-      (t/is (= :openai (:session-affinity-format d)))))
+      (t/is (= :openai (:session-affinity-format d)))
+      (t/is (false? (:send-session-affinity-headers d))
+            "session affinity is OpenRouter-only (pi detectCompat)")))
   (t/testing "deepseek detected by base URL or provider id"
     (doseq [m [(cmodel :base-url "https://api.DEEPSEEK.com")
                (cmodel :provider :deepseek)]]
@@ -392,6 +394,7 @@
       (t/is (= :openrouter (:thinking-format d)))
       (t/is (true? (:supports-developer-role d)))
       (t/is (= :openrouter (:session-affinity-format d)))
+      (t/is (true? (:send-session-affinity-headers d)))
       (t/is (= :anthropic (:cache-control-format d)))))
   (t/testing "zai/moonshot: effort unsupported, max_tokens; moonshot drops strict mode"
     (let [zai (shared/detect-openai-compat
@@ -432,23 +435,39 @@
     (t/is (false? (:supports-store
                    (shared/resolved-openai-compat
                     (cmodel :compat {:supports-store false}))))))
+  (t/testing "an explicit key detection does not name survives the merge"
+    ;; per-wire keys (responses' :supports-explicit-prompt-cache-mode, the
+    ;; anthropic wire's :supports-cache-control-on-tools) have no detected
+    ;; default, and dropping them silently turned a model's compat off
+    (let [r (shared/resolved-openai-compat
+             (cmodel :compat {:supports-explicit-prompt-cache-mode true
+                              :supports-cache-control-on-tools false}))]
+      (t/is (true? (:supports-explicit-prompt-cache-mode r)))
+      (t/is (false? (:supports-cache-control-on-tools r)))))
+  (t/testing "an explicit nil falls back to the detected default"
+    (t/is (= :openai (:thinking-format
+                      (shared/resolved-openai-compat
+                       (cmodel :compat {:thinking-format nil})))))
+    (t/is (true? (:supports-long-cache-retention
+                  (shared/resolved-openai-compat
+                   (cmodel :compat {:supports-long-cache-retention nil}))))))
   (t/testing "no compat at all → pure detection"
     (t/is (= :openai (:thinking-format (shared/resolved-openai-compat (cmodel)))))))
 
 (t/deftest test-openai-payload-sampling-params
   (t/testing "sampling-params merged verbatim into the payload, keys win (pi: Object.assign last)"
     (let [model (assoc (tmodel) :sampling-params {:temperature 1.0 :min_p 0.0})
-          payload (@#'completions/openai-payload model nil [] [] "m1")]
+          payload (@#'completions/openai-payload model nil [] [] "m1" :short nil)]
       (t/is (= 1.0 (:temperature payload)))
       (t/is (= 0.0 (:min_p payload)))
       (t/is (= "m1" (:model payload)))
       (t/is (= true (:stream payload)))))
   (t/testing "sampling-params override pi-named fields (temperature, max tokens)"
     (let [model (assoc (tmodel) :sampling-params {:max_completion_tokens 5})
-          payload (@#'completions/openai-payload model nil [] [] "m1")]
+          payload (@#'completions/openai-payload model nil [] [] "m1" :short nil)]
       (t/is (= 5 (:max_completion_tokens payload)) "sampling key beats the model :max-tokens")))
   (t/testing "no sampling-params → payload unchanged"
-    (let [payload (@#'completions/openai-payload (tmodel) nil [] [] "m1")]
+    (let [payload (@#'completions/openai-payload (tmodel) nil [] [] "m1" :short nil)]
       (t/is (= 32000 (:max_completion_tokens payload)))
       (t/is (nil? (:temperature payload))))))
 
@@ -466,7 +485,7 @@
                ;; produced this message IS deepseek-v4-flash)
                :thinking "prior CoT" :provider :custom :model "deepseek-v4-flash"
                :tool-calls [{:id "c1" :name "bash" :arguments {}}]}]
-        payload (@#'completions/openai-payload model :high msgs [] "deepseek-v4-flash")]
+        payload (@#'completions/openai-payload model :high msgs [] "deepseek-v4-flash" :short nil)]
     (t/is (= {:thinking {:type "enabled"} :reasoning_effort "high"}
              (select-keys payload [:thinking :reasoning_effort])))
     (t/is (= 32768 (:max_tokens payload)))
@@ -477,7 +496,7 @@
     (let [payload (@#'completions/openai-payload model nil
                                                  [{:role :assistant
                                                    :content [{:type :text :text "hi"}]}]
-                                                 [] "deepseek-v4-flash")]
+                                                 [] "deepseek-v4-flash" :short nil)]
       (t/is (= "" (:reasoning_content (first (:messages payload))))))))
 
 (t/deftest test-openai-payload-model-switch-foreign-thinking
@@ -504,14 +523,14 @@
               {:role :assistant :content [{:type :text :text "Found a.txt and b.txt."}]
                :thinking "Qwen's summary CoT"
                :provider :hetzner :model "Qwen3.8-27B"}]]
-    (let [payload (@#'completions/openai-payload qwen-era :high msgs [] "Qwen3.8-27B")
+    (let [payload (@#'completions/openai-payload qwen-era :high msgs [] "Qwen3.8-27B" :short nil)
           [_ a1 _ a2] (:messages payload)]
       ;; pre-switch sanity: same-model replay still works on the old model
       (t/is (= "Qwen's own CoT about running ls" (:reasoning_content a1)))
       (t/is (= "Qwen's summary CoT" (:reasoning_content a2))))
     ;; after the switch the SAME history goes to deepseek-v4-flash
     (let [ds (assoc (tmodel) :compat {:thinking-format :deepseek})
-          payload (@#'completions/openai-payload ds :high msgs [] "deepseek/deepseek-v4-flash")
+          payload (@#'completions/openai-payload ds :high msgs [] "deepseek/deepseek-v4-flash" :short nil)
           [_ a1 _ a2] (:messages payload)]
       (t/is (= {:thinking {:type "enabled"}} (select-keys payload [:thinking])))
       ;; the :deepseek format derives the reasoning_content echo-back
@@ -526,7 +545,7 @@
       ;; field present everywhere, but filled only with own-model reasoning
       (let [ds-flag (assoc ds :compat {:thinking-format :deepseek
                                        :requires-reasoning-content-on-assistant-messages true})
-            payload (@#'completions/openai-payload ds-flag :high msgs [] "deepseek/deepseek-v4-flash")
+            payload (@#'completions/openai-payload ds-flag :high msgs [] "deepseek/deepseek-v4-flash" :short nil)
             [_ a1 _ a2] (:messages payload)]
         (t/is (= "" (:reasoning_content a1))
               "foreign turn carries the required empty fill")
@@ -553,7 +572,7 @@
               {:role :assistant :content [{:type :text :text "mine"}]
                :thinking "own CoT"
                :provider :commandcode :model "stealth/cat-jam:free"}]
-        payload (@#'completions/openai-payload stealth :high msgs [] "stealth/cat-jam:free")
+        payload (@#'completions/openai-payload stealth :high msgs [] "stealth/cat-jam:free" :short nil)
         [_ foreign own] (:messages payload)]
     (t/is (= " " (:reasoning_content foreign))
           "a pre-switch turn carries the non-empty fill, never the foreign CoT")
