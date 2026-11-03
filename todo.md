@@ -1,15 +1,24 @@
 # Todo
 
-Four tracks, in the order to take them. All independent; each is a
-request/ABI-level change with unit-testable surfaces. The context and token
-tracks that used to close this file are dropped — see § Deferred.
+Six tracks. The order below is the order to take them; only the two tool tracks
+are ordered against each other, because they touch the same selection functions
+and share one ABI document. The context and token tracks that used to close
+this file are dropped — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
 | **`github-copilot` anthropic auth** | every `github-copilot/claude-*` model failed with `400 missing required Authorization header` — the anthropic wire sent `x-api-key` to an endpoint that only accepts `Authorization: Bearer` | **landed** (oauth marker → Bearer; verified live) |
-| Prompt-caching parity with pi | kmet's wires never ask for prompt caching (except responses/mistral/bedrock), so cache-read sits at 0; the tool ranker serves MCP only, no source's tools can be declared, and a tool-set change re-sends the whole array | **P0 landed** (anthropic breakpoints + 1h pricing); P1–P6 planned, decisions closed |
+| **Prompt-caching parity with pi** (P) | the wires never ask for caching — anthropic places no breakpoint, completions sends no key — so cache-read sits at 0 while the accounting that prices it is already complete | **P0–P1 landed** (anthropic breakpoints + 1h pricing; completions key/retention/markers/affinity); P2 and P4 remain; decisions closed (D1–D3) |
+| **Tool exposure and declared sets** (P5–P6) | the ranker serves MCP only and no source's tools can be declared, so every tool costs a schema on every round; a tool-set change re-sends the whole array and is recorded nowhere | plan, decisions closed (D4–D8); **P5 → P6** |
+| **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | plan; **after** the exposure track |
 | Around tool hooks | two hand-rolled hook chains + a doubled permission gate; no way to settle a call successfully | decided: **A** — one `:on-tool` around registration |
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | decisions closed (E1–E16); independent |
+
+Between tracks: P (P2 → P4) → exposure (P5 → P6) → S. That order is a decision
+about where the effort goes, not a dependency: P5 needs nothing from P — it is
+the only prefix change whose payoff does not depend on a provider honouring a
+marker. Hooks and eval land whenever; neither touches a wire nor the tool
+registry.
 
 ## `github-copilot`: its anthropic models cannot authenticate
 
@@ -34,9 +43,15 @@ resolution shape (`test_oauth.clj`).
 
 Status: plan, decisions closed. **P0 landed and verified against the live API**
 (anthropic breakpoints, the usage merge it uncovered, the 1h cache-write
-pricing, and D2's corrected resolution seam). Next: P1.
+pricing, and D2's corrected resolution seam). **P1 landed** (completions key,
+retention, anthropic-format markers, affinity headers). P3's resolution landed
+with P0. Next: P2, then P4.
 Owner: whoever takes the `:llm` row next.
 Reference implementation: `~/src/cvstree/pi/packages/ai/src/api/` (pi).
+
+P5 and P6 are **not** this track. Neither is a wire change; they lived here
+because this is where they were first measured. They are
+§ Tool exposure and declared sets.
 
 ### Why
 
@@ -202,6 +217,16 @@ Done when: an OpenRouter `anthropic/*` model gets all three markers and
 non-openai compat provider gets neither key nor markers; `:none` strips all of
 it.
 
+**Done.** `clamp-prompt-cache-key` moved to `shared` (responses and codex
+require it from there); `openai-compat-cache-control` and
+`apply-anthropic-cache-control` sit beside it, and `openai-payload` /
+`openai-request-headers` take `cache-retention` + `session-id`. One detected
+default moved with the change: pi's `detectCompat` sets
+`sendSessionAffinityHeaders` for OpenRouter (`openai-completions.ts:1674`)
+where kmet hardcoded false — the header step has no effect without it, so
+`detect-openai-compat` now follows pi. Tests:
+`test-llm-completions-cache-control`, `-prompt-cache-key`, `-affinity-headers`.
+
 #### P2 — compat keys become the single source, not per-wire hardcoding
 
 Files: `modules/ai/src/kmet/ai/api/shared.clj` (`detect-openai-compat`,
@@ -230,6 +255,13 @@ Done when: no wire branches on `models/provider-family` for caching or
 affinity, and `model_gen`'s "data-only in kmet" note can be deleted.
 
 #### P3 — make `long` reachable, and expose `:none` where it belongs
+
+**Landed with P0** (D2): `kmet.app.config/get-cache-retention` reads the
+variable, `kmet.ai.llm/resolve-cache-retention` defaults an absent value to
+`:short`, and the turn passes the resolved value. The audit is closed by
+construction — the only `kmet.app.llm/send-message` call sites are the turn
+(`loop/completion.clj`) and compaction (`compaction/stage.clj`, which sends
+`:none`).
 
 Files: `modules/ai/src/kmet/ai/llm.clj`, `modules/ai/src/kmet/app/config.clj`,
 `modules/ai/src/kmet/ai/api/shared.clj`.
@@ -261,16 +293,114 @@ Files: `modules/ai/src/kmet/ai/api/openai_responses.clj`.
 Done when: the explicit-mode model sends `prompt_cache_options` and no
 `prompt_cache_retention`.
 
+### Test plan
+
+Pure builders, no network, no `^:slow`:
+
+- `modules/ai/test/kmet/ai/test_llm_anthropic.clj` — new deftest over
+  `anthropic-payload`: three markers `:short`; none `:none`; `:ttl "1h"` on
+  `long`; string-content message wrapped; `:supports-cache-control-on-tools
+  false` drops the tool marker.
+- `modules/ai/test/kmet/ai/test_llm_openai.clj` — `openai-payload` /
+  `openai-request-headers` for: OpenRouter `anthropic/*` (three markers +
+  `x-session-id`), `api.openai.com` (`prompt_cache_key`, no markers), a plain
+  compat provider (neither), `:none` (nothing).
+- `modules/ai/test/kmet/ai/test_llm_models.clj` — an explicit `false` in
+  `:compat` wins over the detected default for each of the three cache keys
+  (this is where `detect-openai-compat` / `resolved-openai-compat` are
+  already under test).
+- Existing byte-stability tests: assert that two consecutive payload builds
+  from the same messages are `pr-str`-equal, so a marker cannot leak
+  per-round churn.
+
+Run: `bb test-changed`, `bb lint-changed`, `bb format-check-changed`.
+
+### Order and size
+
+P0 (landed) and P1 (landed) were independent and each a single-file change plus
+a test. Remaining sequence: P2 → P4. P2 last-if-busy: it deletes duplication,
+it does not change bytes; P4 is three lines in one payload builder. All
+decisions are closed; nothing waits on one.
+
+P2's second half — deleting the hardcoded family map in `openai_responses.clj` —
+touches a file the exposure track rewrites too, so land P2 before P6.
+
+### Decisions
+
+**D1 — `:long` on anthropic (decided: match pi, no beta header).** pi sends
+`cache_control: {:type "ephemeral" :ttl "1h"}` and no `extended-cache-ttl…`
+beta — the string appears nowhere in pi — and it *relies* on the result:
+`usage.cache_creation.ephemeral_1h_input_tokens` is parsed and priced at 2x base
+input (`models.ts:1247-1248`, covered by
+`anthropic-cache-write-1h-cost.test.ts`). nodecode's beta
+(`providers/anthropic.lisp:420`) is the only divergence and reads as carried
+over from when the header was required.
+
+Prerequisite kmet lacks: it drops the 1h split entirely. `models.clj:76` says
+"minus cacheWrite1h" and `usage.clj:29` normalises
+`cache_creation_input_tokens` but not its `:ephemeral_1h_input_tokens` member,
+so a 1h write would be priced at the 5m rate. Landed with P0 (step 8).
+
+**D2 — retention resolution (decided: env now; location corrected while landing
+P0).** The environment is read in `kmet.app.config/get-cache-retention` and the
+resolved value arrives as the call's `:cache-retention`;
+`kmet.ai.llm/resolve-cache-retention` only defaults an absent one to `:short`.
+The plan said `kmet.ai.llm` would read the variable, but `test_seam_requires`
+(`ai-names-no-app-state-root`) forbids a `kmet.ai` namespace from naming any
+`KMET_*` variable — host state arrives as an argument — and the guard is right.
+No per-model or per-provider key: the per-model shape has no consumer, and a
+`settings.edn` key can follow if one appears. The per-call `:cache-retention`
+stays the override compaction uses for `:none`.
+
+**D3 — affinity on anthropic (decided: in P0).** `anthropic-compat` already
+answers `:send-session-affinity-headers` / `:session-affinity-format`, and the
+wire already makes the `request-headers` call, so the headers cost nothing
+extra. Default OpenRouter-only, as pi's `getAnthropicCompat:230` has it.
+
+### Verification beyond tests
+
+On a real session against Anthropic with `-message` logging on, confirm the
+second round's usage chunk reports `cache_read_input_tokens > 0` for all but
+the newest message. That is the only assertion that proves the markers are
+accepted; everything above proves they are sent.
+
+## Tool exposure and declared sets
+
+Status: plan, decisions closed (D4–D8). **P5 → P6**, in that order: P5 defines
+what is declared — exposure, the loadable set, one ranker, `tool_search` — and
+P6 makes the declared set changeable mid-conversation and records it. Taken
+after § Prompt caching's P2 → P4, which is a decision about effort, not a
+dependency: P5 needs no wire work, and P6 wants P0/P1 landed so the cache it
+protects is actually being taken. Kept apart from § Tools: cross-session
+selection in both scopes on purpose — that track is the user's policy over the
+set, this one is the mechanism that produces it.
+
+### Why
+
+Both costs removed here are paid on the declared tool array, the largest
+constant part of the prompt: it sits at the front of the prefix (anthropic
+caches `tools → system → messages`), so every schema is paid on every round and
+every change to it invalidates everything behind it.
+
+- **Nothing can be declared lazily.** The ranker serves MCP only: the MCP
+  adapter registers **one** `mcp` proxy tool with `search`/`describe`/`call`
+  modes
+  (`extensions/mcp-adapter/src/kmet/extensions/mcp_adapter/core.clj:697,1315`),
+  so N servers already cost one schema and `mcp search` already exists. What is
+  missing is that no other source's tools can be declared at all — contributed
+  sources are sandbox-only by construction — so an extension with twenty tools
+  pays twenty schemas on every round. This replaces an earlier "defer MCP tool
+  schemas" idea that turned out to be unnecessary.
+- **A change re-sends the whole array.** kmet computes the tool list per request
+  from the live registry and records nothing, so a resumed session can advertise
+  a set the run it resumes never sent — silently.
+
+### Tasks
+
 #### P5 — pi's exposure semantics, one ranker, and a deferred source
 
-Independent of P0–P4 and, unlike them, not a wire change: it touches the tool
-registry. It replaces an earlier "defer MCP tool schemas" idea that turned out
-to be unnecessary — kmet's MCP adapter already registers **one** `mcp` proxy
-tool with `search`/`describe`/`call` modes
-(`extensions/mcp-adapter/src/kmet/extensions/mcp_adapter/core.clj:697,1315`), so
-N servers already cost one schema and `mcp search` already exists. What is
-missing is that the ranker only serves MCP, and that no source's tools can ever
-be declared.
+Covers the first bullet: a source's tools become declarable, and a declaration
+becomes something the model can defer.
 
 Reference: pi's `ToolExposure` (five values,
 `packages/coding-agent/src/core/extensions/types.ts:536`) and its built-in
@@ -484,23 +614,9 @@ unsupported provider degrades to today's full re-declaration.
 
 ### Test plan
 
-Pure builders, no network, no `^:slow`:
+No network, no `^:slow` — the registry, the ranker and the session fold are
+pure:
 
-- `modules/ai/test/kmet/ai/test_llm_anthropic.clj` — new deftest over
-  `anthropic-payload`: three markers `:short`; none `:none`; `:ttl "1h"` on
-  `long`; string-content message wrapped; `:supports-cache-control-on-tools
-  false` drops the tool marker.
-- `modules/ai/test/kmet/ai/test_llm_openai.clj` — `openai-payload` /
-  `openai-request-headers` for: OpenRouter `anthropic/*` (three markers +
-  `x-session-id`), `api.openai.com` (`prompt_cache_key`, no markers), a plain
-  compat provider (neither), `:none` (nothing).
-- `modules/ai/test/kmet/ai/test_llm_models.clj` — an explicit `false` in
-  `:compat` wins over the detected default for each of the three cache keys
-  (this is where `detect-openai-compat` / `resolved-openai-compat` are
-  already under test).
-- Existing byte-stability tests: assert that two consecutive payload builds
-  from the same messages are `pr-str`-equal, so a marker cannot leak
-  per-round churn.
 - P5, registry: a source registered with `:exposure :deferred` contributes
   nothing to `active-tools` but its tools stay callable from `run_code`; a
   `:sandbox` source keeps today's behaviour; `:model-only` is declared and not
@@ -540,51 +656,21 @@ Pure builders, no network, no `^:slow`:
   resume replays it and a fork taken before a change keeps the older set; an
   unsupported provider re-declares the array, byte-identical to today.
 
-Run: `bb test-changed`, `bb lint-changed`, `bb format-check-changed`.
+Run: `bb test-changed`, `bb test-ext-changed`, `bb lint-changed`, `bb format-check-changed`.
 
 ### Order and size
 
-P0 (landed) and P1 are independent and each is a single-file change plus a
-test. Recommended sequence: P1 → P2 → P4 → P3 (P3 resolves a decided setting
-through `KMET_CACHE_RETENTION`, D2 — read it in `kmet.app.config`, never in
-`kmet.ai`, which may not name a host variable). P2 last-if-busy: it deletes
-duplication, it does not change bytes. P5 is independent of all of them — it touches the tool
-registry, not a wire — so it lands whenever, and is the one item whose payoff
-is measured in prompt tokens rather than cache reads. P6 depends on P5 and wants
-P0/P1 landed so the cache it protects is actually being taken. All decisions
-are closed; nothing waits on one.
+Two items, one commit each. P5 is the larger by surface area — registry, loop
+state, `run_code`'s callable surface, a new ranker namespace, the MCP adapter,
+one ABI doc — and changes no request bytes until a source declares `:deferred`,
+which is exactly what its "a `:direct` tool and every existing extension render
+byte-identical" gate asserts. P6 is three wires plus a session record and may
+land as three commits — anthropic, responses, completions — behind one
+`:tool-change` entry, since each wire's mode ladder is independent. Everything
+is testable without a network except P6's `inline-tools` beta, which needs one
+live request.
 
 ### Decisions
-
-**D1 — `:long` on anthropic (decided: match pi, no beta header).** pi sends
-`cache_control: {:type "ephemeral" :ttl "1h"}` and no `extended-cache-ttl…`
-beta — the string appears nowhere in pi — and it *relies* on the result:
-`usage.cache_creation.ephemeral_1h_input_tokens` is parsed and priced at 2x base
-input (`models.ts:1247-1248`, covered by
-`anthropic-cache-write-1h-cost.test.ts`). nodecode's beta
-(`providers/anthropic.lisp:420`) is the only divergence and reads as carried
-over from when the header was required.
-
-Prerequisite kmet lacks: it drops the 1h split entirely. `models.clj:76` says
-"minus cacheWrite1h" and `usage.clj:29` normalises
-`cache_creation_input_tokens` but not its `:ephemeral_1h_input_tokens` member,
-so a 1h write would be priced at the 5m rate. Landed with P0 (step 8).
-
-**D2 — retention resolution (decided: env now; location corrected while landing
-P0).** The environment is read in `kmet.app.config/get-cache-retention` and the
-resolved value arrives as the call's `:cache-retention`;
-`kmet.ai.llm/resolve-cache-retention` only defaults an absent one to `:short`.
-The plan said `kmet.ai.llm` would read the variable, but `test_seam_requires`
-(`ai-names-no-app-state-root`) forbids a `kmet.ai` namespace from naming any
-`KMET_*` variable — host state arrives as an argument — and the guard is right.
-No per-model or per-provider key: the per-model shape has no consumer, and a
-`settings.edn` key can follow if one appears. The per-call `:cache-retention`
-stays the override compaction uses for `:none`.
-
-**D3 — affinity on anthropic (decided: in P0).** `anthropic-compat` already
-answers `:send-session-affinity-headers` / `:session-affinity-format`, and the
-wire already makes the `request-headers` call, so the headers cost nothing
-extra. Default OpenRouter-only, as pi's `getAnthropicCompat:230` has it.
 
 **D4 — exposure follows pi, including `:model-only` (decided: correcting the
 earlier two-value claim).** The tool record carries
@@ -624,15 +710,20 @@ already in the generated data; the missing compat key is
 
 ### Verification beyond tests
 
-On a real session against Anthropic with `-message` logging on, confirm the
-second round's usage chunk reports `cache_read_input_tokens > 0` for all but
-the newest message. That is the only assertion that proves the markers are
-accepted; everything above proves they are sent.
+Two live checks, both against Anthropic with `-message` logging on: a source
+registered `:exposure :deferred` yields a first request whose `tools` array
+holds `tool_search` and not the source's schemas, with a `cache_creation` that
+covers the prefix; and a promotion made mid-session leaves the next request's
+`cache_read_input_tokens > 0` for everything before the declaration — the
+delta, not a re-declaration, is P6's point.
 
 ## Tools: cross-session selection in both scopes
 
-Depends on nothing in the prompt-caching section, but shares its tool-registry
-files; exposure (§ P5) stays out of it deliberately.
+Depends on § Tool exposure and declared sets — not on its code, on its
+vocabulary: `:enabled-tools` selects over the set that track splits into
+`callable` and `declared`, and a `/tools` row's provenance only means something
+once those are two derivations. Exposure itself stays out of this track: a
+per-tool or per-scope override would make a `:sandbox` tool un-disableable.
 
 ### Why
 
@@ -659,8 +750,8 @@ already exists, and give `/tools` the discovery plus a scope target.
   `resource_config.clj:231-244`). No tab bar — a scope line with the target
   file plus per-row provenance; Tab switches, same as `kmet config` (`:23`,
   `:700-706`).
-- **Exposure stays out.** It is a source-level property (P5), and a
-  project-scope exposure override would make a `:sandbox` tool un-disableable
+- **Exposure stays out.** It is a source-level property (§ Tool exposure), and
+  a project-scope exposure override would make a `:sandbox` tool un-disableable
   (`callable = … ∪ sandbox`).
 - **`/tools` discovers, `kmet config` reviews.** The config screen never loads
   plugins (`tools/config.clj:58-60`), so it sees only built-ins and names
