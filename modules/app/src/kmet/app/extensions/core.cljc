@@ -62,10 +62,8 @@
    reloads each mounted row's extension with the row's config
    (`rows/reload-all!`), and disposing a row unloads the record it owns.
    `load-extension!`/`unload-extension!` are the per-artifact entry points
-   those two call; the path and container loaders below
-   (`load-extension-paths!`, `load-extensions-from-dir`,
-   `reload-extensions!`) serve a caller holding a directory of artifacts and
-   are not on a boot path."
+   those two call; `extension-artifact-paths` is what discovery reads to find
+   the artifacts a row may name."
   (:require [clojure.java.io :as io]
             [clojure.edn :as edn]
             [clojure.string :as str]
@@ -82,7 +80,6 @@
             [kmet.app.debug :as debug]
             [kmet.hikap.alias :as alias]
             [kmet.libs.concurrent :as concurrent]
-            [kmet.libs.host :as host]
             [kmet.loader.core :as loader]
             ;; Jolt only: pulls the fixed bundled extension set into the
             ;; app's require closure (jolt dist AOT-compiles it). bb/JVM
@@ -1825,8 +1822,8 @@
    mounted as one (`:plugin` or a manifest `:inject`); failures are reported,
    not swallowed. Then its
    isolated context goes: namespaces and jars become unreachable, nothing
-   global is touched. Expects the Extension record (from the registry /
-   reload-extensions!); nil is a no-op — the load result map carries only its
+   global is touched. Expects the Extension record (from the registry / a
+   composition row); nil is a no-op — the load result map carries only its
    :extension name, and (deref nil) would otherwise surface as a cryptic NPE.
 
    A `shutdown` that hands back an undelivered promise defers the **release**
@@ -2005,75 +2002,3 @@
                             (fs/exists? (io/file (str entry) "extension.edn"))) path
                        :else nil))))
            vec))))
-
-(defn- report-load-result!
-  "Print the warning/note for a load RESULT (the load functions write
-   nothing themselves); returns RESULT. A :duplicate-name skip names the
-   earlier copy; an :unsupported-loader skip names the declared and
-   available backends; a pending plugin mount says what it waits for; an
-   error is a warning."
-  [label result]
-  (when (and result (:error result))
-    (binding [*out* *err*]
-      (println "Warning: Failed to load extension" label ":"
-               (:error result))))
-  (when (:pending result)
-    (binding [*out* *err*]
-      (println "Note: extension" (:extension result) "from" label
-               "is waiting for its :inject dependencies — init runs when they"
-               "are provided")))
-  (when (:skipped result)
-    (binding [*out* *err*]
-      (if (= :duplicate-name (:reason result))
-        (println "Note: extension" (:extension result) "from" label
-                 "is already loaded — skipping (the earlier copy wins)")
-        (println "Note: extension" (:extension result) "declares loaders"
-                 (pr-str (:declared-loaders result)) "but" (host/runtime-name)
-                 "offers" (pr-str (:available-loaders result)) "— skipping"))))
-  result)
-
-(defn load-extension-paths!
-  "Load extensions from explicit artifact paths (.clj/.jar/.zip files or
-   extension.edn directories — the package-resource unit, pi: package
-   extensions load). Returns the list of per-extension {:extension name
-   :error} results (:skipped true for an extension whose declared loaders
-   this host does not offer, or whose name is already loaded); failures
-   and skips are also printed as notes."
-  [paths]
-  (mapv (fn [path] (report-load-result! path (load-extension! path)))
-        paths))
-
-(defn load-extension-descriptors!
-  "Load bundled extension DESCRIPTORS
-   (kmet.app.extensions.bundled/artifacts) — load-extension-paths!'s
-   descriptor counterpart: the same result maps and notes, with :path the
-   descriptor's synthetic identity."
-  [descriptors]
-  (mapv (fn [descriptor]
-          (report-load-result! (:path descriptor)
-                               (load-extension-descriptor! descriptor)))
-        descriptors))
-
-(defn load-extensions-from-dir
-  "Load all extensions in DIR (a container): top-level .clj files, .jar/.zip
-   archives, and subdirectories containing extension.edn. Returns the list of
-   per-extension {:extension name :error} results; failures are also printed
-   as warnings."
-  [dir]
-  (let [d (io/file dir)]
-    (when (fs/directory? d)
-      (load-extension-paths! (extension-artifact-paths (str d))))))
-
-(defn reload-extensions!
-  "Unload all loaded extensions, then load from DIRS. Returns the list of
-   per-extension {:extension name :error} results. Extension UI (widgets,
-   custom footer/header/editor, dialogs) is reset first (pi: reload calls
-   resetExtensionUI before reloading)."
-  [dirs]
-  (ui-call :reset)
-  (unload-all-extensions!)
-  ;; EAGER (vec around the mapcat): loading is a side effect, and a lazy
-  ;; result means a caller that ignores the return value never loads
-  ;; anything. bb's apply/concat realizes the seq anyway; jolt defers,
-  ;; so the same code silently loaded nothing there.
-  (vec (mapcat load-extensions-from-dir dirs)))

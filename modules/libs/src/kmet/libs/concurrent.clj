@@ -27,7 +27,7 @@
      deliberately omitted.
 
    Whitelisting `future` would pull in an implicit `Executor`, make
-   extension work survive `unload-extension!`/`reload-extensions!`
+   extension work survive `unload-extension!` or `/reload`
    (non-daemon futures keep kmet alive), enable unbounded submission
    with no backpressure, and require the rest of the `future` family
    (`future-call`, `future-cancel`, …) plus `pmap`/`pcalls` for

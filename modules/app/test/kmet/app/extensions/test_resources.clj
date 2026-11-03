@@ -746,24 +746,3 @@
         (t/is (some? (:error result)))
         (t/is (empty? (extensions/get-loaded-extensions)))))
     (fs/delete-tree dir)))
-
-(t/deftest test-reload-extensions
-  (testing "reload-extensions! (container dirs) unloads + reloads"
-    (let [container (test-tmp/temp-dir! "test-ext-container-")]
-      (fs/create-dirs container)
-      (fs/copy-tree "test/fixtures/ext-single" container)
-      (fs/copy-tree "test/fixtures/ext-dir" (str container "/multi-ext"))
-      (extensions/clear-extensions!)
-      (let [results (extensions/reload-extensions! [container])]
-        (t/is (= 2 (count (filter #(nil? (:error %)) results)))
-              (str "both loaded: " (pr-str results)))
-        (t/is (some? (commands/find-command "hello-ext")))
-        (t/is (some? (tools-registry/get-tool (registry/current) "multi-ext-tool")))
-        (testing "reload again: old state fully replaced, no duplicates"
-          (extensions/reload-extensions! [container])
-          (t/is (= 1 (count (filter #(= "hello_ext.clj" (:name %))
-                                    (extensions/get-loaded-extensions))))
-                "no duplicate extensions after reload")
-          (t/is (some? (commands/find-command "hello-ext")))))
-      (extensions/unload-all-extensions!)
-      (fs/delete-tree container))))

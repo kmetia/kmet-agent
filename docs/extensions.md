@@ -523,7 +523,7 @@ adapters already copied):
 ```
 
 - Whitelisting `future` would pull in an implicit global pool, let extension
-  work survive `unload-extension!`/`reload-extensions!` and keep `kmet`
+  work survive `unload-extension!` or `/reload` and keep `kmet`
   alive past shutdown, enable unbounded submission with no backpressure, and
   need the rest of the family (`future-call`/`future-cancel`/`pmap`/`pcalls`)
   for consistency. An explicit daemon `Thread` keeps the lifecycle obvious

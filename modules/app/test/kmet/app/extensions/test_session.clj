@@ -427,18 +427,6 @@
           ;; The JVM caches JarURLConnection archives; unload before deleting.
           (extensions/unload-all-extensions!)
           (fs/delete-if-exists zip)))
-      (testing "load-extensions-from-dir picks up top-level jars"
-        (let [container "target/test-ext-jar-container"]
-          (fs/delete-tree container)
-          (fs/create-dirs container)
-          (fs/copy jar (str container "/jar-ext.jar"))
-          (extensions/unload-all-extensions!)
-          (let [results (extensions/load-extensions-from-dir container)]
-            (t/is (= 1 (count (filter #(nil? (:error %)) results)))
-                  (str "jar picked up: " (pr-str results)))
-            (t/is (= "jar-ok|bundled" (:content (tools-registry/execute-tool (registry/current) "jar-ext-tool" {})))))
-          (extensions/unload-all-extensions!)
-          (fs/delete-tree container)))
       (testing "the SCI backend serves the archive too"
         ;; The space also exercises escaped jar:file URLs on Jolt's SCI fallback.
         (let [sci-jar "target/test ext-jar-sci.jar"]
@@ -763,13 +751,11 @@
                 (t/is (= [:sci] (:available-loaders r)))
                 (t/is (nil? (:error r)) "a skip is informational, not a failure"))))
         (extensions/unload-all-extensions!))
-      (testing "a declaration with no host backend is skipped, with a note"
-        (let [dir (mk "jvm" (manifest "ld-jvm" "[:jvm]"))
-              err-w (java.io.StringWriter.)
-              [r] (binding [*err* err-w] (extensions/load-extension-paths! [dir]))]
+      (testing "a declaration with no host backend is skipped, not failed"
+        (let [r (extensions/load-extension! (mk "jvm" (manifest "ld-jvm" "[:jvm]")))]
           (t/is (true? (:skipped r)))
-          (t/is (not-any? #(= "ld-jvm" (:name %)) (extensions/get-loaded-extensions)))
-          (t/is (str/includes? (str err-w) "skipping")))
+          (t/is (= :unsupported-loader (:reason r)))
+          (t/is (not-any? #(= "ld-jvm" (:name %)) (extensions/get-loaded-extensions))))
         (extensions/unload-all-extensions!))
       (testing "a legacy manifest (no :loader) defaults to both backends with a warning"
         (let [err-w (java.io.StringWriter.)
