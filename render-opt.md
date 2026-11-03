@@ -1,13 +1,13 @@
 # The per-child render cost: watch at the read, probe at the parent
 
 Design record for the work the frame benchmark attributes to `:parts` —
-the chat history's walk over its message components. Status: **change 1
-landed** — 1a ("watch a tracked read at the read") with its failure-path
-follow-up, and 1b ("commit the cache through an in-flight token"); 2 and 3
-are the remainder, sequenced in §9. The verdict this plan encodes
-(§7.1, §9): change 1 is a correctness fix and lands regardless; change 2 is
-worth its risk and is the payoff; change 3 is a measurement-driven maybe
-that defaults to *not landing*.
+the chat history's walk over its message components. Status: **changes 1 and
+2 landed** — 1a ("watch a tracked read at the read") with its failure-path
+follow-up, 1b ("commit the cache through an in-flight token"), and 2 ("trust
+the cache's invalidation edges"). Change 3 (the probe) is the only remainder
+and the measured numbers say it should not land (§9.2/§9.3): `:parts` is
+already at ~1.2 ms, and the probe's cost is the ownership read that commit 2
+added.
 
 Two predecessors were rejected and their reasoning is kept in §10: review.md
 §14's "verify at write / parent probe" sketch, and a draft of this file that
@@ -260,7 +260,8 @@ rejects it on `:atoms` shape.
 ### 4.2 What has to change
 
 Only one thing in the reasoning above is not already true: **presence must
-imply validity for the atom half**, and today it does not (§2's two edges).
+imply validity for the atom half**, and before this work it did not (§2's two
+edges, now labelled pre-change).
 Everything else — the probe, the parents' `or`, the ownership check — is
 consequence.
 
@@ -271,9 +272,10 @@ and the hit path (§4.4). A probe miss alone would heal nothing, and the
 earlier draft of this file claimed it did: the probe's fallback is `render`,
 which would find the still-valid cache, hit it, and never re-register. With
 `tracked?` in the hit path an unowned cache is a miss, the body re-runs, and
-`weak/register!` reinstates the entry and its watches. Today that role is
-played by `atoms-unchanged?` (a changed ref forces a miss); the hit-path
-check replaces it at ~0.2–0.4 µs, paid only by components nobody probes.
+`weak/register!` reinstates the entry and its watches. Before this work that
+role was played by `atoms-unchanged?` (a changed ref forced a miss); the
+hit-path check replaced it at ~0.2–0.4 µs, paid only by components nobody
+probes (commit 3).
 
 ### 4.3 Change 1 — watch at the first read (landed)
 
@@ -327,8 +329,8 @@ tracker-key → snapshot prev-watched → register! prev-watched
 
 Three positions carry weight:
 
-- **`prev-watched` is snapshotted before the first registration.** Today the
-  branch-switch diff reads the previous payload after the body. Once
+- **`prev-watched` is snapshotted before the first registration.** Before
+  this work the branch-switch diff read the previous payload after the body. Once
   registration moves before the body, that read would see the *new*
   payload and the diff would be empty against itself — every ref a previous
   branch read keeps its watch forever, invalidating the component on writes
@@ -389,8 +391,8 @@ Three positions carry weight:
 **A throwing body must leave nothing behind.** Two things break that are not
 true today:
 
-- **Zombie watches.** Today a body that throws installs no watches, so a
-  first-pass failure leaves no state. With install-at-read, the refs read
+- **Zombie watches.** Before this work a body that threw installed no
+  watches, so a first-pass failure left no state. With install-at-read, the refs read
   before the throw are watched under `watch-key`. If the `finally` unwatched
   only those and unregistered, the refs the *previous* pass watched would
   stay installed while the payload naming them disappears with the entry —
@@ -399,8 +401,8 @@ true today:
   the union.
 - **A rejected cache left for a presence check.** A render body only runs
   after the hit check rejected the cache, so a throwing body leaves a
-  *rejected* cache in the atom. Today `atoms-unchanged?` re-rejects it on the
-  next hit; after change 2 nothing would, and presence would silently
+  *rejected* cache in the atom. Before this work `atoms-unchanged?` re-rejected
+  it on the next hit; with change 2 nothing would, and presence would silently
   reverse the rejection. So the failure path must clear the cache atom, not
   just the watches.
 - The fix: the miss path tracks completion (`completed?` set at the end of
@@ -520,7 +522,8 @@ cache, the probe must not skip its wrapper.
 | reaction re-derives to an equal value | unchanged: `rx-unchanged?` keeps the hit. No extra body run, no frame requested. |
 | body reads a reaction on one branch only | the cache describes the pass that wrote it; a pass that read none records `:rx {}` and answers the probe honestly. |
 | one ref's watch is lost (wrong key, a manual `remove-watch` inside `track!` code) | **no longer compensated** — the component stays stale until something else invalidates it. This is the trade, and the residual class: reachable only through `reakt/unwatch-ref` misuse, since `track-render` watches every ref under its one lock-allocated key. |
-| the registry entry is lost (a stray `unregister!`, a dispose-then-re-render) | **healed, not just caught**: both the probe and the hit path test `tracked?` (§4.2), so the cache misses, the body re-runs, and `weak/register!` reinstates the entry and its watches. Today `atoms-unchanged?` is what heals it; the hit-path ownership check is its replacement. (A sweep cannot claim a live subject — only a stray unregister can reach this.) |
+| the registry entry is lost (a stray `unregister!`, a dispose-then-re-render) | **healed, not just caught**: both the probe and the hit path test `tracked?` (§4.2), so the cache misses, the body re-runs, and `weak/register!` reinstates the entry and its watches. Before this work `atoms-unchanged?` was what healed it; the hit-path ownership
+check replaces it. (A sweep cannot claim a live subject — only a stray unregister can reach this.) |
 | a foreign cache atom — an extension or duck-typed component writes `{:atoms … :width … :result …}` by hand | no registry entry for its key → `tracked?` false → `render`. Presence is not proof. |
 | width change | `stable-lines` compares width → miss → render rebuilds. |
 | component disposed / collected | probes and watches die with it; no probe can reach it (the parent's memo is dropped with the child). |
@@ -591,8 +594,9 @@ also name the guarantee change.
 
 The win is split across commits 2 and 3 and must be measured that way: **the
 saving is the per-ref walk, which commit 2 removes; commit 3 only removes the
-call and the residuals around it.** The predictions below are for the gate in
-§9.2 to confirm or kill, not measurements.
+call and the residuals around it.** The table below is the original
+prediction; §9.2 has the measured commit-2 numbers, which land inside the
+"after commit 2" column (and at the "after commit 3" figure, hence §9.3).
 
 | | now | after commit 2 (predicted) | after commit 3 (predicted) |
 |---|---|---|---|
@@ -659,8 +663,8 @@ consequence does travel outside it.
   `stream`-frame or append-latency regression is possible.
 * **Frame requests from self-writing bodies — this one *does* change.** A
   render body that writes a ref it also reads tracked now fires its own
-  watch: the cache is skipped for that pass and a frame is requested. Today
-  such a body silently relies on the next hit check to miss. Converging
+  watch: the cache is skipped for that pass and a frame is requested. Before
+  this work such a body silently relied on the next hit check to miss. Converging
   bodies pay one extra compose once (`custom_message.clj:45-46` writes
   `applied-theme-atom` in the body → two full composes per theme switch;
   `tool_execution.clj:291-292`'s `:timer-id` swap → one extra frame per tool
@@ -840,7 +844,10 @@ dropped, commit 2 does not pay and reverts — nothing else depends on it.
 **Then let it bake** in the app before commit 3: the residual failure mode is
 silent, so real use (streaming, theme switches, tool lifecycles) is the test
 the suite approximates. Commit 3 can wait for it; nothing in 1a/1b/2 needs
-it.
+it. Note: 1b and 2 landed back to back on the oracle rather than after a bake
+(§7.1's softer wording); the bake has not happened yet, so it now gates any
+*further* change here — including, if someone still wants commit 3, that
+decision.
 
 ### 9.3 Commit 3 — the parents (default: not landed)
 
