@@ -27,6 +27,8 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 
 Findings 1–13 are fixed (one commit each, each with a regression test); 12 is dropped.
 Of finding 14's structural list the small items are done and three stand (see §14).
+Line references in the fixed findings describe the code as it was found — the fix moved
+them; §14's surviving bullets point at the code as it stands.
 
 ---
 
@@ -284,12 +286,12 @@ a run without an exit code is `:error` and shows `(no exit code)`.
 
 ## 14. Structure and hot paths
 
-Four of the small items are done; the three structural ones stand.
+The small items and the frame extraction are done; three stand.
 
-- ~~**Frame rebuild copies the whole document**~~ **fixed** (`core.clj:225-226`): the pass now
-  starts from the previous output vector, `assoc`s only the differing chunks, `conj`s the
-  appended tail, and returns the previous vector itself when nothing changed (so the diff
-  scan's `identical?` fast path sees it).
+- ~~**Frame rebuild copies the whole document**~~ **fixed** (`build-frame-lines`,
+  `frame.clj:113-187`): the pass now starts from the previous output vector, `assoc`s only
+  the differing chunks, `conj`s the appended tail, and returns the previous vector itself
+  when nothing changed (so the diff scan's `identical?` fast path sees it).
 - ~~**The flat document is rebuilt at every container level**~~ **fixed**: children are
   flattened through `protocols/cached-lines` (the atom-backed `concat-cached`), a
   per-instance memo (`Container`'s
@@ -312,16 +314,19 @@ Four of the small items are done; the three structural ones stand.
   and rides the message map as `:skill-block` (stripped by `chat-history-get-messages`).
 - ~~**`run-render-loop!` is ~720 lines**~~ **fixed**: the frame moved to `kmet.tui.frame`
   (`render-frame!` + the document/diff/emit passes over an explicit frame-state map); the loop
-  is now 193 lines of lifecycle, timers, lock and schedule, and `test_frame` drives one frame
+  is now 201 lines of lifecycle, timers, lock and schedule, and `test_frame` drives one frame
   on a stub TUI with no terminal. The review asked for three entry points
   (`build-frame`/`diff-frame`/`emit-frame`); they share the cursor and viewport state the diff
   mutates, so they landed as one `render-frame!` with the passes inside it — the split was
   the untested part, not the boundary. `main-diff` then came out too: `diff-frame!` (CC 79) is
-  a top-level fn taking the frame values and the emit kit it needs, so the pass is 301 lines
+  a top-level fn taking the frame values and the emit kit it needs, so the pass is 290 lines
   instead of 551 — the mass moved, it did not shrink (`bb slop` erosion 0.829).
-- **Frame state is ~17 independent atoms** updated field by field (`core.clj:284-311`,
-  force-redraw at 2506-2516, commit at 2994-3016): one `:frame` atom holding a previous-frame
-  map removes the two lists that must stay in sync. Natural once the extraction lands.
+- **Frame state is ~17 independent atoms** updated field by field — `create-tui` builds them
+  (`core.clj:131-195`), `reset-frame!` resets nine one at a time (`frame.clj:435-451`), the
+  commit writes nine in a row (`frame.clj:981-1010`), and the loop clears `force-redraw?`
+  (`core.clj:2127-2129`): one `(:frame tui)` atom holding a previous-frame map removes the two
+  lists that must stay in sync. 29 read sites, all in `core.clj` and `frame.clj`
+  (`render-frame!` reads the memo at `frame.clj:796-798`).
 - ~~**Two session-deletion policies**~~ **fixed**: `session/listing.clj` owns the policy
   (`delete-session-file`: trash then unlink), `delete-session!` calls it and reports a failed
   delete instead of dropping it, and the selector defaults to it.
@@ -329,12 +334,21 @@ Four of the small items are done; the three structural ones stand.
   is the one policy (`:wrap` or `:clamp`, stale index clamped first); the fork, auth, tree and
   session selectors call it. `resource_config` keeps its own step — it walks a row tree and
   skips non-item rows, which is not list navigation.
-- **Duplicated MCP reload**: `mcp start-server!` and `mcp/server-mcp-list.clj` carry the same
-  path twice. Neither name exists in this tree — needs re-locating before it can be worked.
+- **Duplicated MCP reload**: `handle-refresh`
+  (`extensions/mcp-adapter/src/kmet/extensions/mcp_adapter/core.clj:797`) and
+  `reload-config!` (`:1135`) repeat the same reload body — load config, disconnect removed
+  servers, `rebuild-servers`, `configure-storage!`, sync tools and prompts, register the proxy,
+  update the status bar. Only the tails differ: `handle-refresh` adds
+  `bootstrap-direct-tools!` and the "MCP config reloaded." notice. One shared reload helper
+  returns the new config and each caller adds its own tail.
 - ~~**`(System/getenv "TERMUX_VERSION")` runs on every frame**~~ **fixed**: `termux-host?`.
 - ~~**Dead code**: `center-offset`~~ **fixed**: removed.
-- **The dispatch lock is process-global** (`core.clj:1450-1490`) while every other piece of TUI
-  state is per-instance: create it in `create-tui` and read it from the record.
+- **The dispatch lock is process-global** (`core.clj:1046`, captured by name inside
+  `with-dispatch-lock`/`with-render-lock` at 1048-1085) while every other piece of TUI state is
+  per-instance: create it in `create-tui` and read it from the record. All three call sites
+  (`core.clj:1194`, `1231`, `2067`) already have the tui in scope; the tests' `@(var
+  core/dispatch-lock)` reads (`test_render_loop.clj:81`, `408`, `516`, `802`, `829`, `872`) move
+  to the record with it.
 
 ---
 
@@ -347,5 +361,6 @@ Four of the small items are done; the three structural ones stand.
    code~~ all done, 7 and 5 with item 1.
 5. Structural work (14) as its own series: the small items, the frame extraction and
    the lines cache (container/Box/chat-history/document memo plus the quiet-mode parse
-   hoist) are done. Left: the frame-state atom, the per-instance lock; re-locate the
-   MCP reload duplication (`handle-refresh` vs `reload-config!` in the MCP adapter).
+   hoist) are done. Left, in this order: the MCP reload dedup
+   (`handle-refresh`/`reload-config!`, `mcp_adapter/core.clj:797,1135`), the frame-state
+   atom, the per-instance lock.
