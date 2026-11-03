@@ -174,12 +174,18 @@ The shipped set is enumerated in `modules/app/src/kmet/bundled-extensions.edn`;
 single file defines `plugin`, strict ns-path layout, `deps.edn` with only
 `:deps` and no `:local/root`).
 
-To develop against an edited copy, the classic paths still work — symlink
-(or copy) an extension into the global or project extensions dir:
+To develop against an edited copy, symlink (or copy) an extension into the
+global or project extensions dir:
 
 ```bash
 ln -s "$PWD/extensions/tools.clj" ~/.kmet/agent/extensions/tools.clj
 ```
+
+That only changes which artifact a row resolves to; it does not load by
+itself. A bundled extension's row usually exists already (`:ext/tools` in the
+global patch layer), and a new extension needs its row composed — `kmet
+config`, or `{:id :ext/my-ext :plugin :ext/my-ext}` in a patch layer (see
+[Where extensions live and what loads them](#where-extensions-live-and-what-loads-them)).
 
 Built-in extension namespaces follow the layout: a single file is
 `kmet.extensions.<name>` (the file's stem); a manifest dir namespaces its

@@ -27,24 +27,36 @@ color values, installation, and live reload; complete starting points are in
   ["extensions/*.clj" "!extensions/legacy.clj"]}` (plain globs include,
   `!` excludes, `+path`/`-path` force include/exclude, `[]` disables a type)
   or use `kmet config`. The same top-level arrays
-  (`:extensions`/`:skills`/`:prompts`/`:themes`) select exactly which
-  auto-root resources stay enabled without installing a package. A project entry with `:autoload false` is a delta over
+  (`:extensions`/`:skills`/`:prompts`/`:themes`) name auto-root resources
+  without installing a package: the skills, prompts and themes arrays select
+  which ones stay enabled, while an `:extensions` path only widens the
+  discovered set — an extension loads when a composition row names it (see the
+  Extensions bullet). A project entry with `:autoload false` is a delta over
   the global entry of the same package (pi's package model — same pattern
   semantics as pi's `packages.md`).
 - **Skills**: Place `name/SKILL.md` directories (or flat `.md` files) with YAML frontmatter (`name`, `description`) in `~/.kmet/agent/skills/` or `.kmet/skills/` — listed in the system prompt as `<available_skills>`; `/skill:name` loads one on demand (Agent Skills standard, pi-compatible)
 - **Prompt Templates**: Place `.md` files in `~/.kmet/agent/prompts/` or `.kmet/prompts/` — `/name args` expands to the template body with `$1`, `$@`, `${1:-default}`, `${@:N}` placeholders; unknown `/cmd` falls through to the agent (pi-compatible)
 - **Extensions**: Place `.clj` files (or directories with `extension.edn`) in
-  `~/.kmet/agent/extensions/` or `.kmet/extensions/` — the fixed auto roots;
-  extra paths go in top-level `:extensions` settings entries (`KMET_CODING_AGENT_DIR`
-  moves the agent dir). Every extension — single file or manifest dir — is a
-  plugin: its namespace defines a `plugin` var (a `kmet.srce.core/defplugin`
-  map, or a plain map) whose `:apply` receives the extension's ctx and its
-  api map; it may also define `(defn shutdown [api])`. A manifest dir declares
-  `{:name :plugin :loader}` (`:plugin` is that var), and `deps.edn` carries
-  its own source deps. Extensions depend on `kmet.extension` and
-  `kmet.srce.core`. Loaded at startup, reloadable via `/reload`, and
-  unloadable at runtime; unload runs shutdown then disposes everything it
-  registered.
+  `~/.kmet/agent/extensions/` or `.kmet/extensions/` — the fixed discovery
+  roots; extra paths go in top-level `:extensions` settings entries
+  (`KMET_CODING_AGENT_DIR` moves the agent dir). Every extension — single file
+  or manifest dir — is a plugin: its namespace defines a `plugin` var (a
+  `kmet.srce.core/defplugin` map, or a plain map) whose `:apply` receives the
+  extension's ctx and its api map; it may also define `(defn shutdown [api])`.
+  A manifest dir declares `{:name :plugin :loader}` (`:plugin` is that var),
+  and `deps.edn` carries its own source deps. Extensions depend on
+  `kmet.extension` and `kmet.srce.core`.
+  **Discovery is not loading.** A run mounts exactly the extensions its
+  composition names as `:ext/<id>` rows, so a file in a discovery root does
+  nothing until a row names it. `kmet config`'s Extensions group is the
+  toggle: the global scope composes a row in `~/.kmet/agent/patch.edn` and a
+  disable writes a `:remove` patch that keeps the row (and its `:config`),
+  while the project scope writes a project row or a remove patch in
+  `.kmet/patch.edn`, cycling inherit/load/unload as the other groups do. No
+  settings key decides whether an extension loads. A toggle lands in the layer
+  file, so the next run mounts it — `/reload` re-loads the rows already
+  mounted, and unloading runs the extension's shutdown then disposes
+  everything it registered.
   Shipped opt-in extensions live in [`extensions/`](../extensions/)
   ([usage](../extensions/README.md)); writing your own:
   [the authoring guide](extensions.md) and the
