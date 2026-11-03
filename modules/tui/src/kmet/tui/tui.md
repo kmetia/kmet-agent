@@ -126,7 +126,7 @@ atom change → reaction dirty → queued → frame flush runs it →
 
 | namespace | role |
 |---|---|
-| `kmet.tui.core` | TUI instance: create/start/stop, child list, focus, overlays, input listeners, flash, and the render loop — terminal lifecycle, timers, dispatch lock, frame schedule |
+| `kmet.tui.core` | TUI instance: create/start/stop, child list, focus, overlays, input listeners, flash, and the render loop — terminal lifecycle, timers, the instance's dispatch lock, frame schedule |
 | `kmet.tui.frame` | one frame: normalize the composed document, reuse unchanged lines, diff against the previous frame, emit the bytes (`render-frame!`), plus the frame-state reset a forced render needs |
 | `kmet.tui.terminal` | backend abstraction: the lean `ITerminal` protocol (raw mode, bounded reads, live size, writes, progress) + shared ANSI verbs, Kitty/query wrappers and drain; `create-terminal` resolves the host backend at runtime |
 | `kmet.tui.terminal-jline` / `kmet.tui.terminal-native-unix` / `kmet.tui.terminal-native-win` | the three backends — JLine on bb/JVM, termios (Unix) / kernel32 console (Windows) FFI over `jolt.ffi` on Jolt; only these namespaces touch platform deps |
@@ -1122,20 +1122,23 @@ the park.
 
 **Render and input never overlap.** The input reader, the flush timers and
 the render loop are separate threads, but component state is not
-thread-safe by contract: they run under one mutex (`dispatch-lock`,
-§7), so the loop's whole iteration — due timers, the reaction flush and
-the frame, props application included — cannot interleave with a
-keystroke. Without it a frame whose body read a state snapshot before a
-keystroke could apply that snapshot after it, writing the older value
-back over a field the user had just edited (the `/scoped-models`
-backspace freeze), and a render could read a component mid-edit. This is
-pi's single-threaded model; the lock is a `ReentrantLock` because the
-loop must back out of the acquisition when its holder (the reader,
-joining the loop from `tui-suspend!` for the external editor) is waiting
-on it. The park/sleep and the frame's terminal write stay outside the
-lock: writing is blocking tty I/O, and a stalled terminal must not stall
-input dispatch — the frame's bytes are staged under the lock and written
-once it is released.
+thread-safe by contract: they run under the instance's one mutex
+(`dispatch-lock`, §6), so the loop's whole iteration — due timers, the
+reaction flush and the frame, props application included — cannot
+interleave with a keystroke. Without it a frame whose body read a state
+snapshot before a keystroke could apply that snapshot after it, writing
+the older value back over a field the user had just edited (the
+`/scoped-models` backspace freeze), and a render could read a component
+mid-edit. This is pi's single-threaded model; the lock is a
+`ReentrantLock` because the loop must back out of the acquisition when
+its holder (the reader, joining the loop from `tui-suspend!` for the
+external editor) is waiting on it. It lives in the instance
+(`create-tui`), not in a namespace var: a second TUI — a test, a second
+screen — does not serialize against this one's frames or wait on a lock
+whose loop is this one's. The park/sleep and the frame's terminal write
+stay outside the lock: writing is blocking tty I/O, and a stalled
+terminal must not stall input dispatch — the frame's bytes are staged
+under the lock and written once it is released.
 
 ### 6.1 Timers — `kmet.tui.timers`
 

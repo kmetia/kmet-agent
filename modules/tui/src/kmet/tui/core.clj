@@ -107,7 +107,7 @@
                 previous-raw-lines previous-marks previous-flashed?
                 previous-repainted?
                 previous-width render-requested? force-redraw? waker
-                running? stopped? overlays
+                dispatch-lock running? stopped? overlays
                 render-loop input-reader current-reader
                 flashes focus-order-counter
                 show-hardware-cursor? keyboard-protocol-pushed?
@@ -144,6 +144,10 @@
                        :render-requested? (atom false)
                        :force-redraw? (atom false)
                        :waker (wake/make-waker)
+                       ;; the input/render mutex (see with-dispatch-lock): per
+                       ;; instance, so a second TUI in the process neither
+                       ;; serializes against nor deadlocks with this one
+                       :dispatch-lock (java.util.concurrent.locks.ReentrantLock.)
                        :running? (atom false)
                        :stopped? (atom false)
                        :overlays (atom [])
@@ -1042,14 +1046,15 @@
 ;; single thread does it. ReentrantLock, not a monitor: the render loop must
 ;; be able to back out of the acquisition while the lock's holder — the input
 ;; reader, driving tui-suspend!'s join of this loop for the external editor —
-;; waits on it (acquire-dispatch-lock!).
-(def ^:private dispatch-lock (java.util.concurrent.locks.ReentrantLock.))
-
+;; waits on it (acquire-dispatch-lock!). The mutex belongs to the instance
+;; (created in `create-tui`), never to the process: a second TUI — a test, a
+;; second screen — must neither serialize against this one's frames nor hold
+;; its reader at a lock the other's loop owns.
 (defmacro ^:private with-dispatch-lock
-  "Run BODY holding dispatch-lock (reentrant, so a nested render from the
-   reader thread — materialize-ref! — may re-enter)."
-  [& body]
-  `(let [lock# ~'dispatch-lock]
+  "Run BODY holding TUI's dispatch mutex (reentrant, so a nested render from
+   the reader thread — materialize-ref! — may re-enter)."
+  [tui & body]
+  `(let [lock# (:dispatch-lock ~tui)]
      (.lock lock#)
      (try
        ~@body
@@ -1063,26 +1068,29 @@
   20)
 
 (defn- acquire-dispatch-lock!
-  "Take dispatch-lock for a render pass, backing out when the TUI stops or
-   suspends while waiting: the lock's holder may be the input reader thread
+  "Take TUI's dispatch mutex for a render pass, backing out when the TUI stops
+   or suspends while waiting: the lock's holder may be the input reader thread
    blocked in tui-suspend!'s join on the render loop (the external editor),
    and a plain blocking acquire would deadlock that join against the lock.
    Returns true when held."
   [tui]
-  (loop []
-    (or (.tryLock dispatch-lock DISPATCH-ACQUIRE-SLICE-MS
-                  java.util.concurrent.TimeUnit/MILLISECONDS)
-        (if @(:running? tui) (recur) false))))
+  (let [lock (:dispatch-lock tui)]
+    (loop []
+      (or (.tryLock lock DISPATCH-ACQUIRE-SLICE-MS
+                    java.util.concurrent.TimeUnit/MILLISECONDS)
+          (if @(:running? tui) (recur) false)))))
 
 (defmacro ^:private with-render-lock
-  "Run BODY under dispatch-lock when it can be acquired
+  "Run BODY under TUI's dispatch mutex when it can be acquired
    (acquire-dispatch-lock!); returns true when BODY ran — false when the TUI
    stopped/suspended while the lock was held by the reader joining this
    loop."
   [tui & body]
-  `(if (acquire-dispatch-lock! ~tui)
-     (try ~@body true (finally (.unlock dispatch-lock)))
-     false))
+  `(let [tui# ~tui
+         lock# (:dispatch-lock tui#)]
+     (if (acquire-dispatch-lock! tui#)
+       (try ~@body true (finally (.unlock lock#)))
+       false)))
 
 (defn- clear-incomplete-flush!
   "Cancel a pending incomplete-buffer flush timer."
@@ -1191,7 +1199,7 @@
                   ;; is a no-op) so a consumed buffer can never stall
                   ;; until the next key.
                   (when (= gen @(:input-generation tui))
-                    (with-dispatch-lock
+                    (with-dispatch-lock tui
                       ;; Re-check idleness UNDER the lock, then let
                       ;; dispatch-buffer! re-read + consume under this same
                       ;; lock, so the buffer can neither be stolen from the
@@ -1228,7 +1236,7 @@
   ;; interceptor just examined (stalled split sequences then corrupt into
   ;; literal text). Only the interceptor that consumed or held the fragment
   ;; may clear it.
-  (with-dispatch-lock
+  (with-dispatch-lock tui
     (when (nil? (intercept-keyboard-negotiation! tui read-fn buf))
       (when (nil? (intercept-terminal-response! tui read-fn buf))
         (let [s @buf]

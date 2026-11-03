@@ -72,13 +72,13 @@
   (rows [_] (:rows @size))
   (set-progress! [_ _] nil))
 
-(defrecord LockProbeTerminal [size writes lock-held]
+(defrecord LockProbeTerminal [size writes lock-ref lock-held]
   term/ITerminal
   (start! [this _ _] this)
   (stop! [_] nil)
   (started? [_] true)
   (write-output [_ s]
-    (swap! lock-held conj (.isHeldByCurrentThread @(var core/dispatch-lock)))
+    (swap! lock-held conj (.isHeldByCurrentThread @lock-ref))
     (swap! writes conj s))
   (read-input [_ _] -1)
   (columns [_] (:cols @size))
@@ -405,7 +405,7 @@
         (start-loop tui)
         (wait-for-frames (:writes vt) 1 5000)
         (let [frames-before (count (frame-writes (:writes vt)))
-              lock @(var core/dispatch-lock)]
+              lock (:dispatch-lock tui)]
           ;; hold the frame pass off between the change and the latch check so
           ;; the pending assertion is deterministic, not a race with the loop
           (.lock lock)
@@ -513,7 +513,7 @@
         (start-loop tui)
         (wait-for-frames (:writes vt) 1 5000)
         (let [writes-before (count @(:writes vt))
-              lock @(var core/dispatch-lock)]
+              lock (:dispatch-lock tui)]
           ;; hold the frame pass off between the request and the latch check so
           ;; the pending assertion is deterministic, not a race with the loop
           (.lock lock)
@@ -799,7 +799,7 @@
     (let [held (atom [])
           vt (make-virtual-terminal)
           tui (core/create-tui (:terminal vt))
-          lock @(var core/dispatch-lock)]
+          lock (:dispatch-lock tui)]
       (try
         (core/tui-add-child
          tui
@@ -826,7 +826,7 @@
           handled (atom [])
           vt (make-virtual-terminal)
           tui (core/create-tui (:terminal vt))
-          lock @(var core/dispatch-lock)
+          lock (:dispatch-lock tui)
           comp (reify core/IComponent
                  (render [_ _]
                    (when (= 1 (swap! frames inc))
@@ -869,7 +869,7 @@
             blocking acquire would deadlock its join of the render loop"
     (let [vt (make-virtual-terminal)
           tui (core/create-tui (:terminal vt))
-          lock @(var core/dispatch-lock)]
+          lock (:dispatch-lock tui)]
       (try
         (core/tui-add-child tui (test-component (atom ["frame"])))
         (start-loop tui)
@@ -897,10 +897,13 @@
             a stalled terminal must not stall input dispatch"
     (let [writes (atom [])
           lock-held (atom [])
+          lock-ref (atom nil)
           tui (core/create-tui (map->LockProbeTerminal
                                 {:size (atom {:cols 80 :rows 24})
                                  :writes writes
+                                 :lock-ref lock-ref
                                  :lock-held lock-held}))]
+      (reset! lock-ref (:dispatch-lock tui))
       (try
         (core/tui-add-child tui (test-component (atom ["frame"])))
         (start-loop tui)
@@ -910,6 +913,26 @@
               "every terminal write ran with dispatch-lock free")
         (finally
           (stop-loop tui))))))
+
+(deftest ^:slow a-second-tui-does-not-wait-on-another-tuis-lock
+  (testing "the dispatch mutex belongs to the instance: a lock held on one TUI
+            must not stall another TUI's render loop (it did while the mutex was
+            one process-global var)"
+    (let [a-vt (make-virtual-terminal)
+          a (core/create-tui (:terminal a-vt))
+          b-vt (make-virtual-terminal)
+          b (core/create-tui (:terminal b-vt))
+          lock (:dispatch-lock a)]
+      (t/is (not (identical? lock (:dispatch-lock b)))
+            "each TUI owns its mutex")
+      (.lock lock)
+      (try
+        (core/tui-add-child b (test-component (atom ["frame"])))
+        (start-loop b)
+        (wait-for-frames (:writes b-vt) 1 5000)
+        (finally
+          (.unlock lock)
+          (stop-loop b))))))
 
 (deftest ^:slow cursor-marker-never-reaches-the-terminal
   (testing "a CURSOR-MARKER line above the viewport is stripped, not emitted:

@@ -26,7 +26,7 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 | 14+ | Structural: frame copying, render loop size, duplicated policies | low (maintainability) | **partly fixed** (§14) |
 
 Findings 1–13 are fixed (one commit each, each with a regression test); 12 is dropped.
-Of finding 14's structural list the small items are done and three stand (see §14).
+Of finding 14's structural list the small items are done and two stand (see §14).
 Line references in the fixed findings describe the code as it was found — the fix moved
 them; §14's surviving bullets point at the code as it stands.
 
@@ -286,7 +286,7 @@ a run without an exit code is `:error` and shows `(no exit code)`.
 
 ## 14. Structure and hot paths
 
-The small items and the frame extraction are done; three stand.
+The small items and the frame extraction are done; two stand.
 
 - ~~**Frame rebuild copies the whole document**~~ **fixed** (`build-frame-lines`,
   `frame.clj:113-187`): the pass now starts from the previous output vector, `assoc`s only
@@ -343,12 +343,13 @@ The small items and the frame extraction are done; three stand.
   returns the new config and each caller adds its own tail.
 - ~~**`(System/getenv "TERMUX_VERSION")` runs on every frame**~~ **fixed**: `termux-host?`.
 - ~~**Dead code**: `center-offset`~~ **fixed**: removed.
-- **The dispatch lock is process-global** (`core.clj:1046`, captured by name inside
-  `with-dispatch-lock`/`with-render-lock` at 1048-1085) while every other piece of TUI state is
-  per-instance: create it in `create-tui` and read it from the record. All three call sites
-  (`core.clj:1194`, `1231`, `2067`) already have the tui in scope; the tests' `@(var
-  core/dispatch-lock)` reads (`test_render_loop.clj:81`, `408`, `516`, `802`, `829`, `872`) move
-  to the record with it.
+- ~~**The dispatch lock is process-global**~~ **fixed**: the mutex is a field of the TUI
+  record, created in `create-tui` (`core.clj:150`), and `with-dispatch-lock`/`with-render-lock`
+  (`core.clj:1053`, `1083`) read it from the instance — a second TUI no longer serializes
+  against the first's frames or waits on a lock its reader will never release. A regression
+  test holds one TUI's lock and asserts a second TUI's loop keeps rendering
+  (`a-second-tui-does-not-wait-on-another-tuis-lock`); under the shared var the second loop
+  spun in `acquire-dispatch-lock!` until the lock was released.
 
 ---
 
@@ -362,5 +363,5 @@ The small items and the frame extraction are done; three stand.
 5. Structural work (14) as its own series: the small items, the frame extraction and
    the lines cache (container/Box/chat-history/document memo plus the quiet-mode parse
    hoist) are done. Left, in this order: the MCP reload dedup
-   (`handle-refresh`/`reload-config!`, `mcp_adapter/core.clj:797,1135`), the frame-state
-   atom, the per-instance lock.
+   (`handle-refresh`/`reload-config!`, `mcp_adapter/core.clj:797,1135`), then the frame-state
+   atom.
