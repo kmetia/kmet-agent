@@ -22,41 +22,39 @@
   (:require [kmet.app.extensions.rows :as extension-rows]
             [kmet.srce.core :as srce]))
 
-(defn- resolve-plugin
-  "The plugin map SOURCE names, or `{:plugin nil}` when it does not resolve
-   (or is not a plugin map: no keyword :name); `{:error e}` when loading it
-   failed. A namespace that fails to load is not a missing plugin, so the
-   error is carried out to `card` instead of being swallowed — a syntax error
-   must not read as a typo. Loading the namespace mounts nothing."
-  [source]
-  (try
-    (let [v (requiring-resolve source)
-          plugin (when (var? v) @v)]
-      {:plugin (when (and (map? plugin) (keyword? (:name plugin))) plugin)})
-    (catch Throwable e
-      {:error e})))
-
-(defn- load-error-text
-  "A load error as one clause: the file:line the host put in ex-data (Clojure
-   and SCI both do) and its message, so a broken plugin points at itself."
-  [e]
-  (let [d (ex-data e)
+(defn- unknown-plugin
+  "The composition error for a row's plugin SOURCE. CAUSE, when the source
+   failed to load rather than being a var that is not there, is attached and
+   named in the message — a syntax error must not read as a typo — with the
+   file:line the host put in its ex-data (Clojure and SCI both do), so a
+   broken plugin points at itself."
+  [source cause]
+  (let [d (some-> cause ex-data)
         file (or (:file d) (:clojure.error/source d))
-        line (or (:line d) (:clojure.error/line d))]
-    (str (when (and file line) (str file ":" line ": "))
-         (or (ex-message e) "load failed"))))
+        line (or (:line d) (:clojure.error/line d))
+        failure (when cause
+                  (str (when (and file line) (str file ":" line ": "))
+                       (or (ex-message cause) "load failed")))]
+    (ex-info (str "unknown plugin source: " (pr-str source)
+                  " — a row's :plugin must name a defplugin var"
+                  (when failure (str "; loading it failed: " failure)))
+             (cond-> {:type :kmet.app/unknown-plugin :source source}
+               failure (assoc :load-error failure))
+             cause)))
 
-(defn- card [source]
-  (let [{:keys [plugin error]} (resolve-plugin source)]
-    (if plugin
+(defn- card
+  "The card SOURCE's plugin map declares (:name :inject :provide); a source
+   that does not resolve to a plugin map is `:kmet.app/unknown-plugin`.
+   Loading the namespace mounts nothing."
+  [source]
+  (let [plugin (try
+                 (let [v (requiring-resolve source)]
+                   (when (var? v) @v))
+                 (catch Throwable e
+                   (throw (unknown-plugin source e))))]
+    (if (and (map? plugin) (keyword? (:name plugin)))
       (select-keys plugin [:name :inject :provide])
-      (let [failure (when error (load-error-text error))]
-        (throw (ex-info (str "unknown plugin source: " (pr-str source)
-                             " — a row's :plugin must name a defplugin var"
-                             (when failure (str "; loading it failed: " failure)))
-                        (cond-> {:type :kmet.app/unknown-plugin :source source}
-                          failure (assoc :load-error failure))
-                        error))))))
+      (throw (unknown-plugin source nil)))))
 
 (defn- bad-row [row message]
   (throw (ex-info message {:type :kmet.app/bad-row :row row})))
