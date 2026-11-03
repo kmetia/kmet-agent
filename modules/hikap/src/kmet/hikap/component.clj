@@ -85,7 +85,7 @@
     (reakt/unwatch-ref ref key))
   nil)
 
-(declare invalidate-cache schedule-frame!)
+(declare invalidate-cache schedule-frame! tracked?)
 
 (defn- atoms-unchanged?
   "reduce-kv hit check over a cache's plain refs: true while ATOM still
@@ -190,6 +190,11 @@
                                       (= old new))
                           (when-let [c (weak/subject k)]
                             (invalidate-cache c)))))
+            ;; The in-flight token, parked in the cache atom for the body's
+            ;; duration. It is what makes the commit atomic: no other writer
+            ;; can produce this object, so `cur` is still the token exactly
+            ;; when nothing invalidated the pass (§4.3).
+            token {::rendering true}
             ;; Refs this pass read (a set: a re-read adds nothing). The
             ;; payload's :watched and the branch-switch diff's "after" set.
             ;; Single-threaded (a body runs on the render thread), so a
@@ -218,62 +223,64 @@
                       (when (= :plain kind)
                         (reakt/watch-ref ref watch-key handler))
                       (vswap! seen conj ref)))]
-          (let [cache-watch-key (keyword (str (name watch-key) "-cache"))
-                invalidated? (atom false)
-                ;; Watch the cache atom itself: an invalidate mid-body (a
-                ;; render fn calling :invalidate, or a tracked atom changing
-                ;; while the body runs) resets it — a signal that this result
-                ;; was built from stale state, so it must not be cached; the
-                ;; next render re-runs the body with the fresh state.
-                _ (add-watch cache-atom cache-watch-key
-                             (fn [_ _ _ _] (reset! invalidated? true)))]
-            (try
-              (let [result (render-fn)
-                    atom-vals @atoms
-                    rx-refs @rx
-                    ;; Everything the body tracked, reactions included:
-                    ;; :watched is what teardown and the sweep must unwatch
-                    ;; later. (The cache splits the same refs: :atoms plain
-                    ;; keyed by ref, :rx reactions keyed by their state cell.)
-                    watched @seen]
-                (weak/register! watch-key component {:watched watched}
-                                (fn [k {:keys [watched]}]
-                                  (unwatch-all! k watched)))
-                ;; Reaction watches stay a post-body job (see the hook above):
-                ;; by now a re-derived reaction is :idle and its value is what
-                ;; rx-unchanged? compares against.
-                (doseq [r (keys rx-refs)]
-                  (reakt/watch-ref r watch-key handler))
-                ;; A previous pass's refs this pass no longer reads (branch
-                ;; switch) lose their watches here — otherwise they fire
-                ;; invalidate-cache forever on writes nobody consumes.
-                (doseq [r prev-watched]
-                  (when-not (contains? watched r)
-                    (reakt/unwatch-ref r watch-key)))
-                (when-not @invalidated?
-                  (reset! cache-atom {:width width
-                                      :atoms atom-vals
-                                      :rx (cell-keyed-rx rx-refs)
-                                      :result result}))
-                (vreset! completed? true)
-                result)
-              (finally
-                (remove-watch cache-atom cache-watch-key)
-                ;; A failed pass leaves nothing behind: the refs it read are
-                ;; watched from the read, so unwatching only the entry's
-                ;; payload would strand every ref read before the throw (the
-                ;; watches fire forever, unreachable). The union is every ref
-                ;; this pass could have touched, old and new. The identity
-                ;; guard keeps a subject-conflict (a shared cache atom) from
-                ;; deleting the other live subject's entry.
-                (when-not @completed?
-                  (unwatch-all! watch-key (into prev-watched @seen))
-                  (when (identical? component (weak/subject watch-key))
-                    (weak/unregister! watch-key))
+          (try
+            ;; Park the token as the first form in the protected region: from
+            ;; here on any invalidation destroys it, and the commit below
+            ;; keeps the nil instead of writing a stale cache (§4.3).
+            (reset! cache-atom token)
+            (let [result (render-fn)
+                  atom-vals @atoms
+                  rx-refs @rx
+                  ;; Everything the body tracked, reactions included:
+                  ;; :watched is what teardown and the sweep must unwatch
+                  ;; later. (The cache splits the same refs: :atoms plain
+                  ;; keyed by ref, :rx reactions keyed by their state cell.)
+                  watched @seen]
+              (weak/register! watch-key component {:watched watched}
+                              (fn [k {:keys [watched]}]
+                                (unwatch-all! k watched)))
+              ;; Reaction watches stay a post-body job (see the hook above):
+              ;; by now a re-derived reaction is :idle and its value is what
+              ;; rx-unchanged? compares against.
+              (doseq [r (keys rx-refs)]
+                (reakt/watch-ref r watch-key handler))
+              ;; A previous pass's refs this pass no longer reads (branch
+              ;; switch) lose their watches here — otherwise they fire
+              ;; invalidate-cache forever on writes nobody consumes.
+              (doseq [r prev-watched]
+                (when-not (contains? watched r)
+                  (reakt/unwatch-ref r watch-key)))
+              ;; Commit through the token: nothing invalidated the pass iff
+              ;; `cur` is still the object we parked (swap!'s CAS retries if
+              ;; a concurrent invalidate replaced it, and the invalidate's
+              ;; own nil wins either way). A render fn calling :invalidate
+              ;; mid-body also lands here: its reset! destroyed the token.
+              (swap! cache-atom
+                     (fn [cur]
+                       (if (identical? cur token)
+                         {:width width
+                          :atoms atom-vals
+                          :rx (cell-keyed-rx rx-refs)
+                          :result result}
+                         cur)))
+              (vreset! completed? true)
+              result)
+            (finally
+              ;; A failed pass leaves nothing behind: the refs it read are
+              ;; watched from the read, so unwatching only the entry's
+              ;; payload would strand every ref read before the throw (the
+              ;; watches fire forever, unreachable). The union is every ref
+              ;; this pass could have touched, old and new. The identity
+              ;; guard keeps a subject-conflict (a shared cache atom) from
+              ;; deleting the other live subject's entry.
+              (when-not @completed?
+                (unwatch-all! watch-key (into prev-watched @seen))
+                (when (identical? component (weak/subject watch-key))
+                  (weak/unregister! watch-key))
                   ;; The body only runs after the hit check rejected the
                   ;; cache, so a throw leaves a REJECTED cache behind; the
                   ;; next hit must not serve it.
-                  (reset! cache-atom nil))))))))))
+                (reset! cache-atom nil)))))))))
 
 (defmacro track!
   "Reactive cache wrapper for IComponent render methods.

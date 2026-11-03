@@ -168,6 +168,36 @@
             "a retry re-reads and re-registers")
       (component/remove-track-watches! c))))
 
+(t/deftest test-a-self-invalidating-body-is-not-cached
+  (t/testing "a body that invalidates itself mid-run is not cached: its
+            reset! destroys the pass's in-flight token, so the commit keeps nil"
+    (let [c {:cache (atom nil)}
+          runs (atom 0)]
+      (t/is (= :v (component/track-render c 10
+                                          (fn []
+                                            (swap! runs inc)
+                                            (component/invalidate-cache c)
+                                            :v))))
+      (t/is (= 1 @runs))
+      (t/is (nil? @(:cache c)))
+      (t/is (= :v (component/track-render c 10 (fn [] (swap! runs inc) :v))))
+      (t/is (= 2 @runs) "the next render re-ran the body")
+      (t/is (= :v (component/track-render c 10 (fn [] (throw (ex-info "hit must not run" {})))))
+            "and the pass after that is cached")
+      (component/remove-track-watches! c))))
+
+(t/deftest test-a-pass-parks-a-non-cache-token
+  (t/testing "the in-flight token, not nil: that is what lets the commit tell
+            an invalidate apart from an empty cache (and only the atom does)"
+    (let [c {:cache (atom nil)}
+          during (atom ::unset)]
+      (component/track-render c 10 (fn [] (reset! during @(:cache c)) :v))
+      (t/is (map? @during) "the atom held a marker while the body ran")
+      (t/is (not (contains? @during :atoms)) "and it is not a cache")
+      (t/is (some? @(:cache c)) "the commit replaced it")
+      (t/is (contains? @(:cache c) :atoms))
+      (component/remove-track-watches! c))))
+
 (t/deftest test-a-ref-read-twice-is-watched-once
   (t/testing "the payload's :watched is a set — re-reads add no second entry"
     (let [a (atom 1)

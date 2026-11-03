@@ -1,12 +1,12 @@
 # The per-child render cost: watch at the read, probe at the parent
 
 Design record for the work the frame benchmark attributes to `:parts` —
-the chat history's walk over its message components. Status: **change 1a
-landed** (`2fc7a8b4` + its failure-path follow-up); 1b, 2 and 3 are the
-remainder, sequenced in §9. The verdict this plan encodes (§7.1, §9): change
-1 is a correctness fix and lands regardless; change 2 is worth its risk and
-is the payoff; change 3 is a measurement-driven maybe that defaults to *not
-landing*.
+the chat history's walk over its message components. Status: **change 1
+landed** (1a `2fc7a8b4` + its failure-path follow-up, 1b the token commit);
+2 and 3 are the remainder, sequenced in §9. The verdict this plan encodes
+(§7.1, §9): change 1 is a correctness fix and lands regardless; change 2 is
+worth its risk and is the payoff; change 3 is a measurement-driven maybe
+that defaults to *not landing*.
 
 Two predecessors were rejected and their reasoning is kept in §10: review.md
 §14's "verify at write / parent probe" sketch, and a draft of this file that
@@ -780,6 +780,11 @@ Tests: a mid-body write leaves no cache (kept from 1a); an invalidate that
 lands between the flag read and the commit cannot leave a cache — argued,
 not testable without a writer thread (§6); the `invalidated?`/watch-pair
 deletion leaves the mid-body cases 1a covers green.
+
+**Landed.** No rendered-output change, as predicted. What the tests pin: a
+body sees a marker (not nil) in its already-parked cache atom, a
+self-invalidating body is not cached, and the hit path still refuses a marker
+by `:atoms` shape. The race itself stays argued, not tested (§6).
 
 ### 9.2 Commit 2 — trust presence (the payoff)
 
