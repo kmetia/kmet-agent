@@ -297,14 +297,23 @@ the wrappers below or directly.
 (ext/set-active-tools api ["read" "write"])
 ```
 
-### Sandbox tool sources (`register-tool-source!`)
+### Tool sources (`register-tool-source!`)
 
-A tool source contributes a whole catalog of tools **only to the `run_code`
-tool's sandbox surface**: the model never sees them in its tool schema and
-`set-active-tools!` does not filter them. Use it for tools that are meant
-to be looped over inside scripts but would bloat the model's context if
-advertised (the mcp-adapter contributes its cached MCP catalog this way —
-see `docs/architecture.md` § Tools and the script sandbox):
+A tool source contributes a whole catalog of tools at once, instead of one
+`register-tool!` per tool. Its `:exposure` says where the catalog lands:
+
+- **`:sandbox` (the default)** — the `run_code` tool's sandbox surface only:
+the model never sees these tools in its tool schema, `set-active-tools!` does
+not filter them, but `tool_search` can load one when it is active. Use it for
+tools that are meant to be looped over inside scripts but would bloat the
+model's context if advertised (the mcp-adapter contributes its cached MCP
+catalog this way — see `docs/architecture.md` § Tools and the script sandbox).
+- **`:deferred`** — the model-facing table, but **not declared**: the tools are
+callable from `run_code` and `:enabled-tools` / `:default-tools` select over
+them like any registered tool, and one becomes declared to the model once
+`tool_search` loads it. Give the source a `:description` — one line — and the
+model is told the source exists through an appended conversation entry when the
+set of deferred sources changes.
 
 ```clojure
 (ext/register-tool-source! api :my-catalog
@@ -313,15 +322,20 @@ see `docs/architecture.md` § Tools and the script sandbox):
                         :parameters {:type "object" :properties {...}}
                         :streams? true
                         :execute (fn [args & [on-update]] {:content "..."})}
-           "cat_tool_b" {...}}))
+           "cat_tool_b" {...}})
+  ;; opts are optional; this is the default
+  {:exposure :sandbox})
 (ext/unregister-tool-source! api :my-catalog)
 ```
 
-- The 0-arg fn is called whenever the sandbox surface is built, so it must
+- The 0-arg fn is called whenever the surface or table is built, so it must
   return the *current* catalog (read live state, not a snapshot).
 - Re-registering under the same id replaces the source and bumps the
   registry generation, which invalidates cached script contexts — call it
   whenever the catalog changes.
+- `:exposure` belongs to the source, never to a settings key: a per-project
+  override could make a `:sandbox` tool un-disableable. An exposure outside
+  `:sandbox`/`:deferred` is an error, not a fallback.
 - Contributed tools go through the same execution path as registry tools
   (arg normalization, `:prepare-arguments`, `:contextual?`/`:streams?`
   dispatch, error mapping). The registry shadows a colliding name, and the

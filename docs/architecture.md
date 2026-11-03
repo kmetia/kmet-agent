@@ -432,12 +432,16 @@ probe and no real use, and is gone;
   name, description and parameter schema, so a script chooses a call without
   one `describe` per candidate.
 - **The callable set** is the loop's `select-tools` result: all tools ∩ the
-  agent's enabled set, plus extension-contributed sandbox-only sources, minus
-  the exclusions (`run_code` itself, so a bridge submission cannot nest). A
-  source is registered on the `:kmet/tool-source` tag, resolved per call, and
-  never joins the model's table — the mcp-adapter contributes its MCP catalog
-  this way (`kmet.app.tools.registry/register-tool-source!`). Listing and
-  dispatch therefore cannot drift.
+  agent's enabled set, plus extension-contributed sandbox sources, minus the
+  exclusions (`run_code` itself, so a bridge submission cannot nest) and minus
+  the `:model-only` tools (declared to the model, never callable from a
+  script — `tool_search` is one). A source is registered on the
+  `:kmet/tool-source` tag and resolved per call. Its `:exposure` decides where
+  its catalog lands: `:sandbox` (the default) stays out of the model's table —
+  the mcp-adapter contributes its MCP catalog this way — while `:deferred`
+  joins the table undeclared and becomes declared once `tool_search` loads a
+  tool (`kmet.app.tools.registry/register-tool-source!`). Listing and dispatch
+  therefore cannot drift.
 - **Output is `emit` (or a silent script's value).** `(emit v)` (also
   `sandbox/emit`, and the bare `emit` in the script namespace) is the curated
   text channel: strings print raw, other data `pr-str`, and it returns nil.

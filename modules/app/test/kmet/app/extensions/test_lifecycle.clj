@@ -106,7 +106,8 @@
                       "  (ext/register-tool! api {:name \"owned-tool\" :label \"T\"\n"
                       "                           :description \"d\" :parameters []\n"
                       "                           :execute (fn [_] {:content \"ok\"})})\n"
-                      "  (ext/register-tool-source! api :owned-source (fn [] {}))\n"
+                      "  (ext/register-tool-source! api :owned-source (fn [] {})\n"
+                      "    {:exposure :deferred :description \"Owned catalog\"})\n"
                       "  (ext/register-skill! api \"---\\nname: owned-skill\\ndescription: d\\n---\\nbody\")\n"
                       "  (ext/register-prompt! api {:name \"owned-prompt\" :content \"body\"})\n"
                       "  (ext/register-flag! api \"owned-flag\")\n"
@@ -130,6 +131,12 @@
         (t/is (= [owner]
                  (vec (keys (registry/by-owner (registry/current) :kmet/flag "owned-flag"))))
               "the extension's flag is owned by it too")
+        (t/is (= {:exposure :deferred :description "Owned catalog"}
+                 (select-keys (registry/entry (srce/get (support/composition-ctx) :tools)
+                                              :kmet/tool-source :owned-source)
+                              [:exposure :description]))
+              "the ABI carries the source's exposure and description into the
+               registry")
         (t/is (= 1 (count @(:deregister-fns (first (extensions/registered-extensions)))))
               "only the event subscription stays on the tracked list")
         (extensions/unload-all-extensions!)
@@ -139,8 +146,9 @@
         (t/is (nil? (prompts/get-prompt-template "owned-prompt")))
         (t/is (empty? (registry/entries (srce/get (support/composition-ctx) :tools)
                                         :kmet/tool-source))
-              "the sandbox-only tool source went with the owner too — it is
-               invisible in the tool table, so only this registry shows it")
+              "the contributed tool source went with the owner too — a
+               :sandbox source is invisible in the tool table, so only this
+               registry shows it")
         (t/is (empty? (registry/entries (registry/current) :kmet/flag))
               "one dispose took everything the extension registered"))
       (finally

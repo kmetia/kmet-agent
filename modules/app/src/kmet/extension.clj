@@ -116,13 +116,17 @@
 (defn unregister-tool! [api name] ((:unregister-tool! api) name))
 
 (defn register-tool-source!
-  "Register (or replace) a sandbox tool source: ID → a 0-arg fn returning
-   {name → tool map}. Contributed tools join the run_code tool's surface (e.g.
-   the mcp-adapter's MCP catalog) without joining the model's tool set;
-   re-registering under the same ID replaces the source and invalidates
-   cached run_code surfaces. Removed automatically when the extension unloads.
-   Returns the deregister fn."
-  [api id tools-fn] ((:register-tool-source! api) id tools-fn))
+  "Register (or replace) a contributed tool source: ID → a 0-arg fn returning
+   {name → tool map}. Its OPTS decide where the catalog lands: `:exposure
+   :sandbox` (the default) keeps it in the `run_code` sandbox's surface only —
+   the model never sees those tools (e.g. the mcp-adapter's MCP catalog);
+   `:exposure :deferred` makes it model-facing but undeclared until
+   `tool_search` loads a tool. `:description` is the one line the model reads
+   about a deferred source. Re-registering under the same ID replaces the
+   source and invalidates cached run_code surfaces. Removed automatically when
+   the extension unloads. Returns the deregister fn."
+  ([api id tools-fn] (register-tool-source! api id tools-fn nil))
+  ([api id tools-fn opts] ((:register-tool-source! api) id tools-fn opts)))
 (defn unregister-tool-source!
   "Remove a sandbox tool source by ID."
   [api id] ((:unregister-tool-source! api) id))
@@ -412,7 +416,7 @@
                                 (swap! state assoc-in [:tools (:name tool)] tool)
                                 (fn [] (swap! state update :tools dissoc (:name tool))))
               :unregister-tool! (fn [name] (swap! state update :tools dissoc name))
-              :register-tool-source! (fn [id tools-fn]
+              :register-tool-source! (fn [id tools-fn & [_opts]]
                                        (swap! state assoc-in [:tool-sources id] tools-fn)
                                        (fn [] (swap! state update :tool-sources dissoc id)))
               :unregister-tool-source! (fn [id] (swap! state update :tool-sources dissoc id))

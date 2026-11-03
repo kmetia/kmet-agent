@@ -1204,13 +1204,14 @@
                           (tools/unregister-tool! (handle)
                                                   tool-name
                                                   (extension-owner name)))
-      ;; sandbox-only tools: contributed into the run_code tool's surface, never
-      ;; the model's tool set (mcp-adapter's MCP catalog —
+      ;; contributed tool sources: `:exposure :sandbox` (the default) adds the
+      ;; catalog to the run_code tool's surface only, `:deferred` adds it to the
+      ;; model-facing table undeclared (mcp-adapter's MCP catalog as sandbox —
       ;; docs/architecture.md § Tools and the script sandbox)
-      :register-tool-source! (fn [id tools-fn]
+      :register-tool-source! (fn [id tools-fn & [opts]]
                                (tools/register-tool-source!
                                 (handle) id tools-fn
-                                (extension-owner name)))
+                                (assoc opts :owner (extension-owner name))))
       :unregister-tool-source! (fn [id]
                                  (tools/unregister-tool-source!
                                   (handle) id

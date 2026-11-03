@@ -11,7 +11,7 @@
    not compose.
 
    Registrations live in a `kmet.app.registry/Registry` handle under TAG
-   `:kmet/tool` (and `:kmet/tool-source` for sandbox-only sources), owned by an
+   `:kmet/tool` (and `:kmet/tool-source` for contributed catalogs), owned by an
    owner path: visible to every engine, outliving one, and disposed with their
    owner rather than copied into an engine and reset by hand. A tool row's
    registration is its fiber's effect (`mount-tool!`); the extension ABI
@@ -126,47 +126,89 @@
    (registry/deregister! reg :kmet/tool name owner)
    nil))
 
-(defn get-all-tools
-  "Every tool REGISTRY's — the `:tools` service handle's — table holds, name →
-   tool: the composition's tool rows first, then whatever a later owner
-   registered. A registration that reuses a name already in the table replaces
-   it (pi: the extension registry is layered over the base definitions, custom
-   wins), so unloading the shadow leaves the tool it shadowed."
-  [reg]
-  (registered-tools reg))
-
-(defn get-tool
-  "Get a tool by NAME from REGISTRY's view — resolved through get-all-tools, so
-   the map a caller executes is exactly the map the registry lists."
-  [reg name]
-  (get (get-all-tools reg) name))
-
 ;; ─── Extension-contributed tool sources ────────────────────────────────────
-;; Sandbox-only tools: a source contributes tool maps into the run_code tool's
-;; surface without joining get-all-tools (the model's tool set). The
-;; mcp-adapter contributes its cached MCP catalog this way
+;; A source contributes a whole catalog without registering each tool. Its
+;; `:exposure` decides where the catalog lands (pi: a server's exposure):
+;; `:sandbox` (the default, pi's `codemode`) is callable from `run_code` only
+;; and never declared; `:deferred` joins the model-facing table undeclared and
+;; becomes declared once `tool_search` loads one of its tools. The mcp-adapter
+;; contributes its cached MCP catalog as a `:sandbox` source
 ;; (docs/architecture.md § Tools and the script sandbox).
 
+(def ^:private tool-source-exposures
+  "The exposures a contributed tool source may take. A source's exposure is
+   the source's property, never a settings key: a per-project exposure override
+   could make a `:sandbox` tool un-disableable."
+  #{:sandbox :deferred})
+
 (defn- registered-tool-sources
-  "REGISTRY's contributed tool sources in registration order: [[id fn] …].
-   A source re-registered under the same ID replaces the earlier one."
+  "REGISTRY's tool-source registrations in display order, one per id
+   (`registry/effective-entries`: the owner that took a name keeps it)."
   [reg]
-  (mapv vec (registry/entries reg :kmet/tool-source)))
+  (mapv second (registry/effective-entries reg :kmet/tool-source)))
+
+(defn- source-tools
+  "SOURCE's catalog, or {} when its fn throws or returns a non-map — a broken
+   extension must not take the sandbox's surface or the tool table down."
+  [source]
+  (let [tools (try ((:tools-fn source)) (catch Exception _ nil))]
+    (if (map? tools) tools {})))
+
+(defn- sources-with-exposure [reg exposure]
+  (filterv #(= exposure (:exposure %)) (registered-tool-sources reg)))
+
+(defn- merge-source-tools
+  "SOURCES' catalogs merged in registration order."
+  [sources]
+  (reduce (fn [acc source] (merge acc (source-tools source))) {} sources))
+
+(defn- deferred-source-tools
+  "The tools REGISTRY's `:deferred` sources contribute, each tagged with the
+   source's exposure and named by its key — the part of the model-facing table
+   no `register-tool!` call installed."
+  [reg]
+  (into {}
+        (for [[name tool] (merge-source-tools
+                           (sources-with-exposure reg :deferred))]
+          [name (tool/normalize-tool-definition
+                 (assoc tool :name (or (:name tool) name) :exposure :deferred))])))
 
 (defn register-tool-source!
-  "Register (or replace) an extension-contributed tool source on NODE,
-   owned by OWNER — the app's registry by default; an extension passes its
-   own owner path so unloading it disposes the source. ID
+  "Register (or replace) an extension-contributed tool source on REGISTRY. ID
    identifies the source; TOOLS-FN is a 0-arg fn returning {name → tool map}
    — the same shape a registered tool map has (:name :label :description
-   :parameters :execute, optional :streams?/:contextual?/:prepare-arguments).
-   Contributed tools join the run_code sandbox's surface only; the registry
-   shadows a colliding name. Re-registering under the same ID replaces the
-   source; the next run_code call resolves the new catalog. Returns cells'
+   :parameters :execute, optional :streams?/:contextual?/:prepare-arguments)
+   — and must return the *current* catalog, not a snapshot.
+
+   OPTS:
+     :exposure    — `:sandbox` (the default): callable from the `run_code`
+                    sandbox only, never declared; `:deferred`: also joins the
+                    model-facing table, undeclared until `tool_search` loads
+                    the tool.
+     :description — one line naming the source, for the deferred-source listing
+                    the model reads; never used for its individual tools.
+     :owner       — the registration's owner path; an extension passes its own
+                    so unloading it disposes the source.
+
+   Re-registering under the same ID replaces the source; the next call resolves
+   the new catalog. A registered tool shadows a contributed name. Returns the
    deregister fn."
-  ([reg id tools-fn] (register-tool-source! reg id tools-fn tools-owner))
-  ([reg id tools-fn owner]
-   (registry/register! reg :kmet/tool-source id tools-fn owner)))
+  ([reg id tools-fn] (register-tool-source! reg id tools-fn nil))
+  ([reg id tools-fn opts]
+   (let [{:keys [exposure description owner] :or {exposure :sandbox}} opts]
+     (when-not (contains? tool-source-exposures exposure)
+       (throw (ex-info (str "unknown tool-source exposure " (pr-str exposure)
+                            " for " (pr-str id) " — one of "
+                            (pr-str (vec (sort tool-source-exposures))))
+                       {:type :kmet.app/bad-tool-source-exposure
+                        :source id
+                        :exposure exposure})))
+     (registry/register! reg :kmet/tool-source id
+                         {:id id
+                          :exposure exposure
+                          :description description
+                          :tools-fn tools-fn}
+                         (or owner tools-owner)))))
 
 (defn unregister-tool-source!
   "Remove REGISTRY's contributed tool source by ID, from whichever owner
@@ -178,25 +220,56 @@
    nil))
 
 (defn get-contributed-tools
-  "Merge every source registered in REGISTRY into its current tools. A source that throws or returns a non-map
-   contributes nothing — a broken extension must not take the sandbox's
-   surface down."
+  "Merge every `:sandbox` source registered in REGISTRY into its current
+   tools — the extra surface `run_code` adds to the model's tool set. A
+   `:deferred` source is not here: its tools are in `get-all-tools`."
   [reg]
-  (reduce (fn [acc [_ tools-fn]]
-            (let [tools (try (tools-fn) (catch Exception _ nil))]
-              (if (map? tools) (merge acc tools) acc)))
-          {} (registered-tool-sources reg)))
+  (merge-source-tools (sources-with-exposure reg :sandbox)))
+
+(defn get-deferred-sources
+  "The `:deferred` tool sources REGISTRY holds, in registration order, as
+   [{:id :description}] — what the model is told exists without being declared
+   yet. The catalog is not part of the report: a listing names a source, one
+   line, never its tools."
+  [reg]
+  (mapv #(select-keys % [:id :description])
+        (sources-with-exposure reg :deferred)))
+
+;; ─── The model-facing table ────────────────────────────────────────────────
+
+(defn get-all-tools
+  "Every tool REGISTRY's — the `:tools` service handle's — table holds, name →
+   tool: the tools a `:deferred` source contributes, then the composition's
+   tool rows, then whatever a later owner registered. A registration that
+   reuses a name already in the table replaces it (pi: the extension registry
+   is layered over the base definitions, custom wins), so unloading the shadow
+   leaves the tool it shadowed.
+
+   A deferred source's tools are here (tagged `:exposure :deferred`) because
+   they are model-facing: `:enabled-tools` and `:default-tools` select over
+   them like any registered tool, and `tool_search` promotes one from deferred
+   to declared. A `:sandbox` source's tools are deliberately not here
+   (`get-contributed-tools`), so no selection can declare them."
+  [reg]
+  (merge (deferred-source-tools reg) (registered-tools reg)))
+
+(defn get-tool
+  "Get a tool by NAME from REGISTRY's view — resolved through get-all-tools, so
+   the map a caller executes is exactly the map the registry lists."
+  [reg name]
+  (get (get-all-tools reg) name))
 
 ;; ─── Callable surfaces ─────────────────────────────────────────────────────
 
 (defn select-tools
   "Filter ALL (a name → Tool map, e.g. get-all-tools) to a caller's surface:
-   ENABLED names (nil = every tool in ALL), plus CONTRIBUTED sandbox-only
-   tools (not in get-all-tools; a colliding name keeps ALL's record), minus
-   EXCLUDE names (a sandbox must not expose itself). Preserves ALL's order.
-   The loop's schema and the run_code bridge's callable set both resolve
-   through this, so what a caller lists and what it can dispatch cannot
-   drift."
+   ENABLED names (nil = every tool in ALL), plus CONTRIBUTED tools (a
+   `:sandbox` source's catalog — not in ALL, so exposure is not consulted here;
+   a colliding name keeps ALL's record), minus EXCLUDE names (a sandbox must
+   not expose itself). The result is a map with ALL's keys (its order is the
+   map's — a table past array-map size does not keep insertion order). The
+   loop's schema and the run_code bridge's callable set both resolve through
+   this, so what a caller lists and what it can dispatch cannot drift."
   [all {:keys [enabled contributed exclude]}]
   (let [enabled (or enabled (set (keys all)))
         contributed (apply dissoc (or contributed {}) (keys all))

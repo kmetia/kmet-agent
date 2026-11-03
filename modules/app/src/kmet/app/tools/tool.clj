@@ -4,7 +4,30 @@
 (defrecord Tool [name label description prompt-snippet prompt-guidelines
                  parameters execute render-call render-result
                  constrained-sampling render-shell prepare-arguments
-                 execution-mode streams? contextual? title status])
+                 execution-mode streams? contextual? title status exposure])
+
+(def exposure-values
+  "The tool record's `:exposure` — how the model reaches the tool:
+
+   - `:direct` (the default) — declared to the model and callable from a
+     script;
+   - `:deferred` — callable from a script, not declared until `tool_search`
+     loads it;
+   - `:model-only` — declared, never callable from a script (pi's
+     `model-only`: `tool_search` is one, because a script that could call it
+     would change the declared set mid-script);
+   - `:sandbox` — callable from a script, not declared (pi's `codemode`; the
+     exposure a contributed tool source gets).
+
+   pi's `hidden` stays out: kmet can unregister a tool and exclude it with
+   `:enabled-tools`, and pi needs it only because it cannot unregister."
+  #{:direct :deferred :model-only :sandbox})
+
+(defn exposure
+  "TOOL's exposure, `:direct` when the record names none — the default, so
+   every tool and extension written before exposures existed is unchanged."
+  [tool]
+  (or (:exposure tool) :direct))
 
 (defn param
   "Define a tool parameter for JSON schema generation."
@@ -35,8 +58,18 @@
 (defn normalize-tool-definition
   "Normalize a registered tool definition: convert compact :params into a
    JSON-schema :parameters map and give argument-less tools an empty object
-   schema, which provider tool APIs require instead of null."
+   schema, which provider tool APIs require instead of null. An `:exposure`
+   outside `exposure-values` throws — a typo would otherwise read as
+   `:direct`, declaring a tool the author meant to defer."
   [definition]
+  (when-let [exposure (:exposure definition)]
+    (when-not (contains? exposure-values exposure)
+      (throw (ex-info (str "unknown tool exposure " (pr-str exposure)
+                           " for " (pr-str (:name definition))
+                           " — one of " (pr-str (vec (sort exposure-values))))
+                      {:type :kmet.app/bad-tool-exposure
+                       :tool (:name definition)
+                       :exposure exposure}))))
   (let [parameters (if-let [params (:params definition)]
                      (->json-schema (compact->params params))
                      (or (:parameters definition)
@@ -55,7 +88,7 @@
   [& {:keys [name label description prompt-snippet prompt-guidelines
              params parameters execute render-call render-result
              constrained-sampling render-shell prepare-arguments
-             execution-mode streams? contextual? title status]}]
+             execution-mode streams? contextual? title status exposure]}]
   (map->Tool
    {:name name :label label :description description
     :prompt-snippet prompt-snippet :prompt-guidelines prompt-guidelines
@@ -69,7 +102,8 @@
     :streams? streams?
     :contextual? contextual?
     :title title
-    :status status}))
+    :status status
+    :exposure exposure}))
 
 ;; ─── Row config ───────────────────────────────────────────────────────────
 
