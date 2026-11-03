@@ -669,6 +669,23 @@
    "extensions/review/src"
    "extensions/tree-sitter/src"])
 
+(defn- reload-extension-namespaces!
+  "Re-require every loaded `kmet.extensions.*` namespace from the classpath.
+
+   A native load claims the names of the sources it evaluates, evicting the
+   process-global registration of any of them the runtime already had, and the
+   unload then removes the namespace while the runtime's loaded mark survives —
+   a plain `require` cannot bring it back, only `:reload` (loader.md § Limits on
+   jolt). The runner preloads every test namespace, so those evictions land on
+   live code: the source vars a test namespace compiled against go unbound and
+   the rest of the run breaks. Reloading the namespaces that are still present
+   re-reads their `ns` forms from the classpath (which loads the evicted sources
+   fresh) and recompiles their tests against the restored vars."
+  []
+  (doseq [ns-sym (sort (map ns-name (all-ns)))
+          :when (str/starts-with? (str ns-sym) "kmet.extensions.")]
+    (require ns-sym :reload)))
+
 (t/deftest test-shipped-extensions-load-from-src
   ;; the repo's own extensions restructured to src/-as-artifact-root: every
   ;; shipped src/ dir loads through the real runtime.
@@ -676,10 +693,12 @@
   ;; [:jolt :sci], clojure [:sci :jolt]: Jolt picks its native loader when
   ;; :jolt is declared, whatever the order.
   ;;
-  ;; Loading and unloading them here is safe: a native load's private namespace
-  ;; copies go with its unload and a later require of the classpath copies
-  ;; reloads them (jolt#1469's fix; the check ran out of process while the
-  ;; loaded marks survived).
+  ;; Loading and unloading them here is safe only because the unload is
+  ;; followed by `reload-extension-namespaces!`: a native load's private
+  ;; namespace copies go with its unload, but the names it claimed over
+  ;; classpath copies the runtime had already loaded are a host-side reload,
+  ;; which loader.md records as a limit (jolt#1469 covers the namespaces the
+  ;; load itself created).
   ;;
   ;; The clojure extension loads and its tools work on both hosts: its
   ;; rewrite-clj/edamame deps are declared for Jolt (bb's closure drops the
@@ -701,7 +720,8 @@
         (t/is (some? (tools-registry/get-tool handle "clojure_edit")))
         (t/is (some? (skills/get-skill "clojure-edit")))))
     (finally
-      (extensions/unload-all-extensions!))))
+      (extensions/unload-all-extensions!)
+      (reload-extension-namespaces!))))
 
 (t/deftest test-manifest-loader-declaration
   ;; the manifest :loader declaration + host selection: :sci on babashka,
