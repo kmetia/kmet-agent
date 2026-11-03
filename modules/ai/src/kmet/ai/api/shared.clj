@@ -416,11 +416,11 @@
    compat entries always override these values.
 
    Carries pi's full detected key set for parity; keys without a kmet
-   consumer yet (:supports-store, :supports-developer-role,
-   :requires-tool-result-name, ...) are inert data. :reasoning-content-fill is
-   the one kmet-only key: the placeholder an endpoint needs on assistant
-   messages without same-model reasoning (pi has no equivalent), defaulting
-   to the empty string. Routing maps
+   consumer yet (:supports-developer-role, :requires-tool-result-name,
+   :requires-assistant-after-tool-result, ...) are inert data.
+   :reasoning-content-fill is the one kmet-only key: the placeholder an
+   endpoint needs on assistant messages without same-model reasoning (pi has
+   no equivalent), defaulting to the empty string. Routing maps
    (openRouterRouting/vercelGatewayRouting) and feature keys with no kmet
    implementation (zaiToolStream, deferredToolsMode,
    supportsOpenAIGrammarTools) are not ported. Unlike pi, URL matching is

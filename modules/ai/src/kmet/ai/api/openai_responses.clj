@@ -9,7 +9,7 @@
    [kmet.ai.models :as models]
    [kmet.libs.http :refer [transport-error-message]]
    [kmet.ai.message :refer [content-text image-block?]]
-   [kmet.ai.api.shared :refer [clamp-prompt-cache-key copilot-dynamic-headers endpoint-url on-payload request-headers responses-events-handler effective-total-timeout-ms headers-timeout-ms]]))
+   [kmet.ai.api.shared :refer [clamp-prompt-cache-key copilot-dynamic-headers endpoint-url on-payload request-headers resolved-openai-compat responses-events-handler effective-total-timeout-ms headers-timeout-ms]]))
 
 (defn normalize-id-part
   "pi normalizeIdPart: sanitize a tool-call id to [a-zA-Z0-9_-], cap at 64
@@ -120,6 +120,9 @@
   [model messages & [include-system?]]
   (let [system (first (for [m messages :when (= :system (:role m))]
                         (content-text (:content m))))
+        ;; raw compat, not resolved-openai-compat: pi's responses compat
+        ;; defaults supportsDeveloperRole to true, the completions detection
+        ;; derives it per family — resolving here would change the role
         role (if (and (:reasoning model)
                       (not= false (:supports-developer-role (:compat model))))
                "developer" "system")]
@@ -151,21 +154,19 @@
 
 (defn responses-affinity-headers
   "pi createClient session-affinity headers from the session id (prompt
-   caching): openai format sends session_id + x-client-request-id,
-   openai-nosession (opencode zen) only x-client-request-id, openrouter
-   x-session-id. A nil session-id (or cache-retention :none) → none."
+   caching): the responses wire's own set — x-session-id for the openrouter
+   format, otherwise session_id + x-client-request-id (the completions wire
+   adds x-session-affinity; this one never does). The format comes from the
+   resolved compat (pi getCompat :session-affinity-format ?? detection), so an
+   explicit models.edn value wins over OpenRouter detection. A nil session-id
+   → none."
   [model session-id]
   (when session-id
-    (let [fmt (or (:session-affinity-format (:compat model))
-                  (if (or (= :openrouter (models/provider-family model))
-                          (str/includes? (:base-url model) "openrouter.ai"))
-                    :openrouter
-                    :openai))]
-      (case fmt
-        :openrouter {"x-session-id" session-id}
-        :openai {"session_id" session-id "x-client-request-id" session-id}
-        ;; :openai-nosession — no session_id header (opencode zen)
-        {"x-client-request-id" session-id}))))
+    (case (:session-affinity-format (resolved-openai-compat model))
+      :openrouter {"x-session-id" session-id}
+      :openai {"session_id" session-id "x-client-request-id" session-id}
+      ;; :openai-nosession (opencode zen) — no session_id header
+      {"x-client-request-id" session-id})))
 
 (defn responses-payload
   "Request body for an openai-responses request (pi buildParams):
@@ -187,7 +188,9 @@
         reasoning (or effort-reasoning off-reasoning)
         retention (or cache-retention :short)
         caching? (not= :none retention)
-        compat (:compat model-record)]
+        ;; the shared compat resolution (pi getCompat): detection defaults,
+        ;; every explicit non-nil key survives
+        compat (resolved-openai-compat model-record)]
     (cond-> {:model model-id
              :input (responses-messages model-record messages)
              :stream true
@@ -200,8 +203,7 @@
           (and (= :xai (models/provider-family model-record)) (:reasoning model-record)))
       (assoc :include ["reasoning.encrypted_content"])
       (and caching? session-id) (assoc :prompt_cache_key (clamp-prompt-cache-key session-id))
-      ;; pi getCompat: supportsLongCacheRetention defaults to true when absent
-      (and (= :long retention) (not= false (:supports-long-cache-retention compat)))
+      (and (= :long retention) (:supports-long-cache-retention compat))
       (assoc :prompt_cache_retention "24h")
       (and (= :none retention) (:supports-explicit-prompt-cache-mode compat))
       (assoc :prompt_cache_options {:mode "explicit"})

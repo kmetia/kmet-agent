@@ -18,17 +18,17 @@
 
 (defn openai-payload
   "Request body for an openai-completions request (pi buildParams):
-   model/messages/stream/stream_options, tools, prompt-cache params, thinking
-   params, the max-tokens field, then the model's :sampling-params merged last
-   so their keys win over the named request fields (pi: Object.assign(params,
-   samplingParams) after everything else — samplingParams is the single
-   source of sampling truth for a model). CACHE-RETENTION (:short by default,
-   :long or :none) and SESSION-ID drive the prompt-cache half: a
-   prompt_cache_key clamped to 64 chars on api.openai.com or under long
-   retention, a 24h retention request when long is supported, and the
-   anthropic-format cache_control breakpoints when the compat declares
-   :cache-control-format :anthropic. Compat is URL-resolved
-   (resolved-openai-compat, pi getCompat)."
+   model/messages/stream, stream_options and store when the compat allows
+   them, tools, prompt-cache params, thinking params, the max-tokens field,
+   then the model's :sampling-params merged last so their keys win over the
+   named request fields (pi: Object.assign(params, samplingParams) after
+   everything else — samplingParams is the single source of sampling truth
+   for a model). CACHE-RETENTION (:short by default, :long or :none) and
+   SESSION-ID drive the prompt-cache half: a prompt_cache_key clamped to 64
+   chars on api.openai.com or under long retention, a 24h retention request
+   when long is supported, and the anthropic-format cache_control breakpoints
+   when the compat declares :cache-control-format :anthropic. Compat is
+   URL-resolved (resolved-openai-compat, pi getCompat)."
   [model-record effort messages tools model-id cache-retention session-id]
   (let [compat (resolved-openai-compat model-record)
         retention (or cache-retention :short)
@@ -69,8 +69,13 @@
              ;; CoT into the request), and the record carries the provider
              ;; family (an account alias's base) for tool-call id shaping
              :messages messages
-             :stream true
-             :stream_options {:include_usage true}}
+             :stream true}
+      ;; pi buildParams: stream_options only where the wire reports usage in
+      ;; the stream
+      (not= false (:supports-usage-in-streaming compat))
+      (assoc :stream_options {:include_usage true})
+      ;; pi: opt out of server-side storage where the provider has the field
+      (:supports-store compat) (assoc :store false)
       (seq tools) (assoc :tools tools)
       ;; pi: the key on api.openai.com (caching on) or whenever long
       ;; retention is supported; the session id is clamped, and no id means

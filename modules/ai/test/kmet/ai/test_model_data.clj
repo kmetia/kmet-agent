@@ -12,6 +12,7 @@
             [kmet.libs.json :as json]
             [clojure.string :as str]
             [clojure.test :as t]
+            [kmet.ai.api.shared :as shared]
             [kmet.ai.edn-writer :as edn-w]
             [kmet.ai.model-gen :as mg]
             [kmet.libs.concurrent :as concurrent]
@@ -25,6 +26,28 @@
   [& [dir]]
   (let [f gen-models/validate-committed!]
     (if dir (f dir) (f))))
+
+(t/deftest test-generator-detection-agrees-with-runtime
+  ;; the generator keeps a build-time copy of the compat detection (its
+  ;; :supports-strict-mode rule and together's reasoning-only exception are
+  ;; deliberate); every cache/affinity/max-tokens key must agree with the
+  ;; runtime detection, or a regenerated catalog overrides it silently —
+  ;; :send-session-affinity-headers was hardcoded false and would have turned
+  ;; the anthropic-format affinity headers off on every OpenRouter row.
+  (let [gen @#'mg/detect-openai-completions-compat
+        keys [:supports-store :supports-developer-role :supports-reasoning-effort
+              :max-tokens-field :requires-reasoning-content-on-assistant-messages
+              :send-session-affinity-headers :supports-long-cache-retention]
+        model (fn [provider base-url id]
+                {:id id :provider provider :base-url base-url})]
+    (doseq [m [(model :openrouter "https://openrouter.ai/api/v1" "anthropic/claude-x")
+               (model :openrouter "https://openrouter.ai/api/v1" "deepseek/deepseek-x")
+               (model :custom "https://api.deepseek.com" "deepseek-v4-flash")
+               (model :custom "https://api.example.com/v1" "m1")
+               (model :together "https://api.together.xyz/v1" "m1")]]
+      (t/is (= (select-keys (gen m) keys)
+               (select-keys (shared/detect-openai-compat m) keys))
+            (str (:provider m) "/" (:id m))))))
 
 (t/deftest test-committed-catalogs-valid
   (let [errors (validate-dir)]

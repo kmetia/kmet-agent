@@ -767,6 +767,44 @@
     (t/testing "no session id → none"
       (t/is (nil? (@#'completions/completions-affinity-headers openrouter nil :short))))))
 
+(t/deftest test-llm-completions-store-and-stream-options
+  (let [payload-of (fn [& [overrides]]
+                     (@#'completions/openai-payload (completions-model overrides) nil
+                                                    (cache-conversation) [] "m1" :short nil))]
+    (t/testing "store: false where the provider has the field (pi buildParams)"
+      (let [payload (payload-of)]
+        (t/is (false? (:store payload)))
+        (t/is (= {:include_usage true} (:stream_options payload)))))
+    (t/testing "a non-standard provider gets no store field (:supports-store detection)"
+      (let [payload (payload-of {:provider :deepseek
+                                 :base-url "https://api.deepseek.com"})]
+        (t/is (nil? (:store payload)))
+        (t/is (some? (:stream_options payload))
+              "stream_options is independent of the store compat")))
+    (t/testing "an explicit :supports-store false wins over detection"
+      (t/is (nil? (:store (payload-of {:compat {:supports-store false}})))))
+    (t/testing "stream_options follows :supports-usage-in-streaming"
+      (t/is (nil? (:stream_options
+                   (payload-of {:compat {:supports-usage-in-streaming false}})))))))
+
+(t/deftest test-llm-responses-resolved-compat
+  (let [payload-of (fn [compat retention]
+                     (@#'responses/responses-payload (responses-model {:compat compat})
+                                                     :high [] [] "gpt-5.4" retention nil))]
+    (t/testing "an explicit affinity format wins over detection (resolved compat)"
+      (let [model (responses-model {:provider :custom
+                                    :base-url "https://api.example.com/v1"
+                                    :compat {:session-affinity-format :openrouter}})]
+        (t/is (= {"x-session-id" "s1"}
+                 (@#'responses/responses-affinity-headers model "s1")))))
+    (t/testing "an explicit per-wire key the detection never names survives"
+      (t/is (= {:mode "explicit"}
+               (:prompt_cache_options (payload-of {:supports-explicit-prompt-cache-mode true}
+                                                  :none)))))
+    (t/testing "an explicit false for long retention wins over detection"
+      (t/is (nil? (:prompt_cache_retention
+                   (payload-of {:supports-long-cache-retention false} :long)))))))
+
 (t/deftest test-llm-copilot-dynamic-headers
   (t/testing "X-Initiator from the last message role (pi inferCopilotInitiator)"
     (t/is (= {"X-Initiator" "user" "Openai-Intent" "conversation-edits"}

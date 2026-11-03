@@ -1572,7 +1572,16 @@
 (defn- detect-openai-completions-compat
   "pi detectOpenAICompletionsCompat: the URL/provider-based detection for an
    openai-completions model. The families are table rows and the policy lists
-   are data, so a provider that joins one of the groups is a row edit."
+   are data, so a provider that joins one of the groups is a row edit.
+
+   The build-time half of kmet.ai.api.shared/detect-openai-compat: the two
+   must agree on every key both define (cache, affinity, max-tokens, role,
+   effort, reasoning fill) — a regenerated catalog that carried a stale value
+   would override the runtime detection silently — which
+   test-generator-detection-agrees-with-runtime pins. Two deliberate
+   differences: this one derives :supports-strict-mode from the families (the
+   runtime keeps it opt-in), and its :thinking-format honours the
+   together-reasoning-only exception."
   [mm]
   (let [flags (compat-flags mm)
         flag #(get flags %)]
@@ -1592,7 +1601,8 @@
      :supports-strict-mode (not (any-flag? flags [:moonshot :together
                                                   :cloudflare-ai-gateway
                                                   :nvidia :cerebras]))
-     :send-session-affinity-headers false
+     ;; pi detectCompat: OpenRouter asks for the session-affinity headers
+     :send-session-affinity-headers (flag :openrouter)
      :supports-long-cache-retention
      (not (any-flag? flags [:together :cloudflare-workers-ai
                             :cloudflare-ai-gateway :nvidia :ant-ling]))}))

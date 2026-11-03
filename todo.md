@@ -8,7 +8,7 @@ this file are dropped — see § Deferred.
 | track | what it fixes | status |
 |---|---|---|
 | **`github-copilot` anthropic auth** | every `github-copilot/claude-*` model failed with `400 missing required Authorization header` — the anthropic wire sent `x-api-key` to an endpoint that only accepts `Authorization: Bearer` | **landed** (oauth marker → Bearer; verified live) |
-| **Prompt-caching parity with pi** (P) | the wires never ask for caching — anthropic places no breakpoint, completions sends no key — so cache-read sits at 0 while the accounting that prices it is already complete | **P0–P1 landed** (anthropic breakpoints + 1h pricing; completions key/retention/markers/affinity); P2 and P4 remain; decisions closed (D1–D3) |
+| **Prompt-caching parity with pi** (P) | the wires never ask for caching — anthropic places no breakpoint, completions sends no key — so cache-read sits at 0 while the accounting that prices it is already complete | **P0–P2 landed** (anthropic breakpoints + 1h pricing; completions key/retention/markers/affinity; store/stream_options on the compat); P4 remains; decisions closed (D1–D3) |
 | **Tool exposure and declared sets** (P5–P6) | the ranker serves MCP only and no source's tools can be declared, so every tool costs a schema on every round; a tool-set change re-sends the whole array and is recorded nowhere | plan, decisions closed (D4–D8); **P5 → P6** |
 | **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | plan; **after** the exposure track |
 | Around tool hooks | two hand-rolled hook chains + a doubled permission gate; no way to settle a call successfully | decided: **A** — one `:on-tool` around registration |
@@ -44,8 +44,10 @@ resolution shape (`test_oauth.clj`).
 Status: plan, decisions closed. **P0 landed and verified against the live API**
 (anthropic breakpoints, the usage merge it uncovered, the 1h cache-write
 pricing, and D2's corrected resolution seam). **P1 landed** (completions key,
-retention, anthropic-format markers, affinity headers). P3's resolution landed
-with P0. Next: P2, then P4.
+retention, anthropic-format markers, affinity headers). **P2 landed** (the
+responses wire reads the resolved compat, `store`/`stream_options` follow
+theirs, the generator's affinity default is corrected). P3's resolution landed
+with P0. Next: P4.
 Owner: whoever takes the `:llm` row next.
 Reference implementation: `~/src/cvstree/pi/packages/ai/src/api/` (pi).
 
@@ -253,6 +255,36 @@ Files: `modules/ai/src/kmet/ai/api/shared.clj` (`detect-openai-compat`,
 
 Done when: no wire branches on `models/provider-family` for caching or
 affinity, and `model_gen`'s "data-only in kmet" note can be deleted.
+
+**Done.** `resolved-openai-compat` keeps every explicit non-nil key (landed
+with P1); the responses wire reads it in `responses-payload` and
+`responses-affinity-headers`, which drops the inline family/base-url detection
+and keeps its own header set (never `x-session-affinity`) and the `:none` gate
+— pi's responses compat has no `:send-session-affinity-headers`, so there is
+no gate on that key. Two keys became consumers rather than data:
+`:supports-store` (`store: false` where the provider has the field, pi
+buildParams) and `:supports-usage-in-streaming` (gates `stream_options`).
+One default moved with the resolution: the responses wire's long-retention
+gate now follows the shared detection instead of pi's blanket true. Under
+`:long` that stops `prompt_cache_retention` for the 26 `cloudflare-ai-gateway`
+responses models (the gateway is on the detection's unsupported list; pi would
+still send it), and changes nothing else — `xai/grok-4.5` already carried an
+explicit false, and every other responses model is detected true. The
+alternative, a second per-wire default, is the duplication this step removes;
+`:short`, the default, is unaffected either way. The
+generator's stale `:send-session-affinity-headers false` is corrected and
+`test-generator-detection-agrees-with-runtime` pins the cache/affinity keys
+against the runtime detection; the next catalog regen adds
+`:send-session-affinity-headers true` to OpenRouter rows — behaviour-neutral,
+because the runtime detection already resolves it that way. The generator
+keeps two deliberate differences, excluded from the parity test:
+`:supports-strict-mode` is family-derived there, and `:thinking-format`
+honours together's reasoning-only exception.
+
+Known divergence, recorded not fixed: pi's **codex** wire defaults
+`supportsStrictMode` to true (`openai-codex-responses.ts:547`) where kmet reads
+nil as false. Inert today — no tool declares `:constrained-sampling` — but it
+will change every codex request's bytes once one does.
 
 #### P3 — make `long` reachable, and expose `:none` where it belongs
 
