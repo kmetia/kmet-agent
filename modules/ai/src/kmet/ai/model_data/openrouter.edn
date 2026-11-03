@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-02T16:35:36Z"
+ :generated-at "2026-11-03T18:57:42Z"
  :provider {:id :openrouter
             :name "OpenRouter"
             :env-vars ["OPENROUTER_API_KEY"]
@@ -20,7 +20,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "aion-labs/aion-3.0"
    {:id "aion-labs/aion-3.0"
     :name "AionLabs: Aion-3.0"
@@ -35,7 +36,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "aion-labs/aion-3.0-mini"
    {:id "aion-labs/aion-3.0-mini"
     :name "AionLabs: Aion-3.0-Mini"
@@ -50,7 +52,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "aion-labs/aion-3.5"
    {:id "aion-labs/aion-3.5"
     :name "AionLabs: Aion 3.5"
@@ -71,7 +74,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "aion-labs/aion-3.5-mini"
    {:id "aion-labs/aion-3.5-mini"
     :name "AionLabs: Aion 3.5 Mini"
@@ -92,7 +96,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "amazon/nova-2-lite-v1"
    {:id "amazon/nova-2-lite-v1"
     :name "Amazon: Nova 2 Lite"
@@ -106,7 +111,8 @@
     :max-tokens 65535
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "amazon/nova-lite-v1"
    {:id "amazon/nova-lite-v1"
     :name "Amazon: Nova Lite 1.0"
@@ -120,7 +126,8 @@
     :max-tokens 5120
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "amazon/nova-micro-v1"
    {:id "amazon/nova-micro-v1"
     :name "Amazon: Nova Micro 1.0"
@@ -134,7 +141,8 @@
     :max-tokens 5120
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "amazon/nova-premier-v1"
    {:id "amazon/nova-premier-v1"
     :name "Amazon: Nova Premier 1.0"
@@ -148,7 +156,8 @@
     :max-tokens 32000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "amazon/nova-pro-v1"
    {:id "amazon/nova-pro-v1"
     :name "Amazon: Nova Pro 1.0"
@@ -162,7 +171,8 @@
     :max-tokens 5120
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-fable-5"
    {:id "anthropic/claude-fable-5"
     :name "Anthropic: Claude Fable 5"
@@ -181,7 +191,9 @@
     :cost {:input 10 :output 50 :cache-read 1 :cache-write 12.5}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-fable-5.1"
    {:id "anthropic/claude-fable-5.1"
     :name "Anthropic: Claude Fable 5.1"
@@ -200,7 +212,9 @@
     :cost {:input 10 :output 50 :cache-read 0.25 :cache-write 12.5}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-fable-5.1:batch"
    {:id "anthropic/claude-fable-5.1:batch"
     :name "Anthropic: Claude Fable 5.1 (batch)"
@@ -219,7 +233,9 @@
     :cost {:input 5 :output 25 :cache-read 0.125 :cache-write 6.25}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-fable-5:batch"
    {:id "anthropic/claude-fable-5:batch"
     :name "Anthropic: Claude Fable 5 (batch)"
@@ -238,7 +254,9 @@
     :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-haiku-4.5"
    {:id "anthropic/claude-haiku-4.5"
     :name "Anthropic: Claude Haiku 4.5"
@@ -250,7 +268,9 @@
     :cost {:input 1 :output 5 :cache-read 0.1 :cache-write 1.25}
     :context-window 200000
     :max-tokens 64000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-haiku-4.5:batch"
    {:id "anthropic/claude-haiku-4.5:batch"
     :name "Anthropic: Claude Haiku 4.5 (batch)"
@@ -262,7 +282,9 @@
     :cost {:input 0.5 :output 2.5 :cache-read 0.05 :cache-write 0.625}
     :context-window 200000
     :max-tokens 64000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-haiku-5.5"
    {:id "anthropic/claude-haiku-5.5"
     :name "Anthropic: Claude Haiku 5.5"
@@ -281,7 +303,9 @@
     :cost {:input 0.1 :output 0.5 :cache-read 0.01 :cache-write 0.125}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-haiku-5.5:batch"
    {:id "anthropic/claude-haiku-5.5:batch"
     :name "Anthropic: Claude Haiku 5.5 (batch)"
@@ -300,7 +324,9 @@
     :cost {:input 0.05 :output 0.25 :cache-read 0.005 :cache-write 0.0625}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-opus-4.1"
    {:id "anthropic/claude-opus-4.1"
     :name "Anthropic: Claude Opus 4.1"
@@ -312,7 +338,9 @@
     :cost {:input 15 :output 75 :cache-read 1.5 :cache-write 18.75}
     :context-window 200000
     :max-tokens 32000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-opus-4.1:batch"
    {:id "anthropic/claude-opus-4.1:batch"
     :name "Anthropic: Claude Opus 4.1 (batch)"
@@ -324,7 +352,9 @@
     :cost {:input 7.5 :output 37.5 :cache-read 0.75 :cache-write 9.375}
     :context-window 200000
     :max-tokens 32000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-opus-4.5"
    {:id "anthropic/claude-opus-4.5"
     :name "Anthropic: Claude Opus 4.5"
@@ -336,7 +366,9 @@
     :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
     :context-window 200000
     :max-tokens 64000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-opus-4.5:batch"
    {:id "anthropic/claude-opus-4.5:batch"
     :name "Anthropic: Claude Opus 4.5 (batch)"
@@ -348,7 +380,9 @@
     :cost {:input 2.5 :output 12.5 :cache-read 0.25 :cache-write 3.125}
     :context-window 200000
     :max-tokens 64000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-opus-4.6"
    {:id "anthropic/claude-opus-4.6"
     :name "Anthropic: Claude Opus 4.6"
@@ -367,7 +401,9 @@
     :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-opus-4.6:batch"
    {:id "anthropic/claude-opus-4.6:batch"
     :name "Anthropic: Claude Opus 4.6 (batch)"
@@ -386,7 +422,9 @@
     :cost {:input 2.5 :output 12.5 :cache-read 0.25 :cache-write 3.125}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-opus-4.7"
    {:id "anthropic/claude-opus-4.7"
     :name "Anthropic: Claude Opus 4.7"
@@ -405,7 +443,9 @@
     :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-opus-4.7:batch"
    {:id "anthropic/claude-opus-4.7:batch"
     :name "Anthropic: Claude Opus 4.7 (batch)"
@@ -424,7 +464,9 @@
     :cost {:input 2.5 :output 12.5 :cache-read 0.25 :cache-write 3.125}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-opus-4.8"
    {:id "anthropic/claude-opus-4.8"
     :name "Anthropic: Claude Opus 4.8"
@@ -443,7 +485,9 @@
     :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-opus-4.8:batch"
    {:id "anthropic/claude-opus-4.8:batch"
     :name "Anthropic: Claude Opus 4.8 (batch)"
@@ -462,7 +506,9 @@
     :cost {:input 2.5 :output 12.5 :cache-read 0.25 :cache-write 3.125}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-opus-5"
    {:id "anthropic/claude-opus-5"
     :name "Anthropic: Claude Opus 5"
@@ -481,7 +527,9 @@
     :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-opus-5.5"
    {:id "anthropic/claude-opus-5.5"
     :name "Anthropic: Claude Opus 5.5"
@@ -500,7 +548,9 @@
     :cost {:input 4 :output 20 :cache-read 0.2 :cache-write 5}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-opus-5.5:batch"
    {:id "anthropic/claude-opus-5.5:batch"
     :name "Anthropic: Claude Opus 5.5 (batch)"
@@ -519,7 +569,9 @@
     :cost {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-opus-5:batch"
    {:id "anthropic/claude-opus-5:batch"
     :name "Anthropic: Claude Opus 5 (batch)"
@@ -538,7 +590,9 @@
     :cost {:input 2.5 :output 12.5 :cache-read 0.25 :cache-write 3.125}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-sonnet-4.5"
    {:id "anthropic/claude-sonnet-4.5"
     :name "Anthropic: Claude Sonnet 4.5"
@@ -550,7 +604,9 @@
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
     :context-window 1000000
     :max-tokens 64000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-sonnet-4.5:batch"
    {:id "anthropic/claude-sonnet-4.5:batch"
     :name "Anthropic: Claude Sonnet 4.5 (batch)"
@@ -562,7 +618,9 @@
     :cost {:input 1.5 :output 7.5 :cache-read 0.15 :cache-write 1.875}
     :context-window 1000000
     :max-tokens 64000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-sonnet-4.6"
    {:id "anthropic/claude-sonnet-4.6"
     :name "Anthropic: Claude Sonnet 4.6"
@@ -581,7 +639,9 @@
     :cost {:input 3 :output 15 :cache-read 0.3 :cache-write 3.75}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-sonnet-4.6:batch"
    {:id "anthropic/claude-sonnet-4.6:batch"
     :name "Anthropic: Claude Sonnet 4.6 (batch)"
@@ -600,7 +660,9 @@
     :cost {:input 1.5 :output 7.5 :cache-read 0.15 :cache-write 1.875}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-sonnet-5"
    {:id "anthropic/claude-sonnet-5"
     :name "Anthropic: Claude Sonnet 5"
@@ -619,7 +681,9 @@
     :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-sonnet-5.5"
    {:id "anthropic/claude-sonnet-5.5"
     :name "Anthropic: Claude Sonnet 5.5"
@@ -638,7 +702,9 @@
     :cost {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-sonnet-5.5:batch"
    {:id "anthropic/claude-sonnet-5.5:batch"
     :name "Anthropic: Claude Sonnet 5.5 (batch)"
@@ -657,7 +723,9 @@
     :cost {:input 1 :output 5 :cache-read 0.05 :cache-write 1.25}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "anthropic/claude-sonnet-5:batch"
    {:id "anthropic/claude-sonnet-5:batch"
     :name "Anthropic: Claude Sonnet 5 (batch)"
@@ -676,7 +744,9 @@
     :cost {:input 1 :output 5 :cache-read 0.1 :cache-write 1.25}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "auto"
    {:id "auto"
     :name "Auto"
@@ -690,7 +760,8 @@
     :max-tokens 30000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "bytedance-seed/seed-1.6"
    {:id "bytedance-seed/seed-1.6"
     :name "ByteDance Seed: Seed 1.6"
@@ -704,7 +775,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "bytedance-seed/seed-1.6-flash"
    {:id "bytedance-seed/seed-1.6-flash"
     :name "ByteDance Seed: Seed 1.6 Flash"
@@ -718,7 +790,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "bytedance-seed/seed-2-1-turbo"
    {:id "bytedance-seed/seed-2-1-turbo"
     :name "ByteDance Seed: Seed 2.1 Turbo"
@@ -732,7 +805,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "bytedance-seed/seed-2.0-code"
    {:id "bytedance-seed/seed-2.0-code"
     :name "ByteDance Seed: Seed-2.0-Code"
@@ -753,7 +827,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "bytedance-seed/seed-2.0-lite"
    {:id "bytedance-seed/seed-2.0-lite"
     :name "ByteDance Seed: Seed-2.0-Lite"
@@ -774,7 +849,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "bytedance-seed/seed-2.0-mini"
    {:id "bytedance-seed/seed-2.0-mini"
     :name "ByteDance Seed: Seed-2.0-Mini"
@@ -795,7 +871,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "cohere/command-a-plus"
    {:id "cohere/command-a-plus"
     :name "Cohere: Command A+"
@@ -809,7 +886,8 @@
     :max-tokens 64000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "cohere/command-r-08-2024"
    {:id "cohere/command-r-08-2024"
     :name "Cohere: Command R (08-2024)"
@@ -823,7 +901,8 @@
     :max-tokens 4000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "cohere/command-r-plus-08-2024"
    {:id "cohere/command-r-plus-08-2024"
     :name "Cohere: Command R+ (08-2024)"
@@ -837,7 +916,8 @@
     :max-tokens 4000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "cohere/north-mini-code:free"
    {:id "cohere/north-mini-code:free"
     :name "Cohere: North Mini Code (free)"
@@ -851,7 +931,8 @@
     :max-tokens 64000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-chat"
    {:id "deepseek/deepseek-chat"
     :name "DeepSeek: DeepSeek V3"
@@ -865,7 +946,8 @@
     :max-tokens 16000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-chat-v3-0324"
    {:id "deepseek/deepseek-chat-v3-0324"
     :name "DeepSeek: DeepSeek V3 0324"
@@ -879,7 +961,8 @@
     :max-tokens 115200
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-chat-v3.1"
    {:id "deepseek/deepseek-chat-v3.1"
     :name "DeepSeek: DeepSeek V3.1"
@@ -893,7 +976,8 @@
     :max-tokens 147456
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-r1-0528"
    {:id "deepseek/deepseek-r1-0528"
     :name "DeepSeek: R1 0528"
@@ -908,7 +992,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-v3.1-terminus"
    {:id "deepseek/deepseek-v3.1-terminus"
     :name "DeepSeek: DeepSeek V3.1 Terminus"
@@ -922,7 +1007,8 @@
     :max-tokens 147456
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-v3.2"
    {:id "deepseek/deepseek-v3.2"
     :name "DeepSeek: DeepSeek V3.2"
@@ -936,7 +1022,8 @@
     :max-tokens 147456
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-v3.2-exp"
    {:id "deepseek/deepseek-v3.2-exp"
     :name "DeepSeek: DeepSeek V3.2 Exp"
@@ -950,7 +1037,8 @@
     :max-tokens 147456
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-v4-flash"
    {:id "deepseek/deepseek-v4-flash"
     :name "DeepSeek: DeepSeek V4 Flash 0423"
@@ -972,7 +1060,8 @@
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-v4-flash-0731"
    {:id "deepseek/deepseek-v4-flash-0731"
     :name "DeepSeek: DeepSeek V4 Flash 0731"
@@ -988,13 +1077,14 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text]
-    :cost {:input 0.119 :output 0.238 :cache-read 0.0238 :cache-write 0}
+    :cost {:input 0.059 :output 0.3 :cache-read 0.035 :cache-write 0}
     :context-window 1048576
     :max-tokens 943718
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-v4-flash-vision-exp"
    {:id "deepseek/deepseek-v4-flash-vision-exp"
     :name "DeepSeek: DeepSeek V4 Flash Vision Exp"
@@ -1016,7 +1106,8 @@
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-v4-pro"
    {:id "deepseek/deepseek-v4-pro"
     :name "DeepSeek: DeepSeek V4 Pro 0423"
@@ -1038,7 +1129,8 @@
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-v4-pro-0813"
    {:id "deepseek/deepseek-v4-pro-0813"
     :name "DeepSeek: DeepSeek V4 Pro 0813"
@@ -1060,7 +1152,8 @@
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-v4.1-flash"
    {:id "deepseek/deepseek-v4.1-flash"
     :name "DeepSeek: DeepSeek V4.1 Flash"
@@ -1076,13 +1169,14 @@
                          :off "none"
                          :xhigh "xhigh"}
     :input [:text :image]
-    :cost {:input 0.045 :output 0.5 :cache-read 0.006 :cache-write 0}
+    :cost {:input 0.045 :output 0.5 :cache-read 0.012 :cache-write 0}
     :context-window 1048576
     :max-tokens 943718
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-v4.1-flash-1017"
    {:id "deepseek/deepseek-v4.1-flash-1017"
     :name "DeepSeek: DeepSeek V4.1 Flash 1017"
@@ -1104,7 +1198,8 @@
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "deepseek/deepseek-v4.1-flash:batch"
    {:id "deepseek/deepseek-v4.1-flash:batch"
     :name "DeepSeek: DeepSeek V4.1 Flash (batch)"
@@ -1126,7 +1221,8 @@
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "dots-studio/dots-3-note-preview:free"
    {:id "dots-studio/dots-3-note-preview:free"
     :name "Dots Studio: Dots3-Note Preview (free)"
@@ -1140,7 +1236,8 @@
     :max-tokens 460800
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "elorian/glimpse"
    {:id "elorian/glimpse"
     :name "Elorian: Glimpse"
@@ -1154,7 +1251,8 @@
     :max-tokens 256000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "fireworks/ember-1"
    {:id "fireworks/ember-1"
     :name "Fireworks: Ember-1"
@@ -1175,7 +1273,8 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-2.5-flash"
    {:id "google/gemini-2.5-flash"
     :name "Google: Gemini 2.5 Flash"
@@ -1189,7 +1288,8 @@
     :max-tokens 65535
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-2.5-flash-lite"
    {:id "google/gemini-2.5-flash-lite"
     :name "Google: Gemini 2.5 Flash Lite"
@@ -1203,7 +1303,8 @@
     :max-tokens 65535
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-2.5-pro"
    {:id "google/gemini-2.5-pro"
     :name "Google: Gemini 2.5 Pro"
@@ -1218,7 +1319,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-2.5-pro-preview"
    {:id "google/gemini-2.5-pro-preview"
     :name "Google: Gemini 2.5 Pro Preview 06-05"
@@ -1233,7 +1335,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3-flash-preview"
    {:id "google/gemini-3-flash-preview"
     :name "Google: Gemini 3 Flash Preview"
@@ -1254,7 +1357,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3-flash-preview:batch"
    {:id "google/gemini-3-flash-preview:batch"
     :name "Google: Gemini 3 Flash Preview (batch)"
@@ -1275,7 +1379,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3-pro-image"
    {:id "google/gemini-3-pro-image"
     :name "Google: Nano Banana Pro (Gemini 3 Pro Image)"
@@ -1294,7 +1399,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.1-flash-lite"
    {:id "google/gemini-3.1-flash-lite"
     :name "Google: Gemini 3.1 Flash Lite"
@@ -1315,7 +1421,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.1-flash-lite-preview"
    {:id "google/gemini-3.1-flash-lite-preview"
     :name "Google: Gemini 3.1 Flash Lite Preview"
@@ -1336,7 +1443,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.1-flash-lite:batch"
    {:id "google/gemini-3.1-flash-lite:batch"
     :name "Google: Gemini 3.1 Flash Lite (batch)"
@@ -1357,7 +1465,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.1-pro-preview"
    {:id "google/gemini-3.1-pro-preview"
     :name "Google: Gemini 3.1 Pro Preview"
@@ -1378,7 +1487,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.1-pro-preview-customtools"
    {:id "google/gemini-3.1-pro-preview-customtools"
     :name "Google: Gemini 3.1 Pro Preview Custom Tools"
@@ -1399,7 +1509,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.1-pro-preview:batch"
    {:id "google/gemini-3.1-pro-preview:batch"
     :name "Google: Gemini 3.1 Pro Preview (batch)"
@@ -1420,7 +1531,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.5-flash"
    {:id "google/gemini-3.5-flash"
     :name "Google: Gemini 3.5 Flash"
@@ -1441,7 +1553,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.5-flash-lite"
    {:id "google/gemini-3.5-flash-lite"
     :name "Google: Gemini 3.5 Flash Lite"
@@ -1462,7 +1575,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.5-flash-lite:batch"
    {:id "google/gemini-3.5-flash-lite:batch"
     :name "Google: Gemini 3.5 Flash Lite (batch)"
@@ -1483,7 +1597,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.5-flash:batch"
    {:id "google/gemini-3.5-flash:batch"
     :name "Google: Gemini 3.5 Flash (batch)"
@@ -1504,7 +1619,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.6-flash"
    {:id "google/gemini-3.6-flash"
     :name "Google: Gemini 3.6 Flash"
@@ -1525,7 +1641,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.6-flash:batch"
    {:id "google/gemini-3.6-flash:batch"
     :name "Google: Gemini 3.6 Flash (batch)"
@@ -1546,7 +1663,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.7-flash"
    {:id "google/gemini-3.7-flash"
     :name "Google: Gemini 3.7 Flash"
@@ -1567,7 +1685,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.7-flash:batch"
    {:id "google/gemini-3.7-flash:batch"
     :name "Google: Gemini 3.7 Flash (batch)"
@@ -1588,7 +1707,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.8-flash"
    {:id "google/gemini-3.8-flash"
     :name "Google: Gemini 3.8 Flash"
@@ -1609,7 +1729,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-3.8-flash:batch"
    {:id "google/gemini-3.8-flash:batch"
     :name "Google: Gemini 3.8 Flash (batch)"
@@ -1630,7 +1751,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-4-argon"
    {:id "google/gemini-4-argon"
     :name "Google: Gemini 4 Argon"
@@ -1651,7 +1773,8 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-4-argon:batch"
    {:id "google/gemini-4-argon:batch"
     :name "Google: Gemini 4 Argon (batch)"
@@ -1672,7 +1795,8 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemini-nano-banana-2.1"
    {:id "google/gemini-nano-banana-2.1"
     :name "Google: Nano Banana 2.1"
@@ -1693,7 +1817,8 @@
     :max-tokens 58982
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemma-3-12b-it"
    {:id "google/gemma-3-12b-it"
     :name "Google: Gemma 3 12B"
@@ -1707,7 +1832,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemma-3-27b-it"
    {:id "google/gemma-3-27b-it"
     :name "Google: Gemma 3 27B"
@@ -1721,7 +1847,8 @@
     :max-tokens 117964
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemma-4-26b-a4b-it"
    {:id "google/gemma-4-26b-a4b-it"
     :name "Google: Gemma 4 26B A4B "
@@ -1735,12 +1862,13 @@
                          :minimal "MINIMAL"
                          :off nil}
     :input [:text :image]
-    :cost {:input 0.065 :output 0.195 :cache-read 0.033 :cache-write 0}
+    :cost {:input 0.082 :output 0.247 :cache-read 0.041 :cache-write 0}
     :context-window 262144
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemma-4-26b-a4b-it:free"
    {:id "google/gemma-4-26b-a4b-it:free"
     :name "Google: Gemma 4 26B A4B  (free)"
@@ -1759,7 +1887,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemma-4-31b-it"
    {:id "google/gemma-4-31b-it"
     :name "Google: Gemma 4 31B"
@@ -1778,7 +1907,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "google/gemma-4-31b-it:free"
    {:id "google/gemma-4-31b-it:free"
     :name "Google: Gemma 4 31B (free)"
@@ -1797,7 +1927,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "ibm-granite/granite-4.2-8b"
    {:id "ibm-granite/granite-4.2-8b"
     :name "IBM: Granite 4.2 8B"
@@ -1818,7 +1949,8 @@
     :max-tokens 117964
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "inception/mercury-2"
    {:id "inception/mercury-2"
     :name "Inception: Mercury 2"
@@ -1839,7 +1971,8 @@
     :max-tokens 50000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "inception/mercury-2.5"
    {:id "inception/mercury-2.5"
     :name "Inception: Mercury 2.5"
@@ -1860,7 +1993,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "inception/mercury-3"
    {:id "inception/mercury-3"
     :name "Inception: Mercury 3"
@@ -1881,7 +2015,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "inclusionai/ling-3.0-flash"
    {:id "inclusionai/ling-3.0-flash"
     :name "inclusionAI: Ling 3.0 Flash"
@@ -1895,7 +2030,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "inclusionai/ling-3.0-flash-vl"
    {:id "inclusionai/ling-3.0-flash-vl"
     :name "inclusionAI: Ling 3.0 Flash VL"
@@ -1909,7 +2045,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "inclusionai/ling-3.1-flash"
    {:id "inclusionai/ling-3.1-flash"
     :name "inclusionAI: Ling 3.1 Flash"
@@ -1923,7 +2060,8 @@
     :max-tokens 262144
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "liquid/lfm-2.5-2.6b"
    {:id "liquid/lfm-2.5-2.6b"
     :name "LiquidAI: LFM2.5-2.6B"
@@ -1938,7 +2076,8 @@
     :max-tokens 8192
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "liquid/lfm-2.5-2.6b:free"
    {:id "liquid/lfm-2.5-2.6b:free"
     :name "LiquidAI: LFM2.5-2.6B (free)"
@@ -1953,7 +2092,8 @@
     :max-tokens 8192
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "liquid/lfm-2.5-24b-a2b"
    {:id "liquid/lfm-2.5-24b-a2b"
     :name "LiquidAI: LFM2.5-24B-A2B"
@@ -1968,7 +2108,8 @@
     :max-tokens 8192
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "meituan/longcat-2.0"
    {:id "meituan/longcat-2.0"
     :name "Meituan: LongCat 2.0"
@@ -1982,21 +2123,8 @@
     :max-tokens 262144
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
-   "meta-llama/llama-3.1-70b-instruct"
-   {:id "meta-llama/llama-3.1-70b-instruct"
-    :name "Meta: Llama 3.1 70B Instruct"
-    :provider :openrouter
-    :api :openai-completions
-    :base-url "https://openrouter.ai/api/v1"
-    :reasoning false
-    :input [:text]
-    :cost {:input 0.4 :output 0.4 :cache-read 0 :cache-write 0}
-    :context-window 131072
-    :max-tokens 16384
-    :compat {:supports-developer-role false
-             :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "meta-llama/llama-3.1-8b-instruct"
    {:id "meta-llama/llama-3.1-8b-instruct"
     :name "Meta: Llama 3.1 8B Instruct"
@@ -2010,7 +2138,8 @@
     :max-tokens 117964
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "meta-llama/llama-3.3-70b-instruct"
    {:id "meta-llama/llama-3.3-70b-instruct"
     :name "Meta: Llama 3.3 70B Instruct"
@@ -2019,12 +2148,13 @@
     :base-url "https://openrouter.ai/api/v1"
     :reasoning false
     :input [:text]
-    :cost {:input 0.1 :output 0.32 :cache-read 0 :cache-write 0}
+    :cost {:input 0.2 :output 0.52 :cache-read 0.1 :cache-write 0}
     :context-window 131072
-    :max-tokens 16384
+    :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "meta-llama/llama-4-maverick"
    {:id "meta-llama/llama-4-maverick"
     :name "Meta: Llama 4 Maverick"
@@ -2038,7 +2168,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "meta-llama/llama-4-scout"
    {:id "meta-llama/llama-4-scout"
     :name "Meta: Llama 4 Scout"
@@ -2052,7 +2183,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "meta/muse-glimmer-30b"
    {:id "meta/muse-glimmer-30b"
     :name "Meta: Muse Glimmer 30B"
@@ -2073,7 +2205,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "meta/muse-spark-1.1"
    {:id "meta/muse-spark-1.1"
     :name "Meta: Muse Spark 1.1"
@@ -2094,7 +2227,8 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "meta/muse-spark-1.2"
    {:id "meta/muse-spark-1.2"
     :name "Meta: Muse Spark 1.2"
@@ -2115,7 +2249,8 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "meta/muse-spark-1.2-contributor"
    {:id "meta/muse-spark-1.2-contributor"
     :name "Meta: Muse Spark 1.2 Contributor"
@@ -2136,7 +2271,8 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "meta/muse-spark-1.3"
    {:id "meta/muse-spark-1.3"
     :name "Meta: Muse Spark 1.3"
@@ -2157,7 +2293,8 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "meta/muse-spark-1.3-contributor"
    {:id "meta/muse-spark-1.3-contributor"
     :name "Meta: Muse Spark 1.3 Contributor"
@@ -2178,7 +2315,8 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "meta/muse-spark-open"
    {:id "meta/muse-spark-open"
     :name "Meta: Muse Spark Open"
@@ -2199,7 +2337,8 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "meta/muse-wonder"
    {:id "meta/muse-wonder"
     :name "Meta: Muse Wonder"
@@ -2220,7 +2359,8 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "minimax/minimax-m1"
    {:id "minimax/minimax-m1"
     :name "MiniMax: MiniMax M1"
@@ -2234,7 +2374,8 @@
     :max-tokens 40000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "minimax/minimax-m2"
    {:id "minimax/minimax-m2"
     :name "MiniMax: MiniMax M2"
@@ -2249,7 +2390,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "minimax/minimax-m2.1"
    {:id "minimax/minimax-m2.1"
     :name "MiniMax: MiniMax M2.1"
@@ -2264,7 +2406,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "minimax/minimax-m2.5"
    {:id "minimax/minimax-m2.5"
     :name "MiniMax: MiniMax M2.5"
@@ -2279,7 +2422,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "minimax/minimax-m2.7"
    {:id "minimax/minimax-m2.7"
     :name "MiniMax: MiniMax M2.7"
@@ -2294,7 +2438,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "minimax/minimax-m3"
    {:id "minimax/minimax-m3"
     :name "MiniMax: MiniMax M3"
@@ -2308,7 +2453,8 @@
     :max-tokens 512000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "minimax/minimax-m3.1-flash"
    {:id "minimax/minimax-m3.1-flash"
     :name "MiniMax: MiniMax M3.1 Flash"
@@ -2329,7 +2475,8 @@
     :max-tokens 524288
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/codestral-2508"
    {:id "mistralai/codestral-2508"
     :name "Mistral: Codestral 2508"
@@ -2343,7 +2490,8 @@
     :max-tokens 204800
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/devstral-2512"
    {:id "mistralai/devstral-2512"
     :name "Mistral: Devstral 2 2512"
@@ -2357,7 +2505,8 @@
     :max-tokens 209715
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/ministral-14b-2512"
    {:id "mistralai/ministral-14b-2512"
     :name "Mistral: Ministral 3 14B 2512"
@@ -2371,7 +2520,8 @@
     :max-tokens 209715
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/ministral-3b-2512"
    {:id "mistralai/ministral-3b-2512"
     :name "Mistral: Ministral 3 3B 2512"
@@ -2385,7 +2535,8 @@
     :max-tokens 104857
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/ministral-8b-2512"
    {:id "mistralai/ministral-8b-2512"
     :name "Mistral: Ministral 3 8B 2512"
@@ -2399,7 +2550,8 @@
     :max-tokens 209715
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/mistral-large"
    {:id "mistralai/mistral-large"
     :name "Mistral Large"
@@ -2413,7 +2565,8 @@
     :max-tokens 102400
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/mistral-large-2407"
    {:id "mistralai/mistral-large-2407"
     :name "Mistral Large 2407"
@@ -2427,7 +2580,8 @@
     :max-tokens 104857
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/mistral-large-2512"
    {:id "mistralai/mistral-large-2512"
     :name "Mistral: Mistral Large 3 2512"
@@ -2441,7 +2595,8 @@
     :max-tokens 209715
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/mistral-large-4-0"
    {:id "mistralai/mistral-large-4-0"
     :name "Mistral: Mistral Large 4"
@@ -2462,7 +2617,8 @@
     :max-tokens 262144
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/mistral-medium-3"
    {:id "mistralai/mistral-medium-3"
     :name "Mistral: Mistral Medium 3"
@@ -2476,7 +2632,8 @@
     :max-tokens 104857
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/mistral-medium-3-5"
    {:id "mistralai/mistral-medium-3-5"
     :name "Mistral: Mistral Medium 3.5"
@@ -2497,7 +2654,8 @@
     :max-tokens 209715
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/mistral-medium-3-5:batch"
    {:id "mistralai/mistral-medium-3-5:batch"
     :name "Mistral: Mistral Medium 3.5 (batch)"
@@ -2518,7 +2676,8 @@
     :max-tokens 209715
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/mistral-medium-3.1"
    {:id "mistralai/mistral-medium-3.1"
     :name "Mistral: Mistral Medium 3.1"
@@ -2532,7 +2691,8 @@
     :max-tokens 104857
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/mistral-nemo"
    {:id "mistralai/mistral-nemo"
     :name "Mistral: Mistral Nemo"
@@ -2546,7 +2706,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/mistral-saba"
    {:id "mistralai/mistral-saba"
     :name "Mistral: Saba"
@@ -2560,7 +2721,8 @@
     :max-tokens 26214
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/mistral-small-2603"
    {:id "mistralai/mistral-small-2603"
     :name "Mistral: Mistral Small 4"
@@ -2581,7 +2743,8 @@
     :max-tokens 209715
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/mistral-small-3.1-24b-instruct"
    {:id "mistralai/mistral-small-3.1-24b-instruct"
     :name "Mistral: Mistral Small 3.1 24B"
@@ -2595,7 +2758,8 @@
     :max-tokens 102400
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/mistral-small-3.2-24b-instruct"
    {:id "mistralai/mistral-small-3.2-24b-instruct"
     :name "Mistral: Mistral Small 3.2 24B"
@@ -2609,7 +2773,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/mixtral-8x22b-instruct"
    {:id "mistralai/mixtral-8x22b-instruct"
     :name "Mistral: Mixtral 8x22B Instruct"
@@ -2623,7 +2788,8 @@
     :max-tokens 52428
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "mistralai/voxtral-small-24b-2507"
    {:id "mistralai/voxtral-small-24b-2507"
     :name "Mistral: Voxtral Small 24B 2507"
@@ -2637,7 +2803,8 @@
     :max-tokens 26214
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "moonshotai/kimi-k2"
    {:id "moonshotai/kimi-k2"
     :name "MoonshotAI: Kimi K2 0711"
@@ -2651,7 +2818,8 @@
     :max-tokens 98304
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "moonshotai/kimi-k2-0905"
    {:id "moonshotai/kimi-k2-0905"
     :name "MoonshotAI: Kimi K2 0905"
@@ -2665,7 +2833,8 @@
     :max-tokens 98304
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "moonshotai/kimi-k2-thinking"
    {:id "moonshotai/kimi-k2-thinking"
     :name "MoonshotAI: Kimi K2 Thinking"
@@ -2680,7 +2849,8 @@
     :max-tokens 98304
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "moonshotai/kimi-k2.5"
    {:id "moonshotai/kimi-k2.5"
     :name "MoonshotAI: Kimi K2.5"
@@ -2694,7 +2864,8 @@
     :max-tokens 4096
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "moonshotai/kimi-k2.6"
    {:id "moonshotai/kimi-k2.6"
     :name "MoonshotAI: Kimi K2.6"
@@ -2708,7 +2879,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "moonshotai/kimi-k2.7-code"
    {:id "moonshotai/kimi-k2.7-code"
     :name "MoonshotAI: Kimi K2.7 Code"
@@ -2723,7 +2895,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "moonshotai/kimi-k3"
    {:id "moonshotai/kimi-k3"
     :name "MoonshotAI: Kimi K3"
@@ -2744,7 +2917,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "moonshotai/kimi-k3.1-pro"
    {:id "moonshotai/kimi-k3.1-pro"
     :name "MoonshotAI: Kimi K3.1 Pro"
@@ -2765,7 +2939,8 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "moonshotai/kimi-k3:batch"
    {:id "moonshotai/kimi-k3:batch"
     :name "MoonshotAI: Kimi K3 (batch)"
@@ -2786,7 +2961,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "nex-agi/nex-n2.5-pro"
    {:id "nex-agi/nex-n2.5-pro"
     :name "Nex AGI: Nex-N2.5-Pro"
@@ -2807,7 +2983,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "nvidia/nemotron-3-nano-30b-a3b"
    {:id "nvidia/nemotron-3-nano-30b-a3b"
     :name "NVIDIA: Nemotron 3 Nano 30B A3B"
@@ -2821,7 +2998,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
    {:id "nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free"
     :name "NVIDIA: Nemotron 3 Nano Omni (free)"
@@ -2835,7 +3013,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "nvidia/nemotron-3-super-120b-a12b"
    {:id "nvidia/nemotron-3-super-120b-a12b"
     :name "NVIDIA: Nemotron 3 Super"
@@ -2856,7 +3035,8 @@
     :max-tokens 262144
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "nvidia/nemotron-3-ultra-550b-a55b"
    {:id "nvidia/nemotron-3-ultra-550b-a55b"
     :name "NVIDIA: Nemotron 3 Ultra"
@@ -2877,7 +3057,8 @@
     :max-tokens 182520
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "nvidia/nemotron-3-ultra-550b-a55b:free"
    {:id "nvidia/nemotron-3-ultra-550b-a55b:free"
     :name "NVIDIA: Nemotron 3 Ultra (free)"
@@ -2898,7 +3079,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "nvidia/nemotron-3.5-lightning"
    {:id "nvidia/nemotron-3.5-lightning"
     :name "NVIDIA: Nemotron 3.5 Lightning"
@@ -2912,7 +3094,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "nvidia/nemotron-3.5-lightning:free"
    {:id "nvidia/nemotron-3.5-lightning:free"
     :name "NVIDIA: Nemotron 3.5 Lightning (free)"
@@ -2926,7 +3109,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "nvidia/nemotron-3.5-super-vl"
    {:id "nvidia/nemotron-3.5-super-vl"
     :name "NVIDIA: Nemotron 3.5 Super VL"
@@ -2940,7 +3124,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "nvidia/nemotron-3.5-super-vl:free"
    {:id "nvidia/nemotron-3.5-super-vl:free"
     :name "NVIDIA: Nemotron 3.5 Super VL (free)"
@@ -2954,7 +3139,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-3.5-turbo-0613"
    {:id "openai/gpt-3.5-turbo-0613"
     :name "OpenAI: GPT-3.5 Turbo (older v0613)"
@@ -2966,7 +3152,9 @@
     :cost {:input 1 :output 2 :cache-read 0 :cache-write 0}
     :context-window 4095
     :max-tokens 3685
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-3.5-turbo-16k"
    {:id "openai/gpt-3.5-turbo-16k"
     :name "OpenAI: GPT-3.5 Turbo 16k"
@@ -2978,7 +3166,9 @@
     :cost {:input 3 :output 4 :cache-read 0 :cache-write 0}
     :context-window 16385
     :max-tokens 4096
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4"
    {:id "openai/gpt-4"
     :name "OpenAI: GPT-4"
@@ -2990,7 +3180,9 @@
     :cost {:input 30 :output 60 :cache-read 0 :cache-write 0}
     :context-window 8191
     :max-tokens 4096
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4-turbo:batch"
    {:id "openai/gpt-4-turbo:batch"
     :name "OpenAI: GPT-4 Turbo (batch)"
@@ -3002,7 +3194,9 @@
     :cost {:input 5 :output 15 :cache-read 0 :cache-write 0}
     :context-window 128000
     :max-tokens 4096
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4.1"
    {:id "openai/gpt-4.1"
     :name "OpenAI: GPT-4.1"
@@ -3014,7 +3208,9 @@
     :cost {:input 2 :output 8 :cache-read 0.5 :cache-write 0}
     :context-window 1047576
     :max-tokens 32768
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4.1-mini"
    {:id "openai/gpt-4.1-mini"
     :name "OpenAI: GPT-4.1 Mini"
@@ -3026,7 +3222,9 @@
     :cost {:input 0.4 :output 1.6 :cache-read 0.1 :cache-write 0}
     :context-window 1047576
     :max-tokens 32768
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4.1-mini:batch"
    {:id "openai/gpt-4.1-mini:batch"
     :name "OpenAI: GPT-4.1 Mini (batch)"
@@ -3038,7 +3236,9 @@
     :cost {:input 0.2 :output 0.8 :cache-read 0.05 :cache-write 0}
     :context-window 1047576
     :max-tokens 32768
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4.1-nano"
    {:id "openai/gpt-4.1-nano"
     :name "OpenAI: GPT-4.1 Nano"
@@ -3050,7 +3250,9 @@
     :cost {:input 0.1 :output 0.4 :cache-read 0.03 :cache-write 0}
     :context-window 1047576
     :max-tokens 942818
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4.1-nano:batch"
    {:id "openai/gpt-4.1-nano:batch"
     :name "OpenAI: GPT-4.1 Nano (batch)"
@@ -3062,7 +3264,9 @@
     :cost {:input 0.05 :output 0.2 :cache-read 0.0125 :cache-write 0}
     :context-window 1047576
     :max-tokens 32768
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4.1:batch"
    {:id "openai/gpt-4.1:batch"
     :name "OpenAI: GPT-4.1 (batch)"
@@ -3074,7 +3278,9 @@
     :cost {:input 1 :output 4 :cache-read 0.25 :cache-write 0}
     :context-window 1047576
     :max-tokens 32768
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4o"
    {:id "openai/gpt-4o"
     :name "OpenAI: GPT-4o"
@@ -3086,7 +3292,9 @@
     :cost {:input 2.5 :output 10 :cache-read 1.25 :cache-write 0}
     :context-window 128000
     :max-tokens 16384
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4o-2024-05-13"
    {:id "openai/gpt-4o-2024-05-13"
     :name "OpenAI: GPT-4o (2024-05-13)"
@@ -3098,7 +3306,9 @@
     :cost {:input 5 :output 15 :cache-read 0 :cache-write 0}
     :context-window 128000
     :max-tokens 4096
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4o-2024-08-06"
    {:id "openai/gpt-4o-2024-08-06"
     :name "OpenAI: GPT-4o (2024-08-06)"
@@ -3110,7 +3320,9 @@
     :cost {:input 2.5 :output 10 :cache-read 1.25 :cache-write 0}
     :context-window 128000
     :max-tokens 16384
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4o-2024-11-20"
    {:id "openai/gpt-4o-2024-11-20"
     :name "OpenAI: GPT-4o (2024-11-20)"
@@ -3122,7 +3334,9 @@
     :cost {:input 2.5 :output 10 :cache-read 1.25 :cache-write 0}
     :context-window 128000
     :max-tokens 16384
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4o-mini"
    {:id "openai/gpt-4o-mini"
     :name "OpenAI: GPT-4o-mini"
@@ -3134,7 +3348,9 @@
     :cost {:input 0.15 :output 0.6 :cache-read 0.075 :cache-write 0}
     :context-window 128000
     :max-tokens 16384
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4o-mini-2024-07-18"
    {:id "openai/gpt-4o-mini-2024-07-18"
     :name "OpenAI: GPT-4o-mini (2024-07-18)"
@@ -3146,7 +3362,9 @@
     :cost {:input 0.15 :output 0.6 :cache-read 0.075 :cache-write 0}
     :context-window 128000
     :max-tokens 16384
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4o-mini:batch"
    {:id "openai/gpt-4o-mini:batch"
     :name "OpenAI: GPT-4o-mini (batch)"
@@ -3158,7 +3376,9 @@
     :cost {:input 0.075 :output 0.3 :cache-read 0.0375 :cache-write 0}
     :context-window 128000
     :max-tokens 16384
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-4o:batch"
    {:id "openai/gpt-4o:batch"
     :name "OpenAI: GPT-4o (batch)"
@@ -3170,7 +3390,9 @@
     :cost {:input 1.25 :output 5 :cache-read 0.625 :cache-write 0}
     :context-window 128000
     :max-tokens 16384
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5"
    {:id "openai/gpt-5"
     :name "OpenAI: GPT-5"
@@ -3189,7 +3411,9 @@
     :cost {:input 1.25 :output 10 :cache-read 0.125 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5-mini"
    {:id "openai/gpt-5-mini"
     :name "OpenAI: GPT-5 Mini"
@@ -3208,7 +3432,9 @@
     :cost {:input 0.25 :output 2 :cache-read 0.025 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5-mini:batch"
    {:id "openai/gpt-5-mini:batch"
     :name "OpenAI: GPT-5 Mini (batch)"
@@ -3227,7 +3453,9 @@
     :cost {:input 0.125 :output 1 :cache-read 0.0125 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5-nano"
    {:id "openai/gpt-5-nano"
     :name "OpenAI: GPT-5 Nano"
@@ -3246,7 +3474,9 @@
     :cost {:input 0.05 :output 0.4 :cache-read 0.005 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5-nano:batch"
    {:id "openai/gpt-5-nano:batch"
     :name "OpenAI: GPT-5 Nano (batch)"
@@ -3265,7 +3495,9 @@
     :cost {:input 0.025 :output 0.2 :cache-read 0.0025 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5-pro"
    {:id "openai/gpt-5-pro"
     :name "OpenAI: GPT-5 Pro"
@@ -3284,7 +3516,9 @@
     :cost {:input 15 :output 120 :cache-read 0 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5-pro:batch"
    {:id "openai/gpt-5-pro:batch"
     :name "OpenAI: GPT-5 Pro (batch)"
@@ -3303,7 +3537,9 @@
     :cost {:input 7.5 :output 60 :cache-read 0 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.1"
    {:id "openai/gpt-5.1"
     :name "OpenAI: GPT-5.1"
@@ -3322,7 +3558,9 @@
     :cost {:input 1.25 :output 10 :cache-read 0.125 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.1-codex"
    {:id "openai/gpt-5.1-codex"
     :name "OpenAI: GPT-5.1-Codex"
@@ -3341,7 +3579,9 @@
     :cost {:input 1.25 :output 10 :cache-read 0.13 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.1-codex-max"
    {:id "openai/gpt-5.1-codex-max"
     :name "OpenAI: GPT-5.1-Codex-Max"
@@ -3360,7 +3600,9 @@
     :cost {:input 1.25 :output 10 :cache-read 0.125 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.1-codex-mini"
    {:id "openai/gpt-5.1-codex-mini"
     :name "OpenAI: GPT-5.1-Codex-Mini"
@@ -3379,7 +3621,9 @@
     :cost {:input 0.25 :output 2 :cache-read 0.03 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.1:batch"
    {:id "openai/gpt-5.1:batch"
     :name "OpenAI: GPT-5.1 (batch)"
@@ -3398,7 +3642,9 @@
     :cost {:input 0.625 :output 5 :cache-read 0.0625 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.2"
    {:id "openai/gpt-5.2"
     :name "OpenAI: GPT-5.2"
@@ -3417,7 +3663,9 @@
     :cost {:input 1.75 :output 14 :cache-read 0.175 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.2-chat"
    {:id "openai/gpt-5.2-chat"
     :name "OpenAI: GPT-5.2 Chat"
@@ -3430,7 +3678,9 @@
     :cost {:input 1.75 :output 14 :cache-read 0.175 :cache-write 0}
     :context-window 128000
     :max-tokens 32000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.2-codex"
    {:id "openai/gpt-5.2-codex"
     :name "OpenAI: GPT-5.2-Codex"
@@ -3449,7 +3699,9 @@
     :cost {:input 1.75 :output 14 :cache-read 0.175 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.2-pro"
    {:id "openai/gpt-5.2-pro"
     :name "OpenAI: GPT-5.2 Pro"
@@ -3468,7 +3720,9 @@
     :cost {:input 21 :output 168 :cache-read 0 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.2-pro:batch"
    {:id "openai/gpt-5.2-pro:batch"
     :name "OpenAI: GPT-5.2 Pro (batch)"
@@ -3487,7 +3741,9 @@
     :cost {:input 10.5 :output 84 :cache-read 0 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.2:batch"
    {:id "openai/gpt-5.2:batch"
     :name "OpenAI: GPT-5.2 (batch)"
@@ -3506,7 +3762,9 @@
     :cost {:input 0.875 :output 7 :cache-read 0.0875 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.3-codex"
    {:id "openai/gpt-5.3-codex"
     :name "OpenAI: GPT-5.3-Codex"
@@ -3525,7 +3783,9 @@
     :cost {:input 1.75 :output 14 :cache-read 0.175 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.4"
    {:id "openai/gpt-5.4"
     :name "OpenAI: GPT-5.4"
@@ -3544,7 +3804,9 @@
     :cost {:input 2.5 :output 15 :cache-read 0.25 :cache-write 0}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.4-mini"
    {:id "openai/gpt-5.4-mini"
     :name "OpenAI: GPT-5.4 Mini"
@@ -3563,7 +3825,9 @@
     :cost {:input 0.75 :output 4.5 :cache-read 0.075 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.4-mini:batch"
    {:id "openai/gpt-5.4-mini:batch"
     :name "OpenAI: GPT-5.4 Mini (batch)"
@@ -3582,7 +3846,9 @@
     :cost {:input 0.375 :output 2.25 :cache-read 0.0375 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.4-nano"
    {:id "openai/gpt-5.4-nano"
     :name "OpenAI: GPT-5.4 Nano"
@@ -3601,7 +3867,9 @@
     :cost {:input 0.2 :output 1.25 :cache-read 0.02 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.4-nano:batch"
    {:id "openai/gpt-5.4-nano:batch"
     :name "OpenAI: GPT-5.4 Nano (batch)"
@@ -3620,7 +3888,9 @@
     :cost {:input 0.1 :output 0.625 :cache-read 0.01 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.4-pro"
    {:id "openai/gpt-5.4-pro"
     :name "OpenAI: GPT-5.4 Pro"
@@ -3639,7 +3909,9 @@
     :cost {:input 30 :output 180 :cache-read 0 :cache-write 0}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.4-pro:batch"
    {:id "openai/gpt-5.4-pro:batch"
     :name "OpenAI: GPT-5.4 Pro (batch)"
@@ -3658,7 +3930,9 @@
     :cost {:input 15 :output 90 :cache-read 0 :cache-write 0}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.4:batch"
    {:id "openai/gpt-5.4:batch"
     :name "OpenAI: GPT-5.4 (batch)"
@@ -3677,7 +3951,9 @@
     :cost {:input 1.25 :output 7.5 :cache-read 0.125 :cache-write 0}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.5"
    {:id "openai/gpt-5.5"
     :name "OpenAI: GPT-5.5"
@@ -3696,7 +3972,9 @@
     :cost {:input 5 :output 30 :cache-read 0.5 :cache-write 0}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.5-pro"
    {:id "openai/gpt-5.5-pro"
     :name "OpenAI: GPT-5.5 Pro"
@@ -3715,7 +3993,9 @@
     :cost {:input 30 :output 180 :cache-read 0 :cache-write 0}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.5-pro:batch"
    {:id "openai/gpt-5.5-pro:batch"
     :name "OpenAI: GPT-5.5 Pro (batch)"
@@ -3734,7 +4014,9 @@
     :cost {:input 15 :output 90 :cache-read 0 :cache-write 0}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.5:batch"
    {:id "openai/gpt-5.5:batch"
     :name "OpenAI: GPT-5.5 (batch)"
@@ -3753,7 +4035,9 @@
     :cost {:input 2.5 :output 15 :cache-read 0.25 :cache-write 0}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.6-luna"
    {:id "openai/gpt-5.6-luna"
     :name "OpenAI: GPT-5.6 Luna"
@@ -3772,7 +4056,9 @@
     :cost {:input 0.2 :output 1.2 :cache-read 0.02 :cache-write 0.25}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.6-luna-pro"
    {:id "openai/gpt-5.6-luna-pro"
     :name "OpenAI: GPT-5.6 Luna Pro"
@@ -3791,7 +4077,9 @@
     :cost {:input 0.2 :output 1.2 :cache-read 0.02 :cache-write 0.25}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.6-luna-pro:batch"
    {:id "openai/gpt-5.6-luna-pro:batch"
     :name "OpenAI: GPT-5.6 Luna Pro (batch)"
@@ -3810,7 +4098,9 @@
     :cost {:input 0.1 :output 0.6 :cache-read 0.01 :cache-write 0}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.6-luna:batch"
    {:id "openai/gpt-5.6-luna:batch"
     :name "OpenAI: GPT-5.6 Luna (batch)"
@@ -3829,7 +4119,9 @@
     :cost {:input 0.1 :output 0.6 :cache-read 0.01 :cache-write 0}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.6-sol"
    {:id "openai/gpt-5.6-sol"
     :name "OpenAI: GPT-5.6 Sol"
@@ -3848,7 +4140,9 @@
     :cost {:input 4 :output 20 :cache-read 0.4 :cache-write 5}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.6-sol-pro"
    {:id "openai/gpt-5.6-sol-pro"
     :name "OpenAI: GPT-5.6 Sol Pro"
@@ -3867,7 +4161,9 @@
     :cost {:input 4 :output 20 :cache-read 0.4 :cache-write 5}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.6-sol-pro:batch"
    {:id "openai/gpt-5.6-sol-pro:batch"
     :name "OpenAI: GPT-5.6 Sol Pro (batch)"
@@ -3886,7 +4182,9 @@
     :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.6-sol:batch"
    {:id "openai/gpt-5.6-sol:batch"
     :name "OpenAI: GPT-5.6 Sol (batch)"
@@ -3905,7 +4203,9 @@
     :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.6-terra"
    {:id "openai/gpt-5.6-terra"
     :name "OpenAI: GPT-5.6 Terra"
@@ -3924,7 +4224,9 @@
     :cost {:input 2 :output 12 :cache-read 0.2 :cache-write 2.5}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.6-terra-pro"
    {:id "openai/gpt-5.6-terra-pro"
     :name "OpenAI: GPT-5.6 Terra Pro"
@@ -3943,7 +4245,9 @@
     :cost {:input 2 :output 12 :cache-read 0.2 :cache-write 2.5}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.6-terra-pro:batch"
    {:id "openai/gpt-5.6-terra-pro:batch"
     :name "OpenAI: GPT-5.6 Terra Pro (batch)"
@@ -3962,7 +4266,9 @@
     :cost {:input 1 :output 6 :cache-read 0.1 :cache-write 0}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5.6-terra:batch"
    {:id "openai/gpt-5.6-terra:batch"
     :name "OpenAI: GPT-5.6 Terra (batch)"
@@ -3981,7 +4287,9 @@
     :cost {:input 1 :output 6 :cache-read 0.1 :cache-write 0}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-5:batch"
    {:id "openai/gpt-5:batch"
     :name "OpenAI: GPT-5 (batch)"
@@ -4000,7 +4308,9 @@
     :cost {:input 0.625 :output 5 :cache-read 0.0625 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6-astra"
    {:id "openai/gpt-6-astra"
     :name "OpenAI: GPT-6 Astra"
@@ -4019,7 +4329,9 @@
     :cost {:input 10 :output 50 :cache-read 1 :cache-write 12.5}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6-astra-pro"
    {:id "openai/gpt-6-astra-pro"
     :name "OpenAI: GPT-6 Astra Pro"
@@ -4038,7 +4350,9 @@
     :cost {:input 10 :output 50 :cache-read 1 :cache-write 12.5}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6-astra-pro:batch"
    {:id "openai/gpt-6-astra-pro:batch"
     :name "OpenAI: GPT-6 Astra Pro (batch)"
@@ -4057,7 +4371,9 @@
     :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6-astra:batch"
    {:id "openai/gpt-6-astra:batch"
     :name "OpenAI: GPT-6 Astra (batch)"
@@ -4076,7 +4392,9 @@
     :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6-luna"
    {:id "openai/gpt-6-luna"
     :name "OpenAI: GPT-6 Luna"
@@ -4095,7 +4413,9 @@
     :cost {:input 0.1 :output 0.5 :cache-read 0.01 :cache-write 0.125}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6-luna-pro"
    {:id "openai/gpt-6-luna-pro"
     :name "OpenAI: GPT-6 Luna Pro"
@@ -4114,7 +4434,9 @@
     :cost {:input 0.1 :output 0.5 :cache-read 0.01 :cache-write 0.125}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6-luna-pro:batch"
    {:id "openai/gpt-6-luna-pro:batch"
     :name "OpenAI: GPT-6 Luna Pro (batch)"
@@ -4133,7 +4455,9 @@
     :cost {:input 0.05 :output 0.25 :cache-read 0.005 :cache-write 0.0625}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6-luna:batch"
    {:id "openai/gpt-6-luna:batch"
     :name "OpenAI: GPT-6 Luna (batch)"
@@ -4152,7 +4476,9 @@
     :cost {:input 0.05 :output 0.25 :cache-read 0.005 :cache-write 0.0625}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6-sol"
    {:id "openai/gpt-6-sol"
     :name "OpenAI: GPT-6 Sol"
@@ -4171,7 +4497,9 @@
     :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6-sol-pro"
    {:id "openai/gpt-6-sol-pro"
     :name "OpenAI: GPT-6 Sol Pro"
@@ -4190,7 +4518,9 @@
     :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6-sol-pro:batch"
    {:id "openai/gpt-6-sol-pro:batch"
     :name "OpenAI: GPT-6 Sol Pro (batch)"
@@ -4209,7 +4539,9 @@
     :cost {:input 1 :output 5 :cache-read 0.1 :cache-write 1.25}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6-sol:batch"
    {:id "openai/gpt-6-sol:batch"
     :name "OpenAI: GPT-6 Sol (batch)"
@@ -4228,7 +4560,9 @@
     :cost {:input 1 :output 5 :cache-read 0.1 :cache-write 1.25}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6.1-sol"
    {:id "openai/gpt-6.1-sol"
     :name "OpenAI: GPT-6.1 Sol"
@@ -4247,7 +4581,9 @@
     :cost {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6.1-sol-pro"
    {:id "openai/gpt-6.1-sol-pro"
     :name "OpenAI: GPT-6.1 Sol Pro"
@@ -4266,7 +4602,9 @@
     :cost {:input 2 :output 10 :cache-read 0.1 :cache-write 2.5}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6.1-sol-pro:batch"
    {:id "openai/gpt-6.1-sol-pro:batch"
     :name "OpenAI: GPT-6.1 Sol Pro (batch)"
@@ -4285,7 +4623,9 @@
     :cost {:input 1 :output 5 :cache-read 0.05 :cache-write 1.25}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6.1-sol:batch"
    {:id "openai/gpt-6.1-sol:batch"
     :name "OpenAI: GPT-6.1 Sol (batch)"
@@ -4304,7 +4644,9 @@
     :cost {:input 1 :output 5 :cache-read 0.05 :cache-write 1.25}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6.1-terra"
    {:id "openai/gpt-6.1-terra"
     :name "OpenAI: GPT-6.1 Terra"
@@ -4323,7 +4665,9 @@
     :cost {:input 1 :output 5 :cache-read 0.05 :cache-write 1.25}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6.1-terra-pro"
    {:id "openai/gpt-6.1-terra-pro"
     :name "OpenAI: GPT-6.1 Terra Pro"
@@ -4342,7 +4686,9 @@
     :cost {:input 1 :output 5 :cache-read 0.05 :cache-write 1.25}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6.1-terra-pro:batch"
    {:id "openai/gpt-6.1-terra-pro:batch"
     :name "OpenAI: GPT-6.1 Terra Pro (batch)"
@@ -4361,7 +4707,9 @@
     :cost {:input 0.5 :output 2.5 :cache-read 0.025 :cache-write 0.625}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-6.1-terra:batch"
    {:id "openai/gpt-6.1-terra:batch"
     :name "OpenAI: GPT-6.1 Terra (batch)"
@@ -4380,7 +4728,9 @@
     :cost {:input 0.5 :output 2.5 :cache-read 0.025 :cache-write 0.625}
     :context-window 1050000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-audio"
    {:id "openai/gpt-audio"
     :name "OpenAI: GPT Audio"
@@ -4392,7 +4742,9 @@
     :cost {:input 2.5 :output 10 :cache-read 0 :cache-write 0}
     :context-window 128000
     :max-tokens 16384
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-audio-mini"
    {:id "openai/gpt-audio-mini"
     :name "OpenAI: GPT Audio Mini"
@@ -4404,7 +4756,9 @@
     :cost {:input 0.6 :output 2.4 :cache-read 0 :cache-write 0}
     :context-window 128000
     :max-tokens 16384
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-chat-latest"
    {:id "openai/gpt-chat-latest"
     :name "OpenAI: GPT Chat Latest"
@@ -4416,7 +4770,9 @@
     :cost {:input 5 :output 30 :cache-read 0.5 :cache-write 0}
     :context-window 400000
     :max-tokens 128000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-oss-120b"
    {:id "openai/gpt-oss-120b"
     :name "OpenAI: gpt-oss-120b"
@@ -4435,7 +4791,9 @@
     :cost {:input 0.15 :output 0.6 :cache-read 0.075 :cache-write 0}
     :context-window 131072
     :max-tokens 65536
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-oss-120b:batch"
    {:id "openai/gpt-oss-120b:batch"
     :name "OpenAI: gpt-oss-120b (batch)"
@@ -4454,7 +4812,9 @@
     :cost {:input 0.0296 :output 0.136 :cache-read 0 :cache-write 0}
     :context-window 131072
     :max-tokens 117964
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-oss-20b"
    {:id "openai/gpt-oss-20b"
     :name "OpenAI: gpt-oss-20b"
@@ -4470,10 +4830,12 @@
                          :off nil
                          :xhigh nil}
     :input [:text]
-    :cost {:input 0.018 :output 0.09 :cache-read 0.009 :cache-write 0}
+    :cost {:input 0.03 :output 0.13 :cache-read 0.03 :cache-write 0}
     :context-window 131072
-    :max-tokens 32768
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :max-tokens 117964
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-oss-20b:batch"
    {:id "openai/gpt-oss-20b:batch"
     :name "OpenAI: gpt-oss-20b (batch)"
@@ -4492,7 +4854,9 @@
     :cost {:input 0.024 :output 0.112 :cache-read 0 :cache-write 0}
     :context-window 131072
     :max-tokens 117964
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/gpt-oss-safeguard-20b"
    {:id "openai/gpt-oss-safeguard-20b"
     :name "OpenAI: gpt-oss-safeguard-20b"
@@ -4505,7 +4869,9 @@
     :cost {:input 0.075 :output 0.3 :cache-read 0.0375 :cache-write 0}
     :context-window 131072
     :max-tokens 65536
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/o3"
    {:id "openai/o3"
     :name "OpenAI: o3"
@@ -4518,7 +4884,9 @@
     :cost {:input 2 :output 8 :cache-read 0.5 :cache-write 0}
     :context-window 200000
     :max-tokens 100000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/o3-mini:batch"
    {:id "openai/o3-mini:batch"
     :name "OpenAI: o3 Mini (batch)"
@@ -4531,7 +4899,9 @@
     :cost {:input 0.55 :output 2.2 :cache-read 0.275 :cache-write 0}
     :context-window 200000
     :max-tokens 100000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/o3-pro"
    {:id "openai/o3-pro"
     :name "OpenAI: o3 Pro"
@@ -4544,7 +4914,9 @@
     :cost {:input 20 :output 80 :cache-read 0 :cache-write 0}
     :context-window 200000
     :max-tokens 100000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/o3:batch"
    {:id "openai/o3:batch"
     :name "OpenAI: o3 (batch)"
@@ -4557,7 +4929,9 @@
     :cost {:input 1 :output 4 :cache-read 0.25 :cache-write 0}
     :context-window 200000
     :max-tokens 100000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openai/o4-mini:batch"
    {:id "openai/o4-mini:batch"
     :name "OpenAI: o4 Mini (batch)"
@@ -4570,7 +4944,9 @@
     :cost {:input 0.55 :output 2.2 :cache-read 0.1375 :cache-write 0}
     :context-window 200000
     :max-tokens 100000
-    :compat {:thinking-format :openrouter :supports-strict-mode true}}
+    :compat {:thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openrouter/auto"
    {:id "openrouter/auto"
     :name "Auto Router"
@@ -4584,7 +4960,8 @@
     :max-tokens 4096
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openrouter/auto-beta"
    {:id "openrouter/auto-beta"
     :name "Auto Router (Beta)"
@@ -4598,7 +4975,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openrouter/free"
    {:id "openrouter/free"
     :name "Free Models Router"
@@ -4612,7 +4990,8 @@
     :max-tokens 4096
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openrouter/fusion"
    {:id "openrouter/fusion"
     :name "OpenRouter: Fusion"
@@ -4626,7 +5005,8 @@
     :max-tokens 30000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "openrouter/pareto-code"
    {:id "openrouter/pareto-code"
     :name "Pareto Code Router"
@@ -4640,7 +5020,8 @@
     :max-tokens 4096
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "particle-ai/particle-1"
    {:id "particle-ai/particle-1"
     :name "Particle AI: Particle-1"
@@ -4661,7 +5042,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "perceptron/perceptron-mk1.5"
    {:id "perceptron/perceptron-mk1.5"
     :name "Perceptron: Perceptron Mk1.5"
@@ -4682,7 +5064,8 @@
     :max-tokens 8192
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "prism-ml/ternary-bonsai-2-27b"
    {:id "prism-ml/ternary-bonsai-2-27b"
     :name "PrismML: Ternary Bonsai 2 27B"
@@ -4703,7 +5086,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "prism-ml/ternary-bonsai-2-9b"
    {:id "prism-ml/ternary-bonsai-2-9b"
     :name "PrismML: Ternary Bonsai 2 9B"
@@ -4717,7 +5101,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen-2.5-72b-instruct"
    {:id "qwen/qwen-2.5-72b-instruct"
     :name "Qwen2.5 72B Instruct"
@@ -4731,7 +5116,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen-2.5-7b-instruct"
    {:id "qwen/qwen-2.5-7b-instruct"
     :name "Qwen: Qwen2.5 7B Instruct"
@@ -4745,7 +5131,8 @@
     :max-tokens 29491
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen-plus"
    {:id "qwen/qwen-plus"
     :name "Qwen: Qwen-Plus"
@@ -4759,7 +5146,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-14b"
    {:id "qwen/qwen3-14b"
     :name "Qwen: Qwen3 14B"
@@ -4773,7 +5161,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-235b-a22b-2507"
    {:id "qwen/qwen3-235b-a22b-2507"
     :name "Qwen: Qwen3 235B A22B Instruct 2507"
@@ -4782,12 +5171,13 @@
     :base-url "https://openrouter.ai/api/v1"
     :reasoning false
     :input [:text]
-    :cost {:input 0.09 :output 0.55 :cache-read 0 :cache-write 0}
-    :context-window 262144
-    :max-tokens 16384
+    :cost {:input 0.14 :output 0.8 :cache-read 0.05 :cache-write 0}
+    :context-window 131072
+    :max-tokens 117964
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-235b-a22b-thinking-2507"
    {:id "qwen/qwen3-235b-a22b-thinking-2507"
     :name "Qwen: Qwen3 235B A22B Thinking 2507"
@@ -4802,7 +5192,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-30b-a3b"
    {:id "qwen/qwen3-30b-a3b"
     :name "Qwen: Qwen3 30B A3B"
@@ -4816,7 +5207,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-30b-a3b-instruct-2507"
    {:id "qwen/qwen3-30b-a3b-instruct-2507"
     :name "Qwen: Qwen3 30B A3B Instruct 2507"
@@ -4830,7 +5222,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-32b"
    {:id "qwen/qwen3-32b"
     :name "Qwen: Qwen3 32B"
@@ -4844,7 +5237,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-coder"
    {:id "qwen/qwen3-coder"
     :name "Qwen: Qwen3 Coder 480B A35B"
@@ -4858,7 +5252,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-coder-30b-a3b-instruct"
    {:id "qwen/qwen3-coder-30b-a3b-instruct"
     :name "Qwen: Qwen3 Coder 30B A3B Instruct"
@@ -4867,12 +5262,13 @@
     :base-url "https://openrouter.ai/api/v1"
     :reasoning false
     :input [:text]
-    :cost {:input 0.07 :output 0.28 :cache-read 0 :cache-write 0}
+    :cost {:input 0.15 :output 0.6 :cache-read 0 :cache-write 0}
     :context-window 262144
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-coder-flash"
    {:id "qwen/qwen3-coder-flash"
     :name "Qwen: Qwen3 Coder Flash"
@@ -4886,7 +5282,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-coder-next"
    {:id "qwen/qwen3-coder-next"
     :name "Qwen: Qwen3 Coder Next"
@@ -4900,7 +5297,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-next-80b-a3b-instruct"
    {:id "qwen/qwen3-next-80b-a3b-instruct"
     :name "Qwen: Qwen3 Next 80B A3B Instruct"
@@ -4909,12 +5307,13 @@
     :base-url "https://openrouter.ai/api/v1"
     :reasoning false
     :input [:text]
-    :cost {:input 0.09 :output 1.1 :cache-read 0 :cache-write 0}
+    :cost {:input 0.1 :output 1.1 :cache-read 0.07 :cache-write 0}
     :context-window 262144
-    :max-tokens 16384
+    :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-vl-235b-a22b-instruct"
    {:id "qwen/qwen3-vl-235b-a22b-instruct"
     :name "Qwen: Qwen3 VL 235B A22B Instruct"
@@ -4928,7 +5327,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-vl-30b-a3b-instruct"
    {:id "qwen/qwen3-vl-30b-a3b-instruct"
     :name "Qwen: Qwen3 VL 30B A3B Instruct"
@@ -4942,7 +5342,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-vl-30b-a3b-thinking"
    {:id "qwen/qwen3-vl-30b-a3b-thinking"
     :name "Qwen: Qwen3 VL 30B A3B Thinking"
@@ -4957,7 +5358,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3-vl-8b-instruct"
    {:id "qwen/qwen3-vl-8b-instruct"
     :name "Qwen: Qwen3 VL 8B Instruct"
@@ -4971,7 +5373,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.5-122b-a10b"
    {:id "qwen/qwen3.5-122b-a10b"
     :name "Qwen: Qwen3.5-122B-A10B"
@@ -4985,7 +5388,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.5-27b"
    {:id "qwen/qwen3.5-27b"
     :name "Qwen: Qwen3.5-27B"
@@ -4999,7 +5403,8 @@
     :max-tokens 81920
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.5-35b-a3b"
    {:id "qwen/qwen3.5-35b-a3b"
     :name "Qwen: Qwen3.5-35B-A3B"
@@ -5013,7 +5418,8 @@
     :max-tokens 81920
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.5-397b-a17b"
    {:id "qwen/qwen3.5-397b-a17b"
     :name "Qwen: Qwen3.5 397B A17B"
@@ -5027,7 +5433,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.5-9b"
    {:id "qwen/qwen3.5-9b"
     :name "Qwen: Qwen3.5-9B"
@@ -5041,7 +5448,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.5-flash-02-23"
    {:id "qwen/qwen3.5-flash-02-23"
     :name "Qwen: Qwen3.5-Flash"
@@ -5055,7 +5463,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.5-plus-02-15"
    {:id "qwen/qwen3.5-plus-02-15"
     :name "Qwen: Qwen3.5 Plus 2026-02-15"
@@ -5069,7 +5478,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.5-plus-20260420"
    {:id "qwen/qwen3.5-plus-20260420"
     :name "Qwen: Qwen3.5 Plus 2026-04-20"
@@ -5083,7 +5493,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.6-27b"
    {:id "qwen/qwen3.6-27b"
     :name "Qwen: Qwen3.6 27B"
@@ -5097,7 +5508,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.6-35b-a3b"
    {:id "qwen/qwen3.6-35b-a3b"
     :name "Qwen: Qwen3.6 35B A3B"
@@ -5111,7 +5523,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.6-flash"
    {:id "qwen/qwen3.6-flash"
     :name "Qwen: Qwen3.6 Flash"
@@ -5125,7 +5538,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.6-plus"
    {:id "qwen/qwen3.6-plus"
     :name "Qwen: Qwen3.6 Plus"
@@ -5139,7 +5553,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.7-flash"
    {:id "qwen/qwen3.7-flash"
     :name "Qwen: Qwen3.7 Flash"
@@ -5153,7 +5568,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.7-max"
    {:id "qwen/qwen3.7-max"
     :name "Qwen: Qwen3.7 Max"
@@ -5167,7 +5583,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.7-plus"
    {:id "qwen/qwen3.7-plus"
     :name "Qwen: Qwen3.7 Plus"
@@ -5181,7 +5598,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.7-plus:batch"
    {:id "qwen/qwen3.7-plus:batch"
     :name "Qwen: Qwen3.7 Plus (batch)"
@@ -5195,7 +5613,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.8-2.4t-a95b"
    {:id "qwen/qwen3.8-2.4t-a95b"
     :name "Qwen: Qwen3.8 2.4T A95B"
@@ -5216,7 +5635,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.8-27b"
    {:id "qwen/qwen3.8-27b"
     :name "Qwen: Qwen3.8 27B"
@@ -5237,7 +5657,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.8-flash"
    {:id "qwen/qwen3.8-flash"
     :name "Qwen: Qwen3.8 Flash"
@@ -5251,7 +5672,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.8-max-0902"
    {:id "qwen/qwen3.8-max-0902"
     :name "Qwen: Qwen3.8 Max (0902)"
@@ -5272,7 +5694,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.8-max-prime"
    {:id "qwen/qwen3.8-max-prime"
     :name "Qwen: Qwen3.8 Max Prime"
@@ -5293,7 +5716,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "qwen/qwen3.8-omni-flash"
    {:id "qwen/qwen3.8-omni-flash"
     :name "Qwen: Qwen3.8 Omni Flash"
@@ -5307,7 +5731,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "recursive/flint-v1.0:free"
    {:id "recursive/flint-v1.0:free"
     :name "Recursive: Flint (free)"
@@ -5322,7 +5747,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "reflection/beam-1.0-501b-a23b"
    {:id "reflection/beam-1.0-501b-a23b"
     :name "Reflection: Beam 1.0 501B A23B"
@@ -5343,7 +5769,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "rekaai/reka-edge"
    {:id "rekaai/reka-edge"
     :name "Reka Edge"
@@ -5357,7 +5784,8 @@
     :max-tokens 14745
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "relace/relace-search"
    {:id "relace/relace-search"
     :name "Relace: Relace Search"
@@ -5371,7 +5799,8 @@
     :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "sakana/fugu-max"
    {:id "sakana/fugu-max"
     :name "Sakana: Fugu Max"
@@ -5392,7 +5821,8 @@
     :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "sakana/fugu-ultra"
    {:id "sakana/fugu-ultra"
     :name "Sakana: Fugu Ultra"
@@ -5413,7 +5843,8 @@
     :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "sakana/fugu-ultra-v2"
    {:id "sakana/fugu-ultra-v2"
     :name "Sakana: Fugu Ultra v2"
@@ -5434,7 +5865,8 @@
     :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "sakana/sakana-namazu"
    {:id "sakana/sakana-namazu"
     :name "Sakana: Sakana Namazu"
@@ -5455,7 +5887,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "stepfun/step-3.5-flash"
    {:id "stepfun/step-3.5-flash"
     :name "StepFun: Step 3.5 Flash"
@@ -5470,7 +5903,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "stepfun/step-3.7-flash"
    {:id "stepfun/step-3.7-flash"
     :name "StepFun: Step 3.7 Flash"
@@ -5491,7 +5925,8 @@
     :max-tokens 230400
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "stepfun/step-5-preview"
    {:id "stepfun/step-5-preview"
     :name "StepFun: Step 5 Preview"
@@ -5512,7 +5947,8 @@
     :max-tokens 64000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "tencent/hy3"
    {:id "tencent/hy3"
     :name "Tencent: Hy3"
@@ -5533,7 +5969,8 @@
     :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "tencent/hy3-preview"
    {:id "tencent/hy3-preview"
     :name "Tencent: Hy3 preview"
@@ -5554,7 +5991,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "tencent/hy4-preview"
    {:id "tencent/hy4-preview"
     :name "Tencent: Hy4 preview"
@@ -5575,7 +6013,8 @@
     :max-tokens 64000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "thinkingmachines/inkling"
    {:id "thinkingmachines/inkling"
     :name "Thinking Machines: Inkling"
@@ -5596,7 +6035,8 @@
     :max-tokens 471859
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "thinkingmachines/inkling-small"
    {:id "thinkingmachines/inkling-small"
     :name "Thinking Machines: Inkling Small"
@@ -5617,7 +6057,8 @@
     :max-tokens 262144
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "thinkingmachines/inkling-small:free"
    {:id "thinkingmachines/inkling-small:free"
     :name "Thinking Machines: Inkling Small (free)"
@@ -5638,7 +6079,8 @@
     :max-tokens 262144
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "thinkingmachines/inkling:free"
    {:id "thinkingmachines/inkling:free"
     :name "Thinking Machines: Inkling (free)"
@@ -5659,7 +6101,8 @@
     :max-tokens 262144
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "typesafe/jev-router"
    {:id "typesafe/jev-router"
     :name "TypeSafe: Jev Router"
@@ -5673,7 +6116,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "unbiased/pareto-26.10"
    {:id "unbiased/pareto-26.10"
     :name "Pareto 26.10"
@@ -5687,7 +6131,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "unbiased/pareto-26.9"
    {:id "unbiased/pareto-26.9"
     :name "Pareto 26.9"
@@ -5701,7 +6146,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "upstage/solar-mini4"
    {:id "upstage/solar-mini4"
     :name "Upstage: Solar Mini 4"
@@ -5722,7 +6168,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "upstage/solar-pro4"
    {:id "upstage/solar-pro4"
     :name "Upstage: Solar Pro 4"
@@ -5743,7 +6190,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "x-ai/grok-4.20"
    {:id "x-ai/grok-4.20"
     :name "SpaceXAI: Grok 4.20"
@@ -5757,7 +6205,8 @@
     :max-tokens 1800000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "x-ai/grok-4.3"
    {:id "x-ai/grok-4.3"
     :name "SpaceXAI: Grok 4.3"
@@ -5778,7 +6227,8 @@
     :max-tokens 900000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "x-ai/grok-4.3:batch"
    {:id "x-ai/grok-4.3:batch"
     :name "SpaceXAI: Grok 4.3 (batch)"
@@ -5799,7 +6249,8 @@
     :max-tokens 900000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "x-ai/grok-4.5"
    {:id "x-ai/grok-4.5"
     :name "SpaceXAI: Grok 4.5"
@@ -5820,7 +6271,8 @@
     :max-tokens 450000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "x-ai/grok-4.6"
    {:id "x-ai/grok-4.6"
     :name "SpaceXAI: Grok 4.6"
@@ -5841,7 +6293,30 @@
     :max-tokens 450000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
+   "x-ai/grok-4.6:batch"
+   {:id "x-ai/grok-4.6:batch"
+    :name "SpaceXAI: Grok 4.6 (batch)"
+    :provider :openrouter
+    :api :openai-completions
+    :base-url "https://openrouter.ai/api/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max nil
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 1.6 :output 4.8 :cache-read 0.4 :cache-write 0}
+    :context-window 500000
+    :max-tokens 450000
+    :compat {:supports-developer-role false
+             :thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "x-ai/grok-4.7"
    {:id "x-ai/grok-4.7"
     :name "SpaceXAI: Grok 4.7"
@@ -5862,7 +6337,30 @@
     :max-tokens 450000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
+   "x-ai/grok-4.7:batch"
+   {:id "x-ai/grok-4.7:batch"
+    :name "SpaceXAI: Grok 4.7 (batch)"
+    :provider :openrouter
+    :api :openai-completions
+    :base-url "https://openrouter.ai/api/v1"
+    :reasoning true
+    :thinking-level-map {:high "high"
+                         :low "low"
+                         :max nil
+                         :medium "medium"
+                         :minimal nil
+                         :off nil
+                         :xhigh "xhigh"}
+    :input [:text :image]
+    :cost {:input 1.6 :output 4.8 :cache-read 0.4 :cache-write 0}
+    :context-window 500000
+    :max-tokens 450000
+    :compat {:supports-developer-role false
+             :thinking-format :openrouter
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "x-ai/grok-build-0.1"
    {:id "x-ai/grok-build-0.1"
     :name "SpaceXAI: Grok Build 0.1"
@@ -5877,7 +6375,8 @@
     :max-tokens 230400
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "xiaomi/mimo-v2.5"
    {:id "xiaomi/mimo-v2.5"
     :name "Xiaomi: MiMo-V2.5"
@@ -5891,7 +6390,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "xiaomi/mimo-v2.5-pro"
    {:id "xiaomi/mimo-v2.5-pro"
     :name "Xiaomi: MiMo-V2.5-Pro"
@@ -5905,7 +6405,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "xiaomi/mimo-v2.6-flash"
    {:id "xiaomi/mimo-v2.6-flash"
     :name "Xiaomi: MiMo-V2.6-Flash"
@@ -5919,7 +6420,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "xiaomi/mimo-v2.6-pro"
    {:id "xiaomi/mimo-v2.6-pro"
     :name "Xiaomi: MiMo-V2.6-Pro"
@@ -5933,7 +6435,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "xiaomi/mimo-v2.6-pro-ultraspeed"
    {:id "xiaomi/mimo-v2.6-pro-ultraspeed"
     :name "Xiaomi: MiMo-V2.6-Pro-UltraSpeed"
@@ -5947,7 +6450,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "xingchen-agi/xing4.0-29b-a4b:free"
    {:id "xingchen-agi/xing4.0-29b-a4b:free"
     :name "XingChen: Xing4.0 29B A4B (free)"
@@ -5961,7 +6465,8 @@
     :max-tokens 235929
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-4.5"
    {:id "z-ai/glm-4.5"
     :name "Z.ai: GLM 4.5"
@@ -5975,7 +6480,8 @@
     :max-tokens 98304
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-4.5-air"
    {:id "z-ai/glm-4.5-air"
     :name "Z.ai: GLM 4.5 Air"
@@ -5989,7 +6495,8 @@
     :max-tokens 98304
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-4.5v"
    {:id "z-ai/glm-4.5v"
     :name "Z.ai: GLM 4.5V"
@@ -6003,7 +6510,8 @@
     :max-tokens 16384
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-4.6"
    {:id "z-ai/glm-4.6"
     :name "Z.ai: GLM 4.6"
@@ -6017,7 +6525,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-4.6v"
    {:id "z-ai/glm-4.6v"
     :name "Z.ai: GLM 4.6V"
@@ -6031,7 +6540,8 @@
     :max-tokens 32768
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-4.7"
    {:id "z-ai/glm-4.7"
     :name "Z.ai: GLM 4.7"
@@ -6045,7 +6555,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-4.7-flash"
    {:id "z-ai/glm-4.7-flash"
     :name "Z.ai: GLM 4.7 Flash"
@@ -6059,7 +6570,8 @@
     :max-tokens 117964
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-5"
    {:id "z-ai/glm-5"
     :name "Z.ai: GLM 5"
@@ -6073,7 +6585,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-5-turbo"
    {:id "z-ai/glm-5-turbo"
     :name "Z.ai: GLM 5 Turbo"
@@ -6087,7 +6600,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-5.1"
    {:id "z-ai/glm-5.1"
     :name "Z.ai: GLM 5.1"
@@ -6101,7 +6615,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-5.2"
    {:id "z-ai/glm-5.2"
     :name "Z.ai: GLM 5.2"
@@ -6122,7 +6637,8 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-5.3"
    {:id "z-ai/glm-5.3"
     :name "Z.ai: GLM 5.3"
@@ -6143,7 +6659,8 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-5.3-flash"
    {:id "z-ai/glm-5.3-flash"
     :name "Z.ai: GLM 5.3 Flash"
@@ -6159,12 +6676,13 @@
                          :off nil
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 0.0285 :output 0.0923 :cache-read 0.0285 :cache-write 0}
+    :cost {:input 0.0313 :output 0.0846 :cache-read 0.03 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-5.3-flash:batch"
    {:id "z-ai/glm-5.3-flash:batch"
     :name "Z.ai: GLM 5.3 Flash (batch)"
@@ -6185,7 +6703,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-5.3-flashx"
    {:id "z-ai/glm-5.3-flashx"
     :name "Z.ai: GLM 5.3 FlashX"
@@ -6206,7 +6725,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-5.3-flashx-legal"
    {:id "z-ai/glm-5.3-flashx-legal"
     :name "Z.ai: GLM 5.3 FlashX Legal"
@@ -6227,7 +6747,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-5.3-prime"
    {:id "z-ai/glm-5.3-prime"
     :name "Z.ai: GLM 5.3 Prime"
@@ -6248,7 +6769,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-5.3:batch"
    {:id "z-ai/glm-5.3:batch"
     :name "Z.ai: GLM 5.3 (batch)"
@@ -6269,7 +6791,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "z-ai/glm-5v-turbo"
    {:id "z-ai/glm-5v-turbo"
     :name "Z.ai: GLM 5V Turbo"
@@ -6283,7 +6806,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~anthropic/claude-fable-latest"
    {:id "~anthropic/claude-fable-latest"
     :name "Anthropic: Claude Fable Latest"
@@ -6304,7 +6828,8 @@
     :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~anthropic/claude-haiku-latest"
    {:id "~anthropic/claude-haiku-latest"
     :name "Anthropic: Claude Haiku Latest"
@@ -6325,7 +6850,8 @@
     :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~anthropic/claude-opus-latest"
    {:id "~anthropic/claude-opus-latest"
     :name "Anthropic: Claude Opus Latest"
@@ -6346,7 +6872,8 @@
     :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~anthropic/claude-sonnet-latest"
    {:id "~anthropic/claude-sonnet-latest"
     :name "Anthropic: Claude Sonnet Latest"
@@ -6367,7 +6894,8 @@
     :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~deepseek/deepseek-flash-latest"
    {:id "~deepseek/deepseek-flash-latest"
     :name "DeepSeek: DeepSeek Flash Latest"
@@ -6383,12 +6911,13 @@
                          :off "none"
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 0.035 :output 0.5 :cache-read 0.005 :cache-write 0}
+    :cost {:input 0.035 :output 0.315 :cache-read 0.006 :cache-write 0}
     :context-window 1048576
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~deepseek/deepseek-pro-latest"
    {:id "~deepseek/deepseek-pro-latest"
     :name "DeepSeek: DeepSeek Pro Latest"
@@ -6409,7 +6938,8 @@
     :max-tokens 393216
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~deepseek/deepseek-v4-flash-latest"
    {:id "~deepseek/deepseek-v4-flash-latest"
     :name "DeepSeek: DeepSeek V4 Flash Latest"
@@ -6431,7 +6961,8 @@
     :compat {:supports-developer-role false
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~google/gemini-flash-latest"
    {:id "~google/gemini-flash-latest"
     :name "Google: Gemini Flash Latest"
@@ -6452,7 +6983,8 @@
     :max-tokens 65536
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~google/gemini-pro-latest"
    {:id "~google/gemini-pro-latest"
     :name "Google: Gemini Pro Latest"
@@ -6473,7 +7005,8 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~moonshotai/kimi-latest"
    {:id "~moonshotai/kimi-latest"
     :name "MoonshotAI: Kimi Latest"
@@ -6489,12 +7022,13 @@
                          :off "none"
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 0.1495 :output 7.15 :cache-read 0.07475 :cache-write 0}
+    :cost {:input 0.1691 :output 8.532 :cache-read 0.16 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~openai/gpt-astra-latest"
    {:id "~openai/gpt-astra-latest"
     :name "OpenAI: GPT Astra Latest"
@@ -6515,7 +7049,8 @@
     :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~openai/gpt-luna-latest"
    {:id "~openai/gpt-luna-latest"
     :name "OpenAI: GPT Luna Latest"
@@ -6536,7 +7071,8 @@
     :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~openai/gpt-mini-latest"
    {:id "~openai/gpt-mini-latest"
     :name "OpenAI: GPT Mini Latest"
@@ -6557,7 +7093,8 @@
     :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~openai/gpt-sol-latest"
    {:id "~openai/gpt-sol-latest"
     :name "OpenAI: GPT Sol Latest"
@@ -6578,7 +7115,8 @@
     :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~openai/gpt-terra-latest"
    {:id "~openai/gpt-terra-latest"
     :name "OpenAI: GPT Terra Latest"
@@ -6599,7 +7137,8 @@
     :max-tokens 128000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~unbiased/pareto-latest"
    {:id "~unbiased/pareto-latest"
     :name "Pareto Latest"
@@ -6613,7 +7152,8 @@
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~x-ai/grok-latest"
    {:id "~x-ai/grok-latest"
     :name "xAI: Grok Latest"
@@ -6634,7 +7174,8 @@
     :max-tokens 450000
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~z-ai/glm-flash-latest"
    {:id "~z-ai/glm-flash-latest"
     :name "Z.ai: GLM Flash Latest"
@@ -6650,12 +7191,13 @@
                          :off nil
                          :xhigh nil}
     :input [:text :image]
-    :cost {:input 0.0285 :output 0.0923 :cache-read 0.0285 :cache-write 0}
+    :cost {:input 0.0313 :output 0.0846 :cache-read 0.03 :cache-write 0}
     :context-window 1048576
     :max-tokens 131072
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}
    "~z-ai/glm-latest"
    {:id "~z-ai/glm-latest"
     :name "Z.ai: GLM Latest"
@@ -6676,4 +7218,5 @@
     :max-tokens 943718
     :compat {:supports-developer-role false
              :thinking-format :openrouter
-             :supports-strict-mode true}}}}}
+             :supports-strict-mode true
+             :send-session-affinity-headers true}}}}}

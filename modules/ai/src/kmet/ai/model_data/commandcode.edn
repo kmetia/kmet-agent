@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-02T16:02:51Z"
+ :generated-at "2026-11-03T18:57:42Z"
  :provider {:id :commandcode
             :name "Command Code"
             :env-vars ["CMD_API_KEY"]
@@ -691,15 +691,15 @@
     :cost {:input 0.3 :output 0.9 :cache-read 0.06 :cache-write 0}
     :context-window 262144
     :max-tokens 32768}
-   "inclusionai/ling-3.1-flash-1019:free"
-   {:id "inclusionai/ling-3.1-flash-1019:free"
+   "inclusionai/ling-3.1-flash-1019"
+   {:id "inclusionai/ling-3.1-flash-1019"
     :name "Ling 3.1 Flash 1019"
     :provider :commandcode
     :api :openai-completions
     :base-url "https://api.commandcode.ai/provider/v1"
     :reasoning false
     :input [:text]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :cost {:input 0.3 :output 0.9 :cache-read 0.06 :cache-write 0}
     :context-window 1000000
     :max-tokens 32768}
    "meituan/LongCat-2.0"

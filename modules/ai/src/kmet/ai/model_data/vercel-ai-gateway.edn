@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-02T16:35:36Z"
+ :generated-at "2026-11-03T18:57:42Z"
  :provider {:id :vercel-ai-gateway
             :name "Vercel AI Gateway"
             :env-vars ["AI_GATEWAY_API_KEY"]
@@ -1325,7 +1325,7 @@
     :base-url "https://ai-gateway.vercel.sh"
     :reasoning true
     :input [:text]
-    :cost {:input 0 :output 0 :cache-read 0 :cache-write 0}
+    :cost {:input 0.3 :output 0.9 :cache-read 0.06 :cache-write 0}
     :context-window 1000000
     :max-tokens 262144}
    "interfaze/interfaze-beta"
@@ -3220,28 +3220,6 @@
     :cost {:input 0.45 :output 1.2 :cache-read 0.1 :cache-write 0}
     :context-window 1000000
     :max-tokens 1000000}
-   "xiaomi/mimo-v2.5"
-   {:id "xiaomi/mimo-v2.5"
-    :name "MiMo M2.5"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning true
-    :input [:text :image]
-    :cost {:input 0.119 :output 0.238 :cache-read 0.0025 :cache-write 0}
-    :context-window 1050000
-    :max-tokens 131100}
-   "xiaomi/mimo-v2.5-pro"
-   {:id "xiaomi/mimo-v2.5-pro"
-    :name "MiMo V2.5 Pro"
-    :provider :vercel-ai-gateway
-    :api :anthropic-messages
-    :base-url "https://ai-gateway.vercel.sh"
-    :reasoning true
-    :input [:text]
-    :cost {:input 0.3045 :output 0.609 :cache-read 0.0028 :cache-write 0}
-    :context-window 1050000
-    :max-tokens 131000}
    "xiaomi/mimo-v2.6-flash"
    {:id "xiaomi/mimo-v2.6-flash"
     :name "MiMo V2.6 Flash"
