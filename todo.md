@@ -8,8 +8,8 @@ this file are dropped — see § Deferred.
 | track | what it fixes | status |
 |---|---|---|
 | **`github-copilot` anthropic auth** | every `github-copilot/claude-*` model failed with `400 missing required Authorization header` — the anthropic wire sent `x-api-key` to an endpoint that only accepts `Authorization: Bearer` | **landed** (oauth marker → Bearer; verified live) |
-| **Prompt-caching parity with pi** (P) | the wires never ask for caching — anthropic places no breakpoint, completions sends no key — so cache-read sits at 0 while the accounting that prices it is already complete | **P0–P4 landed** (anthropic breakpoints + 1h pricing; completions key/retention/markers/affinity; store/stream_options on the compat; responses explicit-mode windows); the live check below remains; decisions closed (D1–D3) |
-| **Prompt-caching live check** | every caching test proves the markers are *sent*; only a real provider proves they are *accepted* (`cache_read_input_tokens > 0` on round 2) | **open** — the manual session in § Verification beyond tests; run it before the next track |
+| **Prompt-caching parity with pi** (P) | the wires never ask for caching — anthropic places no breakpoint, completions sends no key — so cache-read sits at 0 while the accounting that prices it is already complete | **P0–P4 landed** (anthropic breakpoints + 1h pricing; completions key/retention/markers/affinity; store/stream_options on the compat; responses explicit-mode windows); the anthropic live check passed, the completions one is blocked on OpenRouter credits; decisions closed (D1–D3) |
+| **Prompt-caching live check** | every caching test proves the markers are *sent*; only a real provider proves they are *accepted* (`cache_read_input_tokens > 0` on round 2) | **anthropic wire verified live** (round 2 reads 15886 tokens; `:long` writes the 1h TTL); **blocked on the completions wire** — the OpenRouter key has no credits |
 | **Tool exposure and declared sets** (P5–P6) | the ranker serves MCP only and no source's tools can be declared, so every tool costs a schema on every round; a tool-set change re-sends the whole array and is recorded nowhere | plan, decisions closed (D4–D8); **P5 → P6** |
 | **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | plan; **after** the exposure track |
 | Around tool hooks | two hand-rolled hook chains + a doubled permission gate; no way to settle a call successfully | decided: **A** — one `:on-tool` around registration |
@@ -52,8 +52,9 @@ retention, anthropic-format markers, affinity headers). **P2 landed** (the
 responses wire reads the resolved compat, `store`/`stream_options` follow
 theirs, the generator's affinity default is corrected). **P3 landed** with P0
 and **P4 landed** (explicit-mode responses models carry the window in
-`prompt_cache_options` and omit `prompt_cache_retention`). The track is done
-bar the live check below.
+`prompt_cache_options` and omit `prompt_cache_retention`). The anthropic wire's
+live check passed; the completions wire's is blocked on OpenRouter credits
+(§ Verification beyond tests).
 Owner: whoever takes the `:llm` row next.
 Reference implementation: `~/src/cvstree/pi/packages/ai/src/api/` (pi).
 
@@ -400,13 +401,35 @@ extra. Default OpenRouter-only, as pi's `getAnthropicCompat:230` has it.
 
 ### Verification beyond tests
 
-On a real session against Anthropic with `-message` logging on, confirm the
-second round's usage chunk reports `cache_read_input_tokens > 0` for all but
-the newest message. That is the only assertion that proves the markers are
-accepted; everything above proves they are sent. The same check belongs on
-the completions wire once (an OpenRouter `anthropic/*` model): the marker
-shape is shared but the builder is not, and P1's markers have never been
-seen by a provider.
+Run `bb scripts/live_cache_check.bb` (defaults to
+`github-copilot/claude-haiku-4.5`). Three rounds through
+`kmet.ai.llm/send-message` — payload, headers, transport, parser and usage
+merge are all kmet's — and a per-run nonce keeps the first round cold:
+
+| round | request | usage reported | cost |
+|---|---|---|---|
+| 1 | `:short`, cold prefix | `cache_creation` 15886 (all 5m), `cache_read` 0 | $0.0199 |
+| 2 | `:short`, same prefix + one turn | **`cache_read` 15886**, `cache_creation` 14 (the new turn) | $0.0016 |
+| 3 | `:long`, cold prefix | `cache_creation` 15888 with `ephemeral_1h_input_tokens` 15888 | $0.0318 (2x input) |
+
+Round 2 is the assertion the suite cannot make: the provider accepted the
+breakpoints and billed the prefix at the cache-read rate (round 2 costs 8% of
+round 1). The same script checks the completions wire —
+`bb scripts/live_cache_check.bb openrouter anthropic/claude-haiku-4.5` — but
+the OpenRouter key on this machine has no credits ("Insufficient credits. This
+account never purchased credits"), so P1's anthropic-format markers stay
+unverified live until one is added.
+
+A free OpenRouter model cannot stand in for that check, and the attempt is
+recorded so it is not repeated: the marker gate is OpenRouter **plus an
+`anthropic/*` id**, and no free model is one, so no `cache_control` is placed.
+`nvidia/nemotron-3.5-lightning:free` and `cohere/north-mini-code:free` both
+accept the request and stream usage back (15k-token prefixes, three rounds,
+`prompt_tokens_details.cached_tokens` 0), which does prove the completions
+wire's payload and usage path work through the proxy — the payload shape,
+`store: false`, `stream_options` and the `x-session-id` affinity header are
+all accepted. Free Google/Liquid rows answer 429 from the shared upstream pool;
+`thinkingmachines/inkling-small:free` is 403 (agentic harnesses only).
 
 ## Tool exposure and declared sets
 
@@ -912,7 +935,10 @@ decisions; its file list is the shape the change actually took, with two
 additions it did not name: the gate is the point's innermost `next` rather than
 a chain element (a hook cannot rewrite what the policy judged), and the
 sandbox takes the run's check as a binding (`*tool-check*`) because its pool
-workers must judge the call on the agent's ctx, not the sandbox realm's.
+workers must judge the call on the agent's ctx, not the sandbox realm's. A
+failed hook's error names the extension that registered it (the owner rides as
+metadata on the hook, § A2's "names the hook"), and a settlement keeps the
+old gate's truthy `:block` reading.
 Reference: nodecode `~/src/cvstree/nodecode/src/src/organism/hook.lisp` (the
 `:tool` point, `call-hooked`, `call-isolated`).
 

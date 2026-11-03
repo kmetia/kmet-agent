@@ -66,10 +66,10 @@ Tool interception is one around hook, `ext/on-tool`, shaped
 `(fn [op next] → result)`: do not call `next` to settle the call (veto it, or
 answer it without executing), call `(next op)` to run the tool — after
 rewriting `:args` if the call needs it — and transform the returned map to
-rewrite the result. A hook runs on the tool's own worker thread, so it may
-block (ask the host, read a file) without holding the loop; the chain sits
-outside the app's permission policy, which still judges the arguments a hook
-settled on. `modules/app/src/kmet/extension.md` § Hooks has
+rewrite the result. A hook runs on the call's own thread — its own worker in a
+parallel batch, the loop's in a sequential one — so it may block (ask the host,
+read a file) without holding up its siblings; the chain sits outside the app's
+permission policy, which still judges the arguments a hook settled on. `modules/app/src/kmet/extension.md` § Hooks has
 the details, and `extensions/clojure/` and `extensions/tree-sitter/` are the
 in-repo consumers.
 
