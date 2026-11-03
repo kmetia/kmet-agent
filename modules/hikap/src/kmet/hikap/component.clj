@@ -157,9 +157,11 @@
              (= (:width cache) width)
              ;; The atom half is trusted on presence, not re-verified: every
              ;; read installed its own watch at the read, so a cache that
-             ;; exists describes the values it recorded. `:atoms` is the ref
-             ;; set, kept for the shape and for teardown — do not add a
-             ;; value check here (render-opt.md §4.4, tui.md §3.2).
+             ;; exists describes the values it recorded. `:atoms` records
+             ;; what was read and is never re-derefed — do not add a value
+             ;; check here (render-opt.md §4.4, tui.md §3.2). Teardown does
+             ;; not read it either: the registry payload's :watched names the
+             ;; refs to unwatch.
              (reduce-kv rx-unchanged? true (:rx cache))
              ;; Reactions still verify, above: an input write marks a
              ;; reaction :dirty without notifying its subscribers.

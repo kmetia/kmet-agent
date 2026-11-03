@@ -50,17 +50,19 @@
                        #(reset! (:output-pad-atom %) 3)
                        60))
 
+(defn- assistant []
+  (am/make-assistant-message
+   :text (str "an answer long enough to wrap at this width and to need a "
+              "second line")
+   :thinking "a thinking block"))
+
 (deftest test-assistant-message-cache-matches-fresh
-  (cache-matches-fresh "assistant message"
-                       (fn []
-                         (am/make-assistant-message
-                          :text (str "an answer long enough to wrap at this width "
-                                     "and to need a second line")
-                          :thinking "a thinking block"))
-                       (fn [c]
-                         (reset! (:output-pad-atom c) 3)
-                         (swap! (:text-atom c) str " plus one more delta"))
-                       60))
+  ;; one mutation per call: applying both in one pass would let the pad change
+  ;; force the re-render that masks a broken text-atom watch
+  (cache-matches-fresh "assistant message / pad"
+                       assistant #(reset! (:output-pad-atom %) 3) 60)
+  (cache-matches-fresh "assistant message / text"
+                       assistant #(swap! (:text-atom %) str " plus one more delta") 60))
 
 (deftest test-tool-execution-cache-matches-fresh
   (cache-matches-fresh "tool execution"

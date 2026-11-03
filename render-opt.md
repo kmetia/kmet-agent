@@ -88,7 +88,10 @@ hit gains, §4.4).
 
 ---
 
-## 2. How the cache works today
+## 2. How the cache worked before this work
+
+Landing note: this is the pre-change state, kept as the analysis §4 rests on.
+The current hit path is §4.4; §9.2 records why.
 
 `kmet.hikap.component/track-render`
 (`modules/hikap/src/kmet/hikap/component.clj:128`):
@@ -272,7 +275,7 @@ which would find the still-valid cache, hit it, and never re-register. With
 played by `atoms-unchanged?` (a changed ref forces a miss); the hit-path
 check replaces it at ~0.2–0.4 µs, paid only by components nobody probes.
 
-### 4.3 Change 1 — watch at the first read
+### 4.3 Change 1 — watch at the first read (landed)
 
 `reakt` gains one dynamic var and one line in `tracked-deref`:
 
@@ -419,7 +422,7 @@ two binders (`modules/reakt/test/kmet/reakt/test_reakt.clj:53`,
 `scripts/bench/kmet_reakt_bench.clj:47`) and `ref-kind`'s (`:104-116`) stay as
 they are; only `tracked-deref`'s docstring gains a sentence.
 
-### 4.4 Change 2 — trust presence for the atom half
+### 4.4 Change 2 — trust presence for the atom half (landed)
 
 The hit path becomes:
 
