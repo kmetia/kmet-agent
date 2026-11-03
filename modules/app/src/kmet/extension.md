@@ -761,6 +761,10 @@ for each, the **last non-nil handler result wins**:
     ;; transform it      — rewrite the result: assoc :content / :is-error
     nil))
 
+`next` is valid only inside the hook's own call and at most once: a hook that
+keeps it and calls it later runs the tool after the call has settled, and a
+hook that calls it twice runs the body twice.
+
 Hooks run in registration order, the first registered outermost: it sees the
 op before every later hook and the result after all of them. A hook that
 throws fails the call closed — the model gets an error naming the extension

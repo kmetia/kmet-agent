@@ -13,6 +13,10 @@
    call), and a hook can settle a call *successfully* without executing it,
    which a before/after pair cannot express.
 
+   NEXT is valid once and only inside the hook's own call: a hook that keeps it
+   runs the operation after the call settled, and one that calls it twice runs
+   the operation twice.
+
    Hooks compose in registration order with the first registered outermost: it
    sees the op before any other hook and the result after all of them.
 

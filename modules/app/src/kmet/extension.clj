@@ -197,6 +197,10 @@
        what the tool will run with) and return its result;
      - transform that result — rewrite `:content`, set `:is-error`.
 
+   NEXT runs the tool at most once and only inside the hook's own call: calling
+   it later runs the body after the call settled, calling it twice runs the body
+   twice.
+
    OP carries `:tool-name`, `:args`, `:tool-call-id` and `:assistant-message`
    (the last two absent outside a batch). Hooks run in registration order, the
    first registered outermost; a throwing hook fails the call closed with an
