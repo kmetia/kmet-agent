@@ -33,7 +33,7 @@ re-verification on every `track!` hit that made compose O(refs × messages),
 the two changes that removed it (watch at the read, then trust the
 invalidation edges), the guarantee change that came with it, the measured
 before/after, and why the parent probe was declined. §23.1 holds the earlier
-render-path structure findings that used to live in `review.md` §14.**
+render-path structure findings.**
 
 **§16 re-checks the paths those two fixes touched, on the installed
 `jolt v0.8.21` / `bb` 1.13.225 (2026-10-11): the reakt layer's jolt
@@ -2746,7 +2746,7 @@ Reproduce: `bb scripts/bench/kmet_frame_bench.clj <session> 100 30
 calm,typing,stream` (the script's header says what each scenario drives and
 how paused frames are excluded). Any session with 400+ messages works.
 
-### 23.1 Earlier render-path structure findings (moved from review.md §14)
+### 23.1 Earlier render-path structure findings
 
 - ~~**Frame rebuild copies the whole document**~~ **fixed** (`build-frame-lines`,
   `frame.clj:113-187`): the pass now starts from the previous output vector, `assoc`s only
