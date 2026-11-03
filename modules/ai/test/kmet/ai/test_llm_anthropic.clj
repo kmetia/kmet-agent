@@ -206,8 +206,9 @@
             "both parallel tool calls stream through with their own index and merged args deltas")
       (t/testing "the wire payload puts the system prompt in `system`, not a message"
         (let [payload (json/parse-string @request-body true)]
-          (t/is (= [{:type "text" :text "S"}] (:system payload))
-                "system prompt goes to params.system (pi semantics)")
+          (t/is (= [{:type "text" :text "S" :cache_control {:type "ephemeral"}}]
+                   (:system payload))
+                "system prompt goes to params.system, carrying the cache breakpoint (pi semantics)")
           (t/is (not-any? #(= "system" (:role %)) (:messages payload))
                 "no illegal \"system\" message")
           (t/is (= "claude-haiku-4-5" (:model payload)))
