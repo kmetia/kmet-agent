@@ -15,6 +15,7 @@
             [kmet.tui.components.editor :as editor]
             [kmet.tui.components.container :as container]
             [kmet.tui.components.expandable-text :as expandable-text]
+            [kmet.tui.components.filler :as filler]
             [kmet.ai.models :as models]
             [kmet.app.session.core :as session]
             [kmet.app.session.runtime :as runtime]
@@ -921,6 +922,14 @@
            document-container (container/make-container [header-container
                                                          loaded-resources-container
                                                          chat-container])
+          ;; The screen fill (kmet.tui.components.filler): the document pass
+          ;; expands it to the height the transcript leaves unused, so the
+          ;; dock — pending messages, status, widgets, editor, footer — stays
+          ;; at the screen end. A transcript that loses a line (a streaming
+          ;; reflow) grows the fill instead of pushing the editor up and
+          ;; leaving blank rows below it: the empty lines land between the
+          ;; chat and the editor.
+           fill (filler/make-fill)
            pending-messages-container (:pending-messages-container cs)
           ;; extension widget registries (pi: renderWidgets' maps) — read
           ;; tracked by the widget-area roots below, mutated by :set-widget
@@ -953,9 +962,11 @@
                      :dock-root dock-root)]
 
       ;; Add components in pi's layout-root order: the transcript document
-      ;; first, then the dock children top-to-bottom (pending messages,
-      ;; status, widgets above, editor, widgets below, footer)
+      ;; first, then the screen fill, then the dock children top-to-bottom
+      ;; (pending messages, status, widgets above, editor, widgets below,
+      ;; footer)
        (tui/tui-add-child t document-container)
+       (tui/tui-add-child t fill)
        (tui/tui-add-child t pending-messages-container)
        (tui/tui-add-child t status-root)
        (tui/tui-add-child t widgets-above-root)

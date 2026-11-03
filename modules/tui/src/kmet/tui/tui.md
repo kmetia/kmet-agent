@@ -113,6 +113,31 @@ that shape the rest of this document: components above the viewport must
 not change gratuitously (§3.2's caching rules), and there is no viewport to
 hit-test — mouse support would need a different model.
 
+The layout bottom-anchors its dock (pending messages, status, widgets above
+and below, the editor, the footer) with a **fill**
+(`kmet.tui.components.filler`). The document pass sizes it per frame to the
+screen height the rest of the document leaves unused
+(`compose-document`), and it never lets the document shrink below the
+previous frame's height: a transcript that loses a line in a streaming
+reflow grows the fill, instead of the diff leaving the freed row blank at
+the bottom with the dock — the editor — floating above it. That
+up-and-down move is what the fill removes; the empty lines land where the
+fill is mounted, between the transcript and the dock, i.e. between chat and
+editor. The fill's height must therefore also be the renderer's floor: with
+the document at least as tall as the screen, the document end is the
+window's bottom row, which is the geometry the diff assumes
+(`previousViewportTop + height` is the buffer). The floor
+re-baselines on a forced render (`kmet.tui.frame/reset-frame!`, so a heal
+or the forced-redraw action drops a gap the fill grew) and on a width
+change (the frame full-redraws for it anyway, and the reflow changes the
+natural height). User actions re-baseline it explicitly
+(`tui-reset-screen-fill!`, called by the dock on a panel/editor swap and by
+the session admin on `/new`, `/resume` and `/import`) and keep the pre-fill
+diff behavior — no forced rebuild: the swapped transcript takes its natural
+height and a shrunken document is diffed as it is, so the dock may end up
+above blank rows. The fill's pinning is for streaming, where a reflow must
+not move the editor.
+
 End-to-end flow:
 
 ```
@@ -1115,7 +1140,8 @@ reactive loop:
 - **Time-driven work uses the timer registry (§6.1)** — not its own thread.
 
 **A frame is `kmet.tui.frame/render-frame!`.** The loop hands it the
-composed document (`compose-document`: the component stack plus visible
+composed document (`compose-document`: the component stack — with any fill
+expanded to the screen height the rest leaves unused (§1) — plus visible
 overlays) and the frame state it owns — the live size, the hardware-cursor
 row and viewport-top atoms, the frame-request callback and the write
 buffer. The frame namespace builds the document, normalizes and reuses
@@ -1510,6 +1536,7 @@ DSL tags of §2.2):
 | `markdown` | markdown renderer with syntax highlighting; `render-lines` is the same pass without a component, and its `:cache-atom` makes streaming incremental (below) |
 | `box` | padding + background wrapper (no input) |
 | `container` | transparent child list |
+| `filler` | blank lines that take the screen height the rest of the document leaves unused — the document pass sizes it (mount one per document), bottom-anchoring the dock (see §1) |
 | `stack` / `v_stack` / `h_stack` | vertical/horizontal layout, gaps, entry maps |
 | `scroll_view` | viewport scrolling around a child |
 | `dynamic_border` | border drawn around current content dimensions |

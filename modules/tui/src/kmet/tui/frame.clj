@@ -440,6 +440,10 @@
   (reset! (:previous-width tui) -1)
   (reset! (:previous-height tui) -1)
   (reset! (:max-lines-rendered tui) 0)
+  ;; The fill floor belongs to the frame memo: the rebuilt document may take
+  ;; its natural height and drop the blank space a shrink had grown
+  ;; (kmet.tui.core/compose-document).
+  (reset! (:document-height tui) 0)
   (reset! (:previous-kitty-image-ids tui) #{})
   ;; The line memo's inputs are gone with the frame. The normalized copy goes
   ;; too: the pass starts from PREV-OUT and appends whatever PREV-RAW does not

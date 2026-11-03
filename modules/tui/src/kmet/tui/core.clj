@@ -18,7 +18,8 @@
             [kmet.tui.utils :as utils]
             [kmet.libs.terminal-image :as img]
             [kmet.tui.components.editor :as editor]
-            [kmet.tui.components.alt-screen-flash :as alt-screen-flash]))
+            [kmet.tui.components.alt-screen-flash :as alt-screen-flash]
+            [kmet.tui.components.filler :as filler]))
 
 ;; ═══════════════════════════════════════════════════════════════════════════
 ;; Protocol re-exports
@@ -113,6 +114,7 @@
                 show-hardware-cursor? keyboard-protocol-pushed?
                 negotiation-buffer negotiation-timer
                 previous-height max-lines-rendered clear-on-shrink?
+                document-height
                 full-redraw-count scrollback-dirty? previous-kitty-image-ids
                 frame-count scrollback-heal-target scrollback-heal-graced?
                 pending-osc-11? osc-11-queries
@@ -162,6 +164,12 @@
                        :negotiation-timer (atom nil)
                        :previous-height (atom 0)
                        :max-lines-rendered (atom 0)
+                       ;; the filled document's last height (compose-document):
+                       ;; the floor a mounted Fill keeps the document at while
+                       ;; streaming, so a reflow never moves the editor off the
+                       ;; screen end (tui-reset-screen-fill! re-baselines it on
+                       ;; a user action)
+                       :document-height (atom 0)
                        :clear-on-shrink? (atom (= (System/getenv "KMET_CLEAR_ON_SHRINK") "1"))
                        :full-redraw-count (atom 0)
                        :scrollback-dirty? (atom false)
@@ -1788,6 +1796,24 @@
   (when-let [w (:waker tui)]
     (wake/wake! w)))
 
+(defn tui-reset-screen-fill!
+  "Re-baseline the screen fill. The next frame lays the document out at its
+   natural height (or the screen height, whichever is taller) instead of
+   holding the previous document height (kmet.tui.core/compose-document), so
+   a shrink the fill was absorbing — a closed dock panel, an editor swap, a
+   replaced transcript — does not park the freed rows as blank lines between
+   the chat and the dock.
+
+   The request is an ordinary one, never a clearing rebuild: user actions
+   keep the pre-fill behavior, where a shrunken document is diffed as it is
+   (the dock may end up above blank rows). Streaming does not call this: the
+   fill holds the document height there so a reflow cannot move the editor.
+   A partial TUI without the fill state (a test stub) ignores the reset."
+  [tui]
+  (when-let [height (:document-height tui)]
+    (reset! height 0))
+  (tui-request-render tui))
+
 (defn tui-stop [tui]
   (reset! (:stopped? tui) true)
   (reset! (:running? tui) false)
@@ -1993,20 +2019,76 @@
   (or (boolean @(:render-requested? tui))
       (pos? (reakt/queued-count))))
 
+(defn- fill-pad!
+  "Size this frame's fill and return its line count, for a document whose
+   non-fill components render NATURAL lines. The document is held at H,
+   raised by the previous frame's height (:document-height), so it never
+   shrinks between frames — a transcript that loses a line in a streaming
+   reflow grows the fill instead of leaving the dock floating above blank
+   rows, the editor's up-and-down jump. A user action re-baselines the floor
+   explicitly (tui-reset-screen-fill!), so the pinning is streaming's.
+
+   Two cases re-baseline here: a width change (the frame full-redraws for it
+   and the transcript reflows to a new natural height) and a shrink of more
+   than a screen, where the floor is stale — a structural change (a
+   compaction, a cleared transcript) takes its natural height instead of
+   parking a screenful of blanks above the dock. A height change does not
+   re-baseline: on Termux it takes the diff path, where a shrinking document
+   could not be re-pinned, and H raises the target for a taller screen on its
+   own. A forced render re-baselines too (kmet.tui.frame/reset-frame!)."
+  [tui w h natural]
+  (let [prev-w @(:previous-width tui)]
+    (when (and (pos? prev-w) (not= prev-w w))
+      (reset! (:document-height tui) 0))
+    (let [needed (- (max h @(:document-height tui)) natural)]
+      (if (> needed h)
+        (max 0 (- h natural))
+        (max 0 needed)))))
+
+(defn- compose-filled
+  "The document with its fill (kmet.tui.components.filler) expanded to the
+   screen height the other components leave unused. The fill sits where it was
+   added: the app mounts it between the transcript and the editor dock, so the
+   blank space lands there — between chat and editor — while the dock stays at
+   the screen end. The first fill is sized; a document mounts one (any other
+   renders empty).
+
+   The fill's previous line vector is not part of the natural height: it is
+   the expansion, recomputed here."
+  [document-cache tui w h components]
+  (let [;; a fill renders nil here: its lines are the expansion, not content
+        rendered (mapv (fn [c] (when-not (filler/fill? c) (protocols/render c w)))
+                       components)
+        natural (reduce (fn [n lines] (+ n (count lines))) 0 rendered)
+        pad (fill-pad! tui w h natural)
+        fill-idx (first (keep-indexed (fn [i c] (when (filler/fill? c) i))
+                                      components))
+        fill (nth components fill-idx)]
+    (filler/fill-set-lines! fill pad)
+    ;; a second fill is not sized: it renders empty (the app mounts one)
+    (let [parts (mapv #(or % []) (assoc rendered fill-idx (protocols/render fill w)))]
+      (reset! (:document-height tui) (+ natural pad))
+      (protocols/cached-lines document-cache [w] parts))))
+
 (defn- compose-document
   "The frame's raw document: every component at natural height, with the
-   visible overlays composited on top (pi: compositeOverlays).
+   visible overlays composited on top (pi: compositeOverlays). A top-level
+   fill (kmet.tui.components.filler) expands to the screen height the rest
+   leaves unused (see compose-filled).
 
    DOCUMENT-CACHE is the loop's lines memo (protocols/cached-lines): while
    the component set returns the line vectors it returned last frame, the
    document is returned as-is — no line copying — and the frame pass's
    unchanged-document fast paths see the vector they saw last frame."
   [document-cache tui w h]
-  (composite-overlays
-   tui
-   (protocols/cached-lines document-cache [w]
-                           (mapv (fn [c] (protocols/render c w)) @(:components tui)))
-   w h))
+  (let [components @(:components tui)]
+    (composite-overlays
+     tui
+     (if (some filler/fill? components)
+       (compose-filled document-cache tui w h components)
+       (protocols/cached-lines document-cache [w]
+                               (mapv (fn [c] (protocols/render c w)) components)))
+     w h)))
 
 (defn- run-render-loop!
   "Start the terminal (raw mode) and run the render loop until the TUI is

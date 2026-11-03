@@ -159,13 +159,19 @@
    removed anything. A component that is no longer in the stack is inert,
    so a stale owner cannot yank a newer occupant.
 
+   A release re-baselines the screen fill: the panel takes its height with
+   it, and the fill must not hold the old document height as blank lines
+   between the chat and the editor. The frame is not forced — a user action
+   keeps the pre-fill behavior, where the shrunken document is diffed as it
+   is.
+
    Removals never dispose — the owner does (see dispose!). Focus needs no
    restoring here: the ::focus-guard watch hands input to the revealed
    surface, or to the focus home."
   [cs component]
   (let [{:keys [old new]} (update-stack! cs #(without-component % component))]
     (when-not (identical? old new)
-      (tui/tui-request-render (:tui cs))
+      (tui/tui-reset-screen-fill! (:tui cs))
       true)))
 
 (defn dispose!
@@ -267,6 +273,10 @@
    is not itself a dock mount takes the editor slot — a custom-editor
    swap, a session reset, an extension teardown.
 
+   Like release!, the screen fill is re-baselined when anything was mounted:
+   the document keeps its natural height and the frame diffs it as it is (no
+   forced rebuild).
+
    Focus needs no explicit restore: the ::focus-guard watch sees the
    focused occupant leave and hands input to the resolver's fallback —
    the guard is installed by the stack write itself, so even a caller that
@@ -274,7 +284,9 @@
   [cs]
   (let [{:keys [old]} (update-stack! cs (constantly []))]
     (doseq [e old :when (not (:borrowed? e))]
-      (dispose! cs (:component e)))))
+      (dispose! cs (:component e)))
+    (when (seq old)
+      (tui/tui-reset-screen-fill! (:tui cs)))))
 
 (defn show-panel!
   "Record PANEL in COMP-ATOM and mount it in place of the editor. The

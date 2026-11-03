@@ -40,6 +40,7 @@
             [kmet.tui.terminal :as term]
             [kmet.tui.timers :as timers]
             [kmet.tui.utils :as utils]
+            [kmet.tui.components.filler :as filler]
             [kmet.ui.tui.tool-execution :as te]))
 
 (def ^:private clear-seq
@@ -1067,3 +1068,61 @@
           (when-let [f @(:input-reader tui)]
             (deref f 2000 nil))
           (fs/delete-tree dir))))))
+
+(deftest ^:slow screen-fill-keeps-the-dock-at-the-document-end
+  (testing "a fill child (kmet.tui.components.filler) expands to the screen
+            height the rest of the document leaves unused, so the dock stays
+            at the document end — a transcript that loses a line grows the
+            fill instead of shrinking the document (which would leave the
+            dock floating above blank rows, the editor's streaming jump)"
+    (let [content (atom (mapv #(str "line " %) (range 10)))
+          vt (make-virtual-terminal)
+          tui (core/create-tui (:terminal vt))
+          doc #(deref (:previous-raw-lines tui))
+          ;; Sizing the fill writes its tracked atom, which schedules one
+          ;; follow-up (no-op) frame, so frame counts cannot delimit a step;
+          ;; wait on the document content the step produces instead.
+          rendered? (fn [pred] (wait-until #(pred (doc)) 5000))]
+      (try
+        (core/tui-add-child tui (test-component content))
+        (core/tui-add-child tui (filler/make-fill))
+        (core/tui-add-child tui (test-component (atom ["EDITOR" "FOOTER"])))
+        (start-loop tui)
+        (t/is (rendered? #(and (= 24 (count %)) (= "line 0" (first %))))
+              "the short document is padded to the screen")
+        (t/is (= "FOOTER" (peek (doc))) "the dock is the document end")
+        ;; a shrink (the streaming reflow case): the fill absorbs it
+        (swap! content pop)
+        (core/tui-request-render tui)
+        (t/is (rendered? #(not-any? #{"line 9"} %)) "the shrink rendered")
+        (t/is (= 24 (count (doc))) "the document did not shrink")
+        (t/is (= "FOOTER" (peek (doc))) "the dock did not move")
+        ;; growth consumes the fill; past the screen the document grows
+        (swap! content into (map #(str "more " %) (range 30)))
+        (core/tui-request-render tui)
+        (t/is (rendered? #(some #{"more 29"} %)) "the growth rendered")
+        (t/is (> (count (doc)) 24) "the document overflowed the screen")
+        (t/is (= "FOOTER" (peek (doc))) "the dock is still the document end")
+        ;; a shrink of up to a screen with no fill left: the floor holds
+        (reset! content (mapv #(str "line " %) (range 15)))
+        (core/tui-request-render tui)
+        (t/is (rendered? #(not-any? #{"more 0"} %)) "the shrink rendered")
+        (t/is (= 41 (count (doc))) "the floor held the document height")
+        (t/is (= "FOOTER" (peek (doc))) "the dock still did not move")
+        ;; a forced render re-baselines: the gap is not carried forever
+        (core/tui-request-render tui true)
+        (t/is (rendered? #(= 24 (count %))) "the fill re-baselined to the screen height")
+        (t/is (= "FOOTER" (peek (doc))))
+        ;; a structural shrink (more than a screen) re-baselines without one
+        (reset! content (mapv #(str "line " %) (range 30)))
+        (core/tui-request-render tui)
+        (t/is (rendered? #(some #{"line 29"} %)) "the growth rendered")
+        (t/is (= 32 (count (doc))) "the document grew past the screen")
+        (swap! content (constantly ["line 0"]))
+        (core/tui-request-render tui)
+        (t/is (rendered? #(and (= 24 (count %))
+                               (= "line 0" (first %))
+                               (= "FOOTER" (peek %))))
+              "the fill re-baselined instead of parking blanks")
+        (finally
+          (stop-loop tui))))))

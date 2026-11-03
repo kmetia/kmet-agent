@@ -44,10 +44,10 @@
    Pending bash components and open overlays live outside the TUI's child
    list, so they are disposed explicitly: pending bash first, then
    dock/clear! (leave-before-dispose for dock entries), then the remaining
-   overlays, then the TUI's direct children (document container, pending
-   messages, status, widget strips, footer) via tui-clear; the chat-history
-   cascade runs through ChatHistoryComponent.dispose. Each step is isolated
-   and idempotent."
+   overlays, then the TUI's direct children (document container, screen
+   fill, pending messages, status, widget strips, footer) via tui-clear; the
+   chat-history cascade runs through ChatHistoryComponent.dispose. Each step
+   is isolated and idempotent."
   [cs]
   (try (bash-execution/dispose-pending-bash! @(:pending-bash-components cs))
        (catch Throwable _))

@@ -12,6 +12,7 @@
             [kmet.tui.terminal :as term]
             [kmet.tui.components.container :as container]
             [kmet.tui.components.editor :as editor]
+            [kmet.tui.components.filler :as filler]
             [kmet.tui.components.input :as input]
             [kmet.tui.components.text :as text]
             [kmet.tui.utils :as utils]))
@@ -1390,3 +1391,100 @@
             f4 (compose 24)]
         (t/is (not (identical? f3 f4)))
         (t/is (every? #(= 24 (count %)) f4))))))
+
+(defn- lines-component
+  "An IComponent rendering LINES (an atom of strings)."
+  [lines]
+  (reify core/IComponent
+    (render [_ _] @lines)
+    (handle-input [_ _] nil)
+    (invalidate [_] nil)
+    (dispose [_] nil)))
+
+(t/deftest test-compose-document-fills-the-screen-between-content-and-dock
+  (let [tui (core/create-tui nil)
+        cache (atom nil)
+        content (atom ["chat 1" "chat 2"])
+        dock (atom ["EDITOR"])
+        blanks (fn [doc] (count (filter #(= "" %) doc)))
+        compose (fn [w h] (#'core/compose-document cache tui w h))]
+    (core/tui-add-child tui (lines-component content))
+    (core/tui-add-child tui (filler/make-fill))
+    (core/tui-add-child tui (lines-component dock))
+    (testing "a short document is padded to the screen height, the dock at the end"
+      (let [doc (compose 20 10)]
+        (t/is (= 10 (count doc)))
+        (t/is (= "chat 1" (first doc)))
+        (t/is (= "EDITOR" (peek doc)) "the blank lines land between chat and dock")
+        (t/is (= 7 (blanks doc)))))
+    (testing "growth consumes the fill instead of moving the dock"
+      (reset! content (mapv #(str "chat " %) (range 1 7)))
+      (let [doc (compose 20 10)]
+        (t/is (= 10 (count doc)))
+        (t/is (= "EDITOR" (peek doc)))
+        (t/is (= 3 (blanks doc)))))
+    (testing "a shrink grows the fill instead of shrinking the document"
+      (reset! content ["chat 1"])
+      (let [doc (compose 20 10)]
+        (t/is (= 10 (count doc)))
+        (t/is (= "EDITOR" (peek doc)) "the editor did not move up")
+        (t/is (= 8 (blanks doc)))))
+    (testing "a document taller than the screen carries no fill"
+      (reset! content (mapv #(str "chat " %) (range 20)))
+      (let [doc (compose 20 10)]
+        (t/is (= 21 (count doc)))
+        (t/is (= "EDITOR" (peek doc)))
+        (t/is (zero? (blanks doc)))))
+    (testing "the fill absorbs a small shrink even when the document overflows the screen"
+      (reset! content (mapv #(str "chat " %) (range 19)))
+      (let [doc (compose 20 10)]
+        (t/is (= 21 (count doc)) "the document keeps its height")
+        (t/is (= "EDITOR" (peek doc)))
+        (t/is (= 1 (blanks doc)))))
+    (testing "an unchanged filled document is reused"
+      (let [a (compose 20 10)
+            b (compose 20 10)]
+        (t/is (identical? a b))))
+    (testing "a forced render re-baselines the fill to the natural height"
+      (reset! content (mapv #(str "chat " %) (range 17)))
+      (t/is (= 21 (count (compose 20 10))) "the floor holds the height first")
+      (frame/reset-frame! tui)
+      (let [doc (compose 20 10)]
+        (t/is (= 18 (count doc)) "the stale blank lines are gone")
+        (t/is (= "EDITOR" (peek doc)))))
+    (testing "a width change re-baselines the fill (the transcript reflowed)"
+      (reset! content (mapv #(str "chat " %) (range 24)))
+      (compose 20 10)
+      (reset! content (mapv #(str "chat " %) (range 20)))
+      (t/is (= 25 (count (compose 20 10))) "the floor holds the height first")
+      (reset! (:previous-width tui) 20)
+      (let [doc (compose 24 10)]
+        (t/is (= 21 (count doc)) "the reflowed document took its natural height")
+        (t/is (= "EDITOR" (peek doc)))))
+    (testing "a shrink by more than a screen re-baselines instead of parking a screen of blanks"
+      (reset! content ["chat 1"])
+      (let [doc (compose 20 10)]
+        (t/is (= 10 (count doc)))
+        (t/is (= "EDITOR" (peek doc)))
+        (t/is (= 8 (blanks doc)))))))
+
+(t/deftest test-tui-reset-screen-fill-rebaselines-the-next-document
+  (testing "a user action (dock/editor/session swap) re-baselines the fill
+            through tui-reset-screen-fill!: the next document takes its
+            natural height on an ordinary frame — no forced rebuild"
+    (let [tui (core/create-tui nil)
+          cache (atom nil)
+          content (atom (mapv #(str "chat " %) (range 20)))
+          dock (atom ["EDITOR"])
+          compose (fn [w h] (#'core/compose-document cache tui w h))]
+      (core/tui-add-child tui (lines-component content))
+      (core/tui-add-child tui (filler/make-fill))
+      (core/tui-add-child tui (lines-component dock))
+      (t/is (= 21 (count (compose 20 10))) "the document overflows the screen")
+      (reset! content (mapv #(str "chat " %) (range 17)))
+      (t/is (= 21 (count (compose 20 10)))
+            "the fill holds a shrink of up to a screen")
+      (core/tui-reset-screen-fill! tui)
+      (let [doc (compose 20 10)]
+        (t/is (= 18 (count doc)) "the document took its natural height")
+        (t/is (= "EDITOR" (peek doc)))))))

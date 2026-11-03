@@ -208,6 +208,7 @@
     kmet.tui.components.editing
     kmet.tui.components.editor
     kmet.tui.components.expandable-text
+    kmet.tui.components.filler
     kmet.tui.components.filter-panel
     kmet.tui.components.h-stack
     kmet.tui.components.image

@@ -464,3 +464,22 @@
             "input lands back on the revealed dialog")
       (dock/release! cs dlg)
       (t/is (identical? ed (tui/tui-focused-component ui))))))
+
+(deftest release-rebaselines-the-screen-fill-without-a-forced-rebuild
+  (testing "a released panel takes its height with it: the screen fill is
+            re-baselined on an ordinary frame request (never a clearing
+            rebuild), so the document takes its natural height again and the
+            user action keeps the pre-fill diff behavior"
+    (let [cs (test-cs)
+          disposed (atom [])
+          p (panel disposed "p")
+          requests (atom [])]
+      (with-redefs [tui/tui-set-focus (fn [_ _] nil)
+                    tui/tui-request-render (fn [_ & args] (swap! requests conj (vec args)))]
+        (dock/mount! cs p)
+        (reset! requests [])
+        (dock/release! cs p)
+        (t/is (= [[]] @requests) "one ordinary render request, no force")
+        (reset! requests [])
+        (dock/release! cs p)
+        (t/is (empty? @requests) "a release that removed nothing requests nothing")))))

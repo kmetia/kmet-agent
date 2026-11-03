@@ -339,7 +339,15 @@
     (sync-footer-model! cs)
     (editor/editor-set-history! (:editor cs) (session/get-prompt-history sess)))
   (state/update-footer! cs)
-  (state/update-terminal-title! cs))
+  (state/update-terminal-title! cs)
+  ;; The swap replaces the transcript: re-baseline the screen fill so the
+  ;; frame lays the new transcript out at its natural height instead of
+  ;; holding the old one as blank lines. No forced rebuild — a user action
+  ;; keeps the pre-fill diff behavior (the frame's own above-window /
+  ;; extra-lines fallbacks still decide a large shrink), and at startup the
+  ;; first frame stays the non-clearing one that preserves the output above
+  ;; the TUI.
+  (tui/tui-reset-screen-fill! (:tui cs)))
 
 (defn install-live-session!
   "Point the process-wide extension session slot at the agent's live session.
@@ -395,7 +403,9 @@
       (tui/editor-set-text! @(:current-editor-atom cs) "")
       (state/update-footer! cs)
       (state/update-terminal-title! cs)
-      (tui/tui-request-render (:tui cs))
+      ;; the cleared transcript is a structural shrink: re-baseline the
+      ;; screen fill (see replay-session!)
+      (tui/tui-reset-screen-fill! (:tui cs))
       (chat-history/chat-history-add-message! (:chat-history cs)
                                               {:role :assistant :content "Started a new session."}))))
 
