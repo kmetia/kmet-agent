@@ -87,17 +87,6 @@
 
 (declare invalidate-cache schedule-frame! tracked?)
 
-(defn- atoms-unchanged?
-  "reduce-kv hit check over a cache's plain refs: true while ATOM still
-   holds the value it was read with. identical? first (an untouched atom
-   IS the recorded object), structural = for fresh-but-equal persistent
-   copies."
-  [_acc a v]
-  (let [cur (deref a)]
-    (if (or (identical? cur v) (= cur v))
-      true
-      (reduced false))))
-
 (defn- rx-unchanged?
   "reduce-kv hit check over a cache's reactive entries, keyed by the
    reaction's cell (a reaction's state atom — see track-render); the key IS
@@ -127,20 +116,23 @@
 
 (defn track-render
   "Runtime implementation of track!. Runs RENDER-FN within a tracking scope
-   and caches the result under WIDTH. Returns the cached result while every
-   tracked ref still holds the value it was read with: plain atoms/vars
-   re-deref (atoms-unchanged?), library reactions read their cell's cached
-   value (rx-unchanged?) — never the reaction's own deref, which would
-   settle the batch queue on every hit. Watches invalidate on actual value
-   changes (equal-value resets are no-ops), and the cache records the
-   values AS READ, never a post-body snapshot.
-   Every tracked read is watched FROM THE READ (kmet.reakt.core's
-   *on-tracked-read*), not after the body: a write that lands between the
-   read and the body's end fires that watch, and the mid-body guard refuses
-   the cache — so a stored cache never disagrees with the refs it recorded.
-   (A reaction's watch is the exception: it is installed after the body,
-   because a reaction's own derive fires its watchers; rx-unchanged?'s state
-   test is what catches a reaction that went dirty mid-body.)
+   and caches the result under WIDTH. A cache hit is trusted on PRESENCE, not
+   re-verified: every tracked plain read installed its own watch AT THE READ
+   (kmet.reakt.core's *on-tracked-read*), that watch invalidates on an actual
+   value change (equal-value resets are no-ops), and the commit is atomic
+   through the in-flight token — so a non-nil cache the component still owns
+   can only describe the values it recorded. The `:atoms` map is the ref set
+   in that state (write-only; never re-derefed on a hit).
+   Two things still verify on a hit, both because presence cannot prove
+   them. Reactions (rx-unchanged?) read their cell's cached value — never the
+   reaction's own deref, which would settle the batch queue on every hit —
+   because an input write marks a reaction :dirty without notifying its
+   subscribers; a reaction's watch is also installed after the body, since a
+   reaction's own derive fires its watchers (rx-unchanged?'s state test
+   catches one that went dirty mid-body). Ownership (tracked?) because a
+   stray unregister! or a dispose can drop the registry entry while the cache
+   survives: such a cache misses, the body re-runs, and weak/register!
+   reinstates the entry and its watches.
    Requires COMPONENT to have a :cache-atom (or legacy :cache) field.
    A body that invalidates itself mid-run (a render fn calling :invalidate,
    or writing a ref it read) is not cached — the next render re-runs it with
@@ -160,18 +152,23 @@
     (if (and cache
              ;; New-shape caches only: a cache written before this shape
              ;; existed (an nREPL session reloading this namespace) has
-             ;; neither half, and `reduce-kv` over nil is vacuously true —
-             ;; without this guard it would serve unverified. Rebuild it
-             ;; once instead.
+             ;; neither half. Rebuild it once instead.
              (contains? cache :atoms)
              (= (:width cache) width)
-             ;; Two reduce-kv passes (plain refs / reactive cells), not one
-             ;; every? over the entry seq: this hit check runs once per
-             ;; component per frame, and reduce-kv hands key/value straight
-             ;; to the fn — same comparisons, same short-circuit, no
-             ;; per-entry allocation.
-             (reduce-kv atoms-unchanged? true (:atoms cache))
-             (reduce-kv rx-unchanged? true (:rx cache)))
+             ;; The atom half is trusted on presence, not re-verified: every
+             ;; read installed its own watch at the read, so a cache that
+             ;; exists describes the values it recorded. `:atoms` is the ref
+             ;; set, kept for the shape and for teardown — do not add a
+             ;; value check here (render-opt.md §4.4, tui.md §3.2).
+             (reduce-kv rx-unchanged? true (:rx cache))
+             ;; Reactions still verify, above: an input write marks a
+             ;; reaction :dirty without notifying its subscribers.
+             ;;
+             ;; Ownership: a cache is evidence only while the component still
+             ;; owns its registry entry. A stray unregister! or a dispose
+             ;; dropped it, so this misses, the body re-runs and
+             ;; weak/register! reinstates the entry and its watches.
+             (tracked? component))
       (:result cache)
       (let [atoms (atom {})
             rx (atom {})

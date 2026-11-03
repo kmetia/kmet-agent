@@ -99,16 +99,36 @@
                                         {:id :b :label "Beta" :value "y"}])]
     (t/is (.contains (first (core/render s 30)) "→"))))
 
-(t/deftest test-cache-verifies-values-even-without-watch
-  ;; Simulates the watch-registration race: a value changed after the watch
-  ;; was removed never fires a notification — the value re-verification on
-  ;; cache hit must catch it anyway.
-  (let [c (text/make-text "a" 0 0)]
-    (core/render c 5)
+(t/deftest test-a-lost-watch-leaves-the-component-stale
+  ;; The cache trusts its invalidation edges; there is no value re-check on a
+  ;; hit. A watch removed behind track!'s back is therefore NOT compensated:
+  ;; the component serves its cached lines until something else invalidates
+  ;; it. Accepted residual class (render-opt.md §5) — reachable only by
+  ;; unwatching track!'s own key, which only teardown does. core/invalidate
+  ;; is the way back.
+  (let [c (text/make-text "a" 0 0)
+        before (core/render c 5)]
     (remove-watch (:text-atom c) (watch-key-of c))
     (text/text-set! c "b") ;; no watch → no invalidation
-    (let [lines (core/render c 5)]
-      (t/is (.contains (first lines) "b")))))
+    (t/is (identical? before (core/render c 5)) "the stale cache is served")
+    (t/is (not (some #(str/includes? % "b") (core/render c 5))))
+    (core/invalidate c)
+    (t/is (some #(str/includes? % "b") (core/render c 5)) "explicit invalidation recovers")))
+
+(t/deftest test-a-dropped-registry-entry-heals-through-the-hit-path
+  ;; The hit path requires ownership (tracked?), so an entry lost to a stray
+  ;; unregister! costs one re-render and re-registers — it must not freeze
+  ;; the component (render-opt.md §4.2/§5).
+  (let [c (text/make-text "a" 0 0)]
+    (core/render c 5)
+    (t/is (component/tracked? c))
+    (component/remove-track-watches! c)
+    (t/is (not (component/tracked? c)))
+    (t/is (some #(str/includes? % "a") (core/render c 5)) "served after a re-render")
+    (t/is (component/tracked? c) "the miss re-registered the entry")
+    (text/text-set! c "b")
+    (t/is (some #(str/includes? % "b") (core/render c 5)) "and it invalidates again")
+    (protocols/dispose c)))
 
 ;; ─── install-at-read (change 1) ────────────────
 

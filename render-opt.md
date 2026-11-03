@@ -2,8 +2,9 @@
 
 Design record for the work the frame benchmark attributes to `:parts` —
 the chat history's walk over its message components. Status: **change 1
-landed** (1a `2fc7a8b4` + its failure-path follow-up, 1b the token commit);
-2 and 3 are the remainder, sequenced in §9. The verdict this plan encodes
+landed** — 1a ("watch a tracked read at the read") with its failure-path
+follow-up, and 1b ("commit the cache through an in-flight token"); 2 and 3
+are the remainder, sequenced in §9. The verdict this plan encodes
 (§7.1, §9): change 1 is a correctness fix and lands regardless; change 2 is
 worth its risk and is the payoff; change 3 is a measurement-driven maybe
 that defaults to *not landing*.
@@ -26,8 +27,8 @@ documentation.
 
 Host: bb on Termux, virtual terminal. Session: 447 messages, 18,243
 rendered lines, `:tool-display-mode :expanded` (a real 3.9 MB session).
-Bench: `scripts/bench/kmet_frame_bench.clj` after the measurement fixes
-(`1d7d5560`).
+Bench: `scripts/bench/kmet_frame_bench.clj` after the measurement fixes.
+(Commits are named by subject, not hash: this history gets rewritten.)
 
 | scenario | compose | **parts** | lines | diff+emit | frame total |
 |---|---|---|---|---|---|
@@ -575,9 +576,9 @@ read") and its self-mutating-atom rule land with **1a**, where the
 frame-request behavior arrives; the rest of the §3.2 sentences land with
 commit 2 *the cache trusts its invalidation edges, there is no value
 re-verification, and the cache is served only while the component still owns
-it; a parent may serve a child's cached lines only after proving the cache
-is the child's own, and only while it holds no reaction dependency —
-reactions keep `rx-unchanged?`*. §12 (the idle-frame invariant) is untouched
+it; reactions keep `rx-unchanged?`*, and with commit 3 *a parent may serve a
+child's cached lines only after proving the cache is the child's own, and
+only while it holds no reaction dependency*. §12 (the idle-frame invariant) is untouched
 by this design and needs no edit; say so in commit 2's message, which must
 also name the guarantee change.
 
@@ -753,7 +754,8 @@ failed pass read does not invalidate a later pass;
 keep passing; `test-cache-verifies-values-even-without-watch` still passes
 (the net is still there).
 
-**Landed as `2fc7a8b4` plus its failure-path follow-up.** The suite and the
+**Landed as the "watch a tracked read at the read" commit plus its
+failure-path follow-up.** The suite and the
 discriminating tests were the gate. The flat-bench half could **not** be
 measured on the dev host: it is WSL2, and the same code swings 2× across
 runs there, so the claim rests on the hit path being diffed byte-identical
@@ -800,13 +802,32 @@ by `:atoms` shape. The race itself stays argued, not tested (§6).
 **Soundness gate — the differential staleness test (§6).** For each message
 component family: render it, mutate an input, render again, and compare with
 a *fresh* component built from the same inputs; the no-change case must be
-identical (and `identical?` for the parent's memo). This is the net that
-`atoms-unchanged?` used to be, moved into the suite — the benchmark cannot
-find a stale cache. Then the rest of the §6 list: replace
-`test-cache-verifies-values-even-without-watch`; keep
+identical. This is the net that `atoms-unchanged?` used to be, moved into the
+suite (`kmet.ui.tui.test-track-staleness`) — the benchmark cannot find a
+stale cache. It was proved to bite before it was trusted: with the at-read
+watch disabled, all five families fail it. Then the rest of the §6 list:
+replace `test-cache-verifies-values-even-without-watch` with
+`test-a-lost-watch-leaves-the-component-stale` (the accepted class, with an
+explicit `invalidate` as the way back), and add
+`test-a-dropped-registry-entry-heals-through-the-hit-path`; keep
 `test-equal-value-reset-keeps-cache`, `test-cache-pins-its-reactions`,
 `test-cache-pinned-reaction-survives-…`. `tui.md` §3.2 gains the sentences in
 §6; the commit message names the guarantee change.
+
+**Landed.** `atoms-unchanged?` is gone; the hit path is `contains? :atoms` +
+width + `rx-unchanged?` + `tracked?`. Measured on the dev host (WSL2/x86, the
+same 447-message session): `:parts` calm median 1.25 / 3.06 ms and typing
+1.20 / 2.17 ms across two runs, against 3.6–4.8 ms (calm) and 3.9–6.8 ms
+(typing) on the same host before this commit — noise-limited, but the walk is gone. A min-of-batches
+micro-benchmark also bounds where the change pays: on synthetic caches with
+integer values, 20 refs go 0.88–1.20 µs → 0.41–0.49 µs and 8 refs barely move
+(0.46–0.51 → 0.42–0.47), while a 1-ref `Text` hit gets *slower* (0.48–0.51 →
+0.67–0.77 µs) — the ownership read is a fixed cost that a tiny cache pays
+every hit. Real message caches sit at 12–30 refs whose values are theme maps
+and strings, so the old structural `=` dominated there: the frame numbers
+above, not the synthetic ones, are the real win. It also bounds commit 3: the
+probe's cost is that same ownership read, so it cannot beat a hit on a tiny
+component.
 
 **Perf gate:** `bb scripts/bench/kmet_frame_bench.clj <session> 100 30
 calm,typing,stream` on a fresh session, recorded in §7 against the `now`

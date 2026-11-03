@@ -773,6 +773,17 @@ effects (delegating to children, requesting renders).
   that pass is not cached and a frame is requested. Guarded writes that
   converge (write once, then read the result) cost one extra pass; a body
   that writes a new value on every pass spins the frame loop.
+- **The cache trusts its invalidation edges; a hit re-verifies nothing.**
+  Every tracked read installed its watch at the read, so a stored cache
+  describes the values it recorded — there is no value re-check on a hit, and
+  a watch removed behind `track!`'s back is *not* compensated (the component
+  serves its cached lines until something else invalidates it; an explicit
+  `invalidate` is the way back). A hit also requires that the component still
+  owns its registry entry: an entry dropped by a stray teardown costs one
+  re-render and re-registers, never a frozen subtree. Reactions are the one
+  thing still verified on a hit — an input write marks a reaction `:dirty`
+  without notifying its subscribers — and a cache that read one keeps that
+  check.
 - **Do NOT use track!** for: transparent parents (Container, Box, VStack,
   HStack, ScrollView, ChatHistory — children change independently and the
   parent can't track that), time-animated output (spinners, status flashes —
