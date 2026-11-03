@@ -76,13 +76,14 @@
    policy judged. EXECUTE runs one call over the effective op and returns its
    result.
 
-   A hook that settles the call with `{:block true :reason …}` — the shape the
-   permission check answers, and the extensions' veto — gets the canonical
-   blocked result, so one convention covers both."
+   A hook that settles the call with a truthy `:block` — `{:block true
+   :reason …}`, the shape the permission check answers and the extensions'
+   veto — gets the canonical blocked result, so one convention covers both.
+   No tool result carries :block, so a settlement is told apart from one."
   [{:keys [chain check execute]} op]
   (let [body (fn [op] (or (when check (check op)) (execute op)))
         result ((or chain (fn [op next] (next op))) op body)]
-    (if (and (map? result) (true? (:block result)))
+    (if (and (map? result) (:block result))
       (blocked-result result)
       result)))
 
