@@ -794,10 +794,14 @@
                               (if disabled "disabled" "enabled")))))
     (notify-or-print state ctx (str "Usage: /mcp " (if disabled "disable" "enable") " <server>"))))
 
-(defn- handle-refresh
-  "Reload the EDN config: add/remove/redefine servers (disconnecting dropped
-   and edited ones), resync tools + prompts, rebuild the description (§10.6)."
-  [state ctx]
+(defn- reload-servers!
+  "Reload mcp.edn into the live state and resync everything derived from it:
+   servers added/removed/edited (a removed one disconnects, an edited one goes
+   through `rebuild-server`), auth storage, direct tools, prompt commands, the
+   proxy tool and the status bar. Returns the freshly loaded config so a caller
+   can add a tail of its own — /mcp refresh bootstraps the direct tools, the
+   setup panel reports the file it wrote."
+  [state]
   (let [config (config/load-config)
         current-names (set (keys (:mcp-servers (:config @state))))]
     (doseq [name (remove (set (keys (:mcp-servers config))) current-names)]
@@ -806,10 +810,17 @@
     (auth/configure-storage! (:settings config))
     (sync-direct-tools! state)
     (prompts/sync-prompt-commands! state)
-    (bootstrap-direct-tools! state)
     (register-proxy-tool! state)
-    (notify-or-print state ctx "MCP config reloaded.")
-    (update-status-bar! state)))
+    (update-status-bar! state)
+    config))
+
+(defn- handle-refresh
+  "Reload the EDN config: add/remove/redefine servers (disconnecting dropped
+   and edited ones), resync tools + prompts, rebuild the description (§10.6)."
+  [state ctx]
+  (reload-servers! state)
+  (bootstrap-direct-tools! state)
+  (notify-or-print state ctx "MCP config reloaded."))
 
 (defn- open-browser
   "Open a URL with the platform helper (xdg-open / open /
@@ -1132,21 +1143,6 @@
 
 ;; ─── Setup panel + host-config import (§10.6 setup/import) ───────────────
 
-(defn- reload-config!
-  "Reload the EDN config into the live state (used after setup-panel
-   writes) — servers added/removed/redefined, tools + prompts resynced."
-  [state]
-  (let [config (config/load-config)
-        current-names (set (keys (:mcp-servers (:config @state))))]
-    (doseq [name (remove (set (keys (:mcp-servers config))) current-names)]
-      ((:disconnect-fn @state) name))
-    (swap! state assoc :config config :servers (rebuild-servers state config))
-    (auth/configure-storage! (:settings config))
-    (sync-direct-tools! state)
-    (prompts/sync-prompt-commands! state)
-    (register-proxy-tool! state)
-    (update-status-bar! state)))
-
 (defn- setup-callbacks
   "The setup panel's callbacks over the extension state (pi
    buildSetupCallbacks): every write goes to the project config file, then
@@ -1160,7 +1156,7 @@
      (try
        (let [{:keys [path changed]} (config/write-server-entry!
                                      (:id preset) (:entry preset))]
-         (reload-config! state)
+         (reload-servers! state)
          (spawn (fn []
                   (try ((:ensure-connected-fn @state) (:id preset))
                        (catch Exception _ nil))))
@@ -1173,7 +1169,7 @@
    (fn [name entry]
      (try
        (let [{:keys [path]} (config/write-server-entry! name entry)]
-         (reload-config! state)
+         (reload-servers! state)
          (let [conn (try ((:ensure-connected-fn @state) name)
                          (catch Exception _ nil))]
            {:ok true
@@ -1187,7 +1183,7 @@
        (let [discoveries (filter (fn [d] (contains? (set kinds) (:kind d)))
                                  (config/host-config-discoveries))
              {:keys [path added skipped]} (config/adopt-host-configs! discoveries)]
-         (reload-config! state)
+         (reload-servers! state)
          {:ok true
           :message (str "Adopted " (count added) " server" (when (not= 1 (count added)) "s")
                         " into " path
@@ -1224,7 +1220,7 @@
   (let [discoveries (config/host-config-discoveries)]
     (if (seq discoveries)
       (let [{:keys [path added skipped]} (config/adopt-host-configs! discoveries)]
-        (reload-config! state)
+        (reload-servers! state)
         (notify-or-print state ctx
                          (str "Adopted " (count added) " server" (when (not= 1 (count added)) "s")
                               " from host configs into " path

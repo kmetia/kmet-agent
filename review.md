@@ -23,13 +23,12 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 | 11 | Keyring secret in argv | low/medium (exposure) | **fixed** (Windows; macOS documented) |
 | 12 | `run_code` sandbox exposes `future`/`future-call` | — | **dropped** (not a finding) |
 | 13 | `tui-resume!` bypasses the render-crash guard | high (silent hang) | **fixed** |
-| 14+ | Structural: duplicated policies | low (maintainability) | **partly fixed** (§14) |
+| 14+ | Structural: duplicated policies | low (maintainability) | **fixed** (§14) |
 
-Findings 1–13 are fixed (one commit each, each with a regression test); 12 is dropped.
-Finding 14's render-path items moved to [`perf.md`](perf.md) §23.1; the rest
-stand or are fixed as marked. Line references in the fixed findings describe
-the code as it was found — the fix moved them; §14's surviving bullets point
-at the code as it stands.
+Findings 1–14 are fixed (one commit each, each with a regression test); 12 is
+dropped. Finding 14's render-path items moved to [`perf.md`](perf.md) §23.1,
+and the rest of §14 is fixed as marked. Line references in the fixed findings
+describe the code as it was found — the fix moved them.
 
 ---
 
@@ -289,8 +288,8 @@ a run without an exit code is `:error` and shows `(no exit code)`.
 
 The render-path findings this section used to carry (frame copying, the
 flat-document lines cache, the loop extraction, frame state, the per-frame
-`getenv`) moved to [`perf.md`](perf.md) §23.1. What is left here is
-structure that is not on the render path.
+`getenv`) moved to [`perf.md`](perf.md) §23.1. The findings below are the
+structure that is not on the render path; all of them are fixed as marked.
 
 - ~~**Two session-deletion policies**~~ **fixed**: `session/listing.clj` owns the policy
   (`delete-session-file`: trash then unlink), `delete-session!` calls it and reports a failed
@@ -299,13 +298,13 @@ structure that is not on the render path.
   is the one policy (`:wrap` or `:clamp`, stale index clamped first); the fork, auth, tree and
   session selectors call it. `resource_config` keeps its own step — it walks a row tree and
   skips non-item rows, which is not list navigation.
-- **Duplicated MCP reload**: `handle-refresh`
-  (`extensions/mcp-adapter/src/kmet/extensions/mcp_adapter/core.clj:797`) and
-  `reload-config!` (`:1135`) repeat the same reload body — load config, disconnect removed
-  servers, `rebuild-servers`, `configure-storage!`, sync tools and prompts, register the proxy,
-  update the status bar. Only the tails differ: `handle-refresh` adds
-  `bootstrap-direct-tools!` and the "MCP config reloaded." notice. One shared reload helper
-  returns the new config and each caller adds its own tail.
+- ~~**Duplicated MCP reload**~~ **fixed**: `reload-servers!`
+  (`extensions/mcp-adapter/src/kmet/extensions/mcp_adapter/core.clj:797`) owns the reload body
+  once — load config, disconnect removed servers, `rebuild-servers`, `configure-storage!`,
+  sync tools and prompts, register the proxy, update the status bar — and returns the new
+  config. `handle-refresh` calls it and adds `bootstrap-direct-tools!` plus the "MCP config
+  reloaded." notice; the setup panel's callbacks call it directly (`reload-config!` is gone).
+  A regression test drives the shared helper and `/mcp refresh` over an edited config file.
 
 - ~~**Dead code**: `center-offset`~~ **fixed**: removed.
 
@@ -328,6 +327,5 @@ structure that is not on the render path.
 3. ~~Then the lifecycle fix with a test asserting empty root after unload: 9.~~ done.
 4. ~~Then robustness: 4, 10, 11, and the TUI guard (13), plus the TUI `!` path's nil exit
    code~~ all done, 7 and 5 with item 1.
-5. Structural work (14) as its own series: the small items are done, and the
-   render-path half moved to `perf.md` §23.1. Left: the MCP reload dedup
-   (`handle-refresh`/`reload-config!`, `mcp_adapter/core.clj:797,1135`).
+5. ~~Structural work (14) as its own series: the small items, the MCP reload
+   dedup, and the render-path half (moved to `perf.md` §23.1)~~ all done.

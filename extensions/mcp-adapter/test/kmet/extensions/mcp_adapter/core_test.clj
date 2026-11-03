@@ -134,3 +134,34 @@
         (is (nil? @(get-in rebuilt ["srv" :failed-at]))
             "a fixed server does not inherit the old failure's backoff")
         (is (= ["node" "new.js"] (get-in rebuilt ["srv" :definition :command])))))))
+
+(deftest refresh-and-the-panel-reload-share-one-helper
+  ;; /mcp refresh and the setup panel's reload kept two copies of the same
+  ;; reload body (load config, disconnect dropped servers, rebuild-servers,
+  ;; auth storage, tools, prompts, proxy, status bar); reload-servers! owns
+  ;; it now and each caller adds its own tail.
+  (with-extension
+    {:mcp-servers {"srv" {:command ["node" "old.js"]}}}
+    (fn [_api api-state]
+      (let [ext-state @(var-get #'mcp/state-atom)
+            config-path (config/global-config-path)]
+        (testing "the shared reload applies the file and hands the config back"
+          (tu/write-edn! config-path
+                         {:mcp-servers {"srv" {:command ["node" "new.js"]}
+                                        "added" {:command ["node" "added.js"]}}})
+          (let [config (#'mcp/reload-servers! ext-state)]
+            (is (= config (:config @ext-state)))
+            (is (= ["node" "new.js"]
+                   (get-in @ext-state [:config :mcp-servers "srv" :command])))
+            (is (= #{"srv" "added"} (set (keys (:servers @ext-state)))))))
+        (testing "/mcp refresh runs it and adds its own tail"
+          (tu/write-edn! config-path
+                         {:mcp-servers {"srv" {:command ["node" "third.js"]}}})
+          (let [out (with-out-str ((:handler (get-in @api-state [:commands "mcp"]))
+                                   {:has-ui false} "refresh"))]
+            (is (str/includes? out "MCP config reloaded."))
+            (is (= ["node" "third.js"]
+                   (get-in @ext-state [:config :mcp-servers "srv" :command])))
+            (is (= #{"srv"} (set (keys (:servers @ext-state))))
+                "a server dropped from the file leaves the live map")))))))
+
