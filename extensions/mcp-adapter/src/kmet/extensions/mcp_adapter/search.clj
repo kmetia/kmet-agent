@@ -1,35 +1,16 @@
 (ns kmet.extensions.mcp-adapter.search
-  "mcp proxy search (§9.3): the pi search-ranking.ts port — weighted
-   name/description/server/keyword scoring with searchKeywords boosts,
-   regex mode, and the paged result rendering. Reads the metadata cache
-   only (no spawn)."
+  "mcp proxy search (§9.3): the metadata cache read through the shared ranker
+   (`kmet.libs.ranking`, the pi search-ranking.ts port — weighted
+   name/description/server/keyword scoring with searchKeywords boosts), plus
+   regex mode and the paged result rendering. Reads the metadata cache only (no
+   spawn); `tool_search` ranks the same way over the tools that are not
+   declared yet."
   (:require [clojure.string :as str]
             [kmet.extensions.mcp-adapter.catalog :as catalog]
-            [kmet.extensions.mcp-adapter.names :as names]))
+            [kmet.extensions.mcp-adapter.names :as names]
+            [kmet.libs.ranking :as ranking]))
 
 (def ^:private max-regex-query-length 256)
-
-;; ─── Search ranking (pi search-ranking.ts) ─────────────────────────────
-
-(def ^:private field-weights
-  {:name 12 :original-name 10 :server 8 :description 5 :keywords 5})
-
-(def ^:private min-stem-length 4)
-
-(defn- normalize-search-text
-  "camelCase → spaced, separators → spaces, lowercase (pi
-   normalizeSearchText)."
-  [s]
-  (-> (str s)
-      (str/replace #"([a-z0-9])([A-Z])" "$1 $2")
-      (str/replace #"[_./:-]+" " ")
-      str/lower-case))
-
-(defn- tokenize
-  [s]
-  (->> (str/split (normalize-search-text s) #"[^a-z0-9]+")
-       (remove str/blank?)
-       vec))
 
 (defn- resolve-search-keywords
   "The configured :search-keywords values whose pattern matches the tool
@@ -50,114 +31,28 @@
             (swap! out conj value)))
         @out))))
 
-(defn- score-tool-match
-  "Weighted match score for a tool against a query; nil when the tool does
-   not match (pi scoreToolMatch: phrase matches dominate, token coverage
-   gate for short queries, first-query-token-in-name and whole-field-exact
-   bonuses)."
-  [tool server query keywords]
-  (let [normalized-query (str/trim (normalize-search-text query))
-        query-tokens (tokenize query)]
-    (when (seq query-tokens)
-      (let [fields {:name (normalize-search-text (:name tool))
-                    :original-name (normalize-search-text (:original-name tool))
-                    :server (normalize-search-text server)
-                    :description (normalize-search-text (or (:description tool) ""))}
-            matched-tokens (atom #{})
-            phrase-matched? (atom false)
-            whole-field-exact? (atom false)
-            score (atom 0)]
-        (doseq [[field value] fields]
-          (let [weight (field-weights field)
-                field-tokens (tokenize value)]
-            (cond
-              (= value normalized-query)
-              (do (swap! score + (* weight 14))
-                  (reset! phrase-matched? true)
-                  (reset! whole-field-exact? true))
-              (str/starts-with? value normalized-query)
-              (do (swap! score + (* weight 9))
-                  (reset! phrase-matched? true))
-              (str/includes? value normalized-query)
-              (do (swap! score + (* weight 6))
-                  (reset! phrase-matched? true)))
-            (doseq [token query-tokens]
-              (cond
-                (some #{token} field-tokens)
-                (do (swap! score + (* weight 4))
-                    (swap! matched-tokens conj token))
-                (some (fn [field-token]
-                        (or (str/starts-with? field-token token)
-                            (and (>= (count field-token) min-stem-length)
-                                 (str/starts-with? token field-token))))
-                      field-tokens)
-                (do (swap! score + (* weight 2))
-                    (swap! matched-tokens conj token))
-                (str/includes? value token)
-                (do (swap! score + weight)
-                    (swap! matched-tokens conj token))))))
-        ;; configured keywords are discrete phrases (pi: per-phrase bonus)
-        (when (seq keywords)
-          (let [weight (field-weights :keywords)
-                phrases (->> keywords
-                             (map #(str/trim (normalize-search-text %)))
-                             (remove str/blank?))]
-            (doseq [phrase phrases]
-              (cond
-                (= phrase normalized-query)
-                (do (swap! score + (* weight 14))
-                    (reset! phrase-matched? true)
-                    (reset! whole-field-exact? true))
-                (str/starts-with? phrase normalized-query)
-                (do (swap! score + (* weight 9))
-                    (reset! phrase-matched? true))
-                (str/includes? phrase normalized-query)
-                (do (swap! score + (* weight 6))
-                    (reset! phrase-matched? true))))
-            (let [keyword-tokens (vec (mapcat tokenize phrases))]
-              (doseq [token query-tokens]
-                (cond
-                  (some #{token} keyword-tokens)
-                  (do (swap! score + (* weight 4))
-                      (swap! matched-tokens conj token))
-                  (some (fn [keyword-token]
-                          (or (str/starts-with? keyword-token token)
-                              (and (>= (count keyword-token) min-stem-length)
-                                   (str/starts-with? token keyword-token))))
-                        keyword-tokens)
-                  (do (swap! score + (* weight 2))
-                      (swap! matched-tokens conj token))
-                  (some #(str/includes? % token) phrases)
-                  (do (swap! score + weight)
-                      (swap! matched-tokens conj token)))))))
-        (let [coverage (/ (count @matched-tokens) (count query-tokens))
-              coverage-ok? (if (<= (count query-tokens) 2)
-                             (= coverage 1)
-                             (>= coverage 0.6))]
-          (when (or @phrase-matched? coverage-ok?)
-            (swap! score + (if (= coverage 1) 25 (Math/round (double (* coverage 10)))))
-            (when (some #{(first query-tokens)} (tokenize (:name fields)))
-              (swap! score + 8))
-            (when @whole-field-exact? (swap! score + 20))
-            @score))))))
-
 (defn- rank-tool-matches
-  "All matching cached tools across enabled servers, sorted by score desc
-   then tool name (pi rankToolMatches). KEYWORDS resolved per tool."
+  "The cached tools of the enabled servers as ranker documents — the tool
+   record under `:tool` (its `:inputSchema` renders the param lines), the
+   server under `:server`, the configured keywords resolved per tool — ranked
+   by the shared scorer (pi rankToolMatches)."
   [state query server]
-  (let [matches (atom [])]
-    (doseq [[server-name definition] (:mcp-servers (:config state))
-            :when (and (not (catalog/disabled? state server-name))
-                       (or (nil? server) (= server server-name)))]
-      (doseq [tool (or (catalog/cached-tools state server-name) [])]
-        ;; the cached record keeps its :inputSchema — the ranked output
-        ;; renders the param lines from it
-        (let [tool (assoc tool :original-name (:name tool))
-              keywords (resolve-search-keywords definition (:name tool) server-name)
-              score (score-tool-match tool server-name query keywords)]
-          (when score
-            (swap! matches conj {:server server-name :tool tool :score score})))))
-    (vec (sort-by (juxt (comp - :score) (comp :name :tool)) @matches))))
+  (ranking/rank
+   (into []
+         (mapcat (fn [[server-name definition]]
+                   (when (and (not (catalog/disabled? state server-name))
+                              (or (nil? server) (= server server-name)))
+                     (map (fn [tool]
+                            {:server server-name
+                             :tool tool
+                             :name (:name tool)
+                             :original-name (:name tool)
+                             :description (:description tool)
+                             :keywords (resolve-search-keywords
+                                        definition (:name tool) server-name)})
+                          (or (catalog/cached-tools state server-name) [])))))
+         (:mcp-servers (:config state)))
+   query))
 
 ;; ─── Search (§9.3) ─────────────────────────────────────────────────────
 
@@ -182,12 +77,11 @@
           (sort-by key properties))))
 
 (defn- search-tools
-  "Search cached tools (§9.3): ranked by the search-ranking port when the
-   query is non-empty (name/description/server/keyword weighted scoring);
-   regex mode tests name/description/keywords; an empty query with a
+  "Search cached tools (§9.3): ranked by the shared ranker when the query is
+   non-empty; regex mode tests name/description/keywords; an empty query with a
    SERVER lists that server's tools sorted by name. include/exclude do not
-   filter the proxy search (pi parity — they gate direct-tool
-   registration). Returns {:total :items} honoring :limit/:offset."
+   filter the proxy search (pi parity — they gate direct-tool registration).
+   Returns {:total :items} honoring :limit/:offset."
   [state query compiled server limit offset]
   (let [all (if (or compiled (str/blank? query))
               (let [items (atom [])]

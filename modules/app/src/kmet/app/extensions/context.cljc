@@ -264,6 +264,7 @@
     kmet.libs.oauth
     kmet.libs.path
     kmet.libs.process
+    kmet.libs.ranking
     kmet.libs.sse
     kmet.libs.terminal
     kmet.libs.terminal-image
