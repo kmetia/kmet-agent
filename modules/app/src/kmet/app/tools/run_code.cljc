@@ -839,13 +839,16 @@
                                 ". Active tools: " (str/join ", " (keys surface)))})
       (let [idx (dec (count (swap! trace conj {:tool name :ok false
                                                :error "incomplete"})))
+            cancelled-result
+            (fn []
+              {:is-error true
+               :content (str "run_code cancelled before " name " ran")})
             settle-cancelled!
             (fn []
               (try
                 (swap! trace assoc-in [idx] {:tool name :ok false :error "cancelled"})
                 (catch Throwable _ nil))
-              (deliver p {:is-error true
-                          :content (str "run_code cancelled before " name " ran")}))
+              (deliver p (cancelled-result)))
             run
             (fn []
               (if @signal
@@ -854,8 +857,7 @@
                       ;; the pool queue cannot fire side effects past the deadline
                       execute (fn [op]
                                 (if @signal
-                                  {:is-error true
-                                   :content (str "run_code cancelled before " name " ran")}
+                                  (cancelled-result)
                                   (invoke/execute-tool-call
                                    execute-tool
                                    {:tool-name name

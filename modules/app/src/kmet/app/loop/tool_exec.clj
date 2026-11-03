@@ -101,6 +101,17 @@
     :tools declared-tools
     :on-update (tool-on-update agent (:tool-call-id op))}))
 
+(defn- emit-end!
+  "Emit :tool-execution-end for TC — the one payload both schedulers send, with
+   the effective arguments the call ran on."
+  [agent tc args result]
+  (state/emit agent {:type :tool-execution-end
+                     :tool-call-id (:id tc)
+                     :tool-name (:name tc)
+                     :args args
+                     :result result
+                     :is-error (:is-error result false)}))
+
 (defn- begin-call!
   "Emit :tool-execution-start for TC — the call is offered, before any hook or
    gate runs (pi), so a blocked call is still shown. Sequential and
@@ -159,19 +170,12 @@
    request that was offered it."
   [agent tool-calls assistant-msg declared-tools & [append?]]
   (let [finalized (atom {})
-        emit-end! (fn [tc args result]
-                    (state/emit agent {:type :tool-execution-end
-                                       :tool-call-id (:id tc)
-                                       :tool-name (:name tc)
-                                       :args args
-                                       :result result
-                                       :is-error (:is-error result false)}))
         ;; Always record before emitting: the source-order appends below
         ;; read the map after the futures finish, so a result is never lost
         ;; to a failed emit.
         settle! (fn [tc args result]
                   (swap! finalized assoc (:id tc) result)
-                  (emit-end! tc args result))
+                  (emit-end! agent tc args result))
         _ (doseq [tc tool-calls] (begin-call! agent tc))
         ;; pi: tools receive the session AbortSignal — Escape during a tool
         ;; call must kill the child process, not just abandon the future.
@@ -221,12 +225,7 @@
         (when (not= false append?)
           (state/append-persisted-message! agent result-msg))
         (swap! tool-results conj result)
-        (state/emit agent {:type :tool-execution-end
-                           :tool-call-id (:id tc)
-                           :tool-name (:name tc)
-                           :args args
-                           :result result
-                           :is-error (:is-error result false)})))
+        (emit-end! agent tc args result)))
     ;; pi: terminate rides on blocked results — the batch stops the run
     ;; only when every call in it was blocked with :terminate
     {:results @tool-results
