@@ -32,6 +32,8 @@
             [kmet.app.retry :as retry]
             [kmet.app.session.core :as session]
             [kmet.app.tools.registry :as tools]
+            [kmet.app.tools.search :as search]
+            [kmet.app.tools.tool :as tool]
             [kmet.ai.models :as models]
             [kmet.srce.core :as srce]))
 
@@ -480,31 +482,123 @@ Be precise and concise in your responses."}}]
     (fn [tool-name args opts]
       (execute-tool-for handle tool-name args opts))))
 
-(defn active-tools-for
-  "The tool set a selection resolves to, in TABLE order (name → Tool, see
-   `tool-table`; `registry/select-tools` does the filtering): ENABLED (the
-   runtime allowlist, nil = all) wins; otherwise DEFAULT-TOOLS (a resolved
-   :default-tools selection, nil = every built-in) excludes the built-ins it
-   leaves out — extension tools stay enabled (pi: defaultTools selects the
-   built-in tools; extension/custom tools remain enabled). The wire :tools and
-   the run_code sandbox surface both resolve through this."
+(defn ctx-contributed-tools
+  "The `:sandbox` sources' tools a ctx's `:tools` handle holds — the surface
+   only a script reaches, never the model's table
+   (`registry/get-contributed-tools`). The twin of `ctx-tool-table`: a loaded
+   `:sandbox` tool is declared through this map, and a ctx without a handle is
+   the same programming error here as there."
+  [ctx]
+  (tools/get-contributed-tools (srce/get ctx :tools)))
+
+(defn selection
+  "The tools a run's settings select from TABLE (name → Tool; the filtering is
+   `registry/select-tools`): ENABLED (the runtime allowlist, nil = all) wins;
+   otherwise DEFAULT-TOOLS (a resolved :default-tools selection, nil = every
+   built-in) excludes the built-ins it leaves out — extension tools stay
+   enabled (pi: defaultTools selects the built-in tools; extension/custom tools
+   remain enabled). Exposure is not consulted: both derivations start here."
   [table {:keys [enabled default-tools]}]
-  (vals (tools/select-tools table
-                            {:enabled enabled
-                             :exclude (when (nil? enabled)
-                                        (tools/default-tool-exclusions default-tools))})))
+  (tools/select-tools table
+                      {:enabled enabled
+                       :exclude (when (nil? enabled)
+                                  (tools/default-tool-exclusions default-tools))}))
+
+(defn session-loaded-tools
+  "The tool names SESS recorded as loaded — what `tool_search` promoted into the
+   declared set, in load order. A fold over the branch's `:tool-load` custom
+   entries, so resume, `/tree` and a fork see the set that branch was actually
+   sent; nil (no session) has none."
+  [sess]
+  (into []
+        (comp (mapcat #(get-in % [:data :names])) (distinct))
+        (if sess (session/get-custom-entries sess :tool-load) [])))
+
+(defn loaded-tools
+  "The tool names AGENT's session recorded as loaded (see
+   `session-loaded-tools`)."
+  [agent]
+  (session-loaded-tools (:session agent)))
+
+(defn promote-tools!
+  "Record NAMES as loaded in the agent's session (see `loaded-tools`), which
+   declares them on the next request. The entry is invisible to the wire and
+   appended to the branch, so a resumed or forked session keeps the promotion.
+   Returns the entry, or nil without a session — a promotion that cannot be
+   recorded is not a load."
+  [agent names]
+  (when (seq names)
+    (when-let [sess (:session agent)]
+      (session/append-custom-entry! sess :tool-load {:names (vec names)}))))
+
+(defn- declared-record
+  "NAME → TOOL as the model is sent it, or nil for a tool the run does not
+   declare: `:deferred` only once LOADED, `:sandbox` never (a loaded sandbox
+   tool comes from the contributed map instead — it is not in the table), and
+   `tool_search` only when the table holds a deferred tool to find, else it is
+   a schema every request pays for and no call can use."
+  [loaded deferred? [name tool]]
+  (case (tool/exposure tool)
+    :deferred (when (contains? loaded name) [name tool])
+    :sandbox nil
+    :model-only (when (or deferred? (not= name search/tool-search-name))
+                  [name tool])
+    [name tool]))
+
+(defn declared-tools-for
+  "The tools DECLARED to the model — the wire list — as name → Tool: the
+   selection's `:direct` and `:model-only` tools, plus the `:deferred` ones
+   LOADED promoted, plus a loaded `:sandbox` tool from CONTRIBUTED (the sandbox
+   sources' map, normalized here because a source's tool is only ever declared
+   through a promotion). A deferred tool is callable without being declared;
+   disabling a loaded tool hides it without clearing the load. pi: ToolLoadout's
+   `declared`.
+
+   LOADED is a name seq (see `loaded-tools`); CONTRIBUTED may be nil for a
+   caller with no sandbox sources."
+  [table contributed {:keys [enabled default-tools loaded]}]
+  (let [loaded (set loaded)
+        deferred? (boolean (some search/deferred-tool? (vals table)))
+        from-table (keep (partial declared-record loaded deferred?)
+                         (selection table {:enabled enabled :default-tools default-tools}))
+        from-sandbox (keep (fn [name]
+                             ;; a sandbox tool is not in the table, so the loaded
+                             ;; set and an explicit selection are what declare it
+                             (when (and (contains? loaded name)
+                                        (or (nil? enabled) (contains? enabled name)))
+                               (when-let [t (get contributed name)]
+                                 ;; the key is the address a promoted sandbox tool
+                                 ;; is declared under, so the record carries it
+                                 [name (tool/normalize-tool-definition
+                                        (assoc t :name (or (:name t) name)))])))
+                           loaded)]
+    (into {} (concat from-table from-sandbox))))
+
+(defn callable-tool-names
+  "The names a script may call: the selection minus its `:model-only` tools —
+   the table half of the run_code surface (`registry/select-tools` adds the
+   `:sandbox` sources' catalog). The agent's `run_code` binding resolves this
+   live, so a `:deferred` tool is callable whether or not it is declared."
+  [agent]
+  (into #{}
+        (comp (remove #(= :model-only (tool/exposure %))) (map :name))
+        (vals (selection (tool-table agent)
+                         {:enabled @(:enabled-tools agent)
+                          :default-tools @(:default-tools agent)}))))
 
 (defn active-tools
   "The tools sent to the LLM (pi: AgentSession.getActiveToolNames → the
    declared set): the registry filtered by the state's :enabled-tools and
-   :default-tools (see active-tools-for). Read once per request and threaded
-   through it — the wire list, the declared set and dispatch all resolve
-   against that one capture, so a tool unloaded mid-request still executes for
-   the request that was offered it."
+   :default-tools and narrowed to what is declared (see `declared-tools-for`).
+   Read once per request and threaded through it — the wire list, the declared
+   set and dispatch all resolve against that one capture, so a tool unloaded
+   mid-request still executes for the request that was offered it."
   [agent]
-  (active-tools-for (tool-table agent)
-                    {:enabled @(:enabled-tools agent)
-                     :default-tools @(:default-tools agent)}))
+  (vals (declared-tools-for (tool-table agent)
+                            (ctx-contributed-tools (:ctx agent))
+                            {:enabled @(:enabled-tools agent)
+                             :default-tools @(:default-tools agent)
+                             :loaded (loaded-tools agent)})))
 
 (defn set-active-tools!
   "Restrict the tools sent to the LLM to NAMES (a set or seq of tool
@@ -529,21 +623,21 @@ Be precise and concise in your responses."}}]
                 ;; through untyped; pi's string[] is enforced by TS)
                 (string? names) [names]
                 :else names)
-        enabled (when names (set names))
         ;; validation source: the LIVE registry (pi: setActiveToolsByName
         ;; validates against the tool registry) — captures extension tools
-        ;; registered after the system prompt was built
+        ;; registered after the system prompt was built, sandbox sources
+        ;; included
         table (tool-table agent)
-        valid (if enabled
-                (filterv #(contains? enabled (:name %))
-                         (vals table))
-                ;; nil restores the configured default surface — a
-                ;; :default-tools selection stays in force
-                (active-tools-for table {:default-tools @(:default-tools agent)}))
-        ;; pi filters unknown names out of the enabled set itself (only
-        ;; registry tools are stored); the prompt is built from VALID, so
-        ;; the two can never diverge
-        enabled (when enabled (into #{} (map :name) valid))
+        contributed (ctx-contributed-tools (:ctx agent))
+        live (merge contributed table)
+        ;; pi filters unknown names out of the enabled set itself
+        enabled (when names (into #{} (filter #(contains? live %)) names))
+        ;; the prompt's tool list is the DECLARED set under the new selection
+        ;; (a deferred tool the toggle enables is declared only once loaded)
+        valid (vals (declared-tools-for table contributed
+                                        {:enabled enabled
+                                         :default-tools @(:default-tools agent)
+                                         :loaded (loaded-tools agent)}))
         opts (assoc @(:system-prompt-opts agent) :tools valid)]
     (reset! (:enabled-tools agent) enabled)
     (when (seq @(:system-prompt-opts agent))

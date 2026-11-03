@@ -6,10 +6,16 @@
    model-facing table (undeclared, tagged `:exposure :deferred` by the source),
    where the selection settings and the declared/callable split resolve over
    them."
-  (:require [clojure.test :as t]
+  (:require [babashka.fs :as fs]
+            [clojure.test :as t]
+            [kmet.app.loop.state :as state]
+            [kmet.app.loop.test-support :as support]
             [kmet.app.registry :as registry]
+            [kmet.app.session.core :as session]
             [kmet.app.tools.registry :as tools]
+            [kmet.app.tools.search :as search]
             [kmet.app.tools.tool :as tool]
+            [kmet.test-tmp :as test-tmp]
             [kmet.test-utils :as tu]))
 
 (defn- handle []
@@ -118,3 +124,141 @@
     (doseq [[name tool] (tools/get-all-tools h)]
       (t/is (nil? (:exposure tool)) name)
       (t/is (= :direct (tool/exposure tool)) name))))
+
+;; ─── Declared and callable (the P5 split) ─────────────────────────────────
+
+(t/use-fixtures :each (fn [f] (support/with-registry f)))
+
+(defn- names [tools]
+  (into #{} (map :name) tools))
+
+(defn- temp-session []
+  (let [dir (test-tmp/temp-dir! "test-tool-exposure-")]
+    {:session (session/create-session dir) :dir dir}))
+
+(defn- deferred-source! [h id description tools]
+  (tools/register-tool-source! h id (fn [] tools)
+                               {:exposure :deferred :description description}))
+
+(t/deftest test-deferred-tool-is-undeclared-until-loaded
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)]
+    (try
+      (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
+      (t/is (not (contains? (names (state/active-tools agent)) "deferred-a"))
+            "not declared before a load")
+      (t/is (contains? (state/callable-tool-names agent) "deferred-a")
+            "callable from a script before it is declared")
+      (state/promote-tools! agent ["deferred-a"])
+      (t/is (contains? (names (state/active-tools agent)) "deferred-a")
+            "declared after the promotion")
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-model-only-is-declared-and-not-callable
+  (let [h (support/tool-table)
+        agent (support/make-agent-state)]
+    (tools/register-tool! h {:name "probe" :exposure :model-only
+                             :description "probe" :execute (fn [_] {:content "x"})})
+    (try
+      (t/is (contains? (names (state/active-tools agent)) "probe"))
+      (t/is (not (contains? (state/callable-tool-names agent) "probe"))
+            "a script may not call a model-only tool")
+      (finally (tools/unregister-tool! h "probe")))))
+
+(t/deftest test-tool-search-is-declared-only-when-a-deferred-tool-exists
+  (let [h (support/tool-table)
+        agent (support/make-agent-state)]
+    (tools/register-tool! h {:name search/tool-search-name :exposure :model-only
+                             :description "search" :execute (fn [_] {:content "x"})})
+    (try
+      (t/is (not (contains? (names (state/active-tools agent)) search/tool-search-name))
+            "no deferred tool to find, so no schema to pay for")
+      (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
+      (t/is (contains? (names (state/active-tools agent)) search/tool-search-name))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (tools/unregister-tool! h search/tool-search-name)))))
+
+(t/deftest test-disabling-a-loaded-tool-hides-it-without-clearing-the-load
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)]
+    (try
+      (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
+      (state/promote-tools! agent ["deferred-a"])
+      (t/is (contains? (names (state/active-tools agent)) "deferred-a"))
+      (reset! (:enabled-tools agent) #{"read"})
+      (t/is (not (contains? (names (state/active-tools agent)) "deferred-a"))
+            "a disabled tool is hidden, loaded or not")
+      (t/is (= ["deferred-a"] (state/loaded-tools agent))
+            "the load survives the disable")
+      (reset! (:enabled-tools agent) nil)
+      (t/is (contains? (names (state/active-tools agent)) "deferred-a")
+            "re-enabling restores it with no second search")
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-a-loaded-sandbox-tool-is-declared
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)]
+    (try
+      (tools/register-tool-source! h ::sandbox (fn [] {"sb-a" {:description "sandbox a"}}))
+      (t/is (not (contains? (names (state/active-tools agent)) "sb-a")))
+      (state/promote-tools! agent ["sb-a"])
+      (let [declared (into {} (map (juxt :name identity)) (state/active-tools agent))]
+        (t/is (contains? declared "sb-a") "a loaded sandbox tool is declared")
+        (t/is (= {:type "object" :properties {} :required []}
+                 (:parameters (get declared "sb-a")))
+              "and normalized like any declared tool"))
+      (finally
+        (tools/unregister-tool-source! h ::sandbox)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-a-promotion-survives-resume-and-a-fork-taken-after-it
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)]
+    (try
+      (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
+      (let [early (session/append-entry session {:role :user :content "hi"})]
+        (state/promote-tools! agent ["deferred-a"])
+        (t/is (contains? (names (state/active-tools agent)) "deferred-a"))
+        (t/is (contains? (names (state/active-tools
+                                 (support/make-agent-state :session session)))
+                         "deferred-a")
+              "a resumed session advertises what its branch recorded")
+        (let [forked (session/fork-session session (:id (last @(:entries session))))]
+          (t/is (contains? (names (state/active-tools
+                                   (support/make-agent-state :session forked)))
+                           "deferred-a")
+                "a fork taken after the promotion keeps it"))
+        (let [forked (session/fork-session session (:id early))]
+          (t/is (not (contains? (names (state/active-tools
+                                        (support/make-agent-state :session forked)))
+                                "deferred-a"))
+                "a fork taken before the promotion does not")))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-an-explicit-selection-hides-a-loaded-sandbox-tool
+  ;; a sandbox tool is not in the table, so the enabled set is the only way to
+  ;; say "not this one" — it must hide, like a disabled deferred tool does
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)]
+    (try
+      (tools/register-tool-source! h ::sandbox (fn [] {"sb-a" {:description "sandbox a"}}))
+      (state/promote-tools! agent ["sb-a"])
+      (reset! (:enabled-tools agent) #{"read"})
+      (t/is (not (contains? (names (state/active-tools agent)) "sb-a")))
+      (reset! (:enabled-tools agent) #{"read" "sb-a"})
+      (t/is (contains? (names (state/active-tools agent)) "sb-a"))
+      (finally
+        (tools/unregister-tool-source! h ::sandbox)
+        (fs/delete-tree dir)))))

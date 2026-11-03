@@ -52,17 +52,22 @@
 
 (defn- prompt-options
   "The options the run's prompt is built from: what the config says, the run's
-   cwd, the project context files, and the tool table the state will resolve
-   through its ctx."
-  [config ctx {:keys [cwd default-tools]}]
+   cwd, the project context files, and the DECLARED tools the state will
+   resolve through its ctx — the same derivation the wire uses, so the prompt's
+   Available-tools list cannot offer what no request declares."
+  [config ctx {:keys [cwd default-tools session]}]
   {:custom-prompt (cfg/get-custom-prompt config)
    :append-prompt (cfg/get-append-system-prompt config)
    :cwd cwd
    :context-files (context/load-project-context-files
                    (cfg/get-agent-dir) (str (fs/cwd)))
-   :tools (loop-state/active-tools-for
-           (loop-state/ctx-tool-table ctx)
-           {:default-tools default-tools})})
+   :tools (vals (loop-state/declared-tools-for
+                 (loop-state/ctx-tool-table ctx)
+                 (loop-state/ctx-contributed-tools ctx)
+                 {:default-tools default-tools
+                  ;; a resumed session keeps the tools it was sent
+                  :loaded (when session
+                            (loop-state/session-loaded-tools session))}))})
 
 (defn agent-state
   "The loop's AgentState for CTX from CONFIG and the run's resolved pieces:
@@ -96,7 +101,8 @@
         ;; included — stays with the launch dir
         runtime-cwd (or cwd (session/session-cwd session) (str (fs/cwd)))
         prompt-opts (prompt-options config ctx {:cwd runtime-cwd
-                                                :default-tools default-tools})
+                                                :default-tools default-tools
+                                                :session session})
         system-prompt (apply system-prompt-fn (mapcat identity prompt-opts))
         thinking (let [raw (:thinking config :off)]
                    (if (:reasoning model-rec)

@@ -373,6 +373,19 @@ The tool layer is `kmet.app.tools.*`: one record per tool, mounted as a row
 (`:tool/read`, `:tool/bash`, …) and dispatched through the `:tools` service. Two
 things are worth knowing before changing a tool.
 
+**Declared and callable are two derivations.** A tool record carries an
+`:exposure` (`kmet.app.tools.tool`): `:direct` (the default) and `:model-only`
+are declared while selected; `:deferred` is callable but declared only once
+`tool_search` loads it; `:sandbox` (a contributed source's catalog) is callable
+and never declared. `kmet.app.loop.state/declared-tools-for` builds the wire
+list from the selection (`:enabled-tools` / `:default-tools`) and the loaded set
+— a `tool_search`-named tool is declared only while the table holds a
+`:deferred` tool to find, so a direct-only setup pays no schema for it. The
+loaded set is a session fact (`:tool-load` entries folded along the branch), so
+resume, `/tree` and a fork replay the tools that branch was sent, and disabling
+a loaded tool hides it without forgetting the load. `callable-tool-names` is
+the other half — the selection minus the `:model-only` tools.
+
 **One invocation pipeline.** `kmet.app.tools.invoke` is the only
 chain → check → execute path:
 

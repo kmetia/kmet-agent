@@ -80,6 +80,7 @@
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.read :as read-tool]
             [kmet.app.tools.run-code :as run-code-tool]
+            [kmet.app.tools.search :as tool-search]
             [kmet.ai.auth :as auth]
             [kmet.app.session.core :as session]
             [kmet.ai.models :as models]
@@ -1138,14 +1139,19 @@
                                      (tools-util/cwd))
                 ;; a thunk, not a snapshot: set-active-tools! takes effect on
                 ;; the next turn, and the run_code sandbox keys its context on
-                ;; the set it resolves at call time. The effective active set
-                ;; is resolved (not just :enabled-tools) so a :default-tools
-                ;; selection hides the built-ins it disables from scripts too
-                ;; (pi: the codemode callable set is the active direct tools)
-                run-code-tool/*enabled-tools-fn*
-                (fn []
-                  (when (or @(:enabled-tools agent) @(:default-tools agent))
-                    (into #{} (map :name) (state/active-tools agent))))
+                ;; the set it resolves at call time. The callable names are
+                ;; resolved (not just :enabled-tools) so a :default-tools
+                ;; selection hides its built-ins from scripts too, and a
+                ;; :model-only tool stays unreachable however the set is
+                ;; configured (pi: the codemode callable set is the active
+                ;; direct tools plus the registered codemode ones)
+                run-code-tool/*enabled-tools-fn* #(state/callable-tool-names agent)
+                ;; the declared set as `tool_search` sees it, and the promotion
+                ;; it records: both resolved per call, so two searches in one
+                ;; turn see each other's loads and the next request declares
+                ;; what the last one found
+                tool-search/*run* {:declared #(into #{} (map :name) (state/active-tools agent))
+                                   :load! #(state/promote-tools! agent %)}
                 ;; the run's tool chain — the same around hooks the loop's own
                 ;; batches run, so a scripted inner call is hooked exactly as an
                 ;; outer one is
