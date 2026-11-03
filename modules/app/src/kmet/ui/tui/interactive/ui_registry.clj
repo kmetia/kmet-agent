@@ -669,7 +669,7 @@
                   (doseq [key (keys @(:extension-statuses-atom ftr))]
                     (footer/footer-set-extension-status! ftr key nil))
                   (spinner/spinner-set-indicator! (:spinner (:status-indicator cs)) nil)
-                  (status-indicator/status-indicator-set-text! (:status-indicator cs) "Working")
+                  (status-indicator/status-indicator-set-text! (:status-indicator cs) nil)
                   (chat-history/chat-history-set-hidden-thinking-label! ch nil)
                   (reset! extension-autocomplete-factories [])
                   (rebuild-autocomplete-provider!)

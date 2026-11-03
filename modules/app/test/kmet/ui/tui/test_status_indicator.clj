@@ -181,3 +181,36 @@
     (testing "swapping back to a plain editor restores the layer"
       (reset! ed (editor/make-editor))
       (is (= 2 (count (protocols/render root 60)))))))
+
+;; ─── Working message per run phase (pi: workingMessage) ────────────────────
+
+(defn- working-line
+  "The indicator as it lands in the editor border — what the user reads."
+  [indicator]
+  (plain (si/render-in-border indicator 40)))
+
+(deftest test-working-phase-names-the-wait
+  (testing "the working line names the wait for the model's first token, the
+            one phase the transcript cannot show; streaming text/thinking and
+            the tool boxes show themselves, so they keep one plain word"
+    (let [working (si/make-status-indicator)]
+      (si/status-indicator-start! working)
+      (is (= "F Working..." (working-line working)))
+      (si/status-indicator-set-phase! working :waiting-for-model)
+      (is (= "F Waiting for model..." (working-line working)))
+      (si/status-indicator-set-phase! working :working)
+      (is (= "F Working..." (working-line working))))))
+
+(deftest test-extension-working-message-wins-over-the-phase
+  (testing "an extension message (setWorkingMessage) owns the line: the phase
+            transitions leave it alone, and nil gives the line back"
+    (let [working (si/make-status-indicator)]
+      (si/status-indicator-start! working)
+      (si/status-indicator-set-text! working "Fetching docs")
+      (si/status-indicator-set-phase! working :waiting-for-model)
+      (is (= "F Fetching docs" (working-line working)))
+      (si/status-indicator-set-text! working nil)
+      (is (= "F Working..." (working-line working)))
+      (testing "the phase transitions resume once the extension lets go"
+        (si/status-indicator-set-phase! working :waiting-for-model)
+        (is (= "F Waiting for model..." (working-line working)))))))

@@ -32,7 +32,8 @@
        (mod (quot (max 0 elapsed) spinner/default-interval-ms)
             (count spinner/default-frames))))
 
-(defcomponent StatusIndicator nil [spinner active-atom border-color-fn]
+(defcomponent StatusIndicator nil [spinner active-atom border-color-fn
+                                   extension-atom]
   (render [this width]
     (if @active-atom
       ;; The Spinner renders the pi Loader shape itself (leading blank +
@@ -64,12 +65,27 @@
     (spinner/spinner-set-spinner-color-fn! (:spinner indicator) (pick :accent))
     (spinner/spinner-set-message-color-fn! (:spinner indicator) (pick :muted))))
 
+;; ─── Working message ──────────────────────────────────────────────────────
+;; The status line names only what the transcript cannot show: the silence
+;; while the agent waits for the model's first token. Thinking text, the
+;; response and the tool boxes already say what the model is producing, so
+;; those phases keep one plain word. While an extension owns the line
+;; (setWorkingMessage) the phase transitions write nothing; nil gives it
+;; back (pi: workingMessage ?? defaultWorkingMessage).
+
+(def ^:private phase-text
+  {:waiting-for-model "Waiting for model..."
+   :working           "Working..."})
+
+(defn- phase-message [phase]
+  (get phase-text phase (get phase-text :working)))
+
 (defn make-status-indicator
   "Create the default working StatusIndicator.
    When active, shows a spinner with the given message.
    When inactive, renders nothing (the idle two rows).
    Options key-value pairs:
-     :text  — message text (default \"Working\")
+     :text  — initial message text (default the :working phase text)
      :theme — theme map (default dark-theme)
      :border-color-fn — 0-arg fn returning the editor's border color fn
        while the status lives in the editor border, nil otherwise (the
@@ -77,7 +93,7 @@
        nil keeps the accent/muted standalone colors (pi:
        showWorkingStatusIndicator's colorFn)."
   [& {:keys [text theme border-color-fn]
-      :or {text "Working" theme theme/dark-theme}}]
+      :or {text (phase-message :working) theme theme/dark-theme}}]
   (let [sp (spinner/make-spinner
             :text text
             :active false
@@ -86,7 +102,8 @@
             :interval-ms spinner/default-interval-ms)
         indicator (map->StatusIndicator {:spinner sp
                                          :active-atom (atom false)
-                                         :border-color-fn border-color-fn})]
+                                         :border-color-fn border-color-fn
+                                         :extension-atom (atom false)})]
     (install-colors! indicator theme)
     indicator))
 
@@ -110,9 +127,20 @@
   (reset! (:active-atom indicator) false))
 
 (defn status-indicator-set-text!
-  "Set the message text displayed next to the spinner."
+  "Set the message text displayed next to the spinner (pi: setWorkingMessage).
+   The caller owns the line until nil gives it back to the run phases."
   [indicator text]
-  (spinner/spinner-set-text! (:spinner indicator) text))
+  (reset! (:extension-atom indicator) (some? text))
+  (spinner/spinner-set-text! (:spinner indicator) (or text (phase-message :working))))
+
+(defn status-indicator-set-phase!
+  "Name the run phase in the working spinner: :waiting-for-model while the
+   agent waits for the model's first token, :working for everything else
+   (streaming text or thinking, tool execution). Inert while an extension
+   owns the line."
+  [indicator phase]
+  (when-not @(:extension-atom indicator)
+    (spinner/spinner-set-text! (:spinner indicator) (phase-message phase))))
 
 (defn status-indicator-set-theme!
   "Update the theme colors on the underlying spinner."

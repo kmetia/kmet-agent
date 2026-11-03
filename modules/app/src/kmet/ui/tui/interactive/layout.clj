@@ -83,7 +83,7 @@
   "Tool-execution events: the transcript's tool components. Parallel tool
    calls each own a component in PENDING-TOOL-COMPS keyed by tool-call id,
    so updates and ends correlate by id."
-  [{:keys [chat-history tui pending-tool-comps]} evt]
+  [{:keys [chat-history tui pending-tool-comps cs-ref]} evt]
   (case (:type evt)
     :tool-execution-start
     ;; Pi: create pending component once, update in place.
@@ -107,7 +107,11 @@
         ;; calls each own a component; updates/ends correlate by id
         (swap! pending-tool-comps assoc (:tool-call-id evt) comp))
       ;; mount poke stays: the new message lands in the untracked
-      ;; messages-atom, so no watch exists for it yet
+      ;; messages-atom, so no watch exists for it yet. A call arriving
+      ;; before any delta (a provider that emits the whole message at once)
+      ;; ends the wait for the model here — the first sign of output.
+      (when-let [cs @cs-ref]
+        (status/show-working-phase! cs :working))
       (tui/tui-request-render tui))
 
     :tool-execution-prepared
@@ -203,6 +207,7 @@
     ;; it — like a thinking signature — closes the live thinking phase the
     ;; :stream-last display follows.
     (when-let [cs @cs-ref]
+      (status/show-working-phase! cs :working)
       (case (:type (:delta evt))
         :text (turn/on-agent-text cs (:content (:delta evt)))
         :thinking (turn/on-agent-thinking cs (:content (:delta evt)))
@@ -219,7 +224,9 @@
     (when (and (:error-message (:message evt))
                (chat-history/chat-history-streaming-empty? chat-history))
       (chat-history/chat-history-remove-streaming-placeholder! chat-history)
-      (tui/tui-request-render tui))))
+      (tui/tui-request-render tui))
+    (when-let [cs @cs-ref]
+      (status/show-working-phase! cs :working))))
 
 (defn- on-run-lifecycle
   "Run-level events: the spinner/animation presentation, the footer, and the
@@ -239,6 +246,7 @@
         (status/start-anim-timer! cs)
         (when-not (= :working (:kind @(:status-current cs)))
           (status/activate-working-indicator! cs))
+        (status/show-working-phase! cs :waiting-for-model)
         (state/update-footer! cs)))
 
     :agent-end
@@ -267,7 +275,10 @@
     (when-let [cs @cs-ref]
       (when (and (runtime/turn-running? (:engine cs))
                  (not= :working (:kind @(:status-current cs))))
-        (status/activate-working-indicator! cs)))
+        (status/activate-working-indicator! cs))
+      ;; every LLM call opens with a wait for its first token — the one
+      ;; phase the transcript cannot show, so the status line names it
+      (status/show-working-phase! cs :waiting-for-model))
 
     :turn-end nil
 
@@ -288,8 +299,13 @@
     :status
     ;; Pi: agent status changes keep the footer/status
     ;; layer in sync via the :status event (update-footer!'s invalidate
-    ;; schedules the frame)
+    ;; schedules the frame). The status atom names the run phase, so the
+    ;; working line follows it: :thinking opens an LLM call (the wait for
+    ;; its first token), everything else — tool execution — is plain work.
     (when-let [cs @cs-ref]
+      (status/show-working-phase! cs (if (= :thinking (:status evt))
+                                       :waiting-for-model
+                                       :working))
       (state/update-footer! cs))
 
     :queue-update

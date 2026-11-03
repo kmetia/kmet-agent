@@ -1487,3 +1487,38 @@
             (is (= [:user :assistant :user] (mapv :role msgs))
                 "no marker row; the turns' messages are all there")))
         (finally (fs/delete-tree sess-dir))))))
+
+(deftest working-line-follows-the-run-phase
+  ;; the transcript already shows thinking text, the response and the tool
+  ;; boxes, so the status line names only the silence — the wait for the
+  ;; model's first token — and keeps one plain word for everything else.
+  (let [handle (hs/new-handle)
+        cs (hs/core-state handle {:tui {:render-requested? (atom false)
+                                        :force-redraw? (atom false)
+                                        :running? (atom true)}})
+        handler ((var layout/make-agent-event-handler)
+                 {:chat-history (:chat-history cs)
+                  :tui (:tui cs)
+                  :cs-ref (atom cs)
+                  :pending-tool-comps (atom {})})
+        ;; the line as the user reads it, animation frame normalized to F
+        text #(-> (status-indicator/render-in-border (:status-indicator cs) 40)
+                  (tu/strip-ansi)
+                  (str/replace #"[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏]" "F"))]
+    (try
+      (reset! (:turn-running? handle) true)
+      (handler {:type :agent-start})
+      (is (= "F Waiting for model..." (text)) "agent-start opens the wait")
+      (handler {:type :message-update :message {:role :assistant :content []}
+                :delta {:type :thinking :content "hmm"}})
+      (is (= "F Working..." (text)) "the first delta ends the wait")
+      (handler {:type :turn-start})
+      (is (= "F Waiting for model..." (text)) "each LLM call re-opens the wait")
+      (handler {:type :tool-execution-start :tool-call-id "t1"
+                :tool-name "bash" :args {}})
+      (is (= "F Working..." (text)) "tool execution is plain work")
+      (handler {:type :status :status :thinking})
+      (is (= "F Waiting for model..." (text)) "the status atom names the phase too")
+      (handler {:type :status :status :executing :tool-calls []})
+      (is (= "F Working..." (text)))
+      (finally (status/stop-anim-timer! cs)))))

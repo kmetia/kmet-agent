@@ -175,6 +175,18 @@
   (when-not (runtime/turn-running? (:engine cs))
     (status-indicator/status-indicator-stop! (:status-indicator cs))))
 
+(defn show-working-phase!
+  "Name the run phase in the working spinner: :waiting-for-model while the
+   agent waits for the model's first token, :working for everything else
+   (streaming text or thinking, tool execution). Only the silence is named
+   because the transcript already shows what the model produces — thinking
+   text, the response, the tool boxes — while nothing on screen shows the
+   wait. An extension message (:set-working-message) owns the line while it
+   is set, so the phase stays invisible then."
+  [cs phase]
+  (when-some [indicator (:status-indicator cs)]
+    (status-indicator/status-indicator-set-phase! indicator phase)))
+
 (defn release-background-status!
   "Release a long-running background status indicator (share, branch
    summarization) once its work finishes, and give the working spinner
