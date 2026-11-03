@@ -783,7 +783,7 @@ effects (delegating to children, requesting renders).
   re-render and re-registers, never a frozen subtree. Reactions are the one
   thing still verified on a hit — an input write marks a reaction `:dirty`
   without notifying its subscribers — and a cache that read one keeps that
-  check.
+  check. Measurements and the decisions behind this contract: `perf.md` §23.
 - **Do NOT use track!** for: transparent parents (Container, Box, VStack,
   HStack, ScrollView, ChatHistory — children change independently and the
   parent can't track that), time-animated output (spinners, status flashes —

@@ -103,7 +103,7 @@
   ;; The cache trusts its invalidation edges; there is no value re-check on a
   ;; hit. A watch removed behind track!'s back is therefore NOT compensated:
   ;; the component serves its cached lines until something else invalidates
-  ;; it. Accepted residual class (render-opt.md §5) — reachable only by
+  ;; it. Accepted residual class (tui.md §3.2) — reachable only by
   ;; unwatching track!'s own key, which only teardown does. core/invalidate
   ;; is the way back.
   (let [c (text/make-text "a" 0 0)
@@ -118,7 +118,7 @@
 (t/deftest test-a-dropped-registry-entry-heals-through-the-hit-path
   ;; The hit path requires ownership (tracked?), so an entry lost to a stray
   ;; unregister! costs one re-render and re-registers — it must not freeze
-  ;; the component (render-opt.md §4.2/§5).
+  ;; the component (tui.md §3.2).
   (let [c (text/make-text "a" 0 0)]
     (core/render c 5)
     (t/is (component/tracked? c))

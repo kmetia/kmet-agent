@@ -159,7 +159,7 @@
              ;; read installed its own watch at the read, so a cache that
              ;; exists describes the values it recorded. `:atoms` records
              ;; what was read and is never re-derefed — do not add a value
-             ;; check here (render-opt.md §4.4, tui.md §3.2). Teardown does
+             ;; check here (tui.md §3.2; history in perf.md §23). Teardown does
              ;; not read it either: the registry payload's :watched names the
              ;; refs to unwatch.
              (reduce-kv rx-unchanged? true (:rx cache))
@@ -192,7 +192,7 @@
             ;; The in-flight token, parked in the cache atom for the body's
             ;; duration. It is what makes the commit atomic: no other writer
             ;; can produce this object, so `cur` is still the token exactly
-            ;; when nothing invalidated the pass (§4.3).
+            ;; when nothing invalidated the pass.
             token {::rendering true}
             ;; Refs this pass read (a set: a re-read adds nothing). The
             ;; payload's :watched and the branch-switch diff's "after" set.
@@ -225,7 +225,7 @@
           (try
             ;; Park the token as the first form in the protected region: from
             ;; here on any invalidation destroys it, and the commit below
-            ;; keeps the nil instead of writing a stale cache (§4.3).
+            ;; keeps the nil instead of writing a stale cache.
             (reset! cache-atom token)
             (let [result (render-fn)
                   atom-vals @atoms

@@ -41,10 +41,9 @@ global.**
 User-facing documentation belongs in `docs/` (keep the root
 [`README.md`](README.md) short and user-facing); implementation notes belong
 next to their source package. The temporary notes `perf.md`, `jolt-bugs.md`,
-`tcl.md`, `new-app.md` (the kmet2 design record: the open seams, the limits
-that shipped and the declined options) and `render-opt.md` (the per-child
-render cache redesign, proposed, not started) intentionally remain at the
-project root.
+`tcl.md` and `new-app.md` (the kmet2 design record: the open seams, the limits
+that shipped and the declined options) intentionally remain at the project
+root.
 
 ## Basic development flow
 

@@ -4,8 +4,8 @@
    constructed component renders, and an unchanged one must hand back the
    identical object.
 
-   This is the net `atoms-unchanged?` used to be (render-opt.md §6), moved
-   into the suite where it belongs: the frame benchmark can show a cache got
+   This is the net `atoms-unchanged?` used to be (`tui.md` §3.2, `perf.md`
+   §23), moved into the suite where it belongs: the frame benchmark can show a cache got
    faster, never that it went stale, and the failure mode is silent."
   (:require [clojure.test :as t :refer [deftest]]
             [kmet.test-utils :as tu]

@@ -28,6 +28,13 @@ The frame bench cannot see any of it: its harness mounts no fn components
 (a call-counted probe reports zero `ComponentFn` renders on a replayed
 session, §14.1).**
 
+**§23 is the message-cache walk (`:parts`) in 2026-11: the per-ref
+re-verification on every `track!` hit that made compose O(refs × messages),
+the two changes that removed it (watch at the read, then trust the
+invalidation edges), the guarantee change that came with it, the measured
+before/after, and why the parent probe was declined. §23.1 holds the earlier
+render-path structure findings that used to live in `review.md` §14.**
+
 **§16 re-checks the paths those two fixes touched, on the installed
 `jolt v0.8.21` / `bb` 1.13.225 (2026-10-11): the reakt layer's jolt
 primitive deficit is gone — `tracked-deref` in a scope is now 1.9x faster
@@ -2665,3 +2672,123 @@ streaming path at real block sizes (§22.2).
 - Virtualization still stands as §10.6 left it: the scroll view renders the
   whole document, so a redraw (resize) re-renders every component
   (468 ms on the fixture, 1.48 MB written).
+
+## 23. The message-cache walk (`:parts`) — 2026-11
+
+`ChatHistory`'s walk over its message components
+(`kmet.ui.tui.chat-history/message-parts`) was the largest single item in
+compose on a 447-message / 18,243-line session (`:tool-display-mode
+:expanded`): 3.9 ms of a 7 ms typing frame, 75–80 % of compose. One `track!`
+hit per message (`kmet.hikap.component/track-render`), ~6 µs each (user 3.9,
+assistant 4.8, tool 7.9); ~78 % of that was the per-ref walk — the hit
+re-derefed every tracked atom and compared values (`atoms-unchanged?`, 220 ns
+per atom on the phone) — and ~1.2 µs was fixed overhead. The walk existed as
+the net under a real hole and cost more than the work it guarded.
+
+Two changes landed, with one guarantee change named:
+
+1. **Watch at the read.** `kmet.reakt.core/*on-tracked-read*` is called with
+   the ref and its kind just before `tracked-deref` derefs it; `track-render`
+   installs a `:plain` ref's watch there, and registers the weak entry before
+   the body with the previous pass's payload. That closes both windows the
+   old net covered: **read→watch** (a write between a read and the body's end
+   used to be unobserved and cached as-read) and **check→write** (the cache
+   write was a read-then-act, so a concurrent `invalidate-cache` was erased
+   by it). The commit is now an in-flight token: the miss path parks
+   `{::rendering true}` in the cache atom and commits with
+   `(swap! cache-atom (fn [cur] (if (identical? cur token) M cur)))`, which
+   deletes `invalidated?`, its cache-atom watch and the add/remove-watch pair.
+   Reaction watches stay post-body — a reaction's own derive fires its
+   watchers, so an at-read install would invalidate the pass that read it;
+   `rx-unchanged?`'s state test carries that half. A throwing body leaves no
+   watches, no entry and no cache (it unwatches the union of this pass's reads
+   and the previous payload); without that, a pass that throws strands every
+   watch it installed.
+2. **Trust presence** (the guarantee change). The hit path is
+   `contains? :atoms` + width + `rx-unchanged?` + `tracked?`: no value
+   re-verification. A watch lost behind `track!`'s back now leaves the
+   component stale until something else invalidates it (accepted, pinned by
+   `test-a-lost-watch-leaves-the-component-stale`), and an entry dropped by a
+   stray teardown re-renders and re-registers (`tracked?`, pinned by
+   `test-a-dropped-registry-entry-heals-through-the-hit-path`). Reactions keep
+   `rx-unchanged?`: an input write marks a reaction `:dirty` without notifying
+   its subscribers. `tui.md` §3.2 is the contract.
+
+Measured after, dev host (WSL2/x86), same session: `:parts` calm 1.25–3.06 ms,
+typing 1.20–2.17 ms, against 3.6–4.8 / 3.9–6.8 before. The gain is
+ref-count dependent: a min-of-batches micro-benchmark on synthetic caches
+(integer values) has 20 refs 0.88–1.20 µs → 0.41–0.49, 8 refs barely moving,
+and a **1-ref `Text` hit slower** (0.48–0.51 → 0.67–0.77 µs), because the
+ownership read is a fixed cost. Real message caches read 12–30 refs whose
+values are theme maps and strings, where the old structural `=` was the
+dominant term — the frame numbers, not the synthetic ones, are the win. This
+host is noisy (WSL2 swings ~2× on identical code), so those are ranges, not
+points; the soundness gate was a test, not the benchmark
+(`kmet.ui.tui.test-track-staleness`: each message family's invalidated render
+must equal a fresh component's render, and it was proved to bite — disabling
+the at-read watch fails all five families).
+
+**Declined: the parent probe.** Skipping the child's `render` call through a
+`stable-lines` helper at `message-parts`/`Container.render` was modelled at
+~0.2 ms and is worth nothing measured: after change 2 the phase sits at
+~1.2 ms with the ~1.2 ms flatten/flags loop as its floor, and the probe's
+cost is the same ownership read a 1-ref hit already loses to. Nothing of it
+shipped. Also rejected: **verify-at-write** (a write can land after the check,
+before the watch — the window shrinks, it does not close);
+**a flag re-check at the commit** (the flag is set by the watch, i.e. after
+the invalidating write, so it cannot be read at the right time — the token
+exists for that reason); **reaction-driven invalidation of dependents**
+(sound, but it buys nothing for this walk — no message component reads a
+reaction — and needs ordering rules around manual reactions self-disposing on
+unwatch).
+
+Reproduce: `bb scripts/bench/kmet_frame_bench.clj <session> 100 30
+calm,typing,stream` (the script's header says what each scenario drives and
+how paused frames are excluded). Any session with 400+ messages works.
+
+### 23.1 Earlier render-path structure findings (moved from review.md §14)
+
+- ~~**Frame rebuild copies the whole document**~~ **fixed** (`build-frame-lines`,
+  `frame.clj:113-187`): the pass now starts from the previous output vector, `assoc`s only
+  the differing chunks, `conj`s the appended tail, and returns the previous vector itself
+  when nothing changed (so the diff scan's `identical?` fast path sees it).
+
+- ~~**The flat document is rebuilt at every container level**~~ **fixed**: children are
+  flattened through `protocols/cached-lines` (the atom-backed `concat-cached`), a
+  per-instance memo (`Container`'s
+  `:lines-cache`, `ChatHistoryComponent :lines-cache`, `Box`'s `:cache`, the frame's
+  per-run `document-cache`) that hands back the previous line vector — the same object,
+  so the parent hits too — while every child returns the object it returned last pass.
+  The key holds the assembly's non-child inputs (`[width]` for a container; geometry and
+  a background sample for a Box), so a re-derived child is a miss: no invalidation hook,
+  no parent link, and no staleness when a reactive child re-derives. Grouping separators
+  are parts (one shared `[""]`), so a quiet-run regrouping can only show up as a changed
+  parts sequence. `Container.render` no longer calls `render-all`, and `join-lines` is
+  the one join (a single part is returned as-is). Measured (Termux/bb, 9k-line
+  transcript, 4 nesting levels): idle compose 3.44 → 1.91 ms, keystroke 4.33 →
+  2.10 ms; the frame pass then sees the identical document and takes its
+  unchanged-document fast paths. Retained cost is one pointer array per memoized level
+  (~8 bytes/line; no line text is copied) and dies with the component or the loop run.
+  The quiet-mode re-parse went with it: `skill-block/parse` ran per user message per
+  pass (105 µs for a 3 KB block — a transcript with a dozen skill invocations burned
+  milliseconds every frame); the parse now happens once in `chat-history-add-message!`
+  and rides the message map as `:skill-block` (stripped by `chat-history-get-messages`).
+
+- ~~**`run-render-loop!` is ~720 lines**~~ **fixed**: the frame moved to `kmet.tui.frame`
+  (`render-frame!` + the document/diff/emit passes over an explicit frame-state map); the loop
+  is now 201 lines of lifecycle, timers, lock and schedule, and `test_frame` drives one frame
+  on a stub TUI with no terminal. The review asked for three entry points
+  (`build-frame`/`diff-frame`/`emit-frame`); they share the cursor and viewport state the diff
+  mutates, so they landed as one `render-frame!` with the passes inside it — the split was
+  the untested part, not the boundary. `main-diff` then came out too: `diff-frame!` (CC 79) is
+  a top-level fn taking the frame values and the emit kit it needs, so the pass is 290 lines
+  instead of 551 — the mass moved, it did not shrink (`bb slop` erosion 0.829).
+
+- **Frame state is ~17 independent atoms** updated field by field — `create-tui` builds them
+  (`core.clj:131-195`), `reset-frame!` resets nine one at a time (`frame.clj:435-451`), the
+  commit writes nine in a row (`frame.clj:981-1010`), and the loop clears `force-redraw?`
+  (`core.clj:2127-2129`): one `(:frame tui)` atom holding a previous-frame map removes the two
+  lists that must stay in sync. 29 read sites, all in `core.clj` and `frame.clj`
+  (`render-frame!` reads the memo at `frame.clj:796-798`).
+
+- ~~**`(System/getenv "TERMUX_VERSION")` runs on every frame**~~ **fixed**: `termux-host?`.

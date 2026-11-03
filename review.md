@@ -23,12 +23,13 @@ codebase's own guardrails (subprocess arg lists, resolve-inside-try, jar extensi
 | 11 | Keyring secret in argv | low/medium (exposure) | **fixed** (Windows; macOS documented) |
 | 12 | `run_code` sandbox exposes `future`/`future-call` | — | **dropped** (not a finding) |
 | 13 | `tui-resume!` bypasses the render-crash guard | high (silent hang) | **fixed** |
-| 14+ | Structural: frame copying, render loop size, duplicated policies | low (maintainability) | **partly fixed** (§14) |
+| 14+ | Structural: duplicated policies | low (maintainability) | **partly fixed** (§14) |
 
 Findings 1–13 are fixed (one commit each, each with a regression test); 12 is dropped.
-Of finding 14's structural list the small items are done and two stand (see §14).
-Line references in the fixed findings describe the code as it was found — the fix moved
-them; §14's surviving bullets point at the code as it stands.
+Finding 14's render-path items moved to [`perf.md`](perf.md) §23.1; the rest
+stand or are fixed as marked. Line references in the fixed findings describe
+the code as it was found — the fix moved them; §14's surviving bullets point
+at the code as it stands.
 
 ---
 
@@ -284,49 +285,13 @@ throws and asserts the future ends, `:stopped?` is set and the stack is in
 `kmet-render-crash.log`. The TUI `!` path's nil exit code found while fixing 3 is fixed too:
 a run without an exit code is `:error` and shows `(no exit code)`.
 
-## 14. Structure and hot paths
+## 14. Structure
 
-The small items and the frame extraction are done; two stand.
+The render-path findings this section used to carry (frame copying, the
+flat-document lines cache, the loop extraction, frame state, the per-frame
+`getenv`) moved to [`perf.md`](perf.md) §23.1. What is left here is
+structure that is not on the render path.
 
-- ~~**Frame rebuild copies the whole document**~~ **fixed** (`build-frame-lines`,
-  `frame.clj:113-187`): the pass now starts from the previous output vector, `assoc`s only
-  the differing chunks, `conj`s the appended tail, and returns the previous vector itself
-  when nothing changed (so the diff scan's `identical?` fast path sees it).
-- ~~**The flat document is rebuilt at every container level**~~ **fixed**: children are
-  flattened through `protocols/cached-lines` (the atom-backed `concat-cached`), a
-  per-instance memo (`Container`'s
-  `:lines-cache`, `ChatHistoryComponent :lines-cache`, `Box`'s `:cache`, the frame's
-  per-run `document-cache`) that hands back the previous line vector — the same object,
-  so the parent hits too — while every child returns the object it returned last pass.
-  The key holds the assembly's non-child inputs (`[width]` for a container; geometry and
-  a background sample for a Box), so a re-derived child is a miss: no invalidation hook,
-  no parent link, and no staleness when a reactive child re-derives. Grouping separators
-  are parts (one shared `[""]`), so a quiet-run regrouping can only show up as a changed
-  parts sequence. `Container.render` no longer calls `render-all`, and `join-lines` is
-  the one join (a single part is returned as-is). Measured (Termux/bb, 9k-line
-  transcript, 4 nesting levels): idle compose 3.44 → 1.91 ms, keystroke 4.33 →
-  2.10 ms; the frame pass then sees the identical document and takes its
-  unchanged-document fast paths. Retained cost is one pointer array per memoized level
-  (~8 bytes/line; no line text is copied) and dies with the component or the loop run.
-  The quiet-mode re-parse went with it: `skill-block/parse` ran per user message per
-  pass (105 µs for a 3 KB block — a transcript with a dozen skill invocations burned
-  milliseconds every frame); the parse now happens once in `chat-history-add-message!`
-  and rides the message map as `:skill-block` (stripped by `chat-history-get-messages`).
-- ~~**`run-render-loop!` is ~720 lines**~~ **fixed**: the frame moved to `kmet.tui.frame`
-  (`render-frame!` + the document/diff/emit passes over an explicit frame-state map); the loop
-  is now 201 lines of lifecycle, timers, lock and schedule, and `test_frame` drives one frame
-  on a stub TUI with no terminal. The review asked for three entry points
-  (`build-frame`/`diff-frame`/`emit-frame`); they share the cursor and viewport state the diff
-  mutates, so they landed as one `render-frame!` with the passes inside it — the split was
-  the untested part, not the boundary. `main-diff` then came out too: `diff-frame!` (CC 79) is
-  a top-level fn taking the frame values and the emit kit it needs, so the pass is 290 lines
-  instead of 551 — the mass moved, it did not shrink (`bb slop` erosion 0.829).
-- **Frame state is ~17 independent atoms** updated field by field — `create-tui` builds them
-  (`core.clj:131-195`), `reset-frame!` resets nine one at a time (`frame.clj:435-451`), the
-  commit writes nine in a row (`frame.clj:981-1010`), and the loop clears `force-redraw?`
-  (`core.clj:2127-2129`): one `(:frame tui)` atom holding a previous-frame map removes the two
-  lists that must stay in sync. 29 read sites, all in `core.clj` and `frame.clj`
-  (`render-frame!` reads the memo at `frame.clj:796-798`).
 - ~~**Two session-deletion policies**~~ **fixed**: `session/listing.clj` owns the policy
   (`delete-session-file`: trash then unlink), `delete-session!` calls it and reports a failed
   delete instead of dropping it, and the selector defaults to it.
@@ -341,8 +306,9 @@ The small items and the frame extraction are done; two stand.
   update the status bar. Only the tails differ: `handle-refresh` adds
   `bootstrap-direct-tools!` and the "MCP config reloaded." notice. One shared reload helper
   returns the new config and each caller adds its own tail.
-- ~~**`(System/getenv "TERMUX_VERSION")` runs on every frame**~~ **fixed**: `termux-host?`.
+
 - ~~**Dead code**: `center-offset`~~ **fixed**: removed.
+
 - ~~**The dispatch lock is process-global**~~ **fixed**: the mutex is a field of the TUI
   record, created in `create-tui` (`core.clj:150`), and `with-dispatch-lock`/`with-render-lock`
   (`core.clj:1053`, `1083`) read it from the instance — a second TUI no longer serializes
@@ -353,6 +319,8 @@ The small items and the frame extraction are done; two stand.
 
 ---
 
+---
+
 ## Suggested order of work
 
 1. ~~Small and testable, one commit each: 3, 7, 8, 6, 5.~~ all done.
@@ -360,8 +328,6 @@ The small items and the frame extraction are done; two stand.
 3. ~~Then the lifecycle fix with a test asserting empty root after unload: 9.~~ done.
 4. ~~Then robustness: 4, 10, 11, and the TUI guard (13), plus the TUI `!` path's nil exit
    code~~ all done, 7 and 5 with item 1.
-5. Structural work (14) as its own series: the small items, the frame extraction and
-   the lines cache (container/Box/chat-history/document memo plus the quiet-mode parse
-   hoist) are done. Left, in this order: the MCP reload dedup
-   (`handle-refresh`/`reload-config!`, `mcp_adapter/core.clj:797,1135`), then the frame-state
-   atom.
+5. Structural work (14) as its own series: the small items are done, and the
+   render-path half moved to `perf.md` §23.1. Left: the MCP reload dedup
+   (`handle-refresh`/`reload-config!`, `mcp_adapter/core.clj:797,1135`).
