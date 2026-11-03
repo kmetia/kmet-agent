@@ -14,7 +14,8 @@
    container that embeds its children as text windows) and no app content,
    theme or renderer. It demonstrates the extra-tag seam an app UI builds on;
    `scripts/demos/gui_tk_demo.clj` shows the plain backend without it.
-   Staged groundwork for the `ui-tk` service (new-app.md § Not doing)."
+   Staged groundwork for the `ui-tk` service
+   (modules/app/src/kmet/design.md § Not doing)."
   (:require [kmet.tk.core :as tk]
             [kmet.tk.dsl :as dsl]
             [kmet.tk.options :as opt])

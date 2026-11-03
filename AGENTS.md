@@ -14,8 +14,9 @@ the request as `kmet.ai.llm` behind the row) and modes are replaceable rows, and
 an extension mounts beside them instead of patching a privileged core. Module
 map, composition and service catalog: [`docs/architecture.md`](docs/architecture.md);
 open seams (a composition edit still has no `applied` / `restart-required`
-vocabulary among them): [`new-app.md`](new-app.md) § Open at HEAD; kernel
-departures from Cordis: [`srce.md`](modules/srce/src/kmet/srce/srce.md) §5/§10.
+vocabulary among them): [`design.md`](modules/app/src/kmet/design.md) § Open at
+HEAD; kernel departures from Cordis:
+[`srce.md`](modules/srce/src/kmet/srce/srce.md) §5/§10.
 **New behavior attaches to a documented seam — a plugin row, a service, an
 event, or the extension contract — not to a branch in the entry or a new
 global.**
@@ -26,13 +27,13 @@ global.**
 |------|-------------------------|
 | Application layout and contributor workflow | [`docs/architecture.md`](docs/architecture.md) |
 | Kernel: ctx tree, services, inject, fibers, effects, events | usage: [`modules/srce/README.md`](modules/srce/README.md); contracts: [`modules/srce/src/kmet/srce/srce.md`](modules/srce/src/kmet/srce/srce.md) |
-| kmet2 application: composition, services, agents, sessions, tools and the script sandbox | [`docs/architecture.md`](docs/architecture.md); open seams and declined options in [`new-app.md`](new-app.md) |
+| kmet2 application: composition, services, agents, sessions, tools and the script sandbox | [`docs/architecture.md`](docs/architecture.md); open seams and declined options in [`modules/app/src/kmet/design.md`](modules/app/src/kmet/design.md) |
 | TUI, components, Hiccup, reactivity, input, and rendering | [`modules/tui/src/kmet/tui/tui.md`](modules/tui/src/kmet/tui/tui.md) |
 | Tk backend and its widget sample (`kmet.tk.*`, `kmet.gui-sample.*`) | [`modules/tk/src/kmet/tk/README.md`](modules/tk/src/kmet/tk/README.md) |
 | Extension contract (`kmet.extension` API, allowed namespaces, lifecycle) | [`modules/app/src/kmet/extension.md`](modules/app/src/kmet/extension.md) |
 | Extension authoring guide (layouts, loaders, deps, UI, testing) | [`docs/extensions.md`](docs/extensions.md) |
 | pi alignment and feature-gap analysis | [`docs/pi-alignment.md`](docs/pi-alignment.md) |
-| Architecture lineage: pi functionality, dsh's Cordis "everything is a plugin" model | [`new-app.md`](new-app.md) § Prior art: DSH and § Reconciliation; [`modules/srce/src/kmet/srce/srce.md`](modules/srce/src/kmet/srce/srce.md) |
+| Architecture lineage: pi functionality, dsh's Cordis "everything is a plugin" model | [`design.md`](modules/app/src/kmet/design.md) § Prior art: DSH; [`modules/srce/src/kmet/srce/srce.md`](modules/srce/src/kmet/srce/srce.md) |
 | Loader design and backends | [`modules/loader/src/kmet/loader/loader.md`](modules/loader/src/kmet/loader/loader.md) |
 | Jolt provider scaffolding and host integration | [`jolt/src/jolt/kmet/README.md`](jolt/src/jolt/kmet/README.md) |
 | Platforms (Linux, macOS, Windows, WSL, Termux), building and distribution | [`docs/building.md`](docs/building.md) |
@@ -41,9 +42,10 @@ global.**
 User-facing documentation belongs in `docs/` (keep the root
 [`README.md`](README.md) short and user-facing); implementation notes belong
 next to their source package. The temporary notes `perf.md`, `jolt-bugs.md`,
-`tcl.md` and `new-app.md` (the kmet2 design record: the open seams, the limits
-that shipped and the declined options) intentionally remain at the project
-root.
+`tcl.md` intentionally remain at the project root; the app's design record —
+the open seams, the shipped limits and the declined options — lives beside the
+contract it describes, in
+[`modules/app/src/kmet/design.md`](modules/app/src/kmet/design.md).
 
 ## Basic development flow
 

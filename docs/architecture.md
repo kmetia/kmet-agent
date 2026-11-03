@@ -11,9 +11,9 @@ the user-facing `docs/` directory: see
 [`pi-alignment.md`](pi-alignment.md). The generated composition catalog is
 [`composition.md`](composition.md); the app's design record — the open seams,
 the limits that shipped and the options declined — is
-[`new-app.md`](../new-app.md); this file is the current map. Temporary analysis
-notes (`perf.md`, `jolt-bugs.md`, `tcl.md`) remain at the
-repository root by convention.
+[`modules/app/src/kmet/design.md`](../modules/app/src/kmet/design.md); this file
+is the current map. Temporary analysis notes (`perf.md`, `jolt-bugs.md`,
+`tcl.md`) remain at the repository root by convention.
 
 ## Project structure
 
@@ -135,8 +135,8 @@ kmet/app/
 Each row names its own file (`sessions.clj`, `extensions.clj`, `agents.clj`,
 `world.clj`, …): a row is a `srce` plugin whose `apply` provides its service,
 and `registries.clj` is the router behind them. How the rows are composed is
-§ Composition below; [`new-app.md`](../new-app.md) keeps the design record and
-the items that did not ship.
+§ Composition below; [`design.md`](../modules/app/src/kmet/design.md) keeps the
+design record and the items that did not ship.
 
 ### The front end (`modules/app/src/kmet/ui`)
 
@@ -458,7 +458,7 @@ probe and no real use, and is gone;
   have no signal plumbing), and a host-blocked script is abandoned after a
   1.5 s interrupt grace rather than killed — the one accepted limitation of an
   in-process sandbox, with the process-isolation tier recorded in
-  [`new-app.md`](../new-app.md) § Open at HEAD.
+  [`design.md`](../modules/app/src/kmet/design.md) § Open at HEAD.
 - **Result shape.** `:details` carries the effective `:timeout`, the measured
   `:elapsed-ms` (wall clock for the whole call, including the grace and the
   capture drain) and the call trace `{:calls [...]}` — one entry per inner

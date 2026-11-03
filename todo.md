@@ -1225,8 +1225,9 @@ plus ~150 moved (step 2).
    scoping of "a `def` in one call is invisible to the next" to `run_code`);
    `bb generate-catalog`; `docs/pi-alignment.md` § codemode (the persistent
    `store`/`load` half and the extension analogue are no longer missing);
-   `new-app.md` § Open at HEAD 5 (one line: a persistent context makes Jolt's
-   `eval-in` more attractive later; the decision is unchanged).
+   `modules/app/src/kmet/design.md` § Open at HEAD 5 (one line: a persistent
+   context makes Jolt's `eval-in` more attractive later; the decision is
+   unchanged).
 
 ### Test plan
 
@@ -1266,7 +1267,7 @@ plus ~150 moved (step 2).
   that is the feature and the risk. Files are plain text in the project for
   review, and no sandbox is claimed.
 - A host-blocked call still hits the existing interrupt-grace limitation
-  (no process isolation — `new-app.md` § Open at HEAD 5).
+  (no process isolation — `modules/app/src/kmet/design.md` § Open at HEAD 5).
 - Nothing is kept from `run_code`; nothing from `eval` is visible to
   `run_code` or to a subagent; two agents in one process have two stores and
   two contexts.
