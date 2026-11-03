@@ -2,6 +2,7 @@
   "kmet.app.catalog — row cards read from the plugin map itself, and the
    `:ext/…` form resolved from the installed extensions by name."
   (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [kmet.app.catalog :as catalog]
             [kmet.app.packages :as packages]
@@ -76,6 +77,32 @@
   (testing "an explicit :id wins over the plugin name"
     (is (= :read (:id (catalog/describe {:plugin 'kmet.app.test-catalog/test-plugin
                                          :id :read}))))))
+
+(deftest a-load-failure-is-not-a-missing-plugin
+  ;; The require error used to be swallowed, so a plugin namespace that fails
+  ;; to compile read as an absent var — a syntax error reported itself as a
+  ;; typo. The error now travels with the report: the message names its
+  ;; file:line, :load-error holds it, and it stays the cause.
+  (let [boom (ex-info "Unable to resolve symbol: helper in this context"
+                      {:file "/repo/modules/app/src/kmet/app/compaction.clj"
+                       :line 12})]
+    (with-redefs [requiring-resolve (fn [_] (throw boom))]
+      (let [e (try (catalog/describe {:plugin 'some.plugin/plugin})
+                   (catch Exception e e))
+            message (ex-message e)]
+        (is (= :kmet.app/unknown-plugin (:type (ex-data e)))
+            "the composition-error type is unchanged")
+        (is (str/includes? message "some.plugin/plugin") "the source is named")
+        (is (str/includes? message "Unable to resolve symbol: helper"))
+        (is (= "/repo/modules/app/src/kmet/app/compaction.clj:12: Unable to resolve symbol: helper in this context"
+               (:load-error (ex-data e)))
+            "ex-data carries the text, not the throwable")
+        (is (identical? boom (ex-cause e)) "the load error stays the cause"))))
+  (with-redefs [requiring-resolve (fn [_] (throw (ex-info "no site" {})))]
+    (is (str/includes? (try (catalog/describe {:plugin 'some.plugin/plugin})
+                            (catch Exception e (ex-message e)))
+                       "; loading it failed: no site")
+        "a failure without a file:line still reports its message")))
 
 (deftest inject-comes-back-normalized
   ;; The card must read like the fiber record: a vector declaration is
