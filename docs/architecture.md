@@ -391,7 +391,11 @@ yet with `kmet.libs.ranking` — the same scorer `mcp search` reads the MCP cach
 with — and loads every match, so the next request declares them. Its
 description is a constant (registering a source never rewrites a cached schema)
 and it is `:model-only`, because a script that could call it would change what
-the model sees mid-script.
+the model sees mid-script. A deferred source is announced to the model by one
+appended `:custom-message` entry — its id and one line, written when the set or
+a description changes (`state/sync-tool-sources-listing!`), never on a
+promotion and never by rebuilding the leading system prompt (pi's appended
+`mcp_servers` section; D7).
 
 **One invocation pipeline.** `kmet.app.tools.invoke` is the only
 chain → check → execute path:

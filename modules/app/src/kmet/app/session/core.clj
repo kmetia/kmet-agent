@@ -58,6 +58,8 @@
 (def context-edit-label context/context-edit-label)
 (def context-entries context/context-entries)
 (def context-messages context/context-messages)
+(def deferred-sources-listing context/deferred-sources-listing)
+(def tool-sources-custom-type context/tool-sources-custom-type)
 (def derive-context-settings context/derive-context-settings)
 (def detect-cache-miss context/detect-cache-miss)
 (def project-context context/project-context)

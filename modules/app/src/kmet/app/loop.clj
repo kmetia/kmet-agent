@@ -428,6 +428,10 @@
   ;; pi: pending nextTurn messages ride with the prompt, after the user
   ;; message and before before_agent_start's injected messages
   (state/inject-next-turn-messages! agent)
+  ;; tell the model which deferred tool sources exist, if that changed since the
+  ;; branch's last listing (a promotion appends nothing, pi: the mcp_servers
+  ;; section is appended rather than the declarations rewritten)
+  (state/sync-tool-sources-listing! agent)
   (let [bas (extensions/apply-before-agent-start-hooks
              message @(:system agent))]
     (when (:system-prompt bas)

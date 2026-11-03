@@ -7,6 +7,7 @@
    where the selection settings and the declared/callable split resolve over
    them."
   (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [clojure.test :as t]
             [kmet.ai.llm :as llm]
             [kmet.app.config :as cfg]
@@ -308,4 +309,83 @@
       (finally
         (tools/unregister-tool-source! h ::catalog)
         (tools/unregister-tool! h search/tool-search-name)
+        (fs/delete-tree dir)))))
+
+;; ─── The deferred-source listing ──────────────────────────────────────────
+
+(defn- listings [sess]
+  (filter #(and (= :custom-message (:role %))
+                (= session/tool-sources-custom-type (:custom-type %)))
+          (session/get-branch sess)))
+
+(t/deftest test-a-deferred-source-is-named-once-in-an-appended-message
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)]
+    (try
+      (t/is (nil? (state/sync-tool-sources-listing! agent))
+            "no deferred source, nothing to say — and no message")
+      (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
+      (let [msg (state/sync-tool-sources-listing! agent)]
+        (t/is (some? msg))
+        (t/is (str/includes? (:content msg) "1 deferred tool source"))
+        (t/is (str/includes? (:content msg) "- catalog: A catalog"))
+        (t/is (str/includes? (:content msg) "tool_search"))
+        (t/is (false? (:display msg)) "the model reads it, not the chat"))
+      (t/is (nil? (state/sync-tool-sources-listing! agent))
+            "the same set is not announced twice")
+      (t/is (= 1 (count (listings session))))
+      ;; a promotion is not a source change: nothing appended
+      (state/promote-tools! agent ["deferred-a"])
+      (t/is (nil? (state/sync-tool-sources-listing! agent)))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-a-changed-description-is-appended-again
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)]
+    (try
+      (deferred-source! h ::catalog "First line" {"a" (tool-map "a")})
+      (state/sync-tool-sources-listing! agent)
+      (deferred-source! h ::catalog "Second line" {"a" (tool-map "a")})
+      (t/is (some? (state/sync-tool-sources-listing! agent))
+            "a description change is worth a new message")
+      (t/is (= 2 (count (listings session))))
+      (t/is (str/includes? (:content (last (listings session))) "Second line"))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-a-vanished-source-set-says-so-once
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)]
+    (try
+      (deferred-source! h ::catalog "A catalog" {"a" (tool-map "a")})
+      (state/sync-tool-sources-listing! agent)
+      (tools/unregister-tool-source! h ::catalog)
+      (t/is (str/includes? (:content (state/sync-tool-sources-listing! agent))
+                           "No tool sources are deferred.")
+            "the stale listing is corrected instead of left standing")
+      (t/is (nil? (state/sync-tool-sources-listing! agent))
+            "and corrected once")
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-the-listing-prefix-is-not-rewritten
+  ;; gate 6: the leading system prompt is untouched — the listing is one
+  ;; appended entry, so a source appearing costs no prefix miss
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)
+        system-before @(:system agent)]
+    (try
+      (deferred-source! h ::catalog "A catalog" {"a" (tool-map "a")})
+      (state/sync-tool-sources-listing! agent)
+      (t/is (= system-before @(:system agent)))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
         (fs/delete-tree dir)))))

@@ -15,6 +15,7 @@
      branch-with-summary! build-context build-context-messages build-session-info
      build-session-infos clone-session common-ancestor-id compact-with-summary!
      context-edit-label context-entries context-messages copy-imported-session!
+     deferred-sources-listing
      create-session delete-session! delete-session-file
      derive-context-settings detect-cache-miss
      encode-cwd find-most-recent-session fork-from fork-session
@@ -25,7 +26,8 @@
      make-bash-entry plan-session-import project-context project-entries
      record-bash-result! replace-entries! reset-leaf! resolve-session-path
      sanitize-session-name session-cwd session-dir-for-cwd session-entry-text
-     set-label! tool-usage tool-usage-report usage-breakdown usage-totals})
+     set-label! tool-sources-custom-type tool-usage tool-usage-report
+     usage-breakdown usage-totals})
 
 (deftest facade-loads-the-implementation
   (testing "requiring the façade loads the namespaces behind it"

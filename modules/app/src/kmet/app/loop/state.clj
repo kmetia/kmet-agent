@@ -433,6 +433,36 @@ Be precise and concise in your responses."}}]
     (emit agent {:type :message-start :message msg})
     msg))
 
+(defn- last-tool-sources-listing
+  "The text of the branch's last deferred-source listing, or nil when the
+   branch has none — what `sync-tool-sources-listing!` compares against, so the
+   message is appended once per change rather than once per prompt."
+  [sess]
+  (:content (last (filter #(and (= :custom-message (:role %))
+                                (= session/tool-sources-custom-type (:custom-type %)))
+                          (session/get-branch sess)))))
+
+(defn sync-tool-sources-listing!
+  "Tell the model which deferred tool sources exist, when the set or one of its
+   one-line descriptions changed since the branch's last listing. Appends one
+   `:custom-message` (user-role, not displayed) and never rewrites the leading
+   system prompt, which is a full prefix miss; a promotion appends nothing.
+   Returns the message, or nil when there was nothing new to say."
+  [agent]
+  (when-let [sess (:session agent)]
+    (let [sources (tools/get-deferred-sources (srce/get (:ctx agent) :tools))
+          text (session/deferred-sources-listing sources)
+          previous (last-tool-sources-listing sess)]
+      ;; an empty set is only worth a message when something was listed before:
+      ;; a session that never had a deferred source stays silent
+      (when (and (not= text previous)
+                 (or (seq sources) previous))
+        (append-custom-message! agent {:role :custom
+                                       :custom-type session/tool-sources-custom-type
+                                       :content text
+                                       :display false
+                                       :details {:sources (mapv :id sources)}})))))
+
 (defn append-persisted-message!
   "Append MSG to both the live context and the session (pi: append + append-entry).
    Returns MSG. Centralizes the two-step append so context/session stay in sync."

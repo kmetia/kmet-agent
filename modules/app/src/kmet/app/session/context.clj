@@ -6,6 +6,34 @@
             [kmet.app.session.store :as store]
             [kmet.ai.usage :as usage]))
 
+(def tool-sources-custom-type
+  "The custom-message type that tells the model which deferred tool sources
+   exist. One type, so the listing's own last entry can be found and compared
+   without re-deriving what it said."
+  :tool-sources)
+
+(defn deferred-sources-listing
+  "The text that tells the model which deferred tool sources exist: one line per
+   source (its id and its one line), and what it can do about them. Once
+   something was listed, an empty set says so rather than leaving the stale
+   message standing.
+
+   pi keeps an `mcp_servers` section in the system prompt and *appends* a new
+   one when it changes, so earlier messages stay cached; kmet has no
+   mid-conversation system role, so this is appended as a custom message
+   (`state/sync-tool-sources-listing!`) instead of rebuilding the leading one."
+  [sources]
+  (if (empty? sources)
+    "No tool sources are deferred."
+    (str (count sources) " deferred tool source" (when (not= 1 (count sources)) "s")
+         ". Their tools are callable from run_code now; tool_search loads one so you can call it directly.\n\n"
+         (str/join "\n"
+                   (map (fn [{:keys [id description]}]
+                          (if (str/blank? (str description))
+                            (str "- " (name id))
+                            (str "- " (name id) ": " description)))
+                        sources)))))
+
 (defn derive-context-settings
   "Derive {:thinking-level :model :provider} from the branch root→leaf (pi:
    getSessionContextSettings): the latest :thinking-level-change entry wins
