@@ -131,7 +131,42 @@
             "the next render re-reads the ref")
       (t/is (= 2 @runs))
       (t/is (= 2 (component/track-render c 10 (fn [] (throw (ex-info "hit must not run" {})))))
-            "and the pass it wrote is cached"))))
+            "and the pass it wrote is cached")
+      (component/remove-track-watches! c))))
+
+(t/deftest test-a-throwing-body-leaves-no-watches-or-cache
+  (t/testing "a throw after a read unwatches what it read — a stranded watch
+            would fire forever and invalidate a later pass that never read it"
+    (let [a (atom 1)
+          b (atom 2)
+          c {:cache (atom nil)}]
+      (t/is (thrown? Exception
+                     (component/track-render c 10 (fn [] (reakt/tracked-deref a)
+                                                    (throw (ex-info "boom" {}))))))
+      (t/is (nil? @(:cache c)) "no cache from a failed pass")
+      (t/is (not (component/tracked? c)) "no registry entry")
+      (t/is (= 2 (component/track-render c 10 (fn [] (reakt/tracked-deref b)))))
+      (t/is (some? @(:cache c)))
+      (reset! a 99)
+      (t/is (some? @(:cache c)) "a ref only the failed pass read is not watched")
+      (reset! b 3)
+      (t/is (nil? @(:cache c)) "the ref the successful pass read is watched")
+      (component/remove-track-watches! c)))
+  (t/testing "the same when a previous pass's cache is present"
+    (let [a (atom 1)
+          c {:cache (atom nil)}]
+      (component/track-render c 10 (fn [] (reakt/tracked-deref a)))
+      (t/is (some? @(:cache c)))
+      ;; width change forces the miss that then throws
+      (t/is (thrown? Exception
+                     (component/track-render c 11 (fn [] (reakt/tracked-deref a)
+                                                    (throw (ex-info "boom" {}))))))
+      (t/is (nil? @(:cache c)) "the rejected cache is not left for the next hit")
+      (t/is (not (component/tracked? c)))
+      (reset! a 2)
+      (t/is (= 2 (component/track-render c 11 (fn [] (reakt/tracked-deref a))))
+            "a retry re-reads and re-registers")
+      (component/remove-track-watches! c))))
 
 (t/deftest test-a-ref-read-twice-is-watched-once
   (t/testing "the payload's :watched is a set — re-reads add no second entry"
@@ -140,7 +175,8 @@
       (component/track-render c 10 (fn [] (+ (reakt/tracked-deref a)
                                              (reakt/tracked-deref a)
                                              (reakt/tracked-deref a))))
-      (t/is (= #{a} (:watched (weak/payload (watch-key-of c))))))))
+      (t/is (= #{a} (:watched (weak/payload (watch-key-of c)))))
+      (component/remove-track-watches! c))))
 
 (t/deftest test-branch-switch-unwatches-dropped-refs
   (t/testing "a ref only a previous branch read stops invalidating"
@@ -158,7 +194,8 @@
       (reset! a 2)                               ;; no longer read
       (t/is (some? @(:cache c)) "a dropped ref keeps its old watch away")
       (reset! b 11)                              ;; still read
-      (t/is (nil? @(:cache c)) "a ref this branch reads still invalidates"))))
+      (t/is (nil? @(:cache c)) "a ref this branch reads still invalidates")
+      (component/remove-track-watches! c))))
 
 ;; ─── weak registry ─────────────────────────────
 

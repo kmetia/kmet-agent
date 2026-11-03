@@ -133,16 +133,21 @@
    value (rx-unchanged?) — never the reaction's own deref, which would
    settle the batch queue on every hit. Watches invalidate on actual value
    changes (equal-value resets are no-ops), and the cache records the
-   values AS READ (not a post-body snapshot), so an atom that changed
-   mid-render makes the stored values disagree with the current ones on the
-   next hit check and forces a re-render.
+   values AS READ, never a post-body snapshot.
    Every tracked read is watched FROM THE READ (kmet.reakt.core's
    *on-tracked-read*), not after the body: a write that lands between the
-   read and the body's end therefore fires, and the mid-body guard refuses
-   the cache instead of storing a value the ref no longer holds.
+   read and the body's end fires that watch, and the mid-body guard refuses
+   the cache — so a stored cache never disagrees with the refs it recorded.
+   (A reaction's watch is the exception: it is installed after the body,
+   because a reaction's own derive fires its watchers; rx-unchanged?'s state
+   test is what catches a reaction that went dirty mid-body.)
    Requires COMPONENT to have a :cache-atom (or legacy :cache) field.
-   A body that invalidates itself mid-run (a render fn calling :invalidate)
-   is not cached — the next render re-runs it with the fresh state.
+   A body that invalidates itself mid-run (a render fn calling :invalidate,
+   or writing a ref it read) is not cached — the next render re-runs it with
+   the fresh state.
+   A body that throws leaves no watches, no registry entry and no cache: the
+   refs it read are unwatched (the union of this pass's reads and the
+   previous pass's payload), because an unreachable watch fires forever.
    Atom handlers capture the component's watch KEY only and find the
    component through the weak registry, so a watch never roots a component;
    a collected component's watches are removed by the next sweep
@@ -173,8 +178,9 @@
             watch-key (tracker-key component)
             ;; The previous pass's payload, snapshotted BEFORE the
             ;; pre-registration below overwrites it: it is the branch-switch
-            ;; diff's "before" set and what a failure must unwatch.
-            prev-watched (:watched (weak/payload watch-key))
+            ;; diff's "before" set and, with @seen, what a failed pass must
+            ;; unwatch.
+            prev-watched (or (:watched (weak/payload watch-key)) #{})
             ;; KEY only — the atom watch must not root the component.
             handler (let [k watch-key]
                       (fn [_ _ old new]
@@ -184,11 +190,14 @@
                                       (= old new))
                           (when-let [c (weak/subject k)]
                             (invalidate-cache c)))))
-            ;; Refs whose watch this pass installed, in read order (deduped):
-            ;; the payload's :watched and the branch-switch diff's "after"
-            ;; set. Single-threaded (a body runs on the render thread), so a
-            ;; volatile set is enough and it never touches a frame.
-            seen (volatile! #{})]
+            ;; Refs this pass read (a set: a re-read adds nothing). The
+            ;; payload's :watched and the branch-switch diff's "after" set.
+            ;; Single-threaded (a body runs on the render thread), so a
+            ;; volatile is enough and it never touches a frame.
+            seen (volatile! #{})
+            ;; Set when the body and the cache write both finish: a throw
+            ;; anywhere in between must leave no state behind (see finally).
+            completed? (volatile! false)]
         ;; Register FIRST, and outside the try: a throw here (a shared cache
         ;; atom, ::weak/subject-conflict) must not leave watches installed
         ;; under a key remove-track-watches! cannot find, nor let a failure
@@ -246,9 +255,25 @@
                                       :atoms atom-vals
                                       :rx (cell-keyed-rx rx-refs)
                                       :result result}))
+                (vreset! completed? true)
                 result)
               (finally
-                (remove-watch cache-atom cache-watch-key)))))))))
+                (remove-watch cache-atom cache-watch-key)
+                ;; A failed pass leaves nothing behind: the refs it read are
+                ;; watched from the read, so unwatching only the entry's
+                ;; payload would strand every ref read before the throw (the
+                ;; watches fire forever, unreachable). The union is every ref
+                ;; this pass could have touched, old and new. The identity
+                ;; guard keeps a subject-conflict (a shared cache atom) from
+                ;; deleting the other live subject's entry.
+                (when-not @completed?
+                  (unwatch-all! watch-key (into prev-watched @seen))
+                  (when (identical? component (weak/subject watch-key))
+                    (weak/unregister! watch-key))
+                  ;; The body only runs after the hit check rejected the
+                  ;; cache, so a throw leaves a REJECTED cache behind; the
+                  ;; next hit must not serve it.
+                  (reset! cache-atom nil))))))))))
 
 (defmacro track!
   "Reactive cache wrapper for IComponent render methods.
@@ -263,7 +288,11 @@
    the component's cache is invalidated automatically, so setters become
    plain (reset! atom val) / (swap! atom f) with no manual
    (protocols/invalidate comp) call. While all tracked values are unchanged,
-   the cached result is returned without re-running BODY."
+   the cached result is returned without re-running BODY.
+
+   Each read's watch is installed at the read, so a body that writes a ref
+   it also reads self-invalidates that pass (and requests a frame): read
+   such atoms through non-tracking helpers instead. tui.md §3.2."
   [component width & body]
   `(track-render ~component ~width (fn [] ~@(rewrite-derefs body))))
 

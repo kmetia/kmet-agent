@@ -1,10 +1,11 @@
 # The per-child render cost: watch at the read, probe at the parent
 
 Design record for the work the frame benchmark attributes to `:parts` —
-the chat history's walk over its message components. Status: **proposed**,
-not started. The verdict this plan encodes (§7.1, §9): change 1 is a
-correctness fix and lands regardless; change 2 is worth its risk and is the
-payoff; change 3 is a measurement-driven maybe that defaults to *not
+the chat history's walk over its message components. Status: **change 1a
+landed** (`2fc7a8b4` + its failure-path follow-up); 1b, 2 and 3 are the
+remainder, sequenced in §9. The verdict this plan encodes (§7.1, §9): change
+1 is a correctness fix and lands regardless; change 2 is worth its risk and
+is the payoff; change 3 is a measurement-driven maybe that defaults to *not
 landing*.
 
 Two predecessors were rejected and their reasoning is kept in §10: review.md
@@ -722,47 +723,63 @@ serves caches written by the old code — §6).
   keeping them is what isolates this step — the hit path and the invalidation
   mechanism stay as they are, so any suite or bench movement comes from
   install-at-read alone;
+* the **failure path** (it does not depend on 1b's token, and without it 1a
+  is worse than the status quo: a throw strands every ref it read): mark
+  `completed?` after the cache write; on failure the `finally` unwatches
+  `(into prev-watched @seen)`, unregisters **only when the entry is still
+  this component** (a `subject-conflict` must not delete the other subject's
+  entry) and clears the cache atom — the body only runs after the hit check
+  rejected the cache, so a throw otherwise leaves that rejected cache for a
+  presence check to serve (§4.3);
 * no change to `weak.clj`, `remove-track-watches!`, `sweep-dead-watches!`.
 
-Expected behavior change, and the only one: a body that writes a ref it reads
-now fires its own watch, so that pass is not cached and a frame is requested
-(§8 — `custom_message.clj:45`, `tool_execution.clj:291`). The *render* path is
-untouched, so `:parts`, compose and the frame numbers on the bench scenarios
-must be flat (they do not switch themes or start tools); a movement there
-means the rewrite is not a no-op.
+Expected behavior changes: a body that writes a ref it reads now fires its
+own watch, so that pass is not cached and a frame is requested (§8 —
+`custom_message.clj:45`, `tool_execution.clj:291`); and a throwing body
+leaves no watches, no entry and no cache instead of the previous pass's
+entry and a rejected cache. With the net still in place the *rendered output*
+is unchanged (a rejected cache and a nil cache both force a re-run); commit 2
+is what makes the clear load-bearing. The *render* path is untouched, so
+`:parts`, compose and the frame numbers on the bench scenarios must be flat
+(they do not switch themes or start tools).
 
 Tests (`modules/tui/test/kmet/tui/components/test_track.clj`, plus a hikap
 case): the watch exists during the body; a re-read of the same ref adds no
 second watch; a branch switch stops the previous branch's atom from
-invalidating; `test-live-watch-count-follows-render-and-dispose` and
-`test-tracker-key-*` keep passing; `test-cache-verifies-values-even-without-watch`
-still passes (the net is still there).
+invalidating; a throwing body leaves no watches, no entry and no cache (with
+and without a previous pass's cache — the union unwatch); a ref only the
+failed pass read does not invalidate a later pass;
+`test-live-watch-count-follows-render-and-dispose` and `test-tracker-key-*`
+keep passing; `test-cache-verifies-values-even-without-watch` still passes
+(the net is still there).
 
-### 9.1b Commit 1b — atomic commit and the failure path (still with the net)
+**Landed as `2fc7a8b4` plus its failure-path follow-up.** The suite and the
+discriminating tests were the gate. The flat-bench half could **not** be
+measured on the dev host: it is WSL2, and the same code swings 2× across
+runs there, so the claim rests on the hit path being diffed byte-identical
+to the previous commit and a min-of-batches micro-measure (hits flat at
+~400 ns, the number the 447-message walk pays). Confirm the flat bench on
+the Termux host.
+
+### 9.1b Commit 1b — atomic commit (still with the net)
 
 * delete `invalidated?`, `cache-watch-key` and the cache-atom
   `add-watch`/`remove-watch` pair: the in-flight token (§4.3) replaces them,
   parked as the first form inside the `try`;
-* the cache write becomes the token-checked `swap!` (§4.3);
-* the failure path: `completed?` volatile set at the end of the `try`; the
-  `finally` clears the token, unwatches `(into prev-watched @seen)` and
-  `unregister!`s when it is unset;
+* the cache write becomes the token-checked `swap!` (§4.3); the 1a failure
+  path already `reset!`s the cache atom, which clears the token too;
 * `(declare tracked?)` next to the existing `(declare invalidate-cache
   schedule-frame!)` — `tracked?` is defined below `track-render` and is used
   by the hit path from commit 2 on.
 
-Expected behavior changes, both stated in the commit message: a body that
-writes a ref it reads now schedules a frame (§8 — arrived at 1a, kept here),
-and a throwing body clears the cache and unregisters instead of leaving a
-rejected cache behind. With the net still in place the *rendered output* is
-unchanged (a rejected cache and a nil cache both force a re-run); commit 2 is
-what makes the clear load-bearing. The bench must stay flat: the walk is
-still there.
+Expected behavior change: none observable — this is the same two writers
+(`invalidate-cache`'s nil, the pass's commit) exchanging a racy pair for an
+atomic one. The bench must stay flat: the walk is still there.
 
-Tests: a mid-body write leaves no cache; a throwing body leaves no watches,
-no entry and no cache (a second render re-runs the body); a throwing body
-with a *previous* pass's cache leaves no cache and no zombie watches (the
-union unwatch — the case the first draft of this file got wrong).
+Tests: a mid-body write leaves no cache (kept from 1a); an invalidate that
+lands between the flag read and the commit cannot leave a cache — argued,
+not testable without a writer thread (§6); the `invalidated?`/watch-pair
+deletion leaves the mid-body cases 1a covers green.
 
 ### 9.2 Commit 2 — trust presence (the payoff)
 
