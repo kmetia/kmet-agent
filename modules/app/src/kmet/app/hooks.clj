@@ -23,10 +23,25 @@
    propagates untouched: the body's caller already turns a failing operation
    into a result, and a hook failure must stay distinguishable from it.")
 
+(defn- hook-owner
+  "The extension a hook belongs to, for an error the model reads: the owner
+   path's last element, so an extension named tree-sitter renders as
+   tree-sitter. A hook registered outside an extension carries no owner."
+  [hook]
+  (let [owner (:owner (meta hook))]
+    (cond
+      (nil? owner) nil
+      (sequential? owner) (last owner)
+      :else owner)))
+
 (defn- hook-error
-  "The fail-closed result of a hook that threw, as the model sees it."
-  [t]
-  {:content (str "tool hook error: " (ex-message t))
+  "The fail-closed result of a hook that threw, as the model sees it — naming
+   the extension that registered the hook when it has one, so a hook failure
+   is actionable in a process with several extensions loaded."
+  [hook t]
+  {:content (str "tool hook error"
+                 (when-some [owner (hook-owner hook)] (str " in " owner))
+                 ": " (ex-message t))
    :is-error true})
 
 (defn- run-hook
@@ -54,13 +69,13 @@
                  (hook op inner)
                  (catch Throwable t
                    (when @from-next (throw t))
-                   (hook-error t)))]
+                   (hook-error hook t)))]
     (cond
       (some? result) result
       @descended @inner-result
       ;; a hook that settles a call is responsible for the result: a nil one
       ;; would erase the call from the transcript
-      :else (hook-error (ex-info "hook settled the call without a result" {})))))
+      :else (hook-error hook (ex-info "hook settled the call without a result" {})))))
 
 (defn around
   "Compose HOOKS into one chain, `(fn [op next] → result)`.

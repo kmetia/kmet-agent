@@ -763,9 +763,10 @@ for each, the **last non-nil handler result wins**:
 
 Hooks run in registration order, the first registered outermost: it sees the
 op before every later hook and the result after all of them. A hook that
-throws fails the call closed — the model gets an error naming the hook's
-message — whether it threw before descending or after the body ran; a throw
-from the tool itself stays the tool's own error.
+throws fails the call closed — the model gets an error naming the extension
+that registered it and the hook's own message — whether it threw before
+descending or after the body ran; a throw from the tool itself stays the
+tool's own error.
 
 Parallel batches run each call's chain and body on its own worker thread, so
 a hook that asks a human is asked per call, and a slow hook holds only its

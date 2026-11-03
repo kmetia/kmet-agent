@@ -1,11 +1,13 @@
 (ns kmet.app.test-extensions
   (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [kmet.app.commands :as commands]
             [kmet.app.extensions.core :as extensions]
             [kmet.app.registry :as registry]
             [kmet.app.tools.registry :as tools]
             [kmet.app.extensions :as row]
+            [kmet.app.hooks :as hooks]
             [kmet.app.registries :as registries]
             [kmet.srce.core :as srce]
             [kmet.test-tmp :as test-tmp]))
@@ -194,3 +196,18 @@
         (extensions/install-session! previous)
         (extensions/bind-runtime-capabilities! previous-runtime)))))
 
+(deftest a-tool-hook-error-names-its-extension
+  ;; fail-closed is only actionable if the model can tell whose hook crashed:
+  ;; the registered hook carries its owner, and the settled error names it
+  (with-restored-host
+    (fn []
+      (mounted)
+      (extensions/register-tool-hook! [:app :extensions "paren-ext"]
+                                      (fn [_op _next] (throw (ex-info "boom" {}))))
+      (let [chain (hooks/around (extensions/get-tool-hooks))
+            result (chain {:tool-name "bash" :args {}}
+                          (fn [_] {:content "ran" :is-error false}))]
+        (is (true? (:is-error result)))
+        (is (str/includes? (:content result) "paren-ext")
+            "the error names the extension, not only the hook's message")
+        (is (str/includes? (:content result) "boom"))))))

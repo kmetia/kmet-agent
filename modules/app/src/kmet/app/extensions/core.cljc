@@ -356,18 +356,24 @@
   (registry/register! (handle) :kmet/hook
                       (hook-name kind) {:owner owner :hook hook} owner))
 
-(defn- hooks-of
-  "Every KIND hook, owner-major: owners in first-registration order, each
-   owner's in its own. The registry lists by registration, so the owners are
-   put back in order here — one extension's hooks stay adjacent, in its own
-   sequence, whatever else registers between them."
+(defn- hook-entries
+  "Every KIND hook as {:owner … :hook …}, owner-major: owners in
+   first-registration order, each owner's in its own. The registry lists by
+   registration, so the owners are put back in order here — one extension's
+   hooks stay adjacent, in its own sequence, whatever else registers between
+   them."
   [kind]
   (let [hooks (->> (registry/entries (handle) :kmet/hook)
                    (keep (fn [[n v]] (when (= kind (first n)) v)))
                    vec)
         owner-order (into {} (map-indexed (fn [i owner] [owner i])
                                           (distinct (map :owner hooks))))]
-    (into [] (map :hook) (sort-by (comp owner-order :owner) hooks))))
+    (sort-by (comp owner-order :owner) hooks)))
+
+(defn- hooks-of
+  "Every KIND hook, in the order `hook-entries` puts it."
+  [kind]
+  (into [] (map :hook) (hook-entries kind)))
 
 (defn register-input-hook!
   "Register OWNER's input hook (extension api: on-input). Fires for agent
@@ -470,9 +476,13 @@
 
 (defn get-tool-hooks
   "Every tool hook (extension api: on-tool), owners in first-registration
-   order, each owner's in its own."
+   order, each owner's in its own. Each hook carries its owner as `:owner`
+   metadata, so a hook that throws names the extension and not only its own
+   message (`kmet.app.hooks` renders it)."
   []
-  (hooks-of :tool))
+  (into [] (map (fn [{:keys [owner hook]}]
+                  (vary-meta hook assoc :owner owner)))
+        (hook-entries :tool)))
 
 ;; ─── Shortcuts + markdown transformers (extension api) ────────────────────
 

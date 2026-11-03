@@ -200,7 +200,7 @@
    OP carries `:tool-name`, `:args`, `:tool-call-id` and `:assistant-message`
    (the last two absent outside a batch). Hooks run in registration order, the
    first registered outermost; a throwing hook fails the call closed with an
-   error result naming its message. Parallel batches run each call's chain in
+   error result naming the extension and the hook's message. Parallel batches run each call's chain in
    its own future, so a hook that asks a human is asked per call.
    Returns a deregister fn; unload also removes it."
   [api hook] ((:on-tool api) hook))
