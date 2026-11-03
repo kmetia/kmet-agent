@@ -216,8 +216,8 @@
       (is (not-any? #(re-find #"secret beta" %) (plain-b)) "b hides again"))))
 
 (deftest test-stream-last-thinking
-  (testing ":stream-last renders the live block's tail while the model thinks
-            and the hidden label for the blocks whose phase ended"
+  (testing ":stream-last heads the live block's tail with the hidden label and
+            keeps the label alone once the phase ended"
     (let [thinking (str/join "\n\n" (for [i (range 30)] (str "thought line " i)))
           active (atom true)
           c (am/make-assistant-message :thinking thinking
@@ -226,17 +226,33 @@
           plain #(mapv strip-ansi (core/render c 80))]
       (am/assistant-message-set-streaming! c true)
       (let [lines (plain)
-            content (remove str/blank? lines)]
-        (is (= 7 (count lines))
-            "the live window is six lines plus the message's top pad")
+            content (remove str/blank? lines)
+            visible (mapv strip-ansi
+                          (core/render (am/make-assistant-message
+                                        :thinking thinking :thinking-mode :visible)
+                                       80))]
+        (is (= 9 (count lines))
+            "the live block is the label, a blank spacer, its six tail lines
+             and the top pad")
+        (is (= "Thinking..." (str/trim (second lines)))
+            "the hidden label heads the live block, as it does under :hidden")
+        (is (str/blank? (nth lines 2))
+            "one blank spacer separates the label from the tail")
         (is (some #(re-find #"thought line 29" %) content)
             "the newest thinking is visible")
         (is (not-any? #(re-find #"thought line 0$" %) content)
-            "the head of the block is not rendered"))
-      (testing "the phase ends → the hidden label replaces the tail"
+            "the head of the block is not rendered")
+        (is (= (vec (take-last 6 visible)) (vec (drop 3 lines)))
+            "the tail is the :visible lines verbatim — nothing prefixed, so
+             selecting the block copies the thinking as it reads"))
+      (testing "the phase ends → the tail is dropped, the label remains"
         (reset! active false)
         (let [lines (plain)]
-          (is (some #(re-find #"Thinking\.\.\." %) lines)
+          (is (= (mapv strip-ansi
+                       (core/render (am/make-assistant-message
+                                     :thinking thinking :thinking-mode :hidden)
+                                    80))
+                 lines)
               "a finished block reads exactly as it does under :hidden")
           (is (not-any? #(re-find #"thought line" %) lines)
               "no thinking content outside the label")))
@@ -263,7 +279,8 @@
         (is (apply = filled)
             "once the block fills the window its height never changes — a
              resizing block made the chat's bottom jump by a line per delta")
-        (is (= 7 (first filled)) "six tail lines plus the top pad")))))
+        (is (= 9 (first filled)) "the label, a blank spacer, six tail lines
+                                   and the top pad")))))
 
 (deftest test-streaming-thinking-renders-only-the-tail
   (testing "a thinking delta re-renders the trailing markdown blocks, not the

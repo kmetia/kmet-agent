@@ -601,11 +601,11 @@
 
 (defn chat-history-end-thinking!
   "End the live thinking phase of the streaming assistant message: the
-   :stream-last tail is replaced by the hidden label here. The phase closes
-   on the first text or tool-call delta, on the provider's thinking signature
-   (Anthropic's block-end marker), and on finalize; the earlier thinking
-   blocks were already closed, so at most one live tail is on screen. No-op
-   without a streaming message."
+   :stream-last tail is dropped here, leaving the hidden label. The phase
+   closes on the first text or tool-call delta, on the provider's thinking
+   signature (Anthropic's block-end marker), and on finalize; the earlier
+   thinking blocks were already closed, so at most one live tail is on
+   screen. No-op without a streaming message."
   [ch]
   (when-let [msg @(:streaming-atom ch)]
     (reset! (:thinking-active-atom msg) false))
@@ -790,9 +790,9 @@
 
 (def valid-thinking-modes
   "The thinking-block display modes ctrl+t cycles: :visible (full markdown),
-   :stream-last (the tail of the live thinking block while the model thinks,
-   the hidden label once that phase ends), :hidden (one italic label line —
-   pi's hideThinkingBlock)."
+   :stream-last (the hidden label above the tail of the live thinking block
+   while the model thinks, the label alone once that phase ends), :hidden
+   (one italic label line — pi's hideThinkingBlock)."
   #{:visible :stream-last :hidden})
 
 (defn normalize-thinking-mode

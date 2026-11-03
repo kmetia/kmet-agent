@@ -53,53 +53,63 @@
                            :cache-atom cache-atom))))
 
 (def ^:private stream-last-tail-lines
-  "Rendered lines kept by :stream-last — the tail of the block the model is
-   still thinking. Counted in display lines (wrapping included), so the block
-   never occupies more than this many rows."
+  "Rendered tail lines :stream-last keeps while the model is still thinking —
+   counted in display lines (wrapping included), so the window height is
+   fixed."
   6)
 
 (defn- thinking-label-line
   "The hidden-thinking label line (pi: hiddenThinkingLabel) — what :hidden
-   shows for every block, and :stream-last once the block's live phase
-   ended."
+   shows for every block, and what :stream-last heads its live tail with and
+   keeps once that phase ended."
   [left-pad theme hidden-label]
   (str left-pad (theme/italic (theme/fg theme :thinking-text hidden-label))))
 
-(defn- render-thinking-to-width
+(defn- render-thinking-lines
   "Render thinking text as markdown tinted thinkingText + italic (pi:
-   Markdown with defaultTextStyle {color: thinkingText, italic: true}). Code
-   fences inside thinking highlight, like pi. MODE picks the projection:
-   :visible renders the whole block, :hidden renders the hidden-thinking
-   label instead (pi: hiddenThinkingLabel), :stream-last renders the trailing
+   Markdown with defaultTextStyle {color: thinkingText, italic: true}); code
+   fences inside thinking still highlight, like pi. CACHE-ATOM keeps the
+   render incremental, so a streaming delta only re-renders changed blocks."
+  [text cw left-pad theme transform cache-atom]
+  (mapv #(str left-pad %)
+        (md/render-lines text cw
+                         :theme (theme/get-markdown-theme theme)
+                         :default-style (fn [s]
+                                          (theme/italic (theme/fg theme :thinking-text s)))
+                         :transform transform
+                         :padding-x 0
+                         ;; the style kind is in the key so the text and
+                         ;; thinking block caches never cross
+                         :cache-key [cw theme :thinking]
+                         :cache-atom cache-atom)))
+
+(defn- render-thinking-to-width
+  "MODE picks the projection of the thinking block: :visible the whole
+   block, :hidden the hidden-thinking label instead (pi: hiddenThinkingLabel),
+   :stream-last that label, a blank spacer and the trailing
    STREAM-LAST-TAIL-LINES while THINKING-LIVE? — the model is still thinking
-   — and falls back to the same label once that phase ended, so a finished
-   block reads exactly as it does under :hidden and at most one live tail is
-   on screen. The tail is a slice of the rendered lines, not of the source:
-   the incremental block cache stays intact, a fence never starts mid-marker,
-   and the window keeps its height while the block streams (a take-last of
-   the growing block, never a re-trimmed window)."
+   — and the label alone once that phase ended, so a finished block reads
+   exactly as under :hidden and at most one live tail is on screen. The tail
+   is a slice of the rendered lines, not of the source: the incremental
+   block cache stays intact, a fence never starts mid-marker, and the window
+   keeps its height while the block streams (a take-last of the growing
+   block, never a re-trimmed window). The tail lines are the :visible lines
+   verbatim — nothing prefixed — so selecting the block copies the thinking
+   as it reads."
   [text cw left-pad theme mode thinking-live? hidden-label transform cache-atom]
-  (if (not (seq text))
-    []
-    (if (= mode :hidden)
-      [(thinking-label-line left-pad theme hidden-label)]
-      (let [lines (mapv #(str left-pad %)
-                        (md/render-lines text cw
-                                         :theme (theme/get-markdown-theme theme)
-                                         :default-style (fn [s]
-                                                          (theme/italic (theme/fg theme :thinking-text s)))
-                                         :transform transform
-                                         :padding-x 0
-                                         ;; the style kind is in the key so the
-                                         ;; text and thinking block caches
-                                         ;; never cross
-                                         :cache-key [cw theme :thinking]
-                                         :cache-atom cache-atom))]
-        (case mode
-          :stream-last (if thinking-live?
-                         (vec (take-last stream-last-tail-lines lines))
-                         [(thinking-label-line left-pad theme hidden-label)])
-          lines)))))
+  (if (seq text)
+    (let [label (thinking-label-line left-pad theme hidden-label)]
+      (if (or (= mode :hidden)
+              (and (= mode :stream-last) (not thinking-live?)))
+        [label]
+        (let [lines (render-thinking-lines text cw left-pad theme transform cache-atom)]
+          (if (= mode :stream-last)
+            ;; blank spacer line, like the block's own paragraph gaps, so the
+            ;; label never reads as the first thought line
+            (into [label (str left-pad (apply str (repeat cw \space)))]
+                  (take-last stream-last-tail-lines lines))
+            lines))))
+    []))
 
 ;; The rendered-* atoms are the render body's OWN outputs — reflow-all!
 ;; writes them on a cache miss, after the values the cache recorded. A

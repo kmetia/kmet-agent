@@ -434,8 +434,8 @@
 (def thinking-modes
   "Thinking-block display modes (kmet deviation — pi has only the boolean
    hideThinkingBlock): :visible renders the whole block, :stream-last the
-   trailing lines of the block the model is still thinking (the hidden label
-   once the phase ends), :hidden one label line."
+   label above the trailing lines of the block the model is still thinking
+   (once the phase ends only the label remains), :hidden one label line."
   #{:visible :stream-last :hidden})
 
 (defn get-thinking-mode
