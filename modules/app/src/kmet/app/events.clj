@@ -346,15 +346,16 @@
                         (pi: summarization_retry_attempt_start). Payload: :source
                         (:compaction | :branch-summary) and, for a compaction, :reason."}
     :tool-execution-start {:mode :emit :domain :loop
-                           :doc "Fired when a tool call arrives for execution, before its before hooks
-                        and the permission gate — a permission :ask, if any, still follows.
-                        Payload: :tool-call-id, :tool-name, :args."}
+                           :doc "Fired when a tool call arrives for execution, before any tool hook
+                        runs and before the permission check — a permission :ask, if any,
+                        still follows. Payload: :tool-call-id, :tool-name, :args."}
     :tool-execution-prepared {:mode :emit :domain :loop
-                              :doc "Fired when a tool call's body is about to run: its before hooks and the
-                        permission gate passed and a permission :ask, if any, is answered, so a
-                        front end starts measuring the tool's duration here. A call that never runs
-                        (blocked, undeclared, or guard-suppressed) has no prepared event. Payload:
-                        :tool-call-id, :tool-name, :args."}
+                              :doc "Fired when a tool call's body is about to run: every tool hook
+                        descended and the permission check passed (so a permission :ask, if
+                        any, is answered), which is where a front end starts measuring the
+                        tool's duration. A call that never runs (settled by a hook, undeclared,
+                        or guard-suppressed) has no prepared event. Payload: :tool-call-id,
+                        :tool-name, :args."}
     :agent-start {:mode :emit :domain :loop
                   :doc "Fired at the start of each attempt: once per user submission, and once
                         more for every auto-retry, overflow-recovery, or agent-end-queued
