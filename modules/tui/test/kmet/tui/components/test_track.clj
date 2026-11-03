@@ -198,6 +198,37 @@
       (t/is (contains? @(:cache c) :atoms))
       (component/remove-track-watches! c))))
 
+(t/deftest test-any-write-to-the-cache-atom-destroys-the-pass
+  (t/testing "the refusal signal is the cache atom itself, not invalidate-cache:
+            a body that nils it directly is not cached either"
+    (let [c {:cache (atom nil)}]
+      (t/is (= :v (component/track-render c 10 (fn [] (reset! (:cache c) nil) :v))))
+      (t/is (nil? @(:cache c)))
+      (component/remove-track-watches! c))))
+
+(t/deftest test-repeated-failed-passes-accumulate-nothing
+  (t/testing "two throws leave no cache, no entry and no extra watches, and a
+            later pass is not invalidated by refs only the failed passes read"
+    (let [a (atom 1)
+          b (atom 2)
+          c {:cache (atom nil)}
+          before (component/live-watch-count)]
+      (dotimes [_ 2]
+        (t/is (thrown? Exception
+                       (component/track-render c 10
+                                               (fn []
+                                                 (reakt/tracked-deref a)
+                                                 (throw (ex-info "boom" {})))))))
+      (t/is (nil? @(:cache c)) "no cache from a failed pass")
+      (t/is (not (component/tracked? c)) "no registry entry")
+      (t/is (<= (component/live-watch-count) before) "no entry accumulated")
+      (component/track-render c 10 (fn [] (reakt/tracked-deref b)))
+      (reset! a 42)
+      (t/is (some? @(:cache c)) "a ref only the failed passes read is not watched")
+      (reset! b 3)
+      (t/is (nil? @(:cache c)) "the ref the successful pass read is watched")
+      (component/remove-track-watches! c))))
+
 (t/deftest test-a-ref-read-twice-is-watched-once
   (t/testing "the payload's :watched is a set — re-reads add no second entry"
     (let [a (atom 1)
