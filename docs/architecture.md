@@ -385,6 +385,13 @@ loaded set is a session fact (`:tool-load` entries folded along the branch), so
 resume, `/tree` and a fork replay the tools that branch was sent, and disabling
 a loaded tool hides it without forgetting the load. `callable-tool-names` is
 the other half — the selection minus the `:model-only` tools.
+**`tool_search`** (`kmet.app.tools.search`, the `:tool/tool_search` row) is the
+tool that closes the loop: it ranks the searchable tools that are not declared
+yet with `kmet.libs.ranking` — the same scorer `mcp search` reads the MCP cache
+with — and loads every match, so the next request declares them. Its
+description is a constant (registering a source never rewrites a cached schema)
+and it is `:model-only`, because a script that could call it would change what
+the model sees mid-script.
 
 **One invocation pipeline.** `kmet.app.tools.invoke` is the only
 chain → check → execute path:

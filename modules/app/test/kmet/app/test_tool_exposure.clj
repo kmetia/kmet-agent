@@ -8,6 +8,9 @@
    them."
   (:require [babashka.fs :as fs]
             [clojure.test :as t]
+            [kmet.ai.llm :as llm]
+            [kmet.app.config :as cfg]
+            [kmet.app.loop :as loop]
             [kmet.app.loop.state :as state]
             [kmet.app.loop.test-support :as support]
             [kmet.app.registry :as registry]
@@ -117,13 +120,16 @@
                  (tools/get-deferred-sources h))
               "a broken source is still a source the listing names")))))
 
-(t/deftest test-built-in-tools-declare-no-exposure
-  ;; the request must not change for a tool written before exposures existed:
-  ;; no exposure is declared, and the reader supplies :direct
+(t/deftest test-built-in-tools-declare-no-exposure-but-the-search-tool
+  ;; a tool written before exposures existed declares none and reads as
+  ;; :direct, so its declaration is unchanged; tool_search is the one built-in
+  ;; that names an exposure of its own
   (let [h (tu/tool-registry)]
     (doseq [[name tool] (tools/get-all-tools h)]
-      (t/is (nil? (:exposure tool)) name)
-      (t/is (= :direct (tool/exposure tool)) name))))
+      (if (= name search/tool-search-name)
+        (t/is (= :model-only (:exposure tool)))
+        (t/is (nil? (:exposure tool)) name))
+      (t/is (keyword? (tool/exposure tool)) name))))
 
 ;; ─── Declared and callable (the P5 split) ─────────────────────────────────
 
@@ -261,4 +267,45 @@
       (t/is (contains? (names (state/active-tools agent)) "sb-a"))
       (finally
         (tools/unregister-tool-source! h ::sandbox)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-a-search-promotes-a-tool-into-the-next-request
+  ;; the whole P5 path through the loop: the model calls tool_search, the run
+  ;; records the load in the session, and the next request declares the tool —
+  ;; the request before it did not
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)
+        requests (atom [])
+        calls (atom 0)]
+    (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
+    (tools/register-tool! h (search/definition h))
+    (try
+      (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                    llm/send-message
+                    (fn [o]
+                      (swap! requests conj (into #{} (map :name) (:tools o)))
+                      (future
+                        (if (= 1 (swap! calls inc))
+                          (do ((:on-tool-call o) {:id "tc1"
+                                                  :name search/tool-search-name
+                                                  :arguments "{\"query\":\"deferred_a tool\"}"
+                                                  :index 0})
+                              ((:on-done o) :tool-calls))
+                          (do ((:on-text o) "found it")
+                              ((:on-done o) "stop")))
+                        :done))]
+        @(loop/run-agent-turn agent {:message "find the tool"
+                                     :on-done (fn [_])
+                                     :on-error (fn [_])}))
+      (t/is (not (contains? (first @requests) "deferred-a"))
+            "the first request does not declare the deferred tool")
+      (t/is (contains? (first @requests) search/tool-search-name)
+            "tool_search is declared because a deferred tool exists")
+      (t/is (contains? (second @requests) "deferred-a")
+            "the promotion declares it on the very next request")
+      (t/is (= ["deferred-a"] (state/loaded-tools agent)))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (tools/unregister-tool! h search/tool-search-name)
         (fs/delete-tree dir)))))

@@ -815,7 +815,9 @@
 (t/deftest test-active-tools-default-tools
   (t/testing "a :default-tools selection filters built-ins; extension tools
               stay enabled; a runtime selection wins; nil restores the default"
-    (let [builtins (set tools-registry/builtin-tool-names)
+    (let [;; tool_search is a built-in row the run declares only while a
+          ;; deferred tool exists to find, so this table (no sources) has none
+          builtins (disj (set tools-registry/builtin-tool-names) "tool_search")
           builtin-names (fn [ag] (into #{} (filter builtins) (map :name (state/active-tools ag))))
           all-names (fn [ag] (set (map :name (state/active-tools ag))))
           ag (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash"
@@ -836,14 +838,17 @@
         (t/is (= #{"read"} (builtin-names ag))))
       (t/testing "no setting → every tool active"
         (let [fal (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash")]
-          (t/is (= (set (keys (tools-registry/get-all-tools (support/tool-table)))) (all-names fal))))))))
+          (t/is (= (disj (set (keys (tools-registry/get-all-tools (support/tool-table)))) "tool_search")
+                   (all-names fal))))))))
 
 (t/deftest test-apply-default-tools-reload
   (t/testing "reload replaces the selection: tools newly in
               :default-tools become active; tools removed from it
               go inactive (pi: defaultTools controls the built-in
               surface)"
-    (let [builtins (set tools-registry/builtin-tool-names)
+    (let [;; tool_search is declared only while a deferred tool exists (see
+          ;; test-active-tools-default-tools)
+          builtins (disj (set tools-registry/builtin-tool-names) "tool_search")
           builtin-names (fn [ag] (into #{} (filter builtins) (map :name (state/active-tools ag))))
           ag (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash"
                                        :default-tools ["read"])]

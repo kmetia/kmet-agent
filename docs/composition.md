@@ -43,6 +43,7 @@ its layers; this page is what the build ships.
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
 | `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  |  |
+| `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
@@ -80,6 +81,7 @@ its layers; this page is what the build ships.
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
 | `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  |  |
+| `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
@@ -111,6 +113,7 @@ its layers; this page is what the build ships.
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
 | `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  |  |
+| `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
@@ -142,6 +145,7 @@ its layers; this page is what the build ships.
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
 | `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  |  |
+| `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
@@ -174,6 +178,7 @@ its layers; this page is what the build ships.
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
 | `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  |  |
+| `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
@@ -205,6 +210,7 @@ its layers; this page is what the build ships.
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
 | `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  |  |
+| `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
@@ -235,6 +241,7 @@ its layers; this page is what the build ships.
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
 | `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  |  |
+| `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
 | `:skills` | `kmet.app.registries/skills` |  | `skills` |  |  |
@@ -322,4 +329,18 @@ Call a tool from the script only when its result is too large to read while the 
 Report with (emit value), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (emit-image "shot.png") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.
 
 Sandbox: Clojure; on babashka a full babashka surface, on the JVM the java.lang/java.io/java.util subset. Require clojure.*/babashka.* namespaces or the bundled libs (rewrite-clj, cljfmt, edamame, parinferish); System/java.io.*/Throwable resolve on babashka (Jolt's SCI exposes no class table). Aliases: fs, str/set/edn/walk, json, p, sh, tools, sandbox. Discover the surface with (all-ns) and a namespace's vars with (ns-publics 'babashka.fs). :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB.
+
+---
+
+### `tool_search`
+
+**Label:** Tool search
+
+**Parameters:** `query` (required), `limit`
+
+**Description:**
+
+Searches over deferred tool metadata and exposes matching tools for the next model call.
+
+Some of the tools, such as tools of MCP servers, may not have been provided to you upfront, and you should use this tool to search for the required tools. For MCP tool discovery, always use this tool.
 

@@ -48,6 +48,7 @@
           {:id :tool/edit :plugin kmet.app.tools.edit/plugin}
           {:id :tool/bash :plugin kmet.app.tools.bash/plugin}
           {:id :tool/run_code :plugin kmet.app.tools.run-code/plugin}
+          {:id :tool/tool_search :plugin kmet.app.tools.search/plugin}
           {:id :commands :plugin kmet.app.registries/commands}
           {:id :prompts :plugin kmet.app.registries/prompts}
           {:id :skills :plugin kmet.app.registries/skills}
