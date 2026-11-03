@@ -28,6 +28,13 @@
     (= reason "network_error") {:stop-reason :error :error-message "Provider finish_reason: network_error"}
     :else {:stop-reason :error :error-message (str "Provider finish_reason: " reason)}))
 
+(defn- done-sentinel?
+  "True when DATA is the stream's own end marker rather than a chunk: the
+   [DONE] payload or an empty one. A :done derived from it carries no
+   provider finish_reason."
+  [data]
+  (or (nil? data) (= data "[DONE]")))
+
 (defn parse-openai-event
   "Parse an OpenAI chat-completions SSE data payload into a vector of kmet
    events: :text, :thinking, :tool-call, :tool-call-args, :done (with
@@ -39,7 +46,7 @@
    (pi: iterateOpenAiEvents reasoningFields — llama.cpp uses
    reasoning_content, other OpenAI-compatible endpoints use reasoning)."
   [data]
-  (if (or (nil? data) (= data "[DONE]"))
+  (if (done-sentinel? data)
     [{:type :done :stop-reason :stop}]
     (try
       (let [chunk (json/parse-string data true)
@@ -462,12 +469,37 @@
 
    Detects premature stream end: when the stream ends before [DONE] is
    received, reports {:type :error} (pi: iterateOpenAiEvents throws
-   'Stream ended without finish_reason')."
-  [response handler signal & [idle-timeout-ms abort-fn]]
-  (sse-lib/process-data-stream response handler signal parse-openai-event
-                               #(= :done (:type %))
-                               "Stream ended before a terminal response event"
-                               idle-timeout-ms abort-fn))
+   'Stream ended without finish_reason').
+
+   OPTS :supports-finish-reason? — a model whose compat reports
+   :supports-finish-reason false never sends a finish_reason, so the [DONE]
+   sentinel's bare :stop is dropped and the stream's end derives the reason
+   from what the turn produced: :tool-use when a tool call arrived, :stop
+   otherwise (pi openai-completions.ts:682-690)."
+  [response handler signal & [idle-timeout-ms abort-fn opts]]
+  (let [supports-finish-reason? (not= false (:supports-finish-reason? opts))
+        saw-tool-call? (atom false)
+        parse (fn [data]
+                (let [events (parse-openai-event data)
+                      ;; the sentinel carries no finish_reason — with the key
+                      ;; off, the end rule below derives the reason instead
+                      events (if (and (not supports-finish-reason?)
+                                      (done-sentinel? data))
+                               (remove #(= :done (:type %)) events)
+                               events)]
+                  (when (some #(contains? #{:tool-call :tool-call-args} (:type %))
+                              events)
+                    (reset! saw-tool-call? true))
+                  events))]
+    (sse-lib/process-data-stream response handler signal parse
+                                 #(= :done (:type %))
+                                 (fn []
+                                   (if supports-finish-reason?
+                                     {:type :error
+                                      :message "Stream ended before a terminal response event"}
+                                     {:type :done
+                                      :stop-reason (if @saw-tool-call? :tool-use :stop)}))
+                                 idle-timeout-ms abort-fn)))
 
 (defn process-anthropic-stream
   "Read an Anthropic stream response body, buffering multi-line event data.
@@ -565,7 +597,8 @@
   [response handler signal & [idle-timeout-ms abort-fn]]
   (sse-lib/process-data-stream response handler signal parse-google-event
                                #(= :done (:type %))
-                               "Stream ended before a terminal response event"
+                               (fn [] {:type :error
+                                       :message "Stream ended before a terminal response event"})
                                idle-timeout-ms abort-fn))
 
 ;; ─── Mistral chat-completions stream (SSE; OpenAI-compatible chunk shape) ──
@@ -705,7 +738,8 @@
   [response handler signal & [idle-timeout-ms abort-fn]]
   (sse-lib/process-data-stream response handler signal parse-mistral-event
                                #(= :done (:type %))
-                               "Mistral stream ended without a finish reason"
+                               (fn [] {:type :error
+                                       :message "Mistral stream ended without a finish reason"})
                                idle-timeout-ms abort-fn))
 
 ;; ─── AWS Bedrock ConverseStream (binary event-stream frames) ──────────────

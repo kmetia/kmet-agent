@@ -542,6 +542,54 @@
     (t/is (= :done (:type (last @events))))
     (.close in)))
 
+(t/deftest test-openai-stream-finish-reason-compat
+  ;; pi supportsFinishReason (openai-completions.ts:682-690): a provider that
+  ;; never sends a finish_reason ends its streams without one on purpose, so
+  ;; the stop reason is derived from what the turn produced instead of the
+  ;; request failing. The default (the key absent or true) keeps erroring.
+  (let [run (fn [payload opts]
+              (let [[in out] (make-pipe)
+                    events (atom [])
+                    f (future
+                        (sse/process-openai-stream {:body in}
+                                                   (fn [e] (swap! events conj e))
+                                                   nil nil nil opts)
+                        :done)]
+                (doseq [line payload]
+                  (.write out (.getBytes line)))
+                (.flush out)
+                (.close out)
+                (t/is (= :done (deref f 3000 :timeout)))
+                (.close in)
+                @events))
+        tool-call "data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"t1\",\"function\":{\"name\":\"bash\",\"arguments\":\"\"}}]}}]}\n\n"
+        text "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"]
+    (t/testing "unterminated stream with a tool call derives :tool-use"
+      (let [events (run [tool-call] {:supports-finish-reason? false})]
+        (t/is (= {:type :done :stop-reason :tool-use} (last events)))
+        (t/is (not-any? #(= :error (:type %)) events))))
+    (t/testing "unterminated stream without a tool call derives :stop"
+      (t/is (= {:type :done :stop-reason :stop}
+               (last (run [text] {:supports-finish-reason? false})))))
+    (t/testing "the [DONE] sentinel derives its reason the same way"
+      (t/is (= {:type :done :stop-reason :tool-use}
+               (last (run [tool-call "data: [DONE]\n\n"]
+                          {:supports-finish-reason? false})))))
+    (t/testing "a finish_reason is never overridden, and the sentinel adds no second done"
+      (let [events (run [tool-call
+                         "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n"
+                         "data: [DONE]\n\n"]
+                        {:supports-finish-reason? false})]
+        (t/is (= {:type :done :stop-reason :length} (last events)))
+        (t/is (= 1 (count (filter #(= :done (:type %)) events)))
+              "the dropped sentinel leaves exactly one terminal event")))
+    (t/testing "a provider that supports finish_reason still errors (the default)"
+      (doseq [opts [nil {} {:supports-finish-reason? true}]]
+        (let [events (run [tool-call] opts)]
+          (t/is (= {:type :error
+                    :message "Stream ended before a terminal response event"}
+                   (last events))))))))
+
 ;; ─── Mistral chat-completions parsing ─────────────────────────────────────
 
 (t/deftest test-parse-mistral-event

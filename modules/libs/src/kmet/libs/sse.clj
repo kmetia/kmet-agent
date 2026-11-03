@@ -276,9 +276,12 @@
    chat-completions, Google streamGenerateContent, Mistral chat-completions):
    parses each payload via parse-fn and dispatches events to handler.
    terminal? marks the event that proves the stream completed (premature-end
-   detection); end-message is reported when the stream ends without one.
+   detection); end-event is a 0-arg fn returning the event dispatched when
+   the stream ends without one — the caller decides what an unterminated
+   stream means (an :error for most wires, a derived terminal event for a
+   provider that never sends a finish_reason).
    signal, idle-timeout-ms, abort-fn as in process-openai-stream."
-  [response handler signal parse-fn terminal? end-message idle-timeout-ms abort-fn]
+  [response handler signal parse-fn terminal? end-event idle-timeout-ms abort-fn]
   (try
     (let [saw-terminal (atom false)
           end-reason (stream-loop (:body response) idle-timeout-ms signal abort-fn
@@ -298,6 +301,6 @@
                                     ([e] (handler {:type :error
                                                    :message (str "Stream error: " (ex-message e))}))))]
       (when (and (= :eof end-reason) (not @saw-terminal) (not (and signal @signal)))
-        (handler {:type :error :message end-message})))
+        (handler (end-event))))
     (catch Exception e
       (handler {:type :error :message (str "Stream error: " (ex-message e))}))))

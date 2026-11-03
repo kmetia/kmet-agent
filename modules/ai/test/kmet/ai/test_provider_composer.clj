@@ -139,6 +139,26 @@
     (t/testing "thinking-level-map merges key-wise"
       (t/is (= {:high "high" :medium "med" :max nil} (:thinking-level-map m))))))
 
+(t/deftest test-model-override-compat-nil-does-not-erase
+  ;; merge-compat drops a nil override (the rule resolved-openai-compat
+  ;; applies to a model's own :compat): writing a key out empty must fall
+  ;; back to the provider's value, not delete it.
+  (let [model (pc/compose-model-provider
+               :builtin (base-provider (base-model "m1" {:compat {:supports-store false
+                                                                  :cache-control-format :anthropic
+                                                                  :thinking-format "openai"}}))
+               {:model-overrides
+                {"m1" {:compat {:supports-store nil
+                                :cache-control-format nil
+                                :supports-reasoning-effort false}}}}
+               nil)
+        m (first (:models model))]
+    (t/is (= false (:supports-store (:compat m))) "the provider value survives")
+    (t/is (= :anthropic (:cache-control-format (:compat m))))
+    (t/is (= false (:supports-reasoning-effort (:compat m))) "a real override still wins")
+    (t/is (= :openai (:thinking-format (:compat m)))
+          "normalization still runs over the merged map")))
+
 (t/deftest test-model-overrides-wins-over-upsert
   (t/testing "modelOverrides apply after custom-model upserts (pi: topmost layer)"
     (let [model (pc/compose-model-provider

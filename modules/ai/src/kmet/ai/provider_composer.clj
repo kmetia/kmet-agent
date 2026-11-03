@@ -35,9 +35,14 @@
 
 (defn- merge-compat
   "Flat compat merge, override wins per key (pi mergeCompat — kmet's compat
-   has no nested routing maps yet)."
+   has no nested routing maps yet). An explicit nil never erases the base
+   value: nil means \"leave it to the detected default\", the same rule
+   resolved-openai-compat applies to a model's own :compat, so a key cannot
+   disappear by being written out empty."
   [base override]
-  (normalize-compat (if override (merge base override) base)))
+  (normalize-compat (if override
+                      (merge base (into {} (remove (comp nil? val)) override))
+                      base)))
 
 (defn apply-model-override
   "Apply a models.edn model-override onto a model map (pi applyModelOverride):

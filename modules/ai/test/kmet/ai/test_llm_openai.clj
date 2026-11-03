@@ -665,6 +665,48 @@
                       :provider :openrouter
                       :base-url "https://openrouter.ai/api/v1"}))
 
+(t/deftest test-llm-completions-compat-message-shapes
+  ;; The message-shape compat keys reach the wire through openai-payload, and
+  ;; a model without them sends byte-identical messages to before the keys
+  ;; existed (the same conversation, no name, no bridge, no text-carried
+  ;; thinking).
+  (let [conversation (fn []
+                       [{:role :system :content [{:type :text :text "S"}]}
+                        {:role :user :content [{:type :text :text "hi"}]}
+                        {:role :assistant :content [{:type :text :text "checking"}]
+                         :thinking "pondering" :provider :custom :model "m1"
+                         :tool-calls [{:id "c1" :name "bash" :arguments {:cmd "ls"}}]}
+                        {:role :tool :tool-name "bash"
+                         :content [{:type :tool_result :tool_use_id "c1" :content "out"}]}
+                        {:role :user :content [{:type :text :text "and?"}]}])
+        build (fn [model]
+                (:messages (@#'completions/openai-payload
+                            model nil (conversation) cache-tools "m1" :short "sess-1")))]
+    (t/testing "a plain model keeps the plain shape"
+      (let [msgs (build (completions-model))]
+        (t/is (= 5 (count msgs)))
+        (t/is (= "pondering" (:reasoning_content (nth msgs 2))))
+        (t/is (not (contains? (nth msgs 3) :name)))))
+    (t/testing "the three message-shape keys change the request bytes"
+      (let [msgs (build (completions-model
+                         {:compat {:requires-tool-result-name true
+                                   :requires-assistant-after-tool-result true
+                                   :requires-thinking-as-text true}}))]
+        (t/is (= [{:type "text" :text "pondering"} {:type "text" :text "checking"}]
+                 (:content (nth msgs 2)))
+              "thinking becomes a leading text part")
+        (t/is (nil? (:reasoning_content (nth msgs 2))))
+        (t/is (= "bash" (:name (nth msgs 3))))
+        (t/is (= "I have processed the tool results." (:content (nth msgs 4)))
+              "the bridge precedes the user turn")
+        (t/is (= 6 (count msgs)))))
+    (t/testing "an explicit false is the same bytes as an absent key"
+      (t/is (= (pr-str (build (completions-model)))
+               (pr-str (build (completions-model
+                               {:compat {:requires-tool-result-name false
+                                         :requires-assistant-after-tool-result false
+                                         :requires-thinking-as-text false}}))))))))
+
 (t/deftest test-llm-completions-cache-control
   (let [model completions-anthropic-model]
     (t/testing "short (default): markers on the system prompt, the last tool

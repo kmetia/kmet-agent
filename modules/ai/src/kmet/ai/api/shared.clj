@@ -223,6 +223,130 @@
     {:provider target
      :family target}))
 
+(defn- openai-text-parts
+  "A message's non-blank text blocks as OpenAI text parts (pi's
+   assistantTextParts) — the parts :requires-thinking-as-text puts the
+   thinking in front of."
+  [content]
+  (into []
+        (keep (fn [b]
+                (when (and (contains? #{:text "text"} (:type b))
+                           (not (str/blank? (:text b))))
+                  {:type "text" :text (:text b)})))
+        content))
+
+(defn- message-context
+  "The per-request values the chat-completion conversion reads: the target's
+   provenance and provider family (see message-target) plus OPTS' reasoning
+   mode and the resolved compat's message-shape keys."
+  [target model-id {:keys [reasoning? fill compat]}]
+  (let [{:keys [provider family]} (message-target target)]
+    {:provider provider
+     :family family
+     :model-id model-id
+     :reasoning? reasoning?
+     :fill fill
+     :tool-result-name? (:requires-tool-result-name compat)
+     :after-tool-result? (:requires-assistant-after-tool-result compat)
+     :thinking-as-text? (:requires-thinking-as-text compat)}))
+
+(defn- openai-tool-message
+  "A tool result as a chat-completion tool message. pi requiresToolResultName:
+   the tool's name rides the message when the provider asks for it."
+  [{:keys [family tool-result-name?]} m]
+  (cond-> {:role "tool"
+           :tool_call_id (normalize-openai-tool-call-id
+                          (-> m :content first :tool_use_id) family)
+           :content (tool-result-content m)}
+    (and tool-result-name? (:tool-name m)) (assoc :name (:tool-name m))))
+
+(defn- openai-assistant-content
+  "pi's content decision for an assistant turn: the thinking-as-text parts,
+   the message's own text, the empty string an after-tool-result provider
+   needs in place of null, or nil (the field stays absent)."
+  [content text as-text after-tool-result?]
+  (cond
+    as-text (into [{:type "text" :text as-text}] (openai-text-parts content))
+    (seq text) text
+    after-tool-result? ""
+    :else nil))
+
+(defn- openai-assistant-message
+  "One assistant turn as a chat-completion message, or nil when it is skipped
+   (pi: content or tool_calls, but never neither). The two message-shape keys
+   are decided here: under :requires-thinking-as-text the message's own
+   thinking rides in the content as a leading text part, and under
+   :requires-assistant-after-tool-result an absent content becomes \"\". Only
+   the request model's own thinking is ever replayed (the provenance gate
+   openai-messages documents); FILL is what a provider that requires
+   reasoning_content gets when the message holds no same-model reasoning."
+  [{:keys [provider model-id family reasoning? fill thinking-as-text?
+           after-tool-result?]} m]
+  (let [;; provenance-gated: another model's chain-of-thought is never replayed
+        thinking (when (same-origin? m provider model-id)
+                   (not-empty (str/trim (or (:thinking m) ""))))
+        as-text (and thinking-as-text? thinking)
+        text (message/content-text (:content m))
+        has-tc (seq (:tool-calls m))
+        content (openai-assistant-content (:content m) text as-text after-tool-result?)
+        reasoning (cond
+                    ;; the thinking is text now, so the field takes the fill
+                    as-text (when reasoning? (or fill ""))
+                    reasoning? (or thinking fill "")
+                    :else thinking)]
+    (when (or (seq text) has-tc)
+      (cond-> {:role "assistant"}
+        (some? content) (assoc :content content)
+        has-tc (assoc :tool_calls
+                      (mapv (fn [tc]
+                              {:id (normalize-openai-tool-call-id (:id tc) family)
+                               :type "function"
+                               :function {:name (:name tc)
+                                          :arguments (json/generate-string
+                                                      (:arguments tc))}})
+                            (:tool-calls m)))
+        (some? reasoning) (assoc :reasoning_content reasoning)))))
+
+(defn- openai-chat-message
+  "One kmet wire message as the chat-completion message it becomes (nil when
+   it is dropped)."
+  [ctx m]
+  (case (name (:role m))
+    "tool" (openai-tool-message ctx m)
+    "assistant" (openai-assistant-message ctx m)
+    {:role (name (:role m)) :content (openai-content (:content m))}))
+
+(defn- bridge-tool-results
+  "pi requiresAssistantAfterToolResult: a synthetic assistant turn between a
+   tool result and the user turn that follows it, for providers that reject
+   the pair. Runs on the converted messages, so the previous message is the
+   last one actually emitted — an assistant turn dropped in between does not
+   break the bridge (pi: lastRole survives a skipped turn)."
+  [messages]
+  (into []
+        (mapcat (fn [prev m]
+                  (if (and (= "tool" (:role prev)) (= "user" (:role m)))
+                    [{:role "assistant"
+                      :content "I have processed the tool results."} m]
+                    [m]))
+                (cons nil messages) messages)))
+
+(defn- convert-openai-messages
+  "The one converter behind openai-messages / openai-messages-with-reasoning.
+   OPTS carries :reasoning? (always emit reasoning_content, with :fill as the
+   placeholder when there is no same-model reasoning) and the resolved
+   compat's message-shape keys (see message-context and
+   openai-assistant-message); nil compat keeps the plain shape.
+
+   One turn can become two messages: the compat's tool-result bridge
+   (bridge-tool-results) runs over the converted list."
+  [messages target model-id opts]
+  (let [ctx (message-context target model-id opts)
+        converted (into [] (keep #(openai-chat-message ctx %)) messages)]
+    (if (:after-tool-result? ctx)
+      (bridge-tool-results converted)
+      converted)))
+
 (defn openai-messages
   "Map wire messages to OpenAI chat-completion messages. The caller has
    already converted agent roles (pi: convertToLlm, kmet.app.loop.message/
@@ -235,48 +359,13 @@
    for same-model messages and degrade everything else — feeding another
    model's chain-of-thought back as if it were the target's own derails
    DeepSeek-class thinking models into re-running their last tool call after a
-   mid-session /model switch). Tested directly by test_llm, hence public."
-  [messages & [target model-id]]
-  (let [{:keys [provider family]} (message-target target)]
-    (into []
-          (keep (fn [m]
-                  (let [role (name (:role m))
-                        ;; provenance-gated: nil unless this model said it
-                        thinking (when (same-origin? m provider model-id)
-                                   (str/trim (or (:thinking m) "")))]
-                    (case role
-                      "tool"
-                      {:role "tool"
-                       :tool_call_id (normalize-openai-tool-call-id
-                                      (-> m :content first :tool_use_id)
-                                      family)
-                       :content (tool-result-content m)}
-                      "assistant"
-                      (let [text (message/content-text (:content m))
-                            has-tc (seq (:tool-calls m))
-                            msg (cond-> {:role "assistant"}
-                                  (seq text) (assoc :content text)
-                                  has-tc
-                                  (assoc :tool_calls
-                                         (mapv (fn [tc]
-                                                 {:id (normalize-openai-tool-call-id
-                                                       (:id tc) family)
-                                                  :type "function"
-                                                  :function {:name (:name tc)
-                                                             :arguments (json/generate-string
-                                                                         (:arguments tc))}})
-                                               (:tool-calls m))))]
-                        ;; pi: some providers require "either content or
-                        ;; tool_calls, but not none" — skip empty assistant
-                        ;; messages (a turn that ended with only reasoning, or
-                        ;; an aborted response that got no content) instead of
-                        ;; sending content ""
-                        (when (or (seq text) has-tc)
-                          (cond-> msg
-                            (seq thinking) (assoc :reasoning_content thinking))))
-                      {:role role
-                       :content (openai-content (:content m))}))))
-          messages)))
+   mid-session /model switch). COMPAT is the request's resolved compat: its
+   :requires-tool-result-name / :requires-assistant-after-tool-result /
+   :requires-thinking-as-text reshape the messages as pi's buildParams does.
+   Tested directly by test_llm, hence public."
+  [messages & [target model-id compat]]
+  (convert-openai-messages messages target model-id
+                           {:reasoning? false :compat compat}))
 
 (defn openai-messages-with-reasoning
   "Like openai-messages but every kept assistant message carries a
@@ -289,49 +378,13 @@
    that same provider+model (see openai-messages — cross-model CoT is never
    replayed); everything else gets FILL (default \"\"). FILL must be non-empty
    for endpoints that turn the field into a thinking block and reject an empty
-   one (the stealth models: compat :reasoning-content-fill)."
-  [messages & [target model-id fill]]
-  (let [{:keys [provider family]} (message-target target)]
-    (into []
-          (keep (fn [m]
-                  (let [role (name (:role m))
-                        ;; provenance-gated: FILL unless this model said it; an
-                        ;; empty same-model thinking also takes the fill (these
-                        ;; endpoints reject a blank reasoning block)
-                        thinking (or (when (same-origin? m provider model-id)
-                                       (not-empty (str/trim (or (:thinking m) ""))))
-                                     fill
-                                     "")]
-                    (case role
-                      "tool"
-                      {:role "tool"
-                       :tool_call_id (normalize-openai-tool-call-id
-                                      (-> m :content first :tool_use_id)
-                                      family)
-                       :content (tool-result-content m)}
-                      "assistant"
-                      (let [text (message/content-text (:content m))
-                            has-tc (seq (:tool-calls m))
-                            msg (cond-> {:role "assistant"}
-                                  (seq text) (assoc :content text)
-                                  has-tc (assoc :tool_calls
-                                                (mapv (fn [tc]
-                                                        {:id (normalize-openai-tool-call-id
-                                                              (:id tc) family)
-                                                         :type "function"
-                                                         :function {:name (:name tc)
-                                                                    :arguments (json/generate-string
-                                                                                (:arguments tc))}})
-                                                      (:tool-calls m))))]
-                        ;; skip empty assistant messages (pi: providers
-                        ;; require content or tool_calls) — an empty
-                        ;; reasoning_content-only message is rejected too
-                        (when (or (seq text) has-tc)
-                          ;; deepseek thinking mode requires reasoning_content on assistant messages
-                          (assoc msg :reasoning_content thinking)))
-                      {:role role
-                       :content (openai-content (:content m))}))))
-          messages)))
+   one (the stealth models: compat :reasoning-content-fill). COMPAT is the
+   resolved compat, as in openai-messages; with :requires-thinking-as-text the
+   reasoning rides in the content and this field takes FILL (pi: the required
+   empty field is filled after the thinking has been converted)."
+  [messages & [target model-id fill compat]]
+  (convert-openai-messages messages target model-id
+                           {:reasoning? true :fill fill :compat compat}))
 
 (defn resolve-template-values
   "pi buildChatTemplateValues + resolveChatTemplateKwargValue: resolve the
@@ -415,9 +468,11 @@
    :compat leaves a key unset (resolved-openai-compat applies it). Explicit
    compat entries always override these values.
 
-   Carries pi's full detected key set for parity; keys without a kmet
-   consumer yet (:supports-developer-role, :requires-tool-result-name,
-   :requires-assistant-after-tool-result, ...) are inert data.
+   Carries pi's full detected key set for parity. The message-shape keys
+   (:requires-tool-result-name, :requires-assistant-after-tool-result,
+   :requires-thinking-as-text) are read by the message converters and
+   :supports-finish-reason by the completions stream; keys without a kmet
+   consumer yet (:supports-developer-role, ...) are inert data.
    :reasoning-content-fill is the one kmet-only key: the placeholder an
    endpoint needs on assistant messages without same-model reasoning (pi has
    no equivalent), defaulting to the empty string. Routing maps

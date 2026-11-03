@@ -47,8 +47,9 @@
                              compat)
         messages (if requires-reasoning?
                    (openai-messages-with-reasoning messages model-record model-id
-                                                   (:reasoning-content-fill compat))
-                   (openai-messages messages model-record model-id))
+                                                   (:reasoning-content-fill compat)
+                                                   compat)
+                   (openai-messages messages model-record model-id compat))
         tools (when (seq tools)
                 (mapv #(tool->openai-schema %
                                             (not= false (:supports-strict-mode compat)))
@@ -152,7 +153,13 @@
                                    dispatch
                                    signal
                                    idle-timeout-ms
-                                   (fn [] (ai-http/abort! response)))
+                                   (fn [] (ai-http/abort! response))
+                                   ;; pi supportsFinishReason: a provider that
+                                   ;; never sends one ends its streams
+                                   ;; without it on purpose
+                                   {:supports-finish-reason?
+                                    (not= false (:supports-finish-reason
+                                                 (resolved-openai-compat model-record)))})
         ;; stream fully consumed — the trailing usage chunk (if any) was
         ;; dispatched; emit the deferred terminal done now
         (finalize (some-> signal deref))

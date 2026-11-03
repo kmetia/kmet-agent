@@ -239,6 +239,88 @@
     (t/is (= [" " " "] (mapv :reasoning_content reasoning))
           "the fill applies where no same-model reasoning exists")))
 
+(t/deftest test-llm-compat-message-shapes
+  ;; pi buildParams' message-shape compat keys (openai-completions.ts:1229,
+  ;; :1284, :1312-1316, :1418-1420): each reshapes the conversation for a
+  ;; provider that needs it; an absent compat leaves the bytes as they were.
+  (let [conversation
+        (fn []
+          [{:role :system :content [{:type :text :text "S"}]}
+           {:role :user :content [{:type :text :text "hi"}]}
+           {:role :assistant :content [{:type :text :text "checking"}]
+            :thinking "pondering"
+            :provider :custom :model "m1"
+            :tool-calls [{:id "c1" :name "bash" :arguments {:cmd "ls"}}]}
+           {:role :tool :tool-name "bash"
+            :content [{:type :tool_result :tool_use_id "c1" :content "out"}]}
+           {:role :user :content [{:type :text :text "and?"}]}])
+        convert (fn [compat] (@#'shared/openai-messages (conversation) :custom "m1" compat))]
+    (t/testing "no compat: no name, no bridge, thinking as reasoning_content"
+      (let [msgs (convert nil)]
+        (t/is (= 5 (count msgs)))
+        (t/is (= "pondering" (:reasoning_content (nth msgs 2))))
+        (t/is (= "checking" (:content (nth msgs 2))))
+        (t/is (not (contains? (nth msgs 3) :name)))
+        (t/is (= ["system" "user" "assistant" "tool" "user"] (mapv :role msgs)))))
+    (t/testing ":requires-tool-result-name carries the tool name on the result"
+      (t/is (= "bash" (:name (nth (convert {:requires-tool-result-name true}) 3)))
+            "the name the call was made with rides the tool message")
+      (t/is (not (contains? (first (@#'shared/openai-messages
+                                    [{:role :tool
+                                      :content [{:type :tool_result :tool_use_id "c1"
+                                                 :content "out"}]}]
+                                    nil nil {:requires-tool-result-name true}))
+                            :name))
+            "a result with no tool name sends none"))
+    (t/testing ":requires-thinking-as-text moves thinking into a leading text part"
+      (let [assistant (nth (convert {:requires-thinking-as-text true}) 2)]
+        (t/is (= [{:type "text" :text "pondering"} {:type "text" :text "checking"}]
+                 (:content assistant))
+              "thinking first, then the message's own text parts")
+        (t/is (nil? (:reasoning_content assistant))
+              "thinking is not also sent as reasoning")))
+    (t/testing ":requires-assistant-after-tool-result bridges tool results and user turns"
+      (let [msgs (convert {:requires-assistant-after-tool-result true})]
+        (t/is (= 6 (count msgs)))
+        (t/is (= {:role "assistant" :content "I have processed the tool results."}
+                 (nth msgs 4))
+              "the synthetic assistant turn sits between the tool result and the user turn")
+        (t/is (= "user" (:role (nth msgs 5)))))
+      (t/is (= 3 (count (@#'shared/openai-messages
+                         [{:role :tool :content [{:type :tool_result :tool_use_id "c1"
+                                                  :content "out"}]}
+                          ;; the bridge looks at the last emitted message, so a
+                          ;; skipped assistant turn does not break it
+                          {:role :assistant :content []}
+                          {:role :user :content [{:type :text :text "and?"}]}]
+                         nil nil {:requires-assistant-after-tool-result true})))
+            "the bridge survives an empty assistant turn between the two"))
+    (t/testing "the same key fills an assistant turn's absent content"
+      (let [msgs [{:role :assistant :content []
+                   :tool-calls [{:id "c1" :name "bash" :arguments {}}]}
+                  {:role :tool :content [{:type :tool_result :tool_use_id "c1"
+                                          :content "out"}]}]
+            plain (@#'shared/openai-messages msgs)
+            filled (@#'shared/openai-messages msgs nil nil
+                                              {:requires-assistant-after-tool-result true})]
+        (t/is (not (contains? (first plain) :content))
+              "without the key the field stays absent")
+        (t/is (= "" (:content (first filled)))
+              "with it a tool-call turn sends an empty string, not null")))
+    (t/testing "thinking-as-text without thinking keeps the plain text content"
+      (let [msgs [{:role :assistant :content [{:type :text :text "answer"}]}]
+            converted (@#'shared/openai-messages msgs nil nil {:requires-thinking-as-text true})]
+        (t/is (= "answer" (:content (first converted))))))
+    (t/testing "both reasoning flags: thinking rides in the content, the field takes the fill"
+      (let [converted (@#'shared/openai-messages-with-reasoning
+                       (conversation) :custom "m1" " "
+                       {:requires-thinking-as-text true})
+            assistant (nth converted 2)]
+        (t/is (= [{:type "text" :text "pondering"} {:type "text" :text "checking"}]
+                 (:content assistant)))
+        (t/is (= " " (:reasoning_content assistant))
+              "the required field takes the fill once the thinking is text")))))
+
 (t/deftest test-llm-empty-assistant-dropped
   ;; pi: "some providers require either content or tool_calls, but not none" —
   ;; an empty assistant message (e.g. a resumed session whose last turn ended
