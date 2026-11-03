@@ -38,18 +38,72 @@ it; they are recorded here because P6 builds on them:
   `{:declared f :load! f}`) bound beside `run_code`'s, because a tool body has
   no other path to the agent's session.
 
+The lookup table is `scripts/live_tool_exposure_check.bb`: `registry/*` and
+`loop.state/declared-tools-for` (the derivation the wire list really comes
+from) drive three live `kmet.ai.llm/send-message` rounds on the
+`:anthropic-messages` wire, and each request's payload is captured with
+`:on-payload`, so the check reads the tools array Anthropic received — the
+plan's "`-message` logging on" is not needed, and nothing has to be parsed out
+of a log file.
+
+Run on 2026-11-04, `claude-haiku-4-5` family (`:commandcode`, the only
+anthropic-wire credential that authenticates on this machine — see the
+leftover below):
+
+| round | tools declared | cache_creation | cache_read |
+|---|---|---|---|
+| 1. deferred source registered, nothing loaded | 3 (`probe_one`, `probe_two`, `tool_search`) | 7,670 | 0 |
+| 2. same prefix, same array | 3, identical | 14 | 7,670 |
+| 3. one tool promoted (`.kmet` load recorded) | 4 (`cat_alpha` + the three) | 7,755 | 0 |
+
+What that shows, and what it leaves: a deferred source contributes **no**
+schema before a load (the two deferred names are absent from round 1's array)
+and `tool_search` is declared because the tool exists to find (gate 1); the
+tools array sits *inside* the cached prefix (round 2 reads all 7,670 written
+tokens), which is the measured reason a tool change is expensive; and a
+promotion re-sends the array and pays a full prefix miss (round 3: read 0,
+re-write 7,755) — the cost P6 exists to remove. Round 2 also proves the
+declaration is byte-stable when nothing changed (gate 3 for the setup the
+rounds ran in).
+
 Known inputs for P6, found while landing P5:
 
 - **Declared order is not stable.** `registry/select-tools` returns a map, so
-  past array-map size the wire order is hash order. P6's "byte-identical up to
-  the delta" gate needs a stable order first: sort by name, or carry the
-  selection as an ordered vector.
+  past array-map size the wire order is hash order, and `get-all-tools` merges
+  a deferred source's tools *first*, so a promotion inserts the loaded tool at
+  the head of the array (round 3 above: `cat_alpha` before `probe_one`).
+  P6's "byte-identical up to the delta" gate needs an order of its own first:
+  sort by name, or carry the selection as an ordered vector.
 - `session/schema.clj`'s `Entry` union is missing `:custom-message` (and would
   miss any new role): with the strict load pass on (`--debug`), every custom
   message is reported and skipped. Pre-existing, one line plus a test.
 - A `:default-tools` selection that omits `tool_search` makes a deferred tool
   unreachable (nothing can promote it). Coherent — an explicit selection wins —
   but it should be said in `docs/configuration.md` when that track lands.
+
+### Leftovers from P5
+
+1. **The github-copilot run itself.** `~/.kmet/agent/auth.edn` holds a stub
+   credential for `:github-copilot` (`:access "fresh"`, `:refresh "r"` — a
+   landing fixture, not a token; there is no `gh` CLI or `COPILOT_GITHUB_TOKEN`
+   here), so the plan's "gh copilot haiku" invocation cannot authenticate on
+   this machine. The wire under test is the same (`:anthropic-messages`) and
+   the substitute run above covers the mechanism; re-run
+   `bb scripts/live_tool_exposure_check.bb` (defaults: `github-copilot`
+   `claude-haiku-4.5`) where a real Copilot token exists to close it.
+2. **A composed-app run of the same check.** The script builds its tool table
+   with `register-tool!` / `register-tool-source!` rather than booting the
+   composition, so it proves the derivation and the wire, not the row mount;
+   the loop-level mount is covered by
+   `test-a-search-promotes-a-tool-into-the-next-request`. A live run through
+   `--profile print` with an extension that registers a deferred source would
+   close the last gap.
+3. **The prompt's Available-tools list for a promoted tool.** The leading
+   system prompt is never rebuilt for a promotion (by design), so a promoted
+   tool never appears in that list — it appears in the appended source listing
+   and in the declarations. Worth one sentence in
+   `docs/configuration.md`/`extension.md` when someone reads the two together;
+   the listing text is the only place the model is told twice.
 
 ### P6 — mid-conversation tool changes without a full re-prefill
 
