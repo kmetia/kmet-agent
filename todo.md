@@ -46,9 +46,10 @@ from) drive three live `kmet.ai.llm/send-message` rounds on the
 plan's "`-message` logging on" is not needed, and nothing has to be parsed out
 of a log file.
 
-Run on 2026-11-04, `claude-haiku-4-5` family (`:commandcode`, the only
-anthropic-wire credential that authenticates on this machine — see the
-leftover below):
+Run on 2026-11-04, `claude-haiku-4-5` family, on both anthropic-wire
+credentials this machine holds — first `:commandcode`, then `:github-copilot`
+once that credential authenticated here (leftover 1). The three rounds produce
+the same numbers on either:
 
 | round | tools declared | cache_creation | cache_read |
 |---|---|---|---|
@@ -66,14 +67,29 @@ re-write 7,755) — the cost P6 exists to remove. Round 2 also proves the
 declaration is byte-stable when nothing changed (gate 3 for the setup the
 rounds ran in).
 
+The composed half is `scripts/live_tool_exposure_composed_check.bb` (leftover
+2): it boots `--profile print` with the same probe installed in a scratch agent
+dir and mounted as the composition row `:ext/p5_probe`, and reads each
+request's tools array from the extension's own `:before-provider-request`
+listener. Run on 2026-11-04 against `:github-copilot`/`claude-haiku-4.5`: round
+1 declared 17 tools with both deferred names absent and `tool_search` present,
+the model's `tool_search` call promoted `cat_alpha` and `cat_beta` into round 2
+(19 tools, every round-1 name still declared), the model called `cat_alpha`
+("cat_alpha ok"), and round 3's array was identical to round 2's item for item.
+The mount rule cost the first attempts: a file in a discovery root is
+discovered, not mounted (`docs/extensions.md` § Where extensions live and what
+loads them), which is why the probe is both installed *and* patched in as a row.
+
 Known inputs for P6, found while landing P5:
 
 - **Declared order is not stable.** `registry/select-tools` returns a map, so
   past array-map size the wire order is hash order, and `get-all-tools` merges
-  a deferred source's tools *first*, so a promotion inserts the loaded tool at
-  the head of the array (round 3 above: `cat_alpha` before `probe_one`).
-  P6's "byte-identical up to the delta" gate needs an order of its own first:
-  sort by name, or carry the selection as an ordered vector.
+  a deferred source's tools *first*. The composed run measured the effect: two
+  promoted names entered a 17-tool array at positions 2 and 17 of 19 —
+  interleaved with the existing declarations, not appended, where appending
+  would have been 17 and 18. P6's "byte-identical up to the delta" gate needs
+  an order of its own first: sort by name, or carry the selection as an
+  ordered vector.
 - `session/schema.clj`'s `Entry` union is missing `:custom-message` (and would
   miss any new role): with the strict load pass on (`--debug`), every custom
   message is reported and skipped. Pre-existing, one line plus a test.
@@ -83,27 +99,29 @@ Known inputs for P6, found while landing P5:
 
 ### Leftovers from P5
 
-1. **The github-copilot run itself.** `~/.kmet/agent/auth.edn` holds a stub
-   credential for `:github-copilot` (`:access "fresh"`, `:refresh "r"` — a
-   landing fixture, not a token; there is no `gh` CLI or `COPILOT_GITHUB_TOKEN`
-   here), so the plan's "gh copilot haiku" invocation cannot authenticate on
-   this machine. The wire under test is the same (`:anthropic-messages`) and
-   the substitute run above covers the mechanism; re-run
-   `bb scripts/live_tool_exposure_check.bb` (defaults: `github-copilot`
-   `claude-haiku-4.5`) where a real Copilot token exists to close it.
-2. **A composed-app run of the same check.** The script builds its tool table
-   with `register-tool!` / `register-tool-source!` rather than booting the
-   composition, so it proves the derivation and the wire, not the row mount;
-   the loop-level mount is covered by
-   `test-a-search-promotes-a-tool-into-the-next-request`. A live run through
-   `--profile print` with an extension that registers a deferred source would
-   close the last gap.
+1. **The github-copilot run itself — closed 2026-11-04.** The landing
+   fixture was replaced by a real credential on this machine (a `ghu_…` refresh
+   token with a `tid=…` access token, ten hours to expiry), so
+   `bb scripts/live_tool_exposure_check.bb` now runs its default
+   `github-copilot`/`claude-haiku-4.5` invocation here and produced the three
+   rows above unchanged. No substitute is needed.
+2. **A composed-app run of the same check — closed 2026-11-04** by
+   `scripts/live_tool_exposure_composed_check.bb`. The other script builds its
+   tool table with `register-tool!` / `register-tool-source!` rather than
+   booting the composition, so it proves the derivation and the wire, not the
+   row mount; this one installs the probe in a scratch agent dir, mounts it as
+   `:ext/p5_probe` through `--patch`, runs `--profile print`, and reads the
+   arrays from the extension's listener. It passes, and it measured the
+   promotion's placement inside the array (see the ordering input above).
 3. **The prompt's Available-tools list for a promoted tool.** The leading
    system prompt is never rebuilt for a promotion (by design), so a promoted
    tool never appears in that list — it appears in the appended source listing
    and in the declarations. Worth one sentence in
    `docs/configuration.md`/`extension.md` when someone reads the two together;
-   the listing text is the only place the model is told twice.
+   the listing text is the only place the model is told twice. The composed run
+   shows the other side of it: asked to "Say exactly: mount-test", the model
+   answered from the appended listing — "I see you've mentioned '1 deferred
+   tool source'" — because that listing was the only place the source existed.
 
 ### P6 — mid-conversation tool changes without a full re-prefill
 
