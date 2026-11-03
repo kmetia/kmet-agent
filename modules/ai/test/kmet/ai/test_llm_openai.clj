@@ -587,6 +587,25 @@
     (let [model (responses-model {:compat {:supports-explicit-prompt-cache-mode true}})
           payload (@#'responses/responses-payload model :high [] [] "gpt-5.4" :none nil)]
       (t/is (= {:mode "explicit"} (:prompt_cache_options payload)))))
+  (t/testing "explicit-mode models carry the window in prompt_cache_options and
+             omit prompt_cache_retention (pi getPromptCacheRetention/Options)"
+    (let [model (responses-model {:compat {:supports-explicit-prompt-cache-mode true}})
+          long-payload (@#'responses/responses-payload model :high [] [] "gpt-5.4" :long "sess-1")
+          short-payload (@#'responses/responses-payload model :high [] [] "gpt-5.4" :short "sess-1")
+          unsupported (@#'responses/responses-payload
+                       (responses-model {:compat {:supports-explicit-prompt-cache-mode true
+                                                  :supports-long-cache-retention false}})
+                       :high [] [] "gpt-5.4" :long "sess-1")]
+      (t/is (= {:ttl "30m"} (:prompt_cache_options long-payload)))
+      (t/is (nil? (:prompt_cache_retention long-payload)))
+      (t/is (= "sess-1" (:prompt_cache_key long-payload))
+            "the key itself is not suppressed")
+      (t/is (nil? (:prompt_cache_options short-payload))
+            "short sends neither the window nor the retention param")
+      (t/is (nil? (:prompt_cache_retention short-payload)))
+      (t/is (nil? (:prompt_cache_options unsupported)))
+      (t/is (nil? (:prompt_cache_retention unsupported))
+            "no long support → no 30m window")))
   (t/testing "session ids over 64 chars are clamped (pi clampOpenAIPromptCacheKey)"
     (let [long-id (apply str (repeat 80 "x"))
           payload (@#'responses/responses-payload (responses-model) :high [] [] "gpt-5.4" :short long-id)]

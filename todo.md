@@ -8,15 +8,15 @@ this file are dropped — see § Deferred.
 | track | what it fixes | status |
 |---|---|---|
 | **`github-copilot` anthropic auth** | every `github-copilot/claude-*` model failed with `400 missing required Authorization header` — the anthropic wire sent `x-api-key` to an endpoint that only accepts `Authorization: Bearer` | **landed** (oauth marker → Bearer; verified live) |
-| **Prompt-caching parity with pi** (P) | the wires never ask for caching — anthropic places no breakpoint, completions sends no key — so cache-read sits at 0 while the accounting that prices it is already complete | **P0–P2 landed** (anthropic breakpoints + 1h pricing; completions key/retention/markers/affinity; store/stream_options on the compat); P4 remains; decisions closed (D1–D3) |
-| **Prompt-caching live check** | every caching test proves the markers are *sent*; only a real provider proves they are *accepted* (`cache_read_input_tokens > 0` on round 2) | **open** — the manual session in § Verification beyond tests; due after P4 |
+| **Prompt-caching parity with pi** (P) | the wires never ask for caching — anthropic places no breakpoint, completions sends no key — so cache-read sits at 0 while the accounting that prices it is already complete | **P0–P4 landed** (anthropic breakpoints + 1h pricing; completions key/retention/markers/affinity; store/stream_options on the compat; responses explicit-mode windows); the live check below remains; decisions closed (D1–D3) |
+| **Prompt-caching live check** | every caching test proves the markers are *sent*; only a real provider proves they are *accepted* (`cache_read_input_tokens > 0` on round 2) | **open** — the manual session in § Verification beyond tests; run it before the next track |
 | **Tool exposure and declared sets** (P5–P6) | the ranker serves MCP only and no source's tools can be declared, so every tool costs a schema on every round; a tool-set change re-sends the whole array and is recorded nowhere | plan, decisions closed (D4–D8); **P5 → P6** |
 | **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | plan; **after** the exposure track |
 | Around tool hooks | two hand-rolled hook chains + a doubled permission gate; no way to settle a call successfully | decided: **A** — one `:on-tool` around registration |
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | decisions closed (E1–E16); independent |
 | **Remaining openai-compat keys** | four completions compat keys pi converts messages and derives stop reasons with are inert data in kmet (`requires-tool-result-name`, `requires-assistant-after-tool-result`, `requires-thinking-as-text`, `supports-finish-reason`), and `merge-compat` lets an explicit nil erase a provider-level value | backlog — no shipped model sets any of the four; the P2 pass (store/stream_options) is the template |
 
-Between tracks: P (P4, then the live cache check) → exposure (P5 → P6) → S.
+Between tracks: the live cache check, then exposure (P5 → P6) → S.
 That order is a decision about where the effort goes, not a dependency: P5
 needs nothing from P — it is the only prefix change whose payoff does not
 depend on a provider honouring a marker. Hooks and eval land whenever; neither
@@ -50,8 +50,10 @@ Status: plan, decisions closed. **P0 landed and verified against the live API**
 pricing, and D2's corrected resolution seam). **P1 landed** (completions key,
 retention, anthropic-format markers, affinity headers). **P2 landed** (the
 responses wire reads the resolved compat, `store`/`stream_options` follow
-theirs, the generator's affinity default is corrected). P3's resolution landed
-with P0. Next: P4.
+theirs, the generator's affinity default is corrected). **P3 landed** with P0
+and **P4 landed** (explicit-mode responses models carry the window in
+`prompt_cache_options` and omit `prompt_cache_retention`). The track is done
+bar the live check below.
 Owner: whoever takes the `:llm` row next.
 Reference implementation: `~/src/cvstree/pi/packages/ai/src/api/` (pi).
 
@@ -329,6 +331,14 @@ Files: `modules/ai/src/kmet/ai/api/openai_responses.clj`.
 Done when: the explicit-mode model sends `prompt_cache_options` and no
 `prompt_cache_retention`.
 
+**Done.** `long?` became the shared long-retention condition, and the payload
+computes one `cache-options` value — `{:mode "explicit"}` for `:none`,
+`{:ttl "30m"}` for long — exactly pi's `getPromptCacheOptions`, with
+`prompt_cache_retention` gated on `(not explicit?)` as in
+`getPromptCacheRetention`. Tests extend `test-llm-responses-cache-params`:
+long with explicit mode sends the 30m window and no retention, `short` sends
+neither, and a model without long support sends neither on `long`.
+
 ### Test plan
 
 Pure builders, no network, no `^:slow`:
@@ -353,7 +363,7 @@ Run: `bb test-changed`, `bb lint-changed`, `bb format-check-changed`.
 
 ### Order and size
 
-P0–P2 landed; P4 is the last item — three lines in one payload builder.
+P0–P4 landed; only the live cache check remains — a manual session, no code.
 All decisions are closed; nothing waits on one.
 
 ### Decisions

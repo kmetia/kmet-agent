@@ -234,10 +234,13 @@ window is 5 minutes by default.
 `KMET_CACHE_RETENTION` changes that host-wide. `long` asks for the longer
 retention where the model supports it (`ttl: "1h"` on the Anthropic wires
 and OpenRouter's anthropic-format models, `prompt_cache_retention: "24h"` on
-`openai-responses` and `openai-completions`); an Anthropic 1-hour cache write
-is priced at twice the base input rate. `none` turns caching off — no
-markers, no cache key, no session-affinity headers. Compaction summaries
-always ask for `none`: they are read once.
+`openai-responses` and `openai-completions`; a model whose compat declares
+`:supports-explicit-prompt-cache-mode` asks for a 30-minute window in
+`prompt_cache_options` instead). An Anthropic 1-hour cache write is priced at
+twice the base input rate. `none` turns caching off — no markers, no cache
+key, no session-affinity headers (an explicit-mode model still sends its
+`{mode "explicit"}` option). Compaction summaries always ask for `none`: they
+are read once.
 
 The cache half of the accounting was already there — `cache_read` and
 `cache_write` tokens and their cost — so `/cost`, the footer and the

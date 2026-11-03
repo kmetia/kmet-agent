@@ -175,9 +175,10 @@
    disabled but the model allows it — :xhigh/:max and gpt-5* off:null
    models omit the param and think by default), include for the reasoning
    content (effort requests + xai always), max_output_tokens (min 16),
-   prompt-cache params (key from the session id, a 24h retention when long
-   and supported, explicit mode when caching is off on a cache-enabled
-   model), then :sampling-params merged last so their keys win."
+   prompt-cache params (key from the session id; a 24h retention when long is
+   supported, unless the model's compat takes explicit-mode options — then the
+   options carry the window instead: explicit mode for :none, a 30m ttl for
+   long), then :sampling-params merged last so their keys win."
   [model-record effort messages tools model-id cache-retention session-id]
   (let [effort-reasoning (when (and (:reasoning model-record) effort)
                            {:effort (models/effort-value model-record effort)
@@ -190,7 +191,15 @@
         caching? (not= :none retention)
         ;; the shared compat resolution (pi getCompat): detection defaults,
         ;; every explicit non-nil key survives
-        compat (resolved-openai-compat model-record)]
+        compat (resolved-openai-compat model-record)
+        explicit? (:supports-explicit-prompt-cache-mode compat)
+        long? (and (= :long retention) (:supports-long-cache-retention compat))
+        ;; pi getPromptCacheOptions: on an explicit-mode model the options carry
+        ;; the cache window and the retention param is omitted instead
+        cache-options (when explicit?
+                        (cond
+                          (= :none retention) {:mode "explicit"}
+                          long? {:ttl "30m"}))]
     (cond-> {:model model-id
              :input (responses-messages model-record messages)
              :stream true
@@ -203,10 +212,8 @@
           (and (= :xai (models/provider-family model-record)) (:reasoning model-record)))
       (assoc :include ["reasoning.encrypted_content"])
       (and caching? session-id) (assoc :prompt_cache_key (clamp-prompt-cache-key session-id))
-      (and (= :long retention) (:supports-long-cache-retention compat))
-      (assoc :prompt_cache_retention "24h")
-      (and (= :none retention) (:supports-explicit-prompt-cache-mode compat))
-      (assoc :prompt_cache_options {:mode "explicit"})
+      (and long? (not explicit?)) (assoc :prompt_cache_retention "24h")
+      cache-options (assoc :prompt_cache_options cache-options)
       (seq (:sampling-params model-record)) (merge (:sampling-params model-record)))))
 
 (defn responses-dynamic-headers
