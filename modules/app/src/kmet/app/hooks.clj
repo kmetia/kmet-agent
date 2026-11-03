@@ -44,26 +44,29 @@
                  ": " (ex-message t))
    :is-error true})
 
+(def ^:private not-run
+  "The sentinel RAN starts as, so a nil result from NEXT is told apart from a
+   hook that never ran the call at all."
+  ::not-run)
+
 (defn- run-hook
   "Run one HOOK over OP with NEXT as its continuation.
 
-   DESCENDED and FROM-NEXT are what make the fail-closed policy positional: a
-   throw with FROM-NEXT set came out of the body and is rethrown; any other
-   throw is the hook's own and settles the call as an error. A hook that
-   descends and returns nil passes NEXT's result through, so a hook that only
-   observes the call need not return it."
+   RAN and FROM-NEXT are what make the fail-closed policy positional: a throw
+   with FROM-NEXT set came out of the body and is rethrown; any other throw is
+   the hook's own and settles the call as an error. A hook that descends and
+   returns nil passes NEXT's result through, so a hook that only observes the
+   call need not return it."
   [hook op next]
-  (let [descended (volatile! false)
+  (let [ran (volatile! not-run)
         from-next (volatile! false)
-        inner-result (volatile! nil)
         inner (fn [op]
-                (vreset! descended true)
                 (let [r (try
                           (next op)
                           (catch Throwable t
                             (vreset! from-next true)
                             (throw t)))]
-                  (vreset! inner-result r)
+                  (vreset! ran r)
                   r))
         result (try
                  (hook op inner)
@@ -72,7 +75,7 @@
                    (hook-error hook t)))]
     (cond
       (some? result) result
-      @descended @inner-result
+      (not (identical? not-run @ran)) @ran
       ;; a hook that settles a call is responsible for the result: a nil one
       ;; would erase the call from the transcript
       :else (hook-error hook (ex-info "hook settled the call without a result" {})))))

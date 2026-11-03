@@ -142,7 +142,7 @@
 ;; cover every edamame-detectable parse problem: delimiter imbalances AND other
 ;; reader errors. No backup, no simulation, no duplication of the edit engine.
 
-(defn- unparseable-write
+(defn- write-veto
   "The veto for a `write` whose content does not parse, or nil."
   [op]
   (when (= "write" (:tool-name op))
@@ -157,7 +157,7 @@
                           :delimiter "fix the delimiters or use clojure_edit / clojure_paren_repair."
                           "fix the syntax error before writing."))})))))
 
-(defn- unparseable-edit
+(defn- edit-warning
   "The warning to append to a successful `edit`'s result when the file it left
    does not parse, or nil."
   [op result]
@@ -182,9 +182,9 @@
    straight through."
   [op next]
   (case (:tool-name op)
-    "write" (or (unparseable-write op) (next op))
+    "write" (or (write-veto op) (next op))
     "edit" (let [result (next op)]
-             (if-some [warning (unparseable-edit op result)]
+             (if-some [warning (edit-warning op result)]
                (assoc result :content warning)
                result))
     (next op)))

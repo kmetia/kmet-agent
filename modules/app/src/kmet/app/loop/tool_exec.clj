@@ -127,11 +127,7 @@
                             :args (:arguments tc)
                             :tool-call-id (:id tc)
                             :assistant-message assistant-msg
-                            :signal (:signal agent)})
-        body (if declared?
-               (fn [op] (execute-call! agent assistant-msg op declared-tools))
-               (fn [_] {:content (str "Tool " (:name tc) " not found")
-                        :is-error true}))]
+                            :signal (:signal agent)})]
     {:result (invoke/tool-point
               {:chain @(:tool-hook agent)
                ;; the policy is read from the run's own ctx at call time, so a
@@ -139,8 +135,13 @@
                ;; without the driver still gets the gate
                :check (fn [op] (permissions/check (:ctx agent) op))
                :execute (fn [op]
+                          ;; the effective arguments the chain settled on — what
+                          ;; the end event reports
                           (reset! effective (:args op))
-                          (body op))}
+                          (if declared?
+                            (execute-call! agent assistant-msg op declared-tools)
+                            {:content (str "Tool " (:name tc) " not found")
+                             :is-error true}))}
               op)
      :args @effective}))
 

@@ -66,7 +66,7 @@
   (str "Fix the reported syntax error in " path
        " (e.g. with the edit tool)."))
 
-(defn- unparseable-write
+(defn- write-veto
   "The veto for a `write` whose content does not parse under its route's
    validator, or nil. Deferred/unknown routes pass through; infra failures pass
    through (never-throw)."
@@ -81,7 +81,7 @@
             {:block true
              :reason (str report "\nWrite blocked — " hint)}))))))
 
-(defn- unparseable-edit
+(defn- edit-warning
   "The warning to append to a successful `edit`'s result when the file it left
    does not parse, or nil. Deferred/unknown routes and infra failures pass
    through."
@@ -104,9 +104,9 @@
    straight through."
   [op next]
   (case (:tool-name op)
-    "write" (or (unparseable-write op) (next op))
+    "write" (or (write-veto op) (next op))
     "edit" (let [result (next op)]
-             (if-some [warning (unparseable-edit op result)]
+             (if-some [warning (edit-warning op result)]
                (assoc result :content warning)
                result))
     (next op)))

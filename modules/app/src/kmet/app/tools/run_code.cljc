@@ -850,32 +850,29 @@
             (fn []
               (if @signal
                 (settle-cancelled!)
-                (let [result (invoke/tool-point
+                (let [;; a call whose hook ran past the abort never executes:
+                      ;; the pool queue cannot fire side effects past the deadline
+                      execute (fn [op]
+                                (if @signal
+                                  {:is-error true
+                                   :content (str "run_code cancelled before " name " ran")}
+                                  (invoke/execute-tool-call
+                                   execute-tool
+                                   {:tool-name name
+                                    :args (:args op)
+                                    :signal signal
+                                    :ctx ctx
+                                    :on-update on-update
+                                    :tools surface
+                                    :bindings {:signal signal
+                                               :session-env-fn session-env-fn
+                                               :shell shell
+                                               :skill-resolver skill-resolver
+                                               :cwd cwd}})))
+                      result (invoke/tool-point
                               {:chain hook
-                               ;; the run's policy judges the inner call's
-                               ;; effective arguments, exactly as it judges an
-                               ;; outer one
                                :check check
-                               ;; a call whose hook ran past the abort never
-                               ;; executes: the pool queue cannot fire side
-                               ;; effects past the deadline
-                               :execute (fn [op]
-                                          (if @signal
-                                            {:is-error true
-                                             :content (str "run_code cancelled before " name " ran")}
-                                            (invoke/execute-tool-call
-                                             execute-tool
-                                             {:tool-name name
-                                              :args (:args op)
-                                              :signal signal
-                                              :ctx ctx
-                                              :on-update on-update
-                                              :tools surface
-                                              :bindings {:signal signal
-                                                         :session-env-fn session-env-fn
-                                                         :shell shell
-                                                         :skill-resolver skill-resolver
-                                                         :cwd cwd}})))}
+                               :execute execute}
                               (invoke/tool-op {:tool-name name
                                                :args args
                                                :tool-call-id (str "run_code-" idx)

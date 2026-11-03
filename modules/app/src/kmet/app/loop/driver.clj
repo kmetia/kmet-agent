@@ -45,9 +45,8 @@
    The hooks are read per call, so one registered mid-run fires on the next
    call — and the chain is one value: the loop's batches and the run_code
    sandbox run it (`loop/state`'s :tool-hook, `run-code/*tool-hook*`)."
-  []
-  (fn [op next]
-    ((hooks/around (extensions/get-tool-hooks)) op next)))
+  [op next]
+  ((hooks/around (extensions/get-tool-hooks)) op next))
 
 ;; ── the state ─────────────────────────────────────────────────────────────
 
@@ -146,7 +145,7 @@
                                :loop-guard-threshold (:threshold loop-guard-settings)
                                :thinking-loop-guard-enabled
                                (get config :thinking-loop-guard-enabled true)
-                               :tool-hook (extension-tool-hook)
+                               :tool-hook extension-tool-hook
                                :on-event on-event}
                               timeout-opts
                               agent-opts
