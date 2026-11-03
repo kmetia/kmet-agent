@@ -133,24 +133,21 @@
 (defn- write-content [args]
   (hook-arg args :content))
 
-;; ── Hooks: write (pre, reject) + edit (post, warn) ────────────────────────
-;; write content IS the file — validate directly in the pre-hook and block
-;; with a precise report (what failed, where, why). edit newText in
-;; isolation is NOT the file — an edit like ")" closing a form opened
-;; elsewhere is unbalanced alone but correct in context — so validate the
-;; RESULTING file in the post-hook and warn (non-blocking) with the same
-;; report + fix hint. Both cover every edamame-detectable parse problem:
-;; delimiter imbalances AND other reader errors. No backup, no simulation,
-;; no duplication of the edit engine.
+;; ── Hook: write blocked, edit warned ──────────────────────────────────────
+;; write content IS the file — validate it before the call runs and settle the
+;; call with a precise report (what failed, where, why). edit newText in
+;; isolation is NOT the file — an edit like ")" closing a form opened elsewhere
+;; is unbalanced alone but correct in context — so validate the RESULTING file
+;; after the edit and warn (non-blocking) with the same report + fix hint. Both
+;; cover every edamame-detectable parse problem: delimiter imbalances AND other
+;; reader errors. No backup, no simulation, no duplication of the edit engine.
 
-(defn on-tool-call
-  "Before-tool hook: only intercepts `write` on Clojure files. Blocks any
-   write whose content does not parse, stating exactly what is wrong and
-   where."
-  [{:keys [tool-name args]}]
-  (when (= "write" tool-name)
-    (let [path    (write-path args)
-          content (write-content args)]
+(defn- unparseable-write
+  "The veto for a `write` whose content does not parse, or nil."
+  [op]
+  (when (= "write" (:tool-name op))
+    (let [path    (write-path (:args op))
+          content (write-content (:args op))]
       (when (and (util/clojure-file? path) (string? content))
         (when-let [problem (util/parse-problem path content)]
           {:block true
@@ -160,14 +157,12 @@
                           :delimiter "fix the delimiters or use clojure_edit / clojure_paren_repair."
                           "fix the syntax error before writing."))})))))
 
-(defn on-tool-result
-  "After-tool hook: only inspects `edit` on Clojure files after success.
-   Warns (non-blocking) when the resulting file no longer parses, naming
-   the actual error; delimiters get a clojure_paren_repair hint, other
-   syntax errors point at manual fixing."
-  [{:keys [tool-name args result is-error]}]
-  (when (and (= "edit" tool-name) (not is-error) (map? result))
-    (let [path (write-path args)]
+(defn- unparseable-edit
+  "The warning to append to a successful `edit`'s result when the file it left
+   does not parse, or nil."
+  [op result]
+  (when (and (= "edit" (:tool-name op)) (not (:is-error result)) (map? result))
+    (let [path (write-path (:args op))]
       (when (util/clojure-file? path)
         (try
           (when (fs/exists? path)
@@ -176,10 +171,23 @@
                 (let [hint (case (:kind problem)
                              :delimiter (str "Run clojure_paren_repair on " path " to auto-fix, or correct the delimiters manually.")
                              (str "Fix the syntax error manually (e.g. with the edit tool) — " path " does not parse."))]
-                  {:content (str (or (:content result) "")
-                                 "\n\n⚠️ " (:report problem)
-                                 "\n" hint)}))))
+                  (str (or (:content result) "")
+                       "\n\n⚠️ " (:report problem)
+                       "\n" hint)))))
           (catch Exception _ nil))))))
+
+(defn on-tool
+  "The around tool hook: blocks an unparseable `write` before it runs, warns
+   when an `edit` left a file that does not parse, and passes every other call
+   straight through."
+  [op next]
+  (case (:tool-name op)
+    "write" (or (unparseable-write op) (next op))
+    "edit" (let [result (next op)]
+             (if-some [warning (unparseable-edit op result)]
+               (assoc result :content warning)
+               result))
+    (next op)))
 
 (defn register!
   "Register clojure_paren_repair as a kmet tool and wire the paren-check
@@ -210,5 +218,4 @@
       "format"    {:type        "boolean"
                    :description "Format the file with cljfmt after repairing delimiters (default: true)"}}}
     :execute execute :title title})
-  (ext/on-tool-call api on-tool-call)
-  (ext/on-tool-result api on-tool-result))
+  (ext/on-tool api on-tool))

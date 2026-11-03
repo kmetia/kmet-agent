@@ -103,17 +103,20 @@
    registry tool is callable."
   nil)
 
-(def ^:dynamic *tool-hooks*
-  "Bound by kmet.app.loop next to *enabled-tools-fn*: the run's agent-level
-   tool hooks — the same fns the loop's own batches call:
-     :before (fn [{:keys [tool-name args tool-call-id assistant-message]}])
-              → nil | {:block true :reason …} | {:args rewritten}
-     :after  (fn [{:keys [tool-name args result is-error]}])
-              → nil | {:content … :is-error …}
-   nil = no hooks (extension code calling the tool outside a loop run).
+(def ^:dynamic *tool-hook*
+  "Bound by kmet.app.loop next to *enabled-tools-fn*: the run's tool chain —
+   the same `(fn [op next])` the loop's own batches run. nil = no hooks
+   (extension code calling the tool outside a loop run).
    A scripted inner call carries a synthetic :tool-call-id and the turn's
-   :assistant-message (from *assistant-message*); a blocked call's :terminate
+   :assistant-message (from *assistant-message*); a settled call's :terminate
    rides through to the script's result — an inner call has no batch to stop."
+  nil)
+
+(def ^:dynamic *tool-check*
+  "Bound by kmet.app.loop next to *tool-hook*: the run's permission check,
+   `(fn [op])` → nil when the call may proceed, else the block result. The
+   agent's own ctx — never the sandbox realm's, which is the boundary the
+   script runs behind and not the ctx its policy lives on. nil = no gate."
   nil)
 
 (def ^:dynamic *assistant-message*
@@ -185,7 +188,7 @@
    cancel signal (Escape) fired or the script itself aborted
    (timeout/output-limit). Read-only (kmet.libs.concurrent/or-signal) — tools
    poll it (bash's poller kills the process tree), and the bridge checks it
-   before a call starts and again after the before hook, so an aborted
+   before a call starts and again after the chain settled, so an aborted
    script's queued calls never run. A normally finished script leaves it
    false: its queue still drains (fire-and-forget `tools/call`)."
   [run-signal abort]
@@ -797,7 +800,7 @@
   ;;
   ;; Kept process-wide on purpose (landing 9b's decision): this is a *bound*,
   ;; not a setting. Everything an inner call needs to know — the cwd, the
-  ;; shell, the skill resolver, the cancel signal, the hooks — travels per
+  ;; shell, the skill resolver, the cancel signal, the chain — travels per
   ;; submission in the invocation pipeline's :bindings, so two agents sharing
   ;; the pool still run in their own cwd and shell. A pool per agent would
   ;; multiply platform threads by the number of agents (the thread *cap* is
@@ -819,15 +822,15 @@
    bindings, so the bridge passes the run's cancel signal, session env, shell,
    skill resolver and cwd as the invocation pipeline's :bindings (bash reads
    *cancel-signal* and *shell*; read/write/edit resolve against *cwd*). The
-   call runs through the shared pipeline (kmet.app.tools.invoke) with the run's
-   tool hooks (*tool-hooks*): a blocked call settles with the hook's reason
-   without executing, and the after hook runs for blocked calls too (loop
-   parity). Inner calls carry a synthetic tool-call id and the turn's
-   assistant message. A call picked up after the script aborted — or whose
-   before hook ran past the abort — is settled as cancelled and never
-   executes: the pool queue cannot fire side effects past the deadline."
-  [{:keys [surface execute-tool signal ctx cwd session-env-fn shell skill-resolver hooks
-           assistant-message trace on-update]} name args]
+   call runs through the shared tool point (kmet.app.tools.invoke) with the
+   run's chain (*tool-hook*): a hook that settles the call keeps its result and
+   nothing executes, exactly as the loop's own batches behave. Inner calls
+   carry a synthetic tool-call id and the turn's assistant message. A call
+   picked up after the script aborted — or whose hook ran past the abort — is
+   settled as cancelled and never executes: the pool queue cannot fire side
+   effects past the deadline."
+  [{:keys [surface execute-tool signal ctx cwd session-env-fn shell skill-resolver hook
+           check assistant-message trace on-update]} name args]
   (let [name (tool-name name)
         p (promise)]
     (if-not (contains? surface name)
@@ -847,39 +850,45 @@
             (fn []
               (if @signal
                 (settle-cancelled!)
-                (let [call {:tool-name name
-                            :args args
-                            :tool-call-id (str "run_code-" idx)
-                            :assistant-message assistant-message}
-                      prep (invoke/prepare-tool-call (assoc call :before-hook (:before hooks)))]
-                  (if @signal
-                    (settle-cancelled!)
-                    (let [call (assoc call :args (if (contains? prep :args) (:args prep) args))
-                          executed (if (:block prep)
-                                     (:block prep)
-                                     (invoke/execute-tool-call
-                                      execute-tool
-                                      (assoc call
-                                             :signal signal
-                                             :ctx ctx
-                                             :on-update on-update
-                                             :tools surface
-                                             :bindings {:signal signal
-                                                        :session-env-fn session-env-fn
-                                                        :shell shell
-                                                        :skill-resolver skill-resolver
-                                                        :cwd cwd})))
-                          result (invoke/finish-tool-call
-                                  (assoc call :after-hook (:after hooks))
-                                  executed)]
-                      (try
-                        (swap! trace assoc-in [idx]
-                               (cond-> {:tool name
-                                        :ok (not (:is-error result))}
-                                 (:is-error result)
-                                 (assoc :error (preview (:content result)))))
-                        (catch Throwable _ nil))
-                      (deliver p result))))))]
+                (let [result (invoke/tool-point
+                              {:chain hook
+                               ;; the run's policy judges the inner call's
+                               ;; effective arguments, exactly as it judges an
+                               ;; outer one
+                               :check check
+                               ;; a call whose hook ran past the abort never
+                               ;; executes: the pool queue cannot fire side
+                               ;; effects past the deadline
+                               :execute (fn [op]
+                                          (if @signal
+                                            {:is-error true
+                                             :content (str "run_code cancelled before " name " ran")}
+                                            (invoke/execute-tool-call
+                                             execute-tool
+                                             {:tool-name name
+                                              :args (:args op)
+                                              :signal signal
+                                              :ctx ctx
+                                              :on-update on-update
+                                              :tools surface
+                                              :bindings {:signal signal
+                                                         :session-env-fn session-env-fn
+                                                         :shell shell
+                                                         :skill-resolver skill-resolver
+                                                         :cwd cwd}})))}
+                              (invoke/tool-op {:tool-name name
+                                               :args args
+                                               :tool-call-id (str "run_code-" idx)
+                                               :assistant-message assistant-message
+                                               :signal signal}))]
+                  (try
+                    (swap! trace assoc-in [idx]
+                           (cond-> {:tool name
+                                    :ok (not (:is-error result))}
+                             (:is-error result)
+                             (assoc :error (preview (:content result)))))
+                    (catch Throwable _ nil))
+                  (deliver p result))))]
         (.offer @bridge-queue run)
         p))))
 
@@ -1067,7 +1076,8 @@
         session-env-fn bash-tool/*session-env-fn*
         shell bash-tool/*shell*
         skill-resolver read-tool/*skill-resolver*
-        hooks *tool-hooks*
+        hook *tool-hook*
+        check *tool-check*
         assistant-message *assistant-message*
         live? (atom true)
         ;; a queued call still runs after the script returned
@@ -1103,7 +1113,8 @@
                             :session-env-fn session-env-fn
                             :shell shell
                             :skill-resolver skill-resolver
-                            :hooks hooks
+                            :hook hook
+                            :check check
                             :assistant-message assistant-message
                             :on-update on-update
                             :trace trace})

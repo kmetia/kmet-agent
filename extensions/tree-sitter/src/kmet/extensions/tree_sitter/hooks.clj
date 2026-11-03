@@ -66,15 +66,14 @@
   (str "Fix the reported syntax error in " path
        " (e.g. with the edit tool)."))
 
-(defn on-tool-call
-  "Before-tool hook: only intercepts `write`. Blocks any write whose
-   content does not parse under its route's validator, stating exactly
-   what is wrong and where. Deferred/unknown routes pass through; infra
-   failures pass through (never-throw)."
-  [{:keys [tool-name args]}]
-  (when (= "write" tool-name)
-    (let [path (write-path args)
-          content (arg args :content)]
+(defn- unparseable-write
+  "The veto for a `write` whose content does not parse under its route's
+   validator, or nil. Deferred/unknown routes pass through; infra failures pass
+   through (never-throw)."
+  [op]
+  (when (= "write" (:tool-name op))
+    (let [path (write-path (:args op))
+          content (arg (:args op) :content)]
       (when (and (string? content) (seq (str path)))
         (when-some [{:keys [problems]} (validate-content! path content {})]
           (let [report (validate/report-text problems)
@@ -82,20 +81,32 @@
             {:block true
              :reason (str report "\nWrite blocked — " hint)}))))))
 
-(defn on-tool-result
-  "After-tool hook: only inspects `edit` results that succeeded. Warns
-   (non-blocking) when the resulting file no longer parses under its
-   route's validator, appending ⚠️ + report + fix hint to the result the
-   model sees. Deferred/unknown routes and infra failures pass through."
-  [{:keys [tool-name args result is-error]}]
-  (when (and (= "edit" tool-name) (not is-error) (map? result))
-    (let [path (write-path args)]
+(defn- unparseable-edit
+  "The warning to append to a successful `edit`'s result when the file it left
+   does not parse, or nil. Deferred/unknown routes and infra failures pass
+   through."
+  [op result]
+  (when (and (= "edit" (:tool-name op)) (not (:is-error result)) (map? result))
+    (let [path (write-path (:args op))]
       (when (and (seq (str path)) (fs/exists? path))
         (try
           (when-some [{:keys [problems]}
                       (validate-content! path (slurp (str path)) {})]
             (let [report (validate/report-text problems)
                   hint (warn-hint-for path (first problems))]
-              {:content (str (or (:content result) "")
-                             "\n\n⚠️ " report "\n" hint)}))
+              (str (or (:content result) "")
+                   "\n\n⚠️ " report "\n" hint)))
           (catch Exception _ nil))))))
+
+(defn on-tool
+  "The around tool hook: blocks an unparseable `write` before it runs, warns
+   when an `edit` left a file that does not parse, and passes every other call
+   straight through."
+  [op next]
+  (case (:tool-name op)
+    "write" (or (unparseable-write op) (next op))
+    "edit" (let [result (next op)]
+             (if-some [warning (unparseable-edit op result)]
+               (assoc result :content warning)
+               result))
+    (next op)))

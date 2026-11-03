@@ -471,8 +471,8 @@
     (let [calls (atom 0)
           opts (atom [])
           agent (support/make-agent-state)]
-      (reset! (:before-tool-call agent)
-              (fn [_] {:block true :reason "Policy" :terminate true}))
+      (reset! (:tool-hook agent)
+              (support/tool-hook (fn [_op _next] {:block true :reason "Policy" :terminate true})))
       (reset! (:finish-turn agent)
               (fn [e] (when (zero? (:turn-index e)) :continue)))
       (with-redefs [cfg/get-api-key (fn [_] "test-key")

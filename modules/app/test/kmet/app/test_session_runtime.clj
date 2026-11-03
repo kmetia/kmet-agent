@@ -483,43 +483,32 @@
           (when dir (fs/delete-tree dir {:missing-ok true})))))))
 
 (deftest test-tool-hooks-come-from-the-app-tree
-  ;; The transform chain reads the store (P2), so a hook an extension
-  ;; registered reaches the engine — and leaves when it is deregistered.
+  ;; The tool chain reads the store (P2), so a hook an extension registered
+  ;; reaches the engine — and leaves when it is deregistered.
   (with-handle
     (fn [handle _]
       (let [ag (rt/agent-state handle)
-            before (fn [ctx] (@(:before-tool-call ag) ctx))
-            after (fn [ctx] (@(:after-tool-call ag) ctx))
+            chain (fn [op] (@(:tool-hook ag) op (fn [op] {:content (str "ran:" (:args op))
+                                                          :is-error false})))
             owner (extensions/extension-owner "test-tool-hooks")
-            hook-call (fn [{:keys [tool-name args]}]
-                        (if (= "kmet-test-danger" tool-name)
-                          {:block true :reason "not that one" :terminate true}
-                          {:args (assoc args :patched true)}))
-            hook-result (fn [{:keys [result]}]
-                          {:content (str "wrapped:" (:content result))
-                           :is-error false})
-            dereg-call (extensions/register-tool-call-hook! owner hook-call)
-            dereg-result (extensions/register-tool-result-hook! owner hook-result)]
+            hook (fn [op next]
+                   (if (= "kmet-test-danger" (:tool-name op))
+                     {:block true :reason "not that one" :terminate true}
+                     (let [result (next (update op :args assoc :patched true))]
+                       (assoc result :content (str "wrapped:" (:content result))))))
+            dereg (extensions/register-tool-hook! owner hook)]
         (try
           (is (= {:block true :reason "not that one" :terminate true}
-                 (before {:tool-name "kmet-test-danger" :args {}}))
-              "a tool-call hook can block a call and says why")
-          (is (= {:block {:content "not that one" :is-error true :terminate true}}
-                 (invoke/prepare-tool-call
-                  {:before-hook @(:before-tool-call ag)
-                   :tool-name "kmet-test-danger"
-                   :args {}}))
-              "its :terminate reaches the call's block result (extension.md:916)")
-          (is (true? (:patched (:args (before {:tool-name "read" :args {}}))))
-              "or rewrite its arguments")
-          (is (= "wrapped:ok"
-                 (:content (after {:tool-name "read"
-                                   :result {:content "ok" :is-error false}})))
-              "a tool-result hook rewrites the result")
-          (finally (dereg-call) (dereg-result)))
-        (is (not-any? #(identical? hook-call %)
-                      (extensions/get-tool-call-hooks))
-            "a deregistered tool-call hook leaves the registry")
-        (is (not-any? #(identical? hook-result %)
-                      (extensions/get-tool-result-hooks))
-            "so does a tool-result hook")))))
+                 (@(:tool-hook ag) {:tool-name "kmet-test-danger" :args {}} identity))
+              "a tool hook can settle a call and says why")
+          (is (= {:content "not that one" :is-error true :terminate true}
+                 (invoke/tool-point {:chain @(:tool-hook ag)
+                                     :execute (fn [_] {:content "should not run" :is-error false})}
+                                    {:tool-name "kmet-test-danger" :args {}}))
+              "its :terminate reaches the canonical block result (extension.md)")
+          (is (= {:content "wrapped:ran:{:patched true}" :is-error false}
+                 (chain {:tool-name "read" :args {}}))
+              "the chain rewrites the args and the result in one hook")
+          (finally (dereg)))
+        (is (not-any? #(identical? hook %) (extensions/get-tool-hooks))
+            "a deregistered tool hook leaves the registry")))))

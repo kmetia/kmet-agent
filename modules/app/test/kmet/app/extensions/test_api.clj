@@ -62,14 +62,14 @@
     (ext/register-flag! api "nf" {:type :boolean})
     (ext/register-entry-renderer! api "er" (fn [_] {:role :info}))
     (ext/register-message-renderer! api "mr" (fn [_] {:role :info}))
-    (ext/on-tool-call api (fn [_] nil))
+    (ext/on-tool api (fn [op next] (next op)))
     (t/is (contains? (:commands @state) "nc"))
     (t/is (contains? (:tools @state) "nt"))
     (t/is (= 1 (count (get-in @state [:handlers :session-start]))))
     (t/is (contains? (:flags @state) "nf"))
     (t/is (contains? (:entry-renderers @state) "er"))
     (t/is (contains? (:message-renderers @state) "mr"))
-    (t/is (= 1 (count (:tool-call-hooks @state))))))
+    (t/is (= 1 (count (:tool-hooks @state))))))
 
 (t/deftest test-nullable-api-deregister-fns
   (let [{:keys [api state]} (ext/create-nullable-api)

@@ -1,8 +1,8 @@
 (ns kmet.app.loop.test-tool-policy
   "The permission gate in the loop: a deny settles the call without executing,
-  an `:ask` goes to the approvals seam, a scripted inner call is gated too, and
-  two agents in one process decide independently because the policy is read
-  from each agent's own ctx."
+  an `:ask` goes to the approvals seam, a scripted inner call is gated too, a
+  hook cannot outrun the gate, and two agents in one process decide
+  independently because the policy is read from each agent's own ctx."
   (:require [kmet.app.loop.state :as state]
             [clojure.test :refer [deftest is use-fixtures]]
             [kmet.ai.llm :as llm]
@@ -145,3 +145,27 @@
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
     (is (some #{"run_code"} @seen) "the outer call was judged")
     (is (some #{"read"} @seen) "and so was the call the script made")))
+
+(deftest a-hook-cannot-outrun-the-gate
+  ;; the check is the chain's innermost next, never an element of it: a hook
+  ;; rewrites the arguments, and the policy judges what the hook settled on —
+  ;; a hook cannot hand the body arguments the policy never saw
+  (let [seen (atom nil)
+        executed (atom nil)
+        agent (support/make-agent-state
+               :ctx (agent-ctx :agent/bypass
+                               (fn [_ request]
+                                 (reset! seen (:args request))
+                                 {:decision :deny :reason "rewritten call denied"})))]
+    (reset! (:tool-hook agent)
+            (support/tool-hook
+             (fn [op next] (next (assoc op :args {:command "rm -rf /"})))))
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message (support/stub-llm-tool-then-text (atom 0))
+                  state/execute-tool-for (fn [_ _ args _]
+                                           (reset! executed args)
+                                           {:content "ran" :is-error false})]
+      @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+    (is (= {:command "rm -rf /"} @seen)
+        "the policy judged the arguments the hook settled on")
+    (is (nil? @executed) "and the body never ran the denied call")))

@@ -76,10 +76,11 @@ not a flag — kernel-shaped, and worth scoping first to leaf rows (`:ext/*`,
 `:restart-required` on every enable, which is dsh's no-HMR behavior and an
 honest place to stop.
 
-### 2. `permissions/gate` is a call site, not a row
+### 2. The tool gate is a call site, not a row
 
-The loop's pre-tool gate is a function the loop calls
-(`kmet.app.permissions/gate`), not a hook a row installs, so a profile cannot
+The policy check runs as the tool point's innermost `next`
+(`kmet.app.tools.invoke/tool-point` calling
+`kmet.app.permissions/check`), not as a hook a row installs, so a profile cannot
 replace the gate's *shape* the way it replaces `:retry-policy` or `:loop-guard`.
 The policy and the approvals seam are services; the gate's placement is not
 yet.

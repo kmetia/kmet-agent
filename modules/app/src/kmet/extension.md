@@ -742,41 +742,46 @@ for each, the **last non-nil handler result wins**:
     ;; return nil, or {:system-prompt ...} / {:message msg-map}
     nil))
 
-;; transform tool calls/results (pi: tool_call / tool_result)
-(ext/on-tool-call api
-  (fn [{:keys [tool-name args]}]
-    ;; nil (pass), {:block true :reason "..."}, or {:args transformed}
-    ;; a blocked call may add :terminate true — when EVERY call in the
-    ;; batch is blocked with :terminate the run stops after the batch
-    ;; (no follow-up LLM call; the follow-up queue still drains)
+;; around a tool call (pi: beforeToolCall / afterToolCall — kmet has one
+;; around shape instead of two points)
+(ext/on-tool api
+  (fn [op next]
+    ;; op = {:tool-name :args :tool-call-id :assistant-message}
+    ;;   :tool-call-id / :assistant-message are absent outside a batch
+    ;;
+    ;; do not call next  — the return value settles the call: nothing runs.
+    ;;   {:block true :reason "..."} is the veto (a call may add
+    ;;   :terminate true — when EVERY call in the batch is vetoed with
+    ;;   :terminate the run stops after the batch, no follow-up LLM call,
+    ;;   the follow-up queue still drains); any other map is the result the
+    ;;   model sees, which is how a hook settles a call SUCCESSFULLY
+    ;;   without executing it (a cache hit, a stub, a dry run)
+    ;; (next op)         — run the rest of the chain; :args is what the tool
+    ;;   will run with, so (next (assoc op :args rewritten)) rewrites a call
+    ;; transform it      — rewrite the result: assoc :content / :is-error
     nil))
-(ext/on-tool-result api
-  (fn [{:keys [tool-name result is-error]}]
-    ;; nil, or {:content ...} / {:is-error ...} overrides
-    nil))
-```
 
-Parallel batches run tool bodies concurrently: `on-tool-call` hooks fire
-sequentially during preparation, while `on-tool-result` hooks run when
-their tool finishes, on that tool's worker thread — they may overlap with
-each other, and so may `:tool-execution-end` listeners. Keep shared
-extension state in atoms.
+Hooks run in registration order, the first registered outermost: it sees the
+op before every later hook and the result after all of them. A hook that
+throws fails the call closed — the model gets an error naming the hook's
+message — whether it threw before descending or after the body ran; a throw
+from the tool itself stays the tool's own error.
 
-Scripted tool calls run through the same hooks: a `run_code` call's inner
-`tools/call` fires the before hook (block with `{:block true :reason ...}`,
-or rewrite with `{:args ...}`) and the after hook (override `:content` /
-`:is-error`). Two caveats: an inner call carries a synthetic `:tool-call-id`
-(but the batch's assistant message), and a blocked call's `:terminate` hint
-rides through to the script's result (a script has no batch to stop). Inner
-calls still produce no tool-execution events and no transcript/session
-entries.
+Parallel batches run each call's chain and body on its own worker thread, so
+a hook that asks a human is asked per call, and a slow hook holds only its
+own call. Scripted tool calls run through the same chain: a `run_code` call's
+inner `tools/call` fires the hooks with a synthetic `:tool-call-id` (and the
+batch's assistant message), and a settled call's `:terminate` hint rides
+through to the script's result (a script has no batch to stop). Inner calls
+still produce no tool-execution events and no transcript/session entries.
 
-Hooks run **before** the app's permission policy (`:permissions`, an
-app-level service no extension can mount), so a hook can rewrite a call but
-not allow one the policy denies — and a hook is an interception, not a
-sandbox: the run_code sandbox can also shell out through `babashka.process`
-(`p/sh`/`p/shell`/`p/process`), which no per-tool hook covers, so blocking
-the `run_code` tool itself is what a hook can do.
+The chain sits **outside** the app's permission policy (`:permissions`, an
+app-level service no extension can mount): the check is the chain's innermost
+`next`, so a hook may rewrite a call but the policy judges the rewritten one —
+and a hook can never allow what the policy denies. A hook is an interception,
+not a sandbox: the run_code sandbox can also shell out through
+`babashka.process` (`p/sh`/`p/shell`/`p/process`), which no per-tool hook
+covers, so blocking the `run_code` tool itself is what a hook can do.
 
 ### Shortcuts and markdown transformers
 
@@ -1244,7 +1249,7 @@ involved. Call the plugin's `:apply` with it and assert what was registered:
 
 State shape: `:commands` `:tools` `:handlers` `:flags` `:shortcuts`
 `:markdown-transformers` `:entry-renderers` `:message-renderers` `:aliases`
-`:tool-call-hooks` `:tool-result-hooks` `:input-hooks`
+`:tool-hooks` `:input-hooks`
 `:before-agent-start-hooks` `:ui-calls` `:emitted` `:model-calls`. Every
 registration function returns a deregister fn; the nullable api's deregister
 fns remove the corresponding registration.

@@ -327,31 +327,37 @@
         (t/is (every? :ok (get-in r [:details :calls])))))))
 
 (t/deftest test-run-code-inner-tool-hooks
-  ;; the run's agent-level hooks reach scripted calls: arg rewrite, block
-  ;; (settled without executing, after hook still runs — loop parity),
-  ;; result override; inner calls carry a synthetic id and no message
+  ;; the run's tool chain reaches scripted calls: arg rewrite, settlement
+  ;; (nothing executes), result rewrite; inner calls carry a synthetic id and
+  ;; no assistant message
   (with-custom-tool {:name "run-code-test-echo"
                      :label "Echo"
                      :description "Echo args"
                      :execute (fn [args] {:content (pr-str args)})}
     (fn []
       (let [payloads (atom [])]
-        (binding [run-code/*tool-hooks*
-                  {:before (fn [ctx]
-                             (swap! payloads conj ctx)
-                             (when (= "run-code-test-echo" (:tool-name ctx))
-                               (if (:block (:args ctx))
-                                 {:block true :reason "blocked by hook" :terminate true}
-                                 {:args (assoc (:args ctx) :hooked true)})))
-                   :after (fn [ctx]
-                            (when (= "run-code-test-echo" (:tool-name ctx))
-                              {:content (str (:content (:result ctx)) "|after")}))}]
+        (binding [run-code/*tool-hook*
+                  (fn [op next]
+                    (when (= "run-code-test-echo" (:tool-name op))
+                      (swap! payloads conj op))
+                    (if (and (= "run-code-test-echo" (:tool-name op))
+                             (:block (:args op)))
+                      {:block true :reason "blocked by hook" :terminate true}
+                      (let [result (next (if (= "run-code-test-echo" (:tool-name op))
+                                           (update op :args assoc :hooked true)
+                                           op))]
+                        (if (= "run-code-test-echo" (:tool-name op))
+                          (assoc result :content (str (:content result) "|after"))
+                          result))))]
           (let [r (run (str "(emit [(deref (tools/call \"run-code-test-echo\" {:n 1}))"
                             " (deref (tools/call \"run-code-test-echo\" {:block true}))])"))]
             (t/is (not (:is-error r)) (:content r))
             (t/is (str/includes? (:content r) ":n 1, :hooked true"))
             (t/is (str/includes? (:content r) "|after"))
-            (t/is (str/includes? (:content r) "blocked by hook|after"))
+            (t/is (str/includes? (:content r) "{:content \"blocked by hook\", :is-error true"))
+            (t/is (not (str/includes? (:content r) "blocked by hook|after"))
+                  "a settled call is not post-processed: the hook that settled it
+                   never descended, so no outer hook's result rewrite applies")
             (t/is (str/includes? (:content r) ":terminate true")
                   "a blocked inner call reports the hook's :terminate to the script")
             (t/is (not (contains? r :terminate))
@@ -752,8 +758,8 @@
                                   (reset! ran true)
                                   {:content "ran"})}
       (fn []
-        (binding [run-code/*tool-hooks*
-                  {:before (fn [_] (Thread/sleep 800) nil)}]
+        (binding [run-code/*tool-hook*
+                  (fn [op next] (Thread/sleep 800) (next op))]
           (let [r (run "(deref (tools/call \"run-code-test-slow-hook-target\" {}))"
                        {:timeout 0.2})]
             (t/is (:is-error r))

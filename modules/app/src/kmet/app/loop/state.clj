@@ -63,8 +63,10 @@
                                         ;;    :follow-up-mode :all|:one-at-a-time
                                         ;;    :auto-compact bool :context-window int-or-nil}
                        retry-count      ;; atom of int: retries performed for the in-flight LLM call
-                       before-tool-call ;; atom of (fn [ctx]) → {:block true :reason} | nil
-                       after-tool-call  ;; atom of (fn [ctx]) → override map | nil
+                       tool-hook        ;; atom of the run's tool chain (fn [op next]) → result, or nil —
+                                        ;; the around hooks (kmet.app.hooks/around); the permission check is
+                                        ;; the tool point's innermost next, not part of this value. One value,
+                                        ;; so the loop's batches and the run_code sandbox run the same hooks
                        system-prompt-override ;; atom of string or nil (per-run override, pi: _systemPromptOverride)
                        transform-context      ;; atom of (fn [messages]) → messages (pi: transformContext)
                        prepare-next-turn      ;; atom of (fn [ctx]) → update map | nil (pi: prepareNextTurn)
@@ -120,7 +122,7 @@
      :max-agent-delay-ms (default 60000 — pi maxAgentDelayMs, the backoff cap),
      :branch-summary-reserve-tokens (default 16384 — pi
      branchSummary.reserveTokens, the branch-summary input budget),
-         :before-tool-call, :after-tool-call, :system-prompt-override,
+         :tool-hook, :system-prompt-override,
          :transform-context, :prepare-next-turn, :prepare-request, :finish-turn,
          :get-api-key, :scoped-models (default []),
          :steering-mode (default :all), :follow-up-mode (default
@@ -149,7 +151,7 @@
          has no tool table; an agent's run passes its own child ctx, which
          carries its own :loop-guard and :retry-policy stages, and a process
          run passes the app root)"
-  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms max-agent-delay-ms branch-summary-reserve-tokens before-tool-call after-tool-call system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts system-prompt-fn compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens compact-model-overrides http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools ctx]
+  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms max-agent-delay-ms branch-summary-reserve-tokens tool-hook system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts system-prompt-fn compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens compact-model-overrides http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools ctx]
       :or {provider :opencode-go
            thinking :off
            steering-mode :all
@@ -204,8 +206,7 @@ Be precise and concise in your responses."}}]
                                 :loop-guard-threshold (max 2 (long loop-guard-threshold))
                                 :thinking-loop-guard-enabled (boolean thinking-loop-guard-enabled)})
                     :retry-count (atom 0)
-                    :before-tool-call (atom before-tool-call)
-                    :after-tool-call (atom after-tool-call)
+                    :tool-hook (atom tool-hook)
                     :system-prompt-override (atom system-prompt-override)
                     :transform-context (atom transform-context)
                     :prepare-next-turn (atom prepare-next-turn)

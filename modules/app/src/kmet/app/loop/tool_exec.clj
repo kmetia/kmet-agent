@@ -1,10 +1,16 @@
 (ns kmet.app.loop.tool-exec
-  "Tool-call preparation, hooks, and batch execution.
+  "Tool-call preparation and batch execution.
 
-   Tool hooks (pi: beforeToolCall / afterToolCall): registered via
-   set-before-tool-call! / set-after-tool-call!. The before hook can block
-   execution ({:block true :reason ...}); the after hook can rewrite the
-   result (:content / :is-error).
+   Every call runs one tool point (`kmet.app.tools.invoke/tool-point`): the
+   run's around hooks outside, the permission check at their innermost `next`,
+   the body beneath it. A hook that does not descend settles the call, so a
+   veto, an argument rewrite, a result rewrite and a successful settlement
+   without execution are one shape (extension api: `on-tool`).
+
+   Preparation — the `:tool-execution-start` event — stays sequential and
+   source-ordered; the chain and the body run inside each call's future on the
+   parallel path, so a hook that asks a human is answered from its own call
+   rather than blocking the batch's preparation.
 
    Tool execution mode (pi: toolExecution): tools default to :parallel; if
    any tool call targets a :sequential tool the whole batch runs
@@ -72,125 +78,100 @@
     ;; absent when the state has no ctx, so "no :srce-ctx" reads as "no ctx"
     (:ctx agent) (assoc :srce-ctx (:ctx agent))))
 
-(defn- execute-tool-body!
+(defn- execute-call!
   "THE place a tool body starts, on the parallel and the sequential path alike:
-   emit :tool-execution-prepared — the call cleared its before hooks and the
-   permission gate in preparation, so the block that has existed since
-   :tool-execution-start (which fires before those gates, and so before an
-   `:ask` is answered) is now executing and a front end starts its clock here —
-   then run the body through the registry's executor. One entry point, so the
+   emit :tool-execution-prepared — the chain above this point descended, so the
+   call cleared its hooks and the permission gate and a front end starts its
+   clock here — then run the body through the registry's executor with the op's
+   effective arguments (whatever the hooks settled on). One entry point, so the
    event and the body cannot drift and a third path cannot forget one of them."
-  [agent assistant-msg tc declared-tools]
+  [agent assistant-msg op declared-tools]
   (state/emit agent {:type :tool-execution-prepared
-                     :tool-call-id (:id tc)
-                     :tool-name (:name tc)
-                     :args (:arguments tc)})
+                     :tool-call-id (:tool-call-id op)
+                     :tool-name (:tool-name op)
+                     :args (:args op)})
   (invoke/execute-tool-call
    (state/tool-executor agent)
-   {:tool-name (:name tc)
-    :args (:arguments tc)
-    :tool-call-id (:id tc)
+   {:tool-name (:tool-name op)
+    :args (:args op)
+    :tool-call-id (:tool-call-id op)
     :assistant-message assistant-msg
     :signal (:signal agent)
     :ctx (tool-ctx agent)
     :tools declared-tools
-    :on-update (tool-on-update agent (:id tc))}))
+    :on-update (tool-on-update agent (:tool-call-id op))}))
 
-(defn- prepare-tool-call!
-  "Run one tool call's preparation: emit :tool-execution-start, then either settle
-   it immediately when the tool is not in the request's captured tool map (pi:
-   prepareToolCall's tools.find) or run the before-tool-call hook and return TC
-   with any rewritten :arguments. Scheduling of the execution itself stays with
-   the caller (parallel vs sequential), which emits :tool-execution-prepared
-   when the body starts."
-  [agent assistant-msg tc declared-tools]
-  (let [tc-id (:id tc)
-        tc-name (:name tc)
-        tc-args (:arguments tc)]
-    (state/emit agent {:type :tool-execution-start
-                       :tool-call-id tc-id
-                       :tool-name tc-name
-                       :args tc-args})
-    (if-not (contains? declared-tools tc-name)
-      ;; undeclared call settles as an error without executing, but the
-      ;; after hook still runs in finish-tool-call!
-      (assoc tc :kmet/blocked
-             {:content (str "Tool " tc-name " not found")
-              :is-error true})
-      ;; the hook chain is the extension hooks followed by the permission
-      ;; gate: a rewrite is judged by the policy, and a deny settles the call
-      ;; with the reason the loop already reports
-      (let [prep (invoke/prepare-tool-call
-                  {:tool-name tc-name
-                   :args tc-args
-                   :tool-call-id tc-id
-                   :assistant-message assistant-msg
-                   :before-hook (permissions/gate @(:before-tool-call agent)
-                                                  (:ctx agent)
-                                                  (:signal agent))})]
-        (cond
-          (:block prep)
-          (assoc tc :kmet/blocked (:block prep))
+(defn- begin-call!
+  "Emit :tool-execution-start for TC — the call is offered, before any hook or
+   gate runs (pi), so a blocked call is still shown. Sequential and
+   source-ordered, on both schedulers; the rest of the call comes after."
+  [agent tc]
+  (state/emit agent {:type :tool-execution-start
+                     :tool-call-id (:id tc)
+                     :tool-name (:name tc)
+                     :args (:arguments tc)}))
 
-          (contains? prep :args)
-          (assoc tc :arguments (:args prep))
+(defn- call-point!
+  "One tool call through the run's tool point: the around hooks, the permission
+   check and the body (chain → check → body). Returns {:result … :args …}, ARGS
+   being the effective arguments the chain settled on — what the call actually
+   ran with, and what the end event reports.
 
-          :else tc)))))
-
-(defn- finish-tool-call!
-  "Apply the after-tool-call hook to RAW for the given TC (pi: after hooks),
-   preserving the rewritten ARGS. Returns the final result map."
-  [agent assistant-msg tc args raw]
-  (invoke/finish-tool-call
-   {:tool-name (:name tc)
-    :args args
-    :tool-call-id (:id tc)
-    :assistant-message assistant-msg
-    :after-hook @(:after-tool-call agent)}
-   raw))
+   An undeclared call (pi: prepareToolCall's tools.find) never reaches a body:
+   its `next` settles the call as an error, so the hooks still see it — and may
+   rewrite or block it — while nothing executes."
+  [agent assistant-msg declared-tools tc]
+  (let [declared? (contains? declared-tools (:name tc))
+        effective (atom (:arguments tc))
+        op (invoke/tool-op {:tool-name (:name tc)
+                            :args (:arguments tc)
+                            :tool-call-id (:id tc)
+                            :assistant-message assistant-msg
+                            :signal (:signal agent)})
+        body (if declared?
+               (fn [op] (execute-call! agent assistant-msg op declared-tools))
+               (fn [_] {:content (str "Tool " (:name tc) " not found")
+                        :is-error true}))]
+    {:result (invoke/tool-point
+              {:chain @(:tool-hook agent)
+               ;; the policy is read from the run's own ctx at call time, so a
+               ;; child ctx's policy decides for that agent and a state built
+               ;; without the driver still gets the gate
+               :check (fn [op] (permissions/check (:ctx agent) op))
+               :execute (fn [op]
+                          (reset! effective (:args op))
+                          (body op))}
+              op)
+     :args @effective}))
 
 (defn- execute-tool-calls-parallel!
   "Execute tool calls concurrently (pi: executeToolCallsParallel).
-   Preparation (start events + before hooks) is sequential; execution is
-   concurrent. Each call emits its tool-execution-prepared and finalizes
-   (after hook + tool-execution-end) inside its own future, so a tool's clock
-   starts when its body does and it flips to done — with its own Took
+   The start events fire sequentially in source order; each call's chain and
+   body run in its own future, so a call flips to done — with its own Took
    duration — the moment it finishes (pi: emitToolExecutionEnd in the
-   concurrent closure) instead of when the slowest sibling does;
-   blocked and undeclared calls settle during preparation. Context/session
-   results are appended afterwards, in source order. Returns results in
-   source order.
+   concurrent closure) instead of when the slowest sibling does. Context/session
+   results are appended afterwards, in source order. Returns results in source
+   order.
    DECLARED-TOOLS — the request's captured tool map (name → tool): the
    declared set and the dispatch of every call resolve against that one
    capture, so a tool unloaded after the request was built still runs for the
    request that was offered it."
   [agent tool-calls assistant-msg declared-tools & [append?]]
   (let [finalized (atom {})
-        ;; the names declared for this request — a call outside the map is
-        ;; an immediate error, never executed; the map is also the dispatch
-        ;; override, so execution agrees with what the model was offered
-        emit-end! (fn [tc result]
+        emit-end! (fn [tc args result]
                     (state/emit agent {:type :tool-execution-end
                                        :tool-call-id (:id tc)
                                        :tool-name (:name tc)
-                                       :args (:arguments tc)
+                                       :args args
                                        :result result
                                        :is-error (:is-error result false)}))
-        finish-call (fn [tc raw]
-                      (finish-tool-call! agent assistant-msg tc (:arguments tc) raw))
         ;; Always record before emitting: the source-order appends below
         ;; read the map after the futures finish, so a result is never lost
         ;; to a failed emit.
-        settle! (fn [tc result]
+        settle! (fn [tc args result]
                   (swap! finalized assoc (:id tc) result)
-                  (emit-end! tc result))
-        prepared (mapv #(prepare-tool-call! agent assistant-msg % declared-tools)
-                       tool-calls)
-        ;; Blocked calls settle during preparation (pi: an immediate
-        ;; outcome's end fires right away), not after the batch.
-        _ (doseq [tc prepared :when (contains? tc :kmet/blocked)]
-            (settle! tc (finish-call tc (:kmet/blocked tc))))
-        pending (filterv #(not (contains? % :kmet/blocked)) prepared)
+                  (emit-end! tc args result))
+        _ (doseq [tc tool-calls] (begin-call! agent tc))
         ;; pi: tools receive the session AbortSignal — Escape during a tool
         ;; call must kill the child process, not just abandon the future.
         ;; The cancel signal and the session env/cwd bindings come from the
@@ -200,28 +181,23 @@
         futures (into {} (map (fn [tc]
                                 [(:id tc)
                                  (future
-                                   ;; a batch is prepared, asks answered, before
-                                   ;; any future runs: each call's clock starts
-                                   ;; with its own body
-                                   (let [result (finish-call
-                                                 tc
-                                                 (execute-tool-body!
-                                                  agent assistant-msg tc
-                                                  declared-tools))]
-                                     (settle! tc result)
+                                   (let [{:keys [result args]}
+                                         (call-point! agent assistant-msg
+                                                      declared-tools tc)]
+                                     (settle! tc args result)
                                      result))])
-                              pending))
+                              tool-calls))
         raw-results (await-all-tool-results! futures)
         ;; A future body that threw before settling (await-all already turns
         ;; it into an error result) still records a result and emits its end
         ;; event here — the fallback is settled as-is, never by re-running
-        ;; the failed after hook.
-        _ (doseq [tc pending :when (not (contains? @finalized (:id tc)))]
-            (settle! tc (get raw-results (:id tc))))]
+        ;; the failed chain.
+        _ (doseq [tc tool-calls :when (not (contains? @finalized (:id tc)))]
+            (settle! tc (:arguments tc) (get raw-results (:id tc))))]
     ;; context + session in source order (skipped when the caller appends —
     ;; the repeat-loop guard path appends everything itself in source order)
     (when (not= false append?)
-      (doseq [tc prepared]
+      (doseq [tc tool-calls]
         (let [result (get @finalized (:id tc))
               result-msg (message/tool-result-message (:id tc) (:name tc) result)]
           (state/append-persisted-message! agent result-msg))))
@@ -233,31 +209,21 @@
 
 (defn- execute-tool-calls-sequential!
   "Execute tool calls one at a time (pi: executeToolCallsSequential).
-   Same hooks and events as the parallel path, and the same captured
-   DECLARED-TOOLS map decides the declared set and the dispatch; results in
-   source order."
+   Same chain, events and captured DECLARED-TOOLS map as the parallel path;
+   results in source order."
   [agent tool-calls assistant-msg declared-tools & [append?]]
   (let [tool-results (atom [])]
     (doseq [tc tool-calls]
-      (let [tc-id (:id tc)
-            tc-name (:name tc)
-            tc-args (:arguments tc)
-            ;; shared preparation: emits the start event and runs the
-            ;; before-tool-call hook (+ undeclared handling)
-            prepared (prepare-tool-call! agent assistant-msg tc declared-tools)
-            args (:arguments prepared)
-            raw (if (contains? prepared :kmet/blocked)
-                  (:kmet/blocked prepared)
-                  (execute-tool-body! agent assistant-msg prepared declared-tools))
-            result (finish-tool-call! agent assistant-msg prepared args raw)
-            result-msg (message/tool-result-message tc-id tc-name result)]
+      (begin-call! agent tc)
+      (let [{:keys [result args]} (call-point! agent assistant-msg declared-tools tc)
+            result-msg (message/tool-result-message (:id tc) (:name tc) result)]
         (when (not= false append?)
           (state/append-persisted-message! agent result-msg))
         (swap! tool-results conj result)
         (state/emit agent {:type :tool-execution-end
-                           :tool-call-id tc-id
-                           :tool-name tc-name
-                           :args tc-args
+                           :tool-call-id (:id tc)
+                           :tool-name (:name tc)
+                           :args args
                            :result result
                            :is-error (:is-error result false)})))
     ;; pi: terminate rides on blocked results — the batch stops the run
@@ -269,7 +235,7 @@
 (defn execute-tool-calls!
   "Execute tool calls. If any target tool is :sequential the whole batch runs
    sequentially; otherwise tools run in parallel (pi: toolExecution mode).
-   Runs before/after-tool-call hooks and returns results in source order.
+   Runs the tool point for every call and returns results in source order.
    Calls outside the declared (active) tool set settle as errors without
    executing — pi: prepareToolCall resolves against the request's tools.
    APPEND? — whether the executor appends results to the context/session
@@ -279,9 +245,9 @@
    providers reject misordered results).
 
    The batch runs under run-code-tool/*assistant-message* so a scripted inner
-   call carries the same assistant message in its hook payload as the outer
-   run_code call (futures convey the binding; the bridge captures it on the
-   tool thread and hands it to its pool workers, which do not).
+   call carries the same assistant message in its op as the outer run_code
+   call (futures convey the binding; the bridge captures it on the tool thread
+   and hands it to its pool workers, which do not).
 
    REQUEST-TOOLS is the tool list captured when the request was built, in
    registry order; the declared set and the dispatch of every call in the

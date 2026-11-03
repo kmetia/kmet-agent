@@ -7,6 +7,7 @@
             [kmet.ai.models :as models]
             [kmet.ai.auth :as auth]
             [kmet.app.events :as events]
+            [kmet.app.hooks :as hooks]
             [kmet.app.session.core :as session]
             [kmet.app.loop :as loop]
             [kmet.app.loop.stages :as loop-stages]
@@ -62,6 +63,12 @@
    in OPTS still wins."
   [& opts]
   (apply loop/make-agent-state :ctx (process-ctx) opts))
+
+(defn tool-hook
+  "The run's tool chain over HOOKS, exactly as the driver builds it minus the
+   composition's permission gate: first registered outermost, fail-closed."
+  [& hooks]
+  (hooks/around hooks))
 
 (defn run-turn-capturing-llm
   "Run one turn on AGENT with a stubbed LLM call; returns the captured

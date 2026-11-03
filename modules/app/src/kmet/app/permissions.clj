@@ -248,25 +248,6 @@
                      nil)
                  (block (or (reason-of answer) "the approval request was denied"))))))))
 
-(defn gate
-  "HOOK with the permission check after it: HOOK may rewrite the arguments or
-   block, and then the policy judges the effective call at CTX. SIGNAL rides
-   the request so an `:ask` can be aborted with the run.
-
-   Returns nil when there is no hook and the policy allows — the shape
-   `invoke/prepare-tool-call` and the run_code tool hooks expect."
-  [hook ctx signal]
-  (fn [payload]
-    (let [rewritten (when hook (hook payload))
-          ;; `contains?`, not truthiness: a hook may rewrite the arguments to
-          ;; nil (a tool that takes none), and the policy must judge that call
-          request (cond-> (assoc payload :args (if (contains? rewritten :args)
-                                                 (:args rewritten)
-                                                 (:args payload)))
-                    signal (assoc :signal signal))]
-      (or (when-not (:block rewritten) (check ctx request))
-          rewritten))))
-
 ;; ── the rows ──────────────────────────────────────────────────────────────
 
 (defn- policy-fn

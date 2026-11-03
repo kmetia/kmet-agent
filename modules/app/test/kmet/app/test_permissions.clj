@@ -3,7 +3,9 @@
   is, what a broken provider does (deny, never allow), when the approver is
   consulted, and where the gate sits relative to the extension hooks."
   (:require [clojure.test :refer [deftest is testing]]
+            [kmet.app.hooks :as hooks]
             [kmet.app.permissions :as permissions]
+            [kmet.app.tools.invoke :as invoke]
             [kmet.srce.core :as srce]))
 
 (defn- with-policy
@@ -244,34 +246,52 @@
     (is (nil? (permissions/check root bash-call)))
     (is (= 2 @asked) "nothing stores the decision, so both calls ask")))
 
-(deftest the-gate-runs-the-extension-hook-first
+(deftest the-check-is-the-points-innermost-next
+  ;; the tool point (kmet.app.tools.invoke/tool-point) runs the chain outside
+  ;; the permission check: every hook settles the op first, and only then does
+  ;; the policy judge the effective call
   (testing "the policy judges the rewritten arguments"
     (let [seen (atom nil)
-          root (srce/root)]
+          root (srce/root)
+          chain (hooks/around [(fn [op next] (next (assoc op :args {"command" "ls -la"})))])]
       (srce/provide! root :permissions
                      (permissions/policy (fn [_ request] (reset! seen (:args request)) :allow)))
-      (let [hook (permissions/gate (fn [_] {:args {"command" "ls -la"}}) root nil)]
-        (is (= {:args {"command" "ls -la"}} (hook bash-call))
-            "the rewrite still reaches the call")
-        (is (= {"command" "ls -la"} @seen) "the policy saw the effective call"))))
-  (testing "a blocking hook ends the chain without consulting the policy"
+      (is (= {:content "ran"}
+             (invoke/tool-point {:chain chain
+                                 :check (fn [op] (permissions/check root op))
+                                 :execute (fn [_] {:content "ran"})}
+                                bash-call))
+          "the rewritten call reaches the body")
+      (is (= {"command" "ls -la"} @seen) "the policy saw the effective call")))
+  (testing "a hook that settles the call never consults the policy"
     (let [consulted (atom false)
-          root (srce/root)]
+          root (srce/root)
+          chain (hooks/around [(fn [_op _next] {:block true :reason "hook"})])]
       (srce/provide! root :permissions
                      (permissions/policy (fn [_ _] (reset! consulted true) :allow)))
-      (let [hook (permissions/gate (fn [_] {:block true :reason "hook"}) root nil)]
-        (is (= {:block true :reason "hook"} (hook bash-call)))
-        (is (false? @consulted)))))
+      (is (= {:content "hook" :is-error true}
+             (invoke/tool-point {:chain chain
+                                 :check (fn [op] (permissions/check root op))
+                                 :execute (fn [_] {:content "ran"})}
+                                bash-call)))
+      (is (false? @consulted))))
   (testing "a hook may clear the arguments, and the policy sees that call"
     (let [seen (atom :unread)
-          root (srce/root)]
+          root (srce/root)
+          chain (hooks/around [(fn [op next] (next (assoc op :args nil)))])]
       (srce/provide! root :permissions
                      (permissions/policy (fn [_ request] (reset! seen (:args request)) :allow)))
-      (is (= {:args nil} ((permissions/gate (fn [_] {:args nil}) root nil) bash-call))
-          "the rewrite is not lost")
-      (is (nil? @seen) "and the policy judged the call with no arguments")))
-  (testing "no hook and an allowing policy is nil — the loop executes"
-    (is (nil? ((permissions/gate nil (srce/root) nil) bash-call)))))
+      (is (= {:content "ran"}
+             (invoke/tool-point {:chain chain
+                                 :check (fn [op] (permissions/check root op))
+                                 :execute (fn [_] {:content "ran"})}
+                                bash-call)))
+      (is (nil? @seen) "the policy judged the call with no arguments")))
+  (testing "no hook and an allowing policy runs the body"
+    (is (= {:content "ran"}
+           (invoke/tool-point {:check (fn [op] (permissions/check (srce/root) op))
+                               :execute (fn [_] {:content "ran"})}
+                              bash-call)))))
 
 (deftest a-service-that-cannot-answer-fails-when-it-is-built
   (is (thrown? clojure.lang.ExceptionInfo (permissions/policy nil)))

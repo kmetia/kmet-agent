@@ -79,7 +79,7 @@
 ;;   :register-tool-source! :unregister-tool-source!  — sandbox tool sources
 ;;   :on-event :emit-event!                             — event bus
 ;;   :on-input :on-before-agent-start                   — hooks
-;;   :on-tool-call :on-tool-result                      — tool transforms
+;;   :on-tool                                           — the around tool hook
 ;;   :register-flag! :get-flag
 ;;   :register-shortcut! :register-markdown-transformer! :send-message!
 ;;   :register-entry-renderer! :register-message-renderer!
@@ -186,8 +186,24 @@
 
 (defn on-input [api hook] ((:on-input api) hook))
 (defn on-before-agent-start [api hook] ((:on-before-agent-start api) hook))
-(defn on-tool-call [api hook] ((:on-tool-call api) hook))
-(defn on-tool-result [api hook] ((:on-tool-result api) hook))
+(defn on-tool
+  "Register a tool hook (pi has no around shape: beforeToolCall /
+   afterToolCall are two points there, one here). (fn [op next] → result):
+
+     - do not call NEXT — the return value settles the call and nothing
+       executes: `{:block true :reason …}` is the canonical veto, a
+       `{:content … :is-error …}` map settles with that result;
+     - `(next op)` — run the rest of the chain over a rebuilt op (`:args` is
+       what the tool will run with) and return its result;
+     - transform that result — rewrite `:content`, set `:is-error`.
+
+   OP carries `:tool-name`, `:args`, `:tool-call-id` and `:assistant-message`
+   (the last two absent outside a batch). Hooks run in registration order, the
+   first registered outermost; a throwing hook fails the call closed with an
+   error result naming its message. Parallel batches run each call's chain in
+   its own future, so a hook that asks a human is asked per call.
+   Returns a deregister fn; unload also removes it."
+  [api hook] ((:on-tool api) hook))
 
 (defn register-flag! [api name & [opts]] ((:register-flag! api) name opts))
 (defn get-flag [api name] ((:get-flag api) name))
@@ -356,7 +372,7 @@
       :entry-renderers {custom-type renderer} :message-renderers {custom-type renderer}
       :aliases {alias-kw fn}
       :skills [{:content opts}] :prompts [prompt]
-      :tool-call-hooks [...] :tool-result-hooks [...]
+      :tool-hooks [...]
       :input-hooks [...] :before-agent-start-hooks [...]
       :bash-tool-opts [opts...]
       :ui-calls [args...] :emitted [events...] :model-calls [...]}}
@@ -369,7 +385,7 @@
                       :flags {} :entry-renderers {} :message-renderers {}
                       :aliases {}
                       :skills [] :prompts []
-                      :tool-call-hooks [] :tool-result-hooks []
+                      :tool-hooks []
                       :input-hooks [] :before-agent-start-hooks []
                       :bash-tool-opts []
                       :ui-calls [] :emitted [] :model-calls []})
@@ -419,8 +435,7 @@
               :emit-event! (fn [event] (swap! state update :emitted conj event))
               :on-input (hook :input-hooks)
               :on-before-agent-start (hook :before-agent-start-hooks)
-              :on-tool-call (hook :tool-call-hooks)
-              :on-tool-result (hook :tool-result-hooks)
+              :on-tool (hook :tool-hooks)
               :register-flag! (assoc-k :flags)
               :get-flag (fn [name] (get-in @state [:flags name]))
               :register-shortcut! (assoc-k :shortcuts)

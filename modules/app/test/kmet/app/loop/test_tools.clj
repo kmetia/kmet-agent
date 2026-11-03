@@ -1,6 +1,6 @@
 (ns kmet.app.loop.test-tools
-  "Tool execution: before/after hooks, parallel tool calls, bash result recording,
-   active tools, and thinking-level events."
+  "Tool execution: the around tool hook, parallel tool calls, bash result
+   recording, active tools, and thinking-level events."
   (:require [clojure.test :as t]
             [clojure.string :as str]
             [babashka.fs :as fs]
@@ -27,56 +27,156 @@
 
 ;; ─── Tool hooks (before/after tool-call) ─────────────────────────────────
 
-(t/deftest test-loop-before-tool-call-blocks
+(t/deftest test-loop-tool-hooks-compose-first-registered-outermost
+  ;; kmet.app.hooks/around: the first registered hook wraps every later one, so
+  ;; it sees the op first and the result last — the order the docs promise
+  (let [trace (atom [])
+        hook (fn [tag]
+               (fn [op next]
+                 (swap! trace conj [tag :in])
+                 (let [r (next op)]
+                   (swap! trace conj [tag :out])
+                   r)))
+        agent (support/make-agent-state)]
+    (reset! (:tool-hook agent) (support/tool-hook (hook :outer) (hook :inner)))
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message (support/stub-llm-tool-then-text (atom 0))
+                  state/execute-tool-for (fn [_ _ _ _]
+                                           (swap! trace conj [:body])
+                                           {:content "ok" :is-error false})]
+      @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+    (t/is (= [[:outer :in] [:inner :in] [:body] [:inner :out] [:outer :out]]
+             @trace)
+          "outermost first, the body innermost, results unwound in reverse")))
+
+(t/deftest test-loop-tool-hook-settles-without-executing
+  ;; an around hook that does not descend settles the call: the body never
+  ;; runs, the batch still records a result, and nothing is prepared
   (let [events (atom [])
         executed (atom false)
         agent (support/make-agent-state :on-event (fn [e] (swap! events conj e)))]
-    (reset! (:before-tool-call agent)
-            (fn [_] {:block true :reason "Permission denied"}))
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [_op _next] {:block true :reason "Permission denied"})))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message (support/stub-llm-tool-then-text (atom 0))
                   state/execute-tool-for (fn [_ _ _ _] (reset! executed true)
                                            {:content "should not run" :is-error false})]
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
-    (t/is (false? @executed) "blocked tool must not execute")
+    (t/is (false? @executed) "settled tool must not execute")
     (t/is (not-any? #(= :tool-execution-prepared (:type %)) @events)
-          "a blocked call never reaches execution, so it is never prepared")
+          "a settled call never reaches execution, so it is never prepared")
     (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
       (t/is (= "tc1" (:tool-call-id end)))
-      (t/is (true? (:is-error end)) "blocked tool result is an error")
+      (t/is (true? (:is-error end)) "a settled call's result is an error")
       (t/is (= "Permission denied" (:content (:result end)))))))
 
-(t/deftest test-loop-prepared-event-follows-the-before-hook
-  ;; :tool-execution-start fires before the before-tool-call hook (pi), so a
-  ;; gated call's block exists while an approval `:ask` is still up;
-  ;; :tool-execution-prepared is emitted once the hook and the permission gate
-  ;; passed, just before the body runs — the moment a front end starts timing
-  ;; the tool.
+(t/deftest test-loop-tool-hook-settles-success-without-executing
+  ;; the capability the before/after pair cannot express: a hook may settle a
+  ;; call SUCCESSFULLY without the body running (a cache hit, a stub, a dry run)
+  (let [events (atom [])
+        executed (atom false)
+        agent (support/make-agent-state :on-event (fn [e] (swap! events conj e)))]
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [_op _next] {:content "cache hit" :is-error false})))
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message (support/stub-llm-tool-then-text (atom 0))
+                  state/execute-tool-for (fn [_ _ _ _] (reset! executed true)
+                                           {:content "ran" :is-error false})]
+      @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+    (t/is (false? @executed) "the body did not run")
+    (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
+      (t/is (= "cache hit" (:content (:result end))))
+      (t/is (false? (:is-error end)) "a settlement need not be an error"))))
+
+(t/deftest test-loop-tool-hook-throws-before-next
+  ;; fail-closed: a hook that crashes before descending settles the call
+  ;; unexecuted instead of letting it through
+  (let [events (atom [])
+        executed (atom false)
+        agent (support/make-agent-state :on-event (fn [e] (swap! events conj e)))]
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [_op _next] (throw (ex-info "hook boom" {})))))
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message (support/stub-llm-tool-then-text (atom 0))
+                  state/execute-tool-for (fn [_ _ _ _] (reset! executed true)
+                                           {:content "ok" :is-error false})]
+      @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+    (t/is (false? @executed) "a crashing hook must not let the call through")
+    (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
+      (t/is (true? (:is-error end)))
+      (t/is (.contains (:content (:result end)) "tool hook error"))
+      (t/is (.contains (:content (:result end)) "hook boom"))
+      (t/is (nil? (:terminate (:result end))))
+      (t/is (not (:terminate end)) "a failure never terminates the run"))))
+
+(t/deftest test-loop-tool-hook-throws-after-next
+  ;; fail-closed, the other position: the body ran, the hook then threw, and
+  ;; the model is told the call failed rather than handed an unmodified result
+  (let [events (atom [])
+        executed (atom false)
+        agent (support/make-agent-state :on-event (fn [e] (swap! events conj e)))]
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [op next]
+                                 (next op)
+                                 (throw (ex-info "hook boom" {})))))
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message (support/stub-llm-tool-then-text (atom 0))
+                  state/execute-tool-for (fn [_ _ _ _] (reset! executed true)
+                                           {:content "ran" :is-error false})]
+      @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+    (t/is (true? @executed) "the body ran before the hook threw")
+    (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
+      (t/is (true? (:is-error end)))
+      (t/is (.contains (:content (:result end)) "tool hook error")))))
+
+(t/deftest test-loop-tool-error-is-not-a-hook-error
+  ;; an exception from the body is the operation's own: it must surface as the
+  ;; ordinary execution error, never as a hook failure
+  (let [events (atom [])
+        agent (support/make-agent-state :on-event (fn [e] (swap! events conj e)))]
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [op next] (next op))))
+    (with-redefs [cfg/get-api-key (fn [_] "test-key")
+                  llm/send-message (support/stub-llm-tool-then-text (atom 0))
+                  state/execute-tool-for (fn [_ _ _ _]
+                                           (throw (ex-info "tool boom" {})))]
+      @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+    (let [end (first (filter #(= :tool-execution-end (:type %)) @events))
+          content (:content (:result end))]
+      (t/is (true? (:is-error end)))
+      (t/is (.contains content "Error executing bash"))
+      (t/is (not (.contains content "tool hook error"))))))
+
+(t/deftest test-loop-prepared-event-follows-the-hook
+  ;; :tool-execution-start fires before the hook (pi), so a gated call's block
+  ;; exists while an approval `:ask` is still up; :tool-execution-prepared is
+  ;; emitted once the chain descended past the permission check, just before
+  ;; the body runs — the moment a front end starts timing the tool.
   (let [order (atom [])
         agent (support/make-agent-state
                :on-event (fn [e]
                            (when (#{:tool-execution-start :tool-execution-prepared
                                     :tool-execution-end} (:type e))
                              (swap! order conj (:type e)))))]
-    (reset! (:before-tool-call agent)
-            (fn [_] (swap! order conj :gate) nil))
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [op next] (swap! order conj :hook) (next op))))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message (support/stub-llm-tool-then-text (atom 0))
                   state/execute-tool-for (fn [_ _ _ _] (swap! order conj :exec)
                                            {:content "ok" :is-error false})]
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
-    (t/is (= [:tool-execution-start :gate :tool-execution-prepared :exec
+    (t/is (= [:tool-execution-start :hook :tool-execution-prepared :exec
               :tool-execution-end]
              @order)
-          "start, the gate, prepared, the body, end — in that order")))
+          "start, the hook, prepared, the body, end — in that order")))
 
-(t/deftest test-loop-before-tool-call-terminate
+(t/deftest test-loop-tool-hook-terminate
   (let [events (atom [])
         executed (atom false)
         llm-calls (atom 0)
         agent (support/make-agent-state :on-event (fn [e] (swap! events conj e)))]
-    (reset! (:before-tool-call agent)
-            (fn [_] {:block true :reason "Policy" :terminate true}))
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [_op _next] {:block true :reason "Policy" :terminate true})))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message (fn [opts]
                                      (future
@@ -89,25 +189,26 @@
                   state/execute-tool-for (fn [_ _ _ _] (reset! executed true)
                                            {:content "should not run" :is-error false})]
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
-    (t/is (false? @executed) "blocked tool must not execute")
+    (t/is (false? @executed) "settled tool must not execute")
     (t/is (= 1 @llm-calls) "terminate stops the run — no follow-up LLM call")
     (t/is (= :idle @(:status agent)))
     (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
       (t/is (= "tc1" (:tool-call-id end)))
-      (t/is (= "Policy" (:content (:result end))) "blocked result still in transcript")
+      (t/is (= "Policy" (:content (:result end))) "the settled result is in the transcript")
       (t/is (true? (:is-error end))))))
 
-(t/deftest test-loop-before-tool-call-terminate-mixed-batch
+(t/deftest test-loop-tool-hook-terminate-mixed-batch
   (let [events (atom [])
         executed (atom 0)
         llm-calls (atom 0)
         agent (support/make-agent-state :on-event (fn [e] (swap! events conj e)))]
     ;; pi: terminate only when EVERY finalized call in the batch carries
     ;; the hint — a single non-terminated call keeps the run going
-    (reset! (:before-tool-call agent)
-            (fn [ctx]
-              (when (= "tc1" (:tool-call-id ctx))
-                {:block true :reason "Policy" :terminate true})))
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [op next]
+                                 (if (= "tc1" (:tool-call-id op))
+                                   {:block true :reason "Policy" :terminate true}
+                                   (next op)))))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message (fn [opts]
                                      (future
@@ -125,27 +226,42 @@
                   state/execute-tool-for (fn [_ _ _ _] (swap! executed inc)
                                            {:content "ran" :is-error false})]
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
-    (t/is (= 1 @executed) "non-blocked call in the batch executed")
+    (t/is (= 1 @executed) "the call the hook descended into executed")
     (t/is (= 2 @llm-calls) "mixed batch does not terminate — follow-up LLM call happened")
     (t/is (= :idle @(:status agent)))
     (t/is (some #(and (= :tool-execution-end (:type %))
                       (= "tc1" (:tool-call-id %))
                       (true? (:is-error %)))
                 @events)
-          "blocked call still reports its error result")))
+          "the settled call still reports its error result")))
 
-(t/deftest test-loop-before-tool-call-hook-throws
+(t/deftest test-loop-tool-hook-throws-does-not-terminate
+  ;; a crashing hook is a failed call, never a deliberate block: :terminate
+  ;; stays the mark of a veto
   (let [events (atom [])
+        llm-calls (atom 0)
         agent (support/make-agent-state :on-event (fn [e] (swap! events conj e)))]
-    (reset! (:before-tool-call agent)
-            (fn [_] (throw (ex-info "hook boom" {}))))
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [_op _next] (throw (ex-info "hook boom" {})))))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
-                  llm/send-message (support/stub-llm-tool-then-text (atom 0))
+                  llm/send-message (fn [opts]
+                                     (future
+                                       (if (= 1 (swap! llm-calls inc))
+                                         (do (when-let [on-tc (:on-tool-call opts)]
+                                               (on-tc {:id "tc1" :name "bash" :arguments "{}" :index 0}))
+                                             (when-let [on-done (:on-done opts)]
+                                               (on-done :tool-calls)))
+                                         (do (when-let [on-text (:on-text opts)]
+                                               (on-text "ok"))
+                                             (when-let [on-done (:on-done opts)]
+                                               (on-done :stop))))
+                                       :done))
                   state/execute-tool-for (fn [_ _ _ _] {:content "ok" :is-error false})]
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+    (t/is (= 2 @llm-calls) "the run continues past a hook failure")
     (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
       (t/is (true? (:is-error end)))
-      (t/is (.contains (:content (:result end)) "before-tool-call hook error")))))
+      (t/is (.contains (:content (:result end)) "tool hook error")))))
 
 (t/deftest test-loop-undeclared-tool-call-settles-as-error
   ;; pi: prepareToolCall resolves the call against the tools declared for the
@@ -228,51 +344,61 @@
       (t/is (false? (:is-error end)))
       (t/is (= "ran" (:content (:result end)))))))
 
-(t/deftest test-loop-after-tool-call-rewrites
+(t/deftest test-loop-tool-hook-replaces-the-result
+  ;; the post side of an around hook: transform what the body returned
   (let [events (atom [])
         agent (support/make-agent-state :on-event (fn [e] (swap! events conj e)))]
-    (reset! (:after-tool-call agent)
-            (fn [{:keys [result]}]
-              {:content (str (:content result) " [sanitized]")}))
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [op next]
+                                 (let [result (next op)]
+                                   (assoc result :content (str (:content result) " [sanitized]"))))))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message (support/stub-llm-tool-then-text (atom 0))
                   state/execute-tool-for (fn [_ _ _ _] {:content "secret-key=abc" :is-error false})]
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
     (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
       (t/is (= "secret-key=abc [sanitized]" (:content (:result end))))
-      (t/is (false? (:is-error end)) "rewrite preserves is-error unless overridden"))))
+      (t/is (false? (:is-error end)) "the result keeps is-error unless the hook changes it"))))
 
-(t/deftest test-loop-after-tool-call-sets-error
+(t/deftest test-loop-tool-hook-sets-error
   (let [events (atom [])
         agent (support/make-agent-state :on-event (fn [e] (swap! events conj e)))]
-    (reset! (:after-tool-call agent)
-            (fn [{:keys [result]}]
-              {:content (:content result) :is-error true}))
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [op next] (assoc (next op) :is-error true))))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message (support/stub-llm-tool-then-text (atom 0))
                   state/execute-tool-for (fn [_ _ _ _] {:content "ok" :is-error false})]
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
     (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
-      (t/is (true? (:is-error end)) "after hook can mark a result as error"))))
+      (t/is (true? (:is-error end)) "a hook can mark a result as error"))))
 
-(t/deftest test-loop-after-tool-call-hook-throws
-  (let [events (atom [])
+(t/deftest test-loop-tool-hook-throws-after-the-body-runs-once
+  ;; a hook that throws in its post position fails the call closed; the batch
+  ;; still settles exactly one result for it
+  (let [hook-calls (atom 0)
+        events (atom [])
         agent (support/make-agent-state :on-event (fn [e] (swap! events conj e)))]
-    (reset! (:after-tool-call agent)
-            (fn [_] (throw (ex-info "hook boom" {}))))
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [op next]
+                                 (next op)
+                                 (swap! hook-calls inc)
+                                 (throw (AssertionError. "hook boom")))))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message (support/stub-llm-tool-then-text (atom 0))
                   state/execute-tool-for (fn [_ _ _ _] {:content "ok" :is-error false})]
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
+    (t/is (= 1 @hook-calls) "the failing hook runs exactly once")
     (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
+      (t/is (= "tc1" (:tool-call-id end)))
       (t/is (true? (:is-error end)))
-      (t/is (.contains (:content (:result end)) "after-tool-call hook error")))))
+      (t/is (.contains (:content (:result end)) "tool hook error")))
+    (t/is (= :idle @(:status agent)) "the turn completes")))
 
-(t/deftest test-loop-before-tool-call-rewrites-args
+(t/deftest test-loop-tool-hook-rewrites-args
   (let [seen (atom [])
         agent (support/make-agent-state)]
-    (reset! (:before-tool-call agent)
-            (fn [_] {:args {:command "rewritten"}}))
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [op next] (next (assoc op :args {:command "rewritten"})))))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message (support/stub-llm-tool-then-text (atom 0))
                   state/execute-tool-for (fn [_ _ args _]
@@ -282,7 +408,7 @@
     (t/is (= [{:command "rewritten"}] @seen)
           "the parallel path executes with the rewritten args")))
 
-(t/deftest test-loop-before-tool-call-rewrites-args-sequential
+(t/deftest test-loop-tool-hook-rewrites-args-sequential
   ;; the sequential path honors the rewrite too (it ignored one before the
   ;; pipeline refactor)
   (let [seen (atom nil)
@@ -295,8 +421,8 @@
                                                    :execution-mode :sequential))
     (try
       (let [agent (support/make-agent-state)]
-        (reset! (:before-tool-call agent)
-                (fn [_] {:args {:x "rewritten"}}))
+        (reset! (:tool-hook agent)
+                (support/tool-hook (fn [op next] (next (assoc op :args {:x "rewritten"})))))
         (with-redefs [cfg/get-api-key (fn [_] "test-key")
                       llm/send-message
                       (fn [opts]
@@ -369,15 +495,15 @@
         (tools-registry/unregister-tool! (support/tool-table) "capture-probe" [:probe :test])))))
 
 (t/deftest test-loop-scripted-calls-fire-tool-hooks
-  ;; the run's agent-level hooks reach calls made inside a script: the loop
-  ;; binds run-code/*tool-hooks* and run-code/*assistant-message* around the batch,
+  ;; the run's tool chain reaches calls made inside a script: the loop
+  ;; binds run-code/*tool-hook* and run-code/*assistant-message* around the batch,
   ;; the bridge captures them on the tool thread and hands them to its pool
   ;; workers (raw threads convey no bindings)
   (let [hook-calls (atom [])
         calls (atom 0)
         agent (support/make-agent-state)]
-    (reset! (:before-tool-call agent)
-            (fn [ctx] (swap! hook-calls conj ctx) nil))
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [op next] (swap! hook-calls conj op) (next op))))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message
                   (fn [opts]
@@ -397,7 +523,7 @@
                       :done))]
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
     (t/is (some #(= "read" (:tool-name %)) @hook-calls)
-          "the scripted read call fired the run's before-tool-call hook")
+          "the scripted read call ran through the run's tool hook")
     (t/is (some #(str/starts-with? (str (:tool-call-id %)) "run_code-") @hook-calls)
           "the inner call carries a synthetic script-N tool-call-id")
     (t/is (some #(= "tc1" (:tool-call-id %)) @hook-calls)
@@ -492,27 +618,27 @@
                        (filter #(= :tool (:role %)) (state/get-context agent))))
               "results are still appended to context in source order")))))
 
-(t/deftest test-loop-parallel-after-tool-call-error-settles-once
-  ;; An after hook throwing a non-Exception kills the tool's future before
-  ;; it settles; the batch settles await-all's error fallback as-is instead
-  ;; of re-running the failed hook (which would throw again on the loop
-  ;; thread).
+(t/deftest test-loop-parallel-hook-failure-settles-once
+  ;; a hook that throws in its post position fails that call closed and the
+  ;; batch still settles exactly one result for it — the failing chain is never
+  ;; re-run on the loop thread
   (let [hook-calls (atom 0)
         events (atom [])
         agent (support/make-agent-state :on-event (fn [e] (swap! events conj e)))]
-    (reset! (:after-tool-call agent)
-            (fn [_]
-              (swap! hook-calls inc)
-              (throw (AssertionError. "after hook boom"))))
+    (reset! (:tool-hook agent)
+            (support/tool-hook (fn [op next]
+                                 (next op)
+                                 (swap! hook-calls inc)
+                                 (throw (AssertionError. "hook boom")))))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
                   llm/send-message (support/stub-llm-tool-then-text (atom 0))
                   state/execute-tool-for (fn [_ _ _ _] {:content "ok" :is-error false})]
       @(loop/run-agent-turn agent {:message "run" :on-error (fn [_])}))
-    (t/is (= 1 @hook-calls) "the failed after hook runs exactly once")
-    (let [end (first (filter #(= :tool-execution-end (:type %)) @events))]
-      (t/is (= "tc1" (:tool-call-id end)))
-      (t/is (true? (:is-error end)) "the future's failure is reported as an error result")
-      (t/is (str/includes? (:content (:result end)) "Error executing tool")))
+    (t/is (= 1 @hook-calls) "the failing hook runs exactly once")
+    (let [ends (filter #(= :tool-execution-end (:type %)) @events)]
+      (t/is (= 1 (count ends)) "one result per call")
+      (t/is (true? (:is-error (first ends))))
+      (t/is (str/includes? (:content (:result (first ends))) "tool hook error")))
     (t/is (= :idle @(:status agent)) "the turn completes")))
 
 (t/deftest test-loop-sequential-tool-execution

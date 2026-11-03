@@ -461,31 +461,18 @@
 (defn get-message-renderer [custom-type]
   (registry/entry (handle) :kmet/message-renderer custom-type))
 
-(defn register-tool-call-hook!
-  "Register OWNER's tool-call hook (extension api: on-tool-call): (fn [ctx])
-   → nil | {:block true :reason} | {:args transformed}. Returns a deregister
-   fn."
+(defn register-tool-hook!
+  "Register OWNER's tool hook (extension api: on-tool): (fn [op next]) → the
+   result. It may settle the call by not calling NEXT, rebuild the op before
+   calling it, or transform what it returns. Returns a deregister fn."
   [owner hook]
-  (register-app-hook! owner :tool-call hook))
+  (register-app-hook! owner :tool hook))
 
-(defn register-tool-result-hook!
-  "Register OWNER's tool-result hook (extension api: on-tool-result):
-   (fn [ctx]) → nil | {:content ... :is-error ...} overrides. Returns a
-   deregister fn."
-  [owner hook]
-  (register-app-hook! owner :tool-result hook))
-
-(defn get-tool-call-hooks
-  "Every tool-call hook (extension api: on-tool-call), owners in
-   first-registration order, each owner's in its own."
+(defn get-tool-hooks
+  "Every tool hook (extension api: on-tool), owners in first-registration
+   order, each owner's in its own."
   []
-  (hooks-of :tool-call))
-
-(defn get-tool-result-hooks
-  "Every tool-result hook (extension api: on-tool-result), owners in
-   first-registration order, each owner's in its own."
-  []
-  (hooks-of :tool-result))
+  (hooks-of :tool))
 
 ;; ─── Shortcuts + markdown transformers (extension api) ────────────────────
 
@@ -1247,12 +1234,9 @@
       :on-before-agent-start (fn [hook]
                                (register-before-agent-start-hook!
                                 (extension-owner name) (loader-aware ext hook)))
-      :on-tool-call (fn [hook]
-                      (register-tool-call-hook! (extension-owner name)
-                                                (loader-aware ext hook)))
-      :on-tool-result (fn [hook]
-                        (register-tool-result-hook! (extension-owner name)
-                                                    (loader-aware ext hook)))
+      :on-tool (fn [hook]
+                 (register-tool-hook! (extension-owner name)
+                                      (loader-aware ext hook)))
       :register-flag! (fn [flag-name & [opts]]
                         (register-flag! (extension-owner name) flag-name opts))
       :get-flag get-flag

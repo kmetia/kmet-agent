@@ -1146,14 +1146,14 @@
                 (fn []
                   (when (or @(:enabled-tools agent) @(:default-tools agent))
                     (into #{} (map :name) (state/active-tools agent))))
-                ;; the run's agent-level tool hooks as thunks — a hook set
-                ;; mid-run is picked up, and scripted inner calls go through
-                ;; the same before/after semantics as the loop's own batches
-                run-code-tool/*tool-hooks*
-                {:before (permissions/gate
-                          (fn [ctx] (when-let [h @(:before-tool-call agent)] (h ctx)))
-                          (:ctx agent) (:signal agent))
-                 :after (fn [ctx] (when-let [h @(:after-tool-call agent)] (h ctx)))}]
+                ;; the run's tool chain — the same around hooks the loop's own
+                ;; batches run, so a scripted inner call is hooked exactly as an
+                ;; outer one is
+                run-code-tool/*tool-hook* @(:tool-hook agent)
+                ;; the policy the loop's own batches apply, over the run's ctx:
+                ;; an inner call is judged on its effective arguments too
+                run-code-tool/*tool-check*
+                (fn [op] (permissions/check (:ctx agent) op))]
         (future
           (let [attempt-token (atom nil)
                 begin-attempt! (fn []

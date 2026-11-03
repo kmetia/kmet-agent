@@ -124,8 +124,8 @@ errors.")
                        :execute (fn [args _on-update signal _ctx]
            ;; Tool contract (kmet.app.tools.registry): execute returns
            ;; {:content ...}; :details rides along for the renderer. A bare
-           ;; string reaches the after-tool-call chain, whose
-           ;; (contains? result :is-error) throws on strings.
+           ;; string reaches the tool point, whose (contains? result :is-error)
+           ;; throws on strings.
                                   (let [res (tools/execute st signal args)]
                                     (cond-> {:content (:content res)}
                                       (:details res) (assoc :details (:details res)))))}))

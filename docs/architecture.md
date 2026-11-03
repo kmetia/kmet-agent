@@ -347,18 +347,19 @@ lets a dialog give up; the gate imposes no deadline). The TUI answers with its
 dialog, the server answers later over the wire, headless answers with its
 configured default, and `:ui/request!` stays the generic dialog channel.
 
-The gate is the loop's pre-tool waterfall and runs **after** the extension
+The gate is the tool point's innermost `next` and runs **after** the extension
 hooks, so a hook's argument rewrite is judged by the policy instead of slipping
-past it; `run_code`'s bridge composes the same gate into the tool hooks, so a
-script's inner `tools/call` is gated too. A policy that throws, or answers
-something that is not a verdict, is a deny — the failure mode of an approval
-gate must never be allow. `:remember!` records an answer at `:once`, `:agent` or
+past it — and a hook cannot rewrite what the policy already judged.
+`run_code`'s bridge runs the same point with the run's checks, so a script's
+inner `tools/call` is gated too, judged on the agent's ctx and not the sandbox
+realm's. A policy that throws, or answers something that is not a verdict, is a
+deny — the failure mode of an approval gate must never be allow. `:remember!` records an answer at `:once`, `:agent` or
 `:workspace` scope in the memory the agent's ctx carries, which is what makes a
 remote session usable without a prompt per call.
 
 A tool call's events split at that seam: `:tool-execution-start` fires before
-the gate (the call's block exists while the question is up), and
-`:tool-execution-prepared` fires once the hooks and the policy passed, just
+the chain (the call's block exists while the question is up), and
+`:tool-execution-prepared` fires once the chain descended past the check, just
 before the body runs — a front end starts the tool's elapsed timer there, so a
 human's thinking time is not counted as the tool's. The TUI's ask shows the
 call's own one-line title (`$ <command>`, the path) in the question, because
@@ -373,22 +374,24 @@ The tool layer is `kmet.app.tools.*`: one record per tool, mounted as a row
 things are worth knowing before changing a tool.
 
 **One invocation pipeline.** `kmet.app.tools.invoke` is the only
-prepare → execute → finish path:
+chain → check → execute path:
 
-- `prepare-tool-call` runs the before hook (pass, rewrite args, or block the
-  call with a result);
+- `tool-point` runs the call's around chain — `kmet.app.hooks/around` over the
+  registered `:on-tool` hooks, first registered outermost, fail-closed — around
+  the body. A hook that does not call `next` settles the call (nothing runs),
+  and a `{:block true …}` result becomes the canonical blocked error;
+- the permission check is the chain's innermost `next`, so the policy judges
+  the arguments every hook settled on;
 - `execute-tool-call` executes under the caller's worker bindings and turns a
-  throwing tool into an error result;
-- `finish-tool-call` applies the after hook's `:content`/`:is-error` overrides,
-  for blocked calls too.
+  throwing tool into an error result.
 
-The loop splits the phases so it can prepare sequentially, execute a batch
-concurrently, and keep emitting events and appending to the session; the
-`run_code` bridge runs all three inside one worker task and keeps its own
-promise and call trace. A scripted call therefore meets the run's
-before/after tool hooks exactly as a loop batch does — and the policy gate is
-the outer `run_code` call, not an inner one, because a per-tool hook is not a
-sandbox (a script can shell out through `babashka.process`).
+The loop emits a call's start event sequentially and runs its chain and body on
+its own worker, keeping the batch concurrent while every call's clock starts
+with its own body; the `run_code` bridge runs the same point inside one worker
+task and keeps its own promise and call trace. A scripted call therefore meets
+the run's chain exactly as a loop batch does — and the policy judges it too —
+while a hook still is not a sandbox (a script can shell out through
+`babashka.process`).
 
 **`run_code`** (`kmet.app.tools.run-code`, the `:tool/run_code` row) is
 model-written Clojure in a per-call sandbox with the agent's tools bridged in.
@@ -453,7 +456,7 @@ probe and no real use, and is gone;
   both feed the bridge's signal, which is the read-only OR of the run's and the
   script's (`kmet.libs.concurrent/or-signal`), so an inner call is cancelled by
   either. A pool task checks that signal before the call starts and again
-  after the before hook, so a slow hook cannot start a call past the abort.
+  inside the execute step, so a slow hook cannot start a call past the abort.
   Per-tool coverage stays cooperative (bash kills its process tree; MCP calls
   have no signal plumbing), and a host-blocked script is abandoned after a
   1.5 s interrupt grace rather than killed — the one accepted limitation of an

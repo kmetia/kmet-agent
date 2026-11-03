@@ -204,53 +204,73 @@
       (is (= "(defn process [items]\n  (map (fn [x]\n         (* x 2))\n       items))\n" content)))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════════
-;; Hooks: write (pre, reject) + edit (post, warn)
+;; Hook: write blocked, edit warned (one around function)
 ;; ═══════════════════════════════════════════════════════════════════════════════
 
+(defn- run-hook
+  "Run the extension's around hook over OP with NEXT answering RESULT, and
+   report whether it descended — i.e. whether the tool body would have run."
+  [op result]
+  (let [descended (atom false)
+        r (paren-repair/on-tool op (fn [_] (reset! descended true) result))]
+    {:result r :descended? @descended}))
+
 (deftest ^:bb-only test-write-hook-blocks-unbalanced
-  (let [result (paren-repair/on-tool-call
-                {:tool-name "write"
-                 :args {:path "src/foo.clj"
-                        :content "(defn foo [x]"}})]
+  (let [{:keys [result descended?]}
+        (run-hook {:tool-name "write"
+                   :args {:path "src/foo.clj"
+                          :content "(defn foo [x]"}}
+                  {:content "wrote"})]
     (is (:block result))
+    (is (not descended?) "a blocked write never reaches the body")
     (is (str/includes? (:reason result) "Unbalanced delimiters in src/foo.clj"))
     (is (str/includes? (:reason result) "Write blocked"))))
 
 (deftest ^:bb-only test-write-hook-blocks-syntax-error-explicitly
   ;; Any parse problem blocks the write — a bad token names the reader's
   ;; actual error and position instead of letting the broken file through.
-  (let [result (paren-repair/on-tool-call
-                {:tool-name "write"
-                 :args {:path "src/foo.clj"
-                        :content "(def x 1)\n#"}})]
+  (let [{:keys [result descended?]}
+        (run-hook {:tool-name "write"
+                   :args {:path "src/foo.clj"
+                          :content "(def x 1)\n#"}}
+                  {:content "wrote"})]
     (is (:block result))
+    (is (not descended?))
     (is (str/includes? (:reason result) "Syntax error in src/foo.clj"))
     (is (str/includes? (:reason result) "at line 2"))
     (is (str/includes? (:reason result) "Write blocked"))))
 
 (deftest ^:bb-only test-write-hook-allows-balanced
-  (is (nil? (paren-repair/on-tool-call
-             {:tool-name "write"
-              :args {:path "src/foo.clj"
-                     :content "(defn foo [x] (+ x 1))"}}))))
+  (let [{:keys [result descended?]}
+        (run-hook {:tool-name "write"
+                   :args {:path "src/foo.clj"
+                          :content "(defn foo [x] (+ x 1))"}}
+                  {:content "wrote"})]
+    (is descended? "the body runs")
+    (is (= {:content "wrote"} result) "and its result passes through")))
 
 (deftest ^:bb-only test-write-hook-ignores-non-clojure
-  (is (nil? (paren-repair/on-tool-call
-             {:tool-name "write"
-              :args {:path "src/foo.txt"
-                     :content "(unbalanced"}}))))
+  (let [{:keys [descended?]}
+        (run-hook {:tool-name "write"
+                   :args {:path "src/foo.txt"
+                          :content "(unbalanced"}}
+                  {:content "wrote"})]
+    (is descended?)))
 
 (deftest ^:bb-only test-write-hook-ignores-other-tools
-  (is (nil? (paren-repair/on-tool-call
-             {:tool-name "edit"
-              :args {:path "src/foo.clj"
-                     :content "(unbalanced"}}))))
+  (let [{:keys [descended?]}
+        (run-hook {:tool-name "edit"
+                   :args {:path "src/foo.clj"
+                          :content "(unbalanced"}}
+                  {:content "edited"})]
+    (is descended? "an edit is judged on its result, not on its arguments")))
 
 (deftest ^:bb-only test-write-hook-reports-expected-vs-opened
-  (let [result (paren-repair/on-tool-call
-                {:tool-name "write"
-                 :args {:path "a.clj"
-                        :content "(defn foo [x]"}})]
+  (let [{:keys [result]}
+        (run-hook {:tool-name "write"
+                   :args {:path "a.clj"
+                          :content "(defn foo [x]"}}
+                  {:content "wrote"})]
     (is (:block result))
     ;; precise: expected ')' to close '(' with opened-at location
     (is (str/includes? (:reason result) "expected ')' to close '('"))
@@ -260,35 +280,31 @@
   ;; Regression: an extra closer makes edamame report BLANK delimiter
   ;; strings — truthy empty strings that rendered as "expected '' to
   ;; close ''". The report must name the offending character instead.
-  (let [result (paren-repair/on-tool-call
-                {:tool-name "write"
-                 :args {:path "a.clj"
-                        :content "(defn foo [x] (+ x 1)))"}})]
+  (let [{:keys [result]}
+        (run-hook {:tool-name "write"
+                   :args {:path "a.clj"
+                          :content "(defn foo [x] (+ x 1)))"}}
+                  {:content "wrote"})]
     (is (:block result))
     (is (str/includes? (:reason result) "unexpected ')'"))
     (is (not (str/includes? (:reason result) "''")))))
 
 (deftest ^:bb-only test-edit-hook-reports-unexpected-closer
-  ;; Same blank-delimiter case through the post-edit hook, where the
+  ;; Same blank-delimiter case through the post side of the hook, where the
   ;; report reads the offending character from the written file.
   (let [path (write-test-file! "edit-extra-close.clj" "(defn foo [x] (+ x 1)))")
-        result (paren-repair/on-tool-result
-                {:tool-name "edit"
-                 :args {:path path}
-                 :result {:content "edited"}
-                 :is-error false})]
-    (is (some? result))
+        {:keys [result descended?]}
+        (run-hook {:tool-name "edit" :args {:path path}}
+                  {:content "edited" :is-error false})]
+    (is descended?)
     (is (str/includes? (:content result) "unexpected ')'"))
     (is (not (str/includes? (:content result) "''")))))
 
 (deftest ^:bb-only test-edit-hook-warns-on-unbalanced-result
   (let [path (write-test-file! "edit-warn.clj" "(defn foo [x]")
-        result (paren-repair/on-tool-result
-                {:tool-name "edit"
-                 :args {:path path}
-                 :result {:content "edited"}
-                 :is-error false})]
-    (is (some? result))
+        {:keys [result]}
+        (run-hook {:tool-name "edit" :args {:path path}}
+                  {:content "edited" :is-error false})]
     (is (str/includes? (:content result) "⚠️"))
     (is (str/includes? (:content result) "clojure_paren_repair"))
     (is (str/includes? (:content result) "edited"))))
@@ -297,12 +313,9 @@
   ;; A non-delimiter syntax error warns too — with a manual-fix hint,
   ;; since clojure_paren_repair cannot repair reader errors.
   (let [path (write-test-file! "edit-syntax-warn.clj" "(def x 1) #")
-        result (paren-repair/on-tool-result
-                {:tool-name "edit"
-                 :args {:path path}
-                 :result {:content "edited"}
-                 :is-error false})]
-    (is (some? result))
+        {:keys [result]}
+        (run-hook {:tool-name "edit" :args {:path path}}
+                  {:content "edited" :is-error false})]
     (is (str/includes? (:content result) "⚠️"))
     (is (str/includes? (:content result) "Syntax error in"))
     (is (str/includes? (:content result) "Fix the syntax error manually"))
@@ -310,30 +323,25 @@
 
 (deftest ^:bb-only test-edit-hook-silent-on-balanced-result
   (let [path (write-test-file! "edit-ok.clj" "(defn foo [x] (+ x 1))")
-        result (paren-repair/on-tool-result
-                {:tool-name "edit"
-                 :args {:path path}
-                 :result {:content "edited"}
-                 :is-error false})]
-    (is (nil? result))))
+        {:keys [result]}
+        (run-hook {:tool-name "edit" :args {:path path}}
+                  {:content "edited" :is-error false})]
+    (is (= {:content "edited" :is-error false} result)
+        "a clean file leaves the result untouched")))
 
 (deftest ^:bb-only test-edit-hook-ignores-errors
   (let [path (write-test-file! "edit-err.clj" "(defn foo [x]")
-        result (paren-repair/on-tool-result
-                {:tool-name "edit"
-                 :args {:path path}
-                 :result {:content "failed"}
-                 :is-error true})]
-    (is (nil? result))))
+        {:keys [result]}
+        (run-hook {:tool-name "edit" :args {:path path}}
+                  {:content "failed" :is-error true})]
+    (is (= {:content "failed" :is-error true} result))))
 
 (deftest ^:bb-only test-edit-hook-ignores-non-clojure
   (let [path (write-test-file! "notes.txt" "(unbalanced")
-        result (paren-repair/on-tool-result
-                {:tool-name "edit"
-                 :args {:path path}
-                 :result {:content "edited"}
-                 :is-error false})]
-    (is (nil? result))))
+        {:keys [result]}
+        (run-hook {:tool-name "edit" :args {:path path}}
+                  {:content "edited" :is-error false})]
+    (is (= {:content "edited" :is-error false} result))))
 
 ;; ─── Quiet titles ───────────────────────────────────────────────────────────
 

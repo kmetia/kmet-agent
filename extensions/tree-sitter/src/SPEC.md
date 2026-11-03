@@ -109,10 +109,11 @@ No background refresh thread; version bumps land via manifest updates.
 write-block and edit-warn semantics follow paren_repair exactly, plus the
 never-throw rule below.
 
-Composition context: `on-tool-call` hooks chain in registration order,
-arg-rewrites propagate, blocks don't short-circuit (first block's reason
-wins), and **a throwing hook becomes a block** (fail-closed) — see
-`interactive.clj` before-tool-call loop.
+Composition context: `on-tool` hooks chain in registration order, the first
+registered outermost; a hook settles a call by not calling `next` (a block
+does not short-circuit the hooks outside it — its reason is what reaches the
+model unless an outer hook replaces it), and **a throwing hook settles the
+call as an error** (fail-closed) — see `kmet.app.hooks`.
 
 1. **Language dispatch by file extension.**
    - Clojure family (`.clj .cljs .cljc .cljd .bb .edn .lpy`):

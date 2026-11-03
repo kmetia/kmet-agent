@@ -27,8 +27,7 @@
   (dispatch/set-api! api)
   (doseq [tool (tools/tool-defs)]
     (ext/register-tool! api tool))
-  (ext/on-tool-call api hooks/on-tool-call)
-  (ext/on-tool-result api hooks/on-tool-result))
+  (ext/on-tool api hooks/on-tool))
 
 ;; unload unregisters everything this extension added (tools + hooks)
 ;; automatically — nothing to tear down by hand

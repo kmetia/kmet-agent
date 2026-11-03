@@ -16,6 +16,7 @@
   (:require [babashka.fs :as fs]
             [kmet.app.config :as cfg]
             [kmet.app.extensions.core :as extensions]
+            [kmet.app.hooks :as hooks]
             [kmet.app.loop :as loop]
             [kmet.app.loop.state :as loop-state]
             [kmet.app.packages :as packages]
@@ -33,48 +34,20 @@
             [kmet.ai.models :as models]
             [kmet.srce.core :as srce]))
 
-;; ── extension hook chains ─────────────────────────────────────────────────
+;; ── the tool point ────────────────────────────────────────────────────────
 
-(defn- extension-before-tool-call
-  "Chain extension tool-call hooks (pi: beforeToolCall) — the runtime wires
-   them for every run, so write-reject / edit-warn hooks fire headless too.
-   Every hook runs; the value is nil | {:args ...} | the first blocking hook's
-   result verbatim, so its :terminate reaches the call's block result (a later
-   block or rewrite is ignored once blocked)."
-  [ctx]
-  (loop [hooks (extensions/get-tool-call-hooks)
-         blocked nil
-         args (:args ctx)]
-    (if-let [hook (first hooks)]
-      (let [r (try (hook (assoc ctx :args args))
-                   (catch Exception e
-                     {:block true
-                      :reason (str "tool-call hook error: " (ex-message e))}))]
-        (cond
-          (:block r)
-          (recur (next hooks) (or blocked r) args)
-          (contains? r :args)
-          (recur (next hooks) blocked (:args r))
-          :else
-          (recur (next hooks) blocked args)))
-      (or blocked (when (not= args (:args ctx)) {:args args})))))
+(defn- extension-tool-hook
+  "The run's tool chain: every registered `:on-tool` hook, first registered
+   outermost. The permission check is the tool point's innermost `next`
+   (kmet.app.tools.invoke/tool-point), so no hook can rewrite the arguments
+   after the policy judged them.
 
-(defn- extension-after-tool-call
-  "Chain extension tool-result hooks (pi: afterToolCall). Returns the
-   (possibly rewritten) result."
-  [ctx]
-  (reduce (fn [result hook]
-            (if-let [r (try (hook (assoc ctx :result result
-                                         :is-error (:is-error result false)))
-                            (catch Exception e
-                              {:content (str "tool-result hook error: " (ex-message e))
-                               :is-error true}))]
-              (cond-> result
-                (:content r) (assoc :content (:content r))
-                (contains? r :is-error) (assoc :is-error (:is-error r)))
-              result))
-          (:result ctx)
-          (extensions/get-tool-result-hooks)))
+   The hooks are read per call, so one registered mid-run fires on the next
+   call — and the chain is one value: the loop's batches and the run_code
+   sandbox run it (`loop/state`'s :tool-hook, `run-code/*tool-hook*`)."
+  []
+  (fn [op next]
+    ((hooks/around (extensions/get-tool-hooks)) op next)))
 
 ;; ── the state ─────────────────────────────────────────────────────────────
 
@@ -173,8 +146,7 @@
                                :loop-guard-threshold (:threshold loop-guard-settings)
                                :thinking-loop-guard-enabled
                                (get config :thinking-loop-guard-enabled true)
-                               :before-tool-call extension-before-tool-call
-                               :after-tool-call extension-after-tool-call
+                               :tool-hook (extension-tool-hook)
                                :on-event on-event}
                               timeout-opts
                               agent-opts

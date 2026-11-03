@@ -182,9 +182,9 @@
                       "  (ext/on-input api (fn [{:keys [text]}]\n"
                       "                      {:action :transform :text (str text \"-hooked\")}))\n"
                       "  (ext/on-before-agent-start api (fn [_] {:system-prompt \"HOOK SYS\"}))\n"
-                      "  (ext/on-tool-call api (fn [_] {:args {:by \"hook-ext\"}})))\n"))
+                      "  (ext/on-tool api (fn [op next] (next (assoc op :args {:by \"hook-ext\"})))))\n"))
     (try
-      (let [tool-hooks (count (extensions/get-tool-call-hooks))
+      (let [tool-hooks (count (extensions/get-tool-hooks))
             result (extensions/load-extension! dir)
             owner (extensions/extension-owner "hook-ext")]
         (t/is (nil? (:error result)) (str "loaded: " (:error result)))
@@ -195,14 +195,14 @@
                                    (extensions/apply-before-agent-start-hooks "p" "orig")))
                              "HOOK SYS")
               "and its before-agent-start hook")
-        (t/is (= (inc tool-hooks) (count (extensions/get-tool-call-hooks)))
-              "and its tool-call hook reaches the transform chain")
+        (t/is (= (inc tool-hooks) (count (extensions/get-tool-hooks)))
+              "and its tool hook reaches the chain")
         (t/is (= 3 (count (filter (fn [[_ m]] (= owner (:owner m)))
                                   (registry/entries (registry/current) :kmet/hook))))
               "all three live under the extension's owner")
         (extensions/unload-all-extensions!)
-        (t/is (= tool-hooks (count (extensions/get-tool-call-hooks)))
-              "unload removes the tool-call hook")
+        (t/is (= tool-hooks (count (extensions/get-tool-hooks)))
+              "unload removes the tool hook")
         (t/is (not (str/includes? (:text (extensions/apply-input-hooks "hi" :interactive))
                                   "-hooked"))
               "the input hook")

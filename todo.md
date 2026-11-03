@@ -9,16 +9,20 @@ this file are dropped — see § Deferred.
 |---|---|---|
 | **`github-copilot` anthropic auth** | every `github-copilot/claude-*` model failed with `400 missing required Authorization header` — the anthropic wire sent `x-api-key` to an endpoint that only accepts `Authorization: Bearer` | **landed** (oauth marker → Bearer; verified live) |
 | **Prompt-caching parity with pi** (P) | the wires never ask for caching — anthropic places no breakpoint, completions sends no key — so cache-read sits at 0 while the accounting that prices it is already complete | **P0–P2 landed** (anthropic breakpoints + 1h pricing; completions key/retention/markers/affinity; store/stream_options on the compat); P4 remains; decisions closed (D1–D3) |
+| **Prompt-caching live check** | every caching test proves the markers are *sent*; only a real provider proves they are *accepted* (`cache_read_input_tokens > 0` on round 2) | **open** — the manual session in § Verification beyond tests; due after P4 |
 | **Tool exposure and declared sets** (P5–P6) | the ranker serves MCP only and no source's tools can be declared, so every tool costs a schema on every round; a tool-set change re-sends the whole array and is recorded nowhere | plan, decisions closed (D4–D8); **P5 → P6** |
 | **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | plan; **after** the exposure track |
 | Around tool hooks | two hand-rolled hook chains + a doubled permission gate; no way to settle a call successfully | decided: **A** — one `:on-tool` around registration |
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | decisions closed (E1–E16); independent |
+| **Remaining openai-compat keys** | four completions compat keys pi converts messages and derives stop reasons with are inert data in kmet (`requires-tool-result-name`, `requires-assistant-after-tool-result`, `requires-thinking-as-text`, `supports-finish-reason`), and `merge-compat` lets an explicit nil erase a provider-level value | backlog — no shipped model sets any of the four; the P2 pass (store/stream_options) is the template |
 
-Between tracks: P (P2 → P4) → exposure (P5 → P6) → S. That order is a decision
-about where the effort goes, not a dependency: P5 needs nothing from P — it is
-the only prefix change whose payoff does not depend on a provider honouring a
-marker. Hooks and eval land whenever; neither touches a wire nor the tool
-registry.
+Between tracks: P (P4, then the live cache check) → exposure (P5 → P6) → S.
+That order is a decision about where the effort goes, not a dependency: P5
+needs nothing from P — it is the only prefix change whose payoff does not
+depend on a provider honouring a marker. Hooks and eval land whenever; neither
+touches a wire nor the tool registry. The openai-compat backlog is off the
+order: land it when a provider needs one of the keys, since no shipped model
+does.
 
 ## `github-copilot`: its anthropic models cannot authenticate
 
@@ -349,13 +353,8 @@ Run: `bb test-changed`, `bb lint-changed`, `bb format-check-changed`.
 
 ### Order and size
 
-P0 (landed) and P1 (landed) were independent and each a single-file change plus
-a test. Remaining sequence: P2 → P4. P2 last-if-busy: it deletes duplication,
-it does not change bytes; P4 is three lines in one payload builder. All
-decisions are closed; nothing waits on one.
-
-P2's second half — deleting the hardcoded family map in `openai_responses.clj` —
-touches a file the exposure track rewrites too, so land P2 before P6.
+P0–P2 landed; P4 is the last item — three lines in one payload builder.
+All decisions are closed; nothing waits on one.
 
 ### Decisions
 
@@ -394,14 +393,17 @@ extra. Default OpenRouter-only, as pi's `getAnthropicCompat:230` has it.
 On a real session against Anthropic with `-message` logging on, confirm the
 second round's usage chunk reports `cache_read_input_tokens > 0` for all but
 the newest message. That is the only assertion that proves the markers are
-accepted; everything above proves they are sent.
+accepted; everything above proves they are sent. The same check belongs on
+the completions wire once (an OpenRouter `anthropic/*` model): the marker
+shape is shared but the builder is not, and P1's markers have never been
+seen by a provider.
 
 ## Tool exposure and declared sets
 
 Status: plan, decisions closed (D4–D8). **P5 → P6**, in that order: P5 defines
 what is declared — exposure, the loadable set, one ranker, `tool_search` — and
 P6 makes the declared set changeable mid-conversation and records it. Taken
-after § Prompt caching's P2 → P4, which is a decision about effort, not a
+after § Prompt caching's P4, which is a decision about effort, not a
 dependency: P5 needs no wire work, and P6 wants P0/P1 landed so the cache it
 protects is actually being taken. Kept apart from § Tools: cross-session
 selection in both scopes on purpose — that track is the user's policy over the
@@ -888,10 +890,19 @@ plugin.
 
 ## Around tool hooks: pre/post → one filter
 
-Status: decided — **A**: one `:on-tool` around registration, the old pair
-removed, the two in-repo consumers migrated in the same change (§ A1),
-fail-closed on a hook's own error (§ A2). One implementation question remains
-(§ A3, where the primitive lives).
+**Landed.** One `:on-tool` around registration (`ext/on-tool` →
+`extensions/register-tool-hook!` → `kmet.app.hooks/around`), the old
+`:on-tool-call` / `:on-tool-result` pair removed and both in-repo consumers
+(`extensions/clojure`'s paren repair, `extensions/tree-sitter`) migrated to one
+function each; `kmet.app.tools.invoke/tool-point` is the single dispatch
+(chain → permission check → body) shared by the loop's batches and the run_code
+sandbox; hooks fail closed (§ A2) and the primitive lives in
+`kmet.app.hooks` (§ A3). The plan below is kept as the record of the
+decisions; its file list is the shape the change actually took, with two
+additions it did not name: the gate is the point's innermost `next` rather than
+a chain element (a hook cannot rewrite what the policy judged), and the
+sandbox takes the run's check as a binding (`*tool-check*`) because its pool
+workers must judge the call on the agent's ctx, not the sandbox realm's.
 Reference: nodecode `~/src/cvstree/nodecode/src/src/organism/hook.lisp` (the
 `:tool` point, `call-hooked`, `call-isolated`).
 
@@ -1504,6 +1515,44 @@ extensions are never loaded by default — every profile naming the row anyway.
 The service is provided unconditionally by the factory (lazy, zero cost until
 the first call), so removing `:tool/eval` leaves a service with no reader, the
 same accepted shape as `:sandbox` without `:tool/run_code`.
+
+## Remaining openai-compat keys
+
+Status: backlog. No shipped catalog row sets any of the four keys below, so
+landing one changes no existing request; the trigger is a provider that needs
+it, declared in `models.edn` (unknown compat keys pass validation —
+`model_config.clj:68-90` type-checks only the booleans it names). The work is
+conversion-side, not a request field, which is why the P2 pass
+(`store`/`stream_options`) did not carry it. Both wires' builders stay pure,
+so the tests are pure too.
+
+Reference: `~/src/cvstree/pi/packages/ai/src/api/openai-completions.ts`.
+
+| key | pi | kmet target |
+|---|---|---|
+| `:requires-tool-result-name` | the tool message carries `name` (`:1418-1420`) | `shared/openai-messages`' tool branch adds `:name (:tool-name m)` |
+| `:requires-assistant-after-tool-result` | a synthetic assistant `"I have processed the tool results."` before a user turn that follows tool results (`:1229-1234`) and after lifted tool-result images (`:1440-1445`); assistant messages with no text send `""` instead of null (`:1284`) | the same converter: today an `into [] (keep …)`, so it must become a reduce that can emit a second message; the empty-content rule rides the assistant branch |
+| `:requires-thinking-as-text` | thinking becomes a leading `text` block instead of `reasoning_content` (`:1312-1316`) | the assistant branch of both converters (`openai-messages` / `openai-messages-with-reasoning`), which always emits `reasoning_content` |
+| `:supports-finish-reason` | when false, a stream that ends without `finish_reason` derives toolUse/stop instead of erroring (`:682-690`) | `sse/process-openai-stream`'s terminal-event check + `openai-stop-reason`, both of which currently treat a missing `finish_reason` as an error |
+
+### Also here: the nil-override rule
+
+`provider_composer.clj`'s `merge-compat` is a plain `merge`, so an explicit
+`nil` in a models.edn override erases a provider-level value — the shape
+`resolved-openai-compat` had before the P2 fix (there an explicit nil now
+falls back to detection). `model_config` rejects nil for the boolean keys it
+names but not for `:cache-control-format`, `:session-affinity-format`,
+`:send-session-affinity-headers`, `:supports-long-cache-retention`,
+`:supports-explicit-prompt-cache-mode` or any key it does not name, so a nil
+does reach the merge. Align `merge-compat` with the resolved merge (drop nil
+overrides) or reject them in validation — one rule for both.
+
+### Done when
+
+Each key has a reader and a builder test (conversation in, payload out); a
+models.edn compat carrying it changes the request bytes and an unsupported
+provider's request is byte-identical; `merge-compat` ignores an explicit nil
+instead of erasing the base, with a test; existing byte-stability tests hold.
 
 ## Deferred: context and token tracks
 

@@ -34,11 +34,11 @@
   (with-restored-host
     (fn []
       (mounted)
-      (is (= [] (extensions/get-tool-call-hooks)) "the host answers: no hooks yet")
+      (is (= [] (extensions/get-tool-hooks)) "the host answers: no hooks yet")
       ;; the host's own tags land in the handle this row made — the thing that
       ;; makes the binding worth a row, since a run's hooks resolve here
-      (extensions/register-tool-call-hook! :owner/fn (fn [_] nil))
-      (is (= 1 (count (extensions/get-tool-call-hooks)))
+      (extensions/register-tool-hook! :owner/fn (fn [op next] (next op)))
+      (is (= 1 (count (extensions/get-tool-hooks)))
           "a registration the host accepted is one its bound handle holds")
       (is (fn? (:register! (extensions/resources :skills)))
           "and the row binds the resource operations itself, backed by the
@@ -65,16 +65,16 @@
   (with-restored-host
     (fn []
       (let [{:keys [fiber]} (mounted)]
-        (extensions/register-tool-call-hook! :owner/first (fn [_] nil))
+        (extensions/register-tool-hook! :owner/first (fn [op next] (next op)))
         (let [{second :fiber} (mounted)]
-          (is (= [] (extensions/get-tool-call-hooks))
+          (is (= [] (extensions/get-tool-hooks))
               "the second mount binds its own handle")
           (srce/dispose! second)
-          (is (= 1 (count (extensions/get-tool-call-hooks)))
+          (is (= 1 (count (extensions/get-tool-hooks)))
               "and disposing it restores the one it replaced"))
         (srce/dispose! fiber))
       (is (= :kmet/no-host-services
-             (try (extensions/get-tool-call-hooks)
+             (try (extensions/get-tool-hooks)
                   nil
                   (catch Exception e (:type (ex-data e)))))
           "disposing the last one unbinds: a host with no owner is a named error"))))
