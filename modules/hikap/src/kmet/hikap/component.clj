@@ -136,6 +136,10 @@
    values AS READ (not a post-body snapshot), so an atom that changed
    mid-render makes the stored values disagree with the current ones on the
    next hit check and forces a re-render.
+   Every tracked read is watched FROM THE READ (kmet.reakt.core's
+   *on-tracked-read*), not after the body: a write that lands between the
+   read and the body's end therefore fires, and the mid-body guard refuses
+   the cache instead of storing a value the ref no longer holds.
    Requires COMPONENT to have a :cache-atom (or legacy :cache) field.
    A body that invalidates itself mid-run (a render fn calling :invalidate)
    is not cached — the next render re-runs it with the fresh state.
@@ -166,8 +170,45 @@
       (:result cache)
       (let [atoms (atom {})
             rx (atom {})
-            watch-key (tracker-key component)]
-        (binding [reakt/*tracking-scope* [atoms rx]]
+            watch-key (tracker-key component)
+            ;; The previous pass's payload, snapshotted BEFORE the
+            ;; pre-registration below overwrites it: it is the branch-switch
+            ;; diff's "before" set and what a failure must unwatch.
+            prev-watched (:watched (weak/payload watch-key))
+            ;; KEY only — the atom watch must not root the component.
+            handler (let [k watch-key]
+                      (fn [_ _ old new]
+                        ;; equal-value resets are no-ops: identical? fast
+                        ;; path, structural = for persistent copies
+                        (when-not (or (identical? old new)
+                                      (= old new))
+                          (when-let [c (weak/subject k)]
+                            (invalidate-cache c)))))
+            ;; Refs whose watch this pass installed, in read order (deduped):
+            ;; the payload's :watched and the branch-switch diff's "after"
+            ;; set. Single-threaded (a body runs on the render thread), so a
+            ;; volatile set is enough and it never touches a frame.
+            seen (volatile! #{})]
+        ;; Register FIRST, and outside the try: a throw here (a shared cache
+        ;; atom, ::weak/subject-conflict) must not leave watches installed
+        ;; under a key remove-track-watches! cannot find, nor let a failure
+        ;; path unregister the other live subject's entry. The payload is the
+        ;; previous pass's watched set, so a dispose racing the body unwatches
+        ;; what is actually installed; it is refreshed after the body.
+        (weak/register! watch-key component {:watched prev-watched}
+                        (fn [k {:keys [watched]}]
+                          (unwatch-all! k watched)))
+        (binding [reakt/*tracking-scope* [atoms rx]
+                  reakt/*on-tracked-read*
+                  (fn [ref kind]
+                    (when-not (contains? @seen ref)
+                      ;; :plain only — a reaction's own derive fires its
+                      ;; watchers, so a watch installed before the read would
+                      ;; invalidate this very pass. rx-unchanged? carries the
+                      ;; reaction half: a dirty reaction always misses.
+                      (when (= :plain kind)
+                        (reakt/watch-ref ref watch-key handler))
+                      (vswap! seen conj ref)))]
           (let [cache-watch-key (keyword (str (name watch-key) "-cache"))
                 invalidated? (atom false)
                 ;; Watch the cache atom itself: an invalidate mid-body (a
@@ -181,30 +222,18 @@
               (let [result (render-fn)
                     atom-vals @atoms
                     rx-refs @rx
-                    rx-vals (cell-keyed-rx rx-refs)
                     ;; Everything the body tracked, reactions included:
-                    ;; the payload's :watched is what teardown and the sweep
-                    ;; must unwatch later. (The cache splits the same refs:
-                    ;; :atoms plain keyed by ref, :rx reactions keyed by
-                    ;; their state cell.)
-                    watched (into (set (keys atom-vals)) (keys rx-refs))
-                    prev-watched (:watched (weak/payload watch-key))
-                    ;; KEY only — the atom watch must not root the component.
-                    handler (let [k watch-key]
-                              (fn [_ _ old new]
-                                ;; equal-value resets are no-ops: identical?
-                                ;; fast path, structural = for persistent copies
-                                (when-not (or (identical? old new)
-                                              (= old new))
-                                  (when-let [c (weak/subject k)]
-                                    (invalidate-cache c)))))]
-                ;; Register FIRST: a throw here (a shared cache atom) must
-                ;; not leave watches installed under a key
-                ;; remove-track-watches! cannot find.
+                    ;; :watched is what teardown and the sweep must unwatch
+                    ;; later. (The cache splits the same refs: :atoms plain
+                    ;; keyed by ref, :rx reactions keyed by their state cell.)
+                    watched @seen]
                 (weak/register! watch-key component {:watched watched}
                                 (fn [k {:keys [watched]}]
                                   (unwatch-all! k watched)))
-                (doseq [r watched]
+                ;; Reaction watches stay a post-body job (see the hook above):
+                ;; by now a re-derived reaction is :idle and its value is what
+                ;; rx-unchanged? compares against.
+                (doseq [r (keys rx-refs)]
                   (reakt/watch-ref r watch-key handler))
                 ;; A previous pass's refs this pass no longer reads (branch
                 ;; switch) lose their watches here — otherwise they fire
@@ -215,7 +244,7 @@
                 (when-not @invalidated?
                   (reset! cache-atom {:width width
                                       :atoms atom-vals
-                                      :rx rx-vals
+                                      :rx (cell-keyed-rx rx-refs)
                                       :result result}))
                 result)
               (finally

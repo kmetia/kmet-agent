@@ -757,16 +757,22 @@ Record components wrap their render body:
 
 Every `@atom` read in the body is recorded; when any changes, the cache
 invalidates automatically — setters become plain `reset!`/`swap!`, no manual
-`(protocols/invalidate c)` calls. While all tracked values are unchanged the
-cached result returns untouched. `defcomponent` generates the
-cache-clearing `invalidate` method when the render uses `track!`; write an
-`invalidate` method only for extra side effects (delegating to children,
-requesting renders).
+`(protocols/invalidate c)` calls. Each read's watch is installed **at the
+read**, so a write that lands while the body runs invalidates the pass
+instead of being stored as a value the atom no longer holds. While all
+tracked values are unchanged the cached result returns untouched.
+`defcomponent` generates the cache-clearing `invalidate` method when the
+render uses `track!`; write an `invalidate` method only for extra side
+effects (delegating to children, requesting renders).
 
 - **`track-deps`** declares dependencies inside a track! body whose *values*
   don't appear there but must still invalidate: `(track-deps @a @b)`.
-- Atoms the render body itself mutates should be read through non-tracking
-  helpers so they don't self-invalidate.
+- Atoms the render body itself mutates must be read through non-tracking
+  helpers so they don't self-invalidate. Every tracked read installs its watch
+  at the read, so a write later in the same body fires its own invalidation:
+  that pass is not cached and a frame is requested. Guarded writes that
+  converge (write once, then read the result) cost one extra pass; a body
+  that writes a new value on every pass spins the frame loop.
 - **Do NOT use track!** for: transparent parents (Container, Box, VStack,
   HStack, ScrollView, ChatHistory — children change independently and the
   parent can't track that), time-animated output (spinners, status flashes —

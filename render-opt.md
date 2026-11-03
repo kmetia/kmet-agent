@@ -132,9 +132,12 @@ watchers fire only when it re-derives to a *different value*. Hence
 **Two edges** make a non-nil cache not yet a proof.
 
 1. **Read before watch** (step 3): watches are installed after the body, so
-   a ref read *during* the body has no watch yet and a concurrent write goes
-   unobserved (the LLM stream appends to `text-atom` on a worker thread while
-   the render loop composes); the cache is written with the value as read.
+   a **plain ref** read *during* the body has no watch yet and a concurrent
+   write goes unobserved (the LLM stream appends to `text-atom` on a worker
+   thread while the render loop composes); the cache is written with the
+   value as read. The reaction half of the cache does not need this: a
+   reaction marks itself `:dirty` and `rx-unchanged?`'s state test refuses
+   the hit whatever the watch timing.
 2. **Check before write** (step 4): the cache write is guarded by
    `(when-not @invalidated? …)` — a read-then-act. An `invalidate-cache` that
    lands between the flag read and the `reset!` is erased by the write that
@@ -274,15 +277,16 @@ check replaces it at ~0.2–0.4 µs, paid only by components nobody probes.
 ```clojure
 ;; reakt/core.clj
 (def ^:dynamic *on-tracked-read*
-  "Called with each trackable REF just before it is deref'd inside a
-   tracking scope; track-render installs that ref's watch there. Nil
-   outside one. A var of its own, so *tracking-scope*'s shape — and its
-   two binders in reakt's test and in the bench — stay as they are."
+  "Called with each trackable REF and its kind just before it is deref'd
+   inside a tracking scope; track-render installs a :plain ref's watch
+   there. Nil outside one. A var of its own, so *tracking-scope*'s shape —
+   and its two binders in reakt's test and in the bench — stay as they are."
   nil)
 
 (defn tracked-deref [ref]
   (let [kind (ref-kind ref)]
-    (when (and kind *on-tracked-read*) (*on-tracked-read* ref))   ; install, then read
+    (when (and kind *on-tracked-read*)
+      (*on-tracked-read* ref kind))                      ; install, then read
     (let [v (deref ref)]
       ...)))
 ```
@@ -292,6 +296,17 @@ the invalidate nils the token the pass parked in the cache atom, and the
 commit (§ below) then refuses to cache the pass; the read that follows sees
 the new value — conservative in the right direction. Volatiles and delays
 stay untracked because the hook sits inside the existing `kind` test.
+
+**The hook installs `:plain` refs only**, and the kind is passed for that
+reason — implementation found the case, and it is a correctness matter, not
+an optimisation: a reaction's first derive (nil → value) fires its watchers,
+so a watch installed before the read invalidates the very pass that read it
+— the component never caches its first render and `:rx` comes out empty.
+The reaction half needs no install-at-read anyway: a dirty reaction misses
+through `rx-unchanged?`'s state test, not through watch timing. Reaction
+watches therefore stay in the post-body install, which shrinks to `:rx`
+reads instead of disappearing (`@seen` still records them: it is the payload
+and the branch-switch set).
 
 `track-render` binds the hook to "record REF in this pass's watched set, and
 install `watch-key`'s handler on it unless already there" (a `volatile!`
@@ -495,6 +510,7 @@ cache, the probe must not skip its wrapper.
 | branch switch: a newly read ref is written *during* the same body | installed at its first read → fires → cache refused. |
 | an invalidate lands concurrently with the cache commit | the token-checked `swap!` (§4.3) cannot lose it: `swap!` retries and keeps the nil if the invalidate wrote first, and the nil clobbers `m` if it wrote second. |
 | the body throws after reading refs | the `finally` clears the cache, unwatches `(into prev-watched @seen)` and unregisters → no zombie watches, no rejected cache left for a presence check, `tracked?` false, a retry is a real miss and re-registers cleanly. |
+| body reads a reaction whose first derive falls in this pass | its watch is installed **after** the body (§4.3 — a reaction's derive fires its own watchers, so an at-read install would invalidate the pass that read it); `rx-unchanged?` gates the hit on the cell state, not on watch timing. |
 | body reads a reaction, on any branch | `:rx` non-empty → probe refuses → `render` runs `rx-unchanged?` exactly as today (`:dirty`/`:unrun`/`:failed`/`:disposed` all still caught). |
 | reaction re-derives to an equal value | unchanged: `rx-unchanged?` keeps the hit. No extra body run, no frame requested. |
 | body reads a reaction on one branch only | the cache describes the pass that wrote it; a pass that read none records `:rx {}` and answers the probe honestly. |
@@ -553,17 +569,16 @@ caches written by the **old** code — which could be stale at write time, the
 very edge change 1 closes — until their next invalidation. Restart before
 benchmarking (§9.2), or clear the caches.
 
-`modules/tui/src/kmet/tui/tui.md` §3.2 (the cache contract) must say: *the
-cache trusts its invalidation edges; every tracked read is watched from the
-read; there is no value re-verification, and the cache is served only while
-the component still owns it. A parent may serve a child's cached lines only
-after proving the cache is the child's own, and only while the cache holds no
-reaction dependency — reactions keep `rx-unchanged?`.* §3.2's existing
-"read self-mutated atoms through non-tracking helpers" note must be promoted
-from a perf hint to the rule that keeps a body from invalidating itself on
-every pass (§8). §12 (the idle-frame invariant) is untouched by this design
-and needs no edit; say so in the commit message, which must also name the
-guarantee change.
+`tui.md` §3.2's contract sentence ("every tracked read is watched from the
+read") and its self-mutating-atom rule land with **1a**, where the
+frame-request behavior arrives; the rest of the §3.2 sentences land with
+commit 2 *the cache trusts its invalidation edges, there is no value
+re-verification, and the cache is served only while the component still owns
+it; a parent may serve a child's cached lines only after proving the cache
+is the child's own, and only while it holds no reaction dependency —
+reactions keep `rx-unchanged?`*. §12 (the idle-frame invariant) is untouched
+by this design and needs no edit; say so in commit 2's message, which must
+also name the guarantee change.
 
 ---
 
@@ -697,9 +712,11 @@ serves caches written by the old code — §6).
 * the pre-body registration: snapshot `prev-watched`, then `register!
   prev-watched` **outside the `try`** (a `subject-conflict` throw must not let
   the `finally` delete the other subject's entry) — §4.3;
-* the post-body `doseq` of `watch-ref` and the
-  `(into (set (keys atom-vals)) (keys rx-refs))` payload derivation go away —
-  `@seen` is that union; `:atoms`/`:rx` are still written to the cache;
+* the post-body `watch-ref` loop narrows to the `:rx` reads and the
+  `(into (set (keys atom-vals)) (keys rx-refs))` payload derivation goes away
+  (`@seen` is that union) — install-at-read is for `:plain` only, because a
+  reaction's first derive fires its own watchers (§4.3); `:atoms`/`:rx` are
+  still written to the cache;
 * **keep** `invalidated?`, `cache-watch-key`, the cache-atom watch, the
   check-then-`reset!` write and `atoms-unchanged?`. Step 1b replaces them;
   keeping them is what isolates this step — the hit path and the invalidation
@@ -809,8 +826,9 @@ again and put the before/after in §7.
 
 `bb test-changed`, `bb lint-changed`, `bb format-check-changed` per commit;
 plus `bb test kmet.tui.test-reakt-integration kmet.tui.components.test-track
-kmet.tui.test-frame kmet.hikap.test-core` (the reactive layer's suites), and
-the chat-history suite for commit 3. Commits 1a and 1b additionally require a
+kmet.tui.test-frame kmet.hikap.test-hikap-core kmet.hikap.test-hikap-component`
+(the reactive layer's suites), and the chat-history suite (`kmet.ui.tui.test-chat-history`)
+for commit 3. Commits 1a and 1b additionally require a
 **flat bench** (they are not supposed to move the numbers), and commit 2
 requires the differential staleness test (§6) ahead of the perf gate.
 

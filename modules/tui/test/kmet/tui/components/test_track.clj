@@ -110,6 +110,56 @@
     (let [lines (core/render c 5)]
       (t/is (.contains (first lines) "b")))))
 
+;; ─── install-at-read (change 1) ────────────────
+
+(t/deftest test-a-body-that-writes-a-tracked-ref-is-not-cached
+  (t/testing "the watch is installed at the read, so a mid-body write fires
+            and the pass is not cached at all"
+    (let [a (atom 1)
+          c {:cache (atom nil)}
+          runs (atom 0)
+          body (fn []
+                 (let [v (reakt/tracked-deref a)]
+                   (swap! runs inc)
+                   (when (= 1 v) (reset! a 2))
+                   v))]
+      (t/is (= 1 (component/track-render c 10 body)) "the body returns what it read")
+      (t/is (= 1 @runs))
+      (t/is (nil? @(:cache c))
+            "a write the old post-body install would have missed is observed")
+      (t/is (= 2 (component/track-render c 10 (fn [] (swap! runs inc) (reakt/tracked-deref a))))
+            "the next render re-reads the ref")
+      (t/is (= 2 @runs))
+      (t/is (= 2 (component/track-render c 10 (fn [] (throw (ex-info "hit must not run" {})))))
+            "and the pass it wrote is cached"))))
+
+(t/deftest test-a-ref-read-twice-is-watched-once
+  (t/testing "the payload's :watched is a set — re-reads add no second entry"
+    (let [a (atom 1)
+          c {:cache (atom nil)}]
+      (component/track-render c 10 (fn [] (+ (reakt/tracked-deref a)
+                                             (reakt/tracked-deref a)
+                                             (reakt/tracked-deref a))))
+      (t/is (= #{a} (:watched (weak/payload (watch-key-of c))))))))
+
+(t/deftest test-branch-switch-unwatches-dropped-refs
+  (t/testing "a ref only a previous branch read stops invalidating"
+    (let [a (atom 1)
+          b (atom 10)
+          branch (atom :a)
+          c {:cache (atom nil)}
+          body (fn [] (if (= :a (reakt/tracked-deref branch))
+                        (reakt/tracked-deref a)
+                        (reakt/tracked-deref b)))]
+      (t/is (= 1 (component/track-render c 10 body)))
+      (reset! branch :b)                         ;; invalidates
+      (t/is (= 10 (component/track-render c 10 body)))
+      (t/is (some? @(:cache c)) "the second pass cached")
+      (reset! a 2)                               ;; no longer read
+      (t/is (some? @(:cache c)) "a dropped ref keeps its old watch away")
+      (reset! b 11)                              ;; still read
+      (t/is (nil? @(:cache c)) "a ref this branch reads still invalidates"))))
+
 ;; ─── weak registry ─────────────────────────────
 
 (t/deftest test-live-watch-count-follows-render-and-dispose

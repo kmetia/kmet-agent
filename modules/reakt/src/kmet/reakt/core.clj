@@ -69,6 +69,19 @@
    kmet.hikap.component/track-render around render bodies; nil outside one."
   nil)
 
+(def ^:dynamic *on-tracked-read*
+  "Called with each trackable REF and its kind (:plain or :rx) just before
+   tracked-deref derefs it inside a tracking scope. The one caller
+   (kmet.hikap.component/track-render) installs a :plain ref's watch there,
+   so a write landing between the read and the body's end cannot be lost; a
+   :rx watch stays a post-body job, because a reaction's own derive fires its
+   watchers and would invalidate the pass that just read it. Nil outside a
+   tracking scope. A var of its own, not a third slot in *tracking-scope*:
+   that shape is read by two binders (reakt's test, the reakt bench) and two
+   docstrings, and none of them has anything to say about watch
+   installation."
+  nil)
+
 (def ^:dynamic *reaction-frame*
   "The running reaction's capture frame ({:pending (atom #{}) :self ref}),
    bound around reaction bodies below. nil outside one."
@@ -149,19 +162,26 @@
    This is the entry point for reactive reads outside component render
    bodies (which route through the track! rewrite).
 
-   Classified once per call and shared by both capture frames."
+   Classified once per call and shared by both capture frames, and
+   *on-tracked-read* (when bound) runs BEFORE the deref, with the kind: a
+   dependency watch installed at the read cannot miss a write that lands
+   between the read and a post-body registration."
   [ref]
-  (let [v (deref ref)
-        kind (ref-kind ref)]
-    (when kind
-      ;; Record the read in the tracking scope when one is bound, then in
-      ;; the running reaction (record-dep! no-ops without one).
-      (when-some [[atoms rx] *tracking-scope*]
-        (case kind
-          :plain (swap! atoms assoc ref v)
-          :rx (swap! rx assoc ref v)))
-      (record-dep! ref v))
-    v))
+  (let [kind (ref-kind ref)]
+    ;; Install-then-read: a write in the window fires the watch the hook just
+    ;; installed, and the read below already sees the new value.
+    (when (and kind *on-tracked-read*)
+      (*on-tracked-read* ref kind))
+    (let [v (deref ref)]
+      (when kind
+        ;; Record the read in the tracking scope when one is bound, then in
+        ;; the running reaction (record-dep! no-ops without one).
+        (when-some [[atoms rx] *tracking-scope*]
+          (case kind
+            :plain (swap! atoms assoc ref v)
+            :rx (swap! rx assoc ref v)))
+        (record-dep! ref v))
+      v)))
 
 (defn add-on-dispose!
   "Register F to run when R is disposed; F receives R (Reagent's
