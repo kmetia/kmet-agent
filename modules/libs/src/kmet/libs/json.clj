@@ -42,11 +42,9 @@
 
    :escape-slash false keeps / unescaped, matching the previous default
    behavior. :escape-unicode false writes non-ASCII as raw UTF-8 instead of
-   backslash-u escapes: on the JVM that only trades bytes for escape noise,
-   but Jolt's data.json emits exactly four hex digits per code point, so an
-   astral code point (U+1F44D) comes out as a five-digit escape — malformed
-   JSON that a lenient parser reads as U+1F44 followed by the literal \"d\".
-   Raw UTF-8 is valid JSON and skips that path on every host."
+   backslash-u escapes: valid JSON on every host, and the smaller encoding —
+   an astral code point costs four raw bytes against twelve for its
+   surrogate-pair escape."
   [:escape-slash false :escape-unicode false])
 
 (def parse-string

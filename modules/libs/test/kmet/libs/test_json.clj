@@ -38,12 +38,10 @@
     (is (= "{\"a\":1}" (json/generate-string {:a 1} {:pretty false})))))
 
 (deftest astral-round-trip
-  (testing "non-BMP text crosses the seam as raw UTF-8, not a split backslash-u escape"
-    ;; A code point above U+FFFF has to be escaped as a surrogate pair. Jolt's
-    ;; data.json escapes with exactly four hex digits instead, so U+1F44D is
-    ;; written as a five-digit escape that a lenient reader splits back into
-    ;; U+1F44 plus the literal "d" — the thumbs-up bug. Raw UTF-8 is valid
-    ;; JSON everywhere and never enters that escape path.
+  (testing "non-BMP text crosses the seam as raw UTF-8, not a backslash-u escape"
+    ;; :escape-unicode false is the seam's contract: a code point above U+FFFF
+    ;; goes out raw (four UTF-8 bytes) rather than as a surrogate-pair escape,
+    ;; and round-trips intact.
     (let [emoji (String. (Character/toChars 128077))]
       (is (= (str "{\"a\":\"" emoji "\"}")
              (json/generate-string {:a emoji})))

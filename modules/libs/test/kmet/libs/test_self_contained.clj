@@ -7,10 +7,10 @@
      through a literal `(requiring-resolve 'kmet.…)`
    - sandbox-safe: no static-field reference in any code a sandbox runs. SCI
      has static-method access but no static-field access, so a `Class/FIELD`
-     inside a function body is a crash in every extension. A top-level `def`
-     initializer is exempt: it runs on the host, once, and the sandbox receives
-     the resulting value by reference — which is how Jolt (static fields, no
-     enum static methods) and SCI (static methods, no fields) are both served."
+     inside a function body is a crash in every extension. An enum constant is
+     read with the static method (`valueOf`) or in a top-level `def`
+     initializer, which runs on the host once and hands the sandbox the
+     resulting value by reference."
   (:require [clojure.test :as t :refer [deftest is]]
             [clojure.string :as str]
             [babashka.fs :as fs]
@@ -129,9 +129,8 @@
   ;; kmet.libs.* namespace is whitelisted into extension contexts — so a
   ;; `Class/FIELD` inside a function body is a crash at the call, in the sandbox
   ;; only (the host runs it fine). A `def` initializer is exempt because it runs
-  ;; on the host; that exemption is also what keeps Jolt working, since Jolt has
-  ;; static fields but no enum static methods — the two hosts need opposite
-  ;; spellings, and a host-resolved constant serves both.
+  ;; on the host; an enum constant is read there with the static method
+  ;; (`(TimeUnit/valueOf "MILLISECONDS")`), which the sandbox resolves too.
   (doseq [f (lib-files)
           :let [fields (static-fields f)]]
     (is (empty? fields)

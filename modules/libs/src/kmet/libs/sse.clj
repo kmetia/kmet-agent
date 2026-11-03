@@ -40,12 +40,11 @@
   (io/reader body))
 
 (def ^:private time-unit-millis
-  "The `MILLISECONDS` unit, resolved once at load. The field is the only portable
-   spelling: Jolt has no enum static-method support (`TimeUnit/valueOf` is \"No
-   matching field or method\" there), and a static *field* read inside a function
-   body is `Unable to resolve symbol` in an extension's SCI. A `def` initializer
-   runs on the host, once, and the sandbox receives the value by reference."
-  java.util.concurrent.TimeUnit/MILLISECONDS)
+  "The `MILLISECONDS` unit, resolved once at load. `valueOf` is the portable
+   spelling: a static *field* read inside a function body is `Unable to resolve
+   symbol` in an extension's SCI, while the static method resolves there and on
+   every host."
+  (java.util.concurrent.TimeUnit/valueOf "MILLISECONDS"))
 
 (def ^:private idle-chunk-size
   "Units (bytes/chars) the daemon reads per queue handoff. The handoff is the

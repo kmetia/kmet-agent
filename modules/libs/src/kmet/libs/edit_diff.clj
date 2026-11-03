@@ -264,12 +264,11 @@
   #"[\u2018\u2019\u201A\u201B\u201C\u201D\u201E\u201F\u2010\u2011\u2012\u2013\u2014\u2015\u2212\u00A0\u2002-\u200A\u202F\u205F\u3000]")
 
 (def ^:private nfkc-form
-  "The NFKC form, resolved once at load. The field is the only portable spelling:
-   Jolt has no enum static-method support (`Normalizer$Form/valueOf` is \"No
-   matching field or method\" there), and a static *field* read inside a function
-   body is `Unable to resolve symbol` in an extension's SCI. A `def` initializer
-   runs on the host, once, and the sandbox receives the value by reference."
-  java.text.Normalizer$Form/NFKC)
+  "The NFKC form, resolved once at load. `valueOf` is the portable spelling: a
+   static *field* read inside a function body is `Unable to resolve symbol` in
+   an extension's SCI, while the static method resolves there and on every
+   host."
+  (java.text.Normalizer$Form/valueOf "NFKC"))
 
 (def ^:private ascii-only-re
   "Full-match ASCII. NFKC is the identity on ASCII and the quote/dash/space

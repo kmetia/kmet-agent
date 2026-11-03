@@ -16,11 +16,11 @@
 
 (defn- extension-root
   "The extension root that holds THIS-FILE, found from the file's own
-   location where the host reports a full path (babashka, the JVM — five
-   parents up), else from the checkout: Jolt answers `*file*` relative to the
-   namespace's own source root, so its parents are no way back to the
-   extension. The search covers a run from an extension's own directory (its
-   `bb test`) and one from the repo root (the repo runner)."
+   location where the host reports a path that reaches it (babashka's `*file*`
+   is absolute), else from the checkout: the JVM and Jolt answer `*file*`
+   relative to the namespace's source root (`kmet/extensions/...`), which is no
+   way back to the extension. The search covers a run from an extension's own
+   directory (its `bb test`) and one from the repo root (the repo runner)."
   []
   (let [candidates (concat (take 8 (iterate fs/parent (fs/absolutize (or *file* this-file))))
                            [(fs/cwd)]
