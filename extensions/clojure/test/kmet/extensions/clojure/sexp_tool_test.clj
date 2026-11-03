@@ -698,6 +698,18 @@
       (is (str/includes? content "(+ y 2)"))
       (is (str/includes? content "(* z 3)")))))
 
+(deftest ^:bb-only test-rename-would-leave-duplicate-defn-rejected
+  ;; The shared pipeline guard also covers a sexp rename onto an existing
+  ;; definition name; without it the file would silently end up with two
+  ;; (defn b) forms.
+  (let [path (write-test-file! "duplicate-rename"
+                               "(defn a [] 1)\n\n(defn b [] 2)\n")
+        result (sexp-tool/execute (sexp-opts path "a" "b" :replace_all true))]
+    (is (:is-error result))
+    (is (str/includes? (:content result) "b at lines 1, 3"))
+    (is (str/includes? (:content result) "No change was written"))
+    (is (= "(defn a [] 1)\n\n(defn b [] 2)\n" (read-test-file path)))))
+
 ;; ═══════════════════════════════════════════════════════════════════════════════
 ;; UTF-8 content
 ;; ═══════════════════════════════════════════════════════════════════════════════

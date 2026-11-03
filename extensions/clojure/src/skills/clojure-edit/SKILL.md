@@ -46,6 +46,19 @@ pass complete, balanced forms. When a file's delimiters get broken, run
   - a comment on its own line leads the NEXT form and stays with it
 - The inserted form is blank-line separated from surrounding forms
 
+## Duplicate Definitions Are Refused
+- `clojure_edit` and `clojure_edit_replace_sexp` refuse an edit that would
+  leave two top-level definitions with the same name (or the same `defmethod`
+  dispatch), and write nothing.
+- Only a duplicate the edit introduces is refused; a pre-existing duplicate
+  elsewhere in the file does not block an unrelated edit.
+- Fix it by deleting or renaming the other definition — retrying the same
+  edit hits the same guard. Do not bypass it with generic text editing unless
+  the duplicate is intentional.
+- The guard covers literal top-level definitions only (not a `def` inside
+  `(comment …)` or the branches of a top-level reader conditional), so keep
+  the namespace `require` check after a successful edit.
+
 ## Alias-Qualified Forms
 - `(t/deftest my-test ...)` matches with plain `form_type: "deftest"`
   (the qualified name `t/deftest` also works)

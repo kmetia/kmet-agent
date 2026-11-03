@@ -34,6 +34,10 @@ The tools always apply their edits; preview-only and unified-diff modes are not 
 - cljfmt formatting — only the forms the edit changed are reformatted;
   untouched forms keep their bytes
 - Similar-match suggestions when form not found
+- Duplicate-definition guard — an edit that would leave two top-level
+  definitions with the same name (or the same `defmethod` dispatch) is
+  refused before the file is written; a duplicate that already existed
+  elsewhere does not block an unrelated edit
 
 ### `clojure_edit_replace_sexp`
 
@@ -64,6 +68,10 @@ The tools always apply their edits; preview-only and unified-diff modes are not 
 - cljfmt formatting — only the forms the edit changed are reformatted;
   untouched forms keep their bytes
 - Standard edit-style file call, full numbered diff, and colored result rendering
+
+Both tools share the edit pipeline, including its duplicate-definition guard:
+an edit that would introduce a second top-level definition of the same name
+is refused and the file is left unchanged.
 
 Both tools reuse the host's `render-edit-call` and `render-edit-result` renderers.
 Their normal result stores the numbered display diff in `:details :diff`.

@@ -314,6 +314,84 @@
     (is (str/includes? (read-test-file path) "long (* w h)"))))
 
 ;; ═══════════════════════════════════════════════════════════════════════════════
+;; Duplicate definition guard
+;; ═══════════════════════════════════════════════════════════════════════════════
+
+(deftest ^:bb-only test-replace-would-leave-duplicate-defn-rejected
+  ;; A replace that redefines the anchor under a name already defined later
+  ;; used to leave both copies and report "Edit applied". The pipeline now
+  ;; refuses before writing.
+  (let [path (write-test-file! "duplicate-replace"
+                               "(defn a [] 1)\n\n(defn b [] 2)\n")
+        result (edit-tool/execute (edit-opts path "defn" "a"
+                                             "(defn b [] 3)"))]
+    (is (:is-error result))
+    (is (str/includes? (:content result) "b at lines 1, 3"))
+    (is (str/includes? (:content result) "No change was written"))
+    (is (str/includes? (read-test-file path) "(defn a [] 1)")
+        "the anchor form is untouched")
+    (is (str/includes? (read-test-file path) "(defn b [] 2)")
+        "the existing form is untouched")))
+
+(deftest ^:bb-only test-insert-would-leave-duplicate-defn-rejected
+  (let [path (write-test-file! "duplicate-insert"
+                               "(defn a [] 1)\n\n(defn b [] 2)\n")
+        result (edit-tool/execute (edit-opts path "defn" "a"
+                                             "(defn b [] 3)"
+                                             "insert_after"))]
+    (is (:is-error result))
+    (is (str/includes? (:content result) "b at lines 3, 5"))
+    (is (= "(defn a [] 1)\n\n(defn b [] 2)\n" (read-test-file path)))))
+
+(deftest ^:bb-only test-defmethod-duplicate-dispatch-rejected
+  ;; The dispatch value is part of the definition identity: another
+  ;; implementation of the same multimethod is a new definition, the same
+  ;; dispatch value is a duplicate.
+  (let [path (write-test-file! "duplicate-defmethod"
+                               "(defmethod area :square [x] (* x x))\n")
+        distinct-result (edit-tool/execute
+                         (edit-opts path "defmethod" "area :square"
+                                    "(defmethod area :circle [x] (* 3.14 x x))"
+                                    "insert_after"))]
+    (is (not (:is-error distinct-result)))
+    (is (str/includes? (read-test-file path) "area :circle"))
+    (let [duplicate-result (edit-tool/execute
+                            (edit-opts path "defmethod" "area :square"
+                                       "(defmethod area :circle [x] (* 3.14 x x))"))]
+      (is (:is-error duplicate-result))
+      (is (str/includes? (:content duplicate-result)
+                         "area :circle at lines 1, 3"))
+      (is (str/includes? (read-test-file path)
+                         "(defmethod area :circle [x] (* 3.14 x x))")
+          "the first :circle implementation survives unchanged"))))
+
+(deftest ^:bb-only test-duplicate-name-regardless-of-head-rejected
+  ;; The key is the definition name, not the literal head: defn- vs defn and
+  ;; defn vs def are the same var.
+  (doseq [[file existing] [["duplicate-private-variant" "(defn- b [] 2)"]
+                           ["duplicate-var-head" "(def b 2)"]]]
+    (testing file
+      (let [path (write-test-file! file (str "(defn a [] 1)\n\n" existing "\n"))
+            result (edit-tool/execute (edit-opts path "defn" "a"
+                                                 "(defn b [] 3)"))]
+        (is (:is-error result))
+        (is (str/includes? (:content result) "b at lines 1, 3"))
+        (is (str/includes? (read-test-file path) "(defn a [] 1)")
+            "the anchor form is untouched")))))
+
+(deftest ^:bb-only test-pre-existing-duplicate-does-not-block-unrelated-edit
+  ;; Only a duplicate the edit introduces is refused; an already-duplicated
+  ;; name elsewhere does not block editing another form.
+  (let [path (write-test-file! "duplicate-preexisting"
+                               "(defn a [] 1)\n\n(defn b [] 2)\n\n(defn b [] 3)\n")
+        result (edit-tool/execute (edit-opts path "defn" "a"
+                                             "(defn a [] 9)"))]
+    (is (not (:is-error result)))
+    (is (str/includes? (read-test-file path) "(defn a [] 9)"))
+    (is (str/includes? (read-test-file path) "(defn b [] 2)"))
+    (is (str/includes? (read-test-file path) "(defn b [] 3)"))))
+
+;; ═══════════════════════════════════════════════════════════════════════════════
 ;; Insert before
 ;; ═══════════════════════════════════════════════════════════════════════════════
 

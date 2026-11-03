@@ -671,12 +671,82 @@
       (z/insert-right* at-content (p/parse-string-all "\n"))
       at-content)))
 
+(def ^:private definition-heads
+  "Top-level heads that define a named thing a file should define only once.
+   Matched unqualified, so an alias-qualified macro (t/deftest) counts;
+   `declare` is absent — a repeated forward declaration is harmless."
+  #{"def" "defn" "defn-" "defmacro" "defmacro-" "defmulti" "defmethod"
+    "defonce" "deftest" "deftest-" "definline" "defschema" "defprotocol"
+    "defstruct" "defrecord" "deftype" "definterface"})
+
+(defn- top-level-definition-key
+  "The name a top-level definition NODE introduces (with the dispatch for
+   defmethod), or nil when NODE is not one. The head is matched unqualified,
+   so an alias-qualified macro matches its plain spelling."
+  [node]
+  (let [node     (unwrap-meta node)
+        children (when (= :list (n/tag node))
+                   (remove #(contains? #{:whitespace :comment :uneval}
+                                       (n/tag %))
+                           (n/children node)))
+        head     (some-> children first child-sexpr)
+        def-name (some-> children second child-sexpr)]
+    (when (and (symbol? head) (symbol? def-name)
+               (definition-heads (name head)))
+      (let [dispatch (when (= "defmethod" (name head))
+                       (some-> (nth children 2 nil) n/string str/trim))]
+        (str def-name (when dispatch (str " " dispatch)))))))
+
+(defn- top-level-definition-lines
+  "Map of definition name to the ascending line numbers of its top-level forms
+   in SOURCE. A definition inside a reader conditional or (comment …) is not
+   a top-level list form, so it is not counted."
+  [source]
+  (let [zloc (z/of-string source {:track-position? true})
+        ;; z/of-string starts at the first form; step out to the forms root
+        ;; so the traversal sees every top-level sibling.
+        root (if (= :forms (n/tag (z/node zloc))) zloc (z/up zloc))]
+    (loop [loc (z/down root) acc {}]
+      (if-not loc
+        acc
+        (let [k (top-level-definition-key (z/node loc))]
+          (recur (z/right loc)
+                 (if k
+                   (update acc k (fnil conj []) (first (z/position loc)))
+                   acc)))))))
+
+(defn- introduced-duplicates
+  "The [name lines] duplicates an edit would introduce: names that appear
+   more than once in AFTER and more often than in BEFORE. A pre-existing
+   duplicate is not the edit's fault and does not block it."
+  [before after]
+  (for [[def-name lines] after
+        :when (and (> (count lines) 1)
+                   (> (count lines) (count (get before def-name))))]
+    [def-name lines]))
+
+(defn- duplicate-error
+  "The tool result refusing an edit that would leave DUPS — the definition
+   names and their proposed line numbers."
+  [file-path dups]
+  {:content
+   (str "Refusing the edit: it would leave duplicate top-level definitions in "
+        file-path " (line numbers are from the edited result):\n"
+        (str/join "\n"
+                  (for [[def-name lines] dups]
+                    (str "  - " def-name
+                         " at lines " (str/join ", " lines))))
+        "\n\nA namespace defines each form once. Delete or rename the other "
+        "definition, then retry. No change was written.")
+   :is-error true})
+
 (defn edit-pipeline
   "Run the shared edit pipeline: load FILE-PATH, call FIND-EDIT-FN with the
    parsed zipper (which must return either {:error msg :similar-matches ...}
    or {:zloc updated-zloc}), format the top-level forms the edit changed
-   with the project's cljfmt config, write the file back, and return the
-   tool result map.
+   with the project's cljfmt config, refuse an edit that would introduce a
+   duplicate top-level definition, write the file back, and return the tool
+   result map.
    FIND-EDIT-FN may return nil instead of {:error ...} — that becomes the
    not-found error."
   [file-path find-edit-fn]
@@ -702,11 +772,17 @@
                 formatted (format-changed-forms
                            orig-children
                            (n/children (z/root new-zloc))
-                           (project-fmt-opts file-path))]
-            (spit-utf8 file-path formatted)
-            (let [diff-str (edit-diff/generate-display-diff original formatted)]
-              {:content "Edit applied."
-               :details (when diff-str {:diff diff-str})})))))
+                           (project-fmt-opts file-path))
+                dups      (introduced-duplicates
+                           (top-level-definition-lines original)
+                           (top-level-definition-lines formatted))]
+            (if (seq dups)
+              (duplicate-error file-path dups)
+              (do
+                (spit-utf8 file-path formatted)
+                (let [diff-str (edit-diff/generate-display-diff original formatted)]
+                  {:content "Edit applied."
+                   :details (when diff-str {:diff diff-str})})))))))
     (catch Exception e
       {:content (str "Error editing " file-path ": " (ex-message e))
        :is-error true})))
