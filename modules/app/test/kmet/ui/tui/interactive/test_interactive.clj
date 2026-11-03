@@ -950,7 +950,7 @@
                       packages/load-skills! (fn [] nil)
                       packages/load-prompts! (fn [] nil)
                       context/load-project-context-files (fn [_ _] [])
-                      chat-history/chat-history-set-thinking-hidden! (fn [_ _] nil)
+                      chat-history/chat-history-set-thinking-mode! (fn [_ _] nil)
                       loaded-resources/loaded-resources-set-sections! (fn [_ _] nil)
                       extensions/ui-reset! (fn [] nil)
                       extensions/clear-extensions! (fn [] nil)
@@ -1036,7 +1036,7 @@
                     (fn [_ cwd]
                       (reset! loader-cwd cwd)
                       [{:path "AGENTS.md" :content "LAUNCH CONTEXT"}])
-                    chat-history/chat-history-set-thinking-hidden! (fn [_ _] nil)
+                    chat-history/chat-history-set-thinking-mode! (fn [_ _] nil)
                     loaded-resources/loaded-resources-set-sections! (fn [_ _] nil)
                     extensions/ui-reset! (fn [] nil)
                     extensions/clear-extensions! (fn [] nil)

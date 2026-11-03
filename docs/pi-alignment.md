@@ -310,7 +310,9 @@ RPC `compact` command answers `{:accepted true :scheduled true}`.
 
 kmet (`config.clj`) covers: provider/model/thinking/theme/session-dir/
 http-idle-timeout-ms/system-prompt/append-system-prompt/retry
-(enabled/max-retries/base-delay-ms/max-agent-delay-ms)/enabled-models/hide-thinking-block/
+(enabled/max-retries/base-delay-ms/max-agent-delay-ms)/enabled-models/thinking-mode
+(kmet's :visible/:stream-last/:hidden display modes replacing pi's boolean
+hide-thinking-block; `:stream-last` is a kmet extension)/
 auto-compact/show-cache-miss-notices/
 tree-filter-mode/output-pad/editor-padding-x/autocomplete-max-visible/
 show-hardware-cursor/enable-skill-commands/extensions/skills/prompts/themes dirs,
@@ -452,7 +454,9 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
   vocabulary minus the missing features above: auto-compact, show
   images / image width (terminal-gated), block images, skill commands,
   steering/follow-up mode, HTTP idle/timeout/transport, cache-miss
-  notices, tree filter, thinking, hide thinking, clear on shrink, terminal
+  notices, tree filter, thinking level, thinking display (pi's hide-thinking
+  extended with the kmet-only `:stream-last` tail mode), clear on shrink,
+  terminal
   progress, editor/output padding, autocomplete max items, hardware
   cursor, theme (pi's ThemeSubmenu — single names + Automatic light/dark),
   plus the kmet-only rows (tool display, retry, repeat guards, HTTP total

@@ -2,6 +2,8 @@
  :model "deepseek-v4.1-flash"
  :theme "light/dark"
  :thinking :off
+ :thinking-mode :visible         ; thinking blocks: :visible (default), :stream-last (the live
+                                 ; block's tail while the model thinks, the hidden label after), :hidden
  :session-dir "~/.kmet/sessions"
  :auto-compact true
  :compact-token-threshold nil

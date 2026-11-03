@@ -199,11 +199,14 @@
     :message-update
     ;; the streaming delta the run callbacks used to deliver (pi:
     ;; text_delta / thinking_delta). The delta's type picks the sink; a tool
-    ;; call's has no UI of its own (the tool-execution events carry it).
+    ;; call's has no UI of its own (the tool-execution events carry it), but
+    ;; it — like a thinking signature — closes the live thinking phase the
+    ;; :stream-last display follows.
     (when-let [cs @cs-ref]
       (case (:type (:delta evt))
         :text (turn/on-agent-text cs (:content (:delta evt)))
         :thinking (turn/on-agent-thinking cs (:content (:delta evt)))
+        (:tool-call :signature) (chat-history/chat-history-end-thinking! chat-history)
         nil))
 
     :message-end
@@ -633,7 +636,7 @@
    ;; lookup is supplied here so a tool result renders exactly as its live
    ;; call did
    :tool-fn tool-fn
-   :thinking-hidden (cfg/get-hide-thinking-block config)
+   :thinking-mode (cfg/get-thinking-mode config)
    :tool-display-mode (cfg/get-tool-display-mode config)
    :output-pad (cfg/get-output-pad config)))
 
@@ -998,15 +1001,16 @@
                                        (cycle-tool-display! cs)))
        (editor/editor-set-on-action! ed "app.thinking.toggle"
                                      (fn []
-          ;; pi: showStatus feedback on toggle + persist hideThinkingBlock to
-          ;; settings so the state survives restarts (SettingsManager.save;
-          ;; write errors are recorded — the toggle still applies)
-                                       (let [hidden? (chat-history/chat-history-toggle-thinking-hidden! ch)]
-                                         (try (cfg/set-hide-thinking-block! hidden?)
+          ;; extended: ctrl+t cycles the three display modes (pi only toggles
+          ;; hideThinkingBlock); the status line names the new mode and the
+          ;; setting persists so the state survives restarts (write errors are
+          ;; recorded — the cycle still applies)
+                                       (let [mode (chat-history/chat-history-cycle-thinking-mode! ch)]
+                                         (try (cfg/set-thinking-mode! mode)
                                               (catch Exception e
-                                                (debug/log "Failed to persist hide-thinking-block: " e)))
+                                                (debug/log "Failed to persist thinking-mode: " e)))
                                          (chat-history/chat-history-show-status! ch
-                                                                                 (str "Thinking blocks: " (if hidden? "hidden" "visible")))
+                                                                                 (str "Thinking blocks: " (name mode)))
                                          (turn/request-global-reflow-render! cs))))
       ;; pi: cycleThinkingLevel — Shift+Tab cycles through available levels
        (editor/editor-set-on-action! ed "app.thinking.cycle"

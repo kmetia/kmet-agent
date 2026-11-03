@@ -151,7 +151,8 @@
                streaming-atom  ;; atom of streaming message map or nil
                tools-expanded-atom   ;; tool display mode: :collapsed | :expanded | :quiet
                                       ;; (pi: toolOutputExpanded, extended with quiet)
-               thinking-hidden-atom  ;; flag: thinking blocks hidden (pi: hideThinkingBlock)
+               thinking-mode-atom    ;; display mode: :visible | :stream-last | :hidden
+                                     ;; (pi has only hideThinkingBlock; kmet extends it)
                hidden-label-atom     ;; label shown in place of hidden thinking (pi: hiddenThinkingLabel)
                lines-cache]          ;; render memo (protocols/cached-lines)
 
@@ -177,14 +178,16 @@
 ;; ─── Construction ──────────────────────────────────────────────────────────
 
 (declare normalize-tool-display-mode)
+(declare normalize-thinking-mode)
 
 (defn make-chat-history
   "Create a ChatHistoryComponent. Message components subscribe to
    ui.subs/theme-sub themselves — no theme is threaded through (Stage 5).
    Options:
      :output-pad       — horizontal padding for boxed messages (default 1)
-     :thinking-hidden  — initial thinking-blocks hidden flag (default false;
-                         pi: hideThinkingBlock loaded from settings at startup)
+     :thinking-mode     — initial thinking-block display mode (default
+                         :visible; pi's hideThinkingBlock extended with
+                         :stream-last; loaded from settings at startup)
      :tool-display-mode — initial tool display mode (default :collapsed;
                          loaded from settings at startup)
      :cwd-fn           — 0-arg fn returning the runtime working directory for
@@ -195,8 +198,8 @@
                          renderers). Default: none — tool results then render
                          through the builtin renderers, so a caller that wants
                          a tool's own rendering must pass this."
-  [& {:keys [output-pad thinking-hidden tool-display-mode cwd-fn tool-fn]
-      :or {output-pad 1 thinking-hidden false tool-display-mode :collapsed
+  [& {:keys [output-pad thinking-mode tool-display-mode cwd-fn tool-fn]
+      :or {output-pad 1 thinking-mode :visible tool-display-mode :collapsed
            cwd-fn #(or (System/getProperty "user.dir") ".")
            tool-fn (constantly nil)}}]
   (map->ChatHistoryComponent {:messages-atom (atom [])
@@ -206,7 +209,7 @@
                               :tool-fn tool-fn
                               :streaming-atom (atom nil)
                               :tools-expanded-atom (atom (normalize-tool-display-mode tool-display-mode))
-                              :thinking-hidden-atom (atom (boolean thinking-hidden))
+                              :thinking-mode-atom (atom (normalize-thinking-mode thinking-mode))
                               :hidden-label-atom (atom "Thinking...")
                               :lines-cache (atom nil)}))
 
@@ -338,7 +341,7 @@
   [ch]
   {:output-pad-atom (:output-pad-atom ch)
    :tools-expanded-atom (:tools-expanded-atom ch)
-   :thinking-hidden-atom (:thinking-hidden-atom ch)
+   :thinking-mode-atom (:thinking-mode-atom ch)
    :hidden-label-atom (:hidden-label-atom ch)
    :cwd-fn (:cwd-fn ch)
    :tool-fn (:tool-fn ch)})
@@ -348,9 +351,10 @@
    shared context (message-context). For tool messages, the context's :tool-fn
    resolves the tool definition whose render functions win over the builtin
    ones.
-   Assistant messages SHARE the chat history's thinking-hidden/hidden-label
-   atoms (pi: hideThinkingBlock / hiddenThinkingLabel) — a toggle is one
-   reset! that invalidates every message at once; tool, skill, and summary
+   Assistant messages SHARE the chat history's thinking-mode/hidden-label
+   atoms (pi: hideThinkingBlock / hiddenThinkingLabel, extended with
+   :stream-last) — a toggle is one reset! that invalidates every message at
+   once; tool, skill, and summary
    components share the tools-expanded toggle atom the same way, and every
    boxed component is handed the history's output-pad atom (a pad change is
    one reset! the records read at render). A message
@@ -359,7 +363,7 @@
    :custom messages render through the default labeled box (a registered
    message renderer arrives as :component) and honor the display flag, and
    :compaction / :branch-summary render as collapsible summary boxes."
-  [msg {:keys [output-pad-atom tools-expanded-atom thinking-hidden-atom
+  [msg {:keys [output-pad-atom tools-expanded-atom thinking-mode-atom
                hidden-label-atom cwd-fn tool-fn]}]
   (let [thm @subs/theme-sub]
     (cond
@@ -378,7 +382,8 @@
                     :thinking-atom (:thinking-atom msg)
                     :tool-calls? (boolean (seq (:tool-calls msg)))
                     :output-pad-atom output-pad-atom
-                    :thinking-hidden-atom thinking-hidden-atom
+                    :thinking-mode-atom thinking-mode-atom
+                    :thinking-active-atom (:thinking-active-atom msg)
                     :hidden-label-atom hidden-label-atom)
         :tool (let [name (or (:tool-name msg) (:name msg) "")
                     tool (tool-fn name)
@@ -473,7 +478,12 @@
   [msg]
   (if (= :assistant (:role msg))
     (merge {:text-atom (atom (content->display-text (:content msg "")))
-            :thinking-atom (atom (:thinking msg ""))}
+            :thinking-atom (atom (:thinking msg ""))
+            ;; :stream-last shows the tail only while the model is thinking:
+            ;; the flag opens on a thinking delta and closes at the first
+            ;; text/tool-call/signature delta or on finalize (replayed
+            ;; messages start closed)
+            :thinking-active-atom (atom false)}
            msg)
     msg))
 
@@ -572,7 +582,7 @@
    Creates the data atoms (on the message map) and the component sharing
    them, appends the message map to messages-atom, and returns the message
    map (callers can use chat-history-append-* to feed it — pure swaps).
-   Shares the thinking-hidden/hidden-label atoms with the new message
+   Shares the thinking-mode/hidden-label atoms with the new message
    (pi: hideThinkingBlock)."
   [ch]
   (let [msg (with-assistant-data {:role :assistant :content ""})
@@ -580,7 +590,8 @@
               :text-atom (:text-atom msg)
               :thinking-atom (:thinking-atom msg)
               :output-pad-atom (:output-pad-atom ch)
-              :thinking-hidden-atom (:thinking-hidden-atom ch)
+              :thinking-mode-atom (:thinking-mode-atom ch)
+              :thinking-active-atom (:thinking-active-atom msg)
               :hidden-label-atom (:hidden-label-atom ch))]
     (am/assistant-message-set-streaming! comp true)
     (let [entry (assoc msg :component comp :streaming? true)]
@@ -588,22 +599,37 @@
       (reset! (:streaming-atom ch) entry)
       entry)))
 
+(defn chat-history-end-thinking!
+  "End the live thinking phase of the streaming assistant message: the
+   :stream-last tail is replaced by the hidden label here. The phase closes
+   on the first text or tool-call delta, on the provider's thinking signature
+   (Anthropic's block-end marker), and on finalize; the earlier thinking
+   blocks were already closed, so at most one live tail is on screen. No-op
+   without a streaming message."
+  [ch]
+  (when-let [msg @(:streaming-atom ch)]
+    (reset! (:thinking-active-atom msg) false))
+  nil)
+
 (defn chat-history-append-streaming-text!
   "Append text to the current streaming response — a pure swap on the
    message map's text atom; the component's track! watch invalidates its
    cache and schedules the frame (§3.4). If there's no streaming message,
-   creates one."
+   creates one. Arriving text closes the live thinking phase (:stream-last)."
   [ch text]
   (let [msg (or @(:streaming-atom ch)
                 (chat-history-start-streaming! ch))]
+    (chat-history-end-thinking! ch)
     (swap! (:text-atom msg) str text)))
 
 (defn chat-history-append-thinking-text!
   "Append text to the current thinking display — a pure swap on the message
-   map's thinking atom. If there's no streaming message, creates one."
+   map's thinking atom, opening the live thinking phase (:stream-last shows
+   its tail). If there's no streaming message, creates one."
   [ch text]
   (let [msg (or @(:streaming-atom ch)
                 (chat-history-start-streaming! ch))]
+    (reset! (:thinking-active-atom msg) true)
     (swap! (:thinking-atom msg) str text)))
 
 (defn chat-history-mark-streaming-tool-calls!
@@ -643,12 +669,13 @@
           thinking @(:thinking-atom msg)]
       ;; mark non-streaming so transformers re-run with is-streaming false
       (am/assistant-message-set-streaming! comp false)
+      (chat-history-end-thinking! ch)
       (swap! (:messages-atom ch)
              (fn [msgs]
                (mapv (fn [m]
                        (if (identical? m msg)
                          (-> (assoc m :content text :streaming? false)
-                             (dissoc :text-atom :thinking-atom)
+                             (dissoc :text-atom :thinking-atom :thinking-active-atom)
                              (cond-> (seq thinking) (assoc :thinking thinking)))
                          m))
                      msgs)))
@@ -656,12 +683,11 @@
       comp)))
 
 (defn chat-history-finalize-thinking!
-  "Clear the thinking buffer on the streaming component (no-op with new architecture
-   since thinking is stored in the message component itself)."
-  [_ch]
-  ;; Pi doesn't separately clear thinking — it's captured in the component.
-  ;; If there's a streaming component, the thinking is part of it.
-  nil)
+  "End the live thinking phase on the streaming component — the :stream-last
+   tail disappears when a turn settles without any text (an error, a cancel,
+   or a tool-call-only response). No-op without a streaming message."
+  [ch]
+  (chat-history-end-thinking! ch))
 
 (defn chat-history-get-streaming-text
   "Get the current streaming text (read from the message map's data atom)."
@@ -762,26 +788,48 @@
   [ch]
   (= :expanded (chat-history-get-tool-display-mode ch)))
 
-(defn chat-history-set-thinking-hidden!
-  "Set thinking block visibility on all assistant messages — one reset! on
-   the shared atom: every AssistantMessageComponent references it, so track!
-   invalidates all caches at once and the next frame reflows lazily (pi:
-   setHideThinkingBlock; new messages share the same atom at construction).
-   Returns the value set."
-  [ch hidden?]
-  (let [hidden? (boolean hidden?)]
-    (reset! (:thinking-hidden-atom ch) hidden?)
-    hidden?))
+(def valid-thinking-modes
+  "The thinking-block display modes ctrl+t cycles: :visible (full markdown),
+   :stream-last (the tail of the live thinking block while the model thinks,
+   the hidden label once that phase ends), :hidden (one italic label line —
+   pi's hideThinkingBlock)."
+  #{:visible :stream-last :hidden})
 
-(defn chat-history-toggle-thinking-hidden!
-  "Toggle thinking-block visibility. Returns the new hidden state."
-  [ch]
-  (chat-history-set-thinking-hidden! ch (not @(:thinking-hidden-atom ch))))
+(defn normalize-thinking-mode
+  "Missing and invalid values fall back to :visible."
+  [v]
+  (if (contains? valid-thinking-modes v) v :visible))
 
-(defn chat-history-get-thinking-hidden
-  "Check if thinking blocks are hidden (the tracked hidden flag)."
+(defn chat-history-get-thinking-mode
+  "The tracked thinking-block display mode (:visible | :stream-last | :hidden)."
   [ch]
-  @(:thinking-hidden-atom ch))
+  (normalize-thinking-mode @(:thinking-mode-atom ch)))
+
+(defn chat-history-set-thinking-mode!
+  "Set the thinking-block display mode on all assistant messages — one
+   reset! on the shared atom: every AssistantMessageComponent references it,
+   so track! invalidates all caches at once and the next frame reflows
+   lazily (new messages share the same atom at construction). Throws on an
+   unknown mode. Returns the mode set."
+  [ch mode]
+  (when-not (contains? valid-thinking-modes mode)
+    (throw (ex-info (str "Unknown thinking display mode: " (pr-str mode)
+                         " (expected one of :visible :stream-last :hidden)")
+                    {:mode mode})))
+  (reset! (:thinking-mode-atom ch) mode)
+  mode)
+
+(defn chat-history-cycle-thinking-mode!
+  "Cycle the thinking display (:visible → :stream-last → :hidden → …). One
+   reset! on the shared mode atom — every message's track! invalidates and the
+   next frame reflows. Returns the new mode."
+  [ch]
+  (let [next (case (chat-history-get-thinking-mode ch)
+               :visible :stream-last
+               :stream-last :hidden
+               :hidden :visible
+               :visible)]
+    (chat-history-set-thinking-mode! ch next)))
 
 (defn chat-history-set-hidden-thinking-label!
   "Set the label shown in place of hidden thinking blocks (pi:
@@ -961,14 +1009,14 @@
        ;; and replayed messages carry plain strings already
        (mapv (fn [{:keys [text-atom thinking-atom] :as m}]
                (cond-> (dissoc m :component :streaming? :text-atom :thinking-atom
-                               :skill-block)
+                               :thinking-active-atom :skill-block)
                  text-atom (assoc :content @text-atom)
                  thinking-atom (assoc :thinking @thinking-atom))))))
 
 (defn chat-history-set-output-pad!
   "Set horizontal padding on all messages and the info banner — one reset!
    on the atom every message component shares and reads in its render (like
-   the tool-display and thinking-hidden atoms): the transcript re-pads on
+   the tool-display and thinking-mode atoms): the transcript re-pads on
    the next frame with no per-kind walk, and a pad change re-wraps the
    cached assistant lines (the pad is part of their staleness key).
    Components the history did not build (a pre-built :component from an

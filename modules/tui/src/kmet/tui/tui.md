@@ -104,7 +104,8 @@ healing boundaries are moments where the user is expected
 to be at the document end, so the clear's viewport jump lands on a screen
 transition instead of mid-stream. An *explicit* reflow
 is not the automatic path the clamp protects: the tool-display / thinking
-toggles (and the `set-tool-display-mode` / `set-tools-expanded` extension APIs) and a theme switch are
+toggles (and the `set-tool-display-mode` / `set-tools-expanded` /
+`set-thinking-mode` extension APIs) and a theme switch are
 discrete user actions, so the app forces the clearing rebuild for them rather
 than leave the scrollback showing pre-reflow content (a theme switch would
 leave the whole transcript in the old theme). Two consequences

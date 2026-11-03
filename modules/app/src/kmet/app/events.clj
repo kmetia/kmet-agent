@@ -457,7 +457,10 @@
     :message-update {:mode :emit :domain :loop
                      :doc "Fired for each streaming delta (assistant only).
                         Payload: :message (partial), :delta
-                        {:type :text | :thinking | :tool-call ...}."}
+                        {:type :text | :thinking | :tool-call | :signature ...}.
+                        A :signature delta carries no content key — it marks
+                        the thinking block's end (Anthropic streams it; the
+                        front end closes the live tail on it)."}
     :context-replaced {:mode :emit :domain :loop
                        :doc "Fired when the conversation context is replaced: prepareNextTurn's
                         :context update, or a compaction (auto or manual) rebuilding the context

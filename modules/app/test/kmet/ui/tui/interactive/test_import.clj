@@ -656,7 +656,7 @@
       (with-redefs [auth/configured? (fn [_] true)
                     timg/get-capabilities (constantly no-image-caps)
                     model-selector/sync-footer-model! (fn [_] nil)
-                    chat-history/chat-history-get-thinking-hidden (fn [_] false)
+                    chat-history/chat-history-get-thinking-mode (fn [_] :visible)
                     cfg/save-setting! (fn [path value] (reset! saved [path value]))
                     dock/mount! (support/capture-mount! sl-ref)
                     tui/tui-set-focus (fn [_ _])
@@ -689,7 +689,7 @@
           saved (atom nil)]
       (with-redefs [auth/configured? (fn [_] true)
                     timg/get-capabilities (constantly no-image-caps)
-                    chat-history/chat-history-get-thinking-hidden (fn [_] false)
+                    chat-history/chat-history-get-thinking-mode (fn [_] :visible)
                     cfg/save-setting! (fn [path value] (reset! saved [path value]))
                     dock/mount! (support/capture-mount! sl-ref)
                     tui/tui-set-focus (fn [_ _])
@@ -723,7 +723,7 @@
           saved (atom nil)]
       (with-redefs [auth/configured? (fn [_] true)
                     timg/get-capabilities (constantly no-image-caps)
-                    chat-history/chat-history-get-thinking-hidden (fn [_] false)
+                    chat-history/chat-history-get-thinking-mode (fn [_] :visible)
                     cfg/get-retry-settings-live
                     (fn [_] {:enabled true :max-retries 3 :base-delay-ms 2000})
                     cfg/save-setting! (fn [path value] (reset! saved [path value]))
@@ -791,7 +791,7 @@
           saved (atom nil)]
       (with-redefs [auth/configured? (fn [_] true)
                     timg/get-capabilities (constantly no-image-caps)
-                    chat-history/chat-history-get-thinking-hidden (fn [_] false)
+                    chat-history/chat-history-get-thinking-mode (fn [_] :visible)
                     cfg/save-setting! (fn [path value] (reset! saved [path value]))
                     dock/mount! (support/capture-mount! sl-ref)
                     tui/tui-set-focus (fn [_ _])

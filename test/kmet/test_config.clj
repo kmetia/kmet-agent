@@ -373,12 +373,14 @@
     (t/testing "absent keys pass through untouched"
       (t/is (= base (cfg/apply-cli-overrides base {}))))))
 
-;; ─── hide-thinking-block (pi: hideThinkingBlock in settings.json) ─────────
+;; ─── thinking-mode (pi has the boolean hideThinkingBlock; kmet extends it) ──
 
-(t/deftest test-get-hide-thinking-block
-  (t/is (false? (cfg/get-hide-thinking-block {})))
-  (t/is (false? (cfg/get-hide-thinking-block {:hide-thinking-block false})))
-  (t/is (true? (cfg/get-hide-thinking-block {:hide-thinking-block true}))))
+(t/deftest test-get-thinking-mode
+  (t/is (= :visible (cfg/get-thinking-mode {})) "missing → default")
+  (t/is (= :visible (cfg/get-thinking-mode {:thinking-mode :visible})))
+  (t/is (= :stream-last (cfg/get-thinking-mode {:thinking-mode :stream-last})))
+  (t/is (= :hidden (cfg/get-thinking-mode {:thinking-mode :hidden})))
+  (t/is (= :visible (cfg/get-thinking-mode {:thinking-mode :bogus})) "invalid → default"))
 
 (t/deftest test-get-tool-display-mode
   (t/is (= :collapsed (cfg/get-tool-display-mode {})) "missing → default")
@@ -675,7 +677,7 @@
           (t/is (nil? (cfg/get-enabled-models (edn/read-string (slurp settings-file)))))))
       (finally (fs/delete-tree tmp)))))
 
-(t/deftest test-set-hide-thinking-block!
+(t/deftest test-set-thinking-mode!
   (let [tmp (str (fs/absolutize (fs/file "target" (str "test-settings-" (System/currentTimeMillis)))))
         settings-file (str tmp "/settings.edn")]
     (fs/create-dirs tmp)
@@ -683,21 +685,21 @@
       (with-redefs [cfg/global-settings-path (fn [] settings-file)]
         (t/testing "writes to global settings file, merging existing keys"
           (spit settings-file "{:provider :openai}\n")
-          (cfg/set-hide-thinking-block! true)
-          (t/is (= {:provider :openai :hide-thinking-block true}
+          (cfg/set-thinking-mode! :hidden)
+          (t/is (= {:provider :openai :thinking-mode :hidden}
                    (edn/read-string (slurp settings-file))))
-          (t/testing "second toggle updates the same key"
-            (cfg/set-hide-thinking-block! false)
-            (t/is (= {:provider :openai :hide-thinking-block false}
+          (t/testing "a second change updates the same key"
+            (cfg/set-thinking-mode! :stream-last)
+            (t/is (= {:provider :openai :thinking-mode :stream-last}
                      (edn/read-string (slurp settings-file))))))
         (t/testing "creates the file when missing"
           (fs/delete-tree tmp)
-          (cfg/set-hide-thinking-block! true)
-          (t/is (= {:hide-thinking-block true} (edn/read-string (slurp settings-file)))))
+          (cfg/set-thinking-mode! :hidden)
+          (t/is (= {:thinking-mode :hidden} (edn/read-string (slurp settings-file)))))
         (t/testing "non-map file content is replaced, not merged"
           (spit settings-file "[1 2 3]\n")
-          (cfg/set-hide-thinking-block! true)
-          (t/is (= {:hide-thinking-block true} (edn/read-string (slurp settings-file))))))
+          (cfg/set-thinking-mode! :hidden)
+          (t/is (= {:thinking-mode :hidden} (edn/read-string (slurp settings-file))))))
       (finally (fs/delete-tree tmp)))))
 
 (t/deftest test-concurrent-setting-saves
@@ -707,10 +709,10 @@
       (fs/create-dirs tmp)
       (try
         (with-redefs [cfg/global-settings-path (fn [] settings-file)]
-          (let [futs (doall (for [[k v] [[:hide-thinking-block true] [:provider :anthropic]]]
+          (let [futs (doall (for [[k v] [[:thinking-mode :hidden] [:provider :anthropic]]]
                               (future (cfg/save-setting! k v))))]
             (doseq [f futs] @f))
-          (t/is (= {:hide-thinking-block true :provider :anthropic}
+          (t/is (= {:thinking-mode :hidden :provider :anthropic}
                    (edn/read-string (slurp settings-file)))))
         (finally (fs/delete-tree tmp))))))
 

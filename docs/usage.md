@@ -227,7 +227,7 @@ active session's project.
 | `Ctrl+L` | Select model |
 | `Ctrl+P` / `Shift+Ctrl+P` | Cycle scoped models (`--models` / `/scoped-models`) |
 | `Shift+Tab` | Cycle thinking level |
-| `Ctrl+T` | Toggle thinking blocks |
+| `Ctrl+T` | Cycle thinking display — visible / stream-last / hidden |
 | `Ctrl+O` | Cycle tool display — collapsed / expanded / quiet |
 | `Ctrl+G` | Open the external editor |
 | `Ctrl+Z` | Suspend to background — `fg` resumes (Unix only) |

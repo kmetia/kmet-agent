@@ -384,7 +384,7 @@
 (defn save-setting!
   "Persist a setting to the global settings.edn (pi: SettingsManager.save —
    only the given field is merged into the current file content, nested keys
-   merged leaf-wise). PATH is a key path (e.g. [:hide-thinking-block]); only
+   merged leaf-wise). PATH is a key path (e.g. [:thinking-mode]); only
    that leaf is merged, so unrelated keys survive. Delegates to
    kmet.libs.edn-settings/save-edn-setting!."
   [path value]
@@ -431,16 +431,25 @@
   [config]
   (:shell-command-prefix config))
 
-(defn get-hide-thinking-block
-  "Pi: getHideThinkingBlock — whether thinking blocks are hidden by default."
-  [config]
-  (boolean (:hide-thinking-block config)))
+(def thinking-modes
+  "Thinking-block display modes (kmet deviation — pi has only the boolean
+   hideThinkingBlock): :visible renders the whole block, :stream-last the
+   trailing lines of the block the model is still thinking (the hidden label
+   once the phase ends), :hidden one label line."
+  #{:visible :stream-last :hidden})
 
-(defn set-hide-thinking-block!
-  "Pi: setHideThinkingBlock — persist the thinking-block hidden flag to the
-   global settings file (applied by Ctrl+T / app.thinking.toggle)."
-  [hidden?]
-  (save-setting! [:hide-thinking-block] (boolean hidden?)))
+(defn get-thinking-mode
+  "Thinking-block display mode: :visible (default) | :stream-last | :hidden.
+   Missing and invalid values fall back to :visible."
+  [config]
+  (let [v (:thinking-mode config :visible)]
+    (if (contains? thinking-modes v) v :visible)))
+
+(defn set-thinking-mode!
+  "Persist the thinking-block display mode to the global settings file
+   (applied by Ctrl+T / app.thinking.toggle and the /settings row)."
+  [mode]
+  (save-setting! [:thinking-mode] mode))
 
 (defn get-tool-display-mode
   "Tool display mode (kmet deviation — pi has only the boolean

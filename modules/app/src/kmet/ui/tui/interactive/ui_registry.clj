@@ -409,6 +409,18 @@
                                       ;; assistant messages' watches schedule
                                       (chat-history/chat-history-set-hidden-thinking-label!
                                        ch label))
+         :set-thinking-mode (fn [mode]
+                              ;; the setting and the transcript stay in
+                              ;; lockstep (like set-tool-display-mode): one
+                              ;; reset! on the shared mode atom, persisted for
+                              ;; the next start, reflowed immediately
+                              (let [mode (keyword mode)]
+                                (when (not= mode (chat-history/chat-history-get-thinking-mode ch))
+                                  (chat-history/chat-history-set-thinking-mode! ch mode)
+                                  (try (cfg/set-thinking-mode! mode)
+                                       (catch Exception e
+                                         (debug/log "Failed to persist thinking-mode: " e)))
+                                  (turn/request-global-reflow-render! cs))))
          :set-editor-component (fn [factory]
                                  (let [prev-ed @current-editor-atom
                                        prev-content (tui/editor-get-content prev-ed)]

@@ -199,9 +199,19 @@
                                                   :usage @usage-buf
                                                   :thinking-signature @sig-buf})))
       ;; signatures arrive as whole blobs (possibly repeated across deltas) —
-      ;; last-wins, never concatenated
+      ;; last-wins, never concatenated. A new signature also closes the
+      ;; model's thinking block: it is the one explicit end marker a provider
+      ;; streams (Anthropic), so the UI hides the live :stream-last tail at
+      ;; the block boundary; models without one end the phase at their first
+      ;; text/tool-call delta.
                        :on-signature (fn [sig]
                                        (when (and sig (not (realized? done-promise)))
+                                         (when (and (seq sig) (not= sig @sig-buf))
+                                           (state/emit agent {:type :message-update
+                                                              :message {:role :assistant
+                                                                        :content []
+                                                                        :thinking @thinking-buf}
+                                                              :delta {:type :signature}}))
                                          (reset! sig-buf sig)))
                        :on-tool-call (fn [tc]
                                        (when-not (realized? done-promise)

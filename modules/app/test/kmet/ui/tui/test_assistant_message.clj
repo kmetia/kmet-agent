@@ -30,9 +30,9 @@
             (is (component/tracked? c) "the owner stays tracked")
             (is (<= (watchers) (inc baseline))
                 "temporary text/thinking Markdown must not survive reflow"))
-          (am/assistant-message-set-hide-thinking! c true)
+          (am/assistant-message-set-thinking-mode! c :hidden)
           (core/render c 60)
-          (am/assistant-message-set-hide-thinking! c false)
+          (am/assistant-message-set-thinking-mode! c :visible)
           (am/assistant-message-set-streaming! c false)
           (core/render c 60)
           (is (component/tracked? c) "the owner stays tracked")
@@ -73,7 +73,7 @@
 (deftest test-hide-thinking
   (testing "when hidden, shows 'Thinking...' label instead of content"
     (let [c (am/make-assistant-message :text "response" :thinking "secret reasoning"
-                                       :hide-thinking? true)
+                                       :thinking-mode :hidden)
           plain (mapv strip-ansi (core/render c 40))]
       (is (not-any? #(re-find #"secret reasoning" %) plain)
           "Thinking content should be hidden")
@@ -84,7 +84,7 @@
   (testing "set-hidden-label! replaces the hidden-thinking label (pi:
             setHiddenThinkingLabel)"
     (let [c (am/make-assistant-message :text "response" :thinking "secret"
-                                       :hide-thinking? true)
+                                       :thinking-mode :hidden)
           _ (reset! (:hidden-label-atom c) "Thoughts hidden")
           plain (mapv strip-ansi (core/render c 40))]
       (is (some #(re-find #"Thoughts hidden" %) plain)
@@ -116,13 +116,13 @@
       (let [plain (mapv strip-ansi (core/render c 40))]
         (is (some #(re-find #"step1 step2" %) plain))))))
 
-(deftest test-set-hide-thinking
-  (testing "set-hide-thinking! toggles the label"
-    (let [c (am/make-assistant-message :thinking "reasoning..." :hide-thinking? true)]
-      (am/assistant-message-set-hide-thinking! c false)
+(deftest test-set-thinking-mode
+  (testing "set-thinking-mode! re-renders the label projection"
+    (let [c (am/make-assistant-message :thinking "reasoning..." :thinking-mode :hidden)]
+      (am/assistant-message-set-thinking-mode! c :visible)
       (let [plain (mapv strip-ansi (core/render c 40))]
         (is (some #(re-find #"reasoning" %) plain)
-            "Unhiding should show thinking content")))))
+            "switching to visible should show thinking content")))))
 
 (deftest test-empty-message
   (testing "finalized empty message renders a muted placeholder (not a blank bubble)"
@@ -190,16 +190,16 @@
       (core/render c 60)
       (is (= 1 @reflows) "the next render serves the cache — no second reflow"))))
 
-(deftest test-shared-thinking-hidden-atom
-  (testing "messages sharing the chat history's hide-thinking atom flip together —
+(deftest test-shared-thinking-mode-atom
+  (testing "messages sharing the chat history's thinking-mode atom flip together —
             one reset! is enough, reflow happens lazily on the next render"
-    (let [shared (atom true)
+    (let [shared (atom :hidden)
           label-shared (atom "Thinking...")
           a (am/make-assistant-message :text "response a" :thinking "secret alpha"
-                                       :thinking-hidden-atom shared
+                                       :thinking-mode-atom shared
                                        :hidden-label-atom label-shared)
           b (am/make-assistant-message :text "response b" :thinking "secret beta"
-                                       :thinking-hidden-atom shared
+                                       :thinking-mode-atom shared
                                        :hidden-label-atom label-shared)
           plain-a #(mapv strip-ansi (core/render a 40))
           plain-b #(mapv strip-ansi (core/render b 40))]
@@ -207,13 +207,63 @@
       (is (some #(re-find #"Thinking" %) (plain-a)))
       (is (not-any? #(re-find #"secret alpha" %) (plain-a)))
       ;; flip the SHARED atom once — both messages pick it up on next render
-      (reset! shared false)
+      (reset! shared :visible)
       (is (some #(re-find #"secret alpha" %) (plain-a)) "message a expanded")
       (is (some #(re-find #"secret beta" %) (plain-b)) "message b expanded too")
       ;; and the per-message setter still works (writes the same shared atom)
-      (am/assistant-message-set-hide-thinking! b true)
-      (is (true? @shared) "setter hits the shared atom")
+      (am/assistant-message-set-thinking-mode! b :hidden)
+      (is (= :hidden @shared) "setter hits the shared atom")
       (is (not-any? #(re-find #"secret beta" %) (plain-b)) "b hides again"))))
+
+(deftest test-stream-last-thinking
+  (testing ":stream-last renders the live block's tail while the model thinks
+            and the hidden label for the blocks whose phase ended"
+    (let [thinking (str/join "\n\n" (for [i (range 30)] (str "thought line " i)))
+          active (atom true)
+          c (am/make-assistant-message :thinking thinking
+                                       :thinking-mode :stream-last
+                                       :thinking-active-atom active)
+          plain #(mapv strip-ansi (core/render c 80))]
+      (am/assistant-message-set-streaming! c true)
+      (let [lines (plain)
+            content (remove str/blank? lines)]
+        (is (= 7 (count lines))
+            "the live window is six lines plus the message's top pad")
+        (is (some #(re-find #"thought line 29" %) content)
+            "the newest thinking is visible")
+        (is (not-any? #(re-find #"thought line 0$" %) content)
+            "the head of the block is not rendered"))
+      (testing "the phase ends → the hidden label replaces the tail"
+        (reset! active false)
+        (let [lines (plain)]
+          (is (some #(re-find #"Thinking\.\.\." %) lines)
+              "a finished block reads exactly as it does under :hidden")
+          (is (not-any? #(re-find #"thought line" %) lines)
+              "no thinking content outside the label")))
+      (testing "a finalized message keeps the label"
+        (am/assistant-message-set-streaming! c false)
+        (is (some #(re-find #"Thinking\.\.\." %) (plain))))
+      (testing "an answer arriving with the phase closed renders the label and the text"
+        (swap! (:text-atom c) str "the answer")
+        (let [lines (plain)]
+          (is (some #(re-find #"the answer" %) lines))
+          (is (some #(re-find #"Thinking\.\.\." %) lines))
+          (is (not-any? #(re-find #"thought line" %) lines))))))
+  (testing "the live tail keeps a stable height while the block streams"
+    (let [c (am/make-assistant-message :thinking ""
+                                       :thinking-mode :stream-last
+                                       :thinking-active? true)
+          heights (atom [])]
+      (am/assistant-message-set-streaming! c true)
+      (dotimes [i 20]
+        (swap! (:thinking-text-atom c) str "\n\nthought " i)
+        (swap! heights conj (count (core/render c 80))))
+      (let [filled (vec (drop 4 @heights))]
+        (is (seq filled))
+        (is (apply = filled)
+            "once the block fills the window its height never changes — a
+             resizing block made the chat's bottom jump by a line per delta")
+        (is (= 7 (first filled)) "six tail lines plus the top pad")))))
 
 (deftest test-streaming-thinking-renders-only-the-tail
   (testing "a thinking delta re-renders the trailing markdown blocks, not the

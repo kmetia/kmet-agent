@@ -1,7 +1,7 @@
 (ns kmet.ui.tui.settings-selector
   "Settings selector panel (pi: showSettingsSelector +
    settings-selector.ts) — pi's rows backed by kmet machinery: thinking
-   level (the current model's available levels), hide-thinking, auto-compact,
+   level (the current model's available levels), thinking display, auto-compact,
    inline images (show-images / image-width, terminal-gated, plus the
    ungated block-images), steering/follow-up queue modes, HTTP idle/total timeouts, cache-miss notices,
    tree filter mode, editor/output padding, autocomplete max items, hardware
@@ -141,12 +141,12 @@
    (fn [value]
      (cfg/set-show-terminal-progress! (enabled-value? value)))
 
-   :hide-thinking
+   :thinking-mode
    (fn [value]
-     (let [hidden? (= value "on")]
-       (chat-history/chat-history-set-thinking-hidden!
-        (:chat-history cs) hidden?)
-       (cfg/set-hide-thinking-block! hidden?)))
+     (let [mode (keyword value)]
+       (chat-history/chat-history-set-thinking-mode!
+        (:chat-history cs) mode)
+       (cfg/set-thinking-mode! mode)))
 
    :tool-display-mode
    (fn [value]
@@ -410,13 +410,15 @@
                                    :description "Thinking level for the current model"
                                    :value current
                                    :values levels}
-                                  {:id :hide-thinking
-                                   :label "Hide thinking"
-                                   :description "Hide thinking blocks in assistant responses"
-                     ;; the live chat-history flag, not the startup config
-                     ;; snapshot — Ctrl+T toggles it at runtime
-                                   :value (if (chat-history/chat-history-get-thinking-hidden (:chat-history cs)) "on" "off")
-                                   :values ["off" "on"]}
+                                  {:id :thinking-mode
+                                   :label "Thinking display"
+                                   :description "Thinking blocks: visible, the live tail while thinking (label after), or hidden"
+                     ;; the live chat-history mode, not the startup config
+                     ;; snapshot — Ctrl+T cycles it at runtime
+                                   :value (name (if-let [ch (:chat-history cs)]
+                                                  (chat-history/chat-history-get-thinking-mode ch)
+                                                  :visible))
+                                   :values ["visible" "stream-last" "hidden"]}
                                   {:id :tool-display-mode
                                    :label "Tool display"
                                    :description "How tool calls render: collapsed, expanded, or quiet"

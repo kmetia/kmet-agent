@@ -89,7 +89,7 @@
 ;; ─── Text-surgery persistence ──────────────────────────────────────────────
 
 (defn- setting-line
-  "EDN text for one pretty entry, e.g. \" :hide-thinking-block true\"."
+  "EDN text for one pretty entry, e.g. \" :thinking-mode :hidden\"."
   [key value]
   (str " " (pr-str key) " " (pr-str value)))
 
@@ -120,7 +120,7 @@
 
 (defn save-edn-setting!
   "Persist a single top-level setting to FILE-PATH. PATH is a key path
-   (e.g. [:hide-thinking-block]); only that leaf is merged, so unrelated
+   (e.g. [:thinking-mode]); only that leaf is merged, so unrelated
    keys survive. Hand-written comments are preserved via line surgery; the
    file is rewritten in a canonical pretty format when surgery is unsafe
    (malformed or one-line files, nested paths). File is locked during write."

@@ -138,7 +138,7 @@
          "  Ctrl+Q     — Quit kmet (from anywhere)\n"
          "  Ctrl+G     — Open external editor\n"
          "  Ctrl+O     — Cycle tool display (collapsed/expanded/quiet)\n"
-         "  Ctrl+T     — Toggle thinking blocks\n"
+         "  Ctrl+T     — Cycle thinking display (visible/stream-last/hidden)\n"
          "  Ctrl+L     — Select model\n"
          "  Up/Down    — Scroll chat history")))
 
@@ -697,10 +697,11 @@
           ;; the runtime reads the config for session dirs and new sessions
           (runtime/set-config! (:engine cs) config)
           (theme-ctrl/set-config! (:theme-controller cs) config)
-;; pi: restoreChatBeforeSessionStart — re-apply hideThinkingBlock
-          ;; and the tool display mode from settings to existing chat messages
-          (chat-history/chat-history-set-thinking-hidden! chat-history
-                                                          (cfg/get-hide-thinking-block config))
+;; pi: restoreChatBeforeSessionStart — re-apply the thinking display
+          ;; mode and the tool display mode from settings to existing chat
+          ;; messages
+          (chat-history/chat-history-set-thinking-mode! chat-history
+                                                        (cfg/get-thinking-mode config))
           ;; the header and loaded resources follow the same mode as the chat
           ;; (the ctrl+o handler and the extension setter both keep them in
           ;; sync; reload must not leave them on a stale expansion)

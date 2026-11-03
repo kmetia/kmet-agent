@@ -340,15 +340,46 @@
         (is (= "" (nth lines (dec (idx #"second-tool"))))
             "visible thinking re-opens the run with a separator")))))
 
-(deftest test-thinking-hidden-toggle
-  (testing "toggle thinking hidden state"
+(deftest test-thinking-mode
+  (testing "thinking display mode: get/set/cycle, normalized, validated"
     (let [ch (ch/make-chat-history)]
+      (is (= :visible (ch/chat-history-get-thinking-mode ch)) "default")
       (ch/chat-history-add-message! ch {:role :assistant :content "hello" :thinking "thinking..."})
-      (is (false? (ch/chat-history-get-thinking-hidden ch)))
-      (ch/chat-history-toggle-thinking-hidden! ch)
-      (is (true? (ch/chat-history-get-thinking-hidden ch)))
-      (ch/chat-history-toggle-thinking-hidden! ch)
-      (is (false? (ch/chat-history-get-thinking-hidden ch))))))
+      (is (= :stream-last (ch/chat-history-cycle-thinking-mode! ch)))
+      (is (= :hidden (ch/chat-history-cycle-thinking-mode! ch)))
+      (is (= :visible (ch/chat-history-cycle-thinking-mode! ch)))
+      (is (= :stream-last (ch/chat-history-set-thinking-mode! ch :stream-last)))
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (ch/chat-history-set-thinking-mode! ch :bogus))
+          "an unknown mode is rejected")
+      (is (= :stream-last (ch/chat-history-get-thinking-mode ch))
+          "the rejected mode left the tracked mode alone")))
+  (testing "invalid startup values fall back to visible"
+    (is (= :visible (ch/chat-history-get-thinking-mode
+                     (ch/make-chat-history :thinking-mode :bogus)))))
+  (testing "the startup mode is normalized"
+    (is (= :hidden (ch/chat-history-get-thinking-mode
+                    (ch/make-chat-history :thinking-mode :hidden))))))
+
+(deftest test-thinking-phase-lifecycle
+  (testing "the live thinking phase opens on a thinking delta and closes on
+            text, an explicit end, and finalize"
+    (let [ch (ch/make-chat-history)]
+      (ch/chat-history-append-thinking-text! ch "step 1")
+      (let [msg @(:streaming-atom ch)]
+        (is (true? @(:thinking-active-atom msg)) "a thinking delta opens the phase")
+        (ch/chat-history-append-streaming-text! ch "answer")
+        (is (false? @(:thinking-active-atom msg)) "text closes the phase")
+        (ch/chat-history-append-thinking-text! ch " more thought")
+        (is (true? @(:thinking-active-atom msg)) "a further thinking delta reopens it")
+        (ch/chat-history-end-thinking! ch)
+        (is (false? @(:thinking-active-atom msg)) "an explicit end closes it"))
+      (ch/chat-history-append-thinking-text! ch "next")
+      (ch/chat-history-finalize-streaming! ch)
+      (is (nil? @(:streaming-atom ch)))
+      (let [finalized (peek @(:messages-atom ch))]
+        (is (not (contains? finalized :thinking-active-atom))
+            "finalize strips the live-phase atom with the other content atoms")))))
 
 (deftest test-render-multiple
   (testing "multiple messages render"
@@ -724,8 +755,8 @@
       (is (true? (ch/chat-history-get-tool-expanded ch)) "flag flips without tools")
       (ch/chat-history-toggle-tool-expanded! ch)
       (is (false? (ch/chat-history-get-tool-expanded ch)))
-      (ch/chat-history-toggle-thinking-hidden! ch)
-      (is (true? (ch/chat-history-get-thinking-hidden ch)) "flag flips without messages"))))
+      (is (= :stream-last (ch/chat-history-cycle-thinking-mode! ch))
+          "the thinking mode cycles without messages"))))
 
 (deftest test-new-messages-inherit-flags
   (testing "new tool components inherit the expansion flag"
@@ -743,19 +774,20 @@
                                  (:tools-expanded-atom %))
                     tools)
             "all tools — old and new — link to the shared toggle atom"))))
-  (testing "new assistant messages inherit the thinking-hidden flag"
+  (testing "new assistant messages inherit the thinking-mode atom"
     (let [ch (ch/make-chat-history)]
       (ch/chat-history-add-message! ch
                                     {:role :assistant :content "a" :thinking "t"})
-      (ch/chat-history-toggle-thinking-hidden! ch)
+      (ch/chat-history-set-thinking-mode! ch :hidden)
       (ch/chat-history-add-message! ch
                                     {:role :assistant :content "b" :thinking "t2"})
-      (let [assistants (keep (fn [m] (when (contains? (:component m) :hide-thinking-atom)
+      (let [assistants (keep (fn [m] (when (contains? (:component m) :thinking-mode-atom)
                                        (:component m)))
                              @(:messages-atom ch))]
         (is (= 2 (count assistants)))
-        (is (every? #(true? @(:hide-thinking-atom %)) assistants)
-            "all assistant messages — old and new — have thinking hidden")))))
+        (is (every? #(identical? (:thinking-mode-atom ch) (:thinking-mode-atom %))
+                    assistants)
+            "all assistant messages — old and new — share the mode atom")))))
 
 (deftest test-remove-streaming-placeholder-skips-status
   (testing "placeholder removal drops trailing status lines with it"
@@ -902,7 +934,7 @@
           _ (ch/chat-history-add-message! ch {:role :assistant
                                               :content "resp"
                                               :thinking "secret"})
-          _ (ch/chat-history-toggle-thinking-hidden! ch)
+          _ (ch/chat-history-set-thinking-mode! ch :hidden)
           _ (ch/chat-history-set-hidden-thinking-label! ch "Thoughts hidden")
           lines (plain-lines ch 40)]
       (is (some #(re-find #"Thoughts hidden" %) lines)

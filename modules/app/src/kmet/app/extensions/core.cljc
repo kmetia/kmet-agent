@@ -830,6 +830,7 @@
 (defn ui-set-working-message [message] (ui-call :set-working-message message))
 (defn ui-set-working-visible [visible?] (ui-call :set-working-visible visible?))
 (defn ui-set-hidden-thinking-label [label] (ui-call :set-hidden-thinking-label label))
+(defn ui-set-thinking-mode [mode] (ui-call :set-thinking-mode mode))
 (defn ui-set-editor-component [factory] (ui-call :set-editor-component factory))
 (defn ui-add-autocomplete-provider [factory] (ui-call :add-autocomplete-provider factory))
 (defn ui-set-theme [theme-or-name] (ui-call :set-theme theme-or-name))
@@ -1083,6 +1084,7 @@
    :set-working-message ui-set-working-message
    :set-working-visible ui-set-working-visible
    :set-hidden-thinking-label ui-set-hidden-thinking-label
+   :set-thinking-mode ui-set-thinking-mode
    :set-editor-component ui-set-editor-component
    :add-autocomplete-provider ui-add-autocomplete-provider
    :set-theme ui-set-theme

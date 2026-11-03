@@ -30,6 +30,7 @@
       :set-working-message (fn [msg] (swap! calls conj [:set-working-message msg]))
       :set-working-visible (fn [v] (swap! calls conj [:set-working-visible v]))
       :set-hidden-thinking-label (fn [label] (swap! calls conj [:set-hidden-thinking-label label]))
+      :set-thinking-mode (fn [mode] (swap! calls conj [:set-thinking-mode mode]))
       :set-editor-component (fn [factory] (swap! calls conj [:set-editor-component factory]))
       :add-autocomplete-provider (fn [factory] (swap! calls conj [:add-autocomplete-provider factory]))
       :set-theme (fn [theme-or-name] (swap! calls conj [:set-theme theme-or-name]))
@@ -57,6 +58,7 @@
       (ex/ui-set-working-message "Working...")
       (ex/ui-set-working-visible true)
       (ex/ui-set-hidden-thinking-label "Thinking…")
+      (ex/ui-set-thinking-mode :stream-last)
       (ex/ui-set-editor-component (fn [] nil))
       (ex/ui-add-autocomplete-provider (fn [] nil))
       (ex/ui-set-theme "dark")
@@ -70,6 +72,7 @@
                 :on-terminal-input :set-editor-text :get-editor-text
                 :paste-to-editor :set-working-indicator :set-working-message
                 :set-working-visible :set-hidden-thinking-label
+                :set-thinking-mode
                 :set-editor-component :add-autocomplete-provider
                 :set-theme :get-tools-expanded
                 :set-tools-expanded :get-tool-display-mode

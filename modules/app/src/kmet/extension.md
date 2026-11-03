@@ -950,6 +950,7 @@ from the api.
 (ext/ui-set-working-message api "Working...")
 (ext/ui-set-working-visible api true)
 (ext/ui-set-hidden-thinking-label api "…")
+(ext/ui-set-thinking-mode api :stream-last) ; :visible | :stream-last | :hidden
 (ext/ui-set-editor-component api (fn [tui theme keybindings] comp))
 ;; The default editor embeds the session status (working/retry/compaction/
 ;; branch-summarization spinner) in its own first line — the top border.
@@ -1025,7 +1026,7 @@ bridges the methods the protocol can carry (pi: `rpc-extension-ui.md`):
   hiccup tree cannot cross the wire.
 - **TUI-only (inert no-ops)** — `set-working-message`,
   `set-working-visible`, `set-working-indicator`,
-  `set-hidden-thinking-label`, `set-footer`, `set-header`,
+  `set-hidden-thinking-label`, `set-thinking-mode`, `set-footer`, `set-header`,
   `add-autocomplete-provider`, `set-editor-component`,
   `set-tools-expanded`.
 - **degraded** — everything else keeps the headless answers: `ui-custom`

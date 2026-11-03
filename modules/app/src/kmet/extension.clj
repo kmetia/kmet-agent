@@ -303,6 +303,7 @@
 (defn ui-set-working-message [api message] ((:set-working-message (ui api)) message))
 (defn ui-set-working-visible [api visible?] ((:set-working-visible (ui api)) visible?))
 (defn ui-set-hidden-thinking-label [api label] ((:set-hidden-thinking-label (ui api)) label))
+(defn ui-set-thinking-mode [api mode] ((:set-thinking-mode (ui api)) mode))
 (defn ui-set-editor-component [api factory] ((:set-editor-component (ui api)) factory))
 (defn ui-add-autocomplete-provider [api factory] ((:add-autocomplete-provider (ui api)) factory))
 (defn ui-set-theme [api theme-or-name] ((:set-theme (ui api)) theme-or-name))
@@ -456,6 +457,7 @@
                                         :set-working-message 1 :set-working-visible 1
                                         :on-terminal-input 1 :set-tools-expanded 1
                                         :get-tools-expanded 1
+                                        :set-thinking-mode 1
                                         :set-tool-display-mode 1
                                         :get-tool-display-mode 1}]
                              [k (fn [& args] (swap! state update :ui-calls conj (into [k] args)))]))

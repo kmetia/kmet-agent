@@ -115,8 +115,8 @@
     (fs/create-dirs tmp)
     (try
       (spit f "{:provider :openai}\n")
-      (eds/save-edn-setting! f [:hide-thinking-block] true)
-      (is (= {:provider :openai :hide-thinking-block true}
+      (eds/save-edn-setting! f [:thinking-mode] :hidden)
+      (is (= {:provider :openai :thinking-mode :hidden}
              (edn/read-string (slurp f))))
       (finally (fs/delete-tree tmp)))))
 
@@ -136,9 +136,9 @@
         f (str tmp "/settings.edn")]
     (fs/create-dirs tmp)
     (try
-      (spit f "{:provider :openai\n ;; keep me\n :hide-thinking-block true\n}\n")
-      (eds/save-edn-setting! f [:hide-thinking-block] false)
-      (is (= "{:provider :openai\n ;; keep me\n :hide-thinking-block false\n}\n"
+      (spit f "{:provider :openai\n ;; keep me\n :thinking-mode :hidden\n}\n")
+      (eds/save-edn-setting! f [:thinking-mode] :visible)
+      (is (= "{:provider :openai\n ;; keep me\n :thinking-mode :visible\n}\n"
              (slurp f)))
       (finally (fs/delete-tree tmp)))))
 
@@ -148,8 +148,8 @@
     (fs/create-dirs tmp)
     (try
       (spit f "[1 2 3]\n")
-      (eds/save-edn-setting! f [:hide-thinking-block] true)
-      (is (= {:hide-thinking-block true} (edn/read-string (slurp f))))
+      (eds/save-edn-setting! f [:thinking-mode] :hidden)
+      (is (= {:thinking-mode :hidden} (edn/read-string (slurp f))))
       (finally (fs/delete-tree tmp)))))
 
 ;; ─── File lock bounded retry (regression) ──────────────────────────────────

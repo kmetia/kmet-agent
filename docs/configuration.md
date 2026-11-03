@@ -26,6 +26,8 @@ Example `~/.kmet/agent/settings.edn`:
  :model "deepseek-v4.1-flash"
  :theme "dark"
  :thinking :off
+ :thinking-mode :visible        ; thinking blocks: :visible (default), :stream-last (the live
+                                ; block's tail while the model thinks, the hidden label once it ends), :hidden
  :session-dir "~/.kmet/sessions"
  :http-idle-timeout-ms 120000   ; LLM stream idle timeout in ms; 0 disables idle timeout
  :http-transport :platform      ; :platform (default) = babashka.http-client on both hosts,
