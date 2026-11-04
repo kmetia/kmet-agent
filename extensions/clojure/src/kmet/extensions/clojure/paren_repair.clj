@@ -11,7 +11,6 @@
             [clojure.string :as str]
             [kmet.extensions.clojure.edit-util :as util]
             [kmet.ui.tui.tool-renderers :as renderers]
-            [kmet.extension :as ext]
             [kmet.libs.edit-diff :as edit-diff]
             [kmet.libs.path :as path]))
 
@@ -189,33 +188,30 @@
                result))
     (next op)))
 
-(defn register!
-  "Register clojure_paren_repair as a kmet tool and wire the paren-check
-   hooks: write (pre, reject) + edit (post, warn). No backup, no
-   simulation — write content IS the file; edit is validated on the
-   resulting file after the engine applied it."
-  [api]
-  ((:register-tool! api)
-   {:name            "clojure_paren_repair"
-    :label           "Repair delimiters"
-    :description
-    "Fix delimiter errors (unbalanced parentheses, brackets, braces) in a Clojure file (.clj/.cljs/.cljc/.cljd/.bb/.edn/.lpy; other file types are rejected) using a delimiter-only, indentation-based repair.\n\nUse this tool when:\n- A file has unbalanced delimiters causing parse errors\n- You need to repair a file after an errant edit\n- The file won't compile due to unbalanced parens/brackets\n\nDetection is via edamame (a parse error carrying an unclosed opener); repair is delimiter-only and indentation-based: unclosed openers are closed at the end of their indentation block, and stray or mismatched closers are dropped; explicit closers always win and existing code is never moved or restructured. The file is then formatted with cljfmt (honoring the project's cljfmt.edn) unless format=false.\n\nReturns a status message and diff showing what changed."
-    :render-call renderers/render-edit-call
-    :render-result renderers/render-edit-result
-    :render-shell :self
-    :prompt-snippet "Fix unbalanced delimiters (parens/brackets/braces) in a Clojure file"
-    :prompt-guidelines
-    ["Use clojure_paren_repair when a Clojure file has unbalanced delimiters causing parse errors — after an errant edit or when the file won't compile."
-     "The tool detects delimiter errors with edamame and repairs them delimiter-only (parinferish's tokenizer with indentation-based closing; existing code is never moved or restructured), then formats with cljfmt honoring the project's cljfmt.edn."
-     "Pass format=false to only fix delimiters without reformatting."
-     "The tool returns a diff of the changes."]
-    :parameters
-    {:type       "object"
-     :required   ["file_path"]
-     :properties
-     {"file_path" {:type        "string"
-                   :description "Path to the Clojure file to repair (.clj, .cljs, .cljc, .cljd, .bb, .edn, .lpy)"}
-      "format"    {:type        "boolean"
-                   :description "Format the file with cljfmt after repairing delimiters (default: true)"}}}
-    :execute execute :title title})
-  (ext/on-tool api on-tool))
+(defn definition
+  "The clojure_paren_repair tool record — the recovery path after a broken
+   edit, contributed as a `:deferred` source. The paren-check hooks are wired
+   separately (`kmet.extensions.clojure.core/init`)."
+  []
+  {:name            "clojure_paren_repair"
+   :label           "Repair delimiters"
+   :description
+   "Fix delimiter errors (unbalanced parentheses, brackets, braces) in a Clojure file (.clj/.cljs/.cljc/.cljd/.bb/.edn/.lpy; other file types are rejected) using a delimiter-only, indentation-based repair.\n\nUse this tool when:\n- A file has unbalanced delimiters causing parse errors\n- You need to repair a file after an errant edit\n- The file won't compile due to unbalanced parens/brackets\n\nDetection is via edamame (a parse error carrying an unclosed opener); repair is delimiter-only and indentation-based: unclosed openers are closed at the end of their indentation block, and stray or mismatched closers are dropped; explicit closers always win and existing code is never moved or restructured. The file is then formatted with cljfmt (honoring the project's cljfmt.edn) unless format=false.\n\nReturns a status message and diff showing what changed."
+   :render-call renderers/render-edit-call
+   :render-result renderers/render-edit-result
+   :render-shell :self
+   :prompt-snippet "Fix unbalanced delimiters (parens/brackets/braces) in a Clojure file"
+   :prompt-guidelines
+   ["Use clojure_paren_repair when a Clojure file has unbalanced delimiters causing parse errors — after an errant edit or when the file won't compile."
+    "The tool detects delimiter errors with edamame and repairs them delimiter-only (parinferish's tokenizer with indentation-based closing; existing code is never moved or restructured), then formats with cljfmt honoring the project's cljfmt.edn."
+    "Pass format=false to only fix delimiters without reformatting."
+    "The tool returns a diff of the changes."]
+   :parameters
+   {:type       "object"
+    :required   ["file_path"]
+    :properties
+    {"file_path" {:type        "string"
+                  :description "Path to the Clojure file to repair (.clj, .cljs, .cljc, .cljd, .bb, .edn, .lpy)"}
+     "format"    {:type        "boolean"
+                  :description "Format the file with cljfmt after repairing delimiters (default: true)"}}}
+   :execute execute :title title})

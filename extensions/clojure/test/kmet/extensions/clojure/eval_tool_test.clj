@@ -4,7 +4,6 @@
    repair/timeout notices."
   (:require [clojure.string :as str]
             [clojure.test :as t :refer [deftest is testing]]
-            [kmet.extension :as ext]
             [kmet.extensions.clojure.eval-tool :as eval-tool]
             [kmet.extensions.clojure.nrepl :as nrepl]
             [kmet.tui.core :as core]
@@ -188,9 +187,8 @@
 ;; Registration
 ;; ═══════════════════════════════════════════════════════════════════════════════
 
-(deftest ^:bb-only test-registration-opts-into-the-tail-status-line
+(deftest ^:bb-only test-the-record-opts-into-the-tail-status-line
   (testing "clojure_eval is a runner tool: :status true"
-    (let [{:keys [api state]} (ext/create-nullable-api)
-          _ (eval-tool/register! api)
-          tool (get-in @state [:tools "clojure_eval"])]
-      (is (true? (:status tool))))))
+    ;; the record travels into the deferred source's tools map, so the
+    ;; registration path is the source's — only the map is this module's
+    (is (true? (:status (eval-tool/definition))))))

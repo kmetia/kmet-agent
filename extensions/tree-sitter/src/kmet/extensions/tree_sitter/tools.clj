@@ -321,3 +321,21 @@
     :render-result render/render-result
     :execute (safe find-callees*)
     :title render/title-find-callees}])
+
+(def direct-tool-names
+  "The family's entry points, registered directly: `list_symbols` opens a
+   file, `find_definition` opens a symbol. The rest refine one of those, so
+   they are a `:deferred` source (`deferred-tool-defs`) whose schemas stay out
+   of the declared set until `tool_search` loads them."
+  #{"list_symbols" "find_definition"})
+
+(defn direct-tool-defs
+  "The tool maps `kmet.extensions.tree-sitter.core` registers with
+   register-tool!."
+  []
+  (filterv #(contains? direct-tool-names (:name %)) (tool-defs)))
+
+(defn deferred-tool-defs
+  "The tool maps the extension contributes as one `:deferred` tool source."
+  []
+  (filterv #(not (contains? direct-tool-names (:name %))) (tool-defs)))

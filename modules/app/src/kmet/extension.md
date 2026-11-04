@@ -342,6 +342,16 @@ set of deferred sources changes.
   sandbox exclusion list still applies — a source can never contribute
   `run_code` itself.
 - The registration is removed automatically when the extension unloads.
+- **Defer a family, not its entry point.** The bundled clojure and tree-sitter
+  extensions ship this way: the tool every use of the family starts with
+  (`clojure_edit`, `list_symbols`/`find_definition`) is registered directly,
+  and the refinements that only make sense after one of those — s-expression
+  replacement, delimiter repair, nREPL evaluation, a definition's body, callers
+  and callees — are one `:deferred` source with a `:description` naming them.
+  A deferred source costs no schema until the model searches, and its
+  description is the only thing the model sees before it does, so it has to
+  name the capability (and, practically, the tools) rather than point at the
+  family.
 
 ### Tool execute contract
 

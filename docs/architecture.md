@@ -381,6 +381,11 @@ and never declared. `kmet.app.loop.state/declared-tools-for` builds the wire
 list from the selection (`:enabled-tools` / `:default-tools`) and the loaded set
 — a `tool_search`-named tool is declared only while the table holds a
 `:deferred` tool to find, so a direct-only setup pays no schema for it. The
+bundled clojure and tree-sitter extensions are the shipped users of that: each
+declares its family's entry point directly (`clojure_edit`,
+`list_symbols`/`find_definition`) and contributes its refinements as one
+`:deferred` source, so a default composition declares 6 schemas fewer and
+announces the two sources instead. The
 loaded set is a session fact (`:tool-load` entries folded along the branch), so
 resume, `/tree` and a fork replay the tools that branch was sent, and disabling
 a loaded tool hides it without forgetting the load. `callable-tool-names` is
