@@ -402,7 +402,8 @@ declares its family's entry point directly (`clojure_edit`,
 `:deferred` source, so a default composition declares 6 schemas fewer and
 announces the two sources instead. The
 advertised set is a session fact. The mutations (`set-active-tools!`,
-`apply-default-tools!`) record the live selection with `sync-tool-declarations!`;
+`apply-default-tools!`, `apply-enabled-tools!`) record the live selection with
+`sync-tool-declarations!`;
 the loop reconciles the recorded loadout before every request with
 `sync-resumed-declarations!`; a promotion uses the same resumed reconcile. Both
 write the delta by value — name, description, parameters and constrained

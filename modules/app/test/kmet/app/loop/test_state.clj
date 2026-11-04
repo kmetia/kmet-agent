@@ -60,6 +60,16 @@
             "a tool mounted after the setting defaults on")
       (finally (tools-registry/unregister-tool! h "late-tool")))))
 
+(t/deftest test-loop-apply-enabled-tools-replaces-the-setting
+  (let [agent (support/make-agent-state :enabled-tool-entries ["read"])]
+    (t/is (= #{"read"} (state/callable-tool-names agent)))
+    (state/apply-enabled-tools! agent ["-bash"])
+    (t/is (contains? (state/callable-tool-names agent) "read"))
+    (t/is (not (contains? (state/callable-tool-names agent) "bash")))
+    (state/apply-enabled-tools! agent nil)
+    (t/is (contains? (state/callable-tool-names agent) "bash")
+          "nil clears the setting back to the default surface")))
+
 (t/deftest test-loop-make-agent-state-with-opts
   (let [session {:dummy :session}
         events (atom [])

@@ -518,6 +518,7 @@
                         :set-block-images! runtime/set-block-images!
                         :set-system-prompt! runtime/set-system-prompt!
                         :apply-default-tools! runtime/apply-default-tools!
+                        :apply-enabled-tools! runtime/apply-enabled-tools!
                         :set-config! runtime/set-config!
                         :set-run-options! runtime/set-run-options!
                         :set-http-idle-timeout-ms! runtime/set-http-idle-timeout-ms!

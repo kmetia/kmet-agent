@@ -931,9 +931,9 @@ Be precise and concise in your responses."}}]
 
 (defn set-active-tools!
   "Restrict the tools sent to the LLM to NAMES (a set or seq of tool
-   names); nil restores the configured default surface — every tool, minus
-   the built-ins a :default-tools selection leaves out (pi: setActiveTools).
-   Also rebuilds the
+   names); nil restores the configured surface — the :enabled-tools setting
+   when present, otherwise every tool minus the built-ins a :default-tools
+   selection leaves out (pi: setActiveTools). Also rebuilds the
    system prompt to reflect the new tool set (pi: setActiveToolsByName —
    only tools in the registry can be enabled; unknown names are ignored).
    Validation runs against the LIVE tool registry, and the base prompt
@@ -978,6 +978,18 @@ Be precise and concise in your responses."}}]
          (reset! (:system agent)
                  (apply (:system-prompt-fn agent) (mapcat identity opts)))))
      nil)))
+
+(defn apply-enabled-tools!
+  "Re-apply the :enabled-tools setting after a settings reload or a session
+   switch. ENTRIES is the merged entry list (nil clears the setting). RECORD?
+   (default true) writes the resulting declared-set delta; a session switch
+   passes false so loading a session never rewrites it. Returns ENTRIES."
+  ([agent entries]
+   (apply-enabled-tools! agent entries true))
+  ([agent entries record?]
+   (reset! (:enabled-tool-entries agent) entries)
+   (when record? (sync-tool-declarations! agent))
+   entries))
 
 (defn apply-default-tools!
   "Re-apply the :default-tools selection after a settings reload

@@ -249,6 +249,20 @@
             "excluding the deferred tool too loses nothing")
       (finally
         (tools/unregister-tool-source! h ::catalog)))))
+(t/deftest test-the-prompt-derivation-honors-the-enabled-setting
+  (let [{:keys [session dir]} (temp-session)
+        ctx (support/process-ctx)]
+    (try
+      (t/is (= #{"read"}
+               (names (state/declared-tools-for-session
+                       ctx session {:enabled-tool-entries ["read"]}))))
+      (state/sync-tool-declarations! (support/make-agent-state :session session))
+      (t/is (= #{"read"}
+               (names (state/declared-tools-for-session
+                       ctx session {:enabled-tool-entries ["read"]})))
+            "a recorded declaration is filtered for the prompt")
+      (finally (fs/delete-tree dir)))))
+
 (t/deftest test-a-promotion-records-the-new-declaration
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)

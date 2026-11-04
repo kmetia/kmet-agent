@@ -675,9 +675,11 @@
               ;; pi: _rebuildSystemPrompt with new sources — the prompt is
               ;; built over the CURRENTLY active tool set (pi:
               ;; getActiveToolNames), so a pre-reload set-active-tools
-              ;; restriction survives the reload. The :default-tools setting
-              ;; is re-resolved first (pi: AgentSession.reload — tools newly
-              ;; added to the setting become active; removed ones stay).
+              ;; restriction survives the reload. The selection settings are
+              ;; re-resolved first (pi: AgentSession.reload — tools newly
+              ;; added to a setting become active; removed ones stay).
+              _ (runtime/apply-enabled-tools! (:engine cs)
+                                              (cfg/get-enabled-tools config))
               _ (runtime/apply-default-tools! (:engine cs)
                                               (tools/resolve-default-tools
                                                (cfg/get-default-tools config)))

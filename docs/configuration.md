@@ -187,10 +187,11 @@ and extension alike, and it wins over `:default-tools`:
 A plain list is absolute: a tool that mounts later is not added. A
 modifier-only list is re-resolved against the live table, so a tool that mounts
 later defaults on (an extension or MCP catalog that connects after startup is
-not silently dropped). An empty list selects no tools at all. The runtime
-`/tools` selector's choice still wins over the setting until it is reset or a
-session switch clears it; persisting that choice into these keys is the next
-step of the selection work.
+not silently dropped). An empty list selects no model-facing tools (a
+`:sandbox` source's tools stay callable from `run_code`). The runtime `/tools`
+selector's choice still wins over the setting until it is reset or a session
+switch clears it; persisting that choice into these keys is the next step of
+the selection work.
 
 Project settings layer over user settings for both keys: a `.kmet/settings.edn`
 list of only `+name`/`-name` entries modifies the user's list, while a list
@@ -208,13 +209,14 @@ row in and turn it off here, or restore the row and re-enable it.
 `kmet config` does not list extension tools or `:enabled-tools` entries yet;
 `/tools` remains the live selector for them.
 
-The selection applies at startup, on a session switch (`/resume`, `/import` —
-pi recreates the runtime from settings there, so the outgoing session's
-runtime selection does not carry over), and on `/reload`, which replaces the
-selection: tools newly added become active and tools removed go inactive. A
+The settings apply at startup, on a session switch (`/resume`, `/import` — pi
+recreates the runtime from settings there, so the outgoing session's runtime
+selection does not carry over), and on `/reload`, which re-resolves both
+settings: tools newly added become active and tools removed go inactive. A
 runtime selection made with the `/tools` selector (bundled `tools` extension)
-wins over the setting until the next switch or reload. A tool that is not
-active is also not executable — a call the model makes for a disabled tool
+still wins over the settings until it is reset or a session switch clears it
+(a reload keeps it — the prompt is rebuilt over the active set). A tool that
+is not active is also not executable — a call the model makes for a disabled tool
 settles as `Tool <name> not found` (pi: `prepareToolCall`) instead of running.
 kmet has no CLI equivalent of pi's `--tools`/`--exclude-tools`/`--no-tools`/
 `--no-builtin-tools` yet.

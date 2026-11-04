@@ -109,7 +109,7 @@
 
 (def deep-merge eds/deep-merge)
 
-;; ─── defaultTools scope merge (pi: SettingsManager.mergeDefaultTools) ──────
+;; ─── tool selection scope merge (pi: SettingsManager.mergeDefaultTools) ────
 
 (defn merge-tool-entries
   "Merge the user and project entry lists of a tool selection key (pi:

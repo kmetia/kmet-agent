@@ -115,6 +115,8 @@
        ;; record is its history; the first request reconciles live-only
        ;; differences (set-active-tools!'s RECORD? false)
        (loop-state/set-active-tools! new-ag nil false)
+       (loop-state/apply-enabled-tools!
+        new-ag (cfg/get-enabled-tools (runtime/config engine)) false)
        (loop-state/apply-session-settings! new-ag))
      (apply-session-cwd! engine sess)
      sess)))

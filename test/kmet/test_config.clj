@@ -173,20 +173,20 @@
 ;; ─── tool selection scope merge (pi: defaultTools) ─────────────────────────
 
 (t/deftest test-merge-tool-entries
-  (let [merge-default-tools cfg/merge-tool-entries]
+  (let [merge-tools cfg/merge-tool-entries]
     (t/testing "a user list alone passes through"
-      (t/is (= ["read"] (merge-default-tools ["read"] nil))))
+      (t/is (= ["read"] (merge-tools ["read"] nil))))
     (t/testing "project +name/-name entries append to the user list"
-      (t/is (= ["read" "+bash" "-read"] (merge-default-tools ["read"] ["+bash" "-read"]))))
+      (t/is (= ["read" "+bash" "-read"] (merge-tools ["read"] ["+bash" "-read"]))))
     (t/testing "a project list with a plain name replaces the user list"
-      (t/is (= ["write"] (merge-default-tools ["read"] ["write"]))))
+      (t/is (= ["write"] (merge-tools ["read"] ["write"]))))
     (t/testing "an empty project list is modifier-only: it keeps the user list"
-      (t/is (= ["read"] (merge-default-tools ["read"] []))))
+      (t/is (= ["read"] (merge-tools ["read"] []))))
     (t/testing "a project-only list stands alone (resolved elsewhere)"
-      (t/is (= ["+grep"] (merge-default-tools nil ["+grep"])))
-      (t/is (= [] (merge-default-tools nil []))))
+      (t/is (= ["+grep"] (merge-tools nil ["+grep"])))
+      (t/is (= [] (merge-tools nil []))))
     (t/testing "a malformed project value replaces the user list"
-      (t/is (= "+bash" (merge-default-tools ["read"] "+bash"))))))
+      (t/is (= "+bash" (merge-tools ["read"] "+bash"))))))
 
 (t/deftest test-load-config-default-tools-scope-merge
   (let [tmp (str (fs/create-temp-dir {:dir "target" :prefix "default-tools-test-"}))
