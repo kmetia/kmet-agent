@@ -537,17 +537,16 @@ Be precise and concise in your responses."}}]
    :default-tools (a resolved built-in selection, nil = every built-in)
    excludes the built-ins it leaves out — extension tools stay enabled (pi:
    defaultTools selects the built-in tools; extension/custom tools remain
-   enabled). EXCLUDE adds caller-supplied exclusions.
-   The declared surface and `tool_search`'s candidate list resolve from this
-   one map, so they cannot disagree."
-  [{:keys [enabled enabled-tool-entries live-names default-tools exclude]}]
+   enabled). The declared surface and `tool_search`'s candidate list resolve
+   from this one map, so they cannot disagree."
+  [{:keys [enabled enabled-tool-entries live-names default-tools]}]
   (let [enabled (or enabled
                     (when enabled-tool-entries
                       (tools/resolve-enabled-tools enabled-tool-entries live-names)))]
     {:enabled (when (some? enabled) (set enabled))
-     :exclude (into (or exclude #{})
-                    (when (nil? enabled)
-                      (tools/default-tool-exclusions default-tools)))}))
+     :exclude (if (nil? enabled)
+                (tools/default-tool-exclusions default-tools)
+                #{})}))
 
 (defn tool-selection
   "The selection AGENT's run settings apply, in `selection-opts`'s shape — what
@@ -559,13 +558,13 @@ Be precise and concise in your responses."}}]
   [agent]
   (selection-opts {:enabled @(:enabled-tools agent)
                    :enabled-tool-entries @(:enabled-tool-entries agent)
-                   :live-names (keys (tool-table agent))
-                   :default-tools @(:default-tools agent)}))
+                   :default-tools @(:default-tools agent)
+                   :live-names (keys (tool-table agent))}))
 
 (defn- selected-name?
   "Whether SELECTION — the `selection-opts` map, with a resolved :enabled set
    when a selection key applies — declares NAME. A nil :enabled means no
-   selection key: every name except the caller-supplied :exclude is declared."
+   selection key: every name except the derived :exclude is declared."
   [selection name]
   (if-let [enabled (:enabled selection)]
     (contains? enabled name)
@@ -579,13 +578,15 @@ Be precise and concise in your responses."}}]
   [agent]
   (let [table (tool-table agent)
         selected (tools/select-tools table (tool-selection agent))
-        deferred (into #{}
-                       (keep (fn [[name tool]]
-                               (when (= :deferred (tool/exposure tool)) name)))
-                       table)]
-    (when (and (not (contains? selected search/tool-search-name))
-               (seq (filter deferred (keys selected))))
-      (vec (sort (filter deferred (keys selected)))))))
+        orphaned (->> (keys selected)
+                      (keep (fn [name]
+                              (when (= :deferred (tool/exposure (get table name)))
+                                name)))
+                      sort
+                      vec)]
+    (when (and (seq orphaned)
+               (not (contains? selected search/tool-search-name)))
+      orphaned)))
 
 (defn session-loaded-tools
   "The tool names SESS recorded as loaded — what `tool_search` promoted into the
@@ -733,9 +734,9 @@ Be precise and concise in your responses."}}]
   (let [recorded (some-> session session/session-tool-state)
         selection (selection-opts {:enabled enabled
                                    :enabled-tool-entries enabled-tool-entries
+                                   :default-tools default-tools
                                    :live-names (into (set (keys (ctx-tool-table ctx)))
-                                                     (keys recorded))
-                                   :default-tools default-tools})]
+                                                     (keys recorded))})]
     (declared-tools recorded
                     #(runtime-tool-map ctx)
                     #(declared-tools-for (ctx-tool-table ctx)
@@ -761,9 +762,9 @@ Be precise and concise in your responses."}}]
   (let [recorded (some-> (:session agent) session/session-tool-state)
         selection (selection-opts {:enabled @(:enabled-tools agent)
                                    :enabled-tool-entries @(:enabled-tool-entries agent)
+                                   :default-tools @(:default-tools agent)
                                    :live-names (into (set (keys (tool-table agent)))
-                                                     (keys recorded))
-                                   :default-tools @(:default-tools agent)})]
+                                                     (keys recorded))})]
     (declared-tools recorded
                     #(runtime-tool-map (:ctx agent))
                     #(live-declared-tools agent)
@@ -826,17 +827,13 @@ Be precise and concise in your responses."}}]
                                (contains? live-names name) [name (get live name)]
                                :else [name declaration])))
                      recorded)
-          remounted (into (sorted-map)
+          live-only (into (sorted-map)
                           (filter (fn [[name _]]
-                                    (and (mentioned name)
-                                         (not (contains? recorded name)))))
-                          live)
-          new-tools (into (sorted-map)
-                          (filter (fn [[name _]]
-                                    (and (not (mentioned name))
-                                         (not (contains? builtins name)))))
+                                    (if (mentioned name)
+                                      (not (contains? recorded name))
+                                      (not (contains? builtins name)))))
                           live)]
-      (merge (sorted-map) kept remounted new-tools))))
+      (merge (sorted-map) kept live-only))))
 
 (defn- seen-tools!
   "Observe LIVE-NAMES on AGENT and return the names it had already seen. The
@@ -922,9 +919,9 @@ Be precise and concise in your responses."}}]
           ;; keeps a resume-time gap while a plain/`-name` setting drops it
           selection (selection-opts {:enabled @(:enabled-tools agent)
                                      :enabled-tool-entries @(:enabled-tool-entries agent)
+                                     :default-tools @(:default-tools agent)
                                      :live-names (into (set (keys live))
-                                                       (keys branch-previous))
-                                     :default-tools @(:default-tools agent)})
+                                                       (keys branch-previous))})
           current (or (resume-declarations sess branch-previous live seen selection)
                       live)]
       (record-tool-change! agent (context-tool-state agent) current))))

@@ -49,6 +49,4 @@
         "a plain list is the absolute live selection")
   (t/is (= [] (tools/resolve-enabled-tools [] ["a" "b"])))
   (t/is (= #{"a" "late"} (set (tools/resolve-enabled-tools ["-b"] #{"a" "b" "late"})))
-        "a live tool the setting does not name stays selected")
-  (t/is (= #{"a" "late"} (set (tools/resolve-enabled-tools ["-b"] (set ["a" "b" "late"]))))
-        "a set base works; order is not significant for membership"))
+        "a live tool the setting does not name stays selected"))
