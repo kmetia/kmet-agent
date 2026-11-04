@@ -295,7 +295,25 @@ the wrappers below or directly.
 (ext/get-all-tools api)
 (ext/get-active-tools api)      ; nil = all; else set of enabled names
 (ext/set-active-tools api ["read" "write"])
+
+(ext/tool-selection api)
+;; => {:scope :global
+;;     :entries {:global ["-bash"] :project ["+read"]}
+;;     :enabled #{"read" "write"}
+;;     :origin {"read" :project "write" :default}}
+
+(ext/set-tool-enabled! api "my-tool" false {:scope :project})
 ```
+
+`set-active-tools` is the **runtime** selection: it changes what this agent
+sends now and is not persisted. `tool-selection` and `set-tool-enabled!` are
+the settings side: `tool-selection` returns the raw `:enabled-tools` entries
+per scope, the effective enabled set, each enabled name's origin
+(`:global`, `:project`, `:session`, `:default`) and the default write scope
+(project when the cwd has `.kmet/`, else global). `set-tool-enabled!` writes
+`true`/`false`/`nil` (nil = inherit) into the scope's `:enabled-tools` list,
+using `+name`/`-name` deltas; it does not change the runtime selection.
+
 
 ### Tool sources (`register-tool-source!`)
 

@@ -667,7 +667,7 @@
   "Install the runtime-owned extension capabilities (pi: bindCore):
    :set-model, :get-thinking-level, :set-thinking-level,
    :send-user-message, :send-message!, :get-active-tools,
-   :set-active-tools. Returns nil."
+   :set-active-tools, :tool-selection, :set-tool-enabled!. Returns nil."
   [capabilities]
   (swap! extension-binding assoc :runtime (or capabilities {}))
   nil)
@@ -879,6 +879,9 @@
   nil)
 (defn get-active-tools [] (runtime-call :get-active-tools))
 (defn set-active-tools [names] (runtime-call :set-active-tools names) nil)
+(defn tool-selection [] (runtime-call :tool-selection))
+(defn set-tool-enabled! [name enabled opts]
+  (runtime-call :set-tool-enabled! name enabled opts))
 
 ;; ─── Model / session facades (extension api: models / session) ───────────
 
@@ -1221,6 +1224,8 @@
       :get-all-tools #(vals (tools/get-all-tools (handle)))
       :get-active-tools get-active-tools
       :set-active-tools set-active-tools
+      :tool-selection tool-selection
+      :set-tool-enabled! set-tool-enabled!
       ;; The subscription registers at the host ctx — the app root — so it
       ;; hears every agent under it, as the old process-wide table did; it is
       ;; `track`ed because a non-plugin extension owns no fiber effect.

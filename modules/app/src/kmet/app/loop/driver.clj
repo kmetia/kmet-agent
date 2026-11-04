@@ -30,6 +30,7 @@
             [kmet.app.session.core :as session]
             [kmet.app.session.runtime :as runtime]
             [kmet.app.session.submission :as submission]
+            [kmet.app.tools.config :as tools-config]
             [kmet.app.tools.registry :as tools]
             [kmet.app.tools.shell :as shell]
             [kmet.ai.models :as models]
@@ -408,7 +409,19 @@
                                    (mapv :name (loop-state/active-tools @live)))
                :set-active-tools (fn [names]
                                    (loop-state/set-active-tools! @live names)
-                                   nil)})
+                                   nil)
+               :tool-selection (fn []
+                                 (tools-config/tool-selection
+                                  (loop-state/enabled-tool-names @live)
+                                  {:session @(:enabled-tools @live)}))
+               :set-tool-enabled! (fn [name enabled opts]
+                                    (let [entries (tools-config/set-tool-enabled!
+                                                   name enabled
+                                                   (assoc opts :live-names
+                                                          (keys (loop-state/tool-table @live))))]
+                                      (swap! (:config engine) assoc :enabled-tools entries)
+                                      (loop-state/apply-enabled-tools! @live entries)
+                                      nil))})
             ;; the ExtensionContext keys a run owns — the live agent's model,
             ;; scoped set, thinking level, cwd and pending state, and the
             ;; controls that act on this agent. Everything else (:mode,

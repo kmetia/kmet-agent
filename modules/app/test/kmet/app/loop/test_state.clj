@@ -70,6 +70,14 @@
     (t/is (contains? (state/callable-tool-names agent) "bash")
           "nil clears the setting back to the default surface")))
 
+(t/deftest test-loop-enabled-tool-names
+  (let [agent (support/make-agent-state :enabled-tool-entries ["-bash"])]
+    (t/is (contains? (state/enabled-tool-names agent) "read"))
+    (t/is (not (contains? (state/enabled-tool-names agent) "bash"))))
+  (let [agent (support/make-agent-state)]
+    (t/is (contains? (state/enabled-tool-names agent) "read")
+          "no setting enables the live surface")))
+
 (t/deftest test-loop-make-agent-state-with-opts
   (let [session {:dummy :session}
         events (atom [])

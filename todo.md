@@ -6,14 +6,15 @@ keys, **P5** (tool exposure, the declared/callable split, the shared ranker and
 `tool_search`), **P5.5** (the declared order and the one promotable
 derivation), **P6** (mid-conversation tool changes without a full re-prefill),
 **P6 residuals 1–3** (Codex's declared-set markers, the anchored wire deltas,
-and `tool_search`'s recorded-loadout filter), the P6 unmount/remount residual
-and **S1** (config and resolution for `:enabled-tools`) — is out of this file;
+and `tool_search`'s recorded-loadout filter), the P6 unmount/remount residual,
+**S1** (config and resolution for `:enabled-tools`) and **S2** (the extension
+ABI for tool selection) — is out of this file;
 it lives in git history. The context and token tracks are dropped too — see
 § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | S1 done; **S2 next** |
+| **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | S2 done; **S3 next** |
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–2 done; **step 3 next** |
 
 Cross-session selection (S) comes next; persistent eval lands whenever — it
@@ -66,22 +67,6 @@ already exists, and give `/tools` the discovery plus a scope target.
   invisible until a settings scope names them.
 
 ### Steps
-
-**S2 — extension ABI (two functions).**
-
-- `kmet.app.tools.config` implements, `kmet.extension` exposes:
-  - `(ext/tool-selection api)` → `{:scope • :entries {:global […] :project
-    […]} :enabled #{…} :origin {name :global|:project|:session|:default}}`,
-    one call for the dialog;
-  - `(ext/set-tool-enabled! api name enabled {:scope :global|:project})`,
-    `enabled` nil = inherit.
-- Reuse `modifier-style?` (`tools/config.clj:120-126`) and the delta logic of
-  `apply-builtin-tool-project-override!` (`:148-161`) — one writer, shared with
-  `kmet config`.
-- Default scope: project when `.kmet/` exists, else global — `run-config!`'s
-  rule (`config_command.clj:26-27`).
-- Wire into the extension API map; the allowed-namespace list in
-  `context.cljc` is **unchanged** (no app internal is exposed).
 
 **S3 — `/tools`.**
 

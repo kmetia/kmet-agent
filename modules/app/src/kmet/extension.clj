@@ -75,7 +75,7 @@
 ;;     released on unload; :app-root is the app root, not released)
 ;;   :register-command! :unregister-command! :get-commands
 ;;   :register-tool! :unregister-tool! :get-all-tools :create-bash-tool
-;;   :get-active-tools :set-active-tools
+;;   :get-active-tools :set-active-tools :tool-selection :set-tool-enabled!
 ;;   :register-tool-source! :unregister-tool-source!  — sandbox tool sources
 ;;   :on-event :emit-event!                             — event bus
 ;;   :on-input :on-before-agent-start                   — hooks
@@ -134,6 +134,23 @@
 (defn get-all-tools [api] ((:get-all-tools api)))
 (defn get-active-tools [api] ((:get-active-tools api)))
 (defn set-active-tools [api names] ((:set-active-tools api) names))
+
+(defn tool-selection
+  "The `/tools` dialog's one-call view: the raw :enabled-tools entries per
+   scope, the effective enabled name set and each name's origin
+   (:global, :project, :session or :default)."
+  [api]
+  ((:tool-selection api)))
+
+(defn set-tool-enabled!
+  "Persist NAME's enabled state in the default or given SCOPE: true enables,
+   false disables, nil removes that scope's entry (inherit). OPTIONS may carry
+   :scope (:global/:project) and, for the host, :live-names. Writes only the
+   setting; set-active-tools! is the runtime selection."
+  ([api name enabled]
+   (set-tool-enabled! api name enabled nil))
+  ([api name enabled opts]
+   ((:set-tool-enabled! api) name enabled opts)))
 
 (defn create-bash-tool
   "Build a bash tool (a plain tool map for register-tool!) with spawn options
@@ -382,7 +399,8 @@
       :skills [{:content opts}] :prompts [prompt]
       :tool-hooks [...]
       :input-hooks [...] :before-agent-start-hooks [...]
-      :bash-tool-opts [opts...]
+      :bash-tool-opts [opts...] :tool-selection map-or-nil
+      :tool-enabled-writes [[name enabled opts] ...]
       :ui-calls [args...] :emitted [events...] :model-calls [...]}}
    Deregister fns remove the corresponding registrations (unload replay).
    OPTS: :agent-dir — the value (get-agent-dir api) returns (default nil;
@@ -396,6 +414,7 @@
                       :tool-hooks []
                       :input-hooks [] :before-agent-start-hooks []
                       :bash-tool-opts []
+                      :tool-selection nil :tool-enabled-writes []
                       :ui-calls [] :emitted [] :model-calls []})
          hook (fn [key]
                 (fn [hook]
@@ -423,6 +442,11 @@
               :get-all-tools (fn [] (vals (:tools @state)))
               :get-active-tools (fn [] (keys (:tools @state)))
               :set-active-tools (fn [names] (swap! state assoc :active-tools names))
+              :tool-selection (fn [] (:tool-selection @state))
+              :set-tool-enabled! (fn [name enabled opts]
+                                   (swap! state update :tool-enabled-writes conj
+                                          [name enabled opts])
+                                   nil)
               ;; pi: createBashTool — the fixture records the options and
               ;; returns an inert tool map (extension init code can register it)
               :create-bash-tool (fn [opts]

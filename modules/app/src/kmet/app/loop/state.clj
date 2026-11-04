@@ -545,7 +545,7 @@ Be precise and concise in your responses."}}]
                       (tools/resolve-enabled-tools enabled-tool-entries live-names)))]
     {:enabled (when (some? enabled) (set enabled))
      :exclude (if (nil? enabled)
-                (tools/default-tool-exclusions default-tools)
+                (or (tools/default-tool-exclusions default-tools) #{})
                 #{})}))
 
 (defn tool-selection
@@ -560,6 +560,22 @@ Be precise and concise in your responses."}}]
                    :enabled-tool-entries @(:enabled-tool-entries agent)
                    :default-tools @(:default-tools agent)
                    :live-names (keys (tool-table agent))}))
+
+(defn enabled-tool-names
+  "The names AGENT's selection enables over the live table — the set the
+   `/tools` dialog shows as enabled. A runtime override wins; otherwise the
+   :enabled-tools setting resolves over the live names, falling back to
+   :default-tools."
+  [agent]
+  (let [table (tool-table agent)
+        {:keys [enabled exclude]} (selection-opts
+                                   {:enabled @(:enabled-tools agent)
+                                    :enabled-tool-entries @(:enabled-tool-entries agent)
+                                    :default-tools @(:default-tools agent)
+                                    :live-names (keys table)})]
+    (if enabled
+      enabled
+      (into #{} (remove exclude) (keys table)))))
 
 (defn- selected-name?
   "Whether SELECTION — the `selection-opts` map, with a resolved :enabled set
