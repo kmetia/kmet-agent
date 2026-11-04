@@ -57,30 +57,34 @@
        (when (< kept (count sources))
          (str "\n" (omitted-line (- (count sources) kept))))))
 
-(defn- description-budget
-  "Characters one description may take when KEPT sources share what INTRO and
-   their head lines leave; 0 when the heads alone fill the room (2 characters are
-   reserved for the separator between a head and its description)."
+(defn- share
+  "Characters one description may take when KEPT sources share ROOM — 2 of each
+   line go to the separator after the id — and 0 when there is no room left."
+  [room kept]
+  (if (pos? kept)
+    (max 0 (min max-source-description-chars (- (quot room kept) 2)))
+    0))
+
+(defn- listing-fit
+  "The listing for KEPT sources with the descriptions sharing what the head
+   lines leave of `max-listing-chars`."
   [intro sources kept]
-  (max 0 (min max-source-description-chars
-              (- (quot (- max-listing-chars
-                          (count (listing-text intro sources kept 0)))
-                       kept)
-                 2))))
+  (listing-text intro sources kept
+                (share (- max-listing-chars (count (listing-text intro sources kept 0)))
+                       kept)))
 
 (defn- compose-listing
   "INTRO plus one line per SOURCE within `max-listing-chars`. Descriptions shrink
-   first — every source stays listed, because being listed is the whole point of
-   the message — and only when the head lines alone do not fit do the last
-   sources drop into the omission line (pi: the per-server budget, then the
-   `… N more servers` line). A set with room to spare is the uncapped text,
-   byte for byte."
+   to share the room first — every source stays listed, because being listed is
+   the point of the message — and only heads that cannot fit on their own drop
+   the rest into the closing line (pi: the per-server budget, then the
+   `… N more servers` line). A set with room to spare renders once; a set whose
+   head lines alone overflow walks the count down and renders again per step,
+   which is why the loop is only affordable while sources are the registered
+   extensions of a process (tens), not an unbounded input."
   [intro sources]
   (loop [kept (count sources)]
-    (let [text (listing-text intro sources kept
-                             (if (pos? kept)
-                               (description-budget intro sources kept)
-                               0))]
+    (let [text (listing-fit intro sources kept)]
       (if (or (<= (count text) max-listing-chars) (zero? kept))
         text
         (recur (dec kept))))))
