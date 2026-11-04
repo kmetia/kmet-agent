@@ -2,8 +2,10 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [clojure.test :as t]
+            [kmet.app.keybindings :as app-kb]
             [kmet.libs.theme :as theme]
-            [kmet.tui.components.settings-list :as settings-list]))
+            [kmet.tui.components.settings-list :as settings-list]
+            [kmet.tui.keybindings :as kb]))
 
 (defonce ^:private extension
   (delay
@@ -56,7 +58,9 @@
                      :selection {:entries {:global [] :project []}
                                  :paths {:global "/g/settings.edn"
                                          :project "/p/settings.edn"}}})
-        dialog (ext-fn 'tools-dialog {} state nil (theme/get-theme "dark") nil
+        dialog (ext-fn 'tools-dialog
+                       {} state nil (theme/get-theme "dark")
+                       (kb/make-keybindings-manager app-kb/all-keybinding-defs {})
                        (fn [_]))]
     (t/is (some #(str/includes? % "tab scope") ((:render dialog) 80)))
     ((:handle-input dialog) "	")

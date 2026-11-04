@@ -5,10 +5,10 @@
    Provides a /tools command that opens an interactive selector to enable
    and disable tools. Toggling is a runtime change plus a tools-config
    custom entry on the active branch, restored on session start and branch
-   navigation. `s` persists the current selection through the
+   navigation. Ctrl+S persists the current selection through the
    :enabled-tools setting (ext/set-tool-enabled!), in the scope shown in
    the header; Tab switches that write scope. The dialog never writes
-   settings without `s`.
+   settings without that explicit save.
 
    Loading this extension replaces the builtin /tools listing command —
    builtins never clobber commands an extension registered (pi has no
@@ -30,7 +30,6 @@
             [kmet.libs.theme :as theme]
             [kmet.tui.components.settings-list :as settings-list]
             [kmet.tui.keybindings :as kb]
-            [kmet.tui.keys :as keys]
             [kmet.tui.utils :as u]))
 
 ;; ─── Extension state ───────────────────────────────────────────────────────
@@ -88,7 +87,7 @@
 
 (defn- mark-session-origin!
   "A toggle installs a runtime selection, so every live row's current state
-   now comes from the session until `s` writes the settings."
+   now comes from the session until Ctrl+S writes the settings."
   [state]
   (swap! state update :selection assoc :origin
          (zipmap (map :name (:all-tools @state)) (repeat :session))))
@@ -121,10 +120,12 @@
     (str (if (= :project scope) "Project" "Global") " · " path " · " counts)))
 
 (defn- dialog-header
-  [state th width]
-  (let [title (theme/bold "Tool Configuration")
+  [state th kb-mgr width]
+  (let [save-key (or (kb/key-label-text kb-mgr "app.tools.save") "ctrl+s")
+        title (theme/bold "Tool Configuration")
         hints (theme/fg th :muted
-                        "  tab scope · space toggle · s save · esc close")]
+                        (str "  tab scope · space toggle · " save-key
+                             " save · esc close"))]
     [(u/truncate-to-width (str title hints) width "")
      (u/truncate-to-width
       (theme/fg th :muted (str "Scope: " (scope-line state)))
@@ -173,7 +174,7 @@
    passes to factories (pi: (tui, theme, kb, done)); the render loop
    re-renders after every input, so no explicit requestRender is needed.
    The SettingsList handles navigation, value cycling and escape itself."
-  [api state _tui th _kb close]
+  [api state _tui th kb-mgr close]
   (let [settings (settings-list/make-settings-list
                   (selection-items @state)
                   :theme (theme/get-settings-list-theme th)
@@ -184,7 +185,7 @@
         _ (settings-list/settings-list-set-on-escape! settings
                                                       (fn [] (close nil)))]
     {:render (fn [width]
-               (into (dialog-header state th width)
+               (into (dialog-header state th kb-mgr width)
                      (protocols/render settings width)))
      :handle-input (fn [data]
                      (cond
@@ -192,7 +193,7 @@
                        (swap! state update :scope
                               #(if (= :global %) :project :global))
 
-                       (keys/matches-key? data "s")
+                       (kb/matches-key kb-mgr data "app.tools.save")
                        (save-selection! api state settings)
 
                        :else

@@ -192,7 +192,7 @@ not silently dropped). An empty list selects no model-facing tools (a
 `:sandbox` source's tools stay callable from `run_code`). The runtime `/tools`
 selector's choice still wins over the setting until it is reset or a session
 switch clears it. In the TUI, `/tools` shows the file it will write (Tab
-switches global/project) and `s` persists the current selection into
+switches global/project) and `Ctrl+S` persists the current selection into
 `:enabled-tools`; the branch entry still restores the session's own selection.
 
 Project settings layer over user settings for both keys: a `.kmet/settings.edn`
