@@ -15,7 +15,7 @@ it lives in git history. The context and token tracks are dropped too — see
 | track | what it fixes | status |
 |---|---|---|
 | **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | S2 done; **S3 next** |
-| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–2 done; **step 3 next** |
+| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–3 done; **step 4 next** |
 
 Cross-session selection (S) comes next; persistent eval lands whenever — it
 touches neither a wire nor the tool registry.
@@ -140,7 +140,8 @@ still listing the live set.
 
 ## Persistent eval and eval sources
 
-Status: steps 1–2 done (the shared script layer and the file ops); step 3 next.
+Status: steps 1–3 done (the shared script layer, the file ops and the
+memory-only eval service); step 4 next.
 Decisions closed (E1–E16); independent.
 Independent of every other track; the `:on-tool` hook covers it for free (step
 1 keeps the bridge on `kmet.app.tools.invoke`).

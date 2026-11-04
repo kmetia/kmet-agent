@@ -140,7 +140,8 @@ content. CLI flags `--system-prompt <txt>` and `--append-system-prompt <txt>`
 
 ## Tools
 
-The built-in tools (`read`, `write`, `edit`, `bash`, `run_code`) start enabled.
+The built-in tools (`read`, `write`, `edit`, `bash`, `run_code`, `eval`)
+start enabled.
 Each is a composition row — `:tool/read`, `:tool/bash`, … in the built-in
 bundle — so a profile or a patch layer can take one out of the run entirely
 (`{:id :tool/bash :remove true}`: the tool is not in the model's schema and not

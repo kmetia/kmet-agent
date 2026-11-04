@@ -16,6 +16,7 @@
   (:require [babashka.fs :as fs]
             [clojure.string :as str]
             [kmet.app.config :as cfg]
+            [kmet.app.eval :as eval-svc]
             [kmet.app.extensions.core :as extensions]
             [kmet.app.hooks :as hooks]
             [kmet.app.loop :as loop]
@@ -267,6 +268,14 @@
         ;; default for every agent that did not (kmet.app.sandbox).
         _ (when-not (srce/get child :sandbox)
             (srce/provide! child :sandbox sandbox/default-value))
+        ;; The agent's persistent script environment is per-agent for the same
+        ;; reason: a child may not shadow an ancestor's service, and the
+        ;; environment belongs to the agent. The context is lazy, so this costs
+        ;; nothing until the first eval call; a preset that provided one first
+        ;; wins.
+        _ (when-not (srce/get child :eval)
+            (srce/provide! child :eval (eval-svc/value child)))
+        eval-service (srce/get child :eval)
         ;; What a human already allowed for this agent (`:agent`) and for this
         ;; workspace, which every agent of the composition shares: the permission
         ;; row's remembering policy reads and writes it, and it is a service for
@@ -512,7 +521,9 @@
            :status (fn [] (if @running? :running :idle))
            :dispose! (fn []
                        (reset! disposed? true)
-                       (lifecycle/cancel-run! engine)))
+                       (lifecycle/cancel-run! engine)
+                       (when-let [dispose (:dispose! eval-service)]
+                         (dispose))))
           ;; the rest is the front end's settings and compaction surface: each
           ;; op is the value's own fn behind a wrapper that supplies this
           ;; handle, so the thinking-level rank rule, the model-change entry and

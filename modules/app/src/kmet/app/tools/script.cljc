@@ -1074,9 +1074,12 @@
   "Start the daemon eval thread. The prelude runs here, on the eval thread,
    immediately before the user code: SCI's *ns* is per-thread, so aliases
    registered on the caller thread would not necessarily land in the
-   namespace the script evaluates in. Returns {:done promise :result atom};
-   the thread closes the writers in its finally, which ends the readers."
-  [sci-ctx code prelude capture]
+   namespace the script evaluates in. NS-ATOM, when given, holds the
+   namespace object the previous call ended in: the prelude and the code run
+   there and the code's final namespace is stored back. Returns
+   {:done promise :result atom}; the thread closes the writers in its finally,
+   which ends the readers."
+  [sci-ctx code prelude capture ns-atom]
   (let [done (promise)
         result (atom nil)
         thread (Thread. (fn []
@@ -1084,8 +1087,19 @@
                             (let [v (eval-with-io (:out-w capture) (:err-w capture)
                                                   (fn []
                                                     (when prelude
-                                                      (sci/eval-string* sci-ctx prelude))
-                                                    (sci/eval-string* sci-ctx code)))]
+                                                      (if ns-atom
+                                                        (reset! ns-atom
+                                                                (:ns (sci/eval-string+
+                                                                      sci-ctx prelude
+                                                                      {:ns @ns-atom})))
+                                                        (sci/eval-string* sci-ctx prelude)))
+                                                    (if ns-atom
+                                                      (let [{:keys [val ns]}
+                                                            (sci/eval-string+ sci-ctx code
+                                                                              {:ns @ns-atom})]
+                                                        (reset! ns-atom ns)
+                                                        val)
+                                                      (sci/eval-string* sci-ctx code))))]
                               (reset! result {:status :ok :value v}))
                             (catch Throwable t
                               (let [reason (:reason (ex-data t))]
@@ -1236,7 +1250,7 @@
       (when-not (identical? realm base) realm))))
 
 (defn- run*
-  [{:keys [tool code prelude sci-ctx state interrupt started-at deadline ctx]
+  [{:keys [tool code prelude sci-ctx state interrupt started-at deadline ctx ns-atom]
     :as opts}]
   (let [started-at (or started-at (concurrent/monotonic-ms))
         state (or state (prepare (assoc opts :ctx ctx)))
@@ -1259,7 +1273,7 @@
                                    (:abort state)
                                    (:capture-bytes (:limits state)))
             _ (reset! (:writers state) capture)
-            {:keys [done result]} (start-eval-thread! sci-ctx code prelude capture)]
+            {:keys [done result]} (start-eval-thread! sci-ctx code prelude capture ns-atom)]
         (if deadline
           (when-not (deref done timeout-ms false)
             (compare-and-set! (:abort state) nil :timeout)
@@ -1306,7 +1320,10 @@
    `prepare`, is this call's state. PRELUDE defaults to the alias prelude.
    STARTED-AT/DEADLINE let a caller that serializes calls put the clock where
    the work starts; an explicit :deadline nil means no deadline (otherwise a
-   :timeout computes it). EXTRA-DETAILS merges into the result's :details."
+   :timeout computes it). NS-ATOM, when given, holds the namespace object a
+   kept context's previous call ended in — the prelude and the code start
+   there and the final namespace is stored back. EXTRA-DETAILS merges into the
+   result's :details."
   [{:keys [ctx] :as opts}]
   (require-tool! (:tool opts))
   (let [realm (sandbox-realm ctx)
