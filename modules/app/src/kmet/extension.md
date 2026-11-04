@@ -299,6 +299,7 @@ the wrappers below or directly.
 (ext/tool-selection api)
 ;; => {:scope :global
 ;;     :entries {:global ["-bash"] :project ["+read"]}
+;;     :paths {:global "…/settings.edn" :project ".kmet/settings.edn"}
 ;;     :enabled #{"read" "write"}
 ;;     :origin {"read" :project "write" :default "bash" :global}}
 
@@ -308,7 +309,8 @@ the wrappers below or directly.
 `set-active-tools` is the **runtime** selection: it changes what this agent
 sends now and is not persisted. `tool-selection` and `set-tool-enabled!` are
 the settings side: `tool-selection` returns the raw `:enabled-tools` entries
-per scope, the effective enabled set, each live name's origin
+per scope, the target settings file per scope, the effective enabled set, each
+live name's origin
 (`:global`, `:project`, `:session`, `:default`) and the default write scope
 (project when the cwd has `.kmet/`, else global). `set-tool-enabled!` writes
 `true`/`false`/`nil` (nil = inherit) into the scope's `:enabled-tools` list,

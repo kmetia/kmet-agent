@@ -88,6 +88,7 @@
                    ["read" "write" "bash"] #{"read" "write"} {})]
             (t/is (= :global (:scope s)))
             (t/is (= {:global [] :project []} (:entries s)))
+            (t/is (every? string? (vals (:paths s))))
             (t/is (= #{"read" "write"} (:enabled s)))
             (t/is (= {"read" :default "write" :default "bash" :default}
                      (:origin s)))))))

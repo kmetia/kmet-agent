@@ -7,18 +7,20 @@ keys, **P5** (tool exposure, the declared/callable split, the shared ranker and
 derivation), **P6** (mid-conversation tool changes without a full re-prefill),
 **P6 residuals 1–3** (Codex's declared-set markers, the anchored wire deltas,
 and `tool_search`'s recorded-loadout filter), the P6 unmount/remount residual,
-**S1** (config and resolution for `:enabled-tools`) and **S2** (the extension
-ABI for tool selection) — is out of this file;
+**S1** (config and resolution for `:enabled-tools`), **S2** (the extension
+ABI for tool selection) and **S3** (the `/tools` scope and save flow) — is out
+of this file;
 it lives in git history. The context and token tracks are dropped too — see
 § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | S2 done; **S3 next** |
+| **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | S3 done; **S4 next** |
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–3 done; **step 4 next** |
 
-Cross-session selection (S) comes next; persistent eval lands whenever — it
-touches neither a wire nor the tool registry.
+The cross-session selection track's config review surface and docs (S4/S5)
+remain; persistent eval lands whenever — it touches neither a wire nor the
+tool registry.
 
 ## Tools: cross-session selection in both scopes
 
@@ -67,16 +69,6 @@ already exists, and give `/tools` the discovery plus a scope target.
   invisible until a settings scope names them.
 
 ### Steps
-
-**S3 — `/tools`.**
-
-- Scope line in the header (target file + per-scope counts), Tab to flip; rows
-  carry a provenance suffix (`global`, `project`, `session`, `default`).
-- Toggle = runtime + branch entry, as today
-  (`extensions/tools.clj:39-43,66-95`); `s` persists the selection as a delta
-  through `set-tool-enabled!`, so nothing is written to a settings file without
-  an explicit act.
-- Headless path unchanged (`ui-notify`, `:97-107`).
 
 **S4 — `kmet config` review surface.**
 

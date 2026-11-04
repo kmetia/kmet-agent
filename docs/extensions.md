@@ -667,8 +667,8 @@ sources and an overlay panel).
 
 Tool availability has two layers. `ext/set-active-tools` changes the runtime
 selection for the current agent and is not persisted. `ext/tool-selection`
-reports the settings side — raw `:enabled-tools` entries per scope, the
-effective enabled set and each name's origin — and
+reports the settings side — raw `:enabled-tools` entries, target file, effective
+enabled set and each name's origin per scope — and
 `ext/set-tool-enabled!` writes `true`/`false`/`nil` (nil = inherit) into the
 global or project list. The default write scope is project when the cwd has
 `.kmet/`, else global. The config screen and `/tools` use these; an extension

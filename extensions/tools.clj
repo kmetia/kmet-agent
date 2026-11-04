@@ -3,9 +3,12 @@
    (packages/coding-agent/examples/extensions/tools.ts).
 
    Provides a /tools command that opens an interactive selector to enable
-   and disable tools. The selection persists across session reloads as a
-   tools-config custom entry along the active branch and is restored on
-   session start and branch navigation.
+   and disable tools. Toggling is a runtime change plus a tools-config
+   custom entry on the active branch, restored on session start and branch
+   navigation. `s` persists the current selection through the
+   :enabled-tools setting (ext/set-tool-enabled!), in the scope shown in
+   the header; Tab switches that write scope. The dialog never writes
+   settings without `s`.
 
    Loading this extension replaces the builtin /tools listing command —
    builtins never clobber commands an extension registered (pi has no
@@ -26,7 +29,9 @@
             [kmet.tui.protocols :as protocols]
             [kmet.libs.theme :as theme]
             [kmet.tui.components.settings-list :as settings-list]
-            [kmet.tui.hikap :as h]))
+            [kmet.tui.keybindings :as kb]
+            [kmet.tui.keys :as keys]
+            [kmet.tui.utils :as u]))
 
 ;; ─── Extension state ───────────────────────────────────────────────────────
 
@@ -44,6 +49,20 @@
   "Apply the current selection to the agent (pi: applyTools)."
   [api state]
   (ext/set-active-tools api (vec (:enabled-tools @state))))
+
+(defn- refresh-selection!
+  "Re-read the settings view and keep the write scope the dialog already
+   chose. Returns the selection."
+  [api state]
+  (let [selection (or (ext/tool-selection api)
+                      {:scope :global
+                       :entries {:global [] :project []}
+                       :enabled #{}
+                       :origin {}})]
+    (swap! state (fn [st]
+                   (cond-> (assoc st :selection selection)
+                     (nil? (:scope st)) (assoc :scope (:scope selection)))))
+    selection))
 
 (defn- restore-from-branch!
   "Sync the selection with the session (pi: restoreFromBranch): the last
@@ -65,50 +84,109 @@
 
 ;; ─── The /tools dialog (pi: the ctx.ui.custom factory) ─────────────────────
 
+(defn- selection-items
+  "The SettingsList rows: one per live tool, with the effective source of
+   its current state as a label suffix."
+  [{:keys [all-tools enabled-tools selection]}]
+  (let [origin (:origin selection)]
+    (mapv (fn [t]
+            (let [tool-name (:name t)
+                  source (get origin tool-name :default)]
+              {:id tool-name
+               :label (str tool-name " [" (name source) "]")
+               :value (if (contains? enabled-tools tool-name)
+                        "enabled" "disabled")
+               :values ["enabled" "disabled"]}))
+          (sort-by :name all-tools))))
+
+(defn- scope-line
+  "The header's write-scope line: the target settings file and the entry
+   count each scope currently holds."
+  [state]
+  (let [scope (:scope @state)
+        selection (:selection @state)
+        entries (:entries selection)
+        counts (str "global " (count (:global entries))
+                    " · project " (count (:project entries)))
+        path (get-in selection [:paths scope] "settings.edn")]
+    (str (if (= :project scope) "Project" "Global") " · " path " · " counts)))
+
+(defn- dialog-header
+  [state th width]
+  (let [title (theme/bold "Tool Configuration")
+        hints (theme/fg th :muted
+                        "  tab scope · space toggle · s save · esc close")]
+    [(u/truncate-to-width (str title hints) width "")
+     (u/truncate-to-width
+      (theme/fg th :muted (str "Scope: " (scope-line state)))
+      width "")
+     ""]))
+
+(defn- save-selection!
+  "Persist the checked rows through the :enabled-tools setting in the write
+   scope. The setting is applied to the runtime, the branch entry is
+   refreshed, and the dialog re-reads its provenance. A failure leaves the
+   dialog open and reports the error."
+  [api state settings]
+  (try
+    (let [scope (:scope @state)
+          enabled (:enabled-tools @state)]
+      (doseq [t (:all-tools @state)]
+        (ext/set-tool-enabled! api (:name t) (contains? enabled (:name t))
+                               {:scope scope}))
+      ;; the setting now equals the selection: clear the session override so
+      ;; the settings, not a stale runtime set, are the source it reports
+      (ext/set-active-tools api nil)
+      (persist-state! api state)
+      (let [selection (refresh-selection! api state)]
+        (swap! state assoc :enabled-tools (:enabled selection))
+        (settings-list/settings-list-set-items!
+         settings (selection-items @state) {:preserve-state? true})
+        (ext/ui-notify api (str "Saved " (name scope) " tool selection") :info)))
+    (catch Exception e
+      (ext/ui-notify api (str "Cannot save tool selection: " (ex-message e))
+                     :error))))
+
 (defn- tools-dialog
   "Build the /tools selector component. TUI/TH/KB/CLOSE are what ui-custom
    passes to factories (pi: (tui, theme, kb, done)); the render loop
    re-renders after every input, so no explicit requestRender is needed.
    The SettingsList handles navigation, value cycling and escape itself."
   [api state _tui th _kb close]
-  (let [items (mapv (fn [t]
-                      {:id (:name t)
-                       :label (:name t)
-                       :value (if (contains? (:enabled-tools @state)
-                                             (:name t))
-                                "enabled" "disabled")
-                       :values ["enabled" "disabled"]})
-                    (sort-by :name (:all-tools @state)))
-        settings (settings-list/make-settings-list
-                  items
+  (let [settings (settings-list/make-settings-list
+                  (selection-items @state)
                   :theme (theme/get-settings-list-theme th)
-                  :max-visible (min (+ (count items) 2) 15)
+                  :max-visible (min (+ (count (:all-tools @state)) 2) 15)
                   :on-change (fn [id new-value]
                                (swap! state update :enabled-tools
                                       (if (= new-value "enabled") conj disj) id)
                                (apply-tools! api state)
                                (persist-state! api state)))
         _ (settings-list/settings-list-set-on-escape! settings
-                                                      (fn [] (close nil)))
-        c (h/compile-tree
-           [:container {}
-            [:text {:padding-x 0 :padding-y 0}
-             (theme/fg th :accent (theme/bold "Tool Configuration"))]
-            [:spacer {:lines 1}]
-            settings])]
-    ;; duck-typed component: input goes to the settings list, render and
-    ;; invalidate delegate to the container (pi: the wrapper object
-    ;; delegating handleInput to the settingsList)
-    {:render (fn [width] (protocols/render c width))
-     :handle-input (fn [data] (protocols/handle-input settings data))
-     :invalidate (fn [] (protocols/invalidate c))
-     :dispose #(h/dispose-tree! c)}))
+                                                      (fn [] (close nil)))]
+    {:render (fn [width]
+               (into (dialog-header state th width)
+                     (protocols/render settings width)))
+     :handle-input (fn [data]
+                     (cond
+                       (kb/global-match? data "tui.input.tab")
+                       (swap! state update :scope
+                              #(if (= :global %) :project :global))
+
+                       (keys/matches-key? data "s")
+                       (save-selection! api state settings)
+
+                       :else
+                       (protocols/handle-input settings data)))
+     :invalidate (fn [] (protocols/invalidate settings))
+     :dispose (fn [] (protocols/dispose settings))}))
 
 (defn- open-selector!
   "Open the /tools selector. Headless/print mode has no UI registry
    (ctx.mode !== 'tui' in pi) — notify instead of showing a dialog."
   [api state ctx]
-  (swap! state assoc :all-tools (ext/get-all-tools api))
+  (swap! state assoc :all-tools (or (ext/get-all-tools api) []))
+  (refresh-selection! api state)
   (when (or (not= :interactive (:mode ctx))
             (not (ext/ui-custom api (fn [tui th kb close]
                                       (tools-dialog api state tui th kb close)))))
@@ -118,7 +196,10 @@
   "Register the /tools command and restore the selection on session start
    and branch navigation (pi: toolsExtension)."
   [api]
-  (let [state (atom {:all-tools [] :enabled-tools #{}})]
+  (let [state (atom {:all-tools []
+                     :enabled-tools #{}
+                     :scope nil
+                     :selection nil})]
     (ext/register-command! api
                            {:name "tools"
                             :description "Enable/disable tools interactively"

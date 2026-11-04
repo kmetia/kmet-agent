@@ -137,8 +137,8 @@
 
 (defn tool-selection
   "The `/tools` dialog's one-call view: the raw :enabled-tools entries per
-   scope, the effective enabled name set and each name's origin
-   (:global, :project, :session or :default)."
+   scope, the target settings file per scope, the effective enabled name set
+   and each name's origin (:global, :project, :session or :default)."
   [api]
   ((:tool-selection api)))
 

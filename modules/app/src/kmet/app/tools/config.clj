@@ -206,6 +206,7 @@
    is the runtime `set-active-tools!` set (nil = none); when present, every
    live name is sourced from the session. Returns
    `{:scope :entries {:global [...] :project [...]}
+     :paths {:global <file> :project <file>}
      :enabled #{...} :origin {name :global|:project|:session|:default}}`."
   [live-names enabled {:keys [session]}]
   (let [global (:enabled-tools (cfg/read-global-settings-map))
@@ -215,6 +216,8 @@
     {:scope (default-scope)
      :entries {:global (entry-vector global)
                :project (entry-vector project)}
+     :paths {:global (cfg/global-settings-path)
+             :project (cfg/project-settings-path)}
      :enabled enabled
      :origin (if (some? session)
                (zipmap live (repeat :session))

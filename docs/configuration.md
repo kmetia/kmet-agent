@@ -191,8 +191,9 @@ later defaults on (an extension or MCP catalog that connects after startup is
 not silently dropped). An empty list selects no model-facing tools (a
 `:sandbox` source's tools stay callable from `run_code`). The runtime `/tools`
 selector's choice still wins over the setting until it is reset or a session
-switch clears it; persisting that choice into these keys is the next step of
-the selection work.
+switch clears it. In the TUI, `/tools` shows the file it will write (Tab
+switches global/project) and `s` persists the current selection into
+`:enabled-tools`; the branch entry still restores the session's own selection.
 
 Project settings layer over user settings for both keys: a `.kmet/settings.edn`
 list of only `+name`/`-name` entries modifies the user's list, while a list
@@ -208,7 +209,7 @@ selection, while the project scope writes the usual inherit/load/unload
 off — the run does not mount it, so the setting cannot bring it back; leave the
 row in and turn it off here, or restore the row and re-enable it.
 `kmet config` does not list extension tools or `:enabled-tools` entries yet;
-`/tools` remains the live selector for them.
+`/tools` remains the live selector and now persists that selection.
 
 The settings apply at startup, on a session switch (`/resume`, `/import` — pi
 recreates the runtime from settings there, so the outgoing session's runtime
