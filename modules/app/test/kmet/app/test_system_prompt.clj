@@ -119,6 +119,19 @@
     (is (not (str/includes? without-read "<available_skills>"))
         "skills load through read, so no read tool means no block")))
 
+(deftest the-date-line-ends-the-prompt
+  (testing "the builder's default is the local date"
+    (is (re-find #"\nCurrent date: \d{4}-\d{2}-\d{2}$" (prompt :skills []))
+        "YYYY-MM-DD as the last line"))
+  (testing "a caller can pin it"
+    (let [p (prompt :date "2026-08-03" :cwd "/work" :skills [])]
+      (is (str/ends-with? p "\nCurrent date: 2026-08-03"))
+      (is (str/includes? p "Current working directory: /work"))
+      (is (< (.indexOf p "Current working directory:") (.indexOf p "Current date:")))))
+  (testing "a custom prompt carries it too"
+    (is (str/ends-with? (prompt :custom-prompt "CUSTOM" :date "2026-08-03" :skills [])
+                        "\nCurrent date: 2026-08-03"))))
+
 (deftest a-custom-prompt-still-carries-context-and-skills
   (let [p (prompt :custom-prompt "CUSTOM"
                   :append-prompt "APPENDED"

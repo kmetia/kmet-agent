@@ -63,7 +63,8 @@
       (t/is (str/includes? result "Guidelines:"))
       (t/is (str/includes? result "- Be concise in your responses"))
       (t/is (str/includes? result "- Show file paths clearly when working with files"))
-      (t/is (str/ends-with? result "Current working directory: /tmp"))))
+      (t/is (str/includes? result "Current working directory: /tmp"))
+      (t/is (re-find #"Current date: \d{4}-\d{2}-\d{2}$" result))))
   (t/testing "tools are listed with one-line snippets"
     (let [result (skills/build-system-prompt :cwd "/tmp")]
       (t/is (str/includes? result "- read: Read file contents"))

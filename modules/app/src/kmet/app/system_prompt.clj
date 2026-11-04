@@ -119,6 +119,7 @@
      :custom-prompt — replaces the default base prompt (pi: customPrompt)
      :append-prompt — text appended after the main prompt (pi: appendSystemPrompt)
      :cwd           — current working directory (default: the process's)
+     :date          — the date line's value (default: the local date, YYYY-MM-DD)
      :context-files — seq of {:path ... :content ...} (AGENTS.md/CLAUDE.md)
      :tools         — seq of Tool records; nil means none (an engine passes
                       its ctx's tool table)
@@ -128,10 +129,16 @@
    The skills section is appended only when the read tool is available, since
    skills are loaded on demand via read (pi: hasRead check). Deviations from
    pi: no pi-docs section (kmet ships no bundled docs); the parallel-batching
-   guideline is kmet's addition (pi has no parallel-tool-call guidance)."
+   guideline is kmet's addition (pi has no parallel-tool-call guidance); the
+   `Current date` line is kept — pi dropped it because the daily change
+   invalidates the cached prompt prefix (pi f4e9ca746, #6621), while kmet
+   wants the model to know the date without running `date`. It closes the
+   prompt and is defaulted at call time, so a prompt rebuild picks up a new
+   day."
   [& {:keys [custom-prompt append-prompt cwd context-files tools
-             prompt-guidelines skills]
-      :or {cwd (str (fs/cwd))}}]
+             prompt-guidelines skills date]
+      :or {cwd (str (fs/cwd))
+           date (str (java.time.LocalDate/now))}}]
   (let [selected-tools (mapv :name tools)
         tool-set (set selected-tools)
         has-read (contains? tool-set "read")
@@ -152,7 +159,8 @@
            append-section
            project-context
            skills-block
-           "\nCurrent working directory: " prompt-cwd)
+           "\nCurrent working directory: " prompt-cwd
+           "\nCurrent date: " date)
       (let [visible-tools (filter #(contains? snippets %) selected-tools)
             tools-list (if (seq visible-tools)
                          (str/join "\n" (map (fn [name]
@@ -171,7 +179,8 @@
              append-section
              project-context
              skills-block
-             "\nCurrent working directory: " prompt-cwd)))))
+             "\nCurrent working directory: " prompt-cwd
+             "\nCurrent date: " date)))))
 
 (defn- registered-skills
   "SKILLS' effective skills in display order — one per name, from the owner
