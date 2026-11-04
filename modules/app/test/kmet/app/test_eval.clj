@@ -18,9 +18,10 @@
     (tu/mount-builtin-tools! ctx)
     {:ctx ctx :tools handle :service service}))
 
-(defn- eval! [service code]
-  ((:eval! service) {:code code
-                     :limits (script/resolve-limits nil)}))
+(defn- eval! [service code & [opts]]
+  ((:eval! service) (merge {:code code
+                            :limits (script/resolve-limits nil)}
+                           opts)))
 
 (t/deftest test-a-definition-survives-a-later-call
   (let [{:keys [service]} (eval-ctx)]
@@ -65,6 +66,49 @@
         r (tools/execute-tool tools "eval" {:code "1"} {})]
     (t/is (:is-error r))
     (t/is (str/includes? (:content r) ":eval service"))))
+
+(t/deftest test-the-tool-passes-the-output-budget
+  (let [{:keys [ctx tools]} (eval-ctx)
+        r (tools/execute-tool tools "eval"
+                              {:code "(apply str (repeat 100 \"x\"))"
+                               :max-output-bytes 20}
+                              {:ctx {:srce-ctx ctx}})]
+    (t/is (not (:is-error r)) (:content r))
+    (t/is (= :bytes (get-in r [:truncation :truncated-by])))
+    (t/is (= 20 (get-in r [:truncation :max-bytes])))))
+
+(t/deftest ^:slow test-the-tool-passes-the-timeout
+  (let [{:keys [ctx tools]} (eval-ctx)
+        r (tools/execute-tool tools "eval"
+                              {:code "(loop [] (recur))" :timeout 0.1}
+                              {:ctx {:srce-ctx ctx}})]
+    (t/is (:is-error r))
+    (t/is (= :timeout (get-in r [:details :error])))
+    (t/is (= 0.1 (get-in r [:details :timeout])))))
+
+(t/deftest ^:slow test-a-parallel-call-waits-and-starts-its-clock-after-the-lock
+  (let [{:keys [tools service]} (eval-ctx)
+        started (promise)]
+    (tools/register-tool! tools {:name "eval-test-marker"
+                                 :description "Signals that the first call started"
+                                 :parameters {:type "object" :properties {}}
+                                 :execute (fn [_]
+                                            (deliver started true)
+                                            {:content "ok"})})
+    (try
+      (let [first-call (future
+                         (eval! service
+                                (str "(deref (tools/call \"eval-test-marker\" {}))"
+                                     " (sandbox/sleep 300) :first")))
+            _ (t/is (deref started 2000 false))
+            second-call (eval! service ":second" {:timeout 0.1})]
+        (t/is (not (:is-error second-call)) (:content second-call))
+        (t/is (= ":second" (:content second-call)))
+        (t/is (< (get-in second-call [:details :elapsed-ms]) 200)
+              "the clock starts after the lock, not while waiting for it")
+        (t/is (= ":first" (:content @first-call))))
+      (finally
+        (tools/unregister-tool! tools "eval-test-marker")))))
 
 (t/deftest test-dispose-stops-the-service
   (let [{:keys [service]} (eval-ctx)]
