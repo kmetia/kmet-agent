@@ -1059,7 +1059,7 @@
                  "")]
     (render-code-call label (:code args) suffix theme width context)))
 
-(defn render-code-tool-call
+(defn render-run-code-call
   "Call line for a code tool (run_code, eval): `<label> $ <code>` plus an
    explicit timeout suffix, via the shared code-call renderer. The quiet title
    mirrors the one-line head of the same call."
@@ -1108,7 +1108,7 @@
           (tool-call-nodes context theme)
           (image-nodes context theme)))
 
-(defn render-code-tool-result
+(defn render-run-code-result
   "Result body for a code tool (run_code, eval): the shell-style body (output
    preview, truncation warning) plus the inner-call summary and attached-image
    count lines. The elapsed/took state line — the tool's own measured time when

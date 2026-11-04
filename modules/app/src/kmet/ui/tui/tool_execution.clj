@@ -46,10 +46,10 @@
             :shell :self}
    "bash"  {:call renderers/render-bash-call
             :result renderers/render-bash-result}
-   "run_code" {:call renderers/render-code-tool-call
-               :result renderers/render-code-tool-result}
-   "eval" {:call renderers/render-code-tool-call
-           :result renderers/render-code-tool-result}})
+   "run_code" {:call renderers/render-run-code-call
+               :result renderers/render-run-code-result}
+   "eval" {:call renderers/render-run-code-call
+           :result renderers/render-run-code-result}})
 
 ;; ─── Render context helper ─────────────────────────────────────────────────
 
