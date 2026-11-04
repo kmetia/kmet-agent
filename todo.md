@@ -15,12 +15,12 @@ it lives in git history. The context and token tracks are dropped too — see
 
 | track | what it fixes | status |
 |---|---|---|
-| **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | S3 done; **S4 next** |
+| **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | S3 done; **S4 next**, then S4.5 (opt-in built-ins) |
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–3 done; **step 4 next** |
 
-The cross-session selection track's config review surface and docs (S4/S5)
-remain; persistent eval lands whenever — it touches neither a wire nor the
-tool registry.
+The cross-session selection track's config review surface, opt-in built-in
+defaults and docs (S4/S4.5/S5) remain; persistent eval lands whenever — it
+touches neither a wire nor the tool registry.
 
 ## Tools: cross-session selection in both scopes
 
@@ -59,6 +59,14 @@ already exists, and give `/tools` the discovery plus a scope target.
 - **Exposure stays out.** It is a source-level property (P5's `:exposure`),
   and a project-scope exposure override would make a `:sandbox` tool
   un-disableable (`callable = … ∪ sandbox`).
+- **Opt-in built-in tools.** `run_code` and `eval` stay mounted rows but carry
+  `:default-enabled? false`. With no `:enabled-tools` or runtime selection the
+  built-in default resolves over `default-tool-names` (the built-in rows
+  without the marker), so both start off while `/config` and `/tools` can
+  enable them. This is a deliberate departure from pi's all-on default.
+  `:enabled-tools` remains absolute over all live tools (S1), so an explicit
+  live-set selection still wins; `/tools` writes `+run_code`/`+eval` when
+  opting in.
 - **`/tools` discovers, `kmet config` reviews.** The config screen never loads
   plugins (`tools/config.clj:58-60`), so it sees built-ins plus names a settings
   scope or an extension manifest names; `/tools` runs with the live registry and
@@ -89,21 +97,50 @@ already exists, and give `/tools` the discovery plus a scope target.
   `:enabled-tools` branch.
 - No plugin loading; `mounted-tool-names` (`:45-73`) unchanged.
 
+**S4.5 — opt-in built-in tools.**
+
+- Mark `:tool/run_code` and `:tool/eval` in `:bundle/minimal` with
+  `:default-enabled? false`; document the new row key in
+  `kmet.app.profile` (and the generated composition page if it prints row
+  metadata).
+- Derive `default-tool-names` from `:bundle/minimal` beside
+  `builtin-tool-names`; resolve `:default-tools` over `default-tool-names`
+  (`resolve-default-tools`, `default-tool-exclusions`,
+  `apply-default-tools!`), so an unset or modifier-only value never
+  re-enables an opt-in. Keep `builtin-tool-names` as the full list for the
+  config screen, removal patches and resume logic.
+- `tool-items` resolves an unset `:default-tools` to the opt-in default, so
+  the config rows show off; `apply-builtin-tool-toggle!` writes `+name` when
+  enabling a default-off tool and clears the entry when disabling it.
+  Default-on tools keep the `-name` behavior.
+- `/tools` save: enabling a default-off tool writes `+name` even when no
+  other delta exists, so an all-enabled save cannot collapse to an empty
+  `:enabled-tools` setting and fall back to default-off.
+- Keep the rows mounted; no ABI change. `run_code` being off leaves
+  `:sandbox` tool sources registered but unreachable from the model until it
+  is enabled — state that in the extension docs.
+
 **S5 — docs.**
 
 - `docs/configuration.md:140-196` — `:enabled-tools`, both scopes, the delta
-  rule, precedence; fix the `/reload` sentence at `:194-196` (it contradicts
-  `builtins.clj:676-679`); and say that `tool_search` is a selection row like
-  any other — naming it out of `:enabled-tools`/`:default-tools` orphans every
-  `:deferred` tool, because nothing else can promote one (S1's warn is the
-  other half).
-- `docs/pi-alignment.md:261` (settings parity; CLI flags still the gap) and
-  `:56` (no project trust — note the fail-closed argument).
+  rule, precedence, and the opt-in built-in default (`run_code`/`eval` off
+  until selected; `:enabled-tools` still wins); fix the `/reload` sentence at
+  `:194-196` (it contradicts `builtins.clj:676-679`); and say that
+  `tool_search` is a selection row like any other — naming it out of
+  `:enabled-tools`/`:default-tools` orphans every `:deferred` tool, because
+  nothing else can promote one (S1's warn is the other half).
+- `docs/examples/settings.edn`, `docs/examples/README.md` and
+  `docs/usage.md` — the built-in list no longer starts all on.
+- `modules/app/src/kmet/design.md` and `docs/pi-alignment.md:261` (settings
+  parity; CLI flags still the gap) and `:56` (no project trust — note the
+  fail-closed argument) — record the deliberate departure from pi's all-on
+  `defaultTools`.
 - `modules/app/src/kmet/extension.md` + `docs/extensions.md` (the two new ABI
   functions, a stated break), `extensions/README.md` and the `tools.clj`
-  docstring; also document the opaque `:meta` manifest key and that `:tools`
-  is a static projection for config (only properly filled entries show,
-  `/tools` is authoritative).
+  docstring; also document the opaque `:meta` manifest key, that `:tools` is a
+  static projection for config (only properly filled entries show, `/tools` is
+  authoritative), and that a default-off `run_code` leaves `:sandbox` sources
+  registered but unreachable from the model.
 
 ### Test plan
 
@@ -118,6 +155,11 @@ already exists, and give `/tools` the discovery plus a scope target.
   still validates after the ABI and dialog change.
 - ABI: project write lands in `.kmet/settings.edn` as a delta; `tool-selection`
   reports the right `:origin` per scope; global keeps modifier shape.
+- Opt-in built-ins: with no settings `run_code`/`eval` are absent from the
+  active set but present in `get-all-tools`; `:default-tools ["-bash"]` does
+  not re-enable them; `/config` rows are off and enabling writes `+run_code`;
+  `/tools` save with both opted in keeps them on (no empty-setting collapse);
+  `:enabled-tools` still wins, including its live-set base over all tools.
 - Gates: `bb test-changed`, `bb lint-changed`, `bb format-check-changed`.
 
 ### Done when
@@ -128,12 +170,15 @@ and which file Tab will write; a built-in's toggle still writes
 `:default-tools`; `kmet config` can undo a delta `/tools` wrote without loading
 a plugin; and a directory extension with a valid `:meta :tools` shows those
 rows while one without (or with a malformed list) shows none, with `/tools`
-still listing the live set.
+still listing the live set. With no tool selection, `run_code` and `eval` are
+mounted but off; a `/config` toggle applies on the next start and a `/tools`
+toggle enables them live.
 
 ## Persistent eval and eval sources
 
 Status: steps 1–3 done (the shared script layer, the file ops and the
-memory-only eval service); step 4 next.
+memory-only eval service); step 4 next. The tool is opt-in by default under
+S4.5, so step 4's tests and docs must select it explicitly.
 Decisions closed (E1–E16); independent.
 Independent of every other track; the `:on-tool` hook covers it for free (step
 1 keeps the bridge on `kmet.app.tools.invoke`).
@@ -217,7 +262,9 @@ serializes; the deadline clock starts *after* the lock is taken), and the
 kept-definition index. The context is built lazily on the first eval call —
 never at agent creation.
 
-**The tool.** `:tool/eval` joins `:bundle/minimal` beside `:tool/run_code`:
+**The tool.** `:tool/eval` joins `:bundle/minimal` beside `:tool/run_code`,
+with `:default-enabled? false` (S4.5): off until selected or enabled by
+`/config`/`/tools`.
 
 ```jsonc
 {"code": "Clojure forms. Definitions persist across calls and across sessions of this agent.",
@@ -347,7 +394,8 @@ plus ~150 moved (step 2).
    added to `run_code`'s pointing at `eval`). No persistence, no verbs.
 4. **Persistence.** The store, the kept-form set, the verbatim slice, load
    order, failures, scope inheritance, `:drop`, `:details`. `(eval/kept)` and
-   the file paths in the result land here.
+   the file paths in the result land here; tests and docs must select the
+   opt-in `:tool/eval` row explicitly (S4.5).
 5. **`:kmet/eval-source` and `:core`.** Registry fns
    (`register-eval-source!` / `unregister-` / `get-eval-sources`) in
    `kmet.app.tools.registry`; `registry-tags` + `host-tags`; the service
