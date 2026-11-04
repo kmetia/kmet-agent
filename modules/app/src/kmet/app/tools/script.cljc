@@ -1070,34 +1070,35 @@
             (throw (ex-info (str tool " interrupted")
                             {:type (tool-error-type tool "interrupt") :reason :timeout})))))))
 
+(defn- form-evaluator
+  "The one-form evaluator over SCI-CTX. With NS-ATOM, each form runs in the
+   remembered namespace and the namespace it ended in is stored back; without
+   it, a form runs in the thread's current namespace (the run_code path)."
+  [sci-ctx ns-atom]
+  (if ns-atom
+    (fn [form]
+      (let [{:keys [val ns]} (sci/eval-string+ sci-ctx form {:ns @ns-atom})]
+        (reset! ns-atom ns)
+        val))
+    (fn [form] (sci/eval-string* sci-ctx form))))
+
 (defn- start-eval-thread!
   "Start the daemon eval thread. The prelude runs here, on the eval thread,
    immediately before the user code: SCI's *ns* is per-thread, so aliases
    registered on the caller thread would not necessarily land in the
-   namespace the script evaluates in. NS-ATOM, when given, holds the
-   namespace object the previous successful call ended in: the prelude and
-   the code run there and the code's final namespace is stored back. Returns
-   {:done promise :result atom}; the thread closes the writers in its finally,
-   which ends the readers."
+   namespace the script evaluates in. Returns {:done promise :result atom};
+   the thread closes the writers in its finally, which ends the readers."
   [sci-ctx code prelude capture ns-atom]
   (let [done (promise)
         result (atom nil)
         thread (Thread. (fn []
                           (try
-                            (let [v (eval-with-io (:out-w capture) (:err-w capture)
+                            (let [eval-form (form-evaluator sci-ctx ns-atom)
+                                  v (eval-with-io (:out-w capture) (:err-w capture)
                                                   (fn []
-                                                    (let [eval-form
-                                                          (if ns-atom
-                                                            (fn [form]
-                                                              (let [{:keys [val ns]}
-                                                                    (sci/eval-string+ sci-ctx form
-                                                                                      {:ns @ns-atom})]
-                                                                (reset! ns-atom ns)
-                                                                val))
-                                                            (fn [form] (sci/eval-string* sci-ctx form)))]
-                                                      (when prelude
-                                                        (eval-form prelude))
-                                                      (eval-form code))))]
+                                                    (when prelude
+                                                      (eval-form prelude))
+                                                    (eval-form code)))]
                               (reset! result {:status :ok :value v}))
                             (catch Throwable t
                               (let [reason (:reason (ex-data t))]
