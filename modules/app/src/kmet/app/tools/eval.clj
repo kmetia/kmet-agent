@@ -28,19 +28,18 @@
   (let [code (some-> code str)]
     (if (str/blank? code)
       {:content "No code provided." :is-error true}
-      (let [service (some-> (:srce-ctx ctx) (srce/get :eval))]
-        (if-not service
-          {:content "eval needs an agent's :eval service; call it as a tool in a run."
-           :is-error true}
-          (try
-            ((:eval! service) {:code code
-                               :timeout timeout
-                               :limits (script/resolve-limits max-output-bytes)
-                               :signal signal
-                               :on-update on-update
-                               :ctx ctx})
-            (catch Exception e
-              {:content (str "Error evaluating: " (ex-message e)) :is-error true})))))))
+      (if-let [service (some-> (:srce-ctx ctx) (srce/get :eval))]
+        (try
+          ((:eval! service) {:code code
+                             :timeout timeout
+                             :limits (script/resolve-limits max-output-bytes)
+                             :signal signal
+                             :on-update on-update
+                             :ctx ctx})
+          (catch Exception e
+            {:content (str "Error evaluating: " (ex-message e)) :is-error true}))
+        {:content "eval needs an agent's :eval service; call it as a tool in a run."
+         :is-error true}))))
 
 (def definition
   "The `eval` tool's record — what the `:tool/eval` row mounts."

@@ -1075,8 +1075,8 @@
    immediately before the user code: SCI's *ns* is per-thread, so aliases
    registered on the caller thread would not necessarily land in the
    namespace the script evaluates in. NS-ATOM, when given, holds the
-   namespace object the previous call ended in: the prelude and the code run
-   there and the code's final namespace is stored back. Returns
+   namespace object the previous successful call ended in: the prelude and
+   the code run there and the code's final namespace is stored back. Returns
    {:done promise :result atom}; the thread closes the writers in its finally,
    which ends the readers."
   [sci-ctx code prelude capture ns-atom]
@@ -1086,20 +1086,18 @@
                           (try
                             (let [v (eval-with-io (:out-w capture) (:err-w capture)
                                                   (fn []
-                                                    (when prelude
-                                                      (if ns-atom
-                                                        (reset! ns-atom
-                                                                (:ns (sci/eval-string+
-                                                                      sci-ctx prelude
-                                                                      {:ns @ns-atom})))
-                                                        (sci/eval-string* sci-ctx prelude)))
-                                                    (if ns-atom
-                                                      (let [{:keys [val ns]}
-                                                            (sci/eval-string+ sci-ctx code
-                                                                              {:ns @ns-atom})]
-                                                        (reset! ns-atom ns)
-                                                        val)
-                                                      (sci/eval-string* sci-ctx code))))]
+                                                    (let [eval-form
+                                                          (if ns-atom
+                                                            (fn [form]
+                                                              (let [{:keys [val ns]}
+                                                                    (sci/eval-string+ sci-ctx form
+                                                                                      {:ns @ns-atom})]
+                                                                (reset! ns-atom ns)
+                                                                val))
+                                                            (fn [form] (sci/eval-string* sci-ctx form)))]
+                                                      (when prelude
+                                                        (eval-form prelude))
+                                                      (eval-form code))))]
                               (reset! result {:status :ok :value v}))
                             (catch Throwable t
                               (let [reason (:reason (ex-data t))]
@@ -1321,9 +1319,9 @@
    STARTED-AT/DEADLINE let a caller that serializes calls put the clock where
    the work starts; an explicit :deadline nil means no deadline (otherwise a
    :timeout computes it). NS-ATOM, when given, holds the namespace object a
-   kept context's previous call ended in — the prelude and the code start
-   there and the final namespace is stored back. EXTRA-DETAILS merges into the
-   result's :details."
+   kept context's previous successful call ended in — the prelude and the code
+   start there and the final namespace is stored back. EXTRA-DETAILS merges
+   into the result's :details."
   [{:keys [ctx] :as opts}]
   (require-tool! (:tool opts))
   (let [realm (sandbox-realm ctx)

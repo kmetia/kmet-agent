@@ -69,6 +69,7 @@
 (t/deftest test-dispose-stops-the-service
   (let [{:keys [service]} (eval-ctx)]
     ((:dispose! service))
-    (t/is (= [] ((:kept service)) ((:sources service)) ((:failures service))))
+    (t/is (= [[] [] []]
+             [((:kept service)) ((:sources service)) ((:failures service))]))
     (t/is (thrown-with-msg? clojure.lang.ExceptionInfo #"disposed"
                             (eval! service "1")))))

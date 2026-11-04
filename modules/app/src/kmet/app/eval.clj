@@ -2,10 +2,10 @@
   "The `:eval` service: one persistent SCI environment per agent.
 
    The environment is built on the first call and reused: definitions made by
-   one call are visible to the next, and the last namespace a call entered is
-   re-entered at the start of the next. One lock serializes parallel calls, and
-   the deadline clock starts after it is taken; the environment is disposed
-   with its agent (`:dispose!`).
+   one call are visible to the next, and the last namespace a successful call
+   ended in is re-entered at the start of the next. One lock serializes
+   parallel calls, and the deadline clock starts after it is taken; the
+   environment is disposed with its agent (`:dispose!`).
 
    This is the memory-only stage: nothing is written to disk, the kept index
    and eval sources are empty, and `kmet.app.tools.eval` exposes only `code`,
@@ -25,22 +25,20 @@
         sci-ctx (atom nil)
         sticky-ns (atom nil)
         disposed? (atom false)
-        context (fn []
-                  (or @sci-ctx
-                      (reset! sci-ctx
-                              (script/context (script/base-namespaces)
-                                (script/interrupt-fn interrupt "eval")
-                                "eval"))))
-        tools-handle (fn []
-                       (or (srce/get agent-ctx :tools)
-                           (throw (ex-info "the eval service needs the agent's :tools service"
-                                           {:type :eval/no-tools}))))
+        sci-context (fn []
+                      (or @sci-ctx
+                          (reset! sci-ctx
+                                  (script/context (script/base-namespaces)
+                                    (script/interrupt-fn interrupt "eval")
+                                    "eval"))))
         eval! (fn [{:keys [code timeout limits signal on-update ctx]}]
-                (let [handle (tools-handle)]
-                  (locking lock
-                    (when @disposed?
-                      (throw (ex-info "the agent's eval service is disposed"
-                                      {:type :eval/disposed})))
+                (locking lock
+                  (when @disposed?
+                    (throw (ex-info "the agent's eval service is disposed"
+                                    {:type :eval/disposed})))
+                  (let [handle (or (srce/get agent-ctx :tools)
+                                   (throw (ex-info "the eval service needs the agent's :tools service"
+                                                   {:type :eval/no-tools})))]
                     (script/run {:tool "eval"
                                  :code code
                                  :timeout timeout
@@ -48,7 +46,7 @@
                                  :signal signal
                                  :ctx ctx
                                  :on-update on-update
-                                 :sci-ctx (context)
+                                 :sci-ctx (sci-context)
                                  :interrupt interrupt
                                  :ns-atom sticky-ns
                                  :get-all-tools #(registry/get-all-tools handle)
@@ -56,9 +54,9 @@
                                  :select-tools registry/select-tools
                                  :execute-tool #(registry/execute-tool handle %1 %2 %3)}))))]
     {:eval! eval!
-     :kept (fn [] [])
-     :sources (fn [] [])
-     :failures (fn [] [])
+     :kept (constantly [])
+     :sources (constantly [])
+     :failures (constantly [])
      :dispose! (fn []
                  (locking lock
                    (reset! disposed? true)
