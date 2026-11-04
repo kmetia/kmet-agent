@@ -178,8 +178,10 @@ toggle enables them live.
 
 Status: steps 1–3 done (the shared script layer, the file ops and the
 memory-only eval service); step 4 next. The tool is opt-in by default under
-S4.5, so step 4's tests and docs must select it explicitly.
-Decisions closed (E1–E16); independent.
+S4.5, so step 4's tests and docs must select it explicitly. E17 moves the
+Clojure editing engine and the edit verbs into core; the rest of the clojure
+extension is a post-track task at the end of this section.
+Decisions closed (E1–E17); independent.
 Independent of every other track; the `:on-tool` hook covers it for free (step
 1 keeps the bridge on `kmet.app.tools.invoke`).
 Reference: nodecode (`~/src/cvstree/nodecode/`) — an SBCL agent whose one tool
@@ -239,8 +241,8 @@ Three tiers of what a script can call, and only the third is a source:
 | tier | provided by | examples | removable |
 |---|---|---|---|
 | primitives | `kmet.app.tools.script`, shared with `run_code` | `slurp`, `spit`, `sh`, `p/*`, `fs/*`, `json`, `emit`, `emit-image`, `tools/list`, `tools/describe`, `tools/call`, `(cwd)`, `(env k)`, `(now)`, `(sleep ms)`, `(spawn f)` | no |
-| eval vocabulary | the `:eval` service (it needs kept-definition state) | `(eval/kept)`, `(eval/sources)`, `(eval/help)`, `(eval/patch …)`, `(eval/forget …)` | no |
-| verbs | the `:core` eval source shipped by the eval tool, and every mounted extension's own source | `edit`, `write-file`; `clj/edit-form`, `clj/replace-sexp`, `clj/paren-repair` | yes (`{:core false}`) |
+| eval vocabulary | the `:eval` service (it needs kept-definition state) | `(eval/kept)`, `(eval/sources)`, `(eval/help)`, `(eval/patch …)`, `(eval/forget …)`, `(eval/edit-form …)` | no |
+| verbs | the `:core` eval source shipped by the eval tool (including the Clojure editing verbs after E17), and every mounted extension's own source | `edit`, `write-file`, `clj/edit-form`, `clj/replace-sexp`, `clj/paren-repair`; extension-specific verbs | yes (`{:core false}`) |
 
 **The service.** `:eval` is provided per agent by the agents factory
 (`kmet.app.loop.driver`, beside `:shell`/`:sandbox`/`:permissions`), so a
@@ -421,11 +423,22 @@ plus ~150 moved (step 2).
    replacement through rewrite-clj, re-evaluate, write back to the same
    scope) and `(eval/forget 'name)`. Deferred out of v1 so the structural
    editor gets its own review.
-8. **The clojure extension's verbs.** `clj/edit-form`, `clj/replace-sexp`,
-   `clj/paren-repair`, sharing `edit_util.clj` (`edit-pipeline`,
-   `replace-form`, `format-form-in-isolation`, `repair-delimiters`) with its
-   tools; resolve paths against the source's `:cwd` (and fix the tools' own
-   process-cwd assumption, which the `:contextual?` ctx already answers).
+8. **The Clojure editing engine and verbs.** Extract
+   `kmet.extensions.clojure.edit-util` to `kmet.libs.clj-edit` — the shared
+   engine (`edit-pipeline`, `edit-source`, `replace-form`,
+   `format-form-in-isolation`, `repair-delimiters`, parse and duplicate
+   checks) — and have both the clojure extension's tools and the eval core
+   require it. The `:core` source always ships `clj/edit-form`,
+   `clj/replace-sexp` and `clj/paren-repair` (map args and result parity with
+   the tools), so the rich editor needs neither `:ext/clojure` nor a tool
+   schema. Add the live `eval/edit-form`: find the kept definition's file,
+   apply the edit to the source, re-evaluate, then write and update the index
+   (`edit-source` is the pure step); `eval/patch` stays the minimal subform
+   op. The extension keeps the tools, hooks and skill and drops its eval
+   source (extension-specific verbs may return later); it is not added to
+   `:bundle/minimal`. Resolve paths against the source `:cwd` in the verbs and
+   `(:cwd ctx)` in the tools, which become `:contextual?`; no process-cwd
+   assumption (E17).
 9. **Docs and catalog.** `docs/architecture.md` § Service catalog (`:eval`) and
    § Tools and the script sandbox (the eval tool, the extraction, and the
    scoping of "a `def` in one call is invisible to the next" to `run_code`);
@@ -433,7 +446,8 @@ plus ~150 moved (step 2).
    `store`/`load` half and the extension analogue are no longer missing);
    `modules/app/src/kmet/design.md` § Open at HEAD 5 (one line: a persistent
    context makes Jolt's `eval-in` more attractive later; the decision is
-   unchanged).
+   unchanged); the tier table and the clojure extension's remaining surface
+   (E17 and the post-track task).
 
 ### Test plan
 
@@ -459,9 +473,13 @@ plus ~150 moved (step 2).
   contributes nothing; a source contributing `user` is refused; a source that
   captures `:verbs` past its call is documented as unsupported (no test);
   the `/eval-sources` output names sources, kept definitions and failures.
-- **Step 8:** in `extensions/clojure/test`, `(clj/edit-form …)` and
-  `clojure_edit` on the same fixture produce identical bytes; a bad form
-  produces the tool's message.
+- **Step 8:** the shared engine's tests; `(clj/edit-form …)` and
+  `clojure_edit` on the same fixture produce identical bytes and the same
+  bad-form message, with the verb core and the tool present only when
+  `:ext/clojure` is mounted; `eval/edit-form` updates the live definition,
+  writes only after a successful re-eval, and leaves the file/index untouched
+  on failure; relative paths resolve under the source `:cwd` while the process
+  cwd differs.
 - **Both hosts:** the eval tests run under babashka and Jolt's views
   (`bb test-changed` plus `jolt test` where the tree has it); `sci/init`
   once per agent and the `swap!`-based `seed!` are the two host-sensitive
@@ -539,8 +557,8 @@ service (a source contributing to `user`, `clojure.core`, `tools`,
 `sources-fn` receives `:verbs` — the same fns the script calls — so an
 extension's own logic can compose `(edit …)` without `kmet.app.*` becoming
 requirable and without moving the file ops or the mutation lock into `libs`.
-A libs extraction happens only if a consumer needs the op *outside* a source
-(a non-extension caller), which none does today.
+A libs extraction happens when a consumer needs the op *outside* a source; E17
+is that consumer for the Clojure engine (`kmet.libs.clj-edit`).
 
 **E12 — discovery is in-code, plus one read-only command.** `(eval/sources)`,
 `(eval/kept)`, `(eval/help)` and `/eval-sources`; no system-prompt section.
@@ -548,10 +566,12 @@ A dynamic per-agent section sits in the cached prefix and varies per agent,
 so it would invalidate the whole prefix every time one changed. A source that
 needs unprompted presence registers a skill, the existing seam.
 
-**E13 — `:core` ships file verbs only.** `edit` and `write-file` are the
-two operations a bare profile (no extensions mounted) needs to loop over
-files; everything tool-specific comes from the extension that owns the tool —
-Clojure editing from the clojure extension, search verbs from a future one.
+**E13 — `:core` ships the language-neutral file verbs plus the Clojure editing
+verbs.** `edit` and `write-file` are the two operations a bare profile (no
+extensions mounted) needs to loop over files; `clj/edit-form`,
+`clj/replace-sexp` and `clj/paren-repair` join them after E17 because `eval`
+is a Clojure environment and the engine is bundled. Other tool-specific verbs
+(search, nREPL, …) still come from the extension that owns the tool.
 `read`/`ls`/`glob`/`grep` are deliberately absent: `slurp` and the `fs` alias
 cover them, and a pure-Clojure grep would need gitignore and binary-file
 rules we would get wrong (`rg` via `sh` is the better answer).
@@ -566,8 +586,8 @@ like tool sources); auto-save on any definition.
 
 **E15 — names closed.** `/eval-sources` (the alternative `/eval` is recorded
 and declined for v1: a read-only report that looks like an evaluator invites
-the wrong expectation); `clj/*` for the clojure extension's verbs (not the
-tool names `clojure_*`, and never bare).
+the wrong expectation); `clj/*` for the Clojure verbs (core-provided after
+E17; not the tool names `clojure_*`, and never bare).
 
 **E16 — the service is built-in; the verbs are the extension point.** `:eval`
 is provided by the agents factory and its engine lives in `kmet.app.eval` — an
@@ -587,6 +607,38 @@ extensions are never loaded by default — every profile naming the row anyway.
 The service is provided unconditionally by the factory (lazy, zero cost until
 the first call), so removing `:tool/eval` leaves a service with no reader, the
 same accepted shape as `:sandbox` without `:tool/run_code`.
+
+**E17 — the Clojure editing engine and the edit verbs are core; the tools stay
+an extension.** `eval` is a Clojure environment, and the engine's deps
+(rewrite-clj, cljfmt, edamame, parinferish) are already bundled, so the
+language/dependency case for keeping the editor extension-only does not hold.
+The engine moves to `kmet.libs.clj-edit`; the `:core` source always provides
+`clj/edit-form`, `clj/replace-sexp`, `clj/paren-repair` and the live
+`eval/edit-form` (write only after a successful re-eval). The clojure
+extension keeps `clojure_edit` and its deferred refinements as tools, plus the
+hooks and skill; mounting it is no longer required for the verbs, and it is
+not added to `:bundle/minimal`. This supersedes E11's "no libs extraction"
+condition and E13's Clojure clause. The rest of the extension is reconsidered
+by the post-track task below.
+
+## Post-track task: the rest of the clojure extension
+
+After the eval tool and E17's core verbs land, reconsider the remaining
+clojure extension surface: the `clojure_edit` and deferred
+`clojure_edit_replace_sexp`/`clojure_paren_repair` tools, the paren-check
+hooks, the `clojure-edit` skill, `clojure_eval` (nREPL), and the `:ext/clojure`
+row itself. Decide with usage data (tool calls vs. eval verb calls,
+schema/prompt cost, nREPL use), not in advance:
+
+- **Promote** the rest into core (or a `:bundle/clojure` recommended by
+  default) if the tools are expected everywhere and the eval verbs do not
+  cover direct tool calls.
+- **Drop** the extension if the eval verbs make the tools redundant and the
+  hooks/skill/nREPL do not justify a separate artifact; keep the shared
+  `kmet.libs.clj-edit` engine in core and move nREPL only if it has a home.
+
+Do not duplicate the engine in either outcome. Record the decision here and
+update `docs/extensions.md`/`extension.md` with the chosen surface.
 
 ## Deferred: context and token tracks
 
