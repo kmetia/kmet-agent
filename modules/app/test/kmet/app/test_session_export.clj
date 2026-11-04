@@ -206,6 +206,21 @@
       (t/is (str/includes? html "↓20"))
       (t/is (str/includes? html "Cost: $0.010")))))
 
+(t/deftest test-export-skips-tool-change-markers
+  ;; a :tool-change entry projects to a wire-only marker, never a chat row:
+  ;; the export lists messages, so no empty role bubble appears
+  (let [sess (make-session)]
+    (s/append-entry sess {:role :tool-change
+                          :added [{:name "a" :description "a"
+                                   :parameters {:type "object" :properties {}}}]
+                          :removed ["b"]})
+    (s/append-entry sess {:role :user :content "q"})
+    (s/append-entry sess {:role :assistant :content "a"})
+    (let [html (se/session->html sess)]
+      (t/is (not (str/includes? html "tool-change")))
+      (t/is (str/includes? html "1 user"))
+      (t/is (str/includes? html "1 assistant")))))
+
 (t/deftest test-export-skips-turn-markers
   ;; a :turn-start marker is a log fact for the tree, not a message: the
   ;; export lists messages, so no empty role bubble appears

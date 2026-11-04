@@ -277,14 +277,19 @@
    :context-edit are metadata/state and excluded (a :context-edit entry's
    effect is applied by build-context-messages, not as a message of its own;
    a :turn-start marker is a log fact for the tree — the model never sees a
-   turn boundary). A :tool-change entry projects nothing either: the wire
-   receives its delta as a request option (`loop/state`'s tool-change fold),
-   not as a message the model reads. Excluded :bash entries are kept here and
-   dropped later by the LLM
-   conversion (pi: convertToLlm filters excludeFromContext)."
+   turn boundary). A :tool-change entry projects to a wire-only marker at the
+   entry's position — {:role :tool-change :added [...] :removed [...]} — so
+   the provider sees the declared-set delta where it was recorded; the chat
+   replay, export and tree still skip it. Excluded :bash entries are kept here
+   and dropped later by the LLM conversion (pi: convertToLlm filters
+   excludeFromContext)."
   [entry]
   (case (:role entry)
     (:compaction :branch-summary) [entry]
+    :tool-change
+    [{:role :tool-change
+      :added (:added entry)
+      :removed (:removed entry)}]
     :custom-message
     [{:role :custom
       :custom-type (:custom-type entry)

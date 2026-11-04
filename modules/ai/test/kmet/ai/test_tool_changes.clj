@@ -1,10 +1,12 @@
 (ns kmet.ai.test-tool-changes
-  "The three wires that can anchor a declared-set change in place: Anthropic's
-   inline tool blocks, the Responses ladder, and Kimi's tool-bearing system
-   message. The app records the change history separately from the message
-   stream, so every test passes `:tool-changes` directly."
+  "The wires that can anchor a declared-set change in place: Anthropic's
+   inline tool blocks, the Responses family's additional_tools/tool-search
+   items, and Kimi's tool-bearing system message. The app projects each
+   recorded change to a :role :tool-change marker at its transcript position,
+   so every test passes plain message vectors carrying those markers."
   (:require [clojure.test :as t]
             [kmet.ai.api.anthropic-messages :as anthropic]
+            [kmet.ai.api.openai-codex-responses :as codex]
             [kmet.ai.api.openai-completions :as completions]
             [kmet.ai.api.openai-responses :as responses]
             [kmet.ai.api.shared :as shared]
@@ -18,13 +20,19 @@
   {:name "late_tool" :description "late tool"
    :parameters {:type "object" :properties {}}})
 
+(defn- change
+  [added removed]
+  {:role :tool-change :added added :removed removed})
+
 (def ^:private messages
   [{:role :system :content [{:type :text :text "SYS"}]}
    {:role :user :content [{:type :text :text "hi"}]}])
 
-(def ^:private history
-  {:initial [base-tool]
-   :changes [{:added [late-tool] :removed []}]})
+(def ^:private history-messages
+  [{:role :system :content [{:type :text :text "SYS"}]}
+   (change [base-tool] [])
+   {:role :user :content [{:type :text :text "hi"}]}
+   (change [late-tool] [])])
 
 (defn- anthropic-model [compat]
   (models/map->Model
@@ -56,12 +64,23 @@
     :api :openai-completions :base-url "https://api.moonshot.ai/v1"
     :reasoning false :input [:text] :max-tokens 8192 :compat compat}))
 
+(defn- codex-model [compat]
+  (models/map->Model
+   {:id "gpt-5.4" :name "GPT-5.4" :provider :openai-codex
+    :api :openai-codex-responses :base-url "https://chatgpt.com/backend-api"
+    :reasoning true :input [:text]
+    :cost {:input 2.5 :output 15 :cache-read 0.25 :cache-write 0}
+    :context-window 272000 :max-tokens 128000
+    :compat compat
+    :thinking-level-map {:off "none" :low "low" :medium "medium"
+                         :high "high" :xhigh "xhigh"}}))
+
 ;; ─── Anthropic ────────────────────────────────────────────────────────────
 
 (t/deftest test-anthropic-declares-initial-tools-once-and-anchors-the-delta
-  (let [payload (anthropic/anthropic-payload (native-anthropic) nil messages
+  (let [payload (anthropic/anthropic-payload (native-anthropic) nil history-messages
                                              [base-tool late-tool] "claude-sonnet-5-5"
-                                             :short history)
+                                             :short)
         tools (:tools payload)]
     (t/is (= ["base_tool" "__kmet_deferred_placeholder__"] (mapv :name tools))
           "the top-level array holds the initial declaration and the placeholder,
@@ -79,7 +98,8 @@
       (t/is (= {:type "ephemeral"} (:cache_control (first (:content update))))
             "the trailing change takes the conversation breakpoint"))
     (t/is (true? (anthropic/anthropic-native-tool-changes? (native-anthropic)
-                                                           history [base-tool late-tool]))
+                                                           history-messages
+                                                           [base-tool late-tool]))
           "the request headers add the inline-tools beta")
     (t/is (= "inline-tools-2026-09-15"
              (get (anthropic/anthropic-request-headers
@@ -94,27 +114,34 @@
           "no native change: no beta")))
 
 (t/deftest test-anthropic-anchors-a-removal-and-a-redefinition
-  (let [payload (anthropic/anthropic-payload
-                 (native-anthropic) nil messages [base-tool] "claude-sonnet-5-5" :short
-                 {:initial [base-tool]
-                  :changes [{:added [] :removed ["base_tool"]}]})
+  (let [removal [{:role :system :content [{:type :text :text "SYS"}]}
+                 (change [base-tool] [])
+                 {:role :user :content [{:type :text :text "hi"}]}
+                 (change [] ["base_tool"])]
+        payload (anthropic/anthropic-payload
+                 (native-anthropic) nil removal [base-tool] "claude-sonnet-5-5" :short)
         blocks (-> payload :messages last :content)]
     (t/is (= ["tool_removal"] (mapv :type blocks)))
     (t/is (= "base_tool" (get-in blocks [0 :tool :name]))))
   (let [redefined (assoc base-tool :description "changed")
+        messages [{:role :system :content [{:type :text :text "SYS"}]}
+                  (change [base-tool] [])
+                  {:role :user :content [{:type :text :text "hi"}]}
+                  (change [redefined] ["base_tool"])]
         payload (anthropic/anthropic-payload
-                 (native-anthropic) nil messages [base-tool] "claude-sonnet-5-5" :short
-                 {:initial [base-tool]
-                  :changes [{:added [redefined] :removed ["base_tool"]}]})
+                 (native-anthropic) nil messages [base-tool] "claude-sonnet-5-5" :short)
         blocks (-> payload :messages last :content)]
     (t/is (= ["tool_addition"] (mapv :type blocks))
           "a same-name redefinition is an addition, not a removal")
     (t/is (= "changed" (get-in blocks [0 :tool :definition :description])))))
 
 (t/deftest test-anthropic-falls-back-to-the-current-list-without-an-initial-tool
-  (let [payload (anthropic/anthropic-payload (native-anthropic) nil messages
-                                             [late-tool] "claude-sonnet-5-5" :short
-                                             {:initial [] :changes [{:added [late-tool]}]})]
+  (let [messages [{:role :system :content [{:type :text :text "SYS"}]}
+                  (change [] [])
+                  {:role :user :content [{:type :text :text "hi"}]}
+                  (change [late-tool] [])]
+        payload (anthropic/anthropic-payload (native-anthropic) nil messages
+                                             [late-tool] "claude-sonnet-5-5" :short)]
     (t/is (= [{:name "late_tool" :description "late tool"
                :input_schema {:type "object" :properties {}}
                :cache_control {:type "ephemeral"}}]
@@ -123,28 +150,27 @@
     (t/is (= ["user"] (mapv :role (:messages payload)))
           "and no inline change block")
     (t/is (false? (anthropic/anthropic-native-tool-changes? (native-anthropic)
-                                                            {:initial []} [late-tool])))))
+                                                            messages [late-tool])))))
 
 (t/deftest test-anthropic-without-the-compat-keys-sends-the-current-array
-  (let [payload (anthropic/anthropic-payload (anthropic-model {}) nil messages
+  (let [payload (anthropic/anthropic-payload (anthropic-model {}) nil history-messages
                                              [base-tool late-tool] "claude-sonnet-5-5"
-                                             :short history)]
+                                             :short)]
     (t/is (= ["base_tool" "late_tool"] (mapv :name (:tools payload))))
     (t/is (= ["user"] (mapv :role (:messages payload))))
     (t/is (false? (anthropic/anthropic-native-tool-changes? (anthropic-model {})
-                                                            history
+                                                            history-messages
                                                             [base-tool late-tool])))))
 
 ;; ─── OpenAI Responses ─────────────────────────────────────────────────────
 
-(defn- responses-payload [model tool-changes]
-  (@#'responses/responses-payload model nil messages [base-tool late-tool]
-                                  "gpt-5.4" nil nil tool-changes))
+(defn- responses-payload [model messages]
+  (responses/responses-payload model nil messages [base-tool late-tool]
+                               "gpt-5.4" nil nil))
 
 (t/deftest test-the-folded-tool-state-is-name-sorted
   (let [{:keys [request-tools]}
-        (shared/resolve-request-tools
-         {:initial [late-tool base-tool] :changes []} :none [])]
+        (shared/resolve-request-tools [(change [late-tool base-tool] [])] :none [])]
     (t/is (= ["base_tool" "late_tool"] (mapv :name request-tools))
           "the top-level array must not depend on the history's insertion order")))
 
@@ -152,7 +178,7 @@
   (let [payload (responses-payload
                  (responses-model {:supports-mid-convo-system-messages true
                                    :supports-additional-tools true})
-                 history)
+                 history-messages)
         input (:input payload)
         additional (filter #(= "additional_tools" (:type %)) input)]
     (t/is (nil? (:tools payload))
@@ -170,11 +196,14 @@
                 input))))
 
 (t/deftest test-responses-changes-announces-a-removal-as-text
-  (let [payload (responses-payload
+  (let [messages [{:role :system :content [{:type :text :text "SYS"}]}
+                  (change [base-tool] [])
+                  {:role :user :content [{:type :text :text "hi"}]}
+                  (change [] ["base_tool"])]
+        payload (responses-payload
                  (responses-model {:supports-mid-convo-system-messages true
                                    :supports-additional-tools true})
-                 {:initial [base-tool]
-                  :changes [{:added [] :removed ["base_tool"]}]})
+                 messages)
         input (:input payload)]
     (t/is (not-any? #(and (= "additional_tools" (:type %))
                           (empty? (:tools %)))
@@ -186,7 +215,7 @@
 (t/deftest test-responses-additions-maps-a-later-tool-to-tool-search
   (let [payload (responses-payload
                  (responses-model {:supports-tool-search true})
-                 history)
+                 history-messages)
         input (:input payload)
         calls (filter #(= "tool_search_call" (:type %)) input)
         outputs (filter #(= "tool_search_output" (:type %)) input)]
@@ -200,10 +229,13 @@
           "the loaded definitions are marked deferred")))
 
 (t/deftest test-additions-folds-a-removal-into-the-top-level-list
-  (let [payload (responses-payload
+  (let [messages [{:role :system :content [{:type :text :text "SYS"}]}
+                  (change [base-tool late-tool] [])
+                  {:role :user :content [{:type :text :text "hi"}]}
+                  (change [] ["base_tool"])]
+        payload (responses-payload
                  (responses-model {:supports-tool-search true})
-                 {:initial [base-tool late-tool]
-                  :changes [{:added [] :removed ["base_tool"]}]})]
+                 messages)]
     (t/is (= ["late_tool"] (mapv :name (:tools payload)))
           "a removal cannot be anchored on an additions-only wire, so it moves
            into the top-level state")
@@ -211,7 +243,59 @@
           "nothing follows the folded removal to anchor")))
 
 (t/deftest test-responses-none-sends-the-current-list
-  (let [payload (responses-payload (responses-model {}) history)]
+  (let [payload (responses-payload (responses-model {}) history-messages)]
+    (t/is (= ["base_tool" "late_tool"] (mapv :name (:tools payload))))
+    (t/is (not-any? #(contains? #{"additional_tools" "tool_search_call"}
+                                (:type %))
+                    (:input payload)))))
+
+(t/deftest test-responses-drops-a-later-system-message
+  ;; the leading system message is the prompt; a later one is not a
+  ;; conversation role (kmet has no mid-conversation system prompt update),
+  ;; and must not be converted into a user turn
+  (let [payload (responses-payload
+                 (responses-model {})
+                 [{:role :system :content [{:type :text :text "SYS"}]}
+                  {:role :user :content [{:type :text :text "hi"}]}
+                  {:role :system :content [{:type :text :text "EXTRA"}]}
+                  {:role :assistant :content [{:type :text :text "a"}]}])]
+    (t/is (not-any? #(= "EXTRA" (str (:content %))) (:input payload)))
+    (t/is (= ["developer" "user"] (mapv :role (take 2 (:input payload)))))))
+
+;; ─── OpenAI Codex Responses ──────────────────────────────────────────────
+
+(defn- codex-payload* [model messages]
+  (codex/codex-payload model nil messages [base-tool late-tool] "gpt-5.4" nil))
+
+(t/deftest test-codex-changes-uses-the-shared-head-and-anchored-deltas
+  (let [payload (codex-payload* (codex-model {:supports-mid-convo-system-messages true
+                                              :supports-additional-tools true})
+                                history-messages)
+        input (:input payload)
+        additional (filter #(= "additional_tools" (:type %)) input)]
+    (t/is (= "SYS" (:instructions payload))
+          "the leading prompt goes to instructions")
+    (t/is (not-any? #(= "SYS" (:content %)) input)
+          "and not to a developer message")
+    (t/is (nil? (:tools payload))
+          "every tool is declared in an additional_tools item")
+    (t/is (= "additional_tools" (:type (first input)))
+          "the head item leads the input")
+    (t/is (= [["base_tool"] ["late_tool"]]
+             (mapv #(mapv :name (:tools %)) additional)))))
+
+(t/deftest test-codex-additions-maps-a-later-tool-to-tool-search
+  (let [payload (codex-payload* (codex-model {:supports-tool-search true})
+                                history-messages)
+        input (:input payload)]
+    (t/is (= ["base_tool"] (mapv :name (:tools payload)))
+          "the initial declaration is the top-level array")
+    (t/is (= ["SYS"] [(:instructions payload)]))
+    (t/is (some #(= "tool_search_call" (:type %)) input))
+    (t/is (some #(= "tool_search_output" (:type %)) input))))
+
+(t/deftest test-codex-none-sends-the-current-list
+  (let [payload (codex-payload* (codex-model {}) history-messages)]
     (t/is (= ["base_tool" "late_tool"] (mapv :name (:tools payload))))
     (t/is (not-any? #(contains? #{"additional_tools" "tool_search_call"}
                                 (:type %))
@@ -220,9 +304,9 @@
 ;; ─── OpenAI Completions (Kimi) ───────────────────────────────────────────
 
 (t/deftest test-kimi-anchors-additions-as-a-tool-bearing-system-message
-  (let [payload (@#'completions/openai-payload
+  (let [payload (completions/openai-payload
                  (completions-model {:deferred-tools-mode :kimi})
-                 nil messages [base-tool late-tool] "kimi-k3" nil nil history)
+                 nil history-messages [base-tool late-tool] "kimi-k3" nil nil)
         change (last (:messages payload))]
     (t/is (= ["base_tool"] (mapv (comp :name :function) (:tools payload)))
           "the top-level array is the initial declaration")
@@ -232,9 +316,66 @@
           "the tool-bearing system message carries no text")))
 
 (t/deftest test-completions-without-the-mode-sends-the-current-list
-  (let [payload (@#'completions/openai-payload
-                 (completions-model {}) nil messages [base-tool late-tool]
-                 "m1" nil nil history)]
+  (let [payload (completions/openai-payload
+                 (completions-model {}) nil history-messages
+                 [base-tool late-tool] "m1" nil nil)]
     (t/is (= ["base_tool" "late_tool"]
              (mapv (comp :name :function) (:tools payload))))
     (t/is (= ["system" "user"] (mapv :role (:messages payload))))))
+
+;; ─── The growing request prefix ──────────────────────────────────────────
+
+(defn- growing-prefix
+  "Each payload's items starts with the previous payload's items."
+  [items]
+  (every? (fn [[before after]]
+            (= before (subvec (vec after) 0 (count before))))
+          (partition 2 1 items)))
+
+(def ^:private conversation
+  [{:role :system :content [{:type :text :text "SYS"}]}
+   (change [base-tool] [])
+   {:role :user :content [{:type :text :text "first"}]}])
+
+(def ^:private next-turn
+  [{:role :assistant :content [{:type :text :text "answer"}]}
+   {:role :user :content [{:type :text :text "second"}]}])
+
+(def ^:private later-change
+  [(change [late-tool] [])
+   {:role :user :content [{:type :text :text "third"}]}])
+
+(t/deftest test-anthropic-keeps-a-growing-message-prefix
+  (let [model (native-anthropic)
+        payloads (mapv #(anthropic/anthropic-payload model nil %
+                                                     [base-tool late-tool]
+                                                     "claude-sonnet-5-5" :none)
+                       [(vec conversation)
+                        (into conversation next-turn)
+                        (into conversation (concat next-turn later-change))])]
+    (t/is (growing-prefix (mapv :messages payloads)))
+    (t/is (= ["base_tool" "__kmet_deferred_placeholder__"]
+             (mapv :name (:tools (last payloads))))
+          "the top-level array stays fixed across the changes")))
+
+(t/deftest test-responses-keeps-a-growing-input-prefix
+  (let [model (responses-model {:supports-mid-convo-system-messages true
+                                :supports-additional-tools true})
+        payloads (mapv #(responses-payload model %)
+                       [(vec conversation)
+                        (into conversation next-turn)
+                        (into conversation (concat next-turn later-change))])]
+    (t/is (growing-prefix (mapv :input payloads)))
+    (t/is (nil? (:tools (last payloads))))))
+
+(t/deftest test-kimi-keeps-a-growing-message-prefix
+  (let [model (completions-model {:deferred-tools-mode :kimi})
+        payloads (mapv #(completions/openai-payload model nil %
+                                                    [base-tool late-tool]
+                                                    "kimi-k3" nil nil)
+                       [(vec conversation)
+                        (into conversation next-turn)
+                        (into conversation (concat next-turn later-change))])]
+    (t/is (growing-prefix (mapv :messages payloads)))
+    (t/is (= ["base_tool"] (mapv (comp :name :function)
+                                 (:tools (last payloads)))))))

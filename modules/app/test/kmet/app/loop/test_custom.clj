@@ -44,8 +44,10 @@
           @(loop/run-agent-turn agent {:message "hi" :on-error (fn [_])}))
         (let [requests (mapv :messages @opts)]
           (t/is (= 1 (count requests)))
-          (t/is (= [:system :user :custom] (mapv :role (first requests)))
-                "the queued message rides after the user message"))
+          (t/is (= [:system :user :custom :tool-change]
+                   (mapv :role (first requests)))
+                "the queued message rides after the user message; the
+                 declared-set marker is appended by the request's reconcile"))
         (t/is (= [:turn-start :user :custom-message]
                  (mapv :role (take 3 (session/get-branch sess))))
               "persisted once, after the turn marker and the user entry")
@@ -171,7 +173,8 @@
               "the model swap reaches the first request — no turn boundary needed")
         (t/is (= :anthropic (:provider (first @requests)))
               "and its provider follows")
-        (t/is (= [:system :user :user] (mapv :role (:messages (first @requests))))
+        (t/is (= [:system :user :user :tool-change]
+                 (mapv :role (:messages (first @requests))))
               "the replaced context is what the first request sends")
         (t/is (= "checkpoint" (get-in (:messages (first @requests)) [2 :content 0 :text])))
         (t/is (not-any? #(= "checkpoint" (get-in % [:content 0 :text]))

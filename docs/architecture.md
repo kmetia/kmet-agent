@@ -381,8 +381,12 @@ and never declared. `kmet.app.loop.state/declared-tools-for` builds the live
 candidate set from the selection (`:enabled-tools` / `:default-tools`) and the
 loaded set; `sync-tool-declarations!` records an explicit selection change and
 `sync-resumed-declarations!` reconciles the recorded loadout before each
-request, both against the session's `:tool-change` history. `active-tools`
-returns that recorded fold joined with the live records — name-sorted, because
+request; both append a `:tool-change` entry and its wire marker to the live
+context. The request-time reconcile folds the context's markers, not the whole
+branch, so a compaction that dropped them re-declares the current loadout, and
+a change raised while a tool batch is executing is recorded at the next request
+boundary — never between a call and its result.
+`active-tools` returns the branch's recorded fold joined with the live records — name-sorted, because
 past array-map size a map's order is hash order and a replay of the recorded
 names must reproduce the array. A
 `tool_search`-named tool is declared only while the selection can promote
@@ -413,21 +417,28 @@ remain the promotion log, so disabling a loaded tool hides it without
 forgetting the load. `callable-tool-names` is the other half — the selection
 minus the `:model-only` tools.
 
-**A tool change is a wire delta, not a rebuilt array.** The first `:tool-change`
-entry is the initial declaration the top-level tools array carries; later
-entries ride in place. Anthropic models with
-`:supports-mid-convo-system-messages` and `:supports-mid-convo-tool-changes`
-declare the initial tools once, add a deferred placeholder and the
-`inline-tools-2026-09-15` beta, and send later entries as `tool_addition` /
-`tool_removal` blocks. Responses models use `additional_tools` items (or a
-synthetic tool-search pair where only additions are supported), and Kimi
-completions (`:deferred-tools-mode :kimi` or
-`:supports-mid-convo-tool-additions`) anchor additions as a tool-bearing
-system message. The deltas are re-sent after the conversation on each request;
-the array they extend stays byte-stable. Every other wire keeps today's
-behaviour: the current declared set goes top-level and the deltas stay out of
-the request, which is a fallback, not a regression. The history is appended,
-never rewritten, so a resume or fork keeps what it recorded.
+**A tool change is a transcript message, not a rebuilt array.** Each
+`:tool-change` entry projects to a wire-only `:role :tool-change` marker at its
+recorded position (`session/context-messages`); the chat replay and export
+still skip it (the tree keeps its compact `[tools: …]` line). The first marker
+is the initial declaration the
+top-level tools array carries; later markers ride in place. Anthropic models
+with `:supports-mid-convo-system-messages` and
+`:supports-mid-convo-tool-changes` declare the initial tools once, add a
+deferred placeholder and the `inline-tools-2026-09-15` beta, hold a marker
+until the next assistant message, and send later markers as `tool_addition` /
+`tool_removal` blocks. Responses models use `additional_tools` items at the
+marker's position (or a synthetic tool-search pair where only additions are
+supported), and Kimi completions (`:deferred-tools-mode :kimi` or
+`:supports-mid-convo-tool-additions`) emit a tool-bearing system message there.
+Every request's message list therefore extends the previous one — the delta
+sits where it was recorded, and the cached prefix survives. Every other wire
+drops the markers and sends the current declared set top-level
+(`kmet.ai.llm/send-message`), which is a fallback, not a regression. The
+request-time reconcile folds the markers in the live context, not the whole
+branch, so a compaction that drops them re-declares the current loadout. The
+history is appended, never rewritten, so a resume or fork keeps what it
+recorded.
 
 **`tool_search`** (`kmet.app.tools.search`, the `:tool/tool_search` row) is the
 tool that closes the loop: it ranks the searchable tools that are not declared

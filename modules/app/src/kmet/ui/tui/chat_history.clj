@@ -963,6 +963,8 @@
                       (if (contains? call-ids (tool-result-call-id m))
                         []
                         [(result-with-call-name m)])
+                      ;; wire-only declared-set marker: never a chat row
+                      :tool-change []
                       [m])))
           msgs)))
 

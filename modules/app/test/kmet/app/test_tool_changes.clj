@@ -42,11 +42,13 @@
                                                        :properties {}}}]
                                  :removed ["b"]})))
 
-(t/deftest test-a-tool-change-projects-to-no-message
-  (t/is (= [] (session/context-messages {:role :tool-change
-                                         :added [(tool-map "a")]
-                                         :removed ["b"]}))
-        "the record is a log fact; the wire reads the fold, not a message"))
+(t/deftest test-a-tool-change-projects-to-a-wire-marker
+  (t/is (= [{:role :tool-change :added [(tool-map "a")] :removed ["b"]}]
+           (session/context-messages {:role :tool-change
+                                      :added [(tool-map "a")]
+                                      :removed ["b"]}))
+        "the record projects to a wire-only marker at its position; the chat
+         replay, export and tree still skip the entry"))
 
 (t/deftest test-the-fold-keeps-the-last-definition-and-removes-names
   (let [entries [{:role :user :content "hi"}
@@ -149,6 +151,10 @@
                                :parameters {:type "object" :properties {}}
                                :execute (fn [_] {:content "ok"})})
       (let [resumed (support/make-agent-state :session session)]
+        ;; a real resume rebuilds the context from the session first, so the
+        ;; wire baseline is the recorded marker (prepare-request! does this at
+        ;; the request checkpoint)
+        (state/restore-session-context! resumed)
         (state/sync-resumed-declarations! resumed)
         (let [declared (into {} (map (juxt :name identity))
                              (state/active-tools resumed))]
@@ -223,29 +229,106 @@
         (tools/unregister-tool-source! h ::catalog)
         (fs/delete-tree dir)))))
 
-(t/deftest test-the-request-data-carries-the-initial-set-and-deltas
+(t/deftest test-a-compaction-re-declares-the-loadout-from-the-live-context
+  ;; the wire folds the markers in the live context, not the whole branch:
+  ;; after a compaction drops them, the next reconcile must re-declare the
+  ;; current loadout rather than record a delta against history the wire no
+  ;; longer sees (pi: declareToolChanges over the current transcript).
+  (let [{:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)]
+    (try
+      (state/sync-tool-declarations! agent)
+      (session/append-entry session {:role :compaction
+                                     :summary "summed up"
+                                     :first-kept-id nil})
+      (state/refresh-context-from-session! agent)
+      (t/is (empty? (filter #(= :tool-change (:role %)) @(:messages agent)))
+            "the compaction dropped the initial marker")
+      (state/sync-resumed-declarations! agent)
+      (let [markers (filter #(= :tool-change (:role %)) @(:messages agent))]
+        (t/is (= 1 (count markers)))
+        (t/is (= (names (state/active-tools agent))
+                 (into #{} (map :name) (:added (first markers))))
+              "the new marker declares the whole current set"))
+      (finally (fs/delete-tree dir)))))
+
+(t/deftest test-a-change-recorded-mid-batch-waits-for-the-results
+  ;; a tool_search promotion (or any selection change) lands while the
+  ;; assistant's tool calls are still executing. The marker must not split a
+  ;; call from its result, so it is recorded at the next request boundary.
+  (let [{:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)]
+    (try
+      (state/sync-tool-declarations! agent)
+      (let [before (count (changes session))]
+        (swap! (:messages agent) conj
+               {:role :assistant :content []
+                :tool-calls [{:id "tc1" :name "read" :arguments {}}]})
+        (state/set-active-tools! agent #{"read"})
+        (t/is (= before (count (changes session)))
+              "mid-batch, nothing is recorded yet")
+        (t/is (= :assistant (:role (peek @(:messages agent))))
+              "and no marker splits the call from its result")
+        (state/append-persisted-message!
+         agent {:role :tool :tool-name "read"
+                :content [{:type :tool_result :tool_use_id "tc1"
+                           :content "ok"}]})
+        (state/sync-resumed-declarations! agent)
+        (let [msgs @(:messages agent)
+              change-idx (last (keep-indexed (fn [i m]
+                                               (when (= :tool-change (:role m)) i))
+                                             msgs))
+              tool-idx (first (keep-indexed (fn [i m]
+                                              (when (= :tool (:role m)) i))
+                                            msgs))]
+          (t/is (some? change-idx))
+          (t/is (> change-idx tool-idx)
+                "the marker is recorded after the tool result")))
+      (finally (fs/delete-tree dir)))))
+
+(t/deftest test-the-request-messages-carry-the-markers-at-their-position
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session)
         sent (support/run-turn-capturing-llm agent {:message "hi"})]
     (deferred-source! h ::catalog {"deferred-a" (tool-map "deferred-a")})
     (try
-      (t/is (seq (:tool-changes sent)))
-      (let [before (:tool-changes sent)]
-        (t/is (seq (:initial before)))
-        (t/is (empty? (filter #(= "deferred-a" (:name %)) (:initial before))))
-        (state/promote-tools! agent ["deferred-a"])
-        (let [after (:tool-changes (support/run-turn-capturing-llm
-                                    agent {:message "again"}))]
-          (t/is (= (:initial before) (:initial after))
-                "the initial declaration is byte-stable across requests")
-          (t/is (some #(= "deferred-a" (:name %))
-                      (:added (first (:changes after))))
-                "the promotion is in the delta (with tool_search, which the
-                 deferred source made promotable)")
-          (t/is (not-any? #(= "deferred-a" (:name %))
-                          (:initial after))
-                "the initial declaration is fixed")))
+      (let [markers (filter #(= :tool-change (:role %)) (:messages sent))]
+        (t/is (seq markers))
+        (let [before markers]
+          (t/is (seq (:added (first before))))
+          (t/is (empty? (filter #(= "deferred-a" (:name %)) (:added (first before)))))
+          (state/promote-tools! agent ["deferred-a"])
+          (let [after (filter #(= :tool-change (:role %))
+                              (:messages (support/run-turn-capturing-llm
+                                          agent {:message "again"})))]
+            (t/is (= (:added (first before)) (:added (first after)))
+                  "the initial declaration is byte-stable across requests")
+            (t/is (some #(= "deferred-a" (:name %))
+                        (:added (last after)))
+                  "the promotion is in the marker at the recorded position")
+            (t/is (= (inc (count before)) (count after))
+                  "one new marker, appended"))))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (fs/delete-tree dir)))))
+
+(t/deftest test-a-recorded-removal-narrows-the-search-candidates
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)]
+    (deferred-source! h ::catalog {"deferred-a" (tool-map "deferred-a")})
+    (try
+      (state/sync-tool-declarations! agent)
+      (state/promote-tools! agent ["deferred-a"])
+      ;; an explicit selection removes the promoted tool; the session records it
+      (state/set-active-tools! agent #{"read"})
+      (let [resumed (support/make-agent-state :session session)
+            promotable (tools/promotable-tools (state/tool-table resumed)
+                                               (state/ctx-contributed-tools (:ctx resumed))
+                                               (state/tool-selection resumed))]
+        (t/is (not (contains? promotable "deferred-a"))
+              "a search cannot promise a tool the recorded loadout removed"))
       (finally
         (tools/unregister-tool-source! h ::catalog)
         (fs/delete-tree dir)))))

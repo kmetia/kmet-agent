@@ -119,6 +119,8 @@
                               item-id (assoc :id item-id))))))]
       (when (seq blocks) blocks))
 
+    "tool-change" nil
+
     [{:role "user" :content (responses-user-content (:content m))}]))
 
 (defn responses-tool-support
@@ -153,41 +155,12 @@
        (str/join "\n" (map #(str "- " %) names))))
 
 (defn- additional-tools-item
+  "One Responses `additional_tools` item: TOOLS declared by value at the point
+   of their change (pi: convertResponsesMessages)."
   [tools strict?]
   {:type "additional_tools"
    :role "developer"
    :tools (responses-tools tools strict?)})
-
-(defn- responses-change-items
-  "The input items for the changes after the initial declaration: an optional
-   incremental notice before each later addition, the additional_tools item,
-   and the removal text a wire that cannot remove natively needs (pi
-   convertResponsesMessages)."
-  [deltas declared? strict? role]
-  (loop [ds deltas
-         declared? declared?
-         unavailable []
-         acc []]
-    (if-let [{:keys [added removed]} (first ds)]
-      (let [redefined (into #{} (map :name) added)
-            gone (vec (remove redefined removed))
-            ;; pi announces an addition, not a bare removal
-            notice (when (and declared? (seq added))
-                     {:role role
-                      :content (incremental-tools-notice unavailable)})
-            additional (when (seq added)
-                         (additional-tools-item added strict?))
-            removal-text (when (seq gone)
-                           {:role role
-                            :content (tool-removal-notice gone)})]
-        (recur (next ds)
-               (or declared? (boolean additional))
-               (into unavailable gone)
-               (cond-> acc
-                 notice (conj notice)
-                 additional (conj additional)
-                 removal-text (conj removal-text))))
-      acc)))
 
 (defn- tool-search-pair
   "pi's synthetic load for an addition-only transport: a completed client-side
@@ -207,32 +180,113 @@
       :status "completed"
       :tools (responses-tools tools strict? true)}]))
 
-(defn responses-messages
-  "Map agent messages to OpenAI Responses input items (pi
-   convertResponsesMessages): the system prompt becomes the first developer
-   message (system when the model doesn't support the developer role) —
-   unless INCLUDE-SYSTEM? is false, when the caller carries the system
-   prompt itself (codex: the instructions field) — followed by the
-   converted messages. Declared-set deltas are added by the caller
-   (`responses-payload`), not encoded as transcript messages."
-  ([model messages]
-   (responses-messages model messages true))
-  ([model messages include-system?]
-   (let [system (first (for [m messages :when (= :system (:role m))]
-                         (content-text (:content m))))
-         ;; raw compat, not resolved-openai-compat: pi's responses compat
-         ;; defaults supportsDeveloperRole to true, the completions detection
-         ;; derives it per family — resolving here would change the role
-         role (responses-instruction-role model)]
-     (loop [msgs (remove #(= :system (:role %)) messages)
-            idx 0
-            acc []]
-       (if-let [m (first msgs)]
-         (recur (rest msgs) (inc idx) (into acc (responses-message-items model m idx)))
-         (into (if (and system (not= false include-system?))
-                 [{:role role :content system}]
-                 [])
-               acc))))))
+(defn- responses-marker-items
+  "The input items for one anchored declared-set marker, plus the walk state a
+   later marker needs: the names still unavailable and whether an
+   additional_tools item has been emitted (pi: convertResponsesMessages).
+   `:changes` emits an incremental notice before every later addition, the
+   additional_tools item, then the removal text; `:additions` maps the
+   addition to the synthetic tool-search pair."
+  [marker support strict? role declared-additional? unavailable]
+  (let [added (:added marker)
+        redefined (into #{} (map :name) added)
+        gone (vec (remove redefined (:removed marker)))]
+    (case support
+      :changes
+      (let [available (reduce disj unavailable (map :name added))
+            notice (when (and declared-additional? (seq added))
+                     {:role role
+                      :content (incremental-tools-notice available)})
+            additional (when (seq added)
+                         (additional-tools-item added strict?))
+            removal (when (seq gone)
+                      {:role role
+                       :content (tool-removal-notice gone)})]
+        {:items (cond-> []
+                  notice (conj notice)
+                  additional (conj additional)
+                  removal (conj removal))
+         :unavailable (into available gone)
+         :declared-additional? (or declared-additional? (boolean additional))})
+
+      {:items (if (and (= :additions support) (seq added))
+                (tool-search-pair added strict? (map :name added))
+                [])
+       :unavailable unavailable
+       :declared-additional? declared-additional?})))
+
+(defn- responses-marker-walk
+  "Advance WALK over one declared-set marker. WALK carries the marker index,
+   the message index, the folded prefix length and the head marker that was
+   already consumed, plus the running notice state; the result adds :items and
+   the updated values. A folded or consumed marker contributes nothing."
+  [{:keys [marker-index msg-index folded head-marker declared-additional? unavailable]
+    :as walk}
+   marker support strict? role]
+  (let [skip-head? (and head-marker (zero? marker-index))
+        state (if (and (>= marker-index folded) (not skip-head?))
+                (responses-marker-items marker support strict? role
+                                        declared-additional? unavailable)
+                {:items []
+                 :unavailable unavailable
+                 :declared-additional? declared-additional?})]
+    (assoc walk
+           :marker-index (inc marker-index)
+           :msg-index (if skip-head? msg-index (inc msg-index))
+           :items (:items state)
+           :unavailable (:unavailable state)
+           :declared-additional? (:declared-additional? state))))
+
+(defn responses-input
+  "The Responses family's request input over MESSAGES: the converted message
+   items with every declared-set marker resolved at its transcript position
+   for this model's transport (`responses-tool-support`). The leading system
+   prompt becomes the first developer message unless INCLUDE-SYSTEM? is false
+   (codex carries it in `instructions`); a `:changes` head marker is emitted
+   before it, so the initial declaration leads the input as pi's leading
+   system message does. Returns {:input [...] :request-tools [...]}: the
+   latter is the top-level array (empty for a `:changes` transport)."
+  [model-record messages tools include-system?]
+  (let [compat (resolved-openai-compat model-record)
+        support (responses-tool-support compat)
+        strict? (:supports-strict-mode compat)
+        {:keys [request-tools folded]} (shared/resolve-request-tools messages support tools)
+        role (responses-instruction-role model-record)
+        head-marker (when (= :changes support)
+                      (first (shared/tool-change-messages messages)))
+        head-state (when head-marker
+                     (responses-marker-items head-marker support strict? role false #{}))]
+    (loop [msgs messages
+           walk {:marker-index 0
+                 :msg-index 0
+                 :folded folded
+                 :head-marker head-marker
+                 :declared-additional? (boolean (:declared-additional? head-state))
+                 :unavailable (or (:unavailable head-state) #{})}
+           leading? true
+           acc (or (:items head-state) [])]
+      (if-let [m (first msgs)]
+        (let [msg-role (:role m)]
+          (cond
+            (= msg-role :tool-change)
+            (let [walk (responses-marker-walk walk m support strict? role)]
+              (recur (rest msgs) walk leading? (into acc (:items walk))))
+
+            ;; the leading system message is the prompt; later ones are not a
+            ;; conversation role kmet supports, and the old conversion dropped
+            ;; them
+            (= msg-role :system)
+            (recur (rest msgs) walk false
+                   (if (and leading? include-system?)
+                     (conj acc {:role role :content (content-text (:content m))})
+                     acc))
+
+            :else
+            (recur (rest msgs)
+                   (update walk :msg-index inc)
+                   false
+                   (into acc (responses-message-items model-record m (:msg-index walk))))))
+        {:input acc :request-tools request-tools}))))
 
 (defn responses-tools
   "pi convertResponsesTools: flat function tools with the JSON schema. A
@@ -280,68 +334,48 @@
    prompt-cache params (key from the session id; a 24h retention when long is
    supported, unless the model's compat takes explicit-mode options — then the
    options carry the window instead: explicit mode for :none, a 30m ttl for
-   long), then :sampling-params merged last so their keys win. TOOL-CHANGES is
-   the recorded declared-set history: a mid-conversation-capable model puts the
-   initial declaration in an additional_tools item at the head and anchors
-   later deltas; otherwise the current list goes top-level."
-  ([model-record effort messages tools model-id cache-retention session-id]
-   (responses-payload model-record effort messages tools model-id cache-retention session-id nil))
-  ([model-record effort messages tools model-id cache-retention session-id tool-changes]
-   (let [effort-reasoning (when (and (:reasoning model-record) effort)
-                            {:effort (models/effort-value model-record effort)
-                             :summary "auto"})
-         off-reasoning (when (and (:reasoning model-record) (nil? effort)
-                                  (not (models/off-explicitly-null? model-record)))
-                         {:effort (or (get-in model-record [:thinking-level-map :off]) "none")})
-         reasoning (or effort-reasoning off-reasoning)
-         retention (or cache-retention :short)
-         caching? (not= :none retention)
-         ;; the shared compat resolution (pi getCompat): detection defaults,
-         ;; every explicit non-nil key survives
-         compat (resolved-openai-compat model-record)
-         explicit? (:supports-explicit-prompt-cache-mode compat)
-         long? (and (= :long retention) (:supports-long-cache-retention compat))
-         ;; pi getPromptCacheOptions: on an explicit-mode model the options carry
-         ;; the cache window and the retention param is omitted instead
-         cache-options (when explicit?
-                         (cond
-                           (= :none retention) {:mode "explicit"}
-                           long? {:ttl "30m"}))
-         tool-support (responses-tool-support compat)
-         strict? (:supports-strict-mode compat)
-         {:keys [request-tools anchored changes]}
-         (shared/resolve-request-tools tool-changes tool-support tools)
-         base-input (responses-messages model-record messages)
-         instruction-role (responses-instruction-role model-record)
-         head-item (when (and (= tool-support :changes)
-                              (seq (:added (first changes))))
-                     (additional-tools-item (:added (first changes)) strict?))
-         delta-items (when (= tool-support :changes)
-                       (responses-change-items (rest anchored) (boolean head-item)
-                                               strict? instruction-role))
-         anchored-items (when (= tool-support :additions)
-                          (into []
-                                (mapcat (fn [change]
-                                          (when (seq (:added change))
-                                            (tool-search-pair (:added change) strict?
-                                                              (map :name (:added change)))))
-                                        anchored)))
-         input (into [] (concat (when head-item [head-item])
-                                base-input delta-items anchored-items))]
-     (cond-> {:model model-id
-              :input input
-              :stream true
-              :store false}
-       (seq request-tools) (assoc :tools (responses-tools request-tools strict?))
-       (:max-tokens model-record) (assoc :max_output_tokens (max (:max-tokens model-record) 16))
-       reasoning (assoc :reasoning reasoning)
-       (or effort-reasoning
-           (and (= :xai (models/provider-family model-record)) (:reasoning model-record)))
-       (assoc :include ["reasoning.encrypted_content"])
-       (and caching? session-id) (assoc :prompt_cache_key (clamp-prompt-cache-key session-id))
-       (and long? (not explicit?)) (assoc :prompt_cache_retention "24h")
-       cache-options (assoc :prompt_cache_options cache-options)
-       (seq (:sampling-params model-record)) (merge (:sampling-params model-record))))))
+   long), then :sampling-params merged last so their keys win. The declared-set
+   markers in MESSAGES are resolved by `responses-input`: a
+   mid-conversation-capable model puts the initial declaration in an
+   additional_tools item at the head and anchors later deltas; otherwise the
+   current list goes top-level."
+  [model-record effort messages tools model-id cache-retention session-id]
+  (let [effort-reasoning (when (and (:reasoning model-record) effort)
+                           {:effort (models/effort-value model-record effort)
+                            :summary "auto"})
+        off-reasoning (when (and (:reasoning model-record) (nil? effort)
+                                 (not (models/off-explicitly-null? model-record)))
+                        {:effort (or (get-in model-record [:thinking-level-map :off]) "none")})
+        reasoning (or effort-reasoning off-reasoning)
+        retention (or cache-retention :short)
+        caching? (not= :none retention)
+        ;; the shared compat resolution (pi getCompat): detection defaults,
+        ;; every explicit non-nil key survives
+        compat (resolved-openai-compat model-record)
+        explicit? (:supports-explicit-prompt-cache-mode compat)
+        long? (and (= :long retention) (:supports-long-cache-retention compat))
+        ;; pi getPromptCacheOptions: on an explicit-mode model the options carry
+        ;; the cache window and the retention param is omitted instead
+        cache-options (when explicit?
+                        (cond
+                          (= :none retention) {:mode "explicit"}
+                          long? {:ttl "30m"}))
+        strict? (:supports-strict-mode compat)
+        {:keys [input request-tools]} (responses-input model-record messages tools true)]
+    (cond-> {:model model-id
+             :input input
+             :stream true
+             :store false}
+      (seq request-tools) (assoc :tools (responses-tools request-tools strict?))
+      (:max-tokens model-record) (assoc :max_output_tokens (max (:max-tokens model-record) 16))
+      reasoning (assoc :reasoning reasoning)
+      (or effort-reasoning
+          (and (= :xai (models/provider-family model-record)) (:reasoning model-record)))
+      (assoc :include ["reasoning.encrypted_content"])
+      (and caching? session-id) (assoc :prompt_cache_key (clamp-prompt-cache-key session-id))
+      (and long? (not explicit?)) (assoc :prompt_cache_retention "24h")
+      cache-options (assoc :prompt_cache_options cache-options)
+      (seq (:sampling-params model-record)) (merge (:sampling-params model-record)))))
 
 (defn responses-dynamic-headers
   "The per-request headers beyond the base: session-affinity (gated on
@@ -377,7 +411,7 @@
             retention (or cache-retention :short)
             payload (on-payload opts
                                 (responses-payload model-record effort messages tools model-id
-                                                   retention session-id (:tool-changes opts)))
+                                                   retention session-id))
             headers (responses-request-headers model-record provider-record api-key
                                                session-id retention messages)
             response (ai-http/request url

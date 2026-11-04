@@ -59,9 +59,10 @@
               ((:send! agents) handle "hello" {:target :next-turn})
               (is (= :completed (:outcome (deref settled 20000 ::timeout)))
                   "the booted composition runs a turn and settles it once")
-              (is (= [:user :assistant]
+              (is (= [:user :tool-change :assistant]
                      (mapv :role @(:messages (:agent handle))))
-                  "and the turn is the agent's context")))
+                  "and the turn is the agent's context, the declared-set marker
+                   included")))
           (finally (unsubscribe))))
       (finally (srce/dispose-subtree! (:ctx boot))
                (fs/delete-tree sessions-dir)))))

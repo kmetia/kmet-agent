@@ -6,10 +6,10 @@
    [kmet.ai.api.sse :as sse]
    [clojure.string :as str]
    [kmet.ai.models :as models]
-   [kmet.ai.api.openai-responses :refer [responses-messages responses-tools]]
+   [kmet.ai.api.openai-responses :refer [responses-input responses-tools]]
    [kmet.libs.http :refer [transport-error-message]]
    [kmet.ai.message :refer [content-text]]
-   [kmet.ai.api.shared :refer [clamp-prompt-cache-key on-payload request-headers responses-events-handler effective-total-timeout-ms headers-timeout-ms]]))
+   [kmet.ai.api.shared :refer [clamp-prompt-cache-key on-payload request-headers responses-events-handler effective-total-timeout-ms headers-timeout-ms resolved-openai-compat]]))
 
 (def codex-default-base-url
   "pi DEFAULT_CODEX_BASE_URL: the ChatGPT backend the codex endpoint
@@ -71,28 +71,34 @@
                       "x-client-request-id" session-id)))
 
 (defn codex-payload
-  "pi buildRequestBody: the codex envelope over the shared responses
-   messages/tools — the system prompt goes to the instructions field (not a
-   developer message), text verbosity low, reasoning content always
-   requested, tool_choice auto + parallel_tool_calls, the prompt-cache key
-   when caching. Tools/reasoning/sampling-params merged after the envelope."
+  "pi buildRequestBody: the codex envelope over the shared responses input —
+   the system prompt goes to the instructions field (not a developer message),
+   text verbosity low, reasoning content always requested, tool_choice auto +
+   parallel_tool_calls, the prompt-cache key when caching. The declared-set
+   markers in MESSAGES are resolved by the same `responses-input` the
+   openai-responses wire uses, with the leading prompt excluded: the Codex
+   input takes the head additional_tools item and the anchored deltas at their
+   recorded positions. Tools/reasoning/sampling-params merged after the
+   envelope."
   [model-record effort messages tools model-id codex-session-id]
   (let [system (first (for [m messages :when (= :system (:role m))]
                         (content-text (:content m))))
+        compat (resolved-openai-compat model-record)
+        strict? (:supports-strict-mode compat)
+        {:keys [input request-tools]} (responses-input model-record messages tools false)
         reasoning (when (and (:reasoning model-record) effort)
                     {:effort (models/effort-value model-record effort) :summary "auto"})]
     (cond-> {:model model-id
              :store false
              :stream true
              :instructions (or system "You are a helpful assistant.")
-             :input (responses-messages model-record messages false)
+             :input input
              :text {:verbosity "low"}
              :include ["reasoning.encrypted_content"]
              :tool_choice "auto"
              :parallel_tool_calls true}
       codex-session-id (assoc :prompt_cache_key codex-session-id)
-      (seq tools) (assoc :tools (responses-tools tools
-                                                 (:supports-strict-mode (:compat model-record))))
+      (seq request-tools) (assoc :tools (responses-tools request-tools strict?))
       reasoning (assoc :reasoning reasoning)
       (seq (:sampling-params model-record)) (merge (:sampling-params model-record)))))
 

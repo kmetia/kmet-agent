@@ -263,9 +263,10 @@
               "a turn without tool calls carries no result ids")
         (t/is (= (:id (last (filter #(= :assistant (:role %)) branch)))
                  (:message-entry-id final-turn)))
-        (t/is (= [:user :assistant :tool]
+        (t/is (= [:user :tool-change :assistant :tool]
                  (mapv :role (:context-messages tool-turn)))
-              "the preview carries the projected context messages")
+              "the preview carries the projected context messages, the
+               declared-set marker included")
         (t/is (= [:turn-start :user :tool-change :assistant :tool]
                  (mapv (comp :role :source) (:context-entries tool-turn)))
               "the preview carries the whole projection, the turn marker and the
@@ -340,9 +341,14 @@
       (let [branch (session/get-branch (:session agent))
             user-id (:id (first (filter #(= :user (:role %)) branch)))
             before (state/get-context agent)]
-        (t/is (= ["run" "first"] (mapv #(get-in % [:content 0 :text]) before)))
+        (t/is (= ["run" "first"]
+                 (mapv #(get-in % [:content 0 :text])
+                       (remove (comp #{:tool-change} :role) before))))
         (t/is (= :context-edit (:role (state/append-context-edit! agent user-id nil))))
-        (t/is (= ["first"] (mapv #(get-in % [:content 0 :text]) (state/get-context agent)))
+        (t/is (= ["first"]
+                 (mapv #(get-in % [:content 0 :text])
+                       (remove (comp #{:tool-change} :role)
+                               (state/get-context agent))))
               "the omitted message leaves the live context")
         (t/is (= ["run" "first"]
                  (mapv #(get-in % [:content 0 :text])
@@ -585,7 +591,8 @@
                                      :on-error (fn [_])}))
       (let [boundary (first @boundaries)]
         (t/is (= :agent-before-settle (:type boundary)))
-        (t/is (= [:user :assistant] (mapv :role (:context-messages boundary)))
+        (t/is (= [:user :tool-change :assistant]
+                 (mapv :role (:context-messages boundary)))
               "the projected context messages")
         (t/is (= (mapv :id (session/get-branch (:session agent)))
                  (mapv (comp :id :source) (:context-entries boundary)))

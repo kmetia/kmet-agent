@@ -217,14 +217,15 @@ list until one of those happens.
 
 The declared set is recorded in the session (`:tool-change` entries carrying
 the declarations by value), so a resumed or forked session sends what it was
-sent rather than re-deriving the list from the current registry. On Anthropic
-models that accept mid-conversation tool changes, on Responses models with
+sent rather than re-deriving the list from the current registry. Each entry
+projects to a wire-only marker at its recorded position. On Anthropic models
+that accept mid-conversation tool changes, on Responses models with
 `additional_tools`/tool search, and on Kimi completions, the tool array is
-declared once at the front of the cached prefix and a later change rides as a
-delta appended to the request (`tool_addition`/`tool_removal`,
-`additional_tools`, or a tool-bearing system message), so the array itself is
-never re-sent. Every other wire re-sends the current array; that is a fallback,
-not a regression.
+declared once at the front of the cached prefix and a later change rides where
+it was recorded (`tool_addition`/`tool_removal`, `additional_tools`, or a
+tool-bearing system message), so the array itself is never re-sent and the
+message list stays a growing prefix. Every other wire drops the markers and
+re-sends the current array; that is a fallback, not a regression.
 
 ## HTTP and reload
 

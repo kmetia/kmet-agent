@@ -1,12 +1,14 @@
 # Todo
 
-Two tracks remain after the P6 residuals below. Landed work — the
+Two tracks remain after the one P6 residual below. Landed work — the
 `github-copilot` anthropic auth, the prompt-caching parity pass, the around
 tool hook, the remaining openai-compat keys, **P5** (tool exposure, the
 declared/callable split, the shared ranker and `tool_search`), **P5.5** (the
-declared order and the one promotable derivation) and **P6** (mid-conversation
-tool changes without a full re-prefill) — is out of this file; it lives in git
-history. The context and token tracks are dropped too — see § Deferred.
+declared order and the one promotable derivation), **P6** (mid-conversation
+tool changes without a full re-prefill) and **P6 residuals 1–3** (Codex's
+declared-set markers, the anchored wire deltas, and `tool_search`'s
+recorded-loadout filter) — is out of this file; it lives in git history. The
+context and token tracks are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
@@ -14,62 +16,13 @@ history. The context and token tracks are dropped too — see § Deferred.
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | decisions closed (E1–E16); independent |
 
 Cross-session selection (S) comes next; persistent eval lands whenever — it
-touches neither a wire nor the tool registry. The residuals below are small
-and touch code already at HEAD (`83802474`); items 1–3 close before S starts,
-and item 4 lands with S1 because it needs the persisted selection.
+touches neither a wire nor the tool registry. The one residual below is small
+and touches code already at HEAD (`dd2b7781`); it lands with S1 because it
+needs the persisted selection.
 
-## P6 residuals
+## P6 residual
 
-1. **Codex Responses consumes `:tool-changes`.** `openai_codex_responses.clj`
-   builds its envelope with `responses-messages`/`responses-tools` but never
-   reads the recorded history, so the compat keys its catalog rows now carry
-   are inert there. Reuse the Responses pieces (`shared/resolve-request-tools`,
-   `responses-change-items`, `additional-tools-item`, `tool-search-pair`) in
-   `codex-payload` instead of copying them: the Codex input takes the head
-   `additional_tools` item (its `instructions` field already carries the
-   leading prompt) and the anchored deltas. Test the three Responses modes
-   through `codex-payload`.
-
-2. **Anchor deltas like pi.** A change is a transcript system message at the
-   point it happens, not a tail re-send: the transcript's order is the wire
-   order, so each request's message list is a prefix extension of the previous
-   one and the delta stays cached. pi: `declareToolChanges` inserts or merges a
-   `SystemMessage` with `toolsAdded`/`toolsRemoved` before the first non-system
-   pending message (`agent-loop.ts:342-390`), `resolveTranscriptTools` decides
-   what stays top-level (`transcript.ts:215-265`), and resume restores the
-   loadout from the branch (`agent-session.ts:1851-1885`).
-
-   kmet keeps the recorded `:tool-change` entry where it happened, so this is
-   a projection change, not a new store: `context-messages` emits a wire-only
-   `:tool-change` marker at the entry's position (the chat replay, export and
-   tree still skip it), `to-llm-messages` passes it, and the three wires
-   consume it — Anthropic holds it until the next assistant message and emits
-   `tool_addition`/`tool_removal` blocks; Responses emits `additional_tools` or
-   the synthetic tool-search pair; Kimi emits the tool-bearing system message.
-   The history is then the markers themselves: restore pi's
-   `resolve-transcript-tools` over the message stream (fold the markers, decide
-   the top-level prefix by support) and retire the separate `:tool-changes`
-   request option, so the wires and the transcript cannot disagree.
-   Every other wire drops/collapses the marker into the leading prompt in
-   `llm/send-message` — today's full re-declaration, the same fallback as pi's
-   `"none"`. This supersedes P6's "`:tool-change` projects to no wire message":
-   it still projects to no chat row, but it must project into the LLM context
-   at its position. The initial top-level array remains the first entry's
-   declarations.
-
-   Tests: two requests across a change have the second payload's messages
-   start with the first's (pi's `expectGrowingPrefix`), the delta sits at the
-   recorded position for each of the three wires, an unsupported wire still
-   sends the current array, and the chat replay/export stay unchanged.
-
-3. **`tool_search` candidates follow the recorded loadout.** The search's
-   `:selection` is still the live `:enabled-tools`/`:default-tools` atoms, so a
-   resumed session with a recorded removal can surface a tool the wire would
-   not declare. Filter the candidates against the recorded removal set until
-   S1 persists the selection; S1 owns the final rule, so the gate and the
-   search cannot disagree at HEAD.
-
-4. **Re-registering after an unmount.** A tool that was unmounted (and is now
+1. **Re-registering after an unmount.** A tool that was unmounted (and is now
    a recorded `:removed`) does not return when the same extension mounts it
    again; the reconcile treats the name as mentioned and needs an explicit
    selection. This one waits for S1: without a recorded selection, a resumed
@@ -78,10 +31,8 @@ and item 4 lands with S1 because it needs the persisted selection.
    excludes it. Tests: unmount → remount restores; selection-disable → a
    config reload does not resurrect it without `set-active-tools!`.
 
-Done when items 1–3 have tests and `bb test-changed`, `bb lint-changed` and
-`bb format-check-changed` are green; item 2 is done when the moving request
-prefix is demonstrated, not only when the placement is written down. Item 4
-lands with S1.
+Done when the residual has tests and `bb test-changed`, `bb lint-changed` and
+`bb format-check-changed` are green. It lands with S1.
 
 ## Tools: cross-session selection in both scopes
 

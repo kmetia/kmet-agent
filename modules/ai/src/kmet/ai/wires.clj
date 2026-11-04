@@ -47,3 +47,17 @@
                     {:cause ::unknown-api-type
                      :api api
                      :known (set (keys wires))}))))
+
+(def ^:private tool-change-apis
+  "The wires that read the declared-set markers in the message stream at their
+   transcript position (Anthropic's inline tool blocks, the Responses family's
+   additional_tools/tool-search items, and Kimi's tool-bearing system message).
+   Every other wire drops the markers and sends the current declared set in
+   its top-level tools field."
+  #{:anthropic-messages :openai-responses :openai-codex-responses
+    :azure-openai-responses :openai-completions})
+
+(defn tool-changes?
+  "Whether API consumes the declared-set markers in the message stream."
+  [api]
+  (contains? tool-change-apis api))

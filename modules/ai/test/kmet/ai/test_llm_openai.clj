@@ -273,14 +273,19 @@
                                 :high "high" :xhigh "xhigh" :max nil}}
           overrides)))
 
-(t/deftest test-llm-responses-messages
+(defn- responses-items
+  "The Responses input items for MESSAGES, without the declared-set walk."
+  [model messages]
+  (:input (responses/responses-input model messages [] true)))
+
+(t/deftest test-llm-responses-input
   (let [model (responses-model)
         msgs [{:role :system :content [{:type :text :text "You are helpful"}]}
               {:role :user :content [{:type :text :text "hi"}]}
               {:role :assistant :content [{:type :text :text "answer"}]
                :tool-calls [{:id "call_abc|fc_123" :name "read" :arguments {:path "x"}}]}
               {:role :tool :content [{:type :tool-result :tool_use_id "call_abc|fc_123" :content "file"}]}]
-        items (@#'responses/responses-messages model msgs)]
+        items (responses-items model msgs)]
     (t/is (= {:role "developer" :content "You are helpful"} (first items))
           "reasoning models get the system prompt as a developer message")
     (t/is (= {:role "user" :content [{:type "input_text" :text "hi"}]}
@@ -299,9 +304,9 @@
              (nth items 4))
           "tool results reference the call_id part")))
 
-(t/deftest test-llm-responses-messages-non-reasoning-system-role
+(t/deftest test-llm-responses-input-non-reasoning-system-role
   (let [model (responses-model {:reasoning false})
-        items (@#'responses/responses-messages
+        items (responses-items
                model
                [{:role :system :content [{:type :text :text "S"}]}
                 {:role :user :content [{:type :text :text "u"}]}])]
@@ -310,12 +315,12 @@
     (t/is (= [{:role "user" :content [{:type "input_text" :text "u"}]}]
              (rest items)))))
 
-(t/deftest test-llm-responses-messages-cross-provider-tool-call
+(t/deftest test-llm-responses-input-cross-provider-tool-call
   ;; a tool call id without the `|` separator replays call_id-only (pi's
   ;; different-model path — the id is omitted to avoid fc_/rs_ pairing
   ;; validation)
   (let [model (responses-model)
-        items (@#'responses/responses-messages
+        items (responses-items
                model
                [{:role :user :content [{:type :text :text "u"}]}
                 {:role :assistant :content []
@@ -329,7 +334,7 @@
              (nth items 2))))
   (t/testing "foreign Responses item ids are omitted for Copilot"
     (let [model (responses-model {:provider :github-copilot})
-          items (@#'responses/responses-messages
+          items (responses-items
                  model
                  [{:role :assistant :content []
                    :tool-calls [{:id "call_qwen|V7tZ6kGdR7aeKl14cUq9F_cRTzluuKfD1RULCNcPpxaaOuVPvzVouaxmjWg0G9H"
@@ -338,7 +343,7 @@
                 :name "bash" :arguments "{}"}
                (first items)))))
   (t/testing "non-fc ids are prefixed for Responses-native providers"
-    (let [items (@#'responses/responses-messages
+    (let [items (responses-items
                  (responses-model)
                  [{:role :assistant :content []
                    :tool-calls [{:id "call_openai|opaque-id" :name "bash" :arguments {}}]}])]

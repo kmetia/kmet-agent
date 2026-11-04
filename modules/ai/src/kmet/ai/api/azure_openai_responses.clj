@@ -96,7 +96,7 @@
                                         (:api-version config)))
             payload (on-payload opts
                                 (responses-payload model-record effort messages tools deployment
-                                                   retention session-id (:tool-changes opts)))
+                                                   retention session-id))
             ;; azure sends no session-affinity headers (pi: the Azure client
             ;; sets none) — just the bearer + JSON content type
             headers (request-headers

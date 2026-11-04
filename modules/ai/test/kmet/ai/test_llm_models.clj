@@ -13,6 +13,27 @@
 
 ;; ─── Model resolution & dispatch ───────────────────────────────────────────
 
+(t/deftest test-llm-drops-declared-set-markers-on-a-wire-that-cannot-anchor-them
+  (m/load-catalogs! nil)
+  (let [request (atom nil)
+        tool {:name "base_tool" :description "base"
+              :parameters {:type "object" :properties {}}}
+        messages [{:role :system :content [{:type :text :text "SYS"}]}
+                  {:role :tool-change :added [tool] :removed []}
+                  {:role :user :content [{:type :text :text "hi"}]}]]
+    (with-redefs [auth/resolve-provider-auth (fn [_] {:api-key "test-key"})
+                  google/google-request (fn [opts]
+                                          (reset! request opts)
+                                          (future nil))]
+      @(llm/send-message {:provider :google
+                          :model "gemini-3.1-pro-preview"
+                          :messages messages
+                          :tools [tool]}))
+    (t/is (= [:system :user] (mapv :role (:messages @request)))
+          "a non-anchoring wire drops the markers")
+    (t/is (= [tool] (:tools @request))
+          "and keeps the current declared array top-level")))
+
 (t/deftest test-llm-unknown-model
   ;; a catalog provider with an unknown model id → error (pi: unknown model)
   (m/load-catalogs! nil)

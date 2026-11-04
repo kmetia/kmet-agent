@@ -401,6 +401,15 @@
       (t/is (contains? (second @requests) "deferred-a")
             "the promotion declares it on the very next request")
       (t/is (= ["deferred-a"] (state/loaded-tools agent)))
+      (let [msgs @(:messages agent)
+            tool-idx (last (keep-indexed (fn [i m]
+                                           (when (= :tool (:role m)) i))
+                                         msgs))
+            change-idx (last (keep-indexed (fn [i m]
+                                             (when (= :tool-change (:role m)) i))
+                                           msgs))]
+        (t/is (> change-idx tool-idx)
+              "the promotion marker follows the tool result, not the call"))
       (finally
         (tools/unregister-tool-source! h ::catalog)
         (tools/unregister-tool! h search/tool-search-name)

@@ -320,8 +320,9 @@ request's delta are where the model learns it is now available. The model's
 tool set is recorded as `:tool-change` entries; on a wire that can anchor a
 change (Anthropic inline tool blocks, OpenAI `additional_tools`/tool search,
 Kimi tool-bearing system messages) the tool array is declared once and the
-promotion rides as a delta after the conversation, so the array — the expensive
-front of the cached prefix — is not re-sent.
+promotion rides as a marker at its recorded position, so the array — the
+expensive front of the cached prefix — is not re-sent and the message list
+stays a growing prefix.
 
 ```clojure
 (ext/register-tool-source! api :my-catalog

@@ -493,6 +493,20 @@
       (is (= [{:role :user :content "only"}]
              (ch/chat-history-get-messages ch))))))
 
+(deftest test-rebuild-skips-wire-only-tool-change-markers
+  (testing "a declared-set marker is a wire message, never a chat row"
+    (let [ch (ch/make-chat-history)]
+      (ch/chat-history-rebuild!
+       ch [{:role :user :content "q"}
+           {:role :tool-change
+            :added [{:name "a" :description "a"
+                     :parameters {:type "object" :properties {}}}]
+            :removed []}
+           {:role :assistant :content "a"}])
+      (is (= [:user :assistant]
+             (mapv :role (ch/chat-history-get-messages ch))))
+      (is (= 2 (count (ch/chat-history-get-messages ch)))))))
+
 (deftest test-rebuild-pairs-tool-calls-with-results
   (testing "an agent-context rebuild renders each tool execution's call line
             (name + args) with its result — parallel results merge by id"

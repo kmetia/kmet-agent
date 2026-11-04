@@ -163,7 +163,10 @@
         ((:send! agents) handle {:text "look at this" :images [image]}
                          {:target :next-turn})
         (is (support/wait-until #(seq @requests)) "the model was called")
-        (let [content (-> @requests first :messages last :content)]
+        (let [content (->> (:messages (first @requests))
+                           (filter #(= :user (:role %)))
+                           last
+                           :content)]
           (is (some #(= "aGVsbG8=" (:data %)) content)
               "the provider request carries the image bytes")
           (is (some #(= "look at this" (:text %)) content)

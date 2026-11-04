@@ -531,20 +531,40 @@ Be precise and concise in your responses."}}]
    wins; otherwise :default-tools (a resolved selection, nil = every built-in)
    excludes the built-ins it leaves out — extension tools stay enabled (pi:
    defaultTools selects the built-in tools; extension/custom tools remain
-   enabled). The declared surface and `tool_search`'s candidate list resolve
-   from this one map, so they cannot disagree."
-  [{:keys [enabled default-tools]}]
+   enabled). EXCLUDE adds the recorded removals a resumed session carries.
+   The declared surface and `tool_search`'s candidate list resolve from this
+   one map, so they cannot disagree."
+  [{:keys [enabled default-tools exclude]}]
   {:enabled enabled
-   :exclude (when (nil? enabled)
-              (tools/default-tool-exclusions default-tools))})
+   :exclude (into (or exclude #{})
+                  (when (nil? enabled)
+                    (tools/default-tool-exclusions default-tools)))})
+
+(defn- recorded-removals
+  "Tool names SESS's record removed and has not re-added — the part of a
+   resumed loadout the live selection cannot see. A name re-added by a later
+   entry is in the branch state and therefore not here."
+  [sess]
+  (if-let [recorded (and sess (session/session-tool-state sess))]
+    (let [current (set (keys recorded))
+          removed (into #{}
+                        (comp (filter #(= :tool-change (:role %)))
+                              (mapcat :removed))
+                        (session/get-branch sess))]
+      (into #{} (remove #(contains? current %)) removed))
+    #{}))
 
 (defn tool-selection
-  "The selection AGENT's run settings apply, in `selection-opts`'s shape — what
-   a script's callable set and the `tool_search` binding resolve against, so a
-   search's candidates and the next request's declared set use one rule."
+  "The selection AGENT's run settings and recorded loadout apply, in
+   `selection-opts`'s shape — what a script's callable set and the `tool_search`
+   binding resolve against, so a search's candidates and the next request's
+   declared set use one rule. A recorded removal the live selection does not
+   know (a resumed session) is excluded; S1 owns the persisted-selection rule,
+   so until then the session record is the only source of that fact."
   [agent]
   (selection-opts {:enabled @(:enabled-tools agent)
-                   :default-tools @(:default-tools agent)}))
+                   :default-tools @(:default-tools agent)
+                   :exclude (recorded-removals (:session agent))}))
 
 (defn session-loaded-tools
   "The tool names SESS recorded as loaded — what `tool_search` promoted into the
@@ -563,20 +583,6 @@ Be precise and concise in your responses."}}]
   (session-loaded-tools (:session agent)))
 
 (declare sync-tool-declarations! sync-resumed-declarations!)
-
-(defn tool-changes-for-request
-  "The session's recorded declared-set history in the shape the wire takes:
-   `{:initial [declaration …] :changes [{:added […] :removed […]}]}`. The
-   first :tool-change entry is the initial declaration the top-level tools
-   array carries; every later entry is a delta the wire anchors in place. nil
-   when the branch records none (a session that predates the record), so the
-   wire falls back to the current tools."
-  [agent]
-  (when-let [sess (:session agent)]
-    (let [entries (filter #(= :tool-change (:role %)) (session/get-branch sess))]
-      (when (seq entries)
-        {:initial (vec (:added (first entries)))
-         :changes (mapv #(select-keys % [:added :removed]) (rest entries))}))))
 
 (defn promote-tools!
   "Record NAMES as loaded in the agent's session (see `loaded-tools`) and
@@ -794,28 +800,65 @@ Be precise and concise in your responses."}}]
     (reset! (:seen-tools agent) (into seen live-names))
     seen))
 
+(defn- context-tool-state
+  "The declared tool state the live context's markers fold to, or nil when it
+   carries none — the baseline a new record must extend. The wire reads the
+   context projection, not the whole branch: a compaction drops earlier
+   markers, so the next request must re-declare the current loadout rather
+   than record a delta against history the wire no longer sees."
+  [agent]
+  (let [markers (filter #(= :tool-change (:role %)) @(:messages agent))]
+    (when (seq markers)
+      (session/tool-state markers))))
+
+(defn- mid-tool-batch?
+  "True when the live context's newest assistant tool-call batch still awaits
+   results. A change recorded now would project between a tool call and its
+   result, which the wires that anchor changes must not do (Anthropic holds a
+   marker until the next assistant, but Chat Completions requires the results
+   to follow their call). The next request's reconcile records it after the
+   batch instead (pi declares changes at the request boundary)."
+  [agent]
+  (let [msgs (vec (remove #(= :tool-change (:role %)) @(:messages agent)))
+        assistant-index (last (keep-indexed (fn [i m]
+                                              (when (= :assistant (:role m)) i))
+                                            msgs))]
+    (when-let [i assistant-index]
+      (let [calls (count (:tool-calls (nth msgs i)))
+            results (count (filter #(= :tool (:role %)) (subvec msgs (inc i))))]
+        (< results calls)))))
+
 (defn- record-tool-change!
-  "Append the delta between PREVIOUS and CURRENT to SESS, if any."
-  [sess previous current]
-  (let [{:keys [added removed]} (session/tool-state-changes previous current)]
-    (when (or (seq added) (seq removed))
-      (session/append-entry sess {:role :tool-change
-                                  :added added
-                                  :removed removed}))))
+  "Append the delta between PREVIOUS and CURRENT to AGENT's session and to the
+   live context — the marker the wire reads at that position. A change that
+   lands while a tool batch is executing is not recorded here: it would split
+   the call from its result, so the next request's reconcile records it after
+   the batch. Returns the entry, or nil for no change, no session, or a
+   mid-batch call."
+  [agent previous current]
+  (when-let [sess (:session agent)]
+    (when-not (mid-tool-batch? agent)
+      (let [{:keys [added removed]} (session/tool-state-changes previous current)]
+        (when (or (seq added) (seq removed))
+          (let [entry (session/append-entry sess {:role :tool-change
+                                                  :added added
+                                                  :removed removed})]
+            (append-context-message! agent entry)
+            entry))))))
 
 (defn sync-tool-declarations!
   "Record the live declared set against the session's record, as one
    :tool-change entry. Mutations (`set-active-tools!`, `apply-default-tools!`,
    a promotion) call this, so an explicit re-enable is recorded. The entry is
-   not a message; the wire reads the fold. No entry when nothing changed.
-   Returns the entry, or nil for no change or no session (pi:
-   declareToolChanges)."
+   appended to the live context too (a wire-only marker) but never to the
+   run's message list. No entry when nothing changed. Returns the entry, or
+   nil for no change or no session (pi: declareToolChanges)."
   [agent]
-  (when-let [sess (:session agent)]
-    (let [previous (session/session-tool-state sess)
+  (when (:session agent)
+    (let [previous (context-tool-state agent)
           live (live-declaration-map agent)]
       (seen-tools! agent (set (keys live)))
-      (record-tool-change! sess previous live))))
+      (record-tool-change! agent previous live))))
 
 (defn sync-resumed-declarations!
   "Record the loadout a resumed or running branch restores against its record
@@ -827,9 +870,9 @@ Be precise and concise in your responses."}}]
   (when-let [sess (:session agent)]
     (let [live (live-declaration-map agent)
           seen (seen-tools! agent (set (keys live)))
-          previous (session/session-tool-state sess)
-          current (or (resume-declarations sess previous live seen) live)]
-      (record-tool-change! sess previous current))))
+          branch-previous (session/session-tool-state sess)
+          current (or (resume-declarations sess branch-previous live seen) live)]
+      (record-tool-change! agent (context-tool-state agent) current))))
 
 (defn set-active-tools!
   "Restrict the tools sent to the LLM to NAMES (a set or seq of tool

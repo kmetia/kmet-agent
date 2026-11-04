@@ -185,106 +185,123 @@
     (str/blank? content)
     (every? blank-text-block? content)))
 
+(defn- anthropic-message
+  "One non-system, non-marker message as its Anthropic message, or nil when
+   it converts to no blocks. OPTS carries :provider/:model (provenance),
+   :allow-empty-signature. pi: convertMessages."
+  [m {:keys [provider model allow-empty-signature]}]
+  (let [role (name (:role m))]
+    (case role
+      "tool"
+      (let [tool-use-id (anthropic-normalize-tool-call-id
+                         (-> m :content first :tool_use_id))]
+        {:role "user"
+         :content [(cond-> {:type "tool_result"
+                            :tool_use_id tool-use-id
+                            :content (anthropic-tool-result-content m)}
+                     (:is-error m) (assoc :is_error true))]})
+      ;; pi convertMessages: blank text blocks are dropped from outgoing
+      ;; requests and a message left without sendable content is skipped
+      ;; entirely — Anthropic rejects empty content arrays, so a recorded
+      ;; empty completion must not poison every later turn with a 400.
+      (let [raw (anthropic-content (:content m))
+            same-model? (and (= (:provider m) provider)
+                             (= (:model m) model))
+            sig (:thinking-signature m)
+            ;; pi: signed same-model reasoning replays as a leading thinking
+            ;; block (required before tool_use when thinking is on); unsigned
+            ;; or cross-provider reasoning degrades to plain text — unless the
+            ;; model is allow-listed for empty signatures
+            thinking-blocks (when-let [th (not-empty (str/trim (or (:thinking m) "")))]
+                              [(cond
+                                 (and same-model? (seq sig))
+                                 {:type "thinking" :thinking th :signature sig}
+                                 allow-empty-signature
+                                 {:type "thinking" :thinking th :signature ""}
+                                 :else
+                                 {:type "text" :text th})])
+            tool-uses (when (and (= role "assistant") (:tool-calls m))
+                        (mapv (fn [tc]
+                                {:type "tool_use"
+                                 :id (anthropic-normalize-tool-call-id (:id tc))
+                                 :name (:name tc)
+                                 :input (:arguments tc)})
+                              (:tool-calls m)))
+            content (cond
+                      (seq tool-uses)
+                      (vec (concat thinking-blocks
+                                   (cond
+                                     (string? raw) []
+                                     :else (remove blank-text-block? raw))
+                                   tool-uses))
+                      (vector? raw)
+                      (vec (concat thinking-blocks
+                                   (remove blank-text-block? raw)))
+                      ;; string content keeps its wire shape unless reasoning
+                      ;; blocks precede it
+                      (seq thinking-blocks)
+                      (vec (concat thinking-blocks
+                                   (when (seq raw)
+                                     [{:type "text" :text raw}])))
+                      :else raw)]
+        (when-not (blank-content? content)
+          {:role role :content content})))))
+
 (defn anthropic-messages
   "Map agent messages to Anthropic API messages.
 
    OPTS (optional map) carries the replay context: :provider/:model — the
    current request's provider id and model id — :allow-empty-signature
    (pi compat.allowEmptySignature), :cache-control, the marker to place on
-   the last user/system block, :native-tool-changes?, whether the recorded
-   declared-set deltas become inline tool_addition/tool_removal blocks, and
-   :tool-change-deltas, those deltas (the initial declaration is the request's
-   top-level tools array, so it is not repeated here). An assistant message
-   whose provenance matches replays its reasoning as a leading thinking block
-   carrying the captured signature; without a signature the reasoning degrades
-   to plain text (or an empty-signature thinking block on allow-listed compat
-   models), mirroring pi convertMessages. Messages without provenance (legacy
-   sessions) degrade like unsigned ones.
+   the last user/system block, :native-tool-changes?, whether the declared-set
+   markers become inline tool_addition/tool_removal blocks, and
+   :convert-definition, the tool conversion those blocks use. The first
+   marker is the request's top-level initial declaration, so it is not
+   repeated here; every later marker rides at its transcript position, held
+   until the next sent assistant message (pi: convertMessages' pending system
+   messages — an inline change must never split a tool_use from its
+   tool_result). An assistant message whose provenance matches replays its
+   reasoning as a leading thinking block carrying the captured signature;
+   without a signature the reasoning degrades to plain text (or an empty
+   signature thinking block on allow-listed compat models), mirroring pi
+   convertMessages. Messages without provenance (legacy sessions) degrade like
+   unsigned ones.
 
    The :system message is NOT converted — Anthropic carries the system
    prompt in the request-level `system` field (pi params.system), never as a
-   message with role \"system\" (the API rejects it). The deltas ride as one
-   trailing system message: a change is inserted after the conversation that
-   existed when it was recorded, so this request's prefix — and the cache
-   breakpoint on it — survives."
+   message with role \"system\" (the API rejects it)."
   ([messages]
    (anthropic-messages messages nil))
-  ([messages {:keys [provider model allow-empty-signature cache-control
-                     native-tool-changes? tool-change-deltas convert-definition]}]
-   (let [converted
-         (into []
-               (keep (fn [m]
-                       (let [role (name (:role m))]
-                         (case role
-                           "system" nil
-                           "tool"
-                           (let [tool-use-id (anthropic-normalize-tool-call-id
-                                              (-> m :content first :tool_use_id))]
-                             {:role "user"
-                              :content [(cond-> {:type "tool_result"
-                                                 :tool_use_id tool-use-id
-                                                 :content (anthropic-tool-result-content m)}
-                                          (:is-error m) (assoc :is_error true))]})
-                           ;; pi convertMessages: blank text blocks are
-                           ;; dropped from outgoing requests and a message left
-                           ;; without sendable content is skipped entirely —
-                           ;; Anthropic rejects empty content arrays, so a
-                           ;; recorded empty completion must not poison every
-                           ;; later turn with a 400.
-                           (let [raw (anthropic-content (:content m))
-                                 same-model? (and (= (:provider m) provider)
-                                                  (= (:model m) model))
-                                 sig (:thinking-signature m)
-                                 ;; pi: signed same-model reasoning replays as a
-                                 ;; leading thinking block (required before
-                                 ;; tool_use when thinking is on); unsigned or
-                                 ;; cross-provider reasoning degrades to plain
-                                 ;; text — unless the model is allow-listed for
-                                 ;; empty signatures
-                                 thinking-blocks (when-let [th (not-empty (str/trim (or (:thinking m) "")))]
-                                                   [(cond
-                                                      (and same-model? (seq sig))
-                                                      {:type "thinking" :thinking th :signature sig}
-                                                      allow-empty-signature
-                                                      {:type "thinking" :thinking th :signature ""}
-                                                      :else
-                                                      {:type "text" :text th})])
-                                 tool-uses (when (and (= role "assistant") (:tool-calls m))
-                                             (mapv (fn [tc]
-                                                     {:type "tool_use"
-                                                      :id (anthropic-normalize-tool-call-id (:id tc))
-                                                      :name (:name tc)
-                                                      :input (:arguments tc)})
-                                                   (:tool-calls m)))
-                                 content (cond
-                                           (seq tool-uses)
-                                           (vec (concat thinking-blocks
-                                                        (cond
-                                                          (string? raw) []
-                                                          :else (remove blank-text-block? raw))
-                                                        tool-uses))
-                                           (vector? raw)
-                                           (vec (concat thinking-blocks
-                                                        (remove blank-text-block? raw)))
-                                           ;; string content keeps its wire
-                                           ;; shape unless reasoning blocks
-                                           ;; precede it
-                                           (seq thinking-blocks)
-                                           (vec (concat thinking-blocks
-                                                        (when (seq raw)
-                                                          [{:type "text" :text raw}])))
-                                           :else raw)]
-                             (when-not (blank-content? content)
-                               {:role role :content content}))))))
-               messages)
-         delta-blocks (when (and native-tool-changes? (seq tool-change-deltas))
-                        (into []
-                              (mapcat #(tool-change-blocks % convert-definition)
-                                      tool-change-deltas)))
-         converted (cond-> converted
-                     (seq delta-blocks)
-                     (conj {:role "system" :content delta-blocks}))]
-     (mark-last-user-block converted cache-control))))
+  ([messages {:keys [cache-control native-tool-changes? convert-definition] :as opts}]
+   (loop [msgs messages
+          marker-index 0
+          pending []
+          acc []]
+     (if-let [m (first msgs)]
+       (let [role (:role m)]
+         (cond
+           (= role :system)
+           (recur (rest msgs) marker-index pending acc)
+
+           (= role :tool-change)
+           (let [blocks (when (and native-tool-changes?
+                                   (pos? marker-index)
+                                   convert-definition)
+                          (tool-change-blocks m convert-definition))]
+             (recur (rest msgs) (inc marker-index)
+                    (if (seq blocks)
+                      (conj pending {:role "system" :content blocks})
+                      pending)
+                    acc))
+
+           :else
+           (if-let [message (anthropic-message m opts)]
+             (if (= "assistant" (:role message))
+               (recur (rest msgs) marker-index []
+                      (-> acc (into pending) (conj message)))
+               (recur (rest msgs) marker-index pending (conj acc message)))
+             (recur (rest msgs) marker-index pending acc))))
+       (mark-last-user-block (into acc pending) cache-control)))))
 
 (defn anthropic-auth-headers
   "Base auth headers for an anthropic-messages request (pi anthropic provider
@@ -316,10 +333,12 @@
         messages))
 
 (defn- initial-tools
-  "The tools the request's top-level array carries: the recorded initial
-   declaration when the session has a history, else the current list."
-  [tool-changes tools]
-  (if tool-changes (or (:initial tool-changes) []) tools))
+  "The tools the request's top-level array carries: the first declared-set
+   marker's additions when the session has a history, else the current list."
+  [messages tools]
+  (if-let [marker (first (shared/tool-change-messages messages))]
+    (vec (:added marker))
+    tools))
 
 (defn- native-tool-changes?
   "Whether COMPAT supports inline changes and INITIAL-TOOLS can anchor the
@@ -336,58 +355,57 @@
    Anthropic caches at — the system block, the last tool (only when the model
    supports a marker there) and the last user block. Anthropic honours at most
    four breakpoints per request and three are placed here: a fourth is a
-   deliberate budget change, not a spare slot."
-  ([model-record effort messages tools model-id cache-retention]
-   (anthropic-payload model-record effort messages tools model-id cache-retention nil))
-  ([model-record effort messages tools model-id cache-retention tool-changes]
-   (let [thinking (anthropic-thinking model-record effort)
-         system (system-prompt-text messages)
-         compat (anthropic-compat model-record)
-         cache-control (anthropic-cache-control model-record cache-retention)
-         tool-cache-control (when (:supports-cache-control-on-tools compat)
-                              cache-control)
-         initial (initial-tools tool-changes tools)
-         deltas (:changes tool-changes)
-         native? (native-tool-changes? compat initial)
-         convert-definition #(tool->anthropic-schema % (:supports-strict-tools compat))
-         ;; native: the initial array stays fixed; otherwise the current list
-         declared-tools (if native? initial tools)
-         ;; the cache breakpoint stays on the last initial tool; the
-         ;; placeholder follows it, so the scaffolding it reserves is cached
-         ;; from the first request on
-         schemas (cond-> (vec (or (when (seq declared-tools)
-                                    (mapv convert-definition declared-tools))
-                                  []))
-                   tool-cache-control (shared/mark-last-tool tool-cache-control)
-                   native? (conj deferred-tool-placeholder))]
-     (cond-> {:model model-id
-              :max_tokens (:max-tokens thinking (or (:max-tokens model-record) 4096))
-             ;; replay context: signatures echo only when message provenance matches
-              :messages (anthropic-messages
-                         messages
-                         {:provider (:provider model-record)
-                          :model model-id
-                          :allow-empty-signature (:allow-empty-signature compat)
-                          :cache-control cache-control
-                          :native-tool-changes? native?
-                          :tool-change-deltas deltas
-                          :convert-definition convert-definition})
-              :stream true}
-       (seq system)
-       (assoc :system [(cond-> {:type "text" :text system}
-                         cache-control (assoc :cache_control cache-control))])
-       (seq schemas) (assoc :tools schemas)
-       (:thinking thinking) (assoc :thinking (:thinking thinking))
-      ;; adaptive thinking (pi forceAdaptiveThinking): the
-      ;; output_config effort rides alongside the thinking block
-       (:output_config thinking) (assoc :output_config (:output_config thinking))))))
+   deliberate budget change, not a spare slot. The declared-set markers in
+   MESSAGES drive the top-level array (the first marker) and the inline
+   additions/removals (every later marker, at its transcript position)."
+  [model-record effort messages tools model-id cache-retention]
+  (let [thinking (anthropic-thinking model-record effort)
+        system (system-prompt-text messages)
+        compat (anthropic-compat model-record)
+        cache-control (anthropic-cache-control model-record cache-retention)
+        tool-cache-control (when (:supports-cache-control-on-tools compat)
+                             cache-control)
+        initial (initial-tools messages tools)
+        {:keys [request-tools]} (shared/resolve-request-tools messages :none tools)
+        native? (native-tool-changes? compat initial)
+        convert-definition #(tool->anthropic-schema % (:supports-strict-tools compat))
+        ;; native: the initial array stays fixed; otherwise the current list
+        declared-tools (if native? initial request-tools)
+        ;; the cache breakpoint stays on the last initial tool; the
+        ;; placeholder follows it, so the scaffolding it reserves is cached
+        ;; from the first request on
+        schemas (cond-> (vec (or (when (seq declared-tools)
+                                   (mapv convert-definition declared-tools))
+                                 []))
+                  tool-cache-control (shared/mark-last-tool tool-cache-control)
+                  native? (conj deferred-tool-placeholder))]
+    (cond-> {:model model-id
+             :max_tokens (:max-tokens thinking (or (:max-tokens model-record) 4096))
+            ;; replay context: signatures echo only when message provenance matches
+             :messages (anthropic-messages
+                        messages
+                        {:provider (:provider model-record)
+                         :model model-id
+                         :allow-empty-signature (:allow-empty-signature compat)
+                         :cache-control cache-control
+                         :native-tool-changes? native?
+                         :convert-definition convert-definition})
+             :stream true}
+      (seq system)
+      (assoc :system [(cond-> {:type "text" :text system}
+                        cache-control (assoc :cache_control cache-control))])
+      (seq schemas) (assoc :tools schemas)
+      (:thinking thinking) (assoc :thinking (:thinking thinking))
+     ;; adaptive thinking (pi forceAdaptiveThinking): the
+     ;; output_config effort rides alongside the thinking block
+      (:output_config thinking) (assoc :output_config (:output_config thinking)))))
 
 (defn anthropic-native-tool-changes?
-  "Whether a request over TOOL-CHANGES and TOOLS uses Anthropic's inline tool
+  "Whether a request over MESSAGES and TOOLS uses Anthropic's inline tool
    changes (see `anthropic-payload`); the request headers need the beta flag."
-  [model-record tool-changes tools]
+  [model-record messages tools]
   (native-tool-changes? (anthropic-compat model-record)
-                        (initial-tools tool-changes tools)))
+                        (initial-tools messages tools)))
 
 (defn anthropic-affinity-headers
   "pi createClient session-affinity headers (prompt caching,
@@ -491,11 +509,9 @@
     ;; into its caller), never die inside the future and hang the caller
     (try
       (let [model-id (or (:model opts) (:id model-record))
-            tool-changes (:tool-changes opts)
-            native? (anthropic-native-tool-changes? model-record tool-changes tools)
+            native? (anthropic-native-tool-changes? model-record messages tools)
             payload (on-payload opts (anthropic-payload model-record effort messages
-                                                        tools model-id cache-retention
-                                                        tool-changes))
+                                                        tools model-id cache-retention))
             response (ai-http/request (or base-url (endpoint-url :anthropic-messages (:base-url model-record) model-id))
                                       {:headers (anthropic-request-headers model-record provider-record api-key session-id
                                                                            messages cache-retention native?)

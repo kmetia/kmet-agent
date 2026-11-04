@@ -144,7 +144,6 @@
                        :base-url (:base-url ep)
                        :messages messages
                        :tools request-tools
-                       :tool-changes (state/tool-changes-for-request agent)
                        :signal call-signal
       ;; Provider-event bridges (pi: context / before_provider_request / …):
       ;; read once for this attempt, so a handler installed mid-run reaches

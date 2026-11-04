@@ -15,7 +15,7 @@
    [kmet.ai.auth :as auth]
    [kmet.ai.models :as models]
    [kmet.ai.wires :as wires]
-   [kmet.ai.api.shared :refer [ambient-auth-available?]]))
+   [kmet.ai.api.shared :as shared :refer [ambient-auth-available?]]))
 
 (defn resolve-cache-retention
   "pi resolveCacheRetention (anthropic-messages.ts:75-82): the caller's
@@ -72,13 +72,12 @@
      :api-key     — API key (required — resolved by caller via cfg/get-api-key)
      :thinking    — :off :minimal :low :medium :high :xhigh :max; clamped by
                     the resolved model's capability
-     :messages    — vector of message maps
+     :messages    — vector of message maps. Carries the declared-set markers
+                    (`:role :tool-change` with `:added`/`:removed`) at the
+                    position the change was recorded; the wires that can
+                    anchor a mid-conversation change read them, every other
+                    wire folds/drops them and sends the current declared set
      :tools       — vector of Tool records
-     :tool-changes — the session's recorded declared-set history
-                    ({:initial [declaration …] :changes [{:added […] :removed
-                    […]}]}), consumed by the anthropic-messages,
-                    openai-responses and openai-completions builders; every
-                    other wire ignores it and sends the current :tools list
      :signal      — atom; set to true to cancel
      :idle-timeout-ms — per-byte idle timeout on the stream in ms (pi:
                      httpIdleTimeoutMs — undici bodyTimeout semantics); nil
@@ -176,7 +175,13 @@
           :else
           (let [api (or (:api-type opts) (:api m))
                 p (models/get-provider provider)
-                effort (models/effective-effort m (:thinking opts))]
+                effort (models/effective-effort m (:thinking opts))
+                ;; the markers are a transcript fact; a wire that cannot anchor
+                ;; them drops them and keeps :tools as the current declaration
+                opts (if (or (wires/tool-changes? api)
+                             (nil? (:messages opts)))
+                       opts
+                       (update opts :messages shared/without-tool-change-messages))]
             (try
               ((wires/request-fn api)
                (assoc opts :model-record m :provider-record p

@@ -7,7 +7,7 @@
    [kmet.ai.api.sse :as sse]
    [kmet.ai.models :as models]
    [kmet.libs.http :refer [transport-error-message]]
-   [kmet.ai.api.shared :as shared :refer [apply-anthropic-cache-control clamp-prompt-cache-key copilot-dynamic-headers endpoint-url max-tokens-key openai-compat-cache-control openai-messages openai-messages-with-reasoning openai-thinking-params resolved-openai-compat on-payload request-headers responses-events-handler tool->openai-schema effective-total-timeout-ms headers-timeout-ms]]))
+   [kmet.ai.api.shared :as shared :refer [apply-anthropic-cache-control bridge-tool-results clamp-prompt-cache-key copilot-dynamic-headers endpoint-url max-tokens-key openai-compat-cache-control openai-messages openai-messages-with-reasoning openai-thinking-params resolved-openai-compat on-payload request-headers responses-events-handler tool->openai-schema effective-total-timeout-ms headers-timeout-ms]]))
 
 (defn openai-tool-support
   "How this completions model expresses a declared-set change after the first
@@ -31,6 +31,26 @@
   [model-record]
   (str/includes? (str/lower-case (or (:base-url model-record) "")) "api.openai.com"))
 
+(defn- convert-messages-with-kimi-changes
+  "Convert MESSAGES in runs around the declared-set markers, inserting a
+   tool-bearing system message for an anchored addition (pi:
+   openai-completions convertMessages). The first FOLDED markers are already
+   in the top-level array and are skipped; CONVERT maps a marker-free run to
+   chat messages."
+  [messages folded convert kimi-message]
+  (loop [msgs messages
+         marker-index 0
+         segment []
+         acc []]
+    (if-let [m (first msgs)]
+      (if (= :tool-change (:role m))
+        (let [kimi (when (>= marker-index folded) (kimi-message m))]
+          (recur (rest msgs) (inc marker-index) []
+                 (cond-> (into acc (convert segment))
+                   kimi (conj kimi))))
+        (recur (rest msgs) marker-index (conj segment m) acc))
+      (into acc (convert segment)))))
+
 (defn openai-payload
   "Request body for an openai-completions request (pi buildParams):
    model/messages/stream, stream_options and store when the compat allows
@@ -43,83 +63,87 @@
    chars on api.openai.com or under long retention, a 24h retention request
    when long is supported, and the anthropic-format cache_control breakpoints
    when the compat declares :cache-control-format :anthropic. Compat is
-   URL-resolved (resolved-openai-compat, pi getCompat). TOOL-CHANGES is the
-   recorded declared-set history: a Kimi-shape model keeps the initial list
-   top-level and anchors later additions as tool-bearing system messages."
-  ([model-record effort messages tools model-id cache-retention session-id]
-   (openai-payload model-record effort messages tools model-id cache-retention session-id nil))
-  ([model-record effort messages tools model-id cache-retention session-id tool-changes]
-   (let [compat (resolved-openai-compat model-record)
-         retention (or cache-retention :short)
-         caching? (not= :none retention)
-         long? (and (= :long retention) (:supports-long-cache-retention compat))
-         thinking-params (openai-thinking-params model-record effort)
-         max-tokens-field (max-tokens-key model-record)
-         ;; pi: requiresReasoningContentOnAssistantMessages gates the
-         ;; reasoning_content field (deepseek/opencode-go only; also derived
-         ;; from an explicit :thinking-format :deepseek — resolved-openai-compat).
-         ;; The compat's :reasoning-content-fill is the value used when the
-         ;; message carries no same-model reasoning: "" for DeepSeek, a
-         ;; non-empty placeholder for endpoints that turn the field into a
-         ;; thinking block (Vercel stealth models).
-         requires-reasoning? (:requires-reasoning-content-on-assistant-messages
-                              compat)
-         tool-support (openai-tool-support compat)
-         {:keys [request-tools anchored]}
-         (shared/resolve-request-tools tool-changes tool-support tools)
-         strict? (not= false (:supports-strict-mode compat))
-         messages (if requires-reasoning?
-                    (openai-messages-with-reasoning messages model-record model-id
+   URL-resolved (resolved-openai-compat, pi getCompat). The declared-set
+   markers in MESSAGES drive the top-level array (the folded prefix) and a
+   Kimi-shape model anchors later additions as tool-bearing system messages at
+   their transcript positions."
+  [model-record effort messages tools model-id cache-retention session-id]
+  (let [compat (resolved-openai-compat model-record)
+        retention (or cache-retention :short)
+        caching? (not= :none retention)
+        long? (and (= :long retention) (:supports-long-cache-retention compat))
+        thinking-params (openai-thinking-params model-record effort)
+        max-tokens-field (max-tokens-key model-record)
+        ;; pi: requiresReasoningContentOnAssistantMessages gates the
+        ;; reasoning_content field (deepseek/opencode-go only; also derived
+        ;; from an explicit :thinking-format :deepseek — resolved-openai-compat).
+        ;; The compat's :reasoning-content-fill is the value used when the
+        ;; message carries no same-model reasoning: "" for DeepSeek, a
+        ;; non-empty placeholder for endpoints that turn the field into a
+        ;; thinking block (Vercel stealth models).
+        requires-reasoning? (:requires-reasoning-content-on-assistant-messages
+                             compat)
+        tool-support (openai-tool-support compat)
+        {:keys [request-tools folded]} (shared/resolve-request-tools messages tool-support tools)
+        strict? (not= false (:supports-strict-mode compat))
+        convert (fn [ms]
+                  (if requires-reasoning?
+                    (openai-messages-with-reasoning ms model-record model-id
                                                     (:reasoning-content-fill compat)
                                                     compat)
-                    (openai-messages messages model-record model-id compat))
-         ;; pi openai-completions convertMessages: an addition after the
-         ;; top-level array's folded prefix rides as a tool-bearing system
-         ;; message (the Kimi K3 shape), never as text
-         change-messages (when (= tool-support :additions)
-                           (into []
-                                 (keep (fn [change]
-                                         (when (seq (:added change))
-                                           {:role "system"
-                                            :tools (mapv #(tool->openai-schema % strict?)
-                                                         (:added change))})))
-                                 anchored))
-         messages (into messages change-messages)
-         tools (when (seq request-tools)
-                 (mapv #(tool->openai-schema % strict?) request-tools))
-         cache-control (openai-compat-cache-control compat retention)
-         ;; pi applyAnthropicCacheControl runs after the messages and tools
-         ;; vectors are built and before :sampling-params is merged
-         marked (if cache-control
-                  (apply-anthropic-cache-control messages tools cache-control)
-                  {:messages messages :tools tools})
-         messages (:messages marked)
-         tools (:tools marked)]
-     (cond-> {:model model-id
-              ;; the model record + model-id flow to the converters as the
-              ;; replay target: a message's thinking echoes back as
-              ;; reasoning_content only when the message was produced by this
-              ;; same model (mid-session /model switches must not leak foreign
-              ;; CoT into the request), and the record carries the provider
-              ;; family (an account alias's base) for tool-call id shaping
-              :messages messages
-              :stream true}
-       ;; pi buildParams: stream_options only where the wire reports usage in
-       ;; the stream
-       (not= false (:supports-usage-in-streaming compat))
-       (assoc :stream_options {:include_usage true})
-       ;; pi: opt out of server-side storage where the provider has the field
-       (:supports-store compat) (assoc :store false)
-       (seq tools) (assoc :tools tools)
-       ;; pi: the key on api.openai.com (caching on) or whenever long
-       ;; retention is supported; the session id is clamped, and no id means
-       ;; no key
-       (and session-id (or (and caching? (api-openai-url? model-record)) long?))
-       (assoc :prompt_cache_key (clamp-prompt-cache-key session-id))
-       long? (assoc :prompt_cache_retention "24h")
-       (seq thinking-params) (merge thinking-params)
-       (:max-tokens model-record) (assoc max-tokens-field (:max-tokens model-record))
-       (seq (:sampling-params model-record)) (merge (:sampling-params model-record))))))
+                    (openai-messages ms model-record model-id compat)))
+        ;; pi openai-completions convertMessages: an addition after the
+        ;; top-level array's folded prefix rides at the marker's position as a
+        ;; tool-bearing system message (the Kimi K3 shape), never as text
+        kimi-message (fn [marker]
+                       (when-let [added (seq (:added marker))]
+                         {:role "system"
+                          :tools (mapv #(tool->openai-schema % strict?) added)}))
+        converted (if (= :additions tool-support)
+                    (convert-messages-with-kimi-changes messages folded convert kimi-message)
+                    (convert messages))
+        ;; a marker can split a tool result from its following user message;
+        ;; the bridge is idempotent, so run it over the joined list again when
+        ;; the compat asks for it.
+        converted (if (and (= :additions tool-support)
+                           (:requires-assistant-after-tool-result compat))
+                    (bridge-tool-results converted)
+                    converted)
+        tools (when (seq request-tools)
+                (mapv #(tool->openai-schema % strict?) request-tools))
+        cache-control (openai-compat-cache-control compat retention)
+        ;; pi applyAnthropicCacheControl runs after the messages and tools
+        ;; vectors are built and before :sampling-params is merged
+        marked (if cache-control
+                 (apply-anthropic-cache-control converted tools cache-control)
+                 {:messages converted :tools tools})
+        messages (:messages marked)
+        tools (:tools marked)]
+    (cond-> {:model model-id
+             ;; the model record + model-id flow to the converters as the
+             ;; replay target: a message's thinking echoes back as
+             ;; reasoning_content only when the message was produced by this
+             ;; same model (mid-session /model switches must not leak foreign
+             ;; CoT into the request), and the record carries the provider
+             ;; family (an account alias's base) for tool-call id shaping
+             :messages messages
+             :stream true}
+      ;; pi buildParams: stream_options only where the wire reports usage in
+      ;; the stream
+      (not= false (:supports-usage-in-streaming compat))
+      (assoc :stream_options {:include_usage true})
+      ;; pi: opt out of server-side storage where the provider has the field
+      (:supports-store compat) (assoc :store false)
+      (seq tools) (assoc :tools tools)
+      ;; pi: the key on api.openai.com (caching on) or whenever long
+      ;; retention is supported; the session id is clamped, and no id means
+      ;; no key
+      (and session-id (or (and caching? (api-openai-url? model-record)) long?))
+      (assoc :prompt_cache_key (clamp-prompt-cache-key session-id))
+      long? (assoc :prompt_cache_retention "24h")
+      (seq thinking-params) (merge thinking-params)
+      (:max-tokens model-record) (assoc max-tokens-field (:max-tokens model-record))
+      (seq (:sampling-params model-record)) (merge (:sampling-params model-record)))))
 
 (defn completions-affinity-headers
   "pi createClient session-affinity headers on the completions wire
@@ -165,7 +189,7 @@
             retention (or cache-retention :short)
             payload (on-payload opts
                                 (openai-payload model-record effort messages tools model-id
-                                                retention session-id (:tool-changes opts)))
+                                                retention session-id))
             response (ai-http/request url
                                       {:headers (openai-request-headers model-record provider-record api-key
                                                                         session-id retention messages)
