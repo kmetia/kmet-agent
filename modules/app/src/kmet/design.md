@@ -146,6 +146,18 @@ the process install — which is why a connection must not take the slot.
 - A `:bundle/ptc` / a second `:toolExecutor`: the bridge serves 2% of `run_code`
   calls and no batching, so a second presentation mode has no consumer
   (`docs/architecture.md` § Tools and the script sandbox).
+- A `reachesTools`-style declaration on the discovery tool. pi needs it because
+  its `tool_search` is an extension that must opt in, and because a permission
+  layer has to be told that a declared tool widened the set
+  (`mcp/index.ts:509-520`). kmet states the same fact where it already keeps
+  one — `:exposure` on the tool definition — with two consequences: the
+  widening is derived from the table rather than declared, so it cannot go
+  stale, and the case the declaration exists for has no reader here, because an
+  extension contributes findable tools as a `:deferred` source (never a second
+  searcher) and a promoted tool's own calls are policy-checked by name
+  (`permissions/check`), so no policy sees a widened set it did not judge. If a
+  second discovery tool ever exists, the port is a `:reaches` key read by
+  `loop.state/declared-record`'s existing case — internal, not an ABI addition.
 - The kernel's own exclusions (JS syntax, the loader/HMR/console packages, the
   plugin market, async stack splicing) are listed in
   [`srce.md`](../../../../modules/srce/src/kmet/srce/srce.md).

@@ -10,14 +10,14 @@ git history. The context and token tracks are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| **Tool exposure and declared sets** (P5–P6) | a tool-set change re-sends the whole array and is recorded nowhere | **P5 landed**; **P6 → S** |
+| **Tool exposure and declared sets** (P5–P6) | a tool-set change re-sends the whole array and is recorded nowhere | **P5 landed**; **P5.5 → P6 → S** |
 | **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | plan; **after** the exposure track |
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | decisions closed (E1–E16); independent |
 
-Exposure (P5 → P6) → S. That order is a decision about where the effort goes,
-not a dependency: P5 pays on its own — every schema not sent is a win, and no
-provider has to honour anything. Eval lands whenever; it touches neither a wire
-nor the tool registry.
+Exposure (P5 → P5.5 → P6) → S. That order is a decision about where the effort
+goes, not a dependency: P5 pays on its own — every schema not sent is a win, and
+no provider has to honour anything. Eval lands whenever; it touches neither a
+wire nor the tool registry.
 
 ## Tool exposure and declared sets
 
@@ -80,23 +80,6 @@ The mount rule cost the first attempts: a file in a discovery root is
 discovered, not mounted (`docs/extensions.md` § Where extensions live and what
 loads them), which is why the probe is both installed *and* patched in as a row.
 
-Known inputs for P6, found while landing P5:
-
-- **Declared order is not stable.** `registry/select-tools` returns a map, so
-  past array-map size the wire order is hash order, and `get-all-tools` merges
-  a deferred source's tools *first*. The composed run measured the effect: two
-  promoted names entered a 17-tool array at positions 2 and 17 of 19 —
-  interleaved with the existing declarations, not appended, where appending
-  would have been 17 and 18. P6's "byte-identical up to the delta" gate needs
-  an order of its own first: sort by name, or carry the selection as an
-  ordered vector.
-- `session/schema.clj`'s `Entry` union is missing `:custom-message` (and would
-  miss any new role): with the strict load pass on (`--debug`), every custom
-  message is reported and skipped. Pre-existing, one line plus a test.
-- A `:default-tools` selection that omits `tool_search` makes a deferred tool
-  unreachable (nothing can promote it). Coherent — an explicit selection wins —
-  but it should be said in `docs/configuration.md` when that track lands.
-
 ### Leftovers from P5
 
 1. **The github-copilot run itself — closed 2026-11-04.** The landing
@@ -112,7 +95,7 @@ Known inputs for P6, found while landing P5:
    row mount; this one installs the probe in a scratch agent dir, mounts it as
    `:ext/p5_probe` through `--patch`, runs `--profile print`, and reads the
    arrays from the extension's listener. It passes, and it measured the
-   promotion's placement inside the array (see the ordering input above).
+   promotion's placement inside the array (see § P5.5).
 3. **The prompt's Available-tools list for a promoted tool.** The leading
    system prompt is never rebuilt for a promotion (by design), so a promoted
    tool never appears in that list — it appears in the appended source listing
@@ -122,6 +105,7 @@ Known inputs for P6, found while landing P5:
    shows the other side of it: asked to "Say exactly: mount-test", the model
    answered from the appended listing — "I see you've mentioned '1 deferred
    tool source'" — because that listing was the only place the source existed.
+   S5 rewrites that section, so the sentence lands there.
 
 The listing is bounded (`session/context.clj`): a description elides past 250
 characters, and past 4096 characters the last sources drop into one `… N more
@@ -129,18 +113,52 @@ sources` line — pi's shape for `mcp_servers`, so an MCP `:deferred` source per
 server cannot grow the message without limit. `tool_search`'s description names
 the tool inline, as pi's does.
 
-### Recorded, not scheduled
+### P5.5 — the declared order (one commit, before P6)
 
-- **`reachesTools` — pi's declaration that a tool can reach hidden tools.** pi's
-  MCP extension activates `tool_search` only for a registered tool of that name
-  that declares it (`mcp/index.ts:509-520`), warns when the tool exists but
-  cannot be activated, and the permission layer reads the declaration. kmet
-  recognises the tool by name instead (`state.clj:574`, the only special case
-  in `declared-tools-for`): nothing else can say "this declared tool widened the
-  set", so a permission policy cannot tell, and a third-party discovery tool of
-  another name is just an ordinary tool. Worth a declaration only when
-  permissions judge per tool — until then the name is the contract, and one tool
-  holds it.
+The order P6's acceptance criterion is stated in. An **unchanged** set is
+already byte-stable — round 2 above measured it, because hash order is
+deterministic for one key set — so this is not a live cache bug. It is that a
+*change* moves the entries it does not touch: `get-all-tools` merges a deferred
+source's tools *first*, `registry/select-tools` returns a map, and past
+array-map size the wire order is hash order (the composed run put two promoted
+names at positions 2 and 17 of 19). "Byte-identical up to the delta point"
+cannot be asserted — let alone measured — while that holds.
+
+1. **Sort by name at the wire seam** — `state/active-tools`
+   (`state.clj:619-631`), which `loop.clj:612` reads once per request and
+   threads: the schema, the declared set and dispatch all resolve against that
+   one capture. A sort at `select-tools` is not enough and not the point:
+   `declared-tools-for`'s `(into {} …)` and `active-tools`' `vals` collapse any
+   map's order back to hash order as soon as the table passes eight entries.
+   Sorted by name, a replay recomputes the wire order from the recorded names,
+   so P6 step 1 records no order of its own. Costs one one-time reordering
+   against today's wire, nothing else.
+2. **Derive the discovery gate from what can actually be promoted** — same
+   commit, because both are in `declared-tools-for`. `deferred?`
+   (`state.clj:591`) is computed over the raw table, so a registry holding a
+   deferred tool the selection excludes still declares `tool_search`: the
+   "schema every request pays for and no call can use" (`:566-570`) that P5
+   exists to remove. And `search.clj:71-80` lets a search load a `:sandbox`
+   tool, `from-sandbox` declares it once loaded, while `declared-record` says
+   `:sandbox` is "never declared" and the gate ignores contributed tools — so a
+   run whose only contributions are sandbox sources declares no discovery tool
+   at all. Three places answer "what can search reach" with three rules; they
+   should answer once.
+3. `session/schema.clj`'s `Entry` union is **not** here: `:custom-message`
+   joins with `:tool-change` in P6 step 1 — same file, same test.
+
+Tests land in `modules/app/test/kmet/app/test_tool_exposure.clj`, which already
+asserts these derivations
+(`test-tool-search-is-declared-only-when-a-deferred-tool-exists`, `:178`): a
+table past eight tools declares a name-sorted list that is the same across two
+resolutions; the gate reads the selection and the contributed catalog, not the
+raw table; and the S1 warn fires at resolution, not per request
+(`state/selection` runs per request, `loop.driver` resolves).
+
+Done when `select-tools`' map is unchanged but one table always produces one
+wire order, a tool nothing can promote declares nothing, and no request carries
+a `tool_search` it cannot use. Gates: `bb test-changed`, `bb lint-changed`,
+`bb format-check-changed`.
 
 ### P6 — mid-conversation tool changes without a full re-prefill
 
@@ -175,7 +193,10 @@ Files: `session/schema.clj`, `session/context.clj`,
    *current* advertised set is a fold over the branch by name (pi:
    `getDeclaredTools`, `utils/transcript.ts:170-177`), so a re-added name
    replaces its earlier definition; the registry can no longer change what a
-   resumed session says it was sent.
+   resumed session says it was sent. The `Entry` union gains `:custom-message`
+   beside the new role — with the strict load pass on (`--debug`) every custom
+   message is currently reported and skipped, and the new role would fail the
+   same way; one line plus a test.
 2. **wire — anthropic.** Declare the tools once, on the first request, when the
    model has both mid-conversation capabilities **and** at least one initial
    tool (`supportsMidConvoSystemMessages && supportsMidConvoToolChanges &&
@@ -305,6 +326,11 @@ already exists, and give `/tools` the discovery plus a scope target.
   empty-selection branch (`:314-317`) already has the right meaning for both.
 - `loop.driver`: resolve `:enabled-tools` beside `:121`, thread through
   `prompt-options` (`:85-93`) and `agent-state` (`:127`, `:147`).
+- **Warn when a selection orphans every `:deferred` tool** — no discovery tool
+  left to promote one. `:enabled-tools` can drop `tool_search` exactly as
+  `:default-tools` can, and the loss is silent today. pi's shape
+  (`mcp/index.ts:509-520` warns when `tool_search` exists but cannot be
+  activated): an explicit selection still wins, it just reports.
 
 Done when a config with no `:enabled-tools` produces a byte-identical request,
 and one with `:enabled-tools` wins over `:default-tools`.
@@ -350,7 +376,10 @@ and one with `:enabled-tools` wins over `:default-tools`.
 
 - `docs/configuration.md:140-196` — `:enabled-tools`, both scopes, the delta
   rule, precedence; fix the `/reload` sentence at `:194-196` (it contradicts
-  `builtins.clj:676-679`).
+  `builtins.clj:676-679`); and say that `tool_search` is a selection row like
+  any other — naming it out of `:enabled-tools`/`:default-tools` orphans every
+  `:deferred` tool, because nothing else can promote one (S1's warn is the
+  other half).
 - `docs/pi-alignment.md:261` (settings parity; CLI flags still the gap) and
   `:56` (no project trust — note the fail-closed argument).
 - `modules/app/src/kmet/extension.md` + `docs/extensions.md` (the two new ABI
