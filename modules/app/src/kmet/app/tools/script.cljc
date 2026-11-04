@@ -7,7 +7,8 @@
    runs the code on a daemon thread whose SCI :interrupt-fn aborts interpreted
    code on the run signal or the deadline. `run` owns the capture files, the
    wait, the sandbox realm and the result assembly; a caller that keeps its
-   context (`eval`) supplies `:sci-ctx` and the `:state` it seeds per call.
+   context (`eval`) supplies `:sci-ctx` and the `:interrupt` holder it built
+   the context with, and `run` re-arms and seeds it per call.
 
    The context carries the capability namespaces, the `tools` namespace —
    discovery (tools/list, tools/describe), the per-call bridge (async promises
@@ -138,6 +139,15 @@
    varies by; the suffix is the sandbox layer's."
   [tool suffix]
   (keyword (str (str/replace tool "_" "-") "/" suffix)))
+
+(defn- require-tool!
+  "A script run names its tool: the name is in every message and error type,
+   so a missing one is a caller bug reported here, not a nil in a result."
+  [tool]
+  (when-not (and (string? tool) (seq tool))
+    (throw (ex-info "a script run needs :tool — the tool name used in messages"
+                    {:type :script/missing-tool :tool tool})))
+  tool)
 
 ;; ─── Small helpers ────────────────────────────────────────────────────────
 
@@ -771,19 +781,23 @@
       (contains? process 'sh) (assoc-in ['user 'sh] (get process 'sh)))))
 
 (defn context
-  "Build an SCI context over BASE-NAMESPACES and install the per-call
-   namespaces with `seed!`."
+  "Build an SCI context over NAMESPACES. The per-call namespaces are
+   installed later with `seed!`; INTERRUPT-FN is created from the holder the
+   caller keeps (`interrupt-fn`), and TOOL names the tool in boundary errors."
   [namespaces interrupt-fn tool]
   (sandbox-context namespaces interrupt-fn tool))
 
 (defn seed!
-  "Install STATE's per-call namespaces into CTX. Merging into the existing
-   maps keeps the host namespaces a kept context already carries, so the
-   same call works for a fresh run_code context and a reused eval one."
+  "Install STATE's per-call namespaces into CTX. The fixed namespaces merge
+   into what a kept context already carries; `tools` replaces its map instead,
+   because its key set follows the call's surface — a tool that left the
+   surface must not keep a var in a reused context."
   [ctx state]
-  (doseq [[ns-name ns-map] (call-namespaces state)]
-    (sci/add-namespace! ctx ns-name ns-map))
-  ctx)
+  (let [namespaces (call-namespaces state)]
+    (doseq [[ns-name ns-map] namespaces]
+      (sci/add-namespace! ctx ns-name ns-map))
+    (swap! (:env ctx) assoc-in [:namespaces 'tools] (get namespaces 'tools))
+    ctx))
 
 ;; ─── The callable surface ───────────────────────────────────────────────────────
 
@@ -1024,7 +1038,9 @@
 
 (defn rearm!
   "Point HOLDER at this call's STATE — the combined :cancelled signal, the
-   :deadline and the :abort atom. Returns HOLDER."
+   :deadline and the :abort atom. HOLDER must be the one SCI-CTX's
+   :interrupt-fn was created with, or the call's deadline reaches nothing.
+   Returns HOLDER."
   [holder state]
   (reset! holder {:signal (:cancelled state)
                   :deadline (:deadline state)
@@ -1144,6 +1160,7 @@
    runtime cwd; LIMITS is `resolve-limits`' map (or the default)."
   [{:keys [tool cwd timeout limits signal ctx on-update
            get-all-tools get-contributed-tools select-tools execute-tool]}]
+  (require-tool! tool)
   (let [cwd (or cwd (tool-util/cwd))
         timeout-ms (normalize-timeout timeout)
         limits (or limits (resolve-limits nil))
@@ -1227,64 +1244,71 @@
         deadline (if (contains? opts :deadline)
                    deadline
                    (when timeout-ms (+ started-at timeout-ms)))
-        state (assoc state :deadline deadline)
-        interrupt (or interrupt (interrupt-holder))
-        _ (rearm! interrupt state)
-        sci-ctx (or sci-ctx
-                    (context (base-namespaces)
-                      (interrupt-fn interrupt tool)
-                      tool))
-        _ (seed! sci-ctx state)
-        prelude (if (contains? opts :prelude) prelude alias-prelude)
-        capture (start-capture (:on-update state)
-                               (:abort state)
-                               (:capture-bytes (:limits state)))
-        _ (reset! (:writers state) capture)
-        {:keys [done result]} (start-eval-thread! sci-ctx code prelude capture)]
-    (if deadline
-      (when-not (deref done timeout-ms false)
-        (compare-and-set! (:abort state) nil :timeout)
-        ;; the interpreter notices the abort on its next step; a host-blocked
-        ;; script does not, and is abandoned here
-        (deref done interrupt-grace-ms false))
-      ;; no deadline (bash's nil/0): wait for the script — but Escape must
-      ;; still end the call, so a host-blocked script (which the interrupt
-      ;; cannot reach) is abandoned after the same grace the deadline uses
-      (loop []
-        (when (= ::pending (deref done interrupt-grace-ms ::pending))
-          (if @(:cancelled state)
-            (compare-and-set! (:abort state) nil :aborted)
-            (recur)))))
+        state (assoc state :deadline deadline)]
     (try
-      (finish-capture! capture)
-      (let [res (or @result {:status (or @(:abort state) :timeout)})]
-        (assemble-result {:tool tool
-                          :res res
-                          :emitted @(:emitted state)
-                          :images @(:images state)
-                          :timeout-ms timeout-ms
-                          :output-bytes (:bytes (:limits state))
-                          :output-lines (:lines (:limits state))
-                          :capture-bytes (:capture-bytes (:limits state))
-                          :trace (:trace state)
-                          :abort-reason @(:abort state)
-                          :elapsed-ms (- (concurrent/monotonic-ms) started-at)
-                          :extra-details (:extra-details opts)}))
-      (finally (reset! (:live? state) false)))))
+      (let [interrupt (or interrupt (interrupt-holder))
+            _ (rearm! interrupt state)
+            sci-ctx (if sci-ctx
+                      sci-ctx
+                      (context (base-namespaces)
+                        (interrupt-fn interrupt tool)
+                        tool))
+            _ (seed! sci-ctx state)
+            prelude (if (contains? opts :prelude) prelude alias-prelude)
+            capture (start-capture (:on-update state)
+                                   (:abort state)
+                                   (:capture-bytes (:limits state)))
+            _ (reset! (:writers state) capture)
+            {:keys [done result]} (start-eval-thread! sci-ctx code prelude capture)]
+        (if deadline
+          (when-not (deref done timeout-ms false)
+            (compare-and-set! (:abort state) nil :timeout)
+            ;; the interpreter notices the abort on its next step; a host-blocked
+            ;; script does not, and is abandoned here
+            (deref done interrupt-grace-ms false))
+          ;; no deadline (bash's nil/0): wait for the script — but Escape must
+          ;; still end the call, so a host-blocked script (which the interrupt
+          ;; cannot reach) is abandoned after the same grace the deadline uses
+          (loop []
+            (when (= ::pending (deref done interrupt-grace-ms ::pending))
+              (if @(:cancelled state)
+                (compare-and-set! (:abort state) nil :aborted)
+                (recur)))))
+        (let [res (or @result {:status (or @(:abort state) :timeout)})]
+          (assemble-result {:tool tool
+                            :res res
+                            :emitted @(:emitted state)
+                            :images @(:images state)
+                            :timeout-ms timeout-ms
+                            :output-bytes (:bytes (:limits state))
+                            :output-lines (:lines (:limits state))
+                            :capture-bytes (:capture-bytes (:limits state))
+                            :trace (:trace state)
+                            :abort-reason @(:abort state)
+                            :elapsed-ms (- (concurrent/monotonic-ms) started-at)
+                            :extra-details (:extra-details opts)})))
+      (finally
+        (when-let [capture @(:writers state)]
+          (finish-capture! capture))
+        (reset! (:live? state) false)))))
 
 (defn run
   "Run CODE in the script sandbox. A fresh context is built for the call
    unless SCI-CTX is given (the `eval` service keeps one); the call's
-   namespaces are installed with `seed!`. The call's inner tool calls execute
-   in a sandbox realm, which is detached when the script returns; a
-   fire-and-forget inner call still holds the ctx value, which keeps resolving
-   exactly as it did.
+   namespaces are installed with `seed!` and the interrupt holder is re-armed
+   for the call. The call's inner tool calls execute in a sandbox realm, which
+   is detached when the script returns; a fire-and-forget inner call still
+   holds the ctx value, which keeps resolving exactly as it did.
 
-   TOOL names the tool in messages and error types; PRELUDE defaults to the
-   alias prelude; STARTED-AT/DEADLINE let a caller that serializes calls put
-   the clock where the work starts. EXTRA-DETAILS merges into the result's
-   :details."
+   TOOL names the tool in messages and error types. SCI-CTX pairs with
+   INTERRUPT, the holder its :interrupt-fn was created from — a different
+   holder would re-arm nothing. STATE, when the caller built it with
+   `prepare`, is this call's state. PRELUDE defaults to the alias prelude.
+   STARTED-AT/DEADLINE let a caller that serializes calls put the clock where
+   the work starts; an explicit :deadline nil means no deadline (otherwise a
+   :timeout computes it). EXTRA-DETAILS merges into the result's :details."
   [{:keys [ctx] :as opts}]
+  (require-tool! (:tool opts))
   (let [realm (sandbox-realm ctx)
         opts (if realm (update opts :ctx assoc :srce-ctx realm) opts)]
     (try

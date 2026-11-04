@@ -10,12 +10,12 @@
                          result
 
    Each caller keeps its own concurrency and bookkeeping: the loop emits
-   events and appends context/session entries, the run_code bridge returns
-   promises and keeps a call trace. The registry's `execute-tool` remains the
-   per-tool dispatcher (argument normalization, :prepare-arguments,
+   events and appends context/session entries, the script layer's bridge
+   returns promises and keeps a call trace. The registry's `execute-tool`
+   remains the per-tool dispatcher (argument normalization, :prepare-arguments,
    :contextual?/:streams? shapes); it is passed in rather than required so
-   kmet.app.tools.run-code can use this namespace without a require cycle (the
-   registry requires script)."
+   kmet.app.tools.script can use this namespace without a require cycle (the
+   registry builds the executor the run_code tool hands it)."
   (:require [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.read :as read-tool]
             [kmet.app.tools.util :as tool-util]))
@@ -28,11 +28,10 @@
      (fn [tool-name args {:keys [signal ctx on-update tools]}]
        {:content … :is-error …})
 
-   Passed in rather than required: the registry requires the run_code script
-   support, so requiring the registry here would close the cycle (pi: the
-   lower layer takes a `StreamFn`-shaped value instead of importing a
-   provider). A missing executor is a programming error, not a tool failure,
-   so it throws a named error rather than degrading into one."
+   Passed in rather than required: the executor is a value, so this
+   namespace stays below the registry and the tool layer shares one pipeline
+   without a require cycle. A missing executor is a programming error, not a
+   tool failure, so it throws a named error rather than degrading into one."
   nil)
 
 (defn- executor
