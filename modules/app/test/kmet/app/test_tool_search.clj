@@ -25,11 +25,14 @@
 
 (defn- with-run
   "Run F with `*run*` bound to a fake run whose declared set is a live atom —
-   the loop's thunk in miniature, so a promotion is visible to the next call."
-  [declared f]
-  (binding [search/*run* {:declared (fn [] @declared)
-                          :load! (fn [names] (swap! declared into names))}]
-    (f)))
+   the loop's thunk in miniature, so a promotion is visible to the next call.
+   SELECTION is the run's tool selection (`*run*`'s `:selection`); nil = none."
+  ([declared f] (with-run declared nil f))
+  ([declared selection f]
+   (binding [search/*run* {:declared (fn [] @declared)
+                           :selection (fn [] selection)
+                           :load! (fn [names] (swap! declared into names))}]
+     (f))))
 
 (defn- run-search [h args]
   ((:execute (search/definition h)) args))
@@ -130,6 +133,29 @@
         (t/is (not (str/includes? (:description after) "widget_a")))
         (t/is (= search/tool-search-name (:name after))))
       (finally (tools/unregister-tool-source! h ::catalog)))))
+
+(t/deftest test-the-selection-narrows-the-candidates
+  ;; a search may only promise what the wire would declare: a deferred or
+  ;; contributed sandbox tool the run's selection leaves out is not a
+  ;; candidate — the same `registry/promotable-tools` the discovery gate reads
+  (let [h (handle)
+        declared (atom #{})]
+    (deferred-source! h ::catalog "Widget tools" ["widget_a" "widget_b"])
+    (tools/register-tool-source! h ::sandbox
+                                 (fn [] {"browser_shot" {:description "Take a screenshot of a page"}}))
+    (try
+      (let [r (with-run declared {:enabled #{"widget_a" "browser_shot"}}
+                #(run-search h {:query "widget tool"}))]
+        (t/is (= ["widget_a"] (:loaded (:details r)))
+              "widget_b is excluded by the selection")
+        (t/is (= #{"widget_a"} @declared)))
+      (let [r (with-run declared {:enabled #{"widget_a"}}
+                #(run-search h {:query "screenshot"}))]
+        (t/is (= "No matching tools found." (:content r))
+              "a sandbox tool outside the selection is not a candidate"))
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (tools/unregister-tool-source! h ::sandbox)))))
 
 (t/deftest test-a-parameter-name-is-searchable
   ;; the schema text joins the searchable document (pi: schemaText), so a tool

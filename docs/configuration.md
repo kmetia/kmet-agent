@@ -201,6 +201,20 @@ settles as `Tool <name> not found` (pi: `prepareToolCall`) instead of running.
 kmet has no CLI equivalent of pi's `--tools`/`--exclude-tools`/`--no-tools`/
 `--no-builtin-tools` yet.
 
+An extension tool source may be *deferred*: its tools are callable from
+`run_code` but not declared to the model until the built-in `tool_search`
+loads one. `tool_search` itself is declared only while the selection can
+promote something — a deferred tool or a contributed sandbox tool — so a setup
+with no such source pays no schema for it. It is a row like any other tool:
+removing it (`{:id :tool/tool_search :remove true}`) leaves every deferred
+source reachable from scripts but no longer discoverable by the model.
+
+The leading system prompt's Available-tools list is not rebuilt when a tool is
+promoted; it is rebuilt when the selection changes (`/tools`), on `/reload` and
+on a session switch. A promoted tool therefore appears in the conversation's
+appended source listing and in the request's tool declarations, but not in that
+list until one of those happens.
+
 ## HTTP and reload
 
 `:http-idle-timeout-ms` (default 120000, pi: `httpIdleTimeoutMs`) is the LLM

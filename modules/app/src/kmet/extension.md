@@ -313,7 +313,10 @@ callable from `run_code` and `:enabled-tools` / `:default-tools` select over
 them like any registered tool, and one becomes declared to the model once
 `tool_search` loads it. Give the source a `:description` — one line — and the
 model is told the source exists through an appended conversation entry when the
-set of deferred sources changes.
+set of deferred sources changes. A promotion does not rebuild the leading
+system prompt (that would be a full prefix miss), so a promoted tool does not
+join the prompt's Available-tools list — the appended source listing and the
+request's own declarations are where the model learns it is now available.
 
 ```clojure
 (ext/register-tool-source! api :my-catalog

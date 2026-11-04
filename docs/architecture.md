@@ -379,8 +379,13 @@ are declared while selected; `:deferred` is callable but declared only once
 `tool_search` loads it; `:sandbox` (a contributed source's catalog) is callable
 and never declared. `kmet.app.loop.state/declared-tools-for` builds the wire
 list from the selection (`:enabled-tools` / `:default-tools`) and the loaded set
-— a `tool_search`-named tool is declared only while the table holds a
-`:deferred` tool to find, so a direct-only setup pays no schema for it. The
+— name-sorted, because past array-map size a map's order is hash order and a
+replay of the recorded names must reproduce the array. A `tool_search`-named
+tool is declared only while the selection can promote something — a `:deferred`
+tool or a contributed `:sandbox` tool
+(`kmet.app.tools.registry/promotable-tools`, the same derivation the search
+itself ranks) — so a direct-only setup pays no schema for it and a selection
+that excludes every promotable tool declares none. The
 bundled clojure and tree-sitter extensions are the shipped users of that: each
 declares its family's entry point directly (`clojure_edit`,
 `list_symbols`/`find_definition`) and contributes its refinements as one

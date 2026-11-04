@@ -281,6 +281,27 @@
          (filter (fn [[n _]] (keep? n)))
          (into (empty all)))))
 
+(defn promotable-tools
+  "The tools a search can promote: ALL's `:deferred` tools plus CONTRIBUTED (a
+   `:sandbox` source's catalog), filtered by the same selection the declared
+   surface uses — ENABLED names (nil = everything) and EXCLUDE names (a
+   `:default-tools` exclusion). A deferred tool the selection leaves out is not
+   promotable: loading it could not declare it. A contributed name that ALL
+   holds too keeps ALL's record and is not promotable either.
+
+   This is the one answer to \"what can a search reach\": the discovery gate
+   (`kmet.app.loop.state/declared-tools-for`) declares `tool_search` from it
+   and `tool_search` ranks its own candidate list through it, so a request
+   cannot carry a search for nothing and a search cannot promise a tool the
+   wire would never declare. Returns name → Tool."
+  [all contributed {:keys [enabled exclude]}]
+  (let [contributed (apply dissoc (or contributed {}) (keys all))
+        deferred (into {} (filter (fn [[_ t]] (= :deferred (tool/exposure t))) all))
+        kept? (fn [name]
+                (and (not (contains? (or exclude #{}) name))
+                     (or (nil? enabled) (contains? enabled name))))]
+    (into {} (filter (comp kept? key) (merge deferred contributed)))))
+
 ;; ─── Execution ─────────────────────────────────────────────────────────────
 
 (defn- normalize-args

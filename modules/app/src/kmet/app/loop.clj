@@ -1150,11 +1150,12 @@
                 ;; configured (pi: the codemode callable set is the active
                 ;; direct tools plus the registered codemode ones)
                 run-code-tool/*enabled-tools-fn* #(state/callable-tool-names agent)
-                ;; the declared set as `tool_search` sees it, and the promotion
-                ;; it records: both resolved per call, so two searches in one
-                ;; turn see each other's loads and the next request declares
-                ;; what the last one found
+                ;; what `tool_search` sees and records, resolved per call: the
+                ;; declared names, the selection its candidates honour, and the
+                ;; promotion it appends — two searches in one turn see each
+                ;; other's loads, and the next request declares the last one's
                 tool-search/*run* {:declared #(into #{} (map :name) (state/active-tools agent))
+                                   :selection #(state/tool-selection agent)
                                    :load! #(state/promote-tools! agent %)}
                 ;; the run's tool chain — the same around hooks the loop's own
                 ;; batches run, so a scripted inner call is hooked exactly as an

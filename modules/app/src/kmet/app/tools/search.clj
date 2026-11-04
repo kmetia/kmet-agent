@@ -11,8 +11,9 @@
 
    The tool is `:model-only` (a script that could call it would change what the
    model sees mid-script), its description is a constant — registering a source
-   never rewrites a schema the prefix caches — and it is declared only while
-   the table holds a `:deferred` tool to find."
+   never rewrites a schema the prefix caches — and it is declared only while the
+   run's selection can promote something: a `:deferred` tool or a contributed
+   sandbox tool (`registry/promotable-tools`), which is also the set it ranks."
   (:require [clojure.string :as str]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.tool :as tool]
@@ -31,21 +32,28 @@
    DEFAULT_TOOL_SEARCH_LIMIT)."
   8)
 
-(defn deferred-tool?
-  "Does TOOL wait for `tool_search` before it is declared?"
-  [tool]
-  (= :deferred (tool/exposure tool)))
-
 (def ^:dynamic *run*
   "The run's tool-set view, bound by `kmet.app.loop` for the whole prompt:
-   {:declared (fn [] → the declared name set)
-    :load!    (fn [names] → record the promotion)}
-   `tool_search` reads `:declared` to skip what the model already has and calls
-   `:load!` with its matches. A tool body cannot reach the agent, so this is
-   the same seam `run_code` uses for the run state a tool needs. nil outside a
-   run (a direct call, a test): a match that cannot be recorded is not loaded,
-   so the call reports none (pi: `options.tools` absent)."
+   {:declared  (fn [] → the declared name set)
+    :selection (fn [] → {:enabled … :exclude …} — the run's tool selection,
+                       see `kmet.app.loop.state/tool-selection`)
+    :load!     (fn [names] → record the promotion)}
+   `tool_search` reads `:declared` to skip what the model already has, narrows
+   its candidates with `:selection` (so it never promises a tool the wire would
+   not declare), and calls `:load!` with its matches. A tool body cannot reach
+   the agent, so this is the same seam `run_code` uses for the run state a tool
+   needs. nil outside a run (a direct call, a test): a match that cannot be
+   recorded is not loaded, so the call reports none (pi: `options.tools`
+   absent); a missing `:selection` means no selection, as a direct call has
+   none."
   nil)
+
+(defn- run-selection
+  "The selection `*run*` carries, or nil outside a run (or in a run that bound
+   none) — which `registry/promotable-tools` reads as \"everything\"."
+  [run]
+  (when-let [f (:selection run)]
+    (f)))
 
 (defn- schema-text
   "The descriptions and property names of SCHEMA, recursively — the words a
@@ -68,15 +76,13 @@
    :description (str/join " " (remove str/blank? (cons description (schema-text parameters))))})
 
 (defn- candidates
-  "The tools a search may load: TABLE's `:deferred` tools and CONTRIBUTED (a
-   `:sandbox` source's catalog), minus the names DECLARED already — a
-   contribution that collides with a table tool resolves to the table's
-   record, as it does everywhere else."
-  [table contributed declared]
-  (->> (concat (filter (comp deferred-tool? val)
-                       (remove (fn [[name _]] (contains? declared name)) table))
-               (remove (fn [[name _]] (or (contains? declared name) (contains? table name)))
-                       contributed))
+  "The PROMOTABLE tools a search may load (see `registry/promotable-tools` —
+  the selection's `:deferred` tools plus the contributed sandbox catalog), minus
+  the names DECLARED already. A record that omits `:name` takes its map key,
+  the address a promotion uses."
+  [promotable declared]
+  (->> promotable
+       (remove (fn [[name _]] (contains? declared name)))
        (mapv (fn [[name t]] [name (assoc t :name (or (:name t) name))]))))
 
 (defn- search-and-load
@@ -129,9 +135,10 @@
     (if-let [limit (resolve-limit limit)]
       (let [run *run*
             declared (if run ((:declared run)) #{})
-            matches (search-and-load run
-                                     (candidates (get-all-tools) (get-contributed-tools) declared)
-                                     query limit)]
+            promotable (registry/promotable-tools (get-all-tools)
+                                                  (get-contributed-tools)
+                                                  (run-selection run))
+            matches (search-and-load run (candidates promotable declared) query limit)]
         {:content (render matches)
          :is-error false
          :details {:loaded (mapv :name matches)}})
@@ -152,7 +159,9 @@
    `:tool/tool_search` row builds the composition's record via `definition`;
    tests build their own):
      :get-all-tools          — 0-arg registry tool map (the model's table)
-     :get-contributed-tools  — 0-arg sandbox sources' tool map"
+     :get-contributed-tools  — 0-arg sandbox sources' tool map
+   The declared set and the selection come from `*run*`, not from OPTS: they
+   belong to the run the call happens in, not to the registry."
   [{:keys [get-all-tools get-contributed-tools]}]
   (tool/make-tool
    :name tool-search-name

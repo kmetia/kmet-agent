@@ -5,19 +5,20 @@ tracks are ordered against each other, because they touch the same selection
 functions and share one ABI document. Landed work — the `github-copilot`
 anthropic auth, the prompt-caching parity pass, the around tool hook, the
 remaining openai-compat keys and **P5** (tool exposure, the declared/callable
-split, the shared ranker and `tool_search`) — is out of this file; it lives in
-git history. The context and token tracks are dropped too — see § Deferred.
+split, the shared ranker and `tool_search`) plus **P5.5** (the declared order
+and the one promotable derivation) — is out of this file; it lives in git
+history. The context and token tracks are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| **Tool exposure and declared sets** (P5–P6) | a tool-set change re-sends the whole array and is recorded nowhere | **P5 landed**; **P5.5 → P6 → S** |
+| **Tool exposure and declared sets** (P5–P6) | a tool-set change re-sends the whole array and is recorded nowhere | **P5 + P5.5 landed**; **P6 → S** |
 | **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | plan; **after** the exposure track |
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | decisions closed (E1–E16); independent |
 
-Exposure (P5 → P5.5 → P6) → S. That order is a decision about where the effort
-goes, not a dependency: P5 pays on its own — every schema not sent is a win, and
-no provider has to honour anything. Eval lands whenever; it touches neither a
-wire nor the tool registry.
+Exposure (P5 + P5.5 → P6) → S. That order is a decision about where the
+effort goes, not a dependency: P5 pays on its own — every schema not sent is a
+win, and no provider has to honour anything. Eval lands whenever; it touches
+neither a wire nor the tool registry.
 
 ## Tool exposure and declared sets
 
@@ -96,16 +97,16 @@ loads them), which is why the probe is both installed *and* patched in as a row.
    `:ext/p5_probe` through `--patch`, runs `--profile print`, and reads the
    arrays from the extension's listener. It passes, and it measured the
    promotion's placement inside the array (see § P5.5).
-3. **The prompt's Available-tools list for a promoted tool.** The leading
-   system prompt is never rebuilt for a promotion (by design), so a promoted
-   tool never appears in that list — it appears in the appended source listing
-   and in the declarations. Worth one sentence in
-   `docs/configuration.md`/`extension.md` when someone reads the two together;
-   the listing text is the only place the model is told twice. The composed run
-   shows the other side of it: asked to "Say exactly: mount-test", the model
-   answered from the appended listing — "I see you've mentioned '1 deferred
-   tool source'" — because that listing was the only place the source existed.
-   S5 rewrites that section, so the sentence lands there.
+3. **The prompt's Available-tools list for a promoted tool — closed with
+   P5.5.** The leading system prompt is never rebuilt for a promotion (by
+   design), so a promoted tool never appears in that list — it appears in the
+   appended source listing and in the declarations. One paragraph now says so
+   in `docs/configuration.md` § Tools and one sentence in
+   `modules/app/src/kmet/extension.md` § Tool sources; S5 keeps the paragraph
+   when it rewrites the Tools section. The composed run shows the other side of
+   it: asked to "Say exactly: mount-test", the model answered from the
+   appended listing — "I see you've mentioned '1 deferred tool source'" —
+   because that listing was the only place the source existed.
 
 The listing is bounded (`session/context.clj`): a description elides past 250
 characters, and past 4096 characters the last sources drop into one `… N more
@@ -113,57 +114,83 @@ sources` line — pi's shape for `mcp_servers`, so an MCP `:deferred` source per
 server cannot grow the message without limit. `tool_search`'s description names
 the tool inline, as pi's does.
 
-### P5.5 — the declared order (one commit, before P6)
+### P5.5 — the declared order (landed)
 
-The order P6's acceptance criterion is stated in. An **unchanged** set is
-already byte-stable — round 2 above measured it, because hash order is
-deterministic for one key set — so this is not a live cache bug. It is that a
-*change* moves the entries it does not touch: `get-all-tools` merges a deferred
-source's tools *first*, `registry/select-tools` returns a map, and past
-array-map size the wire order is hash order (the composed run put two promoted
-names at positions 2 and 17 of 19). "Byte-identical up to the delta point"
-cannot be asserted — let alone measured — while that holds.
+The order P6's acceptance criterion is stated in. An **unchanged** set
+was already byte-stable — round 2 above measured it, because hash order is
+deterministic for one key set — so this was not a live cache bug. It is
+that a *change* moves the entries it does not touch: `get-all-tools`
+merges a deferred source's tools *first*, `registry/select-tools` returns a
+map, and past array-map size the wire order is hash order (the composed
+run put two promoted names at positions 2 and 17 of 19).
 
-1. **Sort by name at the wire seam** — `state/active-tools`
-   (`state.clj:619-631`), which `loop.clj:612` reads once per request and
-   threads: the schema, the declared set and dispatch all resolve against that
-   one capture. A sort at `select-tools` is not enough and not the point:
-   `declared-tools-for`'s `(into {} …)` and `active-tools`' `vals` collapse any
-   map's order back to hash order as soon as the table passes eight entries.
-   Sorted by name, a replay recomputes the wire order from the recorded names,
-   so P6 step 1 records no order of its own. Costs one one-time reordering
-   against today's wire, nothing else.
-2. **Derive the discovery gate from what can actually be promoted** — same
-   commit, because both are in `declared-tools-for`. `deferred?`
-   (`state.clj:591`) is computed over the raw table, so a registry holding a
-   deferred tool the selection excludes still declares `tool_search`: the
-   "schema every request pays for and no call can use" (`:566-570`) that P5
-   exists to remove. And `search.clj:71-80` lets a search load a `:sandbox`
-   tool, `from-sandbox` declares it once loaded, while `declared-record` says
-   `:sandbox` is "never declared" and the gate ignores contributed tools — so a
-   run whose only contributions are sandbox sources declares no discovery tool
-   at all. Three places answer "what can search reach" with three rules; they
-   should answer once.
-3. `session/schema.clj`'s `Entry` union is **not** here: `:custom-message`
-   joins with `:tool-change` in P6 step 1 — same file, same test.
+Two changes land here; P6 builds on both:
 
-Tests land in `modules/app/test/kmet/app/test_tool_exposure.clj`, which already
-asserts these derivations
-(`test-tool-search-is-declared-only-when-a-deferred-tool-exists`, `:178`): a
-table past eight tools declares a name-sorted list that is the same across two
-resolutions; the gate reads the selection and the contributed catalog, not the
-raw table; and the S1 warn fires at resolution, not per request
-(`state/selection` runs per request, `loop.driver` resolves).
+1. **One wire order.** `state/declared-tools-for` now returns a name-sorted
+   map (`(into (sorted-map) …)`) instead of a hash map. `active-tools`'
+   `vals` — the once-per-request capture `loop.clj:612` reads and threads —
+   is therefore name-sorted, and so are the prompt options' tool list and
+   `set-active-tools!`'s rebuild, which read the same derivation. Sorting at
+   the derivation is what makes the order survive: a sort inside
+   `select-tools` would be collapsed by `declared-tools-for`'s `into`, and a
+   sort in `active-tools` alone would leave the prompt's list in hash order.
+   A replay recomputes the wire order from the recorded names, so P6 step 1
+   records no order of its own. Costs one one-time reordering against
+   today's wire, nothing else.
+2. **One answer to "what can search reach".** `registry/promotable-tools`
+   (`[all contributed {:enabled :exclude}]`) is the selection over the
+   `:deferred` table tools and the contributed `:sandbox` catalog, and it is
+   read by both the discovery gate (`declared-record`'s `deferred?` is gone)
+   and `tool_search`'s candidate list (`search.clj`). The tool receives the
+   run's selection through `*run*`'s new `:selection` key, bound by the loop
+   to `state/tool-selection` — the same `selection-opts` the declared surface
+   uses. A deferred tool the selection excludes declares no `tool_search`; a
+   sandbox source alone declares it; and a search cannot promise a tool the
+   wire would not declare. Two decisions taken while landing:
+   - **The gate ignores the loaded set.** It asks whether the catalog can be
+     promoted, not whether anything is still unloaded, so loading the last
+     deferred tool leaves `tool_search` declared — a further search returns
+     "No matching tools found", which is honest — and a promotion is a pure
+     addition, one direction for P6's delta.
+   - **A contributed name the table holds is not promotable.** `from-sandbox`
+     now reads the shared map instead of the raw catalog, so a hand-crafted
+     `:tool-load` naming a shadowed contribution no longer declares the
+     phantom; a search never loaded one anyway.
+
+One interaction S inherits: the bundled `/tools` extension persists a
+*snapshot* of the names that were declared when it last toggled, so a restored
+selection can exclude every promotable tool. The gate then drops `tool_search`
+for that run (nothing a search could reach is selected) — the loss S1's orphan
+warn exists to report and S3's delta selection removes. Before this change the
+same snapshot let a search load a deferred tool that the wire would then not
+declare, which was worse.
+
+Tests in `modules/app/test/kmet/app/test_tool_exposure.clj`:
+`test-the-declared-set-is-name-sorted` (12 tools, past array-map size:
+sorted, stable across two resolutions, and an addition leaves every other
+entry in place),
+`test-a-deferred-tool-the-selection-excludes-declares-no-search` and
+`test-a-contributed-sandbox-tool-can-justify-the-search`.
+`modules/app/test/kmet/app/test_tool_search.clj` adds
+`test-the-selection-narrows-the-candidates` (`with-run` now binds
+`:selection`). The S1 warn is not here — it lands where the selection is
+resolved (`state/tool-selection` runs per request, so the warning is emitted
+once at `loop.driver`), because `:enabled-tools` does not exist yet.
+
+`session/schema.clj`'s `Entry` union stays for P6 step 1: `:custom-message`
+joins with `:tool-change` — same file, same test.
 
 Done when `select-tools`' map is unchanged but one table always produces one
-wire order, a tool nothing can promote declares nothing, and no request carries
-a `tool_search` it cannot use. Gates: `bb test-changed`, `bb lint-changed`,
-`bb format-check-changed`.
+wire order, a tool nothing can promote declares nothing, and no request
+carries a `tool_search` it cannot use. Gates: `bb test-changed`,
+`bb lint-changed`, `bb format-check-changed` — all green.
 
 ### P6 — mid-conversation tool changes without a full re-prefill
 
-Depends on P5: the promotions are what make a mid-session tool change ordinary
-rather than a deliberate user action, and both items share the session record.
+Depends on P5 and P5.5: the promotions are what make a mid-session tool change
+ordinary rather than a deliberate user action, both items share the session
+record, and P5.5's name-sorted wire is the order the delta criterion is stated
+in (a recorded declaration list replays to the same array).
 Two reasons, one about the cache and one about fidelity:
 
 - **Cache.** Tools sit at the front of the prefix (Anthropic caches

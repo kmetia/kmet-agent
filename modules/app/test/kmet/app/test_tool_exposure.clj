@@ -132,6 +132,36 @@
         (t/is (nil? (:exposure tool)) name))
       (t/is (keyword? (tool/exposure tool)) name))))
 
+(t/deftest test-promotable-tools-are-the-selection-over-deferred-and-contributed
+  ;; one answer to "what can a search reach": the `:deferred` table tools plus
+  ;; the contributed `:sandbox` catalog, under the same selection the declared
+  ;; surface uses — a direct tool is never a candidate, and a contributed name
+  ;; the table holds keeps the table's record
+  (let [h (handle)
+        promotable (fn [selection]
+                     (tools/promotable-tools (tools/get-all-tools h)
+                                             (tools/get-contributed-tools h)
+                                             selection))]
+    (tools/register-tool! h (tool-map "direct"))
+    (tools/register-tool! h (assoc (tool-map "deferred") :exposure :deferred))
+    (tools/register-tool! h (assoc (tool-map "shared") :exposure :deferred))
+    (tools/register-tool-source! h ::shadow (fn [] {"shared" {:description "contributed"}}))
+    (with-sources h [[::catalog (fn [] {"contributed" (tool-map "contributed")}) {}]]
+      (fn []
+        (t/is (= #{"deferred" "shared" "contributed"}
+                 (set (keys (promotable nil))))
+              "a direct tool is never a candidate")
+        (t/is (= #{"deferred"}
+                 (set (keys (promotable {:enabled #{"deferred"}}))))
+              "the enabled allowlist narrows the catalog")
+        (t/is (empty? (promotable {:enabled #{}}))
+              "an empty selection reaches nothing")
+        (t/is (= #{"shared" "contributed"}
+                 (set (keys (promotable {:exclude #{"deferred"}}))))
+              "an exclusion removes a candidate too")
+        (t/is (= "shared" (:description (get (promotable nil) "shared")))
+              "a contributed name the table holds keeps the table's record")))))
+
 ;; ─── Declared and callable (the P5 split) ─────────────────────────────────
 
 (t/use-fixtures :each (fn [f] (support/with-registry f)))
@@ -146,6 +176,12 @@
 (defn- deferred-source! [h id description tools]
   (tools/register-tool-source! h id (fn [] tools)
                                {:exposure :deferred :description description}))
+
+(defn- search-tool!
+  "Mount the `tool_search` stand-in the declared-set derivations read by name."
+  [h]
+  (tools/register-tool! h {:name search/tool-search-name :exposure :model-only
+                           :description "search" :execute (fn [_] {:content "x"})}))
 
 (t/deftest test-deferred-tool-is-undeclared-until-loaded
   (let [h (support/tool-table)
@@ -178,8 +214,7 @@
 (t/deftest test-tool-search-is-declared-only-when-a-deferred-tool-exists
   (let [h (support/tool-table)
         agent (support/make-agent-state)]
-    (tools/register-tool! h {:name search/tool-search-name :exposure :model-only
-                             :description "search" :execute (fn [_] {:content "x"})})
+    (search-tool! h)
     (try
       (t/is (not (contains? (names (state/active-tools agent)) search/tool-search-name))
             "no deferred tool to find, so no schema to pay for")
@@ -187,6 +222,66 @@
       (t/is (contains? (names (state/active-tools agent)) search/tool-search-name))
       (finally
         (tools/unregister-tool-source! h ::catalog)
+        (tools/unregister-tool! h search/tool-search-name)))))
+
+(t/deftest test-the-declared-set-is-name-sorted
+  ;; the wire order must be a function of the names alone: past array-map size
+  ;; a map's order is hash order, so a replay of recorded names could not
+  ;; reproduce the array and a change could move entries it does not touch
+  (let [h (support/tool-table)
+        agent (support/make-agent-state)
+        names (mapv #(str "probe-" %) (range 12))]
+    (doseq [name (reverse names)]
+      (tools/register-tool! h (tool-map name)))
+    (try
+      (let [declared (mapv :name (state/active-tools agent))]
+        (t/is (= (vec (sort declared)) declared)
+              "a table past array-map size declares its tools in name order")
+        (t/is (= declared (mapv :name (state/active-tools agent)))
+              "one table, one order, on every resolution")
+        ;; a change moves only the entry it adds
+        (tools/register-tool! h (tool-map "probe-5a"))
+        (t/is (= declared (vec (remove #{"probe-5a"}
+                                       (mapv :name (state/active-tools agent)))))
+              "adding a tool leaves every other entry where it was"))
+      (finally
+        (doseq [name (concat names ["probe-5a"])]
+          (tools/unregister-tool! h name))))))
+
+(t/deftest test-a-deferred-tool-the-selection-excludes-declares-no-search
+  ;; the gate reads the selection, not the raw table: a deferred tool no
+  ;; selection can reach is not promotable, so the search schema buys nothing
+  (let [h (support/tool-table)
+        agent (support/make-agent-state)]
+    (search-tool! h)
+    (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
+    (try
+      (t/is (contains? (names (state/active-tools agent)) search/tool-search-name))
+      (reset! (:enabled-tools agent) #{search/tool-search-name "read"})
+      (t/is (not (contains? (names (state/active-tools agent)) search/tool-search-name))
+            "the selection can reach no promotable tool")
+      (reset! (:enabled-tools agent) #{search/tool-search-name "deferred-a"})
+      (t/is (contains? (names (state/active-tools agent)) search/tool-search-name)
+            "the deferred tool is selectable again")
+      (finally
+        (tools/unregister-tool-source! h ::catalog)
+        (tools/unregister-tool! h search/tool-search-name)))))
+
+(t/deftest test-a-contributed-sandbox-tool-can-justify-the-search
+  ;; a sandbox tool is never in the table, but a search can still promote one:
+  ;; the gate reads the contributed catalog, not the raw table
+  (let [h (support/tool-table)
+        agent (support/make-agent-state)]
+    (search-tool! h)
+    (tools/register-tool-source! h ::sandbox
+                                 (fn [] {"sb-a" {:description "sandbox a"}}))
+    (try
+      (t/is (contains? (names (state/active-tools agent)) search/tool-search-name))
+      (reset! (:enabled-tools agent) #{search/tool-search-name})
+      (t/is (not (contains? (names (state/active-tools agent)) search/tool-search-name))
+            "a sandbox tool the selection leaves out is not promotable either")
+      (finally
+        (tools/unregister-tool-source! h ::sandbox)
         (tools/unregister-tool! h search/tool-search-name)))))
 
 (t/deftest test-disabling-a-loaded-tool-hides-it-without-clearing-the-load

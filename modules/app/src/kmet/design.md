@@ -151,8 +151,9 @@ the process install — which is why a connection must not take the slot.
   layer has to be told that a declared tool widened the set
   (`mcp/index.ts:509-520`). kmet states the same fact where it already keeps
   one — `:exposure` on the tool definition — with two consequences: the
-  widening is derived from the table rather than declared, so it cannot go
-  stale, and the case the declaration exists for has no reader here, because an
+  widening is derived from the selection over the table and the contributed
+  catalog rather than declared, so it cannot go stale, and the case the
+  declaration exists for has no reader here, because an
   extension contributes findable tools as a `:deferred` source (never a second
   searcher) and a promoted tool's own calls are policy-checked by name
   (`permissions/check`), so no policy sees a widened set it did not judge. If a
