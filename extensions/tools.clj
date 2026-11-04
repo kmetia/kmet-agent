@@ -37,6 +37,13 @@
 
 (def ^:private tools-config-type "tools-config")
 
+(def ^:private empty-selection
+  {:scope :global
+   :entries {:global [] :project []}
+   :paths {}
+   :enabled #{}
+   :origin {}})
+
 (defn- persist-state!
   "Append the current selection as a tools-config custom entry (pi:
    persistState). Entries ride the branch, so restore reads the last one on
@@ -54,14 +61,11 @@
   "Re-read the settings view and keep the write scope the dialog already
    chose. Returns the selection."
   [api state]
-  (let [selection (or (ext/tool-selection api)
-                      {:scope :global
-                       :entries {:global [] :project []}
-                       :enabled #{}
-                       :origin {}})]
+  (let [selection (or (ext/tool-selection api) empty-selection)]
     (swap! state (fn [st]
-                   (cond-> (assoc st :selection selection)
-                     (nil? (:scope st)) (assoc :scope (:scope selection)))))
+                   (assoc st
+                          :selection selection
+                          :scope (or (:scope st) (:scope selection)))))
     selection))
 
 (defn- restore-from-branch!
@@ -71,16 +75,14 @@
   [api state]
   (let [sess (ext/session api)
         all-tools (ext/get-all-tools api)
-        all-names (mapv :name all-tools)
+        all-names (set (map :name all-tools))
         saved (last (keep (fn [e] (some-> (:data e) :enabled-tools))
-                          ((:get-entries sess) tools-config-type)))]
-    (swap! state assoc :all-tools all-tools)
-    (if saved
-      (do (swap! state assoc :enabled-tools
-                 (set (filter (fn [t] (some #(= t %) all-names)) saved)))
-          (apply-tools! api state))
-      (swap! state assoc :enabled-tools
-             (set (or (ext/get-active-tools api) all-names))))))
+                          ((:get-entries sess) tools-config-type)))
+        enabled (if saved
+                  (set (filter all-names saved))
+                  (set (or (ext/get-active-tools api) all-names)))]
+    (swap! state assoc :all-tools all-tools :enabled-tools enabled)
+    (when saved (apply-tools! api state))))
 
 ;; ─── The /tools dialog (pi: the ctx.ui.custom factory) ─────────────────────
 
@@ -154,27 +156,31 @@
       (ext/ui-notify api (str "Cannot save tool selection: " (ex-message e))
                      :error))))
 
+(defn- toggle-row!
+  "Apply a row change to the runtime and the branch, then mark every row as
+   session-sourced: the toggle installed a whole runtime selection."
+  [api state settings id new-value]
+  (swap! state update :enabled-tools
+         (if (= new-value "enabled") conj disj) id)
+  (apply-tools! api state)
+  (persist-state! api state)
+  (mark-session-origin! state)
+  (settings-list/settings-list-set-items! settings (selection-items @state)
+                                          {:preserve-state? true}))
+
 (defn- tools-dialog
   "Build the /tools selector component. TUI/TH/KB/CLOSE are what ui-custom
    passes to factories (pi: (tui, theme, kb, done)); the render loop
    re-renders after every input, so no explicit requestRender is needed.
    The SettingsList handles navigation, value cycling and escape itself."
   [api state _tui th _kb close]
-  (let [settings-ref (atom nil)
-        settings (settings-list/make-settings-list
+  (let [settings (settings-list/make-settings-list
                   (selection-items @state)
                   :theme (theme/get-settings-list-theme th)
-                  :max-visible (min (+ (count (:all-tools @state)) 2) 15)
-                  :on-change (fn [id new-value]
-                               (swap! state update :enabled-tools
-                                      (if (= new-value "enabled") conj disj) id)
-                               (apply-tools! api state)
-                               (persist-state! api state)
-                               (mark-session-origin! state)
-                               (settings-list/settings-list-set-items!
-                                @settings-ref (selection-items @state)
-                                {:preserve-state? true})))
-        _ (reset! settings-ref settings)
+                  :max-visible (min (+ (count (:all-tools @state)) 2) 15))
+        _ (settings-list/settings-list-set-on-change!
+           settings (fn [id new-value]
+                      (toggle-row! api state settings id new-value)))
         _ (settings-list/settings-list-set-on-escape! settings
                                                       (fn [] (close nil)))]
     {:render (fn [width]
