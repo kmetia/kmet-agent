@@ -417,6 +417,13 @@
       (is (some #(re-find #"run \$ \(\+ 1 2\)" %) plain))
       (is (not-any? #(re-find #":code" %) plain)))))
 
+(deftest test-eval-render-call
+  (testing "eval call shows the code, not the raw args map"
+    (let [plain (render-tool :name "eval" :args {:code "(+ 1 2)" :timeout 5})]
+      (is (some #(re-find #"eval \$ \(\+ 1 2\)" %) plain))
+      (is (some #(re-find #"5s" %) plain))
+      (is (not-any? #(re-find #":code" %) plain)))))
+
 (deftest test-run-code-render-result
   (testing "run_code result shows output, the inner-call summary and duration"
     (let [c (te/make-tool-execution :name "run_code"

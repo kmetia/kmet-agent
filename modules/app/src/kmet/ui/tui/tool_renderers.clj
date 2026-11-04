@@ -1049,20 +1049,27 @@
                             (theme/bold (str label " " code-display)))]
     (h/compile-tree (tool-text (str code-line suffix)))))
 
-(defn render-run-code-call
-  "Call line for the run_code tool: `run $ <code>` (+ an explicit timeout
-   suffix), via the shared code-call renderer. The quiet title mirrors the
-   one-line head of the same call."
-  [_name args theme width context]
+(defn- render-code-call-with-timeout
+  "The shared call line for code tools: `LABEL <code>` plus an explicit
+   timeout suffix."
+  [label args theme width context]
   (let [timeout (:timeout args)
         suffix (if (and (number? timeout) (pos? timeout))
                  (theme/fg theme :muted (str " (" timeout "s)"))
                  "")]
-    (render-code-call "run $" (:code args) suffix theme width context)))
+    (render-code-call label (:code args) suffix theme width context)))
 
-(defn- run-code-calls-nodes
-  "One muted summary line for the run_code tool's inner-call trace (details
-   :calls): the tool work the run_code call did is otherwise invisible in the
+(defn render-code-tool-call
+  "Call line for a code tool (run_code, eval): `<label> $ <code>` plus an
+   explicit timeout suffix, via the shared code-call renderer. The quiet title
+   mirrors the one-line head of the same call."
+  [name args theme width context]
+  (render-code-call-with-timeout (if (= "eval" name) "eval $" "run $")
+                                 args theme width context))
+
+(defn- tool-call-nodes
+  "One muted summary line for a code tool's inner-call trace (details
+   :calls): the tool work the call did is otherwise invisible in the
    transcript. Failed/incomplete entries are counted."
   [context theme]
   (when-let [calls (seq (get-in context [:details :calls]))]
@@ -1081,8 +1088,8 @@
                        ": " summary
                        (when (pos? failed) (str ", " failed " failed")))))])))
 
-(defn- run-code-images-node
-  "One muted line counting the images the script attached (details :images).
+(defn- image-nodes
+  "One muted line counting the images a code tool attached (details :images).
    The blocks reach the model with the result, not the transcript, so the
    count is the only trace the transcript keeps."
   [context theme]
@@ -1092,17 +1099,25 @@
        (tool-text (theme/fg theme :muted
                             (str n " image" (when (> n 1) "s") " attached")))])))
 
-(defn render-run-code-result
-  "Result body for the run_code tool: the shell-style body (output preview,
-   truncation warning) plus the inner-call summary and attached-image count
-   lines. The elapsed/took state line — the tool's own measured time when the
-   result carries it — is the tool component's tail line (state-result-nodes)."
+(defn- code-tool-result-nodes
+  "The shared result body for a code tool: output/truncation, the inner-call
+   summary and the attached-image count. Eval's kept-definition and source
+   lines attach by composing this, not by copying it."
+  [content theme width expanded? ended-at truncation context]
+  (concat (output-result-nodes content theme width expanded? ended-at truncation)
+          (tool-call-nodes context theme)
+          (image-nodes context theme)))
+
+(defn render-code-tool-result
+  "Result body for a code tool (run_code, eval): the shell-style body (output
+   preview, truncation warning) plus the inner-call summary and attached-image
+   count lines. The elapsed/took state line — the tool's own measured time when
+   the result carries it — is the tool component's tail line
+   (state-result-nodes)."
   [content _is-error theme width expanded? _started-at ended-at truncation context]
   (h/compile-tree
    (into [:container {}]
-         (concat (output-result-nodes content theme width expanded? ended-at truncation)
-                 (run-code-calls-nodes context theme)
-                 (run-code-images-node context theme)))))
+         (code-tool-result-nodes content theme width expanded? ended-at truncation context))))
 
 ;; ─── Default renderers (fallback when no custom or built-in) ──────────────
 
