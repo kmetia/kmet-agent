@@ -1,6 +1,7 @@
 # Todo
 
-One track remains. Landed work — the `github-copilot` anthropic auth, the
+Two tracks remain: the closing review of the tool-selection track (**S6**)
+and persistent eval. Landed work — the `github-copilot` anthropic auth, the
 prompt-caching parity pass, the around tool hook, the remaining openai-compat
 keys, **P5** (tool exposure, the declared/callable split, the shared ranker and
 `tool_search`), **P5.5** (the declared order and the one promotable
@@ -15,10 +16,81 @@ history. The context and token tracks are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
+| **Tools: cross-session selection** (S) | S1–S5 landed by accretion: name-target parsing, selection resolution and entry writing now live in several near-copies, and the same rule is stated in several docs — the pre-close budget pass | **S6 next** |
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–3 done; **step 4 next** |
 
-Persistent eval lands whenever — it touches neither a wire nor the tool
-registry.
+The two tracks are independent: S6 changes no behavior and eval lands whenever —
+it touches neither a wire nor the tool registry.
+
+## Tools: cross-session selection (S) — review and simplify
+
+Status: S1–S5 landed (config and resolution, the tool-selection ABI, the
+`/tools` scope and save, the `kmet config` rows, the opt-in built-in defaults
+and the docs). One behavior-preserving task remains before the track is closed.
+
+### Why
+
+The track grew one step at a time and now owns overlapping mechanisms:
+
+- name-target parsing split between `kmet.app.tools.config` (`entry-target`,
+  `entry-targets`, `tool-origins`) and `kmet.app.tools.util`'s modifier
+  predicate, with two `+`/`-` prefix checks (`entry-targets` matches a literal
+  set, `entry-target` calls the predicate);
+- selection resolution in three shapes (`:default-tools` over
+  `default-tool-names`, `:enabled-tools` over the live names, and the config
+  screen's static projection over names it cannot resolve);
+- entry writing in four public writers (`apply-builtin-tool-toggle!`/
+  `-project-override!`, `apply-enabled-tool-toggle!`/`-project-override!`) on
+  top of `set-tool-enabled!`, plus the two private `write-*-enabled!`;
+- the same user-visible rule (unset default, `+name` on enable, project
+  delta, `/tools` save, `:meta :tools` validity) stated in
+  `docs/configuration.md`, `extension.md`, `docs/extensions.md`, the examples
+  and `pi-alignment.md`.
+
+Each is locally reasonable; the review is for the copies, the naming drift
+(`apply-builtin-tool-*` now writes rows called default-tools, and "built-in"
+vs "opt-in" vs "default-off" are used for three different sets) and the docs
+that describe one rule in several places.
+
+### S6 — review and simplify
+
+- Re-read side by side: `kmet.app.tools.config`, the default-selection part of
+  `kmet.app.tools.registry`, the `:meta` plumbing in
+  `kmet.app.extensions.{context,rows}`, the tool branches of
+  `kmet.ui.tui.resource-config`, `kmet.app.loop.state/selection-opts` and
+  `extensions/tools.clj`.
+- Fold duplicated target parsing and entry-vector handling into one private
+  helper; keep the public setting shapes (`:default-tools`, `:enabled-tools`)
+  and the ABI unchanged.
+- Consider one writer for the toggle/override pairs (setting key + state →
+  entry edit) instead of four `apply-*` fns; if the shared helper would pass
+  CC 10, keep the split and say why in the docstring.
+- Check `tool-items`' arity surface: only the config screen and tests call it;
+  collapse arities no caller uses.
+- Make naming consistent: a row is a `default-tool` (writes `:default-tools`)
+  or an `enabled-tool` (writes `:enabled-tools`); "built-in" stays the
+  registry's full name set, "opt-in"/"default-off" the marker.
+- Deduplicate test setup (`with-settings`, `row-of`) only within a file; do
+  not add a cross-module helper for two test namespaces.
+- Docs: cross-check the S5 set so each rule is stated once (or links to its
+  one statement): unset default, `+name` on enable, `/tools` save,
+  `/reload`, project scope, `:meta :tools` validity, `tool_search` orphaning.
+- `bb slop` baseline (2026-11-04):
+  `modules/app/src/kmet/app/tools` verbosity 0.006, erosion 0.301 (12 CC>10,
+  mass 1255/4173); `modules/app/src/kmet/ui/tui/resource_config.clj` erosion
+  0.398 (4 CC>10: `row-line` 17, `frame-tree` 12, `toggle-selected!` 11,
+  `display-name` 11). The pass must not regress erosion in the touched
+  functions and should leave no new clone group under `--dups`.
+
+### Done when
+
+The behavior tests pass with edits limited to renames and consolidation (no
+weakening); one target parser and one entry-update path serve both settings;
+`bb slop` shows no regression in the touched area (record before/after in the
+commit body); the docs agree with the code and each rule has one home. The
+known-unrelated red at HEAD (`test-models` GPT-6 compat, the `bridge-queue`
+process-cell ledger from the eval extraction) is fixed separately or stated
+as out of scope in the commit body.
 
 ## Persistent eval and eval sources
 
