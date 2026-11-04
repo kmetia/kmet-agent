@@ -84,38 +84,46 @@
     (t/testing "no entries: every enabled name is a default"
       (with-settings nil nil
         (fn [_ _]
-          (let [s (tools-config/tool-selection #{"read" "write"} {})]
+          (let [s (tools-config/tool-selection
+                   ["read" "write" "bash"] #{"read" "write"} {})]
             (t/is (= :global (:scope s)))
             (t/is (= {:global [] :project []} (:entries s)))
             (t/is (= #{"read" "write"} (:enabled s)))
-            (t/is (= {"read" :default "write" :default} (:origin s)))))))
+            (t/is (= {"read" :default "write" :default "bash" :default}
+                     (:origin s)))))))
     (t/testing "a global modifier is global provenance"
       (with-settings {:enabled-tools ["-bash"]} nil
         (fn [_ _]
-          (let [s (tools-config/tool-selection #{"read"} {})]
+          (let [s (tools-config/tool-selection ["read" "bash"] #{"read"} {})]
             (t/is (= #{"read"} (:enabled s)))
-            (t/is (= {"read" :default} (:origin s)))
+            (t/is (= {"read" :default "bash" :global} (:origin s)))
             (t/is (= ["-bash"] (get-in s [:entries :global])))))))
     (t/testing "a project modifier beats the global source"
       (with-settings {:enabled-tools ["-read"]}
         {:enabled-tools ["+bash"]}
         (fn [_ _]
-          (let [s (tools-config/tool-selection #{"bash" "write"} {})]
-            (t/is (= {"bash" :project "write" :default} (:origin s)))))))
+          (let [s (tools-config/tool-selection
+                   ["bash" "write" "read"] #{"bash" "write"} {})]
+            (t/is (= {"bash" :project "write" :default "read" :global}
+                     (:origin s)))))))
     (t/testing "a project plain list is absolute"
       (with-settings {:enabled-tools ["read" "bash"]}
         {:enabled-tools ["read"]}
         (fn [_ _]
-          (let [s (tools-config/tool-selection #{"read"} {})]
-            (t/is (= {"read" :project} (:origin s)))))))
+          (let [s (tools-config/tool-selection ["read" "bash"] #{"read"} {})]
+            (t/is (= {"read" :project "bash" :project} (:origin s)))))))
     (t/testing "a global plain list is global provenance"
       (with-settings {:enabled-tools ["read" "bash"]} nil
         (fn [_ _]
-          (let [s (tools-config/tool-selection #{"read" "bash"} {})]
+          (let [s (tools-config/tool-selection
+                   ["read" "bash"] #{"read" "bash"} {})]
             (t/is (= {"read" :global "bash" :global} (:origin s)))))))
     (t/testing "a runtime selection sources every enabled name from the session"
       (with-settings nil nil
         (fn [_ _]
-          (let [s (tools-config/tool-selection #{"read" "write"}
-                                               {:session #{"read" "write"}})]
-            (t/is (= {"read" :session "write" :session} (:origin s)))))))))
+          (let [s (tools-config/tool-selection
+                   ["read" "write" "bash"]
+                   #{"read" "write"}
+                   {:session #{"read" "write"}})]
+            (t/is (= {"read" :session "write" :session "bash" :session}
+                     (:origin s)))))))))

@@ -412,6 +412,7 @@
                                    nil)
                :tool-selection (fn []
                                  (tools-config/tool-selection
+                                  (keys (loop-state/tool-table @live))
                                   (loop-state/enabled-tool-names @live)
                                   {:session @(:enabled-tools @live)}))
                :set-tool-enabled! (fn [name enabled opts]

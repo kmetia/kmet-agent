@@ -186,42 +186,42 @@
           entries))
 
 (defn- tool-origins
-  "Each enabled name's provenance from the raw settings entries."
-  [enabled global project]
-  (let [global-actions (entry-actions global)
-        project-actions (entry-actions project)
+  "Each live name's provenance from the raw settings entries — the enabling
+   or disabling entry that decides its current state."
+  [names global project]
+  (let [project-actions (entry-actions project)
+        global-actions (entry-actions global)
         project-absolute? (and (seq project)
                                (some #(not (registry/tool-selection-modifier? %)) project))
         global-absolute? (not (modifier-style? global))
         origin (fn [name]
-                 (let [project (get project-actions name)
-                       global (get global-actions name)]
-                   (cond
-                     project-absolute? (if project :project :default)
-                     (some? project) (if project :project :default)
-                     global-absolute? (if global :global :default)
-                     (some? global) (if global :global :default)
-                     :else :default)))]
-    (into {} (map (fn [name] [name (origin name)])) enabled)))
+                 (cond
+                   project-absolute? :project
+                   (contains? project-actions name) :project
+                   global-absolute? :global
+                   (contains? global-actions name) :global
+                   :else :default))]
+    (into {} (map (fn [name] [name (origin name)])) names)))
 
 (defn tool-selection
   "The `/tools` dialog's one-call view: the raw `:enabled-tools` entries per
-   scope, the effective ENABLED name set, and each enabled name's origin.
-   SESSION is the runtime `set-active-tools!` set (nil = none); when present,
-   every enabled name is sourced from the session. Returns
+   scope, the effective ENABLED name set, and each live name's origin. SESSION
+   is the runtime `set-active-tools!` set (nil = none); when present, every
+   live name is sourced from the session. Returns
    `{:scope :entries {:global [...] :project [...]}
      :enabled #{...} :origin {name :global|:project|:session|:default}}`."
-  [enabled {:keys [session]}]
+  [live-names enabled {:keys [session]}]
   (let [global (:enabled-tools (cfg/read-global-settings-map))
         project (:enabled-tools (cfg/read-project-settings-map))
-        enabled (set enabled)]
+        live (set live-names)
+        enabled (into #{} (filter live) enabled)]
     {:scope (default-scope)
      :entries {:global (entry-vector global)
                :project (entry-vector project)}
      :enabled enabled
      :origin (if (some? session)
-               (zipmap enabled (repeat :session))
-               (tool-origins enabled global project))}))
+               (zipmap live (repeat :session))
+               (tool-origins live global project))}))
 
 (defn- merged-enabled-entries []
   (cfg/merge-tool-entries (:enabled-tools (cfg/read-global-settings-map))

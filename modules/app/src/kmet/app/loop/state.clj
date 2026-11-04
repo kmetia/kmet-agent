@@ -568,14 +568,15 @@ Be precise and concise in your responses."}}]
    :default-tools."
   [agent]
   (let [table (tool-table agent)
+        names (set (keys table))
         {:keys [enabled exclude]} (selection-opts
                                    {:enabled @(:enabled-tools agent)
                                     :enabled-tool-entries @(:enabled-tool-entries agent)
                                     :default-tools @(:default-tools agent)
-                                    :live-names (keys table)})]
+                                    :live-names names})]
     (if enabled
-      enabled
-      (into #{} (remove exclude) (keys table)))))
+      (into #{} (filter names) enabled)
+      (into #{} (remove exclude) names))))
 
 (defn- selected-name?
   "Whether SELECTION — the `selection-opts` map, with a resolved :enabled set
