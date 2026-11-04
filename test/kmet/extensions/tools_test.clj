@@ -1,6 +1,8 @@
 (ns kmet.extensions.tools-test
   (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [clojure.test :as t]
+            [kmet.libs.theme :as theme]
             [kmet.tui.components.settings-list :as settings-list]))
 
 (defonce ^:private extension
@@ -38,6 +40,30 @@
     (swap! state assoc :scope :global)
     (t/is (= "Global · /home/me/.kmet/agent/settings.edn · global 1 · project 2"
              (ext-fn 'scope-line state)))))
+
+(t/deftest test-toggle-marks-the-session-origin
+  (let [state (atom {:all-tools [{:name "read"} {:name "bash"}]
+                     :selection {:origin {"read" :default
+                                          "bash" :global}}})]
+    (ext-fn 'mark-session-origin! state)
+    (t/is (= {"read" :session "bash" :session}
+             (get-in @state [:selection :origin])))))
+
+(t/deftest test-tab-switches-the-write-scope
+  (let [state (atom {:all-tools [{:name "read"}]
+                     :enabled-tools #{"read"}
+                     :scope :global
+                     :selection {:entries {:global [] :project []}
+                                 :paths {:global "/g/settings.edn"
+                                         :project "/p/settings.edn"}}})
+        dialog (ext-fn 'tools-dialog {} state nil (theme/get-theme "dark") nil
+                       (fn [_]))]
+    (t/is (some #(str/includes? % "tab scope") ((:render dialog) 80)))
+    ((:handle-input dialog) "	")
+    (t/is (= :project (:scope @state)))
+    (t/is (some #(str/includes? % "Project · /p/settings.edn")
+                ((:render dialog) 80)))
+    ((:dispose dialog))))
 
 (t/deftest test-save-selection-writes-the-scope-then-clears-the-runtime
   (let [writes (atom [])

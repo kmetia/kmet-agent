@@ -84,6 +84,13 @@
 
 ;; ─── The /tools dialog (pi: the ctx.ui.custom factory) ─────────────────────
 
+(defn- mark-session-origin!
+  "A toggle installs a runtime selection, so every live row's current state
+   now comes from the session until `s` writes the settings."
+  [state]
+  (swap! state update :selection assoc :origin
+         (zipmap (map :name (:all-tools @state)) (repeat :session))))
+
 (defn- selection-items
   "The SettingsList rows: one per live tool, with the effective source of
    its current state as a label suffix."
@@ -153,7 +160,8 @@
    re-renders after every input, so no explicit requestRender is needed.
    The SettingsList handles navigation, value cycling and escape itself."
   [api state _tui th _kb close]
-  (let [settings (settings-list/make-settings-list
+  (let [settings-ref (atom nil)
+        settings (settings-list/make-settings-list
                   (selection-items @state)
                   :theme (theme/get-settings-list-theme th)
                   :max-visible (min (+ (count (:all-tools @state)) 2) 15)
@@ -161,7 +169,12 @@
                                (swap! state update :enabled-tools
                                       (if (= new-value "enabled") conj disj) id)
                                (apply-tools! api state)
-                               (persist-state! api state)))
+                               (persist-state! api state)
+                               (mark-session-origin! state)
+                               (settings-list/settings-list-set-items!
+                                @settings-ref (selection-items @state)
+                                {:preserve-state? true})))
+        _ (reset! settings-ref settings)
         _ (settings-list/settings-list-set-on-escape! settings
                                                       (fn [] (close nil)))]
     {:render (fn [width]
