@@ -49,7 +49,7 @@
    "run_code" {:call renderers/render-run-code-call
                :result renderers/render-run-code-result}
    "eval" {:call renderers/render-run-code-call
-           :result renderers/render-run-code-result}})
+           :result renderers/render-eval-result}})
 
 ;; ─── Render context helper ─────────────────────────────────────────────────
 

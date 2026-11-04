@@ -112,6 +112,18 @@
       (is (= :idle ((:status agents) handle)))
       (is (some? ((:get agents) root (:id handle))) "and the bare agent is listed"))))
 
+(deftest the-handle-disposes-the-eval-service
+  (let [{:keys [root agents]} (mounted)
+        handle (create! {:root root :agents agents})
+        service (srce/get (:ctx handle) :eval)]
+    (is (some? service) "the agent ctx carries the eval service")
+    ((:dispose! agents) handle)
+    (is (try ((:eval! service) {:code "1"})
+             false
+             (catch clojure.lang.ExceptionInfo e
+               (= :eval/disposed (:type (ex-data e)))))
+        "the handle's dispose reaches the eval service")))
+
 (deftest an-agent-runs-a-turn-and-settles-once
   (let [{:keys [root agents]} (mounted)
         settles (atom [])

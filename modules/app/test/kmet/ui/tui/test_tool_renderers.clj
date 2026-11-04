@@ -529,6 +529,22 @@
       (is (not-any? #(str/includes? % "Took") lines)
           "state-result-nodes owns the Took line (component tail line)"))))
 
+(deftest test-eval-render-result
+  (testing "kept, dropped, source and failure summaries render"
+    (let [context {:details {:kept [{:name "user/a"} {:name "user/b"}]
+                             :dropped ["user/old"]
+                             :sources [{:id :core}]
+                             :failures [{:file "bad.clj" :error "boom"}]}}
+          lines (plain (r/render-eval-result "x" false th 60 true 1000 2000 nil context) 60)]
+      (is (some #(str/includes? % "2 definitions kept: user/a, user/b") lines))
+      (is (some #(str/includes? % "1 definition dropped: user/old") lines))
+      (is (some #(str/includes? % "1 eval source: core") lines))
+      (is (some #(str/includes? % "1 eval source failed") lines))))
+  (testing "empty details renders only the shared body"
+    (let [lines (plain (r/render-eval-result "x" false th 60 true 1000 2000 nil {}) 60)]
+      (is (not-any? #(str/includes? % "definition") lines))
+      (is (not-any? #(str/includes? % "eval source") lines)))))
+
 (deftest test-state-result-nodes
   (testing "running shows Elapsed in the muted foreground, with no background"
     (let [raw (core/render (r/state-result-nodes th (System/currentTimeMillis) nil false) 60)]

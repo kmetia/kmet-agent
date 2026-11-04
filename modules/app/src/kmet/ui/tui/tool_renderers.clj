@@ -1049,6 +1049,12 @@
                             (theme/bold (str label " " code-display)))]
     (h/compile-tree (tool-text (str code-line suffix)))))
 
+(def ^:private code-tool-labels
+  "The call-line label for a code tool. An unknown tool falls back to the
+   run_code label, which is the original code-tool rendering."
+  {"run_code" "run $"
+   "eval" "eval $"})
+
 (defn- render-code-call-with-timeout
   "The shared call line for code tools: `LABEL <code>` plus an explicit
    timeout suffix."
@@ -1061,10 +1067,11 @@
 
 (defn render-run-code-call
   "Call line for a code tool (run_code, eval): `<label> $ <code>` plus an
-   explicit timeout suffix, via the shared code-call renderer. The quiet title
-   mirrors the one-line head of the same call."
+   explicit timeout suffix, via the shared code-call renderer. The label comes
+   from `code-tool-labels`; the quiet title mirrors the one-line head of the
+   same call."
   [name args theme width context]
-  (render-code-call-with-timeout (if (= "eval" name) "eval $" "run $")
+  (render-code-call-with-timeout (get code-tool-labels name "run $")
                                  args theme width context))
 
 (defn- tool-call-nodes
@@ -1109,15 +1116,78 @@
           (image-nodes context theme)))
 
 (defn render-run-code-result
-  "Result body for a code tool (run_code, eval): the shell-style body (output
-   preview, truncation warning) plus the inner-call summary and attached-image
-   count lines. The elapsed/took state line — the tool's own measured time when
-   the result carries it — is the tool component's tail line
-   (state-result-nodes)."
+  "Result body for run_code: the shell-style body (output preview, truncation
+   warning) plus the inner-call summary and attached-image count lines. Eval
+   composes the same `code-tool-result-nodes` with its kept/source summaries.
+   The elapsed/took state line — the tool's own measured time when the result
+   carries it — is the tool component's tail line (state-result-nodes)."
   [content _is-error theme width expanded? _started-at ended-at truncation context]
   (h/compile-tree
    (into [:container {}]
          (code-tool-result-nodes content theme width expanded? ended-at truncation context))))
+
+(defn- eval-kept-nodes
+  "One muted summary line for the definitions an eval call kept."
+  [context theme]
+  (when-let [kept (seq (get-in context [:details :kept]))]
+    (let [n (count kept)
+          names (str/join ", " (map #(if (map? %) (:name %) %) kept))]
+      [[:spacer {:lines 1}]
+       (tool-text (theme/fg theme :muted
+                            (str n " definition" (when (not= 1 n) "s")
+                                 " kept: " names)))])))
+
+(defn- eval-dropped-nodes
+  "One muted summary line for the definitions an eval call dropped."
+  [context theme]
+  (when-let [dropped (seq (get-in context [:details :dropped]))]
+    (let [n (count dropped)
+          names (str/join ", " (map #(if (map? %) (:name %) %) dropped))]
+      [[:spacer {:lines 1}]
+       (tool-text (theme/fg theme :muted
+                            (str n " definition" (when (not= 1 n) "s")
+                                 " dropped: " names)))])))
+
+(defn- eval-source-id
+  "The human-facing id of an eval source entry: a keyword loses its colon,
+   a string stays as written."
+  [source]
+  (let [id (if (map? source) (:id source) source)]
+    (if (keyword? id) (name id) (str id))))
+
+(defn- eval-source-nodes
+  "One muted line naming the eval sources a call loaded."
+  [context theme]
+  (when-let [sources (seq (get-in context [:details :sources]))]
+    (let [n (count sources)
+          ids (str/join ", " (map eval-source-id sources))]
+      [[:spacer {:lines 1}]
+       (tool-text (theme/fg theme :muted
+                            (str n " eval source" (when (not= 1 n) "s")
+                                 (when (seq ids) (str ": " ids)))))])))
+
+(defn- eval-failure-nodes
+  "One muted line counting the eval sources that failed to load."
+  [context theme]
+  (when-let [failures (seq (get-in context [:details :failures]))]
+    (let [n (count failures)]
+      [[:spacer {:lines 1}]
+       (tool-text (theme/fg theme :muted
+                            (str n " eval source" (when (not= 1 n) "s")
+                                 " failed")))])))
+
+(defn render-eval-result
+  "Result body for eval: the shared code-tool body plus the kept, dropped,
+   source and source-failure summary lines when the details carry them. The
+   elapsed/took state line is the tool component's tail line, as for run_code."
+  [content _is-error theme width expanded? _started-at ended-at truncation context]
+  (h/compile-tree
+   (into [:container {}]
+         (concat (code-tool-result-nodes content theme width expanded? ended-at truncation context)
+                 (eval-kept-nodes context theme)
+                 (eval-dropped-nodes context theme)
+                 (eval-source-nodes context theme)
+                 (eval-failure-nodes context theme)))))
 
 ;; ─── Default renderers (fallback when no custom or built-in) ──────────────
 

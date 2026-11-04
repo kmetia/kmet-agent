@@ -46,7 +46,7 @@
   (tool/make-tool
    :name "eval"
    :label "Eval"
-   :description "Evaluate Clojure forms in this agent's persistent environment. Definitions and namespace changes persist across calls for the agent's lifetime — use eval for a helper or state you will reuse, and run_code for a fresh, throwaway script. Output is the emitted text (or the final value of a silent success); stdout and stderr are discarded. Nothing is written to disk."
+   :description "Evaluate Clojure forms in this agent's persistent environment. Definitions persist across calls for the agent's lifetime, and a successful call's namespace is re-entered by the next — use eval for a helper or state you will reuse, and run_code for a fresh, throwaway script. Output is the emitted text (or the final value of a silent success); stdout and stderr are discarded. Nothing is written to disk."
    :prompt-snippet "Eval Clojure with definitions that persist across calls"
    :prompt-guidelines
    ["Use eval when a definition should survive the call — a parser, a report fn, a scratch namespace — and run_code for a throwaway script."
