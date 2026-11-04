@@ -330,12 +330,10 @@
                      :execute (fn [_] {:content "slashed"})}
     (fn []
       (t/is (= "false"
-               (:content (run (str "(emit (contains? (set (keys (ns-publics 'tools)))"
-                                   " 'run-code-test/slashed))"))))
+               (:content (run "(emit (contains? (ns-publics 'tools) 'run-code-test/slashed))")))
             "a name the reader would take apart gets no var")
       (t/is (= "true"
-               (:content (run (str "(emit (contains? (set (keys (ns-publics 'tools)))"
-                                   " 'read))"))))
+               (:content (run "(emit (contains? (ns-publics 'tools) 'read))")))
             "a reader-safe name does")
       (t/is (= "slashed"
                (:content (run (str "(emit (:content (deref (tools/call"
@@ -556,7 +554,7 @@
   (binding [run-code/*enabled-tools-fn* (fn [] #{"read"})]
     (t/is (= "[\"read\"]" (:content (run "(emit (mapv :name (tools/list)))"))))
     (t/is (= "false"
-             (:content (run "(emit (contains? (set (keys (ns-publics 'tools))) 'bash))")))
+             (:content (run "(emit (contains? (ns-publics 'tools) 'bash))")))
           "a tool outside the enabled set gets no var either")
     (let [r (run "(emit @(tools/call \"bash\" {}))")]
       (t/is (str/includes? (:content r) "not active")))))

@@ -6,7 +6,7 @@
    return. The context carries the capability namespaces, the `tools`
    namespace — discovery (tools/list, tools/describe), the per-call bridge
    (async promises over execute-tool, drained by a shared bounded worker
-   pool) with its result helpers and one var per active tool — and the
+   pool) with its result readers and one var per active tool — and the
    script's emit/capture channels. The script runs on a daemon thread whose
    SCI :interrupt-fn aborts interpreted code on the run signal or the
    deadline; *out*/*err* are
@@ -732,7 +732,7 @@
    copied in first (the full-babashka surface), then the sandbox's own
    overrides layer on top: SCI core patches (slurp/spit/file-seq/pmap), json,
    the cwd/pid-tracking process wrappers, the `tools` namespace (discovery,
-   dispatch, the result helpers and one var per active tool), the
+   dispatch, the result readers and one var per active tool), the
    cwd/emit/spawn helpers, and the bare `emit`/`sh`. Built fresh every
    call, so a def in one script is invisible to the next, and the context's
    :load-fn (sandbox-load-fn) makes an unknown require fail with the boundary
@@ -921,10 +921,11 @@
    own names win — they are identities, a tool name is data — so a tool that
    is itself called `text` stays reachable through `call`."
   [surface opts]
-  (let [dispatch (fn [name args] (dispatch! opts name args))
+  (let [;; variadic so `call` is this fn itself, not a wrapper around it
+        dispatch (fn [name & [args]] (dispatch! opts name args))
         discovery (discovery-fns surface)
         dispatch-fns
-        {'call (fn [name & [args]] (dispatch name args))
+        {'call dispatch
          'call! (fn [name & [args]]
                   (let [name (tool-name name)
                         result @(dispatch name args)]
@@ -934,17 +935,15 @@
                                       {:type :run-code/tool-call-failed
                                        :tool name
                                        :result result}))
-                      result)))}]
-    ;; per-tool vars first, then the namespace's own names: merge order is the
-    ;; whole shadowing rule, and a colliding tool name costs one discarded var
-    (merge (into {}
-                 (keep (fn [name]
-                         (when (re-matches tool-var-name-pattern name)
-                           [(symbol name) (fn [& [args]] (dispatch name args))])))
-                 (keys surface))
-           dispatch-fns
-           result-readers
-           discovery)))
+                      result)))}
+        tool-vars (into {}
+                        (keep (fn [name]
+                                (when (re-matches tool-var-name-pattern name)
+                                  [(symbol name) (fn [& [args]] (dispatch name args))])))
+                        (keys surface))]
+    ;; merge order is the shadowing rule: a tool name never displaces one of
+    ;; the namespace's own (a tool called `text` stays reachable via `call`)
+    (merge tool-vars dispatch-fns result-readers discovery)))
 
 ;; ─── Result assembly ──────────────────────────────────────────────────────
 
