@@ -42,7 +42,8 @@
    work identically on both hosts: a namespace that loads has its vars
    selected by ^:slow metadata, and jolt's clojure.test/test-vars applies
    each namespace's :once/:each fixtures exactly like the bb engine."
-  (:require [clojure.string :as str]
+  (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [clojure.test :as t]
             [kmet.libs.host :as host]
             [kmet.tasks.modules :as modules]
@@ -366,30 +367,84 @@
         (println (str "  " (fmt-summary n-test n-pass n-fail n-error)
                       " (" (fmt-duration elapsed-us) ")"))))))
 
+(def ^:private agent-dir-watch
+  "Files under the host agent dir that belong to the developer, not to the
+   run: the mcp adapter's config, metadata cache and token store, the agent's
+   settings and auth, and the composition patch. A test that writes one edits
+   the machine it runs on — the adapter's config was once left holding a test
+   fixture — so the runner watches them and fails the run that touches one."
+  ["mcp.edn" "mcp-cache.edn" "mcp-oauth.edn" "settings.edn" "auth.edn"
+   "accounts.edn" "patch.edn"])
+
+(defn- host-agent-dir
+  "The agent dir a run must not write (the host's own, KMET_CODING_AGENT_DIR
+   honoured), or nil when it cannot be resolved — a host that cannot answer
+   loses the guard, never the run."
+  []
+  (try
+    ((requiring-resolve 'kmet.app.config/get-agent-dir))
+    (catch Throwable _ nil)))
+
+(defn- agent-dir-stamp
+  "A cheap change stamp for the watched files under DIR: name → [size mtime].
+   mtime has ns resolution on the hosts and the size catches a same-instant
+   rewrite, which is all a guard needs — it is not a substitute for a hash."
+  [dir]
+  (into {}
+        (keep (fn [f]
+                (let [p (str (fs/path dir f))]
+                  (when (fs/exists? p)
+                    [f [(fs/size p) (fs/last-modified-time p)]]))))
+        agent-dir-watch))
+
+(defn- agent-dir-changes
+  "The watched files whose stamp differs between BEFORE and AFTER — created,
+   deleted or rewritten."
+  [before after]
+  (into []
+        (keep (fn [f] (when (not= (get before f) (get after f)) f)))
+        (sort (distinct (concat (keys before) (keys after))))))
+
 (defn- run-selected
   "Run selected test vars, grouped by namespace so fixtures apply per ns.
    Engine-specific: bb runs each var with output capture and per-run ref
    counters (see run-ns-vars); jolt's port counts into its own process-wide
    `counters` atom and has no host output capture (see run-ns-vars-jolt).
-   Returns the aggregate {:test :pass :fail :error} map."
+
+   Returns {:counters {:test :pass :fail :error} :agent-dir-writes [[ns file]]}
+   — the second is the host agent-dir files the run touched, attributed to the
+   namespace that was running (see agent-dir-watch)."
   [vars]
-  (if jolt?
-    ;; jolt's counters atom is process-wide and cumulative — the aggregate
-    ;; is the delta across the whole run (per-ns deltas come from
-    ;; run-ns-vars-jolt's own before/after reads).
-    (let [counters (var-get (requiring-resolve (quote clojure.test/counters)))
-          before @counters]
-      (doseq [[ns-sym ns-vars] (sort-by key (group-by (comp ns-name :ns meta) vars))]
-        (run-ns-vars-jolt ns-sym ns-vars))
-      (let [after @counters]
-        {:test (- (:test after) (:test before))
-         :pass (- (:pass after) (:pass before))
-         :fail (- (:fail after) (:fail before))
-         :error (- (:error after) (:error before))}))
-    (binding [t/*report-counters* (ref t/*initial-report-counters*)]
-      (doseq [[ns-sym ns-vars] (sort-by key (group-by (comp ns-name :ns meta) vars))]
-        (run-ns-vars ns-sym ns-vars))
-      @t/*report-counters*)))
+  (let [dir (host-agent-dir)
+        writes (atom [])
+        run-ns (fn [ns-sym run]
+                 (if-not dir
+                   (run)
+                   (let [before (agent-dir-stamp dir)
+                         counters (run)]
+                     (swap! writes into
+                            (map #(vector ns-sym %)
+                                 (agent-dir-changes before (agent-dir-stamp dir))))
+                     counters)))]
+    (if jolt?
+      ;; jolt's counters atom is process-wide and cumulative — the aggregate
+      ;; is the delta across the whole run (per-ns deltas come from
+      ;; run-ns-vars-jolt's own before/after reads).
+      (let [counter-atom (var-get (requiring-resolve (quote clojure.test/counters)))
+            before @counter-atom]
+        (doseq [[ns-sym ns-vars] (sort-by key (group-by (comp ns-name :ns meta) vars))]
+          (run-ns ns-sym #(run-ns-vars-jolt ns-sym ns-vars)))
+        (let [after @counter-atom]
+          {:counters {:test (- (:test after) (:test before))
+                      :pass (- (:pass after) (:pass before))
+                      :fail (- (:fail after) (:fail before))
+                      :error (- (:error after) (:error before))}
+           :agent-dir-writes @writes}))
+      {:counters (binding [t/*report-counters* (ref t/*initial-report-counters*)]
+                   (doseq [[ns-sym ns-vars] (sort-by key (group-by (comp ns-name :ns meta) vars))]
+                     (run-ns ns-sym #(run-ns-vars ns-sym ns-vars)))
+                   @t/*report-counters*)
+       :agent-dir-writes @writes})))
 
 (defn- report-unloaded
   "Print the unloadable-namespace list, prefixed by HEADER when given."
@@ -434,9 +489,11 @@
                                             (catch Throwable _ nil))]
                                :when v]
                            [v false]))
-        results (if (and (not jolt?) (seq cache-vars))
-                  (with-bindings cache-vars (run-selected vars))
-                  (run-selected vars))
+        {:keys [counters agent-dir-writes]}
+        (if (and (not jolt?) (seq cache-vars))
+          (with-bindings cache-vars (run-selected vars))
+          (run-selected vars))
+        results counters
         n-tests (:test results)
         n-assertions (+ (:pass results) (:fail results) (:error results))
         total-us (quot (- (System/nanoTime) start-ns) 1000)
@@ -452,14 +509,23 @@
     (when (pos? (+ fails errs))
       (println (str (str/join ", " [(plural fails "failure" "failures")
                                     (plural errs "error" "errors")]) ".")))
+    (when (seq agent-dir-writes)
+      (println (str "\nTests wrote the host agent dir — point their state at a temp dir"
+                    " (kmet.test-tmp) instead:"))
+      (doseq [[ns-sym f] agent-dir-writes]
+        (println (str "  " ns-sym " — " f))))
     (println "Results:" (str/join ", "
                                   (cond-> [(str (:pass results) " passed")]
                                     (pos? fails) (conj (str fails " failed"))
                                     (pos? errs) (conj (plural errs "error" "errors"))
                                     (pos? unloaded-count)
                                     (conj (str (plural unloaded-count "namespace" "namespaces")
-                                               " failed to load")))))
-    (when (and (not jolt?) mark-validated? (zero? (+ fails errs)) (empty? unloaded))
+                                               " failed to load"))
+                                    (seq agent-dir-writes)
+                                    (conj (plural (count agent-dir-writes)
+                                                  "agent-dir write" "agent-dir writes")))))
+    (when (and (not jolt?) mark-validated? (zero? (+ fails errs)) (empty? unloaded)
+               (empty? agent-dir-writes))
       (try ((requiring-resolve 'kmet.tasks.changed/mark-validated!))
            (catch Throwable e
              (.println System/err
@@ -467,8 +533,10 @@
                             (.getMessage e))))))
     ;; A namespace that could not load fails the run: its tests never ran, so
     ;; exit 0 would silently shrink the gate (a missing require once dropped a
-    ;; whole namespace from an otherwise green run).
-    (exit! (if (or (pos? (+ fails errs)) (pos? unloaded-count)) 1 0))))
+    ;; whole namespace from an otherwise green run). A test that wrote the host
+    ;; agent dir fails it for the same reason: it edited the developer's own
+    ;; machine state, and a green exit would hide the leak.
+    (exit! (if (or (pos? (+ fails errs)) (pos? unloaded-count) (seq agent-dir-writes)) 1 0))))
 
 (defn- slow-flag
   "SLOW? as a boolean: the bb tasks pass the value (`bb test` false,
@@ -537,6 +605,11 @@
    filtered run: only the requested ones) with the load failure reason.
    A full run without filters records the changed-files baseline after a
    green result, so `bb test-changed` sees a clean slate.
+   Every run watches the host agent dir (the mcp adapter's config, cache and
+   token store, the agent's settings/auth, the composition patch) and fails,
+   naming the namespace, when a test writes one: a green run must leave the
+   developer's own machine state alone, and tests point their state at a temp
+   dir (`kmet.test-tmp`) instead.
    ^:bb-only vars (bb-only behavior — kmet.tasks.build,
    bb-bundled SCI ports, Maven deps, the packed-clojure closure, curl --compressed)
    run under bb only: whole-namespace selection drops them on jolt and on the
