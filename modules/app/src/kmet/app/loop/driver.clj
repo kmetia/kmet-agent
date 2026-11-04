@@ -14,6 +14,7 @@
    the caller's, because the front end owns what it renders and the loop only
    reports."
   (:require [babashka.fs :as fs]
+            [clojure.string :as str]
             [kmet.app.config :as cfg]
             [kmet.app.extensions.core :as extensions]
             [kmet.app.hooks :as hooks]
@@ -55,7 +56,7 @@
    cwd, the project context files, and the DECLARED tools the state will
    resolve through its ctx — the same derivation the wire uses, so the prompt's
    Available-tools list cannot offer what no request declares."
-  [config ctx {:keys [cwd default-tools session]}]
+  [config ctx {:keys [cwd default-tools enabled-tool-entries session]}]
   {:custom-prompt (cfg/get-custom-prompt config)
    :append-prompt (cfg/get-append-system-prompt config)
    :cwd cwd
@@ -64,6 +65,7 @@
    :tools (loop-state/declared-tools-for-session
            ctx session
            {:default-tools default-tools
+            :enabled-tool-entries enabled-tool-entries
             ;; a resumed session keeps the tools it was sent
             :loaded (when session
                       (loop-state/session-loaded-tools session))})})
@@ -95,12 +97,14 @@
         model (or model (models/resolve-config-model config))
         model-rec (models/get-model provider model)
         default-tools (tools/resolve-default-tools (cfg/get-default-tools config))
+        enabled-tool-entries (cfg/get-enabled-tools config)
         ;; the prompt's cwd line is the runtime cwd (the resumed session's,
         ;; or a subagent's), but everything project-scoped — context files
         ;; included — stays with the launch dir
         runtime-cwd (or cwd (session/session-cwd session) (str (fs/cwd)))
         prompt-opts (prompt-options config ctx {:cwd runtime-cwd
                                                 :default-tools default-tools
+                                                :enabled-tool-entries enabled-tool-entries
                                                 :session session})
         system-prompt (apply system-prompt-fn (mapcat identity prompt-opts))
         thinking (let [raw (:thinking config :off)]
@@ -122,6 +126,7 @@
                                :system-prompt-fn system-prompt-fn
                                :session session
                                :default-tools default-tools
+                               :enabled-tool-entries enabled-tool-entries
                                :context-window (or (:context-window model-rec)
                                                    (:context-window config))
                                :compact-reserve-tokens (or (:compact-reserve-tokens config)
@@ -161,6 +166,11 @@
     ;; runtime creation): seeded here, so kmet1's engine and every handle start
     ;; with the same scope rather than only the bootstrapped one
     (loop-state/init-scoped-models! state config)
+    (when-let [names (loop-state/orphaned-deferred-tools state)]
+      (binding [*out* *err*]
+        (println "Warning: no active discovery tool can promote deferred tools;"
+                 "add tool_search to :enabled-tools/:default-tools:"
+                 (str/join ", " names))))
     {:state state :cwd runtime-cwd}))
 
 ;; ── the handle ────────────────────────────────────────────────────────────

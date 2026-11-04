@@ -13,7 +13,7 @@
    :resource-type :tools, metadata origin :builtin-tools, display-name the
    tool name and row-id the row it is. The enabled state resolves the
    :default-tools entry list the same way startup does
-   (kmet.app.config/merge-default-tools +
+   (kmet.app.config/merge-tool-entries +
    kmet.app.tools.registry/resolve-default-tools), and is false for a tool the
    layers do not mount.
 
@@ -86,8 +86,8 @@
   ([user-settings project-settings]
    (builtin-tool-items user-settings project-settings nil))
   ([user-settings project-settings mounted]
-   (let [entries (cfg/merge-default-tools (:default-tools user-settings)
-                                          (:default-tools project-settings))
+   (let [entries (cfg/merge-tool-entries (:default-tools user-settings)
+                                         (:default-tools project-settings))
          selection (when entries
                      (set (registry/resolve-default-tools entries)))
          mounted (when mounted (set mounted))]
@@ -149,7 +149,7 @@
   "Project-scope override of builtin ITEM: set STATE (:load → +name,
    :unload → -name, :inherit → remove) in the project :default-tools list,
    replacing any entry targeting the name. An empty list clears the key —
-   read-equivalent to absent (kmet.app.config/merge-default-tools appends a
+   read-equivalent to absent (kmet.app.config/merge-tool-entries appends a
    project modifier-only list to the user list). Always true."
   [item state]
   (let [name (builtin-tool-name item)

@@ -389,26 +389,24 @@
   [entry]
   (tool-util/tool-selection-modifier? entry))
 
-(defn resolve-default-tools
-  "Resolve a merged :default-tools entry list to the initial built-in tool
-   selection (pi: SettingsManager.resolveDefaultTools). Plain names replace
-   the default built-in set; +name adds and -name removes in list order; a
-   list of only +name/-name entries modifies the default set; an empty list
-   selects no built-ins (extension tools are unaffected). Unknown names pass
-   through — they select nothing; callers match against the live registry.
-   A non-list value resolves empty and non-string entries are dropped (pi:
-   getDefaultTools). nil when ENTRIES is nil: no setting, every tool stays
-   active."
-  [entries]
+(defn resolve-selection
+  "Resolve a merged tool-selection entry list over BASE-NAMES (pi:
+   SettingsManager.resolveDefaultTools). Plain names replace the base set;
+   +name adds and -name removes in list order; a list of only +name/-name
+   entries modifies the base set; an empty list selects nothing. Unknown names
+   pass through — they select nothing; callers match against the live
+   registry. A non-list value resolves empty and non-string entries are
+   dropped. nil when ENTRIES is nil: no setting, every tool stays active."
+  [entries base-names]
   (when entries
-    ;; pi: getDefaultTools filters to strings and treats a non-array value
-    ;; as [] before resolving; settings files are not validated
+    ;; a non-array value is treated as [] before resolving; settings files are
+    ;; not validated
     (let [entries (if (sequential? entries) (filterv string? entries) [])
           plain (filterv (complement tool-selection-modifier?) entries)
           base (cond
                  (seq plain) plain
                  (empty? entries) []
-                 :else builtin-tool-names)]
+                 :else base-names)]
       (reduce (fn [names entry]
                 (if (tool-selection-modifier? entry)
                   (let [n (subs entry 1)]
@@ -418,6 +416,20 @@
                   names))
               (vec base)
               entries))))
+
+(defn resolve-default-tools
+  "Resolve a merged :default-tools entry list to the initial built-in tool
+   selection, over `builtin-tool-names`."
+  [entries]
+  (resolve-selection entries builtin-tool-names))
+
+(defn resolve-enabled-tools
+  "Resolve a merged :enabled-tools entry list over LIVE-NAMES — the tools the
+   app can currently see (a get-all-tools key set). The same entry rules as
+   `resolve-selection`; modifier-only lists modify the live set, so a tool
+   mounted later defaults on."
+  [entries live-names]
+  (resolve-selection entries live-names))
 
 (defn default-tool-exclusions
   "Built-in tool names a resolved :default-tools SELECTION leaves out — the

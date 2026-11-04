@@ -41,6 +41,25 @@
     (t/is (nil? (:session agent)))
     (t/is (= :off @(:thinking agent)))))
 
+(t/deftest test-loop-make-agent-state-enabled-tool-entries
+  (let [agent (support/make-agent-state :enabled-tool-entries ["read"])]
+    (t/is (= #{"read"} (state/callable-tool-names agent))
+          "a plain enabled list is the absolute callable selection"))
+  (let [agent (support/make-agent-state :enabled-tool-entries ["-bash"])]
+    (t/is (contains? (state/callable-tool-names agent) "read"))
+    (t/is (not (contains? (state/callable-tool-names agent) "bash"))
+          "a modifier-only enabled list excludes over the live names"))
+  (let [h (support/tool-table)
+        agent (support/make-agent-state :enabled-tool-entries ["-bash"])]
+    (tools-registry/register-tool! h {:name "late-tool"
+                                      :description "late"
+                                      :parameters {:type "object" :properties {}}
+                                      :execute (fn [_] {:content "ok"})})
+    (try
+      (t/is (contains? (state/callable-tool-names agent) "late-tool")
+            "a tool mounted after the setting defaults on")
+      (finally (tools-registry/unregister-tool! h "late-tool")))))
+
 (t/deftest test-loop-make-agent-state-with-opts
   (let [session {:dummy :session}
         events (atom [])

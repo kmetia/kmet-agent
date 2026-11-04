@@ -176,19 +176,37 @@ built-in tool (extension tools stay available), and an unset
 `:default-tools` enables all of them. The built-in `run_code` sandbox only
 exposes the tools that are active.
 
-Project settings layer over user settings: a `.kmet/settings.edn` list of only
-`+name`/`-name` entries modifies the user's selection, while a list containing
-a plain name replaces it.
+`:enabled-tools` is the absolute selection over **every live tool**, built-in
+and extension alike, and it wins over `:default-tools`:
+
+```clojure
+:enabled-tools ["read" "grep"]       ; only these live tools
+:enabled-tools ["-bash" "+my_tool"]  ; the live set, minus bash, plus my_tool
+```
+
+A plain list is absolute: a tool that mounts later is not added. A
+modifier-only list is re-resolved against the live table, so a tool that mounts
+later defaults on (an extension or MCP catalog that connects after startup is
+not silently dropped). An empty list selects no tools at all. The runtime
+`/tools` selector's choice still wins over the setting until it is reset or a
+session switch clears it; persisting that choice into these keys is the next
+step of the selection work.
+
+Project settings layer over user settings for both keys: a `.kmet/settings.edn`
+list of only `+name`/`-name` entries modifies the user's list, while a list
+containing a plain name replaces it.
 
 `kmet config` (the resource TUI) lists the built-in tools in the
 **Bundled with kmet** group, under a `Tools` subgroup before `Extensions`,
-and toggles this setting: the global scope keeps a modifier-only list's shape
-(disabling writes `-name`) and rewrites a plain list as the effective
+and toggles `:default-tools`: the global scope keeps a modifier-only list's
+shape (disabling writes `-name`) and rewrites a plain list as the effective
 selection, while the project scope writes the usual inherit/load/unload
 `+name`/`-name` delta over the user list. Each item names its row
 (`:tool/bash`), and a tool whose row the ambient patch layers removed shows as
 off — the run does not mount it, so the setting cannot bring it back; leave the
 row in and turn it off here, or restore the row and re-enable it.
+`kmet config` does not list extension tools or `:enabled-tools` entries yet;
+`/tools` remains the live selector for them.
 
 The selection applies at startup, on a session switch (`/resume`, `/import` —
 pi recreates the runtime from settings there, so the outgoing session's

@@ -379,7 +379,9 @@ are declared while selected; `:deferred` is callable but declared only once
 `tool_search` loads it; `:sandbox` (a contributed source's catalog) is callable
 and never declared. `kmet.app.loop.state/declared-tools-for` builds the live
 candidate set from the selection (`:enabled-tools` / `:default-tools`) and the
-loaded set; `sync-tool-declarations!` records an explicit selection change and
+loaded set; the `:enabled-tools` entry list is re-resolved over the live names
+on each read, so a tool that mounts later defaults on, while a plain list is
+absolute. `sync-tool-declarations!` records an explicit selection change and
 `sync-resumed-declarations!` reconciles the recorded loadout before each
 request; both append a `:tool-change` entry and its wire marker to the live
 context. The request-time reconcile folds the context's markers, not the whole
@@ -410,9 +412,9 @@ sampling, never the runtime record.
 registry for its runtime fields, so a resumed session replays what it was sent
 rather than re-deriving it from a registry that may have changed: a recorded
 tool the live registry no longer holds stays declared (an MCP server still
-connecting), a
-tool this state watched unmount is removed, and an extension tool registered
-after the record joins the next request. `:tool-load` entries
+connecting), a tool this state watched unmount is removed while it stays gone
+(a remount restores it unless the persisted selection excludes it), and an
+extension tool registered after the record joins the next request. `:tool-load` entries
 remain the promotion log, so disabling a loaded tool hides it without
 forgetting the load. `callable-tool-names` is the other half — the selection
 minus the `:model-only` tools.

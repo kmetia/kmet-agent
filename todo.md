@@ -1,38 +1,23 @@
 # Todo
 
-Two tracks remain after the one P6 residual below. Landed work — the
-`github-copilot` anthropic auth, the prompt-caching parity pass, the around
-tool hook, the remaining openai-compat keys, **P5** (tool exposure, the
-declared/callable split, the shared ranker and `tool_search`), **P5.5** (the
-declared order and the one promotable derivation), **P6** (mid-conversation
-tool changes without a full re-prefill) and **P6 residuals 1–3** (Codex's
-declared-set markers, the anchored wire deltas, and `tool_search`'s
-recorded-loadout filter) — is out of this file; it lives in git history. The
-context and token tracks are dropped too — see § Deferred.
+Two tracks remain. Landed work — the `github-copilot` anthropic auth, the
+prompt-caching parity pass, the around tool hook, the remaining openai-compat
+keys, **P5** (tool exposure, the declared/callable split, the shared ranker and
+`tool_search`), **P5.5** (the declared order and the one promotable
+derivation), **P6** (mid-conversation tool changes without a full re-prefill),
+**P6 residuals 1–3** (Codex's declared-set markers, the anchored wire deltas,
+and `tool_search`'s recorded-loadout filter), the P6 unmount/remount residual
+and **S1** (config and resolution for `:enabled-tools`) — is out of this file;
+it lives in git history. The context and token tracks are dropped too — see
+§ Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | plan; **next** |
+| **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | S1 done; **S2 next** |
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | decisions closed (E1–E16); independent |
 
 Cross-session selection (S) comes next; persistent eval lands whenever — it
-touches neither a wire nor the tool registry. The one residual below is small
-and touches code already at HEAD (`dd2b7781`); it lands with S1 because it
-needs the persisted selection.
-
-## P6 residual
-
-1. **Re-registering after an unmount.** A tool that was unmounted (and is now
-   a recorded `:removed`) does not return when the same extension mounts it
-   again; the reconcile treats the name as mentioned and needs an explicit
-   selection. This one waits for S1: without a recorded selection, a resumed
-   session cannot tell an unmount from an explicit disable. Once S1 persists
-   the selection, a seen-and-live name may return unless the selection
-   excludes it. Tests: unmount → remount restores; selection-disable → a
-   config reload does not resurrect it without `set-active-tools!`.
-
-Done when the residual has tests and `bb test-changed`, `bb lint-changed` and
-`bb format-check-changed` are green. It lands with S1.
+touches neither a wire nor the tool registry.
 
 ## Tools: cross-session selection in both scopes
 
@@ -57,8 +42,9 @@ already exists, and give `/tools` the discovery plus a scope target.
 
 - **`:enabled-tools` is absolute selection over all live tools**;
   `:default-tools` stays the built-in-only, pi-parity key. Precedence already
-  exists: `active-tools-for` prefers `enabled` (`state.clj:472-489`), so
-  `:enabled-tools` wins and `:default-tools` is the fallback — no new rule.
+  exists: `selection-opts`/`tool-selection` prefer `enabled`
+  (`state.clj:536-566`), so `:enabled-tools` wins and `:default-tools` is the
+  fallback — no new rule.
 - **Deltas, not snapshots.** `+name`/`-name` against everything mounted, so a
   tool that appears later defaults on and an MCP catalog that connects late is
   not silently dropped.
@@ -71,34 +57,15 @@ already exists, and give `/tools` the discovery plus a scope target.
   and a project-scope exposure override would make a `:sandbox` tool
   un-disableable (`callable = … ∪ sandbox`).
 - **`/tools` discovers, `kmet config` reviews.** The config screen never loads
-  plugins (`tools/config.clj:58-60`), so it sees only built-ins and names
-  already in settings; `/tools` runs with the live registry and is the only
-  place a first delta can be authored.
+  plugins (`tools/config.clj:58-60`), so it sees built-ins plus names a settings
+  scope or an extension manifest names; `/tools` runs with the live registry and
+  is the only place a first delta can be authored. A directory extension may
+  carry an optional `:meta {:tools [{:name …} …]}` static projection for the
+  config rows; the loader carries `:meta` opaquely and `/tools` stays
+  authoritative. Single-file extensions and dynamically registered tools stay
+  invisible until a settings scope names them.
 
 ### Steps
-
-**S1 — config and resolution (no UI).**
-
-- `kmet.app.config`: generalize `merge-default-tools` → `merge-tool-entries`
-  (one rule for both keys); update its call sites (`load-config` `:264-278`,
-  `tools/config.clj:97`) and tests. No alias, no shim.
-- `load-config`: apply the same special-case to `:enabled-tools`; add
-  `get-enabled-tools` beside `get-default-tools` (`:465-471`).
-- `kmet.app.tools.registry`: generalize `resolve-default-tools` →
-  `resolve-selection [entries base-names]`; keep `resolve-default-tools` as the
-  built-in call and add `resolve-enabled-tools` over live names. The `[]` =
-  empty-selection branch (`:314-317`) already has the right meaning for both.
-- `loop.driver`: resolve `:enabled-tools` beside `:121`, thread through
-  `prompt-options` (`:85-93`) and `agent-state` (`:127`, `:147`).
-- **Warn when a selection orphans every `:deferred` tool** — no discovery tool
-  left to promote one. `:enabled-tools` can drop `tool_search` exactly as
-  `:default-tools` can, and the loss is silent today. pi's shape
-  (`mcp/index.ts:509-520` warns when `tool_search` exists but cannot be
-  activated): an explicit selection still wins, it just reports.
-
-Done when a config with no `:enabled-tools` declares the same set as before
-(P6's recorded initial declaration aside), and one with `:enabled-tools` wins
-over `:default-tools`.
 
 **S2 — extension ABI (two functions).**
 
@@ -128,12 +95,20 @@ over `:default-tools`.
 
 **S4 — `kmet config` review surface.**
 
-- `builtin-tool-items` (`:73-105`) → `tool-items`: built-in rows keep
+- Carry the manifest's optional `:meta` through `manifest-info` →
+  `resolve-extension` → `ext-rows/entry` (a new `:meta` key; the loader does
+  not validate or interpret its contents). No plugin loading.
+- `builtin-tool-items` (`:73-102`) → `tool-items`: built-in rows keep
   `:default-tools`; names in `:enabled-tools` (either scope) that are not
   built-ins get rows that write/clear the delta, shown even though the tool
-  cannot be resolved statically. Default-on extension tools remain invisible
-  here — the documented limit.
-- `toggle-selected!` (`resource_config.clj:588-615`) gains the
+  cannot be resolved statically.
+- Add extension rows from `:meta :tools`: only a properly filled list — a
+  sequential collection of maps with a non-empty string `:name` — produces
+  rows; invalid entries are dropped, and absent/malformed/empty means no rows.
+  No warning: `:meta` is opaque and this is a static projection, while
+  `/tools` remains the live authority. Dynamic tools and single-file
+  extensions stay invisible here unless a settings scope names them.
+- `toggle-selected!` (`resource_config.clj:585-615`) gains the
   `:enabled-tools` branch.
 - No plugin loading; `mounted-tool-names` (`:45-73`) unchanged.
 
@@ -149,22 +124,19 @@ over `:default-tools`.
   `:56` (no project trust — note the fail-closed argument).
 - `modules/app/src/kmet/extension.md` + `docs/extensions.md` (the two new ABI
   functions, a stated break), `extensions/README.md` and the `tools.clj`
-  docstring.
+  docstring; also document the opaque `:meta` manifest key and that `:tools`
+  is a static projection for config (only properly filled entries show,
+  `/tools` is authoritative).
 
 ### Test plan
 
-There is no direct coverage of selection resolution today
-(`merge-default-tools`/`resolve-default-tools` appear only in
-`test_resource_config.clj` and `interactive/test_import.clj`; `active-tools-for`
-has none), so:
-
-- new `modules/app/test/kmet/app/test_tool_selection.clj`: scope merge (project
-  modifier list amends, plain list replaces), `[]` = none, `:enabled-tools` over
-  `:default-tools`, unknown names select nothing, resolution over live names
-  including an extension/MCP name.
 - `modules/app/test/kmet/ui/tui/test_resource_config.clj`: an `:enabled-tools`
   name that is not built-in renders a row; undo clears the entry; a built-in row
   still writes `:default-tools`.
+- Manifest metadata: `resolve-extension`/`ext-rows/entry` carry `:meta`
+  verbatim (absent → nil), a malformed value does not fail the load, and
+  `kmet config` renders only valid `:meta :tools` names (absent/malformed → no
+  rows; extra keys ignored).
 - `modules/app/test/kmet/app/test_bundled_extensions.clj`: the `tools` artifact
   still validates after the ABI and dialog change.
 - ABI: project write lands in `.kmet/settings.edn` as a delta; `tool-selection`
@@ -176,8 +148,10 @@ has none), so:
 An extension tool turned off in project scope stays off in a fresh session in
 that repo and on in another; `/tools` shows where each row's state comes from
 and which file Tab will write; a built-in's toggle still writes
-`:default-tools`; a config without `:enabled-tools` declares the same set as
-before; `kmet config` can undo a delta `/tools` wrote without loading a plugin.
+`:default-tools`; `kmet config` can undo a delta `/tools` wrote without loading
+a plugin; and a directory extension with a valid `:meta :tools` shows those
+rows while one without (or with a malformed list) shows none, with `/tools`
+still listing the live set.
 
 ## Persistent eval and eval sources
 
@@ -412,7 +386,10 @@ plus ~150 moved (step 2).
    `kmet.app.extensions.core/create-extension-api`; `create-nullable-api`
    gains `:eval-sources`; `modules/app/src/kmet/extension.md` +
    `docs/extensions.md` (the `license` example, the `user` prohibition, "use
-   the verbs within the call").
+   the verbs within the call"). The loader's opaque `:meta` (S4) is the later
+   static projection for extension-provided eval verbs, e.g. `:meta {:eval
+   [{:name "clj/edit-form"}]}`; the live `:kmet/eval-source` registry stays
+   authoritative, and the metadata reader lands only when a consumer needs it.
 7. **The eval vocabulary.** `(eval/patch 'name old new)` (structural subform
    replacement through rewrite-clj, re-evaluate, write back to the same
    scope) and `(eval/forget 'name)`. Deferred out of v1 so the structural

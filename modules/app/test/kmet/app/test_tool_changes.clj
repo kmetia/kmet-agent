@@ -102,22 +102,65 @@
       (t/is (= ["bash"] (:removed (peek (changes session)))))
       (finally (fs/delete-tree dir)))))
 
-(t/deftest test-a-resumed-session-keeps-a-recorded-removal
+(t/deftest test-a-resumed-session-honors-a-persisted-selection
+  (let [{:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session
+                                        :enabled-tool-entries ["read"])]
+    (try
+      (state/sync-tool-declarations! agent)
+      (t/is (= #{"read"} (names (state/active-tools agent)))
+            "the configured selection is the live loadout")
+      (let [resumed (support/make-agent-state :session session
+                                              :enabled-tool-entries ["read"])]
+        (state/sync-resumed-declarations! resumed)
+        (t/is (= #{"read"} (names (state/active-tools resumed)))
+              "the persisted selection survives resume")
+        (state/set-active-tools! resumed #{"read" "bash"})
+        (t/is (= #{"bash" "read"} (names (state/active-tools resumed)))
+              "a runtime override re-adds it"))
+      (finally (fs/delete-tree dir)))))
+
+(t/deftest test-a-persisted-selection-filters-a-resumed-record
   (let [{:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session)]
     (try
       (state/sync-tool-declarations! agent)
-      (state/set-active-tools! agent #{"read"})
-      (let [resumed (support/make-agent-state :session session)]
+      (let [resumed (support/make-agent-state :session session
+                                              :enabled-tool-entries ["read"])]
         (t/is (= #{"read"} (names (state/active-tools resumed)))
-              "the recorded removal is the resumed loadout")
+              "the recorded set is filtered before the first request")
+        (state/restore-session-context! resumed)
         (state/sync-resumed-declarations! resumed)
-        (t/is (= #{"read"} (names (state/active-tools resumed)))
-              "the request-time reconcile does not undo an explicit removal")
-        (state/set-active-tools! resumed #{"read" "bash"})
-        (t/is (= #{"bash" "read"} (names (state/active-tools resumed)))
-              "an explicit selection re-adds it"))
+        (t/is (= #{"read"} (names (state/active-tools resumed)))))
       (finally (fs/delete-tree dir)))))
+
+(t/deftest test-a-remounted-tool-returns-unless-the-selection-excludes-it
+  (let [h (support/tool-table)
+        {:keys [session dir]} (temp-session)
+        agent (support/make-agent-state :session session)]
+    (try
+      (tools/register-tool! h (tool-map "flappy"))
+      (state/sync-tool-declarations! agent)
+      (t/is (contains? (names (state/active-tools agent)) "flappy"))
+      ;; unmount: the next reconcile records the removal
+      (tools/unregister-tool! h "flappy")
+      (state/sync-resumed-declarations! agent)
+      (t/is (not (contains? (names (state/active-tools agent)) "flappy")))
+      ;; remount: the recorded removal is not a persisted disable
+      (tools/register-tool! h (tool-map "flappy"))
+      (let [resumed (support/make-agent-state :session session)]
+        (state/sync-resumed-declarations! resumed)
+        (t/is (contains? (names (state/active-tools resumed)) "flappy")
+              "a seen-and-live tool returns after a remount"))
+      ;; a persisted exclusion still wins
+      (let [disabled (support/make-agent-state :session session
+                                               :enabled-tool-entries ["-flappy"])]
+        (state/restore-session-context! disabled)
+        (state/sync-resumed-declarations! disabled)
+        (t/is (not (contains? (names (state/active-tools disabled)) "flappy"))))
+      (finally
+        (tools/unregister-tool! h "flappy")
+        (fs/delete-tree dir)))))
 
 (t/deftest test-a-resumed-session-adds-a-new-extension-tool
   (let [h (support/tool-table)
@@ -169,16 +212,17 @@
 (t/deftest test-a-resumed-promotion-adds-the-discovery-tool-but-keeps-removals
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)
-        agent (support/make-agent-state :session session)]
+        agent (support/make-agent-state :session session
+                                        :enabled-tool-entries ["-bash" "-edit" "-write" "-run_code"])]
     (try
       (state/sync-tool-declarations! agent)
-      (state/set-active-tools! agent #{"read"})
-      ;; a deferred source mounted after the record: tool_search becomes
-      ;; declarable and the promotion must not resurrect the other removals
+      ;; the persisted selection keeps the unrelated built-ins out; the
+      ;; deferred source mounts after the record, so tool_search joins it
       (tools/register-tool-source! h ::catalog
                                    (fn [] {"deferred-a" (tool-map "deferred-a")})
                                    {:exposure :deferred :description "A catalog"})
-      (let [resumed (support/make-agent-state :session session)]
+      (let [resumed (support/make-agent-state :session session
+                                              :enabled-tool-entries ["-bash" "-edit" "-write" "-run_code"])]
         (state/sync-resumed-declarations! resumed)
         (t/is (= #{"read" "tool_search"}
                  (names (state/active-tools resumed)))
@@ -191,6 +235,20 @@
         (tools/unregister-tool-source! h ::catalog)
         (fs/delete-tree dir)))))
 
+(t/deftest test-a-selection-that-orphans-deferred-tools
+  (let [h (support/tool-table)]
+    (deferred-source! h ::catalog {"deferred-a" (tool-map "deferred-a")})
+    (try
+      (t/is (= ["deferred-a"]
+               (state/orphaned-deferred-tools
+                (support/make-agent-state :enabled-tool-entries ["-tool_search"])))
+            "a selected deferred tool with no discovery tool is orphaned")
+      (t/is (nil? (state/orphaned-deferred-tools
+                   (support/make-agent-state
+                    :enabled-tool-entries ["-tool_search" "-deferred-a"])))
+            "excluding the deferred tool too loses nothing")
+      (finally
+        (tools/unregister-tool-source! h ::catalog)))))
 (t/deftest test-a-promotion-records-the-new-declaration
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)
@@ -313,7 +371,7 @@
         (tools/unregister-tool-source! h ::catalog)
         (fs/delete-tree dir)))))
 
-(t/deftest test-a-recorded-removal-narrows-the-search-candidates
+(t/deftest test-a-persisted-selection-narrows-the-search-candidates
   (let [h (support/tool-table)
         {:keys [session dir]} (temp-session)
         agent (support/make-agent-state :session session)]
@@ -321,14 +379,14 @@
     (try
       (state/sync-tool-declarations! agent)
       (state/promote-tools! agent ["deferred-a"])
-      ;; an explicit selection removes the promoted tool; the session records it
-      (state/set-active-tools! agent #{"read"})
-      (let [resumed (support/make-agent-state :session session)
+      ;; a persisted exclusion removes the promoted tool on resume
+      (let [resumed (support/make-agent-state :session session
+                                              :enabled-tool-entries ["-deferred-a"])
             promotable (tools/promotable-tools (state/tool-table resumed)
                                                (state/ctx-contributed-tools (:ctx resumed))
                                                (state/tool-selection resumed))]
         (t/is (not (contains? promotable "deferred-a"))
-              "a search cannot promise a tool the recorded loadout removed"))
+              "a search cannot promise a tool the persisted selection removed"))
       (finally
         (tools/unregister-tool-source! h ::catalog)
         (fs/delete-tree dir)))))

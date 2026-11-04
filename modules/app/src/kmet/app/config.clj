@@ -111,13 +111,14 @@
 
 ;; ─── defaultTools scope merge (pi: SettingsManager.mergeDefaultTools) ──────
 
-(defn merge-default-tools
-  "Merge the user and project :default-tools entry lists (pi:
+(defn merge-tool-entries
+  "Merge the user and project entry lists of a tool selection key (pi:
    SettingsManager.mergeDefaultTools): a project list of only +name/-name
    entries appends to the user list — it modifies the inherited selection —
    while a list with any plain name (or a malformed value) replaces it.
-   Returns USER when PROJECT is nil. Exposed for the `kmet config` screen
-   (kmet.app.tools.config); load-config uses it for the runtime merge."
+   Returns USER when PROJECT is nil. One rule for :default-tools and
+   :enabled-tools; exposed for the `kmet config` screen
+   (kmet.app.tools.config) and used by load-config for the runtime merge."
   [user project]
   (cond
     (nil? project) user
@@ -257,19 +258,22 @@
         base (deep-merge (resolve-scope-paths default-config global-dir)
                          (resolve-scope-paths user-config global-dir)
                          (resolve-scope-paths project-config project-dir))
-        ;; :default-tools — pi merges the scopes' entry lists instead of
-        ;; letting a project list replace the user one: a project list of
-        ;; only +name/-name entries modifies the user selection, any plain
-        ;; name replaces it (SettingsManager.mergeDefaultTools). The
-        ;; tool-name resolution happens at startup
-        ;; (kmet.app.tools.registry/resolve-default-tools).
-        with-default-tools (if (or (contains? (or user-config {}) :default-tools)
-                                   (contains? (or project-config {}) :default-tools))
-                             (assoc base :default-tools
-                                    (merge-default-tools (:default-tools user-config)
-                                                         (:default-tools project-config)))
-                             base)
-        with-env (cond-> with-default-tools
+        ;; :default-tools / :enabled-tools — pi merges the scopes' entry
+        ;; lists instead of letting a project list replace the user one: a
+        ;; project list of only +name/-name entries modifies the user
+        ;; selection, any plain name replaces it (SettingsManager's tool
+        ;; merge). The tool-name resolution happens at startup
+        ;; (kmet.app.tools.registry/resolve-selection).
+        with-tool-entries (reduce (fn [cfg k]
+                                    (if (or (contains? (or user-config {}) k)
+                                            (contains? (or project-config {}) k))
+                                      (assoc cfg k
+                                             (merge-tool-entries (get user-config k)
+                                                                 (get project-config k)))
+                                      cfg))
+                                  base
+                                  [:default-tools :enabled-tools])
+        with-env (cond-> with-tool-entries
                    env-provider (assoc :provider env-provider)
                    env-model (assoc :model env-model))]
     ;; Runtime knobs from the merged config (precedent: auth/load-auth!
@@ -478,6 +482,14 @@
    kmet.app.tools.registry/resolve-default-tools before use."
   [config]
   (:default-tools config))
+
+(defn get-enabled-tools
+  "The merged :enabled-tools entry list — plain live tool names and +name/-name
+   modifiers, or nil when no settings scope sets the key. Resolve it with
+   kmet.app.tools.registry/resolve-enabled-tools over the live tool names
+   before use; it wins over :default-tools."
+  [config]
+  (:enabled-tools config))
 
 (defn get-setting-live
   "Live top-level KEY from the global settings file, falling back to the

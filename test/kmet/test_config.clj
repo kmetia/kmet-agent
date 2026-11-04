@@ -170,10 +170,10 @@
       (t/is (= {:model "x"} (resolve-paths {:model "x"} "/base")))
       (t/is (= {:session-dir nil} (resolve-paths {:session-dir nil} "/base"))))))
 
-;; ─── defaultTools scope merge (pi: defaultTools) ───────────────────────────
+;; ─── tool selection scope merge (pi: defaultTools) ─────────────────────────
 
-(t/deftest test-merge-default-tools
-  (let [merge-default-tools @#'cfg/merge-default-tools]
+(t/deftest test-merge-tool-entries
+  (let [merge-default-tools cfg/merge-tool-entries]
     (t/testing "a user list alone passes through"
       (t/is (= ["read"] (merge-default-tools ["read"] nil))))
     (t/testing "project +name/-name entries append to the user list"
@@ -205,6 +205,35 @@
         (t/is (= ["write"] (load {:default-tools ["read"]}
                                  {:default-tools ["write"]}))))
       (t/testing "no scope setting → nil (every built-in active)"
+        (t/is (nil? (load nil nil))))
+      (finally (fs/delete-tree tmp)))))
+
+(t/deftest test-load-config-enabled-tools-scope-merge
+  (let [tmp (str (fs/create-temp-dir {:dir "target" :prefix "enabled-tools-test-"}))
+        load (fn [user project]
+               (with-redefs [cfg/load-edn-file
+                             (fn [path]
+                               (if (str/starts-with? (str path) tmp)
+                                 user
+                                 (or project {})))]
+                 (cfg/get-enabled-tools (cfg/load-config :no-env? true :agent-dir tmp))))]
+    (try
+      (t/testing "project modifiers append to the user selection"
+        (t/is (= ["-bash" "+grep"] (load {:enabled-tools ["-bash"]}
+                                         {:enabled-tools ["+grep"]}))))
+      (t/testing "a plain project list replaces the user selection"
+        (t/is (= ["read"] (load {:enabled-tools ["-bash"]}
+                                {:enabled-tools ["read"]}))))
+      (t/testing "the two keys merge independently"
+        (with-redefs [cfg/load-edn-file
+                      (fn [path]
+                        (if (str/starts-with? (str path) tmp)
+                          {:default-tools ["read"] :enabled-tools ["+grep"]}
+                          {:default-tools ["+bash"] :enabled-tools ["-bash"]}))]
+          (let [config (cfg/load-config :no-env? true :agent-dir tmp)]
+            (t/is (= ["read" "+bash"] (cfg/get-default-tools config)))
+            (t/is (= ["+grep" "-bash"] (cfg/get-enabled-tools config))))))
+      (t/testing "no scope setting → nil"
         (t/is (nil? (load nil nil))))
       (finally (fs/delete-tree tmp)))))
 

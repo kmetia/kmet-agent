@@ -151,12 +151,15 @@
          :default-tools (resolved :default-tools selection — the built-in
          tools active at startup, pi: defaultTools; nil = every built-in
          active, see kmet.app.tools.registry/resolve-default-tools),
+         :enabled-tool-entries (merged :enabled-tools entry list — resolved
+         against the live names per read, so a tool mounted later defaults on;
+         nil = no setting and :default-tools applies),
          :ctx (the ctx this run reads its loop stages and tool table from and
          scopes its events to — a run names one, because a state without a ctx
          has no tool table; an agent's run passes its own child ctx, which
          carries its own :loop-guard and :retry-policy stages, and a process
          run passes the app root)"
-  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms max-agent-delay-ms branch-summary-reserve-tokens tool-hook system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts system-prompt-fn compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens compact-model-overrides http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools ctx]
+  [& {:keys [model provider system session on-event thinking base-url api-type steering-mode follow-up-mode max-retries base-delay-ms max-agent-delay-ms branch-summary-reserve-tokens tool-hook system-prompt-override transform-context prepare-next-turn prepare-request finish-turn get-api-key scoped-models system-prompt-opts system-prompt-fn compact-token-threshold context-window compact-reserve-tokens keep-recent-tokens compact-model-overrides http-idle-timeout-ms http-total-timeout-ms auto-compact loop-guard-enabled loop-guard-threshold thinking-loop-guard-enabled block-images default-tools enabled-tool-entries ctx]
       :or {provider :opencode-go
            thinking :off
            steering-mode :all
@@ -188,6 +191,7 @@ Be precise and concise in your responses."}}]
                     :signal (atom false)
                     :thinking (atom thinking)
                     :enabled-tools (atom nil)
+                    :enabled-tool-entries (atom enabled-tool-entries)
                     :default-tools (atom default-tools)
                     :on-event on-event
                     :base-url base-url
@@ -527,44 +531,61 @@ Be precise and concise in your responses."}}]
 
 (defn- selection-opts
   "The run's selection in the shape `kmet.app.tools.registry/select-tools` and
-   `promotable-tools` both take: ENABLED (the runtime allowlist, nil = all)
-   wins; otherwise :default-tools (a resolved selection, nil = every built-in)
+   `promotable-tools` both take. ENABLED (the runtime allowlist, nil = all)
+   wins; otherwise ENABLED-TOOL-ENTRIES (the merged :enabled-tools setting)
+   resolves over LIVE-NAMES, so a tool mounted later defaults on. With neither,
+   :default-tools (a resolved built-in selection, nil = every built-in)
    excludes the built-ins it leaves out — extension tools stay enabled (pi:
    defaultTools selects the built-in tools; extension/custom tools remain
-   enabled). EXCLUDE adds the recorded removals a resumed session carries.
+   enabled). EXCLUDE adds caller-supplied exclusions.
    The declared surface and `tool_search`'s candidate list resolve from this
    one map, so they cannot disagree."
-  [{:keys [enabled default-tools exclude]}]
-  {:enabled enabled
-   :exclude (into (or exclude #{})
-                  (when (nil? enabled)
-                    (tools/default-tool-exclusions default-tools)))})
-
-(defn- recorded-removals
-  "Tool names SESS's record removed and has not re-added — the part of a
-   resumed loadout the live selection cannot see. A name re-added by a later
-   entry is in the branch state and therefore not here."
-  [sess]
-  (if-let [recorded (and sess (session/session-tool-state sess))]
-    (let [current (set (keys recorded))
-          removed (into #{}
-                        (comp (filter #(= :tool-change (:role %)))
-                              (mapcat :removed))
-                        (session/get-branch sess))]
-      (into #{} (remove #(contains? current %)) removed))
-    #{}))
+  [{:keys [enabled enabled-tool-entries live-names default-tools exclude]}]
+  (let [enabled (or enabled
+                    (when enabled-tool-entries
+                      (tools/resolve-enabled-tools enabled-tool-entries live-names)))]
+    {:enabled (when (some? enabled) (set enabled))
+     :exclude (into (or exclude #{})
+                    (when (nil? enabled)
+                      (tools/default-tool-exclusions default-tools)))}))
 
 (defn tool-selection
-  "The selection AGENT's run settings and recorded loadout apply, in
-   `selection-opts`'s shape — what a script's callable set and the `tool_search`
-   binding resolve against, so a search's candidates and the next request's
-   declared set use one rule. A recorded removal the live selection does not
-   know (a resumed session) is excluded; S1 owns the persisted-selection rule,
-   so until then the session record is the only source of that fact."
+  "The selection AGENT's run settings apply, in `selection-opts`'s shape — what
+   a script's callable set and the `tool_search` binding resolve against, so a
+   search's candidates and the next request's declared set use one rule. The
+   runtime override (`set-active-tools!`) wins; otherwise the merged
+   :enabled-tools setting resolves over the live table, and :default-tools is
+   the built-in-only fallback."
   [agent]
   (selection-opts {:enabled @(:enabled-tools agent)
-                   :default-tools @(:default-tools agent)
-                   :exclude (recorded-removals (:session agent))}))
+                   :enabled-tool-entries @(:enabled-tool-entries agent)
+                   :live-names (keys (tool-table agent))
+                   :default-tools @(:default-tools agent)}))
+
+(defn- selected-name?
+  "Whether SELECTION — the `selection-opts` map, with a resolved :enabled set
+   when a selection key applies — declares NAME. A nil :enabled means no
+   selection key: every name except the caller-supplied :exclude is declared."
+  [selection name]
+  (if-let [enabled (:enabled selection)]
+    (contains? enabled name)
+    (not (contains? (:exclude selection) name))))
+
+(defn orphaned-deferred-tools
+  "Selected `:deferred` tools that no selected discovery tool can promote,
+   sorted; nil when the selection does not orphan any. `tool_search` is the
+   only discovery tool, so excluding it while keeping a deferred tool selected
+   leaves that tool unreachable."
+  [agent]
+  (let [table (tool-table agent)
+        selected (tools/select-tools table (tool-selection agent))
+        deferred (into #{}
+                       (keep (fn [[name tool]]
+                               (when (= :deferred (tool/exposure tool)) name)))
+                       table)]
+    (when (and (not (contains? selected search/tool-search-name))
+               (seq (filter deferred (keys selected))))
+      (vec (sort (filter deferred (keys selected)))))))
 
 (defn session-loaded-tools
   "The tool names SESS recorded as loaded — what `tool_search` promoted into the
@@ -637,7 +658,7 @@ Be precise and concise in your responses."}}]
    caller with no sandbox sources."
   [table contributed {:keys [loaded] :as opts}]
   (let [loaded (set loaded)
-        selected (selection-opts opts)
+        selected (selection-opts (assoc opts :live-names (keys table)))
         promotable (tools/promotable-tools table contributed selected)
         searchable? (boolean (seq promotable))
         from-table (keep (partial declared-record loaded searchable?)
@@ -677,6 +698,7 @@ Be precise and concise in your responses."}}]
   (declared-tools-for (tool-table agent)
                       (ctx-contributed-tools (:ctx agent))
                       {:enabled @(:enabled-tools agent)
+                       :enabled-tool-entries @(:enabled-tool-entries agent)
                        :default-tools @(:default-tools agent)
                        :loaded (loaded-tools agent)}))
 
@@ -694,11 +716,12 @@ Be precise and concise in your responses."}}]
 (defn- declared-tools
   "The declared tools for a state: the recorded fold joined with the live
    runtime records when the session has a record, else the live derivation.
-   RUNTIME and LIVE are thunks, so a resumed session does not re-derive the
-   live set it just replaced."
-  [recorded runtime live]
+   RECORDED names are filtered through SELECTED? so a configured exclusion wins
+   over a recorded declaration. RUNTIME and LIVE are thunks, so a resumed
+   session does not re-derive the live set it just replaced."
+  [recorded runtime live selected?]
   (if (some? recorded)
-    (join-recorded recorded (runtime))
+    (filterv #(selected? (:name %)) (join-recorded recorded (runtime)))
     (vals (live))))
 
 (defn declared-tools-for-session
@@ -706,14 +729,22 @@ Be precise and concise in your responses."}}]
    prompt before the state exists (`kmet.app.loop.driver/prompt-options`): the
    session's recorded declarations when it has any, else the live derivation
    over CTX's table and the run's selection."
-  [ctx session {:keys [enabled default-tools loaded]}]
-  (declared-tools (some-> session session/session-tool-state)
-                  #(runtime-tool-map ctx)
-                  #(declared-tools-for (ctx-tool-table ctx)
-                                       (ctx-contributed-tools ctx)
-                                       {:enabled enabled
-                                        :default-tools default-tools
-                                        :loaded loaded})))
+  [ctx session {:keys [enabled enabled-tool-entries default-tools loaded]}]
+  (let [recorded (some-> session session/session-tool-state)
+        selection (selection-opts {:enabled enabled
+                                   :enabled-tool-entries enabled-tool-entries
+                                   :live-names (into (set (keys (ctx-tool-table ctx)))
+                                                     (keys recorded))
+                                   :default-tools default-tools})]
+    (declared-tools recorded
+                    #(runtime-tool-map ctx)
+                    #(declared-tools-for (ctx-tool-table ctx)
+                                         (ctx-contributed-tools ctx)
+                                         {:enabled enabled
+                                          :enabled-tool-entries enabled-tool-entries
+                                          :default-tools default-tools
+                                          :loaded loaded})
+                    #(selected-name? selection %))))
 
 (defn active-tools
   "The tools sent to the LLM (pi: AgentSession.getActiveToolNames → the
@@ -727,9 +758,16 @@ Be precise and concise in your responses."}}]
    tool unloaded mid-request still executes for the request that was offered
    it."
   [agent]
-  (declared-tools (some-> (:session agent) session/session-tool-state)
-                  #(runtime-tool-map (:ctx agent))
-                  #(live-declared-tools agent)))
+  (let [recorded (some-> (:session agent) session/session-tool-state)
+        selection (selection-opts {:enabled @(:enabled-tools agent)
+                                   :enabled-tool-entries @(:enabled-tool-entries agent)
+                                   :live-names (into (set (keys (tool-table agent)))
+                                                     (keys recorded))
+                                   :default-tools @(:default-tools agent)})]
+    (declared-tools recorded
+                    #(runtime-tool-map (:ctx agent))
+                    #(live-declared-tools agent)
+                    #(selected-name? selection %))))
 
 (defn- tool-declaration
   "The model-visible half of a tool record: the declaration a :tool-change
@@ -761,10 +799,13 @@ Be precise and concise in your responses."}}]
   "The loadout a resumed branch restores (pi: _restoreToolsFromTranscript):
    its recorded declarations plus extension tools the branch never mentioned —
    a tool registered after the record is activated like a newly registered
-   tool, while a recorded removal stays removed and a recorded tool missing
-   from the registry stays declared. Built-ins never join the second group; a
-   new built-in follows the configured selection, not a resume."
-  [sess recorded live seen]
+   tool, while a recorded tool missing from the registry stays declared unless
+   SELECTION excludes it. A recorded removal no longer decides by itself: a
+   removed tool that is live again was unmounted and remounted (or explicitly
+   re-enabled), and SELECTION restores it when it does not exclude the name.
+   Built-ins never join the new-tool group; a new built-in follows the
+   configured selection, not a resume."
+  [sess recorded live seen selection]
   (if (nil? recorded)
     nil
     (let [mentioned (mentioned-tool-names (session/get-branch sess))
@@ -779,17 +820,23 @@ Be precise and concise in your responses."}}]
           kept (into (sorted-map)
                      (keep (fn [[name declaration]]
                              (cond
+                               (not (selected-name? selection name)) nil
                                (and (contains? seen name)
                                     (not (contains? live-names name))) nil
                                (contains? live-names name) [name (get live name)]
                                :else [name declaration])))
                      recorded)
+          remounted (into (sorted-map)
+                          (filter (fn [[name _]]
+                                    (and (mentioned name)
+                                         (not (contains? recorded name)))))
+                          live)
           new-tools (into (sorted-map)
                           (filter (fn [[name _]]
                                     (and (not (mentioned name))
                                          (not (contains? builtins name)))))
                           live)]
-      (merge (sorted-map) kept new-tools))))
+      (merge (sorted-map) kept remounted new-tools))))
 
 (defn- seen-tools!
   "Observe LIVE-NAMES on AGENT and return the names it had already seen. The
@@ -871,7 +918,15 @@ Be precise and concise in your responses."}}]
     (let [live (live-declaration-map agent)
           seen (seen-tools! agent (set (keys live)))
           branch-previous (session/session-tool-state sess)
-          current (or (resume-declarations sess branch-previous live seen) live)]
+          ;; resolve over the recorded names too, so a modifier-only setting
+          ;; keeps a resume-time gap while a plain/`-name` setting drops it
+          selection (selection-opts {:enabled @(:enabled-tools agent)
+                                     :enabled-tool-entries @(:enabled-tool-entries agent)
+                                     :live-names (into (set (keys live))
+                                                       (keys branch-previous))
+                                     :default-tools @(:default-tools agent)})
+          current (or (resume-declarations sess branch-previous live seen selection)
+                      live)]
       (record-tool-change! agent (context-tool-state agent) current))))
 
 (defn set-active-tools!

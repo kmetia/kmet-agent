@@ -324,9 +324,10 @@ image-width-cells / clear-on-shrink), terminal progress
 (`:show-terminal-progress`), provider image blocking (`:images` — block-images),
 shell customization (`:shell-path` / `:shell-command-prefix` — applied to
 every bash execution: tool, `!` commands, and factory-built tools),
-built-in tool selection (`:default-tools` — pi `defaultTools`; plain names
-replace the built-in set, `+name`/`-name` modify it, scopes layer and
-`/reload` re-resolves it),
+tool selection (`:default-tools` — pi `defaultTools`; plain names replace the
+built-in set, `+name`/`-name` modify it, scopes layer and `/reload` re-resolves
+it; `:enabled-tools` is the absolute selection over every live tool and wins
+over `:default-tools`),
 `.kmet/SYSTEM.md` + `APPEND_SYSTEM.md` discovery, `KMET_PROVIDER`/
 `KMET_MODEL` env vars.
 
@@ -411,7 +412,7 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
 | `sendCustomMessage` (deliverAs steer/followUp/nextTurn) | **Done** — `extensions/send-message!` → the runtime capability's pi branch logic: `:next-turn` queues for the next prompt, a streaming send queues into the run (steer/follow-up) or defers to the end of the turn (`:pending-custom`), an idle send appends and optionally starts a turn. Without a runtime binding (bare library/test use) it appends immediately via the sinks |
 | `setModel`, `getThinkingLevel`, `setThinkingLevel` | **Done** — runtime capabilities (auth-gated setModel with the position-preserving thinking switch, validated levels) |
 | `exec` | **Done** — `extensions/exec` (babashka.process, string capture) |
-| `getActiveTools`/`getAllTools`/`setActiveTools` | **Done** — runtime-bound (`get-active-tools`/`set-active-tools`): `:enabled-tools` (runtime selection, pi: setActiveTools) and `:default-tools` (pi: defaultTools) filter the agent state, applied to the run_code sandbox surface; the resulting declared set is recorded as `:tool-change` session entries and sent as a wire marker at its recorded position on Anthropic/Responses/Kimi (markers dropped, top-level array elsewhere). `get-active-tools` returns the effective active names, `get-all-tools` the array |
+| `getActiveTools`/`getAllTools`/`setActiveTools` | **Done** — runtime-bound (`get-active-tools`/`set-active-tools`): the runtime `:enabled-tools` override (pi: setActiveTools), the `:enabled-tools` settings entry (absolute over live tools) and `:default-tools` (pi: defaultTools) filter the agent state, applied to the run_code sandbox surface; the resulting declared set is recorded as `:tool-change` session entries and sent as a wire marker at its recorded position on Anthropic/Responses/Kimi (markers dropped, top-level array elsewhere). `get-active-tools` returns the effective active names, `get-all-tools` the array |
 | `registerProvider` (`streamSimple`/`refreshModels` at 0.87; `registerNativeProvider` + virtual models at 1.3) | Partial — provider *config* registration is done (`extensions/register-provider!` / `models/register-provider-config!`); wire-layer custom provider streaming (`registerNativeProvider`), dynamic model refresh, and `registerVirtualModel`/`unregisterVirtualModel` are missing |
 | `registerToolRenderer` | Missing — kmet tools carry their own renderer; there is no resolver chain like pi's `ToolRendererResolver` (load-order resolvers choosing how tool calls draw) |
 | `registerMcpServer` / `unregisterMcpServer` / `getMcpServers` | Missing — the `mcp-adapter` extension owns its `mcp.edn` config; extensions cannot contribute servers |
