@@ -224,9 +224,10 @@
    none targets its name."
   [item]
   (reduce (fn [state entry]
-            (if (= (entry-target entry) (tool-name item))
-              (if (= :remove (:modifier (parse-entry entry))) :unload :load)
-              state))
+            (let [parsed (parse-entry entry)]
+              (if (and parsed (= (:name parsed) (tool-name item)))
+                (if (= :remove (:modifier parsed)) :unload :load)
+                state)))
           :inherit
           (or (get (cfg/read-project-settings-map) (tool-setting item)) [])))
 
@@ -285,16 +286,26 @@
    false → :unload, nil → :inherit."
   {true :load false :unload nil :inherit})
 
-(defn- enabled-toggle-options
-  "The `write-global-toggle!` options for :enabled-tools: NAME's opt-in
-   default and a plain-list rewrite over LIVE-NAMES."
-  [name live-names]
-  {:opt-in? (registry/default-off-tool? name)
-   :resolve #(registry/resolve-enabled-tools % live-names)
-   :base (fn [entries]
-           (distinct (concat (filterv string? (entry-vector entries))
-                             (or live-names [])
-                             [name])))})
+(defn- toggle-options
+  "The `write-global-toggle!` options for SETTING-KEY: the tool's opt-in
+   default, its resolver, and the base a plain list is rewritten over.
+   :default-tools resolves over the built-in names; :enabled-tools resolves
+   over LIVE-NAMES and rewrites the live list the save saw."
+  [setting-key name live-names]
+  (case setting-key
+    :default-tools
+    {:opt-in? (registry/default-off-tool? name)
+     :resolve registry/resolve-default-tools
+     :base (constantly registry/builtin-tool-names)}
+    :enabled-tools
+    {:opt-in? (registry/default-off-tool? name)
+     :resolve #(registry/resolve-enabled-tools % live-names)
+     :base (fn [entries]
+             (distinct (concat (filterv string? (entry-vector entries))
+                               (or live-names [])
+                               [name])))}
+    (throw (ex-info "not a tool setting"
+                    {:type ::not-a-tool-setting :setting setting-key}))))
 
 (defn- write-global-toggle!
   "Write NAME's ENABLED state into SETTING-KEY's global entry list. A
@@ -314,10 +325,11 @@
                       opt-in? kept
                       :else (conj kept (delta-entry name false)))]
         (cfg/save-setting! [setting-key] (when (seq updated) updated)))
-      (let [selection (cond-> (set (resolve entries))
-                        enabled (conj name)
-                        (not enabled) (disj name))]
-        (cfg/save-setting! [setting-key] (filterv selection (base entries)))))))
+      (cfg/save-setting! [setting-key]
+                         (filterv (cond-> (set (resolve entries))
+                                    enabled (conj name)
+                                    (not enabled) (disj name))
+                                  (base entries))))))
 
 (defn- write-project-override!
   "Set NAME's STATE (:load → +name, :unload → -name, :inherit → remove) in
@@ -342,17 +354,10 @@
    same writer, so an opt-in built-in enabled for the live set leaves +name.
    Always true."
   [item enabled]
-  (let [name (tool-name item)]
-    (case (tool-setting item)
-      :default-tools
-      (write-global-toggle! :default-tools name enabled
-                            {:opt-in? (registry/default-off-tool? name)
-                             :resolve registry/resolve-default-tools
-                             :base (constantly registry/builtin-tool-names)})
-      :enabled-tools
-      (write-global-toggle! :enabled-tools name enabled
-                            (enabled-toggle-options name nil))
-      (throw (ex-info "not a tool item" {:type ::not-a-tool-item :item item}))))
+  (let [setting (tool-setting item)
+        name (tool-name item)]
+    (write-global-toggle! setting name enabled
+                          (toggle-options setting name nil)))
   true)
 
 (defn apply-tool-project-override!
@@ -377,7 +382,7 @@
   (let [scope (or scope (default-scope))]
     (case scope
       :global (write-global-toggle! :enabled-tools name enabled
-                                    (enabled-toggle-options name live-names))
+                                    (toggle-options :enabled-tools name live-names))
       :project (write-project-override! :enabled-tools name
                                         (enabled->state enabled))
       (throw (ex-info "scope must be :global or :project"
