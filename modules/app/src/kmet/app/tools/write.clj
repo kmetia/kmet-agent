@@ -1,5 +1,7 @@
 (ns kmet.app.tools.write
   "Write tool implementation — create or overwrite files.
+   `write-file` is the shared op the tool and the eval verbs call; `execute`
+   adds the tool's argument handling and success string.
    Pi: write.ts — success message matches pi's wording."
   (:require [clojure.java.io :as io]
             [babashka.fs :as fs]
@@ -16,27 +18,33 @@
   (when-let [raw-path (tool-util/title-path-arg args)]
     (str "write " (path/home-relative raw-path))))
 
+(defn write-file
+  "Write CONTENT to PATH under the file's mutation lock, creating parent
+   directories. PATH resolves against the runtime cwd. Returns
+   {:path path :bytes <count>} — the tool and the eval verbs share this op."
+  [path content signal]
+  (let [resolved (tool-util/resolve-tool-path path)
+        f (io/file resolved)]
+    ;; Pi: mkdir(dir, {recursive: true}) — skip when the path has no parent.
+    ;; Outside the lock on purpose: it prepares the directory, not the file,
+    ;; and create-dirs is idempotent under a concurrent creator.
+    (when-let [parent (fs/parent f)]
+      (fs/create-dirs parent))
+    ;; one writer per file at a time (pi: withFileMutationQueue), so a
+    ;; parallel batch cannot interleave two writes of the same file
+    (mutation/with-file-lock
+      resolved
+      signal
+      (fn []
+        (spit f content)
+        {:path path :bytes (count content)}))))
+
 (defn execute
   "Write content to a file (create or overwrite)."
   [{:keys [path content]} _on-update signal _ctx]
   (try
-    ;; relative paths resolve against the runtime cwd (pi: resolveToCwd), not
-    ;; the process cwd — a session resumed from another project
-    (let [resolved (tool-util/resolve-tool-path path)
-          f (io/file resolved)]
-      ;; Pi: mkdir(dir, {recursive: true}) — skip when the path has no parent.
-      ;; Outside the lock on purpose: it prepares the directory, not the file,
-      ;; and create-dirs is idempotent under a concurrent creator.
-      (when-let [parent (fs/parent f)]
-        (fs/create-dirs parent))
-      ;; one writer per file at a time (pi: withFileMutationQueue), so a
-      ;; parallel batch cannot interleave two writes of the same file
-      (mutation/with-file-lock
-        resolved
-        signal
-        (fn []
-          (spit f content)
-          {:content (str "Successfully wrote " (count content) " bytes to " path)})))
+    (let [result (write-file path content signal)]
+      {:content (str "Successfully wrote " (:bytes result) " bytes to " path)})
     (catch Exception e
       {:content (str "Error writing to " path ": " (ex-message e)) :is-error true})))
 

@@ -14,7 +14,7 @@ it lives in git history. The context and token tracks are dropped too — see
 | track | what it fixes | status |
 |---|---|---|
 | **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | S1 done; **S2 next** |
-| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | decisions closed (E1–E16); independent |
+| Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | steps 1–2 done; **step 3 next** |
 
 Cross-session selection (S) comes next; persistent eval lands whenever — it
 touches neither a wire nor the tool registry.
@@ -155,7 +155,8 @@ still listing the live set.
 
 ## Persistent eval and eval sources
 
-Status: plan, decisions closed (E1–E16) — implementation can start at step 1.
+Status: steps 1–2 done (the shared script layer and the file ops); step 3 next.
+Decisions closed (E1–E16); independent.
 Independent of every other track; the `:on-tool` hook covers it for free (step
 1 keeps the bridge on `kmet.app.tools.invoke`).
 Reference: nodecode (`~/src/cvstree/nodecode/`) — an SBCL agent whose one tool

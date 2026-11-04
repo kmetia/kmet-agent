@@ -1,5 +1,7 @@
 (ns kmet.app.tools.edit
   "Edit tool implementation — precise text replacement in files.
+   `edit-file` is the shared read-modify-write op the tool and the eval verbs
+   call; `execute` adds the tool's argument normalization and rendering.
    Accepts :edits (vector of maps, pi's oldText/newText or kebab-case),
    a JSON-string edits arg, or the legacy top-level old-text/new-text pair.
    Pi: edit.ts — prepareEditArguments + validateEditInput.
@@ -47,40 +49,56 @@
     (cond-> (assoc args :edits (seq kebab))
       legacy (update :edits (fnil conj []) legacy))))
 
-(defn- apply-edits-to-file
+(defn- apply-edits-to-resolved
   "Read-modify-write of RESOLVED for PATH: one section under the mutation
    lock, so two parallel edits of one file cannot both match against the
-   pre-edit text."
+   pre-edit text. Returns {:path path :edits <count> :diff <display diff>};
+   a missing file is an :edit-error, the same message the tool reports."
   [resolved path edits]
   (let [f (io/file resolved)]
-    (if-not (fs/exists? f)
-      {:content (str "File not found: " path) :is-error true}
-      (let [raw (fs/read-all-bytes f)
-            ;; Jolt's (String. bytes "UTF-8") strips a leading BOM
-            ;; (Chez transcoded port); detect it on the raw bytes so
-            ;; strip-bom/restore still round-trips on both hosts.
-            has-bom (and (>= (alength raw) 3)
-                         (= -17 (aget raw 0)) (= -69 (aget raw 1)) (= -65 (aget raw 2)))
-            content (String. (if has-bom
-                               (java.util.Arrays/copyOfRange raw 3 (alength raw))
-                               raw)
-                             "UTF-8")
-            {:keys [text]} (edit-diff/strip-bom content)
-            bom (if has-bom "\uFEFF" "")
-            original-ending (edit-diff/detect-line-ending text)
-            normalized (edit-diff/normalize-to-lf text)
-            {:keys [new-content]}
-            (edit-diff/apply-edits-to-normalized-content normalized edits path)
-            final (str bom (edit-diff/restore-line-endings new-content original-ending))
-            {:keys [diff]} (edit-diff/format-diff-lines
-                            (str/split-lines normalized)
-                            (str/split-lines new-content))
-            diff (when-not (str/blank? diff) diff)]
-        (spit f final)
-        {:content (str "Successfully replaced " (count edits) " block(s) in " path ".")
-         ;; Pi: EditToolDetails.diff — the actually-applied display diff,
-         ;; used by the TUI render-result to correct a stale preview
-         :details (when diff {:diff diff})}))))
+    (when-not (fs/exists? f)
+      (throw (ex-info (str "File not found: " path)
+                      {:type :edit-error :path path})))
+    (let [raw (fs/read-all-bytes f)
+          ;; Jolt's (String. bytes "UTF-8") strips a leading BOM
+          ;; (Chez transcoded port); detect it on the raw bytes so
+          ;; strip-bom/restore still round-trips on both hosts.
+          has-bom (and (>= (alength raw) 3)
+                       (= -17 (aget raw 0)) (= -69 (aget raw 1)) (= -65 (aget raw 2)))
+          content (String. (if has-bom
+                             (java.util.Arrays/copyOfRange raw 3 (alength raw))
+                             raw)
+                           "UTF-8")
+          {:keys [text]} (edit-diff/strip-bom content)
+          bom (if has-bom "\uFEFF" "")
+          original-ending (edit-diff/detect-line-ending text)
+          normalized (edit-diff/normalize-to-lf text)
+          {:keys [new-content]}
+          (edit-diff/apply-edits-to-normalized-content normalized edits path)
+          final (str bom (edit-diff/restore-line-endings new-content original-ending))
+          {:keys [diff]} (edit-diff/format-diff-lines
+                          (str/split-lines normalized)
+                          (str/split-lines new-content))
+          diff (when-not (str/blank? diff) diff)]
+      (spit f final)
+      {:path path
+       :edits (count edits)
+       ;; Pi: EditToolDetails.diff — the actually-applied display diff,
+       ;; used by the TUI render-result to correct a stale preview
+       :diff diff})))
+
+(defn edit-file
+  "Apply NORMALIZED-EDITS (a seq of {:old-text … :new-text …}) to PATH under
+   the file's mutation lock: strip the BOM, normalize line endings, match with
+   exact-then-fuzzy semantics, restore the original endings, write, and return
+   {:path path :edits <count> :diff <display diff>}. PATH resolves against the
+   runtime cwd. Throws ex-info {:type :edit-error} for a missing file, an empty
+   old text, a not-found or duplicate match, overlapping edits, or no change —
+   the tool's own error messages, shared with the eval verbs."
+  [path edits signal]
+  (let [resolved (tool-util/resolve-tool-path path)]
+    (mutation/with-file-lock resolved signal
+      #(apply-edits-to-resolved resolved path edits))))
 
 (defn execute
   "Precise text replacement in a file (pi: edit.ts execute).
@@ -96,11 +114,9 @@
       {:content "Edit tool input is invalid. edits must contain at least one replacement."
        :is-error true}
       (try
-        ;; relative paths resolve against the runtime cwd (pi: resolveToCwd),
-        ;; not the process cwd — a session resumed from another project
-        (let [resolved (tool-util/resolve-tool-path path)]
-          (mutation/with-file-lock resolved signal
-            #(apply-edits-to-file resolved path edits)))
+        (let [result (edit-file path edits signal)]
+          {:content (str "Successfully replaced " (:edits result) " block(s) in " path ".")
+           :details (when-let [diff (:diff result)] {:diff diff})})
         (catch Exception e
           (if (= :edit-error (:type (ex-data e)))
             ;; Pi: edit matching errors surface with their own message
