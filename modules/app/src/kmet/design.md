@@ -35,6 +35,16 @@ These are load-bearing and not obvious from the code:
 - **`:per-agent true` is declined, not deferred.** A preset composes a
   per-agent world, `setup` shadows a service, `isolate` names a realm. A row
   flag nobody reads is exactly what the kernel refuses to ship for `:inject`.
+- **The code tools are opt-in.** pi's `defaultToolNames` ships every built-in
+  on. kmet marks `run_code` and `eval` `:default-enabled? false`: both stay
+  mounted rows (`/config` and `/tools` enable them live), but an unset or
+  modifier-only `:default-tools` resolves over `registry/default-tool-names`
+  and never turns them on — only a plain or `+name` entry does. The departure
+  is deliberate: they are the two tools that execute model-written code in the
+  agent's context (one per call, one persistent), and kmet has no project-trust
+  gate, so the baseline cannot depend on where a settings file came from.
+  `:enabled-tools` is still absolute over the live set, so an explicit choice
+  wins.
 - **`resume!`'s record is the session header.** The log is the durable record;
   an agent store would be a second one, and the server's own rule is "sessions
   are already EDN files; the server adds no new store".

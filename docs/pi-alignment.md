@@ -53,7 +53,7 @@ These were deliberate scope decisions. They still stand unless marked
 | Area | pi feature | kmet decision |
 |---|---|---|
 | Additional run modes | `--mode json`, `--export`, `pi server` / `pi client` / `pi rpc`, `packages/server` / `packages/client` / `packages/protocol` (CBOR — removed in pi 1.3.0), `docs/sdk.md` | *Reopened, no decision recorded* — kmet now ships `--mode rpc` (EDN stdio, `docs/rpc.md`); interactive + print + RPC are the shipped modes. JSON mode, CLI `--export`, the SDK, and any remote/multi-client direction are undecided |
-| Project trust | `core/project-trust.ts`, `core/trust-manager.ts`, `/trust`, `trust-selector.ts`, `--approve`/`--no-approve`, `defaultProjectTrust`, `trust.json` | Not ported — project settings/extensions load unconditionally (`-a`/`-na` parse as no-ops on the package commands) |
+| Project trust | `core/project-trust.ts`, `core/trust-manager.ts`, `/trust`, `trust-selector.ts`, `--approve`/`--no-approve`, `defaultProjectTrust`, `trust.json` | Not ported — project settings/extensions load unconditionally (`-a`/`-na` parse as no-ops on the package commands). With no trust gate the built-in tool defaults are **fail-closed**: `run_code` and `eval` are mounted but `:default-enabled? false`, so an unset or modifier-only selection never grants them; only an explicit plain/`+name` entry in either scope does. It is a default, not a security boundary (`bash` carries the same authority) |
 | Package sources: npm/git | `npm:`/`git:` installs (npm registry + git clone machinery in `core/package-manager.ts`), `pi update`/self-update, temporary `--extension` installs, per-package autoload deltas over npm/git identities | **Git ported, npm not.** kmet installs git repositories as managed checkouts (`kmet install git:github.com/user/repo[@ref]`, `kmet.app.git-packages`, pi's parseGitUrl/clone/updateGit) and `kmet update` updates them (all or one source; no self-update, model refresh, `--force` or `--extension`). npm sources and temporary `--extension` installs are not ported; other remote sources error with "Unsupported package source". **kmet extension beyond pi:** `//subdir` names a package directory inside a repository (`git:host/repo//packages/foo`) — several packages may share one managed checkout, pi's `GitSource` has no subdirectory. The remainder of the package manager IS ported (next section) |
 | Session interop / JSONL | pi JSONL session files, `/export` `.jsonl`, `--export` from JSONL | EDNL-only by design (see [Session storage and alignment](#session-storage-and-alignment)) — `/export` writes standalone HTML |
 
@@ -258,7 +258,7 @@ Missing, by pi's cli.md groups:
 | `--fork <path|id>` | fork an existing session from the CLI (kmet has `/fork` in the TUI) |
 | `--no-session` | in-memory session that is not persisted |
 | `-n/--name` | session display name at startup (kmet has `/name`) |
-| `-t/--tools`, `-xt/--exclude-tools`, `-nbt/--no-builtin-tools`, `-nt/--no-tools` | tool selection for one run (kmet has the `:default-tools` setting and the in-TUI `/tools` selector only) |
+| `-t/--tools`, `-xt/--exclude-tools`, `-nbt/--no-builtin-tools`, `-nt/--no-tools` | tool selection for one run (kmet has the `:default-tools` and absolute `:enabled-tools` settings, `kmet config`, and the in-TUI `/tools` selector; the CLI flags are the gap) |
 | `-e/--extension`, `-ne/--no-extensions` | load extensions / disable discovered ones for one run |
 | `--no-mcp` | disable MCP for one run |
 | `--skill`, `-ns/--no-skills` | load skills / disable discovered ones for one run |
@@ -327,7 +327,10 @@ every bash execution: tool, `!` commands, and factory-built tools),
 tool selection (`:default-tools` — pi `defaultTools`; plain names replace the
 built-in set, `+name`/`-name` modify it, scopes layer and `/reload` re-resolves
 it; `:enabled-tools` is the absolute selection over every live tool and wins
-over `:default-tools`),
+over `:default-tools`; **deliberate departure:** pi ships every
+`defaultToolNames` entry on, while kmet marks `run_code` and `eval`
+`:default-enabled? false`, so an unset selection never turns them on and only a
+plain/`+name` entry does),
 `.kmet/SYSTEM.md` + `APPEND_SYSTEM.md` discovery, `KMET_PROVIDER`/
 `KMET_MODEL` env vars.
 
@@ -469,9 +472,10 @@ Full extension API surface (pi `core/extensions/types.ts`) — one remaining gap
   `session-selector-search.ts`; kmet's terminal `/login` covers the flows
 - **Built-in tool packaging** — pi 1.3 ships `grep`/`find`/`ls`/`powershell` as
   built-ins and `codemode`/`tool_search` as built-in extensions; kmet keeps
-  read/write/edit/bash + `run_code`/`eval` built in and ships the search tools
-  as opt-in extensions. MCP is built-in in pi 1.3 and an extension in kmet.
-  Feature-aligned, different packaging.
+  read/write/edit/bash built in, with `run_code`/`eval` built in but opt-in
+  (`:default-enabled? false`), and ships the grep/find/ls/powershell search
+  tools as opt-in extensions. MCP is built-in in pi 1.3 and an extension in
+  kmet. Feature-aligned, different packaging.
 - **Per-path file-mutation queue** — pi's `write`/`edit` serialize mutations of
   the same file through `withFileMutationQueue` (different files still run in
   parallel), so two same-file writes cannot interleave in a parallel batch.

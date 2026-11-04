@@ -26,10 +26,15 @@
  :http-transport :platform
  :shell-path nil
  :shell-command-prefix nil
- ;; built-in tools enabled at startup; nil = all (read write edit bash run_code).
- ;; Plain names replace the set; "+name"/"-name" entries modify it. Extension
- ;; tools are unaffected.
+ ;; built-in tools enabled at startup; nil = the default set
+ ;; (read write edit bash tool_search). run_code and eval are mounted but
+ ;; opt-in: nil keeps them off, "+run_code" turns one on. Plain names replace
+ ;; the set; "+name"/"-name" entries modify it. Extension tools are unaffected.
  :default-tools nil
+ ;; absolute selection over every live tool, built-in and extension; wins over
+ ;; :default-tools. Plain names select absolutely; "+name"/"-name" entries
+ ;; modify the live set (a tool mounted later defaults on). nil = unset.
+ :enabled-tools nil
  :terminal {:show-images true
             :image-width-cells 60
             :clear-on-shrink false}

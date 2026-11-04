@@ -140,8 +140,9 @@ content. CLI flags `--system-prompt <txt>` and `--append-system-prompt <txt>`
 
 ## Tools
 
-The built-in tools (`read`, `write`, `edit`, `bash`, `run_code`, `eval`)
-start enabled.
+The built-in tools are `read`, `write`, `edit`, `bash`, `tool_search`,
+`run_code` and `eval`. All but the last two start enabled; `run_code` and
+`eval` are mounted but opt-in (see below).
 Each is a composition row — `:tool/read`, `:tool/bash`, … in the built-in
 bundle — so a profile or a patch layer can take one out of the run entirely
 (`{:id :tool/bash :remove true}`: the tool is not in the model's schema and not
@@ -173,9 +174,13 @@ leaving the default in place as if the override had applied.
 Plain names replace the built-in selection; `+name` adds a tool and `-name`
 removes one, applied in list order. A mixed list uses its plain names as the
 selection and then applies the modifiers. An empty list disables every
-built-in tool (extension tools stay available), and an unset
-`:default-tools` enables all of them. The built-in `run_code` sandbox only
-exposes the tools that are active.
+default-on built-in tool (extension tools stay available). An unset
+`:default-tools` selects `default-tool-names` — every built-in row without
+`:default-enabled? false` — so `run_code` and `eval` stay off. Those two rows
+carry that marker: they are mounted, and `/config` or `/tools` can enable
+them, but an unset or modifier-only value never resolves them in. A plain
+list, or an explicit `+run_code`/`+eval`, does. The built-in `run_code`
+sandbox only exposes the tools that are active.
 
 `:enabled-tools` is the absolute selection over **every live tool**, built-in
 and extension alike, and it wins over `:default-tools`:
@@ -189,10 +194,14 @@ A plain list is absolute: a tool that mounts later is not added. A
 modifier-only list is re-resolved against the live table, so a tool that mounts
 later defaults on (an extension or MCP catalog that connects after startup is
 not silently dropped). An empty list selects no model-facing tools (a
-`:sandbox` source's tools stay callable from `run_code`). The runtime `/tools`
-selector's choice still wins over the setting until it is reset or a session
-switch clears it. In the TUI, `/tools` shows the file it will write (Tab
-switches global/project) and `Ctrl+S` persists the current selection into
+`:sandbox` source's tools stay callable from `run_code`). `:enabled-tools`
+wins over `:default-tools`, the opt-in default included: once the key is set,
+the mounted `run_code` and `eval` are on unless a `-name` entry removes them.
+`/tools`' all-enabled save therefore writes `+run_code`/`+eval`, so it cannot
+collapse to an empty setting and fall back to the opt-out default. The runtime
+`/tools` selector's choice still wins over the setting until it is reset or a
+session switch clears it. In the TUI, `/tools` shows the file it will write
+(Tab switches global/project) and `Ctrl+S` persists the current selection into
 `:enabled-tools`; the branch entry still restores the session's own selection.
 
 Project settings layer over user settings for both keys: a `.kmet/settings.edn`
@@ -200,26 +209,41 @@ list of only `+name`/`-name` entries modifies the user's list, while a list
 containing a plain name replaces it.
 
 `kmet config` (the resource TUI) lists the built-in tools in the
-**Bundled with kmet** group, under a `Tools` subgroup before `Extensions`,
-and toggles `:default-tools`: the global scope keeps a modifier-only list's
-shape (disabling writes `-name`) and rewrites a plain list as the effective
-selection, while the project scope writes the usual inherit/load/unload
-`+name`/`-name` delta over the user list. Each item names its row
-(`:tool/bash`), and a tool whose row the ambient patch layers removed shows as
-off — the run does not mount it, so the setting cannot bring it back; leave the
-row in and turn it off here, or restore the row and re-enable it.
-`kmet config` does not list extension tools or `:enabled-tools` entries yet;
-`/tools` remains the live selector and now persists that selection.
+**Bundled with kmet** group, under a `Tools` subgroup before `Extensions`.
+A built-in row toggles `:default-tools`: the global scope keeps a modifier-only
+list's shape (disabling a default-on tool writes `-name`) and rewrites a plain
+list as the effective selection, while the project scope writes the usual
+inherit/load/unload `+name`/`-name` delta over the user list. An opt-in row is
+shown off and its toggle is the inverse: enabling writes `+name`, disabling
+clears the entry. Each item names its row (`:tool/bash`), and a tool whose row
+the ambient patch layers removed shows as off — the run does not mount it, so
+the setting cannot bring it back; leave the row in and turn it off here, or
+restore the row and re-enable it.
+
+The tools listing also includes the names no built-in registry answers to:
+every name either scope's `:enabled-tools` names, and every name an installed
+extension declares under its opaque manifest `:meta {:tools [{:name "…"}]}`.
+Those rows write the `:enabled-tools` delta (global modifier-style or a plain
+selection rewrite; project `+name`/`-name`), not `:default-tools`; a projected
+tool groups with the extension that declares it, while a settings-only name
+lands in a `Tools` group. The projection loads
+no plugin: only a sequential `:tools` list of maps with a non-empty string
+`:name` produces rows (invalid entries are dropped, and absent/malformed means
+none), so a dynamically registered tool stays invisible here until a settings
+scope names it. `/tools`, which runs with the live registry, remains the
+authoritative selector.
 
 The settings apply at startup, on a session switch (`/resume`, `/import` — pi
 recreates the runtime from settings there, so the outgoing session's runtime
 selection does not carry over), and on `/reload`, which re-resolves both
-settings: tools newly added become active and tools removed go inactive. A
+settings before rebuilding the prompt: with no runtime selection in force,
+tools the new settings add become active and tools they drop go inactive. A
 runtime selection made with the `/tools` selector (bundled `tools` extension)
-still wins over the settings until it is reset or a session switch clears it
-(a reload keeps it — the prompt is rebuilt over the active set). A tool that
-is not active is also not executable — a call the model makes for a disabled tool
-settles as `Tool <name> not found` (pi: `prepareToolCall`) instead of running.
+is a separate override: `/reload` does not clear it, so it still decides the
+set until it is reset or a session switch rebuilds the runtime — the prompt is
+rebuilt over that active set. A tool that is not active is also not executable
+— a call the model makes for a disabled tool settles as `Tool <name> not
+found` (pi: `prepareToolCall`) instead of running.
 kmet has no CLI equivalent of pi's `--tools`/`--exclude-tools`/`--no-tools`/
 `--no-builtin-tools` yet.
 
@@ -227,9 +251,11 @@ An extension tool source may be *deferred*: its tools are callable from
 `run_code` but not declared to the model until the built-in `tool_search`
 loads one. `tool_search` itself is declared only while the selection can
 promote something — a deferred tool or a contributed sandbox tool — so a setup
-with no such source pays no schema for it. It is a row like any other tool:
-removing it (`{:id :tool/tool_search :remove true}`) leaves every deferred
-source reachable from scripts but no longer discoverable by the model.
+with no such source pays no schema for it. It is a selection row like any
+other: naming it out of `:enabled-tools`/`:default-tools` (or removing its
+row with `{:id :tool/tool_search :remove true}`) leaves every deferred source
+callable from scripts but no longer discoverable by the model. Nothing else
+can promote one, so the run warns about the orphaned sources at startup.
 
 The leading system prompt's Available-tools list is not rebuilt when a tool is
 promoted; it is rebuilt when the selection changes (`/tools`), on `/reload` and

@@ -314,7 +314,12 @@ live name's origin
 (`:global`, `:project`, `:session`, `:default`) and the default write scope
 (project when the cwd has `.kmet/`, else global). `set-tool-enabled!` writes
 `true`/`false`/`nil` (nil = inherit) into the scope's `:enabled-tools` list,
-using `+name`/`-name` deltas; it does not change the runtime selection.
+using `+name`/`-name` deltas (an opt-in built-in such as `run_code` is written
+as `+run_code` when enabled); it does not change the runtime selection.
+
+Both are new `api` keys. The contract has no compatibility promise before
+1.0: a host that builds the api map by hand must add `:tool-selection` and
+`:set-tool-enabled!`, while `create-nullable-api` already carries them.
 
 
 ### Tool sources (`register-tool-source!`)
@@ -343,6 +348,13 @@ Kimi tool-bearing system messages) the tool array is declared once and the
 promotion rides as a marker at its recorded position, so the array — the
 expensive front of the cached prefix — is not re-sent and the message list
 stays a growing prefix.
+
+`run_code` is a mounted but opt-in row (`:default-enabled? false`): while it
+is off, `:sandbox` sources stay registered and their tools are absent from the
+model's script surface, not unregistered. Enabling `run_code` with `/config`
+or `/tools` makes them callable immediately, and unloading the extension is
+what removes them. The same holds for `:deferred` sources and a disabled
+`tool_search` — the sources remain, but nothing can promote them.
 
 ```clojure
 (ext/register-tool-source! api :my-catalog
@@ -1305,12 +1317,15 @@ involved. Call the plugin's `:apply` with it and assert what was registered:
     (is (= 1 (count (get-in @state [:handlers :session-start]))))))
 ```
 
-State shape: `:commands` `:tools` `:handlers` `:flags` `:shortcuts`
+State shape: `:commands` `:tools` `:tool-sources` `:handlers` `:flags` `:shortcuts`
 `:markdown-transformers` `:entry-renderers` `:message-renderers` `:aliases`
 `:tool-hooks` `:input-hooks`
-`:before-agent-start-hooks` `:ui-calls` `:emitted` `:model-calls`. Every
+`:before-agent-start-hooks` `:tool-selection` `:tool-enabled-writes`
+`:ui-calls` `:emitted` `:model-calls`. Every
 registration function returns a deregister fn; the nullable api's deregister
-fns remove the corresponding registration.
+fns remove the corresponding registration. `:tool-selection` holds the value
+`tool-selection` answers, and `:tool-enabled-writes` collects
+`[name enabled opts]` triples from `set-tool-enabled!`.
 
 For runtime integration tests, `load-extension!` + `unload-extension!` against
 the real registries (see `modules/app/test/kmet/app/extensions/`).

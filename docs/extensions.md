@@ -230,7 +230,10 @@ underscores, dots → slashes; `.clj` → `.cljc` → `.bb` fallback):
 ;; extension.edn
 {:name   "my-ext"
  :plugin my-ext.main/plugin
- :loader [:jolt :sci]}
+ :loader [:jolt :sci]
+ ;; optional, opaque host metadata: `kmet config` reads :tools as a static
+ ;; projection of the tools this extension provides (see below)
+ :meta   {:tools [{:name "my_tool"}]}}
 ```
 
 ```clojure
@@ -245,7 +248,18 @@ loader backends the extension supports — `:loader` (see
 init function: the plugin map's `:apply` **is** the extension body, and its
 `:inject` declares the app services it waits for. The manifest may not carry
 `:inject` or `:entry` (the retired form) — the map is the one declaration, and
-either key fails the load with the replacement spelled out:
+either key fails the load with the replacement spelled out.
+
+`:meta` is optional and opaque to the loader: it is carried through
+resolution verbatim and never validated. The one reader today is `kmet config`,
+which treats `:meta {:tools [{:name "…"}]}` as a **static projection** of the
+tools the extension provides, so the screen can list and toggle them without
+loading the extension. Only a sequential `:tools` list of maps with a non-empty
+string `:name` produces rows; invalid entries are dropped, and an
+absent/malformed/empty value means none. `/tools` runs with the live registry
+and remains authoritative — a tool registered at runtime is invisible to the
+config screen until a settings scope names it. Other keys under `:meta` are
+ignored; `:meta` may also be absent (a single-file extension has no manifest).
 
 ```clojure
 ;; my_ext/main.clj
@@ -673,4 +687,11 @@ enabled set and each name's origin per scope — and
 global or project list. The default write scope is project when the cwd has
 `.kmet/`, else global. The config screen and `/tools` use these; an extension
 that only needs to enable or disable a tool should prefer them over hand-editing
-settings.edn.
+settings.edn. Both are new `api` keys; the contract is pre-1.0, so a host that
+builds the api map itself must add them (`create-nullable-api` already does).
+
+`run_code` is mounted but opt-in (`:default-enabled? false`). While it is off,
+`:sandbox` tool sources stay registered — their tools are simply absent from
+the model's script surface until `/config` or `/tools` enables the tool. The
+same holds for a disabled `tool_search`: `:deferred` sources remain, but
+nothing can promote them, and the run warns about the orphaned sources.

@@ -8,7 +8,10 @@
    navigation. Ctrl+S persists the current selection through the
    :enabled-tools setting (ext/set-tool-enabled!), in the scope shown in
    the header; Tab switches that write scope. The dialog never writes
-   settings without that explicit save.
+   settings without that explicit save. An opt-in built-in (`run_code`,
+   `eval`) is written as `+name` on an enabled save, so an all-enabled
+   selection stays a non-empty setting instead of collapsing to the
+   default-off fallback.
 
    Loading this extension replaces the builtin /tools listing command —
    builtins never clobber commands an extension registered (pi has no
@@ -136,7 +139,11 @@
   "Persist the checked rows through the :enabled-tools setting in the write
    scope. The setting is applied to the runtime, the branch entry is
    refreshed, and the dialog re-reads its provenance. A failure leaves the
-   dialog open and reports the error."
+   dialog open and reports the error.
+
+   The host writes one state per live tool. An opt-in built-in's enabled
+   state is a +name entry (its default is off), so an all-enabled save is
+   never the empty setting that would fall back to the opt-out default."
   [api state settings]
   (try
     (let [scope (:scope @state)
