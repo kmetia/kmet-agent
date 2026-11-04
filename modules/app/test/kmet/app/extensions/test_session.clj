@@ -707,6 +707,24 @@
         (t/is (some? (skills/get-skill "mcp")))
         (t/is (some? (tools-registry/get-tool handle "clojure_edit")))
         (t/is (some? (skills/get-skill "clojure-edit")))))
+    (testing "the clojure and tree-sitter refinements are deferred, not declared"
+      ;; each family's entry point is a registered tool; the refinements ride
+      ;; one `:deferred` source so their schemas cost nothing until
+      ;; `tool_search` loads them (docs/architecture.md § Tools and the script
+      ;; sandbox)
+      (let [handle (registry/current)
+            table (tools-registry/get-all-tools handle)
+            sources (tools-registry/get-deferred-sources handle)]
+        (doseq [name ["clojure_edit_replace_sexp" "clojure_paren_repair" "clojure_eval"
+                      "get_symbol_body" "find_callers" "find_callees"]]
+          (t/is (= :deferred (:exposure (get table name))) name)
+          (t/is (some? (get table name)) name))
+        (doseq [name ["clojure_edit" "list_symbols" "find_definition"]]
+          (t/is (nil? (:exposure (get table name))) name))
+        (t/is (= 2 (count (filter #(re-find #"clojure|tree-sitter" (str (:id %))) sources)))
+              "one deferred source per family, each announced by its description")
+        (t/is (every? #(seq (:description %)) sources)
+              "a deferred source the model is told about has a description")))
     (finally
       (extensions/unload-all-extensions!)
       (reload-extension-namespaces!))))
