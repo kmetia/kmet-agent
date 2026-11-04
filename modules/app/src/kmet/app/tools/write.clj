@@ -20,8 +20,9 @@
 
 (defn write-file
   "Write CONTENT to PATH under the file's mutation lock, creating parent
-   directories. PATH resolves against the runtime cwd. Returns
-   {:path path :bytes <count>} — the tool and the eval verbs share this op."
+   directories. PATH resolves against the runtime cwd. Returns the character
+   count the success message reports as bytes (pi wording) — the tool and the
+   eval verbs share this op."
   [path content signal]
   (let [resolved (tool-util/resolve-tool-path path)
         f (io/file resolved)]
@@ -37,14 +38,14 @@
       signal
       (fn []
         (spit f content)
-        {:path path :bytes (count content)}))))
+        (count content)))))
 
 (defn execute
   "Write content to a file (create or overwrite)."
   [{:keys [path content]} _on-update signal _ctx]
   (try
-    (let [result (write-file path content signal)]
-      {:content (str "Successfully wrote " (:bytes result) " bytes to " path)})
+    (let [characters (write-file path content signal)]
+      {:content (str "Successfully wrote " characters " bytes to " path)})
     (catch Exception e
       {:content (str "Error writing to " path ": " (ex-message e)) :is-error true})))
 

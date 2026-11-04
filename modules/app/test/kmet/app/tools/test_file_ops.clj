@@ -40,6 +40,7 @@
               "the op writes the same bytes as the tool")
         (t/is (= (get-in tool-result [:details :diff]) (:diff op-result))
               "and reports the same applied diff")
+        (t/is (some? (:diff op-result)))
         (t/is (= 1 (:edits op-result)))))))
 
 (t/deftest test-write-file-and-the-tool-produce-the-same-bytes
@@ -55,7 +56,7 @@
           (t/is (= content tool-bytes) "the tool writes the content")
           (t/is (= tool-bytes (slurp (str dir "/" path)))
                 "the op writes the same bytes, creating the parent directory")
-          (t/is (= 5 (:bytes op-result))))))))
+          (t/is (= 5 op-result)))))))
 
 (def ^:private edit-error-cases
   [{:case :not-found
@@ -68,7 +69,11 @@
    {:case :no-change
     :path "no-change.txt"
     :content "abc"
-    :edits [{:old-text "abc" :new-text "abc"}]}])
+    :edits [{:old-text "abc" :new-text "abc"}]}
+   {:case :empty-edits
+    :path "empty.txt"
+    :content "abc"
+    :edits []}])
 
 (t/deftest test-edit-errors-match-through-both-entry-points
   (with-dir

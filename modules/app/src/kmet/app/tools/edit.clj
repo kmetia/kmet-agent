@@ -52,8 +52,8 @@
 (defn- apply-edits-to-resolved
   "Read-modify-write of RESOLVED for PATH: one section under the mutation
    lock, so two parallel edits of one file cannot both match against the
-   pre-edit text. Returns {:path path :edits <count> :diff <display diff>};
-   a missing file is an :edit-error, the same message the tool reports."
+   pre-edit text. Returns {:edits <count> :diff <display diff>}; a missing
+   file is an :edit-error, the same message the tool reports."
   [resolved path edits]
   (let [f (io/file resolved)]
     (when-not (fs/exists? f)
@@ -81,21 +81,25 @@
                           (str/split-lines new-content))
           diff (when-not (str/blank? diff) diff)]
       (spit f final)
-      {:path path
-       :edits (count edits)
+      {:edits (count edits)
        ;; Pi: EditToolDetails.diff — the actually-applied display diff,
        ;; used by the TUI render-result to correct a stale preview
        :diff diff})))
 
 (defn edit-file
-  "Apply NORMALIZED-EDITS (a seq of {:old-text … :new-text …}) to PATH under
-   the file's mutation lock: strip the BOM, normalize line endings, match with
-   exact-then-fuzzy semantics, restore the original endings, write, and return
-   {:path path :edits <count> :diff <display diff>}. PATH resolves against the
-   runtime cwd. Throws ex-info {:type :edit-error} for a missing file, an empty
-   old text, a not-found or duplicate match, overlapping edits, or no change —
-   the tool's own error messages, shared with the eval verbs."
+  "Apply NORMALIZED-EDITS (a non-empty seq of {:old-text … :new-text …}) to
+   PATH under the file's mutation lock: strip the BOM, normalize line endings,
+   match with exact-then-fuzzy semantics, restore the original endings, write,
+   and return {:edits <count> :diff <display diff>}. PATH resolves against the
+   runtime cwd. Throws ex-info {:type :edit-error} for an empty edits list, a
+   missing file, an empty old text, a not-found or duplicate match,
+   overlapping edits, or no change — the tool's own error messages, shared
+   with the eval verbs."
   [path edits signal]
+  (when-not (seq edits)
+    ;; Pi: validateEditInput — at least one replacement required
+    (throw (ex-info "Edit tool input is invalid. edits must contain at least one replacement."
+                    {:type :edit-error})))
   (let [resolved (tool-util/resolve-tool-path path)]
     (mutation/with-file-lock resolved signal
       #(apply-edits-to-resolved resolved path edits))))
@@ -109,19 +113,15 @@
    under the file's mutation lock (pi: withFileMutationQueue)."
   [{:keys [path] :as args} _on-update signal _ctx]
   (let [{:keys [edits]} (normalize-edits args)]
-    (if (or (nil? edits) (empty? edits))
-      ;; Pi: validateEditInput — at least one replacement required
-      {:content "Edit tool input is invalid. edits must contain at least one replacement."
-       :is-error true}
-      (try
-        (let [result (edit-file path edits signal)]
-          {:content (str "Successfully replaced " (:edits result) " block(s) in " path ".")
-           :details (when-let [diff (:diff result)] {:diff diff})})
-        (catch Exception e
-          (if (= :edit-error (:type (ex-data e)))
-            ;; Pi: edit matching errors surface with their own message
-            {:content (ex-message e) :is-error true}
-            {:content (str "Error editing " path ": " (ex-message e)) :is-error true}))))))
+    (try
+      (let [result (edit-file path edits signal)]
+        {:content (str "Successfully replaced " (:edits result) " block(s) in " path ".")
+         :details (when-let [diff (:diff result)] {:diff diff})})
+      (catch Exception e
+        (if (= :edit-error (:type (ex-data e)))
+          ;; Pi: edit matching errors surface with their own message
+          {:content (ex-message e) :is-error true}
+          {:content (str "Error editing " path ": " (ex-message e)) :is-error true})))))
 
 ;; ─── The tool and its row ──────────────────────────────────────────────────
 
