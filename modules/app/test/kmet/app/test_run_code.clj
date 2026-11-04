@@ -297,6 +297,76 @@
         (t/is (= [{:tool "run-code-test-echo" :ok true}]
                  (get-in r [:details :calls])))))))
 
+(t/deftest test-run-code-per-tool-vars
+  ;; every active tool whose name the reader keeps whole is a var on the
+  ;; `tools` namespace, dispatching exactly like `call`
+  (with-custom-tool {:name "run-code-test-echo"
+                     :label "Echo"
+                     :description "Echo args"
+                     :execute (fn [args] {:content (pr-str args)})}
+    (fn []
+      (let [r (run "(emit (tools/text @(tools/run-code-test-echo {:n 1})))")]
+        (t/is (not (:is-error r)) (:content r))
+        (t/is (= "{:n 1}" (:content r)))
+        (t/is (= [{:tool "run-code-test-echo" :ok true}]
+                 (get-in r [:details :calls])))))))
+
+(t/deftest test-run-code-vars-never-shadow-the-namespace
+  ;; a tool named like one of the namespace's own vars stays reachable through
+  ;; `call`, and the var keeps its meaning
+  (with-custom-tool {:name "text"
+                     :label "Text"
+                     :description "A tool called text"
+                     :execute (fn [_] {:content "from-tool"})}
+    (fn []
+      (let [r (run (str "(emit [(tools/text {:content \"a\"})"
+                        " (tools/text (deref (tools/call \"text\" {})))])"))]
+        (t/is (not (:is-error r)) (:content r))
+        (t/is (= "[\"a\" \"from-tool\"]" (:content r))))))
+  ;; a name the reader would take apart has no var; `call` still reaches it
+  (with-custom-tool {:name "run-code-test/slashed"
+                     :label "Slashed"
+                     :description "Not a callable var name"
+                     :execute (fn [_] {:content "slashed"})}
+    (fn []
+      (t/is (= "false"
+               (:content (run (str "(emit (contains? (set (keys (ns-publics 'tools)))"
+                                   " 'run-code-test/slashed))"))))
+            "a name the reader would take apart gets no var")
+      (t/is (= "true"
+               (:content (run (str "(emit (contains? (set (keys (ns-publics 'tools)))"
+                                   " 'read))"))))
+            "a reader-safe name does")
+      (t/is (= "slashed"
+               (:content (run (str "(emit (:content (deref (tools/call"
+                                   " \"run-code-test/slashed\" {}))))"))))))))
+
+(t/deftest test-run-code-result-helpers
+  ;; ok? / text / error read a settled result without spelling the map out
+  (with-custom-tool {:name "run-code-test-fail"
+                     :label "Fail"
+                     :description "Fail"
+                     :execute (fn [_] {:content "boom" :is-error true})}
+    (fn []
+      (let [r (run (str "(emit (let [ok @(tools/call \"read\" {:path \"deps.edn\" :limit 1})"
+                        "             bad @(tools/call \"run-code-test-fail\" {})]"
+                        "  [(tools/ok? ok) (tools/ok? bad) (tools/ok? nil)"
+                        "   (string? (tools/text ok)) (tools/error bad) (tools/error ok)]))"))]
+        (t/is (not (:is-error r)) (:content r))
+        (t/is (= "[true false false true \"boom\" nil]" (:content r)))))))
+
+(t/deftest test-run-code-call-bang
+  ;; call! is the call derefed: the result on success, a throw on failure, so
+  ;; a script that cannot continue just stops and the trace keeps the call
+  (let [r (run "(emit (:content (tools/call! \"no-such-tool\" {}))) (emit :unreachable)")]
+    (t/is (:is-error r) (:content r))
+    (t/is (str/includes? (:content r) "tool call failed") (:content r))
+    (t/is (str/includes? (:content r) "no-such-tool"))
+    (t/is (not (str/includes? (:content r) ":unreachable"))
+          "the throw unwinds the script"))
+  (let [r (run "(emit (:content (tools/call! \"read\" {:path \"deps.edn\" :limit 1})))")]
+    (t/is (not (:is-error r)) (:content r))))
+
 (t/deftest test-run-code-sugar-and-fan-out
   (with-custom-tool {:name "run-code-test-echo"
                      :label "Echo"
@@ -485,6 +555,9 @@
     (t/is (str/includes? (:content r) "not active")))
   (binding [run-code/*enabled-tools-fn* (fn [] #{"read"})]
     (t/is (= "[\"read\"]" (:content (run "(emit (mapv :name (tools/list)))"))))
+    (t/is (= "false"
+             (:content (run "(emit (contains? (set (keys (ns-publics 'tools))) 'bash))")))
+          "a tool outside the enabled set gets no var either")
     (let [r (run "(emit @(tools/call \"bash\" {}))")]
       (t/is (str/includes? (:content r) "not active")))))
 

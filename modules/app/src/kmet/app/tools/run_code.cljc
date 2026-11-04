@@ -3,11 +3,13 @@
    kmet's tools bridged in (design: docs/architecture.md § Tools and the script sandbox).
 
    Lifecycle: every call builds a fresh SCI context and discards it on
-   return. The context carries the capability namespaces, the surface's
-   discovery fns (tools/list, tools/describe) and the per-call tools bridge
+   return. The context carries the capability namespaces, the `tools`
+   namespace — discovery (tools/list, tools/describe), the per-call bridge
    (async promises over execute-tool, drained by a shared bounded worker
-   pool). The script runs on a daemon thread whose SCI :interrupt-fn aborts
-   interpreted code on the run signal or the deadline; *out*/*err* are
+   pool) with its result helpers and one var per active tool — and the
+   script's emit/capture channels. The script runs on a daemon thread whose
+   SCI :interrupt-fn aborts interpreted code on the run signal or the
+   deadline; *out*/*err* are
    captured to bounded temp files, streamed through on-update, and assembled
    into the result (a 16 KiB / 2000-line default budget, configurable per
    call, with a bounded capture tail)."
@@ -729,12 +731,13 @@
   "The per-call sandbox namespaces. The host's babashka/clojure namespaces are
    copied in first (the full-babashka surface), then the sandbox's own
    overrides layer on top: SCI core patches (slurp/spit/file-seq/pmap), json,
-   the cwd/pid-tracking process wrappers, the per-call bridge and discovery
-   fns, the cwd/emit/spawn helpers, and the bare `emit`/`sh`. Built fresh every
+   the cwd/pid-tracking process wrappers, the `tools` namespace (discovery,
+   dispatch, the result helpers and one var per active tool), the
+   cwd/emit/spawn helpers, and the bare `emit`/`sh`. Built fresh every
    call, so a def in one script is invisible to the next, and the context's
    :load-fn (sandbox-load-fn) makes an unknown require fail with the boundary
    error while a reload of a known namespace is a no-op."
-  [surface cwd bridge writers emit-state]
+  [cwd tools-ns writers emit-state]
   (require-host-namespaces!)
   (let [process (process-fns cwd)]
     (merge-with
@@ -748,7 +751,7 @@
               'kmet.libs.json (shared-fns 'kmet.libs.json)
               'babashka.process process
               'sandbox (sandbox-fns cwd writers emit-state)
-              'tools (merge (discovery-fns surface) bridge)
+              'tools tools-ns
               'user {'emit (fn [v] (emit! emit-state v))
                      'emit-image (fn [x] (emit-image! emit-state cwd x))}}
        ;; the cwd-defaulting sh is preloaded bare alongside the aliases
@@ -891,8 +894,57 @@
         (.offer @bridge-queue run)
         p))))
 
-(defn- bridge-fns [opts]
-  {'call (fn [name & [args]] (dispatch! opts name args))})
+(def ^:private tool-var-name-pattern
+  "A tool name the Clojure reader keeps whole — letters, digits and the
+   symbol punctuation, not starting with a digit. A name it would mangle or
+   reject (`a/b`, `a.b`, a leading digit) is not callable as `(tools/NAME …)`,
+   so it keeps `call` as its only handle."
+  #"[a-zA-Z_][a-zA-Z0-9_?!*+\-]*")
+
+(def ^:private result-readers
+  "Readers over a settled bridge result, so a script does not spell the map out
+   at every call site: `ok?` (a result map that did not fail), `text` (its
+   :content) and `error` (its :content only when it failed, nil otherwise)."
+  {'ok? (fn [r] (and (map? r) (not (:is-error r))))
+   'text (fn [r] (:content r))
+   'error (fn [r] (when (:is-error r) (:content r)))})
+
+(defn- tools-namespace
+  "The `tools` namespace a script sees: discovery, the dispatch fns and the
+   result readers in one map, so what a script lists, calls and can name by
+   var cannot drift.
+
+   `call` returns the call's promise; `call!` returns the settled result and
+   throws when it failed, so a script that cannot continue stops there; and
+   every active tool whose name is a plain symbol is also a var
+   (`(tools/edit {…})`) that dispatches exactly like `call`. The namespace's
+   own names win — they are identities, a tool name is data — so a tool that
+   is itself called `text` stays reachable through `call`."
+  [surface opts]
+  (let [dispatch (fn [name args] (dispatch! opts name args))
+        discovery (discovery-fns surface)
+        dispatch-fns
+        {'call (fn [name & [args]] (dispatch name args))
+         'call! (fn [name & [args]]
+                  (let [name (tool-name name)
+                        result @(dispatch name args)]
+                    (if (:is-error result)
+                      (throw (ex-info (str "run_code: tool call failed: "
+                                           name " — " (:content result))
+                                      {:type :run-code/tool-call-failed
+                                       :tool name
+                                       :result result}))
+                      result)))}]
+    ;; per-tool vars first, then the namespace's own names: merge order is the
+    ;; whole shadowing rule, and a colliding tool name costs one discarded var
+    (merge (into {}
+                 (keep (fn [name]
+                         (when (re-matches tool-var-name-pattern name)
+                           [(symbol name) (fn [& [args]] (dispatch name args))])))
+                 (keys surface))
+           dispatch-fns
+           result-readers
+           discovery)))
 
 ;; ─── Result assembly ──────────────────────────────────────────────────────
 
@@ -1104,20 +1156,21 @@
                     :on-update on-update
                     :abort abort
                     :capture-limit (:capture-bytes limits)}
-        bridge (bridge-fns {:surface surface
-                            :execute-tool execute-tool
-                            :signal cancelled
-                            :ctx ctx
-                            :cwd cwd
-                            :session-env-fn session-env-fn
-                            :shell shell
-                            :skill-resolver skill-resolver
-                            :hook hook
-                            :check check
-                            :assistant-message assistant-message
-                            :on-update on-update
-                            :trace trace})
-        fork-ctx (sandbox-context (context-namespaces surface cwd bridge writers emit-state)
+        bridge-opts {:surface surface
+                     :execute-tool execute-tool
+                     :signal cancelled
+                     :ctx ctx
+                     :cwd cwd
+                     :session-env-fn session-env-fn
+                     :shell shell
+                     :skill-resolver skill-resolver
+                     :hook hook
+                     :check check
+                     :assistant-message assistant-message
+                     :on-update on-update
+                     :trace trace}
+        tools-ns (tools-namespace surface bridge-opts)
+        fork-ctx (sandbox-context (context-namespaces cwd tools-ns writers emit-state)
                                   (interrupt-fn abort signal deadline))
         capture (start-capture on-update abort (:capture-bytes limits))
         _ (reset! writers capture)
@@ -1156,7 +1209,7 @@
 (def ^:private description
   (str "Run a Clojure script to work over the environment and report a digest. Use it when the intermediate output would flood the context — scan or transform many files, run a search→read→verify chain, compute counts, matches or a summary — instead of chaining bash cat/head/rg. Use bash for one small command and read for one file.\n\n"
        "Inside the script the local primitives are already there and return values, not rendered text: (slurp path), fs/* (babashka.fs), the bare (sh ...), p/*, json, and (cwd), (env k), (now), (sleep ms), (spawn f).\n\n"
-       "Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call \"name\" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe \"name\") returns one tool's declaration.\n\n"
+       "Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call \"name\" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. A plain name is also a var — @(tools/read {:path \"x\"}) — while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe \"name\") returns one tool's declaration.\n\n"
        "Report with (emit value), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (emit-image \"shot.png\") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.\n\n"
        "Sandbox: Clojure; on babashka a full babashka surface, on the JVM the java.lang/java.io/java.util subset. Require clojure.*/babashka.* namespaces or the bundled libs (rewrite-clj, cljfmt, edamame, parinferish); System/java.io.*/Throwable resolve on babashka (Jolt's SCI exposes no class table). Aliases: fs, str/set/edn/walk, json, p, sh, tools, sandbox. Discover the surface with (all-ns) and a namespace's vars with (ns-publics 'babashka.fs). :timeout is seconds (0/omitted = none). Output is capped at 16 KiB/2000 lines; :max-output-bytes raises it to 50 KiB."))
 
@@ -1188,7 +1241,7 @@
    :prompt-guidelines
    ["Use run_code for Clojure — including one-liners — instead of writing bb -e/bb -f scripts through bash, unless the code needs the project classpath or its tests."
     "Use run_code when a command's output would flood the context: compute inside the script and (emit) only the digest — counts, matches, the lines that matter — instead of chaining bash cat/head/rg; println is discarded (emit the digest, or end on the value you want reported)."
-    "Inside a script prefer (slurp path), fs/* and the bare (sh ...) for local work over the bash and read tools — they return values, not rendered text — and call a tool only when its result is too large to read (a web fetch, an MCP call), emitting the filtered part: @(tools/call \"name\" args)."
+    "Inside a script prefer (slurp path), fs/* and the bare (sh ...) for local work over the bash and read tools — they return values, not rendered text — and call a tool only when its result is too large to read (a web fetch, an MCP call), emitting the filtered part: @(tools/call \"name\" args), or its per-tool var @(tools/read {…})."
     "When the answer is an image (a screenshot, a chart, a rendered page), attach it with (emit-image path) rather than describing it."]
    :params {:code {:type :string :description "Clojure program body to run"}
             :timeout {:type :number

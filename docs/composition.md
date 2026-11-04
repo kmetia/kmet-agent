@@ -324,7 +324,7 @@ Run a Clojure script to work over the environment and report a digest. Use it wh
 
 Inside the script the local primitives are already there and return values, not rendered text: (slurp path), fs/* (babashka.fs), the bare (sh ...), p/*, json, and (cwd), (env k), (now), (sleep ms), (spawn f).
 
-Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe "name") returns one tool's declaration.
+Call a tool from the script only when its result is too large to read while the useful part is small — a web fetch, an MCP call: @(tools/call "name" args) settles with {:content :is-error :details :truncation :images}; check :is-error, and the inner result never enters the conversation. A plain name is also a var — @(tools/read {:path "x"}) — while (tools/call! …) is one call derefed, throwing when it fails; (tools/ok? r), (tools/text r) and (tools/error r) read a result. (tools/list) returns the callable tools with their descriptions and parameters; (tools/describe "name") returns one tool's declaration.
 
 Report with (emit value), or end the script on the value you want reported: a successful script that emits nothing reports its final value. Strings print raw, other data pr-str, and stdout and stderr are always discarded. (emit-image "shot.png") attaches a supported image file (up to 3 MiB) or an {:data <base64> :mime-type <str>} block; at most 8.
 

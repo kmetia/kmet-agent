@@ -460,7 +460,16 @@ probe and no real use, and is gone;
   no ordering guarantee between themselves, and a script's call to a tool that
   declares `:sequential` is not a barrier — that classifier belongs to the
   loop's own batches. There is no batch helper: a script starts the calls it
-  wants and derefs the promises. Discovery (`tools/list`, `tools/describe`) is
+  wants and derefs the promises. Three conveniences sit on that same dispatch,
+  never beside it: `(tools/call! name args)` is the call derefed, with a failed
+  result promoted to a throw (a script that cannot continue stops, and the
+  trace still names the call); one var per active tool
+  (`@(tools/read {:path "x"})`, for names the reader keeps whole — a name it
+  would take apart keeps `call` as its handle); and the result readers
+  `tools/ok?`, `tools/text` and `tools/error`. The namespace's own names
+  (`call`, `call!`, `list`, `describe`, the readers) are never shadowed by a
+  tool var, so a tool that is itself called `text` stays reachable through
+  `call`. Discovery (`tools/list`, `tools/describe`) is
   a bridge-local read and never exposes `:execute`; listing carries each tool's
   name, description and parameter schema, so a script chooses a call without
   one `describe` per candidate.
