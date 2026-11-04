@@ -633,7 +633,7 @@
                                 (edn/read-string (slurp f)))))
             items (item-rows screen)
             first-row (first-item-row screen)]
-        (t/is (= 6 (count items)))
+        (t/is (= 7 (count items)))
         (t/is (every? #(= :tools (:resource-type (:item %))) items))
         (t/is (= "Bundled with kmet" (:label (:group first-row))))
         (t/is (= "bash" (get-in (:item first-row) [:metadata :display-name]))
@@ -739,7 +739,7 @@
             row-of (fn [name]
                      (first (filter #(= name (get-in (:item %) [:metadata :display-name]))
                                     (item-rows screen))))]
-        (t/is (= 6 (count (item-rows screen)))
+        (t/is (= 7 (count (item-rows screen)))
               "the row is still listed, so the screen says why the tool is off")
         (t/is (false? (:enabled (row-of "bash")))
               "the layer removed the row, so the tool is not mounted")
