@@ -79,7 +79,7 @@
             [kmet.app.skills :as skills]
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.read :as read-tool]
-            [kmet.app.tools.run-code :as run-code-tool]
+            [kmet.app.tools.script :as script]
             [kmet.app.tools.search :as tool-search]
             [kmet.ai.auth :as auth]
             [kmet.app.session.core :as session]
@@ -1146,14 +1146,14 @@
                 tools-util/*cwd* (or (session/session-cwd (:session agent))
                                      (tools-util/cwd))
                 ;; a thunk, not a snapshot: set-active-tools! takes effect on
-                ;; the next turn, and the run_code sandbox keys its context on
+                ;; the next turn, and the script sandbox keys its context on
                 ;; the set it resolves at call time. The callable names are
                 ;; resolved (not just :enabled-tools) so a :default-tools
                 ;; selection hides its built-ins from scripts too, and a
                 ;; :model-only tool stays unreachable however the set is
                 ;; configured (pi: the codemode callable set is the active
                 ;; direct tools plus the registered codemode ones)
-                run-code-tool/*enabled-tools-fn* #(state/callable-tool-names agent)
+                script/*enabled-tools-fn* #(state/callable-tool-names agent)
                 ;; what `tool_search` sees and records, resolved per call: the
                 ;; declared names, the selection its candidates honour, and the
                 ;; promotion it appends — two searches in one turn see each
@@ -1164,10 +1164,10 @@
                 ;; the run's tool chain — the same around hooks the loop's own
                 ;; batches run, so a scripted inner call is hooked exactly as an
                 ;; outer one is
-                run-code-tool/*tool-hook* @(:tool-hook agent)
+                script/*tool-hook* @(:tool-hook agent)
                 ;; the policy the loop's own batches apply, over the run's ctx:
                 ;; an inner call is judged on its effective arguments too
-                run-code-tool/*tool-check*
+                script/*tool-check*
                 (fn [op] (permissions/check (:ctx agent) op))]
         (future
           (let [attempt-token (atom nil)

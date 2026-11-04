@@ -19,7 +19,7 @@
             [kmet.app.loop.state :as state]
             [kmet.app.loop.message :as message]
             [kmet.app.tools.invoke :as invoke]
-            [kmet.app.tools.run-code :as run-code-tool]
+            [kmet.app.tools.script :as script]
             [kmet.app.extensions.core :as extensions]))
 
 (defn has-sequential-tool-call?
@@ -244,7 +244,7 @@
    batch with suppressed calls keeps tool_use/tool_result ordering (strict
    providers reject misordered results).
 
-   The batch runs under run-code-tool/*assistant-message* so a scripted inner
+   The batch runs under script/*assistant-message* so a scripted inner
    call carries the same assistant message in its op as the outer run_code
    call (futures convey the binding; the bridge captures it on the tool thread
    and hands it to its pool workers, which do not).
@@ -255,7 +255,7 @@
    and its execution still runs."
   [agent tool-calls assistant-msg request-tools & [append?]]
   (let [declared-tools (into {} (map (juxt :name identity)) request-tools)]
-    (binding [run-code-tool/*assistant-message* assistant-msg]
+    (binding [script/*assistant-message* assistant-msg]
       (if (has-sequential-tool-call? tool-calls declared-tools)
         (execute-tool-calls-sequential! agent tool-calls assistant-msg declared-tools append?)
         (execute-tool-calls-parallel! agent tool-calls assistant-msg declared-tools append?)))))

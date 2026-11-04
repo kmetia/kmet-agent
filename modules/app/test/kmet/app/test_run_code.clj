@@ -9,7 +9,7 @@
             [kmet.app.tools.bash :as bash-tool]
             [kmet.app.tools.read :as read-tool]
             [kmet.app.tools.registry :as tools]
-            [kmet.app.tools.run-code :as run-code]
+            [kmet.app.tools.script :as script]
             [kmet.app.tools.util :as tool-util]
             [kmet.libs.host :as host]
             [kmet.test-utils :as tu]
@@ -404,7 +404,7 @@
                      :execute (fn [args] {:content (pr-str args)})}
     (fn []
       (let [payloads (atom [])]
-        (binding [run-code/*tool-hook*
+        (binding [script/*tool-hook*
                   (fn [op next]
                     (when (= "run-code-test-echo" (:tool-name op))
                       (swap! payloads conj op))
@@ -551,7 +551,7 @@
     (t/is (str/includes? (:content r) "no-such-tool")))
   (let [r (run "(emit @(tools/call \"script\" {:code \"1\"}))")]
     (t/is (str/includes? (:content r) "not active")))
-  (binding [run-code/*enabled-tools-fn* (fn [] #{"read"})]
+  (binding [script/*enabled-tools-fn* (fn [] #{"read"})]
     (t/is (= "[\"read\"]" (:content (run "(emit (mapv :name (tools/list)))"))))
     (t/is (= "false"
              (:content (run "(emit (contains? (ns-publics 'tools) 'bash))")))
@@ -622,7 +622,7 @@
                                          :label "Contributed"
                                          :execute (fn [_] {:content "x" :is-error false})}})
     (fn []
-      (binding [run-code/*enabled-tools-fn* (fn [] #{"read"})]
+      (binding [script/*enabled-tools-fn* (fn [] #{"read"})]
         (t/is (= "[\"read\" \"run-code-test-contributed\"]" (:content (run "(emit (mapv :name (tools/list)))"))))
         (t/is (str/includes? (:content (run "(emit @(tools/call \"bash\" {}))")) "not active"))))))
 
@@ -829,7 +829,7 @@
                                   (reset! ran true)
                                   {:content "ran"})}
       (fn []
-        (binding [run-code/*tool-hook*
+        (binding [script/*tool-hook*
                   (fn [op next] (Thread/sleep 800) (next op))]
           (let [r (run "(deref (tools/call \"run-code-test-slow-hook-target\" {}))"
                        {:timeout 0.2})]

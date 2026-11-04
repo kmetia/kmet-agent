@@ -44,8 +44,8 @@
    after the policy judged them.
 
    The hooks are read per call, so one registered mid-run fires on the next
-   call — and the chain is one value: the loop's batches and the run_code
-   sandbox run it (`loop/state`'s :tool-hook, `run-code/*tool-hook*`)."
+   call — and the chain is one value: the loop's batches and the script
+   sandbox run it (`loop/state`'s :tool-hook, `script/*tool-hook*`)."
   [op next]
   ((hooks/around (extensions/get-tool-hooks)) op next))
 

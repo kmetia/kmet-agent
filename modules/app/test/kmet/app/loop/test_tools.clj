@@ -468,7 +468,7 @@
 
 (t/deftest test-loop-scripted-calls-fire-tool-hooks
   ;; the run's tool chain reaches calls made inside a script: the loop
-  ;; binds run-code/*tool-hook* and run-code/*assistant-message* around the batch,
+  ;; binds script/*tool-hook* and script/*assistant-message* around the batch,
   ;; the bridge captures them on the tool thread and hands them to its pool
   ;; workers (raw threads convey no bindings)
   (let [hook-calls (atom [])
