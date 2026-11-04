@@ -28,22 +28,33 @@
    projection knows; no setting means every such tool is on (deltas, not
    snapshots).
 
-   Built-in toggles write the :default-tools setting. The global scope keeps a
-   modifier-only list's shape — disabling writes -name so future built-ins
-   inherit, enabling removes the entry — and rewrites a list with plain names
-   as the effective selection (plain names replace the whole set). The project
+   A default-tool row (a built-in) writes the :default-tools setting; an
+   enabled-tool row (a name no built-in registry answers to) writes
+   :enabled-tools. The global scope keeps a modifier-only list's shape —
+   disabling writes -name so future tools inherit, enabling removes the entry
+   (for an opt-in tool the inverse) — and rewrites a list with plain names as
+   the effective selection (plain names replace the whole set). The project
    scope writes the +name/-name delta over the user list the other resources
-   use (:load/:unload/:inherit). Non-built-in toggles write :enabled-tools
-   with the same scope shapes."
+   use (:load/:unload/:inherit). Both settings share the same writers."
   (:require [babashka.fs :as fs]
-            [clojure.string :as str]
             [kmet.app.tools.registry :as registry]
             [kmet.app.config :as cfg]))
 
-(defn- entry-target
-  "The tool name ENTRY targets, modifier prefix stripped."
+(defn- parse-entry
+  "ENTRY parsed as {:name string :modifier :add|:remove|nil}; nil for a
+   non-string or blank entry. The one place a +name/-name prefix is read."
   [entry]
-  (if (registry/tool-selection-modifier? entry) (subs (str entry) 1) (str entry)))
+  (when (and (string? entry) (seq entry))
+    (let [prefix (subs entry 0 1)
+          modifier (case prefix "+" :add "-" :remove nil)]
+      {:name (if modifier (subs entry 1) entry)
+       :modifier modifier})))
+
+(defn- entry-target
+  "The tool name ENTRY targets, modifier prefix stripped; nil when ENTRY is
+   not a non-blank string."
+  [entry]
+  (:name (parse-entry entry)))
 
 (defn- entry-vector [entries]
   (if (sequential? entries) (vec entries) []))
@@ -51,34 +62,29 @@
 (defn- entry-targets
   "The names ENTRIES target, modifier prefixes stripped."
   [entries]
-  (into #{}
-        (keep (fn [entry]
-                (when (and (string? entry) (seq entry))
-                  (if (contains? #{"+" "-"} (subs entry 0 1))
-                    (subs entry 1)
-                    entry))))
-        (entry-vector entries)))
+  (into #{} (keep entry-target) (entry-vector entries)))
 
 (defn- modifier-style?
-  "Whether ENTRIES keeps the modifier-only :default-tools shape: nil (no
-   setting — every built-in enabled) or a non-empty list of +name/-name
-   entries. An empty list is plain style — it selects no built-ins."
+  "Whether ENTRIES keeps the modifier-only selection shape: nil (no setting —
+   every built-in enabled / the live set unmodified) or a non-empty list of
+   +name/-name entries. An empty list is plain style — it selects nothing."
   [entries]
   (or (nil? entries)
       (and (seq entries) (every? registry/tool-selection-modifier? entries))))
 
-(defn default-tool-item?
-  "True when ITEM is a built-in tool row: its toggle writes :default-tools."
+(defn- tool-setting
+  "The settings key tool ITEM's toggle writes: :default-tools for a
+   default-tool row (a built-in), :enabled-tools for an enabled-tool row."
   [item]
-  (and (= :tools (:resource-type item))
-       (= :default-tools (get-in item [:metadata :setting]))))
+  (get-in item [:metadata :setting]))
 
-(defn enabled-tool-item?
-  "True when ITEM is a tool row whose toggle writes :enabled-tools — a name
-   no built-in registry answers to."
+(defn tool-item?
+  "True when ITEM is a tool row: a default-tool row (a built-in, writing
+   :default-tools) or an enabled-tool row (a name no built-in registry
+   answers to, writing :enabled-tools)."
   [item]
   (and (= :tools (:resource-type item))
-       (= :enabled-tools (get-in item [:metadata :setting]))))
+       (contains? #{:default-tools :enabled-tools} (tool-setting item))))
 
 (defn tool-name
   "The tool name ITEM's settings entries target (its display name)."
@@ -160,8 +166,6 @@
    is grouped as a settings projection."
   ([user-settings project-settings]
    (tool-items user-settings project-settings nil nil))
-  ([user-settings project-settings mounted]
-   (tool-items user-settings project-settings mounted nil))
   ([user-settings project-settings mounted extension-tools]
    (let [builtin-names (vec registry/builtin-tool-names)
          builtin-set (set builtin-names)
@@ -219,60 +223,14 @@
    its setting: :load for a plain/+ entry, :unload for -, and :inherit when
    none targets its name."
   [item]
-  (let [name (tool-name item)]
-    (reduce (fn [state entry]
-              (if (and (string? entry) (= (entry-target entry) name))
-                (if (str/starts-with? entry "-") :unload :load)
-                state))
-            :inherit
-            (or (get (cfg/read-project-settings-map)
-                     (get-in item [:metadata :setting]))
-                []))))
+  (reduce (fn [state entry]
+            (if (= (entry-target entry) (tool-name item))
+              (if (= :remove (:modifier (parse-entry entry))) :unload :load)
+              state))
+          :inherit
+          (or (get (cfg/read-project-settings-map) (tool-setting item)) [])))
 
-(defn apply-builtin-tool-toggle!
-  "Global-scope toggle of builtin ITEM. A modifier-only list (or an unset
-   key) keeps its shape: for a default-on tool, enabling removes the entry and
-   disabling writes -name; for an opt-in tool (`:default-enabled? false`),
-   enabling writes +name and disabling clears the entry. An empty result clears
-   the key. A list with plain names is rewritten as the effective selection in
-   registry order — pi's plain names replace the whole set. Always true."
-  [item enabled]
-  (let [name (tool-name item)
-        entries (:default-tools (cfg/read-global-settings-map))
-        opt-in? (registry/default-off-tool? name)]
-    (if (modifier-style? entries)
-      (let [filtered (vec (remove #(= (entry-target %) name) entries))
-            updated (cond
-                      enabled (if opt-in?
-                                (conj filtered (str "+" name))
-                                filtered)
-                      opt-in? filtered
-                      :else (conj filtered (str "-" name)))]
-        (cfg/save-setting! [:default-tools] (when (seq updated) updated))
-        true)
-      (let [selection (set (registry/resolve-default-tools entries))
-            selection (if enabled (conj selection name) (disj selection name))
-            updated (filterv selection registry/builtin-tool-names)]
-        (cfg/save-setting! [:default-tools] updated)
-        true))))
-
-(defn apply-builtin-tool-project-override!
-  "Project-scope override of builtin ITEM: set STATE (:load → +name,
-   :unload → -name, :inherit → remove) in the project :default-tools list,
-   replacing any entry targeting the name. An empty list clears the key —
-   read-equivalent to absent (kmet.app.config/merge-tool-entries appends a
-   project modifier-only list to the user list). Always true."
-  [item state]
-  (let [name (tool-name item)
-        current (vec (or (:default-tools (cfg/read-project-settings-map)) []))
-        filtered (filterv #(not= (entry-target %) name) current)
-        updated (if (= state :inherit)
-                  filtered
-                  (conj filtered (str (if (= state :load) "+" "-") name)))]
-    (cfg/save-project-setting! [:default-tools] (when (seq updated) updated))
-    true))
-
-;; ─── The generic :enabled-tools selection (S2) ─────────────────────────────
+;; ─── The :enabled-tools selection (S2) ─────────────────────────────────────
 
 (defn default-scope
   "The scope a settings write defaults to: project when the cwd has `.kmet/`,
@@ -322,16 +280,32 @@
 (defn- delta-entry [name enabled]
   (str (if enabled "+" "-") name))
 
-(defn- write-global-enabled!
-  "Write NAME's state to the global :enabled-tools list. A modifier-only list
-   keeps that shape: an opt-in built-in is enabled by +name and disabled by
-   clearing the entry (its default is off), every other tool by clearing the
-   entry and disabled by -name (the live-set default is on). nil clears the
-   entry. A plain list is rewritten as the effective selection over
-   LIVE-NAMES."
-  [name enabled live-names]
-  (let [entries (:enabled-tools (cfg/read-global-settings-map))
-        opt-in? (registry/default-off-tool? name)]
+(def ^:private enabled->state
+  "The project override state an :enabled-tools value encodes: true → :load,
+   false → :unload, nil → :inherit."
+  {true :load false :unload nil :inherit})
+
+(defn- enabled-toggle-options
+  "The `write-global-toggle!` options for :enabled-tools: NAME's opt-in
+   default and a plain-list rewrite over LIVE-NAMES."
+  [name live-names]
+  {:opt-in? (registry/default-off-tool? name)
+   :resolve #(registry/resolve-enabled-tools % live-names)
+   :base (fn [entries]
+           (distinct (concat (filterv string? (entry-vector entries))
+                             (or live-names [])
+                             [name])))})
+
+(defn- write-global-toggle!
+  "Write NAME's ENABLED state into SETTING-KEY's global entry list. A
+   modifier-only list keeps its shape: nil removes the entry, enabling a
+   default-on tool removes it and disabling writes -name; for an OPT-IN? tool
+   the inverse (enabling writes +name, disabling removes it). A plain list is
+   rewritten as the effective selection of (RESOLVE entries) over (BASE
+   entries). One writer serves both settings because they differ only in
+   their resolver and base, not in their entry rule."
+  [setting-key name enabled {:keys [opt-in? resolve base]}]
+  (let [entries (get (cfg/read-global-settings-map) setting-key)]
     (if (modifier-style? entries)
       (let [kept (filterv #(not= name (entry-target %)) (entry-vector entries))
             updated (cond
@@ -339,27 +313,54 @@
                       enabled (if opt-in? (conj kept (delta-entry name true)) kept)
                       opt-in? kept
                       :else (conj kept (delta-entry name false)))]
-        (cfg/save-setting! [:enabled-tools] (when (seq updated) updated)))
-      (let [selection (set (registry/resolve-enabled-tools entries live-names))
-            selection (if enabled
-                        (conj selection name)
-                        (disj selection name))
-            base (distinct (concat (filterv string? (entry-vector entries))
-                                   (or live-names [])
-                                   [name]))
-            updated (filterv selection base)]
-        (cfg/save-setting! [:enabled-tools] updated)))))
+        (cfg/save-setting! [setting-key] (when (seq updated) updated)))
+      (let [selection (cond-> (set (resolve entries))
+                        enabled (conj name)
+                        (not enabled) (disj name))]
+        (cfg/save-setting! [setting-key] (filterv selection (base entries)))))))
 
-(defn- write-project-enabled!
-  "Write NAME's state to the project :enabled-tools list: true → +name,
-   false → -name, nil → remove the entry (inherit)."
-  [name enabled]
-  (let [current (entry-vector (:enabled-tools (cfg/read-project-settings-map)))
+(defn- write-project-override!
+  "Set NAME's STATE (:load → +name, :unload → -name, :inherit → remove) in
+   SETTING-KEY's project list, replacing any entry targeting NAME. An empty
+   list clears the key — read-equivalent to absent
+   (kmet.app.config/merge-tool-entries appends a project modifier-only list to
+   the user list). One writer serves both settings."
+  [setting-key name state]
+  (when-not (contains? #{:load :unload :inherit} state)
+    (throw (ex-info "state must be :load, :unload or :inherit"
+                    {:type ::bad-override-state :name name :state state})))
+  (let [current (entry-vector (get (cfg/read-project-settings-map) setting-key))
         kept (filterv #(not= name (entry-target %)) current)
-        updated (if (nil? enabled)
+        updated (if (= state :inherit)
                   kept
-                  (conj kept (delta-entry name enabled)))]
-    (cfg/save-project-setting! [:enabled-tools] (when (seq updated) updated))))
+                  (conj kept (delta-entry name (= state :load))))]
+    (cfg/save-project-setting! [setting-key] (when (seq updated) updated))))
+
+(defn apply-tool-toggle!
+  "Global-scope toggle of tool ITEM through its own setting: a default-tool
+   row writes :default-tools, an enabled-tool row :enabled-tools. Both use the
+   same writer, so an opt-in built-in enabled for the live set leaves +name.
+   Always true."
+  [item enabled]
+  (let [name (tool-name item)]
+    (case (tool-setting item)
+      :default-tools
+      (write-global-toggle! :default-tools name enabled
+                            {:opt-in? (registry/default-off-tool? name)
+                             :resolve registry/resolve-default-tools
+                             :base (constantly registry/builtin-tool-names)})
+      :enabled-tools
+      (write-global-toggle! :enabled-tools name enabled
+                            (enabled-toggle-options name nil))
+      (throw (ex-info "not a tool item" {:type ::not-a-tool-item :item item}))))
+  true)
+
+(defn apply-tool-project-override!
+  "Project-scope override of tool ITEM: set STATE (:load → +name, :unload →
+   -name, :inherit → remove) in its setting's project list. Always true."
+  [item state]
+  (write-project-override! (tool-setting item) (tool-name item) state)
+  true)
 
 (defn set-tool-enabled!
   "Persist NAME's enabled state in SCOPE: true enables, false disables, nil
@@ -375,28 +376,11 @@
                     {:type ::bad-enabled :name name :enabled enabled})))
   (let [scope (or scope (default-scope))]
     (case scope
-      :global (write-global-enabled! name enabled live-names)
-      :project (write-project-enabled! name enabled)
+      :global (write-global-toggle! :enabled-tools name enabled
+                                    (enabled-toggle-options name live-names))
+      :project (write-project-override! :enabled-tools name
+                                        (enabled->state enabled))
       (throw (ex-info "scope must be :global or :project"
                       {:type ::bad-scope :name name :scope scope}))))
   (cfg/merge-tool-entries (:enabled-tools (cfg/read-global-settings-map))
                           (:enabled-tools (cfg/read-project-settings-map))))
-
-(defn apply-enabled-tool-toggle!
-  "Global-scope toggle of a non-built-in tool ITEM through :enabled-tools,
-   in the merged list's own shape (a modifier-only list keeps +name/-name, a
-   plain list is rewritten as the effective selection). Always true, so the
-   screen's writer treats it like the built-in toggles."
-  [item enabled]
-  (set-tool-enabled! (tool-name item) enabled {:scope :global})
-  true)
-
-(defn apply-enabled-tool-project-override!
-  "Project-scope override of non-built-in tool ITEM: set STATE (:load →
-   +name, :unload → -name, :inherit → remove) in the project :enabled-tools
-   list. Always true, like the built-in override writer."
-  [item state]
-  (set-tool-enabled! (tool-name item)
-                     (case state :load true :unload false :inherit nil)
-                     {:scope :project})
-  true)

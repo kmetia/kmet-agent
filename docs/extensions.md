@@ -690,8 +690,9 @@ that only needs to enable or disable a tool should prefer them over hand-editing
 settings.edn. Both are new `api` keys; the contract is pre-1.0, so a host that
 builds the api map itself must add them (`create-nullable-api` already does).
 
-`run_code` is mounted but opt-in (`:default-enabled? false`). While it is off,
-`:sandbox` tool sources stay registered — their tools are simply absent from
-the model's script surface until `/config` or `/tools` enables the tool. The
-same holds for a disabled `tool_search`: `:deferred` sources remain, but
-nothing can promote them, and the run warns about the orphaned sources.
+`run_code` is mounted but opt-in (`:default-enabled? false`; see
+[Tools](configuration.md#tools)). While it is off, `:sandbox` tool sources
+stay registered — their tools are simply absent from the model's script
+surface until `/config` or `/tools` enables the tool. A disabled `tool_search`
+likewise leaves `:deferred` sources registered but unpromotable (the run warns
+about the orphaned sources; see [Tools](configuration.md#tools)).

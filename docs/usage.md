@@ -160,15 +160,13 @@ file) and it applies on the next start.
   `:skills`/`:prompts`/`:themes` entries).
 - The **Bundled with kmet** group lists the app-provided bundled extensions
   and, in a `Tools` subgroup before `Extensions`, the tools (`read`, `write`,
-  `edit`, `bash`, `tool_search`, and the opt-in `run_code`/`eval`). Built-in
-  rows toggle the `:default-tools` setting, with the opt-in rows writing
-  `+name` when enabled ([configuration](configuration.md#tools)); the project
-  scope cycles the same inherit/load/unload delta (`+name`/`-name`) as the
-  settings-backed rows. Names only `:enabled-tools` mentions, and the static
-  `:meta {:tools […]}` projection an installed extension declares, get rows
-  too — those toggle `:enabled-tools` instead, so an extension tool can be
-  turned off for a project without loading a plugin. `/tools` remains the
-  live selector.
+  `edit`, `bash`, `tool_search`, and the opt-in `run_code`/`eval`). A built-in
+  row toggles `:default-tools`; names only `:enabled-tools` mentions, and the
+  static `:meta {:tools […]}` projection an installed extension declares, get
+  rows too and toggle `:enabled-tools` — so an extension tool can be turned
+  off for a project without loading a plugin. Tab switches the scope; the
+  entry shapes are the ones in [configuration](configuration.md#tools).
+  `/tools` remains the live selector.
 
 ### In-TUI commands
 

@@ -53,7 +53,7 @@ These were deliberate scope decisions. They still stand unless marked
 | Area | pi feature | kmet decision |
 |---|---|---|
 | Additional run modes | `--mode json`, `--export`, `pi server` / `pi client` / `pi rpc`, `packages/server` / `packages/client` / `packages/protocol` (CBOR — removed in pi 1.3.0), `docs/sdk.md` | *Reopened, no decision recorded* — kmet now ships `--mode rpc` (EDN stdio, `docs/rpc.md`); interactive + print + RPC are the shipped modes. JSON mode, CLI `--export`, the SDK, and any remote/multi-client direction are undecided |
-| Project trust | `core/project-trust.ts`, `core/trust-manager.ts`, `/trust`, `trust-selector.ts`, `--approve`/`--no-approve`, `defaultProjectTrust`, `trust.json` | Not ported — project settings/extensions load unconditionally (`-a`/`-na` parse as no-ops on the package commands). With no trust gate the built-in tool defaults are **fail-closed**: `run_code` and `eval` are mounted but `:default-enabled? false`, so an unset or modifier-only selection never grants them; only an explicit plain/`+name` entry in either scope does. It is a default, not a security boundary (`bash` carries the same authority) |
+| Project trust | `core/project-trust.ts`, `core/trust-manager.ts`, `/trust`, `trust-selector.ts`, `--approve`/`--no-approve`, `defaultProjectTrust`, `trust.json` | Not ported — project settings/extensions load unconditionally (`-a`/`-na` parse as no-ops on the package commands). With no trust gate the built-in tool defaults are **fail-closed** (see [Tools](../configuration.md#tools)): `run_code` and `eval` need an explicit plain/`+name` entry. It is a default, not a security boundary (`bash` carries the same authority) |
 | Package sources: npm/git | `npm:`/`git:` installs (npm registry + git clone machinery in `core/package-manager.ts`), `pi update`/self-update, temporary `--extension` installs, per-package autoload deltas over npm/git identities | **Git ported, npm not.** kmet installs git repositories as managed checkouts (`kmet install git:github.com/user/repo[@ref]`, `kmet.app.git-packages`, pi's parseGitUrl/clone/updateGit) and `kmet update` updates them (all or one source; no self-update, model refresh, `--force` or `--extension`). npm sources and temporary `--extension` installs are not ported; other remote sources error with "Unsupported package source". **kmet extension beyond pi:** `//subdir` names a package directory inside a repository (`git:host/repo//packages/foo`) — several packages may share one managed checkout, pi's `GitSource` has no subdirectory. The remainder of the package manager IS ported (next section) |
 | Session interop / JSONL | pi JSONL session files, `/export` `.jsonl`, `--export` from JSONL | EDNL-only by design (see [Session storage and alignment](#session-storage-and-alignment)) — `/export` writes standalone HTML |
 
@@ -324,13 +324,11 @@ image-width-cells / clear-on-shrink), terminal progress
 (`:show-terminal-progress`), provider image blocking (`:images` — block-images),
 shell customization (`:shell-path` / `:shell-command-prefix` — applied to
 every bash execution: tool, `!` commands, and factory-built tools),
-tool selection (`:default-tools` — pi `defaultTools`; plain names replace the
-built-in set, `+name`/`-name` modify it, scopes layer and `/reload` re-resolves
-it; `:enabled-tools` is the absolute selection over every live tool and wins
-over `:default-tools`; **deliberate departure:** pi ships every
-`defaultToolNames` entry on, while kmet marks `run_code` and `eval`
-`:default-enabled? false`, so an unset selection never turns them on and only a
-plain/`+name` entry does),
+tool selection (`:default-tools` / `:enabled-tools` — pi `defaultTools`; entry
+syntax and scope layering are in [Tools](../configuration.md#tools);
+**deliberate departure:** pi ships every `defaultToolNames` entry on, while
+kmet marks `run_code` and `eval` `:default-enabled? false`, so an unset
+selection never turns them on and only a plain/`+name` entry does),
 `.kmet/SYSTEM.md` + `APPEND_SYSTEM.md` discovery, `KMET_PROVIDER`/
 `KMET_MODEL` env vars.
 

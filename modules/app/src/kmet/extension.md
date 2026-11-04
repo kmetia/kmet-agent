@@ -313,9 +313,10 @@ per scope, the target settings file per scope, the effective enabled set, each
 live name's origin
 (`:global`, `:project`, `:session`, `:default`) and the default write scope
 (project when the cwd has `.kmet/`, else global). `set-tool-enabled!` writes
-`true`/`false`/`nil` (nil = inherit) into the scope's `:enabled-tools` list,
-using `+name`/`-name` deltas (an opt-in built-in such as `run_code` is written
-as `+run_code` when enabled); it does not change the runtime selection.
+`true`/`false`/`nil` (nil = inherit) into the scope's `:enabled-tools` list
+(an opt-in built-in such as `run_code` is enabled by `+run_code`; the entry
+rules are in [`docs/configuration.md`](../../../../docs/configuration.md#tools));
+it does not change the runtime selection.
 
 Both are new `api` keys. The contract has no compatibility promise before
 1.0: a host that builds the api map by hand must add `:tool-selection` and
@@ -349,12 +350,14 @@ promotion rides as a marker at its recorded position, so the array — the
 expensive front of the cached prefix — is not re-sent and the message list
 stays a growing prefix.
 
-`run_code` is a mounted but opt-in row (`:default-enabled? false`): while it
-is off, `:sandbox` sources stay registered and their tools are absent from the
-model's script surface, not unregistered. Enabling `run_code` with `/config`
-or `/tools` makes them callable immediately, and unloading the extension is
-what removes them. The same holds for `:deferred` sources and a disabled
-`tool_search` — the sources remain, but nothing can promote them.
+`run_code` is a mounted but opt-in row (`:default-enabled? false`; see
+[Tools](../../../../docs/configuration.md#tools)): while it is off, `:sandbox`
+sources stay registered and their tools are absent from the model's script
+surface, not unregistered. Enabling `run_code` with `/config` or `/tools`
+makes them callable immediately, and unloading the extension is what removes
+them. The same holds for `:deferred` sources and a disabled `tool_search` —
+the sources remain, but nothing can promote them (the run warns; see
+[Tools](../../../../docs/configuration.md#tools)).
 
 ```clojure
 (ext/register-tool-source! api :my-catalog

@@ -136,6 +136,13 @@
   [items name]
   (first (filter #(= name (get-in % [:metadata :display-name])) items)))
 
+(defn- tool-item
+  "The minimal tool row the toggle writers read: a display name and the
+   setting the row writes."
+  [name setting]
+  {:resource-type :tools
+   :metadata {:display-name name :setting setting}})
+
 (t/deftest test-tool-items-builtins-keep-default-tools
   (let [items (tools-config/tool-items nil nil)]
     (t/is (= (vec registry/builtin-tool-names)
@@ -192,21 +199,19 @@
 (t/deftest test-enabled-tool-writers
   (with-settings nil nil
     (fn [global project]
-      (let [item {:resource-type :tools
-                  :metadata {:display-name "mcp_tool"
-                             :setting :enabled-tools}}]
-        (t/is (true? (tools-config/apply-enabled-tool-toggle! item false)))
+      (let [item (tool-item "mcp_tool" :enabled-tools)]
+        (t/is (true? (tools-config/apply-tool-toggle! item false)))
         (t/is (= ["-mcp_tool"] (:enabled-tools @global)))
         (t/is (= :inherit (tools-config/tool-override-state-of item)))
-        (t/is (true? (tools-config/apply-enabled-tool-toggle! item true)))
+        (t/is (true? (tools-config/apply-tool-toggle! item true)))
         (t/is (nil? (:enabled-tools @global)))
-        (t/is (true? (tools-config/apply-enabled-tool-project-override! item :unload)))
+        (t/is (true? (tools-config/apply-tool-project-override! item :unload)))
         (t/is (= ["-mcp_tool"] (:enabled-tools @project)))
         (t/is (= :unload (tools-config/tool-override-state-of item)))
-        (t/is (true? (tools-config/apply-enabled-tool-project-override! item :load)))
+        (t/is (true? (tools-config/apply-tool-project-override! item :load)))
         (t/is (= ["+mcp_tool"] (:enabled-tools @project)))
         (t/is (= :load (tools-config/tool-override-state-of item)))
-        (t/is (true? (tools-config/apply-enabled-tool-project-override! item :inherit)))
+        (t/is (true? (tools-config/apply-tool-project-override! item :inherit)))
         (t/is (nil? (:enabled-tools @project)))
         (t/is (= :inherit (tools-config/tool-override-state-of item)))))))
 
@@ -215,12 +220,10 @@
 (t/deftest test-opt-in-toggle-writes-plus-name
   (with-settings nil nil
     (fn [global _]
-      (let [item {:resource-type :tools
-                  :metadata {:display-name "run_code"
-                             :setting :default-tools}}]
-        (t/is (true? (tools-config/apply-builtin-tool-toggle! item true)))
+      (let [item (tool-item "run_code" :default-tools)]
+        (t/is (true? (tools-config/apply-tool-toggle! item true)))
         (t/is (= ["+run_code"] (:default-tools @global)))
-        (t/is (true? (tools-config/apply-builtin-tool-toggle! item false)))
+        (t/is (true? (tools-config/apply-tool-toggle! item false)))
         (t/is (nil? (:default-tools @global)))))))
 
 (t/deftest test-opt-in-enable-keeps-an-all-enabled-save-non-empty

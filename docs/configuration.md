@@ -210,28 +210,22 @@ containing a plain name replaces it.
 
 `kmet config` (the resource TUI) lists the built-in tools in the
 **Bundled with kmet** group, under a `Tools` subgroup before `Extensions`.
-A built-in row toggles `:default-tools`: the global scope keeps a modifier-only
-list's shape (disabling a default-on tool writes `-name`) and rewrites a plain
-list as the effective selection, while the project scope writes the usual
-inherit/load/unload `+name`/`-name` delta over the user list. An opt-in row is
-shown off and its toggle is the inverse: enabling writes `+name`, disabling
-clears the entry. Each item names its row (`:tool/bash`), and a tool whose row
+A built-in row toggles `:default-tools` in the global/project shapes above; an
+opt-in row is shown off until the same toggle enables it. Each item names its
+row (`:tool/bash`), and a tool whose row
 the ambient patch layers removed shows as off — the run does not mount it, so
 the setting cannot bring it back; leave the row in and turn it off here, or
 restore the row and re-enable it.
 
 The tools listing also includes the names no built-in registry answers to:
 every name either scope's `:enabled-tools` names, and every name an installed
-extension declares under its opaque manifest `:meta {:tools [{:name "…"}]}`.
-Those rows write the `:enabled-tools` delta (global modifier-style or a plain
-selection rewrite; project `+name`/`-name`), not `:default-tools`; a projected
-tool groups with the extension that declares it, while a settings-only name
-lands in a `Tools` group. The projection loads
-no plugin: only a sequential `:tools` list of maps with a non-empty string
-`:name` produces rows (invalid entries are dropped, and absent/malformed means
-none), so a dynamically registered tool stays invisible here until a settings
-scope names it. `/tools`, which runs with the live registry, remains the
-authoritative selector.
+extension declares under its opaque manifest `:meta {:tools [{:name "…"}]}`
+([manifest validity](extensions.md)). Those rows write `:enabled-tools` with
+the same global/project shapes, not `:default-tools`; a projected tool groups
+with the extension that declares it, while a settings-only name lands in a
+`Tools` group. The projection loads no plugin, so a dynamically registered
+tool stays invisible here until a settings scope names it. `/tools`, which
+runs with the live registry, remains the authoritative selector.
 
 The settings apply at startup, on a session switch (`/resume`, `/import` — pi
 recreates the runtime from settings there, so the outgoing session's runtime

@@ -5,12 +5,10 @@
    unified resolution).
 
    The kmet-only tools group renders first (kmet.app.tools.config): one row
-   per built-in tool, toggled through the :default-tools settings key of the
-   write scope (global: -name modifier or plain selection rewrite; project:
-   +/- delta over the global list). The same group lists the tools no built-in
-   registry answers to — names :enabled-tools names and the static
-   `:meta :tools` projection of installed extension manifests (read, never
-   loaded) — toggled through :enabled-tools instead.
+   per built-in tool (toggled through :default-tools) and one for every tool
+   only :enabled-tools or an extension's static `:meta :tools` projection
+   declares (read, never loaded; toggled through :enabled-tools). The entry
+   shapes live in kmet.app.tools.config.
 
    Extensions are plugins: every extension row (bundled, package, top-level
    or auto-discovered) is toggled into the composition layer of the write
@@ -607,9 +605,9 @@
 
 (defn- toggle-selected!
   "Space/enter on an item row (pi toggleResource): global scope flips the
-   enabled state (extensions compose a row in the global patch layer,
-   built-in tools write :default-tools, package/top-level resources the
-   scope's settings entry); project scope cycles inherit/load/unload (the
+   enabled state (extensions compose a row in the global patch layer, tool
+   rows write their setting, package/top-level resources the scope's settings
+   entry); project scope cycles inherit/load/unload (the
    project patch layer for extensions, the settings override for the rest).
    The row's state updates in place (pi updateItem) — the layout is not
    re-resolved."
@@ -620,21 +618,13 @@
     (when (and row (= :item (:kind row)))
       (let [item (:item row)]
         (cond
-          ;; built-in tools are not :packages entries: the global branch
-          ;; writes the :default-tools list, the project branch its
-          ;; +name/-name delta (kmet.app.tools.config/apply-builtin-tool-*)
-          (tools-config/default-tool-item? item)
+          ;; a tool row is not a :packages entry: the global branch writes
+          ;; its setting (:default-tools or :enabled-tools), the project
+          ;; branch its +name/-name delta (kmet.app.tools.config)
+          (tools-config/tool-item? item)
           (if (= :global (:write-scope st))
-            (global-toggle-row! this row item tools-config/apply-builtin-tool-toggle!)
-            (project-cycle-row! this row item tools-config/apply-builtin-tool-project-override!
-                                (:inherited-enabled row)))
-
-          ;; a tool row no built-in answers to is a :enabled-tools delta
-          (tools-config/enabled-tool-item? item)
-          (if (= :global (:write-scope st))
-            (global-toggle-row! this row item tools-config/apply-enabled-tool-toggle!)
-            (project-cycle-row! this row item
-                                tools-config/apply-enabled-tool-project-override!
+            (global-toggle-row! this row item tools-config/apply-tool-toggle!)
+            (project-cycle-row! this row item tools-config/apply-tool-project-override!
                                 (:inherited-enabled row)))
 
           ;; every extension is a plugin row in the composition; its origin
