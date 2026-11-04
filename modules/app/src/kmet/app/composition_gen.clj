@@ -66,14 +66,19 @@
 
 (def ^:private row-flag-keys
   "The row keys that are not composition data (`kmet.app.profile`), in the
-   order the page shows them: the row the entry runs and how, then the row a
-   generic boot leaves for its owner."
-  [:mode :prompt :session-lifecycle :defer])
+   order the page shows them: the row the entry runs and how, then the rows a
+   generic boot or a default selection leaves alone. An explicit false is part
+   of the value (an opt-in tool row), so it prints as `key=false`."
+  [:mode :prompt :session-lifecycle :defer :default-enabled?])
 
 (defn- row-flags
   "ROW's declared flags, space-separated, or `\"\"`."
   [row]
-  (str/join " " (keep (fn [k] (when (get row k) (name k))) row-flag-keys)))
+  (str/join " " (keep (fn [k]
+                        (when (contains? row k)
+                          (let [v (get row k)]
+                            (if (true? v) (name k) (str (name k) "=" v)))))
+                      row-flag-keys)))
 
 (defn- row-line [row]
   (str "| " (code (:id row))

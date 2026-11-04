@@ -42,13 +42,18 @@
           ;; (`registry/builtin-tool-names` reads it back), and a row's :config
           ;; sets the model-facing presentation — `{:id :tool/bash :config
           ;; {:description "…"}}` overrides what the model reads, never what the
-          ;; tool does.
+          ;; tool does. `:default-enabled? false` keeps a tool mounted but off
+          ;; until a selection names it: `registry/default-tool-names` is the
+          ;; bundle without those rows, so run_code and eval opt out while
+          ;; /config and /tools can still enable them.
           {:id :tool/read :plugin kmet.app.tools.read/plugin}
           {:id :tool/write :plugin kmet.app.tools.write/plugin}
           {:id :tool/edit :plugin kmet.app.tools.edit/plugin}
           {:id :tool/bash :plugin kmet.app.tools.bash/plugin}
-          {:id :tool/run_code :plugin kmet.app.tools.run-code/plugin}
-          {:id :tool/eval :plugin kmet.app.tools.eval/plugin}
+          {:id :tool/run_code :plugin kmet.app.tools.run-code/plugin
+           :default-enabled? false}
+          {:id :tool/eval :plugin kmet.app.tools.eval/plugin
+           :default-enabled? false}
           {:id :tool/tool_search :plugin kmet.app.tools.search/plugin}
           {:id :commands :plugin kmet.app.registries/commands}
           {:id :prompts :plugin kmet.app.registries/prompts}

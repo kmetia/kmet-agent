@@ -368,11 +368,28 @@
   [bundle]
   (into [] (keep (comp tool-row-name :id)) (:rows bundle)))
 
+(defn bundle-default-tool-names
+  "The model-facing tool names BUNDLE's rows declare **on by default**: the
+   `:tool/<name>` ids whose row does not carry `:default-enabled? false`. A
+   marked row is mounted but off until selected; the marker is the only
+   difference from `bundle-tool-names`. Data only, like that function."
+  [bundle]
+  (into [] (keep (fn [row]
+                   (when-not (false? (:default-enabled? row))
+                     (tool-row-name (:id row)))))
+        (:rows bundle)))
+
+(def ^:private minimal-bundle
+  "The composition bundle a run mounts first; its tool rows are the built-in
+   tool declarations."
+  (profile/bundle (profile/builtin) :bundle/minimal))
+
 (def builtin-tool-names
-  "Names of the built-in tools, in composition order — the base a modifier-only
-   `:default-tools` list modifies, and the set the setting can exclude.
-   Pi: DEFAULT_TOOL_NAMES; kmet ships every built-in active by default, so the
-   base is the full built-in set (docs/configuration.md).
+  "Names of the built-in tools, in composition order — the full set: the
+   config screen lists a row for each, a removal patch targets one, and resume
+   logic distinguishes them from extension tools. A row marked
+   `:default-enabled? false` is still here; only `default-tool-names` leaves it
+   out of the default selection.
 
    Derived from `:bundle/minimal`'s rows, not restated beside them: the
    composition is where a built-in tool is declared, so adding a tool row adds
@@ -380,7 +397,24 @@
    second list to keep in step. Reading the table is static (`kmet.app.profile`
    is composition data and resolves no plugin), so the settings layer can still
    ask which names exist before any composition mounts."
-  (bundle-tool-names (profile/bundle (profile/builtin) :bundle/minimal)))
+  (bundle-tool-names minimal-bundle))
+
+(def default-tool-names
+  "The built-in tools active when no :default-tools selection says otherwise:
+   `:bundle/minimal`'s tool rows without `:default-enabled? false` (run_code and
+   eval opt out). The base a modifier-only :default-tools list modifies and the
+   set an unset setting resolves to — so an opt-in tool is never re-enabled by
+   an unset or modifier-only value. A plain or +name selection can still name
+   it explicitly."
+  (bundle-default-tool-names minimal-bundle))
+
+(defn default-off-tool?
+  "True when built-in tool NAME carries `:default-enabled? false`: mounted, but
+   off until a selection names it. False for an extension tool (the live set
+   defaults on) and for a default-on built-in."
+  [name]
+  (and (contains? (set builtin-tool-names) name)
+       (not (contains? (set default-tool-names) name))))
 
 (defn tool-selection-modifier?
   "True when a :default-tools entry is a +name/-name modifier (pi:
@@ -419,9 +453,11 @@
 
 (defn resolve-default-tools
   "Resolve a merged :default-tools entry list to the initial built-in tool
-   selection, over `builtin-tool-names`."
+   selection, over `default-tool-names` (the bundle rows without
+   :default-enabled? false). An unset or modifier-only value therefore never
+   turns an opt-in tool on; a plain or +name entry can still name one."
   [entries]
-  (resolve-selection entries builtin-tool-names))
+  (resolve-selection entries default-tool-names))
 
 (defn resolve-enabled-tools
   "Resolve a merged :enabled-tools entry list over LIVE-NAMES — the tools the
@@ -433,9 +469,9 @@
 
 (defn default-tool-exclusions
   "Built-in tool names a resolved :default-tools SELECTION leaves out — the
-   :exclude list a caller passes to select-tools. nil when SELECTION is nil
-   (no setting; every built-in stays available)."
+   :exclude list a caller passes to select-tools. nil means no setting, whose
+   selection is `default-tool-names`: the exclusion is then the opt-in built-ins
+   (`:default-enabled? false`), never an empty set."
   [selection]
-  (when selection
-    (let [selected (set selection)]
-      (into #{} (remove selected) builtin-tool-names))))
+  (let [selected (set (or selection default-tool-names))]
+    (into #{} (remove selected) builtin-tool-names)))

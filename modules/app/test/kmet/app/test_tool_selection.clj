@@ -50,3 +50,33 @@
   (t/is (= [] (tools/resolve-enabled-tools [] ["a" "b"])))
   (t/is (= #{"a" "late"} (set (tools/resolve-enabled-tools ["-b"] #{"a" "b" "late"})))
         "a live tool the setting does not name stays selected"))
+
+;; ─── S4.5: opt-in built-in tools ──────────────────────────────────────────
+
+(t/deftest test-opt-in-defaults
+  (t/is (= #{"run_code" "eval"}
+           (set (remove (set tools/default-tool-names)
+                        tools/builtin-tool-names)))
+        "the opt-ins are the only difference from the full built-in list")
+  (t/is (tools/default-off-tool? "run_code"))
+  (t/is (tools/default-off-tool? "eval"))
+  (t/is (not (tools/default-off-tool? "read")))
+  (t/is (not (tools/default-off-tool? "extension_tool"))
+        "a name no built-in registry answers to is on (the live-set default)"))
+
+(t/deftest test-resolve-default-tools-uses-the-opt-in-base
+  (t/is (not (contains? (set (tools/resolve-default-tools ["-bash"])) "run_code"))
+        "a modifier-only list does not re-enable an opt-in")
+  (t/is (not (contains? (set (tools/resolve-default-tools ["-bash"])) "eval")))
+  (t/is (contains? (set (tools/resolve-default-tools ["+run_code"])) "run_code")
+        "an explicit +name does")
+  (t/is (= ["run_code"] (tools/resolve-default-tools ["run_code"]))
+        "a plain list names the opt-in absolutely")
+  (t/is (nil? (tools/resolve-default-tools nil))))
+
+(t/deftest test-default-tool-exclusions-include-the-opt-ins
+  (t/is (= #{"run_code" "eval"} (tools/default-tool-exclusions nil))
+        "an unset selection excludes the opt-ins")
+  (t/is (= #{"bash" "run_code" "eval"}
+           (tools/default-tool-exclusions (tools/resolve-default-tools ["-bash"])))
+        "and a modifier-only list keeps them excluded while dropping its target"))

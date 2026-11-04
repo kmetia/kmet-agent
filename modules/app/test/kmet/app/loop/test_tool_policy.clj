@@ -13,7 +13,8 @@
             [kmet.app.loop.test-support :as support]
             [kmet.app.runtime :as runtime]
             [kmet.libs.json :as json]
-            [kmet.srce.core :as srce]))
+            [kmet.srce.core :as srce]
+            [kmet.app.tools.registry :as tools-registry]))
 
 (def ^:private boot
   "The composed application, once per namespace: the loop resolves the `:tools`
@@ -122,6 +123,9 @@
   (let [seen (atom [])
         calls (atom 0)
         agent (support/make-agent-state
+               ;; run_code is opt-in (S4.5); select it and the default-on set,
+               ;; so the script may call read
+               :default-tools (conj (vec tools-registry/default-tool-names) "run_code")
                :ctx (agent-ctx :agent/script (fn [_ request]
                                                (swap! seen conj (:tool-name request))
                                                :allow)))]

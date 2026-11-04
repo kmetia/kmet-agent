@@ -209,3 +209,40 @@
         (t/is (true? (tools-config/apply-enabled-tool-project-override! item :inherit)))
         (t/is (nil? (:enabled-tools @project)))
         (t/is (= :inherit (tools-config/tool-override-state-of item)))))))
+
+;; ─── S4.5: the opt-in tool's saved selection ──────────────────────────────
+
+(t/deftest test-opt-in-toggle-writes-plus-name
+  (with-settings nil nil
+    (fn [global _]
+      (let [item {:resource-type :tools
+                  :metadata {:display-name "run_code"
+                             :setting :default-tools}}]
+        (t/is (true? (tools-config/apply-builtin-tool-toggle! item true)))
+        (t/is (= ["+run_code"] (:default-tools @global)))
+        (t/is (true? (tools-config/apply-builtin-tool-toggle! item false)))
+        (t/is (nil? (:default-tools @global)))))))
+
+(t/deftest test-opt-in-enable-keeps-an-all-enabled-save-non-empty
+  ;; /tools save writes one state per live tool: the default-on tools remove
+  ;; their entries, so the opt-ins must leave a +name behind or the whole
+  ;; setting collapses to nil and falls back to the opt-out default
+  (with-settings nil nil
+    (fn [global _]
+      (let [live ["read" "write" "edit" "bash" "tool_search" "run_code" "eval"]]
+        (doseq [name live]
+          (tools-config/set-tool-enabled! name true {:scope :global
+                                                     :live-names live}))
+        (t/is (= ["+run_code" "+eval"] (:enabled-tools @global))
+              "the opt-ins keep the selection non-empty")
+        (t/is (= (set live)
+                 (set (registry/resolve-enabled-tools (:enabled-tools @global)
+                                                      live)))
+              "and the saved selection resolves to every live tool")))))
+
+(t/deftest test-opt-in-tools-default-off-in-the-config-model
+  (let [items (tools-config/tool-items nil nil)
+        row (row-of items "run_code")]
+    (t/is (false? (:enabled row)))
+    (t/is (false? (:enabled (row-of items "eval"))))
+    (t/is (true? (:enabled (row-of items "read"))))))

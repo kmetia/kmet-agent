@@ -17,7 +17,7 @@
      {:id :permissions :remove true}                   ; drop the row
      {:id :tool/ls :plugin … :after :tool/read}         ; insert (unknown id)
 
-   Four row keys are not composition data:
+   Five row keys are not composition data:
 
    - `:mode true` marks the row `kmet.app.core` runs as the profile's mode,
      handing it the command line (`docs/architecture.md` § Composition). It travels with
@@ -41,6 +41,10 @@
      settings. `kmet.app.runtime/boot` leaves such rows in `:deferred`, and the
      row marker travels with the row so a patch that replaces the plugin keeps
      the timing.
+   - `:default-enabled? false` marks a tool row that is mounted but off until
+     a selection names it (`registry/default-tool-names` is the bundle without
+     those rows). The row stays mounted, so `/config` and `/tools` can enable
+     it live; only the built-in default changes. `run_code` and `eval` opt out.
 
    Config *values* deep-merge; composition does not — a bundle's rows are
    appended as they are, and later layers patch by id. A patch that names an

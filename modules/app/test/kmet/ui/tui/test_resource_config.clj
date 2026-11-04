@@ -638,7 +638,15 @@
         (t/is (= "Bundled with kmet" (:label (:group first-row))))
         (t/is (= "bash" (get-in (:item first-row) [:metadata :display-name]))
               "rows sort by name within the group")
-        (t/is (every? :enabled items))
+        (t/is (every? :enabled
+                      (remove #(#{"run_code" "eval"}
+                                (get-in (:item %) [:metadata :display-name]))
+                              items))
+              "default-on rows are on; the opt-in rows are off")
+        (t/is (not-any? :enabled
+                        (filter #(#{"run_code" "eval"}
+                                  (get-in (:item %) [:metadata :display-name]))
+                                items)))
         (t/is (some #(str/includes? % "Bundled with kmet") (render-lines screen 100)))
         (t/testing "space disables the selected tool with a -name modifier"
           (protocols/handle-input screen " ")
@@ -779,6 +787,43 @@
         (t/is (pos? (count tools-rows)))
         (t/is (every? #(= :tools (:resource-type (:item %))) tools-rows))))
     {:tools? true :bundled? true}))
+
+;; ─── Opt-in built-in tools (:default-enabled? false) ──────────────────────
+
+(t/deftest test-screen-opt-in-builtin-tools
+  ;; run_code and eval are mounted rows with :default-enabled? false: the
+  ;; config rows show off, enabling writes +name, disabling clears it
+  (with-settings
+    (fn [ctx]
+      (let [screen (rc/make-resource-config-screen :rows 40)
+            settings (fn [] (let [f (str (fs/path (:global-dir ctx) "settings.edn"))]
+                              (when (fs/exists? f)
+                                (edn/read-string (slurp f)))))
+            row-of (fn [name]
+                     (first (filter #(= name (get-in (:item %) [:metadata :display-name]))
+                                    (item-rows screen))))]
+        (t/is (false? (:enabled (row-of "run_code"))))
+        (t/is (false? (:enabled (row-of "eval"))))
+        (rc/screen-set-query! screen "run_code")
+        (t/testing "enabling writes +name, not an entry removal"
+          (protocols/handle-input screen " ")
+          (t/is (= ["+run_code"] (:default-tools (settings))))
+          (t/is (true? (:enabled (row-of "run_code")))))
+        (t/testing "disabling clears the entry again"
+          (protocols/handle-input screen " ")
+          (t/is (nil? (:default-tools (settings))))
+          (t/is (false? (:enabled (row-of "run_code")))))))
+    {:tools? true})
+  (with-settings
+    (fn [_]
+      (let [screen (rc/make-resource-config-screen :rows 40)
+            row-of (fn [name]
+                     (first (filter #(= name (get-in (:item %) [:metadata :display-name]))
+                                    (item-rows screen))))]
+        (t/is (true? (:enabled (row-of "run_code")))
+              "a plain :default-tools list names the opt-in explicitly")
+        (t/is (false? (:enabled (row-of "read"))))))
+    {:user {:default-tools ["run_code"]} :tools? true}))
 
 ;; ─── Non-built-in tool rows (:enabled-tools names and :meta :tools) ───────
 

@@ -22,9 +22,11 @@
    Built-in state resolves the :default-tools entry list the same way startup
    does (kmet.app.config/merge-tool-entries +
    kmet.app.tools.registry/resolve-default-tools), and is false for a tool the
-   layers do not mount. Extension rows resolve :enabled-tools over the names
-   the static projection knows; no setting means every such tool is on
-   (deltas, not snapshots).
+   layers do not mount. An unset setting resolves to `default-tool-names`, so
+   a row marked `:default-enabled? false` (run_code, eval) shows off until
+   selected. Extension rows resolve :enabled-tools over the names the static
+   projection knows; no setting means every such tool is on (deltas, not
+   snapshots).
 
    Built-in toggles write the :default-tools setting. The global scope keeps a
    modifier-only list's shape — disabling writes -name so future built-ins
@@ -137,8 +139,9 @@
   "PackageItem-shaped rows for the config screen's tools group.
 
    A built-in tool gets one row, in registry order, resolved against the
-   merged :default-tools entries (an unset setting enables every built-in);
-   its toggle writes :default-tools. A non-built-in name either scope's
+   merged :default-tools entries (an unset setting resolves to
+   `default-tool-names`, so an opt-in row shows off); its toggle writes
+   :default-tools. A non-built-in name either scope's
    :enabled-tools names, and every valid name an installed extension declares
    under its opaque manifest `:meta {:tools [{:name …} …]}`, gets a row whose
    toggle writes/clears the :enabled-tools delta. Those rows are a static
@@ -164,8 +167,9 @@
          builtin-set (set builtin-names)
          entries (cfg/merge-tool-entries (:default-tools user-settings)
                                          (:default-tools project-settings))
-         selection (when entries
-                     (set (registry/resolve-default-tools entries)))
+         selection (if entries
+                     (set (registry/resolve-default-tools entries))
+                     (set registry/default-tool-names))
          mounted (when mounted (set mounted))
          meta-rows (meta-tool-rows extension-tools)
          enabled-entries (cfg/merge-tool-entries (:enabled-tools user-settings)
@@ -181,7 +185,7 @@
          (mapv (fn [name]
                  {:path (str "tools/" name)
                   :resource-type :tools
-                  :enabled (and (if selection (contains? selection name) true)
+                  :enabled (and (contains? selection name)
                                 (if mounted (contains? mounted name) true))
                   :metadata {:origin :bundled
                              :scope :user
@@ -227,16 +231,23 @@
 
 (defn apply-builtin-tool-toggle!
   "Global-scope toggle of builtin ITEM. A modifier-only list (or an unset
-   key) keeps its shape: enabling removes the entry, disabling writes
-   -name, and an empty result clears the key. A list with plain names is
-   rewritten as the effective selection in registry order — pi's plain
-   names replace the whole set. Always true."
+   key) keeps its shape: for a default-on tool, enabling removes the entry and
+   disabling writes -name; for an opt-in tool (`:default-enabled? false`),
+   enabling writes +name and disabling clears the entry. An empty result clears
+   the key. A list with plain names is rewritten as the effective selection in
+   registry order — pi's plain names replace the whole set. Always true."
   [item enabled]
   (let [name (tool-name item)
-        entries (:default-tools (cfg/read-global-settings-map))]
+        entries (:default-tools (cfg/read-global-settings-map))
+        opt-in? (registry/default-off-tool? name)]
     (if (modifier-style? entries)
       (let [filtered (vec (remove #(= (entry-target %) name) entries))
-            updated (if enabled filtered (conj filtered (str "-" name)))]
+            updated (cond
+                      enabled (if opt-in?
+                                (conj filtered (str "+" name))
+                                filtered)
+                      opt-in? filtered
+                      :else (conj filtered (str "-" name)))]
         (cfg/save-setting! [:default-tools] (when (seq updated) updated))
         true)
       (let [selection (set (registry/resolve-default-tools entries))
@@ -313,13 +324,21 @@
 
 (defn- write-global-enabled!
   "Write NAME's state to the global :enabled-tools list. A modifier-only list
-   keeps that shape (false writes -name, true/nil remove it); a plain list is
-   rewritten as the effective selection over LIVE-NAMES."
+   keeps that shape: an opt-in built-in is enabled by +name and disabled by
+   clearing the entry (its default is off), every other tool by clearing the
+   entry and disabled by -name (the live-set default is on). nil clears the
+   entry. A plain list is rewritten as the effective selection over
+   LIVE-NAMES."
   [name enabled live-names]
-  (let [entries (:enabled-tools (cfg/read-global-settings-map))]
+  (let [entries (:enabled-tools (cfg/read-global-settings-map))
+        opt-in? (registry/default-off-tool? name)]
     (if (modifier-style? entries)
       (let [kept (filterv #(not= name (entry-target %)) (entry-vector entries))
-            updated (if (false? enabled) (conj kept (delta-entry name false)) kept)]
+            updated (cond
+                      (nil? enabled) kept
+                      enabled (if opt-in? (conj kept (delta-entry name true)) kept)
+                      opt-in? kept
+                      :else (conj kept (delta-entry name false)))]
         (cfg/save-setting! [:enabled-tools] (when (seq updated) updated)))
       (let [selection (set (registry/resolve-enabled-tools entries live-names))
             selection (if enabled

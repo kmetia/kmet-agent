@@ -149,8 +149,8 @@
          :block-images (default false, pi: images.blockImages — strip image
          blocks from provider calls; transcript and session untouched),
          :default-tools (resolved :default-tools selection — the built-in
-         tools active at startup, pi: defaultTools; nil = every built-in
-         active, see kmet.app.tools.registry/resolve-default-tools),
+         tools active at startup, pi: defaultTools; nil = the default built-in
+         set, see kmet.app.tools.registry/default-tool-names),
          :enabled-tool-entries (merged :enabled-tools entry list — resolved
          against the live names per read, so a tool mounted later defaults on;
          nil = no setting and :default-tools applies),
@@ -534,7 +534,7 @@ Be precise and concise in your responses."}}]
    `promotable-tools` both take. ENABLED (the runtime allowlist, nil = all)
    wins; otherwise ENABLED-TOOL-ENTRIES (the merged :enabled-tools setting)
    resolves over LIVE-NAMES, so a tool mounted later defaults on. With neither,
-   :default-tools (a resolved built-in selection, nil = every built-in)
+   :default-tools (a resolved built-in selection, nil = `default-tool-names`)
    excludes the built-ins it leaves out — extension tools stay enabled (pi:
    defaultTools selects the built-in tools; extension/custom tools remain
    enabled). The declared surface and `tool_search`'s candidate list resolve
@@ -1013,7 +1013,7 @@ Be precise and concise in your responses."}}]
    explicit set-active-tools! selection wins over it. Returns the
    new selection."
   [agent selection]
-  (let [selection (vec (or selection tools/builtin-tool-names))]
+  (let [selection (vec (or selection tools/default-tool-names))]
     (reset! (:default-tools agent) selection)
     (sync-tool-declarations! agent)
     selection))

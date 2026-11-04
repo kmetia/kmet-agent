@@ -42,8 +42,8 @@ its layers; this page is what the build ships.
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
-| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  |  |
-| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  |  |
+| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
@@ -81,8 +81,8 @@ its layers; this page is what the build ships.
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
-| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  |  |
-| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  |  |
+| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
@@ -114,8 +114,8 @@ its layers; this page is what the build ships.
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
-| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  |  |
-| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  |  |
+| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
@@ -147,8 +147,8 @@ its layers; this page is what the build ships.
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
-| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  |  |
-| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  |  |
+| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
@@ -181,8 +181,8 @@ its layers; this page is what the build ships.
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
-| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  |  |
-| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  |  |
+| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
@@ -214,8 +214,8 @@ its layers; this page is what the build ships.
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
-| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  |  |
-| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  |  |
+| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
@@ -246,8 +246,8 @@ its layers; this page is what the build ships.
 | `:tool/write` | `kmet.app.tools.write/plugin` | `tools` |  |  |  |
 | `:tool/edit` | `kmet.app.tools.edit/plugin` | `tools` |  |  |  |
 | `:tool/bash` | `kmet.app.tools.bash/plugin` | `tools` |  |  |  |
-| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  |  |
-| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  |  |
+| `:tool/run_code` | `kmet.app.tools.run-code/plugin` | `tools` |  |  | default-enabled?=false |
+| `:tool/eval` | `kmet.app.tools.eval/plugin` | `tools` |  |  | default-enabled?=false |
 | `:tool/tool_search` | `kmet.app.tools.search/plugin` | `tools` |  |  |  |
 | `:commands` | `kmet.app.registries/commands` |  | `commands` |  |  |
 | `:prompts` | `kmet.app.registries/prompts` |  | `prompts` |  |  |
@@ -349,7 +349,7 @@ Sandbox: Clojure; on babashka a full babashka surface, on the JVM the java.lang/
 
 **Description:**
 
-Evaluate Clojure forms in this agent's persistent environment. Definitions and namespace changes persist across calls for the agent's lifetime — use eval for a helper or state you will reuse, and run_code for a fresh, throwaway script. Output is the emitted text (or the final value of a silent success); stdout and stderr are discarded. Nothing is written to disk.
+Evaluate Clojure forms in this agent's persistent environment. Definitions persist across calls for the agent's lifetime, and a successful call's namespace is re-entered by the next — use eval for a helper or state you will reuse, and run_code for a fresh, throwaway script. Output is the emitted text (or the final value of a silent success); stdout and stderr are discarded. Nothing is written to disk.
 
 ---
 

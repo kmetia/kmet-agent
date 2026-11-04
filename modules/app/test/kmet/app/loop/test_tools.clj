@@ -473,7 +473,9 @@
   ;; workers (raw threads convey no bindings)
   (let [hook-calls (atom [])
         calls (atom 0)
-        agent (support/make-agent-state)]
+        agent (support/make-agent-state
+               :default-tools (conj (vec tools-registry/default-tool-names)
+                                    "run_code"))]
     (reset! (:tool-hook agent)
             (support/tool-hook (fn [op next] (swap! hook-calls conj op) (next op))))
     (with-redefs [cfg/get-api-key (fn [_] "test-key")
@@ -836,10 +838,16 @@
       (t/testing "nil restores the configured default surface"
         (state/set-active-tools! ag nil)
         (t/is (= #{"read"} (builtin-names ag))))
-      (t/testing "no setting → every tool active"
-        (let [fal (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash")]
-          (t/is (= (disj (set (keys (tools-registry/get-all-tools (support/tool-table)))) "tool_search")
-                   (all-names fal))))))))
+      (t/testing "no setting → the default built-in set, opt-ins off"
+        (let [fal (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash")
+              all (tools-registry/get-all-tools (support/tool-table))]
+          (t/is (= (disj (set tools-registry/default-tool-names) "tool_search")
+                   (all-names fal)))
+          (t/is (contains? (set (keys all)) "run_code"))
+          (t/is (contains? (set (keys all)) "eval"))
+          (t/is (not (contains? (all-names fal) "run_code"))
+                "the opt-ins are mounted but absent from the active set")
+          (t/is (not (contains? (all-names fal) "eval"))))))))
 
 (t/deftest test-apply-default-tools-reload
   (t/testing "reload replaces the selection: tools newly in
@@ -859,8 +867,19 @@
       (t/is (= #{"read"} (builtin-names ag))
             "a tool removed from the setting goes inactive")
       (state/apply-default-tools! ag nil)
-      (t/is (= builtins (builtin-names ag))
-            "a removed setting (nil) re-enables every built-in"))))
+      (t/is (= (disj (set tools-registry/default-tool-names) "tool_search")
+               (builtin-names ag))
+            "a removed setting (nil) restores the default set, opt-ins off"))))
+
+(t/deftest test-enabled-tools-live-base-overrides-the-opt-in-default
+  ;; once :enabled-tools is set it is the absolute live-set selection and wins
+  ;; over :default-tools, so a modifier-only list turns the mounted opt-ins on
+  (let [ag (support/make-agent-state :provider :opencode-go :model "deepseek-v4-flash"
+                                     :enabled-tool-entries ["-bash"])
+        names (set (map :name (state/active-tools ag)))]
+    (t/is (contains? names "run_code"))
+    (t/is (contains? names "eval"))
+    (t/is (not (contains? names "bash")))))
 
 (t/deftest test-thinking-level-select-event
   (let [events (atom [])
