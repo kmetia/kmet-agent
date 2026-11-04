@@ -173,33 +173,30 @@
 (defn- entry-vector [entries]
   (if (sequential? entries) (vec entries) []))
 
-(defn- entry-actions
-  "NAME → true/false for ENTRIES, the last entry targeting a name winning."
+(defn- entry-targets
+  "The names ENTRIES target, modifier prefixes stripped."
   [entries]
-  (reduce (fn [m entry]
-            (if-not (and (string? entry) (seq entry))
-              m
-              (let [prefix (subs entry 0 1)
-                    target (if (contains? #{"+" "-"} prefix) (subs entry 1) entry)]
-                (assoc m target (not= "-" prefix)))))
-          {}
-          entries))
+  (into #{}
+        (keep (fn [entry]
+                (when (and (string? entry) (seq entry))
+                  (if (contains? #{"+" "-"} (subs entry 0 1))
+                    (subs entry 1)
+                    entry))))
+        entries))
 
 (defn- tool-origins
   "Each live name's provenance from the raw settings entries — the enabling
    or disabling entry that decides its current state."
   [names global project]
-  (let [project-actions (entry-actions project)
-        global-actions (entry-actions global)
+  (let [project-targets (entry-targets project)
+        global-targets (entry-targets global)
         project-absolute? (and (seq project)
                                (some #(not (registry/tool-selection-modifier? %)) project))
         global-absolute? (not (modifier-style? global))
         origin (fn [name]
                  (cond
-                   project-absolute? :project
-                   (contains? project-actions name) :project
-                   global-absolute? :global
-                   (contains? global-actions name) :global
+                   (or project-absolute? (contains? project-targets name)) :project
+                   (or global-absolute? (contains? global-targets name)) :global
                    :else :default))]
     (into {} (map (fn [name] [name (origin name)])) names)))
 
@@ -223,9 +220,8 @@
                (zipmap live (repeat :session))
                (tool-origins live global project))}))
 
-(defn- merged-enabled-entries []
-  (cfg/merge-tool-entries (:enabled-tools (cfg/read-global-settings-map))
-                          (:enabled-tools (cfg/read-project-settings-map))))
+(defn- delta-entry [name enabled]
+  (str (if enabled "+" "-") name))
 
 (defn- write-global-enabled!
   "Write NAME's state to the global :enabled-tools list. A modifier-only list
@@ -235,10 +231,10 @@
   (let [entries (:enabled-tools (cfg/read-global-settings-map))]
     (if (modifier-style? entries)
       (let [kept (filterv #(not= name (entry-target %)) (entry-vector entries))
-            updated (if (false? enabled) (conj kept (str "-" name)) kept)]
+            updated (if (false? enabled) (conj kept (delta-entry name false)) kept)]
         (cfg/save-setting! [:enabled-tools] (when (seq updated) updated)))
       (let [selection (set (registry/resolve-enabled-tools entries live-names))
-            selection (if (true? enabled)
+            selection (if enabled
                         (conj selection name)
                         (disj selection name))
             base (distinct (concat (filterv string? (entry-vector entries))
@@ -255,7 +251,7 @@
         kept (filterv #(not= name (entry-target %)) current)
         updated (if (nil? enabled)
                   kept
-                  (conj kept (str (if (true? enabled) "+" "-") name)))]
+                  (conj kept (delta-entry name enabled)))]
     (cfg/save-project-setting! [:enabled-tools] (when (seq updated) updated))))
 
 (defn set-tool-enabled!
@@ -276,4 +272,5 @@
       :project (write-project-enabled! name enabled)
       (throw (ex-info "scope must be :global or :project"
                       {:type ::bad-scope :name name :scope scope}))))
-  (merged-enabled-entries))
+  (cfg/merge-tool-entries (:enabled-tools (cfg/read-global-settings-map))
+                          (:enabled-tools (cfg/read-project-settings-map))))
