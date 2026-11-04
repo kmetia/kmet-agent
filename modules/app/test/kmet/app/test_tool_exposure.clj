@@ -389,3 +389,28 @@
       (finally
         (tools/unregister-tool-source! h ::catalog)
         (fs/delete-tree dir)))))
+
+(t/deftest test-the-listing-is-bounded
+  ;; a fleet of deferred sources must not push an unbounded message into the
+  ;; conversation: descriptions elide first, whole sources drop second
+  (let [listing (fn [sources] (session/deferred-sources-listing sources))
+        small [{:id :clojure :description "Clojure editing refinements"}]
+        many (mapv (fn [i] {:id (keyword (str "source" i))
+                            :description "a description"})
+                   (range 300))]
+    (t/is (= (str "1 deferred tool source. Their tools are callable from run_code now;"
+                  " tool_search loads one so you can call it directly.\n\n"
+                  "- clojure: Clojure editing refinements")
+             (listing small))
+          "a small set is the uncapped text, byte for byte")
+    (let [long (listing [{:id :big :description (apply str (repeat 600 "x"))}])]
+      (t/is (<= (count long) 4096))
+      (t/is (str/ends-with? long "…")
+            "a description over the per-source cap elides")
+      (t/is (str/includes? long "- big: ")))
+    (let [text (listing many)]
+      (t/is (<= (count text) 4096) "the whole listing stays under the cap")
+      (t/is (str/includes? (last (str/split-lines text)) "more sources; find their tools")
+            "the dropped sources are counted in one closing line")
+      (t/is (= text (listing many)) "and the text is deterministic"))
+    (t/is (= (listing []) "No tool sources are deferred."))))

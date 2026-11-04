@@ -12,11 +12,67 @@
    without re-deriving what it said."
   :tool-sources)
 
+(def ^:private max-source-description-chars
+  "Characters of one source's description in the listing (pi:
+   MAX_SERVER_DESCRIPTION_CHARS — Codex's cap for deferred namespaces)."
+  250)
+
+(def ^:private max-listing-chars
+  "Characters of the whole listing (pi: MAX_SERVERS_SECTION_CHARS). The text
+   stays under it by eliding descriptions first and dropping whole sources
+   second, so a project with many deferred sources cannot push an unbounded
+   message into the conversation."
+  4096)
+
+(defn- truncate
+  "S within MAX characters, elided with `…` when it does not fit (pi:
+   truncate)."
+  [s max]
+  (cond
+    (<= (count s) max) s
+    (<= max 1) ""
+    :else (str (str/trimr (subs s 0 (dec max))) "…")))
+
+(defn- source-line
+  "One listing line: `- <id>: <description>`, the description elided to
+   DESCRIPTION-CHARS, or the bare id when there is none (pi: a server line)."
+  [source description-chars]
+  (let [head (str "- " (name (:id source)))
+        description (truncate (str/trim (str (:description source))) description-chars)]
+    (if (str/blank? description) head (str head ": " description))))
+
+(defn- omitted-line
+  "The closing line standing for DROPPED sources (pi: the `… N more servers`
+   line)."
+  [dropped]
+  (str "- … " dropped " more source" (when (not= 1 dropped) "s")
+       "; find their tools with tool_search"))
+
+(defn- compose-listing
+  "INTRO plus one line per SOURCE within `max-listing-chars`: the descriptions
+   are capped first (`max-source-description-chars`), then the cap drops to
+   none, then the last sources drop into an omission line. A small set — the
+   common case — is the uncapped text, byte for byte."
+  [intro sources]
+  (let [n (count sources)
+        attempt (fn [description-chars dropped]
+                  (str intro
+                       (str/join "\n" (map #(source-line % description-chars)
+                                           (take (- n dropped) sources)))
+                       (when (pos? dropped)
+                         (str "\n" (omitted-line dropped)))))
+        candidates (concat (map #(attempt max-source-description-chars %) (range (inc n)))
+                           (map #(attempt 0 %) (range (inc n))))]
+    (or (first (filter #(<= (count %) max-listing-chars) candidates))
+        intro)))
+
 (defn deferred-sources-listing
   "The text that tells the model which deferred tool sources exist: one line per
    source (its id and its one line), and what it can do about them. Once
    something was listed, an empty set says so rather than leaving the stale
-   message standing.
+   message standing. The text is bounded (`max-listing-chars`) and
+   deterministic — a set that did not change produces the same bytes, which is
+   what lets `sync-tool-sources-listing!` compare it with the previous entry.
 
    pi keeps an `mcp_servers` section in the system prompt and *appends* a new
    one when it changes, so earlier messages stay cached; kmet has no
@@ -25,14 +81,10 @@
   [sources]
   (if (empty? sources)
     "No tool sources are deferred."
-    (str (count sources) " deferred tool source" (when (not= 1 (count sources)) "s")
-         ". Their tools are callable from run_code now; tool_search loads one so you can call it directly.\n\n"
-         (str/join "\n"
-                   (map (fn [{:keys [id description]}]
-                          (if (str/blank? (str description))
-                            (str "- " (name id))
-                            (str "- " (name id) ": " description)))
-                        sources)))))
+    (compose-listing
+     (str (count sources) " deferred tool source" (when (not= 1 (count sources)) "s")
+          ". Their tools are callable from run_code now; tool_search loads one so you can call it directly.\n\n")
+     sources)))
 
 (defn derive-context-settings
   "Derive {:thinking-level :model :provider} from the branch root→leaf (pi:

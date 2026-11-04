@@ -123,6 +123,25 @@ Known inputs for P6, found while landing P5:
    answered from the appended listing — "I see you've mentioned '1 deferred
    tool source'" — because that listing was the only place the source existed.
 
+The listing is bounded (`session/context.clj`): a description elides past 250
+characters, and past 4096 characters the last sources drop into one `… N more
+sources` line — pi's shape for `mcp_servers`, so an MCP `:deferred` source per
+server cannot grow the message without limit. `tool_search`'s description names
+the tool inline, as pi's does.
+
+### Recorded, not scheduled
+
+- **`reachesTools` — pi's declaration that a tool can reach hidden tools.** pi's
+  MCP extension activates `tool_search` only for a registered tool of that name
+  that declares it (`mcp/index.ts:509-520`), warns when the tool exists but
+  cannot be activated, and the permission layer reads the declaration. kmet
+  recognises the tool by name instead (`state.clj:574`, the only special case
+  in `declared-tools-for`): nothing else can say "this declared tool widened the
+  set", so a permission policy cannot tell, and a third-party discovery tool of
+  another name is just an ordinary tool. Worth a declaration only when
+  permissions judge per tool — until then the name is the contract, and one tool
+  holds it.
+
 ### P6 — mid-conversation tool changes without a full re-prefill
 
 Depends on P5: the promotions are what make a mid-session tool change ordinary

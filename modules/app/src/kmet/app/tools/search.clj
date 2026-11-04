@@ -139,12 +139,13 @@
 
 (def description
   "The tool's static description (pi's TOOL_SEARCH_DESCRIPTION, without the
-   markdown heading): it names no tool and no namespace, so registering a
-   source never changes it and never invalidates a cached prefix."
+   markdown heading): a constant that names itself and no namespace, so
+   registering a source never changes it and never invalidates a cached
+   prefix."
   (str "Searches over deferred tool metadata and exposes matching tools for the next model call.\n\n"
        "Some of the tools, such as tools of MCP servers, may not have been provided to you upfront, "
-       "and you should use this tool to search for the required tools. "
-       "For MCP tool discovery, always use this tool."))
+       "and you should use this tool (`" tool-search-name "`) to search for the required tools. "
+       "For MCP tool discovery, always use `" tool-search-name "`."))
 
 (defn create-tool
   "Build the `tool_search` Tool record. OPTS wires the registry seams (the

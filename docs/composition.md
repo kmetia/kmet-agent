@@ -342,5 +342,5 @@ Sandbox: Clojure; on babashka a full babashka surface, on the JVM the java.lang/
 
 Searches over deferred tool metadata and exposes matching tools for the next model call.
 
-Some of the tools, such as tools of MCP servers, may not have been provided to you upfront, and you should use this tool to search for the required tools. For MCP tool discovery, always use this tool.
+Some of the tools, such as tools of MCP servers, may not have been provided to you upfront, and you should use this tool (`tool_search`) to search for the required tools. For MCP tool discovery, always use `tool_search`.
 

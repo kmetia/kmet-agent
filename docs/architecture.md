@@ -400,7 +400,9 @@ the model sees mid-script. A deferred source is announced to the model by one
 appended `:custom-message` entry — its id and one line, written when the set or
 a description changes (`state/sync-tool-sources-listing!`), never on a
 promotion and never by rebuilding the leading system prompt (pi's appended
-`mcp_servers` section; D7).
+`mcp_servers` section; D7). The text is bounded (`session/context.clj`): a
+description elides past 250 characters, and past 4096 the last sources drop into
+one `… N more sources` line, as pi's section does.
 
 **One invocation pipeline.** `kmet.app.tools.invoke` is the only
 chain → check → execute path:
