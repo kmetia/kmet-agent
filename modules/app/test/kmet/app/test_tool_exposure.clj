@@ -392,12 +392,17 @@
 
 (t/deftest test-the-listing-is-bounded
   ;; a fleet of deferred sources must not push an unbounded message into the
-  ;; conversation: descriptions elide first, whole sources drop second
+  ;; conversation. Being listed is the point of the message, so descriptions
+  ;; shrink first and whole sources drop only when their head lines alone do not
+  ;; fit (pi's per-server budget, then the `… N more servers` line).
   (let [listing (fn [sources] (session/deferred-sources-listing sources))
         small [{:id :clojure :description "Clojure editing refinements"}]
-        many (mapv (fn [i] {:id (keyword (str "source" i))
-                            :description "a description"})
-                   (range 300))]
+        long-descriptions (mapv (fn [i] {:id (keyword (str "server" i))
+                                         :description (apply str (repeat 250 "z"))})
+                                (range 16))
+        long-ids (mapv (fn [i] {:id (keyword (str "a-very-long-source-identifier-" i))
+                                :description "a description"})
+                       (range 400))]
     (t/is (= (str "1 deferred tool source. Their tools are callable from run_code now;"
                   " tool_search loads one so you can call it directly.\n\n"
                   "- clojure: Clojure editing refinements")
@@ -408,9 +413,15 @@
       (t/is (str/ends-with? long "…")
             "a description over the per-source cap elides")
       (t/is (str/includes? long "- big: ")))
-    (let [text (listing many)]
+    (let [text (listing long-descriptions)]
       (t/is (<= (count text) 4096) "the whole listing stays under the cap")
+      (t/is (not (str/includes? text "more source"))
+            "descriptions shrink before a source is dropped")
+      (t/is (= 16 (count (filter #(str/starts-with? % "- server") (str/split-lines text))))
+            "every source is still named"))
+    (let [text (listing long-ids)]
+      (t/is (<= (count text) 4096))
       (t/is (str/includes? (last (str/split-lines text)) "more sources; find their tools")
-            "the dropped sources are counted in one closing line")
-      (t/is (= text (listing many)) "and the text is deterministic"))
+            "only when the head lines alone do not fit are the rest counted in one line")
+      (t/is (= text (listing long-ids)) "and the text is deterministic"))
     (t/is (= (listing []) "No tool sources are deferred."))))

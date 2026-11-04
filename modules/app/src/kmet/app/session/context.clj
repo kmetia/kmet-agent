@@ -48,23 +48,42 @@
   (str "- … " dropped " more source" (when (not= 1 dropped) "s")
        "; find their tools with tool_search"))
 
+(defn- listing-text
+  "INTRO, the first KEPT sources' lines at DESCRIPTION-CHARS, and the omission
+   line standing for the rest."
+  [intro sources kept description-chars]
+  (str intro
+       (str/join "\n" (map #(source-line % description-chars) (take kept sources)))
+       (when (< kept (count sources))
+         (str "\n" (omitted-line (- (count sources) kept))))))
+
+(defn- description-budget
+  "Characters one description may take when KEPT sources share what INTRO and
+   their head lines leave; 0 when the heads alone fill the room (2 characters are
+   reserved for the separator between a head and its description)."
+  [intro sources kept]
+  (max 0 (min max-source-description-chars
+              (- (quot (- max-listing-chars
+                          (count (listing-text intro sources kept 0)))
+                       kept)
+                 2))))
+
 (defn- compose-listing
-  "INTRO plus one line per SOURCE within `max-listing-chars`: the descriptions
-   are capped first (`max-source-description-chars`), then the cap drops to
-   none, then the last sources drop into an omission line. A small set — the
-   common case — is the uncapped text, byte for byte."
+  "INTRO plus one line per SOURCE within `max-listing-chars`. Descriptions shrink
+   first — every source stays listed, because being listed is the whole point of
+   the message — and only when the head lines alone do not fit do the last
+   sources drop into the omission line (pi: the per-server budget, then the
+   `… N more servers` line). A set with room to spare is the uncapped text,
+   byte for byte."
   [intro sources]
-  (let [n (count sources)
-        attempt (fn [description-chars dropped]
-                  (str intro
-                       (str/join "\n" (map #(source-line % description-chars)
-                                           (take (- n dropped) sources)))
-                       (when (pos? dropped)
-                         (str "\n" (omitted-line dropped)))))
-        candidates (concat (map #(attempt max-source-description-chars %) (range (inc n)))
-                           (map #(attempt 0 %) (range (inc n))))]
-    (or (first (filter #(<= (count %) max-listing-chars) candidates))
-        intro)))
+  (loop [kept (count sources)]
+    (let [text (listing-text intro sources kept
+                             (if (pos? kept)
+                               (description-budget intro sources kept)
+                               0))]
+      (if (or (<= (count text) max-listing-chars) (zero? kept))
+        text
+        (recur (dec kept))))))
 
 (defn deferred-sources-listing
   "The text that tells the model which deferred tool sources exist: one line per

@@ -401,8 +401,10 @@ appended `:custom-message` entry — its id and one line, written when the set o
 a description changes (`state/sync-tool-sources-listing!`), never on a
 promotion and never by rebuilding the leading system prompt (pi's appended
 `mcp_servers` section; D7). The text is bounded (`session/context.clj`): a
-description elides past 250 characters, and past 4096 the last sources drop into
-one `… N more sources` line, as pi's section does.
+description elides past 250 characters and the whole text at 4096, where the
+descriptions shrink to share the room — every source stays listed, because being
+listed is the point — and only the head lines outgrowing the room drops the last
+sources into one `… N more sources` line, as pi's section does.
 
 **One invocation pipeline.** `kmet.app.tools.invoke` is the only
 chain → check → execute path:
