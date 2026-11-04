@@ -3,7 +3,8 @@
   (:require [babashka.fs :as fs]
             [clojure.test :as t]
             [kmet.app.config :as cfg]
-            [kmet.app.tools.config :as tools-config]))
+            [kmet.app.tools.config :as tools-config]
+            [kmet.app.tools.registry :as registry]))
 
 (defn- with-settings
   "Run F with the settings maps replaced by atoms, so a writer test inspects
@@ -128,3 +129,83 @@
                    {:session #{"read" "write"}})]
             (t/is (= {"read" :session "write" :session "bash" :session}
                      (:origin s)))))))))
+
+;; ─── S4: the static tool rows beyond the built-ins ─────────────────────────
+
+(defn- row-of
+  [items name]
+  (first (filter #(= name (get-in % [:metadata :display-name])) items)))
+
+(t/deftest test-tool-items-builtins-keep-default-tools
+  (let [items (tools-config/tool-items nil nil)]
+    (t/is (= (vec registry/builtin-tool-names)
+             (mapv #(get-in % [:metadata :display-name]) items)))
+    (t/is (every? #(= :default-tools (get-in % [:metadata :setting])) items))))
+
+(t/deftest test-tool-items-names-non-builtins
+  (let [items (tools-config/tool-items {:enabled-tools ["-mcp_tool" "+bash"]}
+                                       {:enabled-tools ["+mcp_other"]}
+                                       nil nil)
+        mcp (row-of items "mcp_tool")
+        other (row-of items "mcp_other")]
+    (t/is (some? mcp) "a non-built-in :enabled-tools name gets a row")
+    (t/is (= :enabled-tools (get-in mcp [:metadata :setting])))
+    (t/is (false? (:enabled mcp)))
+    (t/is (true? (:enabled other)))
+    (t/is (= :project (get-in other [:metadata :scope]))
+          "a project-only name is grouped as a project setting")))
+
+(t/deftest test-tool-items-extension-meta-projection
+  (let [metadata {:origin :package :scope :user :source "pkg" :base-dir "/pkg"}
+        items (tools-config/tool-items
+               nil nil nil
+               [{:meta {:tools [{:name "ext_tool" :doc "x"}
+                                {:name ""}
+                                {:name 42}
+                                "junk"
+                                {:no-name true}]}
+                 :metadata metadata}
+                {:meta {:tools "not-a-list"} :metadata metadata}
+                {:meta "opaque" :metadata metadata}
+                {:meta nil :metadata metadata}])
+        row (row-of items "ext_tool")]
+    (t/is (some? row) "only the properly filled entry produces a row")
+    (t/is (= :package (get-in row [:metadata :origin]))
+          "the row carries the extension's group metadata")
+    (t/is (= :enabled-tools (get-in row [:metadata :setting])))
+    (t/is (true? (:enabled row))
+          "no setting means the projected tool is on (deltas, not snapshots)")
+    (t/is (nil? (row-of items "")))
+    (t/is (nil? (row-of items "junk")))
+    (t/is (= 1 (count (filter #(= :enabled-tools (get-in % [:metadata :setting]))
+                              items)))
+          "malformed/absent :meta contributes no rows")))
+
+(t/deftest test-tool-items-plain-enabled-list-is-absolute
+  (let [items (tools-config/tool-items
+               {:enabled-tools ["one"]} nil nil
+               [{:meta {:tools [{:name "one"} {:name "two"}]} :metadata {}}])]
+    (t/is (true? (:enabled (row-of items "one"))))
+    (t/is (false? (:enabled (row-of items "two")))
+          "a plain :enabled-tools list selects absolutely")))
+
+(t/deftest test-enabled-tool-writers
+  (with-settings nil nil
+    (fn [global project]
+      (let [item {:resource-type :tools
+                  :metadata {:display-name "mcp_tool"
+                             :setting :enabled-tools}}]
+        (t/is (true? (tools-config/apply-enabled-tool-toggle! item false)))
+        (t/is (= ["-mcp_tool"] (:enabled-tools @global)))
+        (t/is (= :inherit (tools-config/tool-override-state-of item)))
+        (t/is (true? (tools-config/apply-enabled-tool-toggle! item true)))
+        (t/is (nil? (:enabled-tools @global)))
+        (t/is (true? (tools-config/apply-enabled-tool-project-override! item :unload)))
+        (t/is (= ["-mcp_tool"] (:enabled-tools @project)))
+        (t/is (= :unload (tools-config/tool-override-state-of item)))
+        (t/is (true? (tools-config/apply-enabled-tool-project-override! item :load)))
+        (t/is (= ["+mcp_tool"] (:enabled-tools @project)))
+        (t/is (= :load (tools-config/tool-override-state-of item)))
+        (t/is (true? (tools-config/apply-enabled-tool-project-override! item :inherit)))
+        (t/is (nil? (:enabled-tools @project)))
+        (t/is (= :inherit (tools-config/tool-override-state-of item)))))))

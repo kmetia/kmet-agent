@@ -4,10 +4,13 @@
    first, then packages, then top-level groups, pi buildGroups over the
    unified resolution).
 
-   The kmet-only built-in tools group renders first
-   (kmet.app.tools.config): one row per built-in tool, toggled through the
-   :default-tools settings key of the write scope (global: -name modifier
-   or plain selection rewrite; project: +/- delta over the global list).
+   The kmet-only tools group renders first (kmet.app.tools.config): one row
+   per built-in tool, toggled through the :default-tools settings key of the
+   write scope (global: -name modifier or plain selection rewrite; project:
+   +/- delta over the global list). The same group lists the tools no built-in
+   registry answers to — names :enabled-tools names and the static
+   `:meta :tools` projection of installed extension manifests (read, never
+   loaded) — toggled through :enabled-tools instead.
 
    Extensions are plugins: every extension row (bundled, package, top-level
    or auto-discovered) is toggled into the composition layer of the write
@@ -113,6 +116,9 @@
   [origin scope source base-dir agent-dir]
   (cond
     (= origin :bundled) "Bundled with kmet"
+
+    ;; a static :enabled-tools projection no installed manifest explains
+    (= origin :tools) "Tools"
 
     (= origin :package) (str source " (" (name scope) ")")
 
@@ -317,6 +323,20 @@
       (println "Warning: cannot read" (:path layer) "-"
                (get-in layer [:error :message])))))
 
+(defn- extension-tool-projections
+  "The static `:meta :tools` projection of every extension item in ITEMS:
+   `{:meta manifest-meta :metadata group-metadata}`. Reading a manifest is
+   resolution, never a plugin load; an item without a readable manifest
+   contributes nothing."
+  [items]
+  (into []
+        (keep (fn [item]
+                (when-let [meta (ext-rows/item-meta item)]
+                  {:meta meta
+                   :metadata (select-keys (:metadata item)
+                                          [:origin :scope :source :base-dir])})))
+        (:extensions items)))
+
 (defn- read-views
   "Resolve both unified views from the files on disk:
    {:user user-only-resolution :project merged-resolution}. The user view is
@@ -331,27 +351,30 @@
         layers (ext-layers/layers)
         composed (ext-layers/composition layers)
         _ (warn-layer-errors! layers)
-        ;; the built-in tools group joins each view: user-only settings for
-        ;; the global view, the scope-merged :default-tools entries for the
-        ;; project view (kmet.app.tools.config), over the tool rows the ambient
-        ;; layers leave mounted — a tool is a row now, so a layer's
-        ;; `{:id :tool/bash :remove true}` is a tool the screen must not offer
-        tools (fn [project?]
-                (tools-config/builtin-tool-items
+        user-items (mark-extension-items
+                    (pkgs/resolve-package-items user-settings nil nil false
+                                                (pkgs/bundled-items))
+                    composed :global)
+        project-items (mark-extension-items
+                       (pkgs/resolve-package-items user-settings project-settings nil true
+                                                   (pkgs/bundled-items))
+                       composed :project)
+        ;; the tools group joins each view: user-only settings for the
+        ;; global view, the scope-merged entries for the project view
+        ;; (kmet.app.tools.config), over the tool rows the ambient layers
+        ;; leave mounted — a tool is a row now, so a layer's
+        ;; `{:id :tool/bash :remove true}` is a tool the screen must not
+        ;; offer — plus every installed extension's static `:meta :tools`
+        ;; projection (no plugin loads)
+        tools (fn [items project?]
+                (tools-config/tool-items
                  user-settings
                  (when project? project-settings)
                  (tools-config/mounted-tool-names
-                  [(:global layers) (:project layers)])))]
-    {:user (assoc (mark-extension-items
-                   (pkgs/resolve-package-items user-settings nil nil false
-                                               (pkgs/bundled-items))
-                   composed :global)
-                  :tools (tools false))
-     :project (assoc (mark-extension-items
-                      (pkgs/resolve-package-items user-settings project-settings nil true
-                                                  (pkgs/bundled-items))
-                      composed :project)
-                     :tools (tools true))}))
+                  [(:global layers) (:project layers)])
+                 (extension-tool-projections items)))]
+    {:user (assoc user-items :tools (tools user-items false))
+     :project (assoc project-items :tools (tools project-items true))}))
 
 (defn- override-state-of
   "pi getProjectOverrideState — ITEM's project override state: extension
@@ -360,7 +383,7 @@
    everything else."
   [item]
   (cond
-    (tools-config/builtin-tool-item? item) (tools-config/builtin-tool-override-state-of item)
+    (= :tools (:resource-type item)) (tools-config/tool-override-state-of item)
     (= :extensions (:resource-type item)) (or (:override-state item) :inherit)
     (pkgs/top-level-item? item) (pkgs/top-level-override-state-of item)
     :else (pkgs/override-state-of item (pkgs/project-packages))))
@@ -600,10 +623,18 @@
           ;; built-in tools are not :packages entries: the global branch
           ;; writes the :default-tools list, the project branch its
           ;; +name/-name delta (kmet.app.tools.config/apply-builtin-tool-*)
-          (tools-config/builtin-tool-item? item)
+          (tools-config/default-tool-item? item)
           (if (= :global (:write-scope st))
             (global-toggle-row! this row item tools-config/apply-builtin-tool-toggle!)
             (project-cycle-row! this row item tools-config/apply-builtin-tool-project-override!
+                                (:inherited-enabled row)))
+
+          ;; a tool row no built-in answers to is a :enabled-tools delta
+          (tools-config/enabled-tool-item? item)
+          (if (= :global (:write-scope st))
+            (global-toggle-row! this row item tools-config/apply-enabled-tool-toggle!)
+            (project-cycle-row! this row item
+                                tools-config/apply-enabled-tool-project-override!
                                 (:inherited-enabled row)))
 
           ;; every extension is a plugin row in the composition; its origin

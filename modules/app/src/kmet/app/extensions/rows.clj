@@ -63,7 +63,7 @@
           (try
             (let [resolved (resolve-item item)]
               (when (= id (entry-id item resolved))
-                {:id id :item item}))
+                {:id id :item item :meta (:meta resolved)}))
             (catch Exception e
               (debug/log "extension row: cannot resolve " (:path item) ": "
                          (ex-message e))
@@ -71,10 +71,24 @@
         (:extensions (packages/resolve-configured-packages))))
 
 (defn entry
-  "The installed extension SOURCE names, or nil: `{:id :item}`."
+  "The installed extension SOURCE names, or nil: `{:id :item :meta}`. :meta
+   is the manifest's opaque host metadata (nil for a single file); nothing
+   here interprets it."
   [source]
   (when (source? source)
     (resolve-id (id-of source))))
+
+(defn item-meta
+  "The manifest `:meta` map of the extension ITEM answers to, or nil when the
+   item has no manifest or cannot be resolved. Opaque to the loader —
+   `kmet config` reads `:tools` from it as a static projection."
+  [item]
+  (try
+    (:meta (resolve-item item))
+    (catch Exception e
+      (debug/log "extension item meta: cannot resolve " (:path item) ": "
+                 (ex-message e))
+      nil)))
 
 (defn item-source
   "The `:ext/<id>` source ITEM (a resolved package item) answers to, or nil

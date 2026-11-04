@@ -182,3 +182,54 @@
           (finally
             (runtime/shutdown! booted)
             (is (empty? (extensions/registered-extensions)))))))))
+
+;; ─── The opaque manifest :meta (S4) ───────────────────────────────────────
+
+(defn- write-manifest-extension!
+  "Write a loadable directory extension at ROOT: NS-NAME is the plugin
+   namespace and MANIFEST the extension.edn map (its :plugin is filled in).
+   Returns ROOT."
+  [root ns-name manifest]
+  (let [source (str root "/" (-> ns-name
+                                 (str/replace "-" "_")
+                                 (str/replace "." "/"))
+                    ".clj")
+        plugin (symbol (str ns-name "/plugin"))]
+    (fs/create-dirs (fs/parent source))
+    (spit (str root "/extension.edn")
+          (pr-str (assoc manifest :plugin plugin)))
+    (spit source
+          (str "(ns " ns-name " (:require [kmet.srce.core :as srce]))\n"
+               "(srce/defplugin plugin {:name :ext/" (:name manifest) "\n"
+               "  :apply (fn [_ _] nil)})\n"))
+    root))
+
+(deftest manifest-meta-is-carried-verbatim
+  ;; :meta is opaque: resolution and loading never interpret it, and a
+  ;; malformed value does not fail either
+  (extensions/clear-extensions!)
+  (let [valid (write-manifest-extension! (str dir "/meta-valid") "meta-valid.main"
+                                         {:name "meta-valid"
+                                          :meta {:tools [{:name "meta_tool"}]
+                                                 :anything [1 2]}})
+        bare (write-manifest-extension! (str dir "/meta-bare") "meta-bare.main"
+                                        {:name "meta-bare"})
+        odd (write-manifest-extension! (str dir "/meta-odd") "meta-odd.main"
+                                       {:name "meta-odd" :meta "opaque"})]
+    (with-installed [valid bare odd]
+      (fn []
+        (try
+          (is (= {:tools [{:name "meta_tool"}] :anything [1 2]}
+                 (:meta (rows/entry :ext/meta-valid))))
+          (is (= {:tools [{:name "meta_tool"}] :anything [1 2]}
+                 (rows/item-meta (item valid))))
+          (is (nil? (:meta (rows/entry :ext/meta-bare)))
+              "an absent :meta answers nil")
+          (is (= "opaque" (:meta (rows/entry :ext/meta-odd)))
+              "a malformed value is carried, not validated")
+          (let [booted (runtime/boot (composed {:plugin :ext/meta-odd}) {})]
+            (try
+              (is (= ["meta-odd"] (mapv :name (extensions/registered-extensions)))
+                  "a malformed :meta does not fail the load")
+              (finally (runtime/shutdown! booted))))
+          (finally (extensions/unload-all-extensions!)))))))

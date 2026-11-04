@@ -673,7 +673,7 @@
 (defn- manifest-info
   "Validate the manifest map M of the artifact at PATH (FALLBACK-NAME names
    it when :name is absent): {:name :plugin-sym :entry-ns :declared-loaders
-   :legacy-loader?}.
+   :legacy-loader? :meta}.
 
      {:plugin my.ext.core/plugin}   ; the namespace's plugin var
 
@@ -706,7 +706,10 @@
      :plugin-sym plugin-sym
      :entry-ns (symbol (namespace plugin-sym))
      :declared-loaders declared-loaders
-     :legacy-loader? legacy?}))
+     :legacy-loader? legacy?
+     ;; opaque host metadata (kmet config reads :tools as a static
+     ;; projection); the loader validates nothing here
+     :meta (:meta m)}))
 
 (defn- canonical-path
   "The canonical display/identity path of a filesystem artifact root F
@@ -752,13 +755,15 @@
    :entry-ns nil
    :declared-loaders default-loaders
    :legacy-loader? false
+   :meta nil
    :file f
    :path (canonical-path f)})
 
 (defn resolve-extension
   "Resolve PATH into {:name str :kind :file/:dir/:jar :artifact map-or-nil
    :plugin-sym symbol-or-nil :entry-ns symbol-or-nil :declared-loaders [kw ...]
-   :legacy-loader? bool :file io.File :path str}. :artifact ({:kind :dir/:jar
+   :legacy-loader? bool :meta map-or-nil :file io.File :path str}. :meta is
+   the manifest's opaque host metadata (nil for a single file). :artifact ({:kind :dir/:jar
    :root str}) is the strict-layout root for manifest extensions; :plugin-sym
    is the manifest's `:plugin` var, whose namespace is :entry-ns;
    :declared-loaders is the manifest's :loader declaration (defaulted for
@@ -820,6 +825,7 @@
                           {:path path :resource path})))
         {:name (fs/file-name path)
          :kind :resource-file
+         :meta nil
          :artifact (when native
                      {:kind :resource-file
                       :path path

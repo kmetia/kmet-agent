@@ -84,7 +84,7 @@
                            #'cfg/project-dir (fn [] project-dir)
                            #'fs/cwd (fn [] cwd)}
                     (not bundled?) (assoc #'bundled/artifacts (constantly []))
-                    (not tools?) (assoc #'tools-config/builtin-tool-items (fn [_ _ & _] [])))
+                    (not tools?) (assoc #'tools-config/tool-items (fn [_ _ & _] [])))
                   (fn []
                     (f {:global-dir global-dir :project-dir project-dir :cwd cwd
                         :global-patch global-patch :project-patch project-patch}))))]
@@ -779,6 +779,110 @@
         (t/is (pos? (count tools-rows)))
         (t/is (every? #(= :tools (:resource-type (:item %))) tools-rows))))
     {:tools? true :bundled? true}))
+
+;; ─── Non-built-in tool rows (:enabled-tools names and :meta :tools) ───────
+
+(t/deftest test-screen-enabled-tools-row-toggle
+  ;; :enabled-tools names a tool no built-in registry answers to: the row is
+  ;; a static projection shown so the delta can be undone, and its toggle
+  ;; writes :enabled-tools, never :default-tools
+  (with-settings
+    (fn [ctx]
+      (let [screen (rc/make-resource-config-screen :rows 40)
+            settings (fn [] (let [f (str (fs/path (:global-dir ctx) "settings.edn"))]
+                              (when (fs/exists? f)
+                                (edn/read-string (slurp f)))))
+            row-of (fn [name]
+                     (first (filter #(= name (get-in (:item %) [:metadata :display-name]))
+                                    (item-rows screen))))]
+        (t/is (some? (row-of "mcp_tool")))
+        (t/is (false? (:enabled (row-of "mcp_tool"))))
+        (t/is (= :enabled-tools
+                 (get-in (:item (row-of "mcp_tool")) [:metadata :setting])))
+        (rc/screen-set-query! screen "mcp_tool")
+        (t/testing "enabling clears the -name delta"
+          (protocols/handle-input screen " ")
+          (t/is (nil? (:enabled-tools (settings))))
+          (t/is (nil? (:default-tools (settings))))
+          (t/is (true? (:enabled (row-of "mcp_tool")))))
+        (t/testing "disabling writes it again (undo)"
+          (protocols/handle-input screen " ")
+          (t/is (= ["-mcp_tool"] (:enabled-tools (settings))))
+          (t/is (false? (:enabled (row-of "mcp_tool")))))))
+    {:user {:enabled-tools ["-mcp_tool"]} :tools? true}))
+
+(t/deftest test-screen-enabled-tools-project-override-cycle
+  ;; the row exists because the user selection names it; project scope
+  ;; cycles its delta in .kmet/settings.edn, exactly like a built-in's
+  (with-settings
+    (fn [ctx]
+      (let [screen (rc/make-resource-config-screen :rows 40
+                                                   :write-scope :project
+                                                   :project-mode? true)
+            settings (fn [] (let [f (str (fs/path (:project-dir ctx) "settings.edn"))]
+                              (when (fs/exists? f)
+                                (:enabled-tools (edn/read-string (slurp f))))))
+            row-of (fn []
+                     (first (filter #(= "mcp_tool"
+                                        (get-in (:item %) [:metadata :display-name]))
+                                    (item-rows screen))))]
+        (t/is (= :inherit (:override-state (row-of))))
+        (t/is (true? (:inherited? (row-of))))
+        (t/is (true? (:enabled (row-of))))
+        (rc/screen-set-query! screen "mcp_tool")
+        (t/testing "inherit → unload writes -name"
+          (protocols/handle-input screen " ")
+          (t/is (= ["-mcp_tool"] (settings)))
+          (t/is (= :unload (:override-state (row-of))))
+          (t/is (false? (:enabled (row-of)))))
+        (t/testing "unload → load writes +name"
+          (protocols/handle-input screen " ")
+          (t/is (= ["+mcp_tool"] (settings)))
+          (t/is (= :load (:override-state (row-of)))))
+        (t/testing "load → inherit clears the entry"
+          (protocols/handle-input screen " ")
+          (t/is (nil? (settings)))
+          (t/is (= :inherit (:override-state (row-of)))))))
+    {:user {:enabled-tools ["mcp_tool"]} :tools? true}))
+
+(defn- make-meta-extension
+  "A directory extension whose opaque :meta declares TOOLS; nothing loads
+   it in these tests."
+  [root tools]
+  (fs/create-dirs root)
+  (spit (str root "/extension.edn")
+        (pr-str {:name "meta-ext"
+                 :plugin 'meta-ext.main/plugin
+                 :meta {:tools tools}}))
+  root)
+
+(t/deftest test-screen-extension-meta-tool-rows
+  (let [ext (make-meta-extension (str (tmp-dir) "/meta-ext")
+                                 [{:name "meta_tool" :doc "x"}
+                                  {:name ""}
+                                  {:name 42}
+                                  "junk"])]
+    (with-settings
+      (fn [ctx]
+        (let [screen (rc/make-resource-config-screen :rows 40)
+              settings (fn [] (let [f (str (fs/path (:global-dir ctx) "settings.edn"))]
+                                (when (fs/exists? f)
+                                  (edn/read-string (slurp f)))))
+              row-of (fn [name]
+                       (first (filter #(= name (get-in (:item %) [:metadata :display-name]))
+                                      (item-rows screen))))]
+          (t/is (some? (row-of "meta_tool")))
+          (t/is (nil? (row-of "")))
+          (t/is (nil? (row-of "junk")))
+          (t/is (true? (:enabled (row-of "meta_tool"))))
+          (t/is (= :package (get-in (:item (row-of "meta_tool"))
+                                    [:metadata :origin])))
+          (rc/screen-set-query! screen "meta_tool")
+          (protocols/handle-input screen " ")
+          (t/is (= ["-meta_tool"] (:enabled-tools (settings)))
+                "the static extension row writes the delta")
+          (t/is (nil? (:default-tools (settings))))))
+      {:user {:packages [ext]} :tools? true})))
 
 ;; ─── Project auto-dir items (regression: SCI duplicate-key crash) ─────────
 
