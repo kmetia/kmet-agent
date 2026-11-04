@@ -107,7 +107,7 @@ kmet/app/
 │                         tool_exec, the stages, and `driver.clj`/`stages.clj`
 ├── compaction/         — the compaction row and stage
 ├── tools/              — tool, util, invoke, registry, bash (+executor,
-│                         output), read, write, edit, run_code, config, shell
+│                         output), read, write, edit, run_code, eval, config, shell
 ├── modes/              — the mode rows: print, rpc, server (+ server_unix), out
 ├── packages.clj, packages_cli.clj, git_packages.clj — package/resource
 │                         resolution and the install/remove/update/list/config CLI
@@ -118,6 +118,7 @@ kmet/app/
 │                         projection, and the derived session state
 ├── permissions.clj     — the `:permissions` policy and `:approvals` seam
 ├── sandbox.clj         — the `:sandbox` realm a script's tool calls run in
+├── eval.clj            — the `:eval` persistent script environment
 ├── llm.clj, ui.clj     — the `:llm` and `:ui` contracts
 ├── config.clj, config_schema.clj, project_context.clj — settings, their
 │                         schema, and the project context
@@ -254,6 +255,7 @@ schema-validated at load).
 | `:permissions` | `{:policy :remember!}` — the tool-call decision | `kmet.app.permissions/permissions`, per agent |
 | `:approvals` | `{:ask!}` — the one `:ask` delivery seam | `kmet.app.permissions/approvals` at the root; the TUI and server rows supply their own |
 | `:shell` `:sandbox` | the agent's shell options; the realm names a script's tool calls are blocked from | provided per agent by the agents factory; a preset row that mounts first wins |
+| `:eval` | `{:eval! :kept :sources :failures :dispose!}` — the agent's persistent script environment | provided per agent by the agents factory (`kmet.app.eval/value`); a preset row that mounts first wins |
 | `:ui` | the capability service (`kmet.app.ui`) | `kmet.ui.headless/plugin`, `kmet.ui.tui/provider-plugin` |
 | `:extensions` | no service: the row binds the host's services (registry handle, ctx, resource ops, owner sweep) and publishes `process-handle` | `kmet.app.extensions/plugin` |
 
@@ -273,7 +275,7 @@ own spawn.
 
 The kernel's placement rule decides where a value can mount: a child ctx cannot
 shadow a service its ancestor provides, so a per-agent value exists only where
-nothing above provides one. `:permissions`, `:shell` and `:sandbox` are
+nothing above provides one. `:permissions`, `:shell`, `:sandbox` and `:eval` are
 per-agent for that reason, and `:bundle/minimal` deliberately carries no
 `:permissions` row — a policy at the root would be every agent's policy
 forever. `:approvals` is the mirror case: it belongs in the bundle at the root,
@@ -505,8 +507,9 @@ probe and no real use, and is gone;
   the way an extension context gets it. `:load-fn` refuses anything else, so
   requiring a kmet namespace is the named boundary error. Jolt's SCI exposes no
   class table and the JVM host an explicit `java.lang`/`java.io`/`java.util`
-  subset. A `def` in one call is invisible to the next, and redefining an
-  injected var stays call-local.
+  subset. A `def` in one call is invisible to the next (`eval` is the
+  kept-context counterpart below), and redefining an injected var stays
+  call-local.
 - **The bridge.** `(tools/call name args)` returns a promise that settles with
   the record's verbatim result map (`{:content :is-error :details :truncation
   :images}`). Calls run on a shared process-wide pool (16 daemon workers) with
@@ -568,6 +571,20 @@ probe and no real use, and is gone;
   the transcript, the session or the context, and no tool-execution event is
   emitted for them; the only things the model sees are the emitted text (or a
   silent success's final value), the images and the result map.
+
+**`eval`** (`kmet.app.tools.eval`, the `:tool/eval` row) is the persistent
+counterpart. It shares `kmet.app.tools.script` — capability namespaces, capture,
+the tools bridge, deadline/abort and result assembly — but the state belongs to
+the agent, not the call: `kmet.app.eval/value` owns one SCI context (built
+lazily on the first call), one interrupt holder, one sticky namespace and one
+call lock. `seed!` installs the call's namespaces into that context each time,
+so the tool surface follows the agent's registry while definitions stay. A
+definition from one call is visible to the next, and the last namespace a
+successful call ended in is re-entered at the start of the next. Parallel calls
+serialize on the lock, and the deadline starts after it is taken; `:dispose!`
+clears the environment when the agent's handle is disposed. This is the
+memory-only stage: nothing is written to disk yet, and the kept index and eval
+sources are empty.
 
 The bridge pool is process-wide **by decision**: it is a bound, not a setting,
 and everything per-run travels in the submission's `:bindings`, so two agents
