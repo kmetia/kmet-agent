@@ -9,7 +9,14 @@
         ;; by bb >= 1.13.224 but declared for a standalone classpath) and
         ;; malli at load time; pinned at the root deps.edn versions.
         org.clojure/data.json {:mvn/version "2.5.2"}
-        metosin/malli {:mvn/version "0.20.1"}}
+        metosin/malli {:mvn/version "0.20.1"}
+        ;; script_test drives run_code, whose sandbox shares the fixed bundled
+        ;; extension set (kmet.app.extensions.libs). rewrite-clj, edamame and
+        ;; spec.alpha are bb-bundled; cljfmt and parinferish are the two
+        ;; Maven-only members, so the extension's own classpath has to declare
+        ;; them — the root bb.edn versions.
+        dev.weavejester/cljfmt {:mvn/version "0.16.6"}
+        parinferish/parinferish {:mvn/version "0.8.0"}}
  :tasks
  {test {:doc "Run mcp-adapter tests (args: test namespace names; defaults to the offline set; pass everything for the subprocess suites)"
         :task (let [nss (or (some->> *command-line-args* (map symbol))
