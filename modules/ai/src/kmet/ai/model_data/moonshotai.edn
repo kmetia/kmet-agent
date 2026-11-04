@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-27T10:40:46Z"
+ :generated-at "2026-11-04T11:08:57Z"
  :provider {:id :moonshotai
             :name "Moonshot AI"
             :env-vars ["MOONSHOT_API_KEY"]
@@ -22,7 +22,8 @@
              :supports-reasoning-effort false
              :thinking-format :deepseek
              :max-tokens-field :max-tokens
-             :supports-strict-mode false}}
+             :supports-strict-mode false
+             :supports-mid-convo-system-messages true}}
    "kimi-k2.7-code"
    {:id "kimi-k2.7-code"
     :name "Kimi K2.7 Code"
@@ -40,7 +41,8 @@
              :supports-reasoning-effort false
              :thinking-format :deepseek
              :max-tokens-field :max-tokens
-             :supports-strict-mode false}}
+             :supports-strict-mode false
+             :supports-mid-convo-system-messages true}}
    "kimi-k2.7-code-highspeed"
    {:id "kimi-k2.7-code-highspeed"
     :name "Kimi K2.7 Code HighSpeed"
@@ -58,7 +60,8 @@
              :supports-reasoning-effort false
              :thinking-format :deepseek
              :max-tokens-field :max-tokens
-             :supports-strict-mode false}}
+             :supports-strict-mode false
+             :supports-mid-convo-system-messages true}}
    "kimi-k3"
    {:id "kimi-k3"
     :name "Kimi K3"
@@ -84,6 +87,8 @@
              :thinking-format :openai
              :max-tokens-field :max-tokens
              :supports-strict-mode false
+             :supports-mid-convo-system-messages true
+             :supports-mid-convo-tool-additions true
              :deferred-tools-mode :kimi}}
    "kimi-k3.1-pro"
    {:id "kimi-k3.1-pro"
@@ -101,7 +106,9 @@
              :supports-reasoning-effort false
              :thinking-format :deepseek
              :max-tokens-field :max-tokens
-             :supports-strict-mode false}}
+             :supports-strict-mode false
+             :supports-mid-convo-system-messages true
+             :supports-mid-convo-tool-additions true}}
    "kimi-k3.1-pro-highspeed"
    {:id "kimi-k3.1-pro-highspeed"
     :name "Kimi K3.1 Pro Highspeed"
@@ -118,4 +125,6 @@
              :supports-reasoning-effort false
              :thinking-format :deepseek
              :max-tokens-field :max-tokens
-             :supports-strict-mode false}}}}}
+             :supports-strict-mode false
+             :supports-mid-convo-system-messages true
+             :supports-mid-convo-tool-additions true}}}}}

@@ -266,10 +266,11 @@
         (t/is (= [:user :assistant :tool]
                  (mapv :role (:context-messages tool-turn)))
               "the preview carries the projected context messages")
-        (t/is (= [:turn-start :user :assistant :tool]
+        (t/is (= [:turn-start :user :tool-change :assistant :tool]
                  (mapv (comp :role :source) (:context-entries tool-turn)))
-              "the preview carries the whole projection, the turn marker included")
-        (t/is (= (mapv :id (take 4 branch))
+              "the preview carries the whole projection, the turn marker and the
+               declared-set record included")
+        (t/is (= (mapv :id (take 5 branch))
                  (mapv (comp :id :source) (:context-entries tool-turn)))
               "the preview entries carry their source session entries (the
                preview was built at the first boundary — before the final

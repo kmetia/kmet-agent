@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-27T10:40:46Z"
+ :generated-at "2026-11-04T11:08:57Z"
  :provider {:id :github-copilot
             :name "GitHub Copilot"
             :env-vars ["COPILOT_GITHUB_TOKEN"]
@@ -39,7 +39,8 @@
     :headers {"Copilot-Integration-Id" "vscode-chat"
               "Editor-Plugin-Version" "copilot-chat/0.35.0"
               "Editor-Version" "vscode/1.107.0"
-              "User-Agent" "GitHubCopilotChat/0.35.0"}}
+              "User-Agent" "GitHubCopilotChat/0.35.0"}
+    :compat {:supports-mid-convo-system-messages true}}
    "claude-opus-4.8"
    {:id "claude-opus-4.8"
     :name "Claude Opus 4.8"
@@ -56,7 +57,8 @@
               "Editor-Plugin-Version" "copilot-chat/0.35.0"
               "Editor-Version" "vscode/1.107.0"
               "User-Agent" "GitHubCopilotChat/0.35.0"}
-    :compat {:force-adaptive-thinking true}}
+    :compat {:supports-mid-convo-system-messages true
+             :force-adaptive-thinking true}}
    "claude-opus-5"
    {:id "claude-opus-5"
     :name "Claude Opus 5"
@@ -73,7 +75,8 @@
               "Editor-Plugin-Version" "copilot-chat/0.35.0"
               "Editor-Version" "vscode/1.107.0"
               "User-Agent" "GitHubCopilotChat/0.35.0"}
-    :compat {:force-adaptive-thinking true}}
+    :compat {:supports-mid-convo-system-messages true
+             :force-adaptive-thinking true}}
    "claude-opus-5.5"
    {:id "claude-opus-5.5"
     :name "Claude Opus 5.5"
@@ -90,7 +93,8 @@
               "Editor-Plugin-Version" "copilot-chat/0.35.0"
               "Editor-Version" "vscode/1.107.0"
               "User-Agent" "GitHubCopilotChat/0.35.0"}
-    :compat {:force-adaptive-thinking true}}
+    :compat {:supports-mid-convo-system-messages true
+             :force-adaptive-thinking true}}
    "claude-sonnet-4.6"
    {:id "claude-sonnet-4.6"
     :name "Claude Sonnet 4.6"
@@ -141,7 +145,8 @@
               "Editor-Plugin-Version" "copilot-chat/0.35.0"
               "Editor-Version" "vscode/1.107.0"
               "User-Agent" "GitHubCopilotChat/0.35.0"}
-    :compat {:force-adaptive-thinking true}}}
+    :compat {:supports-mid-convo-system-messages true
+             :force-adaptive-thinking true}}}
   :openai-completions
   {"claude-fable-5"
    {:id "claude-fable-5"
@@ -360,7 +365,8 @@
               "Editor-Plugin-Version" "copilot-chat/0.35.0"
               "Editor-Version" "vscode/1.107.0"
               "User-Agent" "GitHubCopilotChat/0.35.0"}
-    :compat {:supports-openai-grammar-tools true}}
+    :compat {:supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.6-sol"
    {:id "gpt-5.6-sol"
     :name "GPT-5.6 Sol"
@@ -387,7 +393,8 @@
               "Editor-Plugin-Version" "copilot-chat/0.35.0"
               "Editor-Version" "vscode/1.107.0"
               "User-Agent" "GitHubCopilotChat/0.35.0"}
-    :compat {:supports-openai-grammar-tools true}}
+    :compat {:supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.6-terra"
    {:id "gpt-5.6-terra"
     :name "GPT-5.6 Terra"
@@ -414,7 +421,8 @@
               "Editor-Plugin-Version" "copilot-chat/0.35.0"
               "Editor-Version" "vscode/1.107.0"
               "User-Agent" "GitHubCopilotChat/0.35.0"}
-    :compat {:supports-openai-grammar-tools true}}
+    :compat {:supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-6-astra"
    {:id "gpt-6-astra"
     :name "GPT-6 Astra"
@@ -441,7 +449,8 @@
               "Editor-Plugin-Version" "copilot-chat/0.35.0"
               "Editor-Version" "vscode/1.107.0"
               "User-Agent" "GitHubCopilotChat/0.35.0"}
-    :compat {:supports-openai-grammar-tools true}}
+    :compat {:supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-6-luna"
    {:id "gpt-6-luna"
     :name "GPT-6 Luna"
@@ -468,7 +477,8 @@
               "Editor-Plugin-Version" "copilot-chat/0.35.0"
               "Editor-Version" "vscode/1.107.0"
               "User-Agent" "GitHubCopilotChat/0.35.0"}
-    :compat {:supports-openai-grammar-tools true}}
+    :compat {:supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-6-sol"
    {:id "gpt-6-sol"
     :name "GPT-6 Sol"
@@ -495,7 +505,8 @@
               "Editor-Plugin-Version" "copilot-chat/0.35.0"
               "Editor-Version" "vscode/1.107.0"
               "User-Agent" "GitHubCopilotChat/0.35.0"}
-    :compat {:supports-openai-grammar-tools true}}
+    :compat {:supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-6.1-sol"
    {:id "gpt-6.1-sol"
     :name "GPT-6.1 Sol"
@@ -522,7 +533,8 @@
               "Editor-Plugin-Version" "copilot-chat/0.35.0"
               "Editor-Version" "vscode/1.107.0"
               "User-Agent" "GitHubCopilotChat/0.35.0"}
-    :compat {:supports-openai-grammar-tools true}}
+    :compat {:supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-6.1-terra"
    {:id "gpt-6.1-terra"
     :name "GPT-6.1 Terra"

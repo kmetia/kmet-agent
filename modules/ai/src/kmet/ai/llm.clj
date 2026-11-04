@@ -74,6 +74,11 @@
                     the resolved model's capability
      :messages    — vector of message maps
      :tools       — vector of Tool records
+     :tool-changes — the session's recorded declared-set history
+                    ({:initial [declaration …] :changes [{:added […] :removed
+                    […]}]}), consumed by the anthropic-messages,
+                    openai-responses and openai-completions builders; every
+                    other wire ignores it and sends the current :tools list
      :signal      — atom; set to true to cancel
      :idle-timeout-ms — per-byte idle timeout on the stream in ms (pi:
                      httpIdleTimeoutMs — undici bodyTimeout semantics); nil

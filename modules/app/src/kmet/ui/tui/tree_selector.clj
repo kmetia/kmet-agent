@@ -206,6 +206,12 @@
           :thinking-level-change (th/fg theme :dim (str "[thinking: "
                                                         (name (:thinking-level entry :unknown)) "]"))
           :custom (th/fg theme :dim (str "[custom: " (name (:custom-type entry :custom)) "]"))
+          :tool-change (th/fg theme :dim
+                              (str "[tools: "
+                                   (str/join " "
+                                             (concat (map #(str "+" (:name %)) (:added entry))
+                                                     (map #(str "-" %) (:removed entry))))
+                                   "]"))
           :context-edit (th/fg theme :dim (session/context-edit-label entry))
           :label (th/fg theme :dim (str "[label: " (or (:label entry) "(cleared)") "]"))
           :turn-start (th/fg theme :dim (str "── turn " turn-number " ──"))

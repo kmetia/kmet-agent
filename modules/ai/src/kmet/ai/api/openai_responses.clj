@@ -8,8 +8,11 @@
    [kmet.ai.constrained-sampling :as cs]
    [kmet.ai.models :as models]
    [kmet.libs.http :refer [transport-error-message]]
+   [kmet.ai.hash :as hash]
    [kmet.ai.message :refer [content-text image-block?]]
-   [kmet.ai.api.shared :refer [clamp-prompt-cache-key copilot-dynamic-headers endpoint-url on-payload request-headers resolved-openai-compat responses-events-handler effective-total-timeout-ms headers-timeout-ms]]))
+   [kmet.ai.api.shared :as shared :refer [clamp-prompt-cache-key copilot-dynamic-headers endpoint-url on-payload request-headers resolved-openai-compat responses-events-handler effective-total-timeout-ms headers-timeout-ms]]))
+
+(declare responses-tools)
 
 (defn normalize-id-part
   "pi normalizeIdPart: sanitize a tool-call id to [a-zA-Z0-9_-], cap at 64
@@ -20,6 +23,14 @@
     (let [sanitized (str/replace s #"[^a-zA-Z0-9_-]" "_")]
       (-> (if (> (count sanitized) 64) (subs sanitized 0 64) sanitized)
           (str/replace #"_+$" "")))))
+
+(defn- responses-instruction-role
+  "pi's instructionRole: developer when the model reasons and accepts the
+   developer role, otherwise system."
+  [model]
+  (if (and (:reasoning model)
+           (not= false (:supports-developer-role (:compat model))))
+    "developer" "system"))
 
 (def ^:private responses-tool-call-providers
   "Providers whose Responses API can replay a function-call item id. Other
@@ -110,47 +121,138 @@
 
     [{:role "user" :content (responses-user-content (:content m))}]))
 
+(defn responses-tool-support
+  "pi getResponsesToolSupport: how this model expresses a declared-set change
+   after the first request — `:changes` (mid-conversation developer messages
+   plus additional_tools items), `:additions` (synthetic tool search) or
+   `:none` (the current list at the top level)."
+  [compat]
+  (cond
+    (and (:supports-mid-convo-system-messages compat)
+         (:supports-additional-tools compat)) :changes
+    (:supports-tool-search compat) :additions
+    :else :none))
+
+(defn- incremental-tools-notice
+  "Precedes every additional_tools item after the first, so a model does not
+   read the latest item as the complete set; still-unavailable tools are
+   restated (pi: renderIncrementalToolsNotice)."
+  [unavailable]
+  (let [notice (str "This is an incremental tools update. Previously declared tools remain"
+                    " available unless explicitly marked unavailable. A tool declared again"
+                    " here is available again, and its latest definition replaces the earlier one.")]
+    (if (seq unavailable)
+      (str notice "\nStill unavailable: " (str/join ", " unavailable) ".")
+      notice)))
+
+(defn- tool-removal-notice
+  "pi: renderToolRemovalNotice — a removal cannot be native on this wire, so
+   it is announced as text."
+  [names]
+  (str "The following tools are no longer available. Do not call them:\n"
+       (str/join "\n" (map #(str "- " %) names))))
+
+(defn- additional-tools-item
+  [tools strict?]
+  {:type "additional_tools"
+   :role "developer"
+   :tools (responses-tools tools strict?)})
+
+(defn- responses-change-items
+  "The input items for the changes after the initial declaration: an optional
+   incremental notice before each later addition, the additional_tools item,
+   and the removal text a wire that cannot remove natively needs (pi
+   convertResponsesMessages)."
+  [deltas declared? strict? role]
+  (loop [ds deltas
+         declared? declared?
+         unavailable []
+         acc []]
+    (if-let [{:keys [added removed]} (first ds)]
+      (let [redefined (into #{} (map :name) added)
+            gone (vec (remove redefined removed))
+            ;; pi announces an addition, not a bare removal
+            notice (when (and declared? (seq added))
+                     {:role role
+                      :content (incremental-tools-notice unavailable)})
+            additional (when (seq added)
+                         (additional-tools-item added strict?))
+            removal-text (when (seq gone)
+                           {:role role
+                            :content (tool-removal-notice gone)})]
+        (recur (next ds)
+               (or declared? (boolean additional))
+               (into unavailable gone)
+               (cond-> acc
+                 notice (conj notice)
+                 additional (conj additional)
+                 removal-text (conj removal-text))))
+      acc)))
+
+(defn- tool-search-pair
+  "pi's synthetic load for an addition-only transport: a completed client-side
+   tool_search call and its output carrying the definitions with
+   defer_loading."
+  [tools strict? seed]
+  (let [names (mapv :name tools)
+        call-id (str "kmet_tool_load_" (hash/short-hash (str seed ":" (str/join "," names))))]
+    [{:type "tool_search_call"
+      :call_id call-id
+      :execution "client"
+      :status "completed"
+      :arguments {:query (str/join " " names) :limit (count names)}}
+     {:type "tool_search_output"
+      :call_id call-id
+      :execution "client"
+      :status "completed"
+      :tools (responses-tools tools strict? true)}]))
+
 (defn responses-messages
   "Map agent messages to OpenAI Responses input items (pi
    convertResponsesMessages): the system prompt becomes the first developer
    message (system when the model doesn't support the developer role) —
    unless INCLUDE-SYSTEM? is false, when the caller carries the system
    prompt itself (codex: the instructions field) — followed by the
-   converted messages."
-  [model messages & [include-system?]]
-  (let [system (first (for [m messages :when (= :system (:role m))]
-                        (content-text (:content m))))
-        ;; raw compat, not resolved-openai-compat: pi's responses compat
-        ;; defaults supportsDeveloperRole to true, the completions detection
-        ;; derives it per family — resolving here would change the role
-        role (if (and (:reasoning model)
-                      (not= false (:supports-developer-role (:compat model))))
-               "developer" "system")]
-    (loop [msgs (remove #(= :system (:role %)) messages)
-           idx 0
-           acc []]
-      (if-let [m (first msgs)]
-        (recur (rest msgs) (inc idx) (into acc (responses-message-items model m idx)))
-        (into (if (and system (not= false include-system?))
-                [{:role role :content system}]
-                [])
-              acc)))))
+   converted messages. Declared-set deltas are added by the caller
+   (`responses-payload`), not encoded as transcript messages."
+  ([model messages]
+   (responses-messages model messages true))
+  ([model messages include-system?]
+   (let [system (first (for [m messages :when (= :system (:role m))]
+                         (content-text (:content m))))
+         ;; raw compat, not resolved-openai-compat: pi's responses compat
+         ;; defaults supportsDeveloperRole to true, the completions detection
+         ;; derives it per family — resolving here would change the role
+         role (responses-instruction-role model)]
+     (loop [msgs (remove #(= :system (:role %)) messages)
+            idx 0
+            acc []]
+       (if-let [m (first msgs)]
+         (recur (rest msgs) (inc idx) (into acc (responses-message-items model m idx)))
+         (into (if (and system (not= false include-system?))
+                 [{:role role :content system}]
+                 [])
+               acc))))))
 
 (defn responses-tools
   "pi convertResponsesTools: flat function tools with the JSON schema. A
    tool whose :constrained-sampling resolves strict gets strictified
    parameters and :strict true; other tools get :strict false (pi: strict
    ?? defaultStrict — emitted whenever the provider accepts strict
-   schemas)."
-  [tools strict?]
-  (mapv (fn [tool]
-          (let [strict (cs/resolve-json-schema-strict-sampling tool strict?)]
-            (cond-> {:type "function"
-                     :name (:name tool)
-                     :description (:description tool)
-                     :parameters (cs/get-json-schema-tool-parameters tool strict)}
-              strict? (assoc :strict (true? strict)))))
-        tools))
+   schemas). DEFER-LOADING? marks a tool search result's tools
+   (`defer_loading: true`)."
+  ([tools strict?]
+   (responses-tools tools strict? false))
+  ([tools strict? defer-loading?]
+   (mapv (fn [tool]
+           (let [strict (cs/resolve-json-schema-strict-sampling tool strict?)]
+             (cond-> {:type "function"
+                      :name (:name tool)
+                      :description (:description tool)
+                      :parameters (cs/get-json-schema-tool-parameters tool strict)}
+               strict? (assoc :strict (true? strict))
+               defer-loading? (assoc :defer_loading true))))
+         tools)))
 
 (defn responses-affinity-headers
   "pi createClient session-affinity headers from the session id (prompt
@@ -178,43 +280,68 @@
    prompt-cache params (key from the session id; a 24h retention when long is
    supported, unless the model's compat takes explicit-mode options — then the
    options carry the window instead: explicit mode for :none, a 30m ttl for
-   long), then :sampling-params merged last so their keys win."
-  [model-record effort messages tools model-id cache-retention session-id]
-  (let [effort-reasoning (when (and (:reasoning model-record) effort)
-                           {:effort (models/effort-value model-record effort)
-                            :summary "auto"})
-        off-reasoning (when (and (:reasoning model-record) (nil? effort)
-                                 (not (models/off-explicitly-null? model-record)))
-                        {:effort (or (get-in model-record [:thinking-level-map :off]) "none")})
-        reasoning (or effort-reasoning off-reasoning)
-        retention (or cache-retention :short)
-        caching? (not= :none retention)
-        ;; the shared compat resolution (pi getCompat): detection defaults,
-        ;; every explicit non-nil key survives
-        compat (resolved-openai-compat model-record)
-        explicit? (:supports-explicit-prompt-cache-mode compat)
-        long? (and (= :long retention) (:supports-long-cache-retention compat))
-        ;; pi getPromptCacheOptions: on an explicit-mode model the options carry
-        ;; the cache window and the retention param is omitted instead
-        cache-options (when explicit?
-                        (cond
-                          (= :none retention) {:mode "explicit"}
-                          long? {:ttl "30m"}))]
-    (cond-> {:model model-id
-             :input (responses-messages model-record messages)
-             :stream true
-             :store false}
-      (seq tools) (assoc :tools (responses-tools tools
-                                                 (:supports-strict-mode compat)))
-      (:max-tokens model-record) (assoc :max_output_tokens (max (:max-tokens model-record) 16))
-      reasoning (assoc :reasoning reasoning)
-      (or effort-reasoning
-          (and (= :xai (models/provider-family model-record)) (:reasoning model-record)))
-      (assoc :include ["reasoning.encrypted_content"])
-      (and caching? session-id) (assoc :prompt_cache_key (clamp-prompt-cache-key session-id))
-      (and long? (not explicit?)) (assoc :prompt_cache_retention "24h")
-      cache-options (assoc :prompt_cache_options cache-options)
-      (seq (:sampling-params model-record)) (merge (:sampling-params model-record)))))
+   long), then :sampling-params merged last so their keys win. TOOL-CHANGES is
+   the recorded declared-set history: a mid-conversation-capable model puts the
+   initial declaration in an additional_tools item at the head and anchors
+   later deltas; otherwise the current list goes top-level."
+  ([model-record effort messages tools model-id cache-retention session-id]
+   (responses-payload model-record effort messages tools model-id cache-retention session-id nil))
+  ([model-record effort messages tools model-id cache-retention session-id tool-changes]
+   (let [effort-reasoning (when (and (:reasoning model-record) effort)
+                            {:effort (models/effort-value model-record effort)
+                             :summary "auto"})
+         off-reasoning (when (and (:reasoning model-record) (nil? effort)
+                                  (not (models/off-explicitly-null? model-record)))
+                         {:effort (or (get-in model-record [:thinking-level-map :off]) "none")})
+         reasoning (or effort-reasoning off-reasoning)
+         retention (or cache-retention :short)
+         caching? (not= :none retention)
+         ;; the shared compat resolution (pi getCompat): detection defaults,
+         ;; every explicit non-nil key survives
+         compat (resolved-openai-compat model-record)
+         explicit? (:supports-explicit-prompt-cache-mode compat)
+         long? (and (= :long retention) (:supports-long-cache-retention compat))
+         ;; pi getPromptCacheOptions: on an explicit-mode model the options carry
+         ;; the cache window and the retention param is omitted instead
+         cache-options (when explicit?
+                         (cond
+                           (= :none retention) {:mode "explicit"}
+                           long? {:ttl "30m"}))
+         tool-support (responses-tool-support compat)
+         strict? (:supports-strict-mode compat)
+         {:keys [request-tools anchored changes]}
+         (shared/resolve-request-tools tool-changes tool-support tools)
+         base-input (responses-messages model-record messages)
+         instruction-role (responses-instruction-role model-record)
+         head-item (when (and (= tool-support :changes)
+                              (seq (:added (first changes))))
+                     (additional-tools-item (:added (first changes)) strict?))
+         delta-items (when (= tool-support :changes)
+                       (responses-change-items (rest anchored) (boolean head-item)
+                                               strict? instruction-role))
+         anchored-items (when (= tool-support :additions)
+                          (into []
+                                (mapcat (fn [change]
+                                          (when (seq (:added change))
+                                            (tool-search-pair (:added change) strict?
+                                                              (map :name (:added change)))))
+                                        anchored)))
+         input (into [] (concat (when head-item [head-item])
+                                base-input delta-items anchored-items))]
+     (cond-> {:model model-id
+              :input input
+              :stream true
+              :store false}
+       (seq request-tools) (assoc :tools (responses-tools request-tools strict?))
+       (:max-tokens model-record) (assoc :max_output_tokens (max (:max-tokens model-record) 16))
+       reasoning (assoc :reasoning reasoning)
+       (or effort-reasoning
+           (and (= :xai (models/provider-family model-record)) (:reasoning model-record)))
+       (assoc :include ["reasoning.encrypted_content"])
+       (and caching? session-id) (assoc :prompt_cache_key (clamp-prompt-cache-key session-id))
+       (and long? (not explicit?)) (assoc :prompt_cache_retention "24h")
+       cache-options (assoc :prompt_cache_options cache-options)
+       (seq (:sampling-params model-record)) (merge (:sampling-params model-record))))))
 
 (defn responses-dynamic-headers
   "The per-request headers beyond the base: session-affinity (gated on
@@ -250,7 +377,7 @@
             retention (or cache-retention :short)
             payload (on-payload opts
                                 (responses-payload model-record effort messages tools model-id
-                                                   retention session-id))
+                                                   retention session-id (:tool-changes opts)))
             headers (responses-request-headers model-record provider-record api-key
                                                session-id retention messages)
             response (ai-http/request url

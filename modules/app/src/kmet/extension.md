@@ -316,7 +316,12 @@ model is told the source exists through an appended conversation entry when the
 set of deferred sources changes. A promotion does not rebuild the leading
 system prompt (that would be a full prefix miss), so a promoted tool does not
 join the prompt's Available-tools list — the appended source listing and the
-request's own declarations are where the model learns it is now available.
+request's delta are where the model learns it is now available. The model's
+tool set is recorded as `:tool-change` entries; on a wire that can anchor a
+change (Anthropic inline tool blocks, OpenAI `additional_tools`/tool search,
+Kimi tool-bearing system messages) the tool array is declared once and the
+promotion rides as a delta after the conversation, so the array — the expensive
+front of the cached prefix — is not re-sent.
 
 ```clojure
 (ext/register-tool-source! api :my-catalog

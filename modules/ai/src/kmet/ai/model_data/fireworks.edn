@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-27T10:40:46Z"
+ :generated-at "2026-11-04T11:08:57Z"
  :provider {:id :fireworks
             :name "Fireworks AI"
             :env-vars ["FIREWORKS_API_KEY"]
@@ -421,8 +421,10 @@
              :thinking-format :openai
              :supports-long-cache-retention false
              :supports-strict-mode true
-             :send-session-affinity-headers true
-             :deferred-tools-mode :kimi}}
+             :supports-mid-convo-system-messages true
+             :supports-mid-convo-tool-additions true
+             :deferred-tools-mode :kimi
+             :send-session-affinity-headers true}}
    "accounts/fireworks/routers/kimi-k3-fast"
    {:id "accounts/fireworks/routers/kimi-k3-fast"
     :name "Kimi K3 Fast"
@@ -447,8 +449,10 @@
              :thinking-format :openai
              :supports-long-cache-retention false
              :supports-strict-mode true
-             :send-session-affinity-headers true
-             :deferred-tools-mode :kimi}}
+             :supports-mid-convo-system-messages true
+             :supports-mid-convo-tool-additions true
+             :deferred-tools-mode :kimi
+             :send-session-affinity-headers true}}
    "accounts/fireworks/routers/kimi-k3-spot"
    {:id "accounts/fireworks/routers/kimi-k3-spot"
     :name "Kimi K3 Spot"
@@ -473,5 +477,7 @@
              :thinking-format :openai
              :supports-long-cache-retention false
              :supports-strict-mode true
-             :send-session-affinity-headers true
-             :deferred-tools-mode :kimi}}}}}
+             :supports-mid-convo-system-messages true
+             :supports-mid-convo-tool-additions true
+             :deferred-tools-mode :kimi
+             :send-session-affinity-headers true}}}}}

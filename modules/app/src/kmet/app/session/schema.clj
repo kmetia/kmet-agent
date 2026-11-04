@@ -83,6 +83,26 @@
                 [:custom-type {:optional true} [:or :string :keyword :nil]]
                 [:data {:optional true} :any]))
 
+(def CustomMessageEntry
+  "A custom message that participates in LLM context (extension state that is
+   also a message). It has always been written; naming it here keeps the
+   strict load pass from reporting it as a wrong shape."
+  (common-entry :custom-message
+                [:custom-type {:optional true} [:or :string :keyword :nil]]
+                [:content {:optional true} [:or :string :nil [:vector :any]]]
+                [:display {:optional true} [:or :boolean :nil]]
+                [:details {:optional true} :any]))
+
+(def ToolChangeEntry
+  "The advertised tool set's change at one point in the transcript, the wire
+   declarations included. The current set is a fold over these entries, so a
+   resumed or forked session replays the declarations it was sent rather than
+   re-deriving them from the live registry (pi: SystemMessage.toolsAdded/
+   toolsRemoved, utils/transcript.clj getCurrentTools)."
+  (common-entry :tool-change
+                [:added {:optional true} [:vector :any]]
+                [:removed {:optional true} [:vector :any]]))
+
 (def LabelEntry
   (common-entry :label
                 [:target-id {:optional true} [:or :string :nil]]
@@ -101,6 +121,8 @@
    [:compaction CompactionEntry]
    [:context-edit ContextEditEntry]
    [:custom CustomEntry]
+   [:custom-message CustomMessageEntry]
+   [:tool-change ToolChangeEntry]
    [:label LabelEntry]])
 
 (def Header

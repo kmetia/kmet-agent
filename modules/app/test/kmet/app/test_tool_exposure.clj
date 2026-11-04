@@ -292,12 +292,12 @@
       (deferred-source! h ::catalog "A catalog" {"deferred-a" (tool-map "deferred-a")})
       (state/promote-tools! agent ["deferred-a"])
       (t/is (contains? (names (state/active-tools agent)) "deferred-a"))
-      (reset! (:enabled-tools agent) #{"read"})
+      (state/set-active-tools! agent #{"read"})
       (t/is (not (contains? (names (state/active-tools agent)) "deferred-a"))
             "a disabled tool is hidden, loaded or not")
       (t/is (= ["deferred-a"] (state/loaded-tools agent))
             "the load survives the disable")
-      (reset! (:enabled-tools agent) nil)
+      (state/set-active-tools! agent nil)
       (t/is (contains? (names (state/active-tools agent)) "deferred-a")
             "re-enabling restores it with no second search")
       (finally
@@ -357,9 +357,9 @@
     (try
       (tools/register-tool-source! h ::sandbox (fn [] {"sb-a" {:description "sandbox a"}}))
       (state/promote-tools! agent ["sb-a"])
-      (reset! (:enabled-tools agent) #{"read"})
+      (state/set-active-tools! agent #{"read"})
       (t/is (not (contains? (names (state/active-tools agent)) "sb-a")))
-      (reset! (:enabled-tools agent) #{"read" "sb-a"})
+      (state/set-active-tools! agent #{"read" "sb-a"})
       (t/is (contains? (names (state/active-tools agent)) "sb-a"))
       (finally
         (tools/unregister-tool-source! h ::sandbox)

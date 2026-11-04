@@ -31,6 +31,8 @@
          :supports-long-cache-retention :supports-strict-mode
          :supports-openai-grammar-tools :supports-tool-search
          :supports-additional-tools :supports-explicit-prompt-cache-mode
+         :supports-mid-convo-system-messages :supports-mid-convo-tool-changes
+         :supports-mid-convo-tool-additions :deferred-tools-mode
          :zai-tool-stream :force-adaptive-thinking :allow-empty-signature
          :chat-template-args :chat-template-kwargs
          :send-session-affinity-headers :supports-cache-control-on-tools

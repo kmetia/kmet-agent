@@ -128,6 +128,40 @@
               "direct API context must not be capped to the Codex subscription limit")
         (t/is (= 272000 (get-in normalized [:cost :tiers 0 :input-tokens-above])))))))
 
+(defn- compat-of [provider api id]
+  (:compat (#'mg/apply-compat-metadata
+            {:provider provider :api api :id id
+             :base-url "https://example.test/v1"})))
+
+(t/deftest test-mid-convo-capability-metadata
+  (t/testing "direct Anthropic Claude models: system messages and inline tool changes"
+    (t/is (= {:supports-mid-convo-system-messages true
+              :supports-mid-convo-tool-changes true}
+             (select-keys (compat-of :anthropic :anthropic-messages "claude-sonnet-5-5")
+                          [:supports-mid-convo-system-messages
+                           :supports-mid-convo-tool-changes]))))
+  (t/testing "proxies that reject inline tool blocks get text only"
+    (let [c (compat-of :github-copilot :anthropic-messages "claude-sonnet-5-5")]
+      (t/is (true? (:supports-mid-convo-system-messages c)))
+      (t/is (nil? (:supports-mid-convo-tool-changes c))))
+    (t/is (nil? (:supports-mid-convo-system-messages
+                 (compat-of :commandcode :anthropic-messages "claude-sonnet-5-5")))
+          "an unverified Anthropic proxy claims nothing"))
+  (t/testing "Kimi K3 accepts tool-bearing system messages; K2.6 text only"
+    (t/is (= {:supports-mid-convo-system-messages true
+              :supports-mid-convo-tool-additions true}
+             (select-keys (compat-of :moonshotai :openai-completions "kimi-k3")
+                          [:supports-mid-convo-system-messages
+                           :supports-mid-convo-tool-additions])))
+    (let [c (compat-of :moonshotai :openai-completions "kimi-k2.6")]
+      (t/is (true? (:supports-mid-convo-system-messages c)))
+      (t/is (nil? (:supports-mid-convo-tool-additions c)))))
+  (t/testing "a known Responses model gets mid-conversation developer messages"
+    (t/is (true? (:supports-mid-convo-system-messages
+                  (compat-of :openai :openai-responses "gpt-5.4"))))
+    (t/is (nil? (:supports-mid-convo-system-messages
+                 (compat-of :openai :openai-responses "gpt-4o"))))))
+
 (t/deftest test-codex-gpt-6-models
   "GPT-6 models are static ChatGPT OAuth catalog entries. Keep their
    Codex-specific wire metadata in lockstep with pi's codexModels entries."
@@ -162,7 +196,8 @@
                    (:thinking-level-map model)))
           (t/is (= {:supports-openai-grammar-tools true
                     :supports-tool-search true
-                    :supports-additional-tools true}
+                    :supports-additional-tools true
+                    :supports-mid-convo-system-messages true}
                    (:compat (#'mg/apply-compat-metadata model)))))))))
 
 (t/deftest test-openai-gpt-56-standard-costs

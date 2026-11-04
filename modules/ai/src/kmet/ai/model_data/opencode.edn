@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-03T18:57:42Z"
+ :generated-at "2026-11-04T11:08:57Z"
  :provider {:id :opencode
             :name "OpenCode (Zen)"
             :env-vars ["OPENCODE_API_KEY"]
@@ -18,7 +18,8 @@
     :cost {:input 10 :output 50 :cache-read 1 :cache-write 12.5}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:force-adaptive-thinking true}}
+    :compat {:supports-mid-convo-system-messages true
+             :force-adaptive-thinking true}}
    "claude-fable-5-1"
    {:id "claude-fable-5-1"
     :name "Claude Fable 5.1"
@@ -31,7 +32,8 @@
     :cost {:input 10 :output 50 :cache-read 0.25 :cache-write 12.5}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:force-adaptive-thinking true}}
+    :compat {:supports-mid-convo-system-messages true
+             :force-adaptive-thinking true}}
    "claude-haiku-4-5"
    {:id "claude-haiku-4-5"
     :name "Claude Haiku 4.5"
@@ -57,7 +59,8 @@
            :cache-read 0.01
            :cache-write 0.125}
     :context-window 1000000
-    :max-tokens 128000}
+    :max-tokens 128000
+    :compat {:supports-mid-convo-system-messages true}}
    "claude-opus-4-5"
    {:id "claude-opus-4-5"
     :name "Claude Opus 4.5"
@@ -107,7 +110,8 @@
     :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:force-adaptive-thinking true}}
+    :compat {:supports-mid-convo-system-messages true
+             :force-adaptive-thinking true}}
    "claude-opus-5"
    {:id "claude-opus-5"
     :name "Claude Opus 5"
@@ -120,7 +124,8 @@
     :cost {:input 5 :output 25 :cache-read 0.5 :cache-write 6.25}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:force-adaptive-thinking true}}
+    :compat {:supports-mid-convo-system-messages true
+             :force-adaptive-thinking true}}
    "claude-opus-5-5"
    {:id "claude-opus-5-5"
     :name "Claude Opus 5.5"
@@ -133,7 +138,8 @@
     :cost {:input 4 :output 20 :cache-read 0.2 :cache-write 5}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:force-adaptive-thinking true}}
+    :compat {:supports-mid-convo-system-messages true
+             :force-adaptive-thinking true}}
    "claude-sonnet-4-5"
    {:id "claude-sonnet-4-5"
     :name "Claude Sonnet 4.5"
@@ -187,7 +193,8 @@
     :cost {:input 2 :output 10 :cache-read 0.2 :cache-write 2.5}
     :context-window 1000000
     :max-tokens 128000
-    :compat {:force-adaptive-thinking true}}
+    :compat {:supports-mid-convo-system-messages true
+             :force-adaptive-thinking true}}
    "qwen3.5-plus"
    {:id "qwen3.5-plus"
     :name "Qwen3.5 Plus"
@@ -603,7 +610,8 @@
              :supports-reasoning-effort false
              :thinking-format :deepseek
              :max-tokens-field :max-tokens
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :supports-mid-convo-system-messages true}}
    "kimi-k2.7-code"
    {:id "kimi-k2.7-code"
     :name "Kimi K2.7 Code"
@@ -618,7 +626,8 @@
     :compat {:supports-store false
              :supports-developer-role false
              :max-tokens-field :max-tokens
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :supports-mid-convo-system-messages true}}
    "kimi-k3"
    {:id "kimi-k3"
     :name "Kimi K3"
@@ -640,7 +649,9 @@
     :compat {:supports-store false
              :supports-developer-role false
              :max-tokens-field :max-tokens
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :supports-mid-convo-system-messages true
+             :supports-mid-convo-tool-additions true}}
    "mimo-v2.6-flash-free"
    {:id "mimo-v2.6-flash-free"
     :name "MiMo-V2.6-Flash Free"
@@ -1028,7 +1039,8 @@
     :context-window 272000
     :max-tokens 128000
     :compat {:session-affinity-format :openai-nosession
-             :supports-openai-grammar-tools true}}
+             :supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.4-mini"
    {:id "gpt-5.4-mini"
     :name "GPT-5.4 Mini"
@@ -1048,7 +1060,8 @@
     :context-window 400000
     :max-tokens 128000
     :compat {:session-affinity-format :openai-nosession
-             :supports-openai-grammar-tools true}}
+             :supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.4-nano"
    {:id "gpt-5.4-nano"
     :name "GPT-5.4 Nano"
@@ -1088,7 +1101,8 @@
     :context-window 1050000
     :max-tokens 128000
     :compat {:session-affinity-format :openai-nosession
-             :supports-openai-grammar-tools true}}
+             :supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.5"
    {:id "gpt-5.5"
     :name "GPT-5.5"
@@ -1112,7 +1126,8 @@
     :context-window 1050000
     :max-tokens 128000
     :compat {:session-affinity-format :openai-nosession
-             :supports-openai-grammar-tools true}}
+             :supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.5-pro"
    {:id "gpt-5.5-pro"
     :name "GPT-5.5 Pro"
@@ -1156,7 +1171,8 @@
     :context-window 1050000
     :max-tokens 128000
     :compat {:session-affinity-format :openai-nosession
-             :supports-openai-grammar-tools true}}
+             :supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.6-sol"
    {:id "gpt-5.6-sol"
     :name "GPT-5.6 Sol"
@@ -1180,7 +1196,8 @@
     :context-window 1050000
     :max-tokens 128000
     :compat {:session-affinity-format :openai-nosession
-             :supports-openai-grammar-tools true}}
+             :supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.6-terra"
    {:id "gpt-5.6-terra"
     :name "GPT-5.6 Terra"
@@ -1204,7 +1221,8 @@
     :context-window 1050000
     :max-tokens 128000
     :compat {:session-affinity-format :openai-nosession
-             :supports-openai-grammar-tools true}}
+             :supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-6-astra"
    {:id "gpt-6-astra"
     :name "GPT-6 Astra"
@@ -1228,7 +1246,8 @@
     :context-window 1050000
     :max-tokens 128000
     :compat {:session-affinity-format :openai-nosession
-             :supports-openai-grammar-tools true}}
+             :supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-6-luna"
    {:id "gpt-6-luna"
     :name "GPT-6 Luna"
@@ -1252,7 +1271,8 @@
     :context-window 1050000
     :max-tokens 128000
     :compat {:session-affinity-format :openai-nosession
-             :supports-openai-grammar-tools true}}
+             :supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-6-sol"
    {:id "gpt-6-sol"
     :name "GPT-6 Sol"
@@ -1276,7 +1296,8 @@
     :context-window 1050000
     :max-tokens 128000
     :compat {:session-affinity-format :openai-nosession
-             :supports-openai-grammar-tools true}}
+             :supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-6.1-sol"
    {:id "gpt-6.1-sol"
     :name "GPT-6.1 Sol"
@@ -1300,7 +1321,8 @@
     :context-window 1050000
     :max-tokens 128000
     :compat {:session-affinity-format :openai-nosession
-             :supports-openai-grammar-tools true}}
+             :supports-openai-grammar-tools true
+             :supports-mid-convo-system-messages true}}
    "grok-4.5"
    {:id "grok-4.5"
     :name "Grok 4.5"

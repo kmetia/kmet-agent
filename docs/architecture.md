@@ -377,12 +377,16 @@ things are worth knowing before changing a tool.
 `:exposure` (`kmet.app.tools.tool`): `:direct` (the default) and `:model-only`
 are declared while selected; `:deferred` is callable but declared only once
 `tool_search` loads it; `:sandbox` (a contributed source's catalog) is callable
-and never declared. `kmet.app.loop.state/declared-tools-for` builds the wire
-list from the selection (`:enabled-tools` / `:default-tools`) and the loaded set
-— name-sorted, because past array-map size a map's order is hash order and a
-replay of the recorded names must reproduce the array. A `tool_search`-named
-tool is declared only while the selection can promote something — a `:deferred`
-tool or a contributed `:sandbox` tool
+and never declared. `kmet.app.loop.state/declared-tools-for` builds the live
+candidate set from the selection (`:enabled-tools` / `:default-tools`) and the
+loaded set; `sync-tool-declarations!` records an explicit selection change and
+`sync-resumed-declarations!` reconciles the recorded loadout before each
+request, both against the session's `:tool-change` history. `active-tools`
+returns that recorded fold joined with the live records — name-sorted, because
+past array-map size a map's order is hash order and a replay of the recorded
+names must reproduce the array. A
+`tool_search`-named tool is declared only while the selection can promote
+something — a `:deferred` tool or a contributed `:sandbox` tool
 (`kmet.app.tools.registry/promotable-tools`, the same derivation the search
 itself ranks) — so a direct-only setup pays no schema for it and a selection
 that excludes every promotable tool declares none. The
@@ -391,10 +395,40 @@ declares its family's entry point directly (`clojure_edit`,
 `list_symbols`/`find_definition`) and contributes its refinements as one
 `:deferred` source, so a default composition declares 6 schemas fewer and
 announces the two sources instead. The
-loaded set is a session fact (`:tool-load` entries folded along the branch), so
-resume, `/tree` and a fork replay the tools that branch was sent, and disabling
-a loaded tool hides it without forgetting the load. `callable-tool-names` is
-the other half — the selection minus the `:model-only` tools.
+advertised set is a session fact. The mutations (`set-active-tools!`,
+`apply-default-tools!`) record the live selection with `sync-tool-declarations!`;
+the loop reconciles the recorded loadout before every request with
+`sync-resumed-declarations!`; a promotion uses the same resumed reconcile. Both
+write the delta by value — name, description, parameters and constrained
+sampling, never the runtime record.
+
+`active-tools` folds those entries and joins each declaration with the live
+registry for its runtime fields, so a resumed session replays what it was sent
+rather than re-deriving it from a registry that may have changed: a recorded
+tool the live registry no longer holds stays declared (an MCP server still
+connecting), a
+tool this state watched unmount is removed, and an extension tool registered
+after the record joins the next request. `:tool-load` entries
+remain the promotion log, so disabling a loaded tool hides it without
+forgetting the load. `callable-tool-names` is the other half — the selection
+minus the `:model-only` tools.
+
+**A tool change is a wire delta, not a rebuilt array.** The first `:tool-change`
+entry is the initial declaration the top-level tools array carries; later
+entries ride in place. Anthropic models with
+`:supports-mid-convo-system-messages` and `:supports-mid-convo-tool-changes`
+declare the initial tools once, add a deferred placeholder and the
+`inline-tools-2026-09-15` beta, and send later entries as `tool_addition` /
+`tool_removal` blocks. Responses models use `additional_tools` items (or a
+synthetic tool-search pair where only additions are supported), and Kimi
+completions (`:deferred-tools-mode :kimi` or
+`:supports-mid-convo-tool-additions`) anchor additions as a tool-bearing
+system message. The deltas are re-sent after the conversation on each request;
+the array they extend stays byte-stable. Every other wire keeps today's
+behaviour: the current declared set goes top-level and the deltas stay out of
+the request, which is a fallback, not a regression. The history is appended,
+never rewritten, so a resume or fork keeps what it recorded.
+
 **`tool_search`** (`kmet.app.tools.search`, the `:tool/tool_search` row) is the
 tool that closes the loop: it ranks the searchable tools that are not declared
 yet with `kmet.libs.ranking` — the same scorer `mcp search` reads the MCP cache

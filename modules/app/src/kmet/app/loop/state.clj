@@ -103,6 +103,9 @@
                                              ;; the replacement removed from the context
                        run-token             ;; atom of the current run's token, or nil outside a
                                              ;; run — nil makes appends context-only
+                       seen-tools            ;; atom of #{tool-name}: the live tools this state has observed,
+                                             ;; so a recorded tool that was never registered here is kept on
+                                             ;; resume while one that was unmounted here is removed
                        system-prompt-opts    ;; atom of the build-system-prompt options map (pi: _baseSystemPromptOptions)
                        system-prompt-fn      ;; the builder the opts map is applied to (see the
                                              ;; :system-prompt-fn option); a plain value, because a
@@ -230,6 +233,7 @@ Be precise and concise in your responses."}}]
                     :pending-bash (atom [])
                     :run-messages (atom {})
                     :run-token (atom nil)
+                    :seen-tools (atom nil)
                     :system-prompt-fn system-prompt-fn
                     :system-prompt-opts (atom system-prompt-opts)
                     :loop-guard (atom {:window [] :suppressed 0})
@@ -558,16 +562,35 @@ Be precise and concise in your responses."}}]
   [agent]
   (session-loaded-tools (:session agent)))
 
+(declare sync-tool-declarations! sync-resumed-declarations!)
+
+(defn tool-changes-for-request
+  "The session's recorded declared-set history in the shape the wire takes:
+   `{:initial [declaration …] :changes [{:added […] :removed […]}]}`. The
+   first :tool-change entry is the initial declaration the top-level tools
+   array carries; every later entry is a delta the wire anchors in place. nil
+   when the branch records none (a session that predates the record), so the
+   wire falls back to the current tools."
+  [agent]
+  (when-let [sess (:session agent)]
+    (let [entries (filter #(= :tool-change (:role %)) (session/get-branch sess))]
+      (when (seq entries)
+        {:initial (vec (:added (first entries)))
+         :changes (mapv #(select-keys % [:added :removed]) (rest entries))}))))
+
 (defn promote-tools!
-  "Record NAMES as loaded in the agent's session (see `loaded-tools`), which
-   declares them on the next request. The entry is invisible to the wire and
-   appended to the branch, so a resumed or forked session keeps the promotion.
-   Returns the entry, or nil without a session — a promotion that cannot be
+  "Record NAMES as loaded in the agent's session (see `loaded-tools`) and
+   record the resulting declared set as a :tool-change entry, which declares
+   them on the next request. The entries are invisible chat-wise and appended
+   to the branch, so a resumed or forked session keeps the promotion. Returns
+   the :tool-load entry, or nil without a session — a promotion that cannot be
    recorded is not a load."
   [agent names]
   (when (seq names)
     (when-let [sess (:session agent)]
-      (session/append-custom-entry! sess :tool-load {:names (vec names)}))))
+      (let [entry (session/append-custom-entry! sess :tool-load {:names (vec names)})]
+        (sync-resumed-declarations! agent)
+        entry))))
 
 (defn- declared-record
   "NAME → TOOL as the model is sent it, or nil for a tool the run does not
@@ -635,20 +658,178 @@ Be precise and concise in your responses."}}]
         (comp (remove #(= :model-only (tool/exposure %))) (map :name))
         (vals (tools/select-tools (tool-table agent) (tool-selection agent)))))
 
+(defn- runtime-tool-map
+  "The ctx's live tool records by name, contributed (sandbox) tools included
+   — the runtime half a recorded declaration joins."
+  [ctx]
+  (merge (ctx-contributed-tools ctx) (ctx-tool-table ctx)))
+
+(defn- live-declared-tools
+  "The set the live registry and the state's selection select, as name →
+   Tool (see `declared-tools-for`)."
+  [agent]
+  (declared-tools-for (tool-table agent)
+                      (ctx-contributed-tools (:ctx agent))
+                      {:enabled @(:enabled-tools agent)
+                       :default-tools @(:default-tools agent)
+                       :loaded (loaded-tools agent)}))
+
+(defn- join-recorded
+  "Recorded declarations joined with the live runtime records for their
+   runtime fields: the declaration wins every model-facing field, while
+   :execute and the rest stay the registry's. A recorded tool the live registry
+   no longer holds is still declared (the transcript is the source of truth);
+   calling it fails at dispatch."
+  [recorded runtime]
+  (mapv (fn [[name declaration]]
+          (merge (get runtime name) declaration))
+        recorded))
+
+(defn- declared-tools
+  "The declared tools for a state: the recorded fold joined with the live
+   runtime records when the session has a record, else the live derivation.
+   RUNTIME and LIVE are thunks, so a resumed session does not re-derive the
+   live set it just replaced."
+  [recorded runtime live]
+  (if (some? recorded)
+    (join-recorded recorded (runtime))
+    (vals (live))))
+
+(defn declared-tools-for-session
+  "The declared set a state over SESSION has, for a caller that must build the
+   prompt before the state exists (`kmet.app.loop.driver/prompt-options`): the
+   session's recorded declarations when it has any, else the live derivation
+   over CTX's table and the run's selection."
+  [ctx session {:keys [enabled default-tools loaded]}]
+  (declared-tools (some-> session session/session-tool-state)
+                  #(runtime-tool-map ctx)
+                  #(declared-tools-for (ctx-tool-table ctx)
+                                       (ctx-contributed-tools ctx)
+                                       {:enabled enabled
+                                        :default-tools default-tools
+                                        :loaded loaded})))
+
 (defn active-tools
   "The tools sent to the LLM (pi: AgentSession.getActiveToolNames → the
-   declared set), name-sorted: the registry filtered by the state's
-   :enabled-tools and :default-tools and narrowed to what is declared (see
-   `declared-tools-for`). Read once per request and threaded through it — the
-   wire list, the declared set and dispatch all resolve against that one
-   capture, so a tool unloaded mid-request still executes for the request that
-   was offered it."
+   declared set), name-sorted: the set the session recorded, joined with the
+   live registry for runtime fields — so a resumed or forked session replays
+   the declarations it was sent rather than re-deriving them from a registry
+   that may have changed. Before the first :tool-change entry (a session that
+   predates the record, a bare test state) it falls back to the live
+   derivation. Read once per request and threaded through it — the wire list,
+   the declared set and dispatch all resolve against that one capture, so a
+   tool unloaded mid-request still executes for the request that was offered
+   it."
   [agent]
-  (vals (declared-tools-for (tool-table agent)
-                            (ctx-contributed-tools (:ctx agent))
-                            {:enabled @(:enabled-tools agent)
-                             :default-tools @(:default-tools agent)
-                             :loaded (loaded-tools agent)})))
+  (declared-tools (some-> (:session agent) session/session-tool-state)
+                  #(runtime-tool-map (:ctx agent))
+                  #(live-declared-tools agent)))
+
+(defn- tool-declaration
+  "The model-visible half of a tool record: the declaration a :tool-change
+   entry stores and the wire sends. Runtime fields (:execute, :streams?, …)
+   stay in the registry (pi: toToolDeclaration)."
+  [tool]
+  (cond-> (select-keys tool [:name :description :parameters])
+    (some? (:constrained-sampling tool))
+    (assoc :constrained-sampling (:constrained-sampling tool))))
+
+(defn- live-declaration-map
+  "The live declared set as name → wire declaration."
+  [agent]
+  (into (sorted-map)
+        (map (juxt :name tool-declaration))
+        (vals (live-declared-tools agent))))
+
+(defn- mentioned-tool-names
+  "Every tool name the branch's :tool-change history ever added or removed — the
+   names a resumed session treats as its own recorded loadout (pi:
+   _restoreToolsFromTranscript's `mentioned`)."
+  [entries]
+  (into #{}
+        (mapcat (fn [{:keys [added removed]}]
+                  (concat (map :name added) removed)))
+        (filter #(= :tool-change (:role %)) entries)))
+
+(defn- resume-declarations
+  "The loadout a resumed branch restores (pi: _restoreToolsFromTranscript):
+   its recorded declarations plus extension tools the branch never mentioned —
+   a tool registered after the record is activated like a newly registered
+   tool, while a recorded removal stays removed and a recorded tool missing
+   from the registry stays declared. Built-ins never join the second group; a
+   new built-in follows the configured selection, not a resume."
+  [sess recorded live seen]
+  (if (nil? recorded)
+    nil
+    (let [mentioned (mentioned-tool-names (session/get-branch sess))
+          ;; tool_search is source-driven, not a fixed built-in: a newly
+          ;; mounted deferred source must make it declarable on resume
+          builtins (disj (set tools/builtin-tool-names) search/tool-search-name)
+          live-names (set (keys live))
+          ;; a recorded tool this state watched disappear is a live unmount; one
+          ;; it never saw is a resume-time gap (an MCP server still connecting).
+          ;; A recorded tool that is live keeps its live definition, so a
+          ;; re-registered extension's new schema is recorded as a redefinition.
+          kept (into (sorted-map)
+                     (keep (fn [[name declaration]]
+                             (cond
+                               (and (contains? seen name)
+                                    (not (contains? live-names name))) nil
+                               (contains? live-names name) [name (get live name)]
+                               :else [name declaration])))
+                     recorded)
+          new-tools (into (sorted-map)
+                          (filter (fn [[name _]]
+                                    (and (not (mentioned name))
+                                         (not (contains? builtins name)))))
+                          live)]
+      (merge (sorted-map) kept new-tools))))
+
+(defn- seen-tools!
+  "Observe LIVE-NAMES on AGENT and return the names it had already seen. The
+   first observation (a new or resumed state) is the live set at that moment,
+   so a recorded tool that was never registered here counts as unseen."
+  [agent live-names]
+  (let [seen (or @(:seen-tools agent) live-names)]
+    (reset! (:seen-tools agent) (into seen live-names))
+    seen))
+
+(defn- record-tool-change!
+  "Append the delta between PREVIOUS and CURRENT to SESS, if any."
+  [sess previous current]
+  (let [{:keys [added removed]} (session/tool-state-changes previous current)]
+    (when (or (seq added) (seq removed))
+      (session/append-entry sess {:role :tool-change
+                                  :added added
+                                  :removed removed}))))
+
+(defn sync-tool-declarations!
+  "Record the live declared set against the session's record, as one
+   :tool-change entry. Mutations (`set-active-tools!`, `apply-default-tools!`,
+   a promotion) call this, so an explicit re-enable is recorded. The entry is
+   not a message; the wire reads the fold. No entry when nothing changed.
+   Returns the entry, or nil for no change or no session (pi:
+   declareToolChanges)."
+  [agent]
+  (when-let [sess (:session agent)]
+    (let [previous (session/session-tool-state sess)
+          live (live-declaration-map agent)]
+      (seen-tools! agent (set (keys live)))
+      (record-tool-change! sess previous live))))
+
+(defn sync-resumed-declarations!
+  "Record the loadout a resumed or running branch restores against its record
+   (pi: _restoreToolsFromTranscript): its recorded declarations, a live
+   redefinition, and extension tools the branch never mentioned; a recorded
+   removal stays removed and a tool this state watched unmount is dropped. The
+   loop calls this once before every request."
+  [agent]
+  (when-let [sess (:session agent)]
+    (let [live (live-declaration-map agent)
+          seen (seen-tools! agent (set (keys live)))
+          previous (session/session-tool-state sess)
+          current (or (resume-declarations sess previous live seen) live)]
+      (record-tool-change! sess previous current))))
 
 (defn set-active-tools!
   "Restrict the tools sent to the LLM to NAMES (a set or seq of tool
@@ -664,37 +845,41 @@ Be precise and concise in your responses."}}]
    with what the model can actually call. The updated options are stored
    back, so a later rebuild from them — refresh-prompt-cwd! on a session
    switch — keeps the same tool set (pi: _rebuildSystemPrompt).
-   Changes take effect on the next agent turn."
-  [agent names]
-  (let [names (cond
-                (nil? names) nil
-                (sequential? names) names
-                ;; a bare string is a single tool name (extensions pass
-                ;; through untyped; pi's string[] is enforced by TS)
-                (string? names) [names]
-                :else names)
-        ;; validation source: the LIVE registry (pi: setActiveToolsByName
-        ;; validates against the tool registry) — captures extension tools
-        ;; registered after the system prompt was built, sandbox sources
-        ;; included
-        table (tool-table agent)
-        contributed (ctx-contributed-tools (:ctx agent))
-        live (merge contributed table)
-        ;; pi filters unknown names out of the enabled set itself
-        enabled (when names (into #{} (filter #(contains? live %)) names))
-        ;; the prompt's tool list is the DECLARED set under the new selection
-        ;; (a deferred tool the toggle enables is declared only once loaded)
-        valid (vals (declared-tools-for table contributed
-                                        {:enabled enabled
-                                         :default-tools @(:default-tools agent)
-                                         :loaded (loaded-tools agent)}))
-        opts (assoc @(:system-prompt-opts agent) :tools valid)]
-    (reset! (:enabled-tools agent) enabled)
-    (when (seq @(:system-prompt-opts agent))
-      (reset! (:system-prompt-opts agent) opts)
-      (reset! (:system agent)
-              (apply (:system-prompt-fn agent) (mapcat identity opts))))
-    nil))
+   Changes take effect on the next agent turn.
+
+   RECORD? (default true) writes the resulting declared-set delta to the
+   session. A session switch passes false: the incoming session's own record
+   is its history, and the first request reconciles the live set if it really
+   differs, so loading a session never rewrites it."
+  ([agent names]
+   (set-active-tools! agent names true))
+  ([agent names record?]
+   (let [names (cond
+                 (nil? names) nil
+                 (sequential? names) names
+                 ;; a bare string is a single tool name (extensions pass
+                 ;; through untyped; pi's string[] is enforced by TS)
+                 (string? names) [names]
+                 :else names)
+         ;; validation source: the LIVE registry (pi: setActiveToolsByName
+         ;; validates against the tool registry) — captures extension tools
+         ;; registered after the system prompt was built, sandbox sources
+         ;; included
+         table (tool-table agent)
+         contributed (ctx-contributed-tools (:ctx agent))
+         live (merge contributed table)
+         ;; pi filters unknown names out of the enabled set itself
+         enabled (when names (into #{} (filter #(contains? live %)) names))]
+     (reset! (:enabled-tools agent) enabled)
+     (when record? (sync-tool-declarations! agent))
+     ;; the prompt's tool list is the DECLARED set under the new selection
+     (let [valid (active-tools agent)
+           opts (assoc @(:system-prompt-opts agent) :tools valid)]
+       (when (seq @(:system-prompt-opts agent))
+         (reset! (:system-prompt-opts agent) opts)
+         (reset! (:system agent)
+                 (apply (:system-prompt-fn agent) (mapcat identity opts)))))
+     nil)))
 
 (defn apply-default-tools!
   "Re-apply the :default-tools selection after a settings reload
@@ -704,7 +889,10 @@ Be precise and concise in your responses."}}]
    explicit set-active-tools! selection wins over it. Returns the
    new selection."
   [agent selection]
-  (reset! (:default-tools agent) (vec (or selection tools/builtin-tool-names))))
+  (let [selection (vec (or selection tools/builtin-tool-names))]
+    (reset! (:default-tools agent) selection)
+    (sync-tool-declarations! agent)
+    selection))
 
 (defn add-bash-result!
   "Record a !/!! bash execution result in the agent context and session.

@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-02T10:45:49Z"
+ :generated-at "2026-11-04T11:08:57Z"
  :provider {:id :openai-codex
             :name "OpenAI Codex"
             :env-vars []
@@ -35,7 +35,9 @@
            :cache-write 0}
     :context-window 272000
     :max-tokens 128000
-    :compat {:supports-openai-grammar-tools true :supports-tool-search true}}
+    :compat {:supports-openai-grammar-tools true
+             :supports-tool-search true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.4-mini"
    {:id "gpt-5.4-mini"
     :name "GPT-5.4 mini"
@@ -48,7 +50,9 @@
     :cost {:input 0.75 :output 4.5 :cache-read 0.075 :cache-write 0}
     :context-window 272000
     :max-tokens 128000
-    :compat {:supports-openai-grammar-tools true :supports-tool-search true}}
+    :compat {:supports-openai-grammar-tools true
+             :supports-tool-search true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.5"
    {:id "gpt-5.5"
     :name "GPT-5.5"
@@ -65,7 +69,9 @@
            :cache-write 0}
     :context-window 272000
     :max-tokens 128000
-    :compat {:supports-openai-grammar-tools true :supports-tool-search true}}
+    :compat {:supports-openai-grammar-tools true
+             :supports-tool-search true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.6-luna"
    {:id "gpt-5.6-luna"
     :name "GPT-5.6 Luna"
@@ -84,7 +90,8 @@
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
              :supports-tool-search true
-             :supports-additional-tools true}}
+             :supports-additional-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.6-sol"
    {:id "gpt-5.6-sol"
     :name "GPT-5.6 Sol"
@@ -103,7 +110,8 @@
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
              :supports-tool-search true
-             :supports-additional-tools true}}
+             :supports-additional-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.6-terra"
    {:id "gpt-5.6-terra"
     :name "GPT-5.6 Terra"
@@ -122,7 +130,8 @@
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
              :supports-tool-search true
-             :supports-additional-tools true}}
+             :supports-additional-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-6-astra"
    {:id "gpt-6-astra"
     :name "GPT-6 Astra"
@@ -147,7 +156,8 @@
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
              :supports-tool-search true
-             :supports-additional-tools true}}
+             :supports-additional-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-6-luna"
    {:id "gpt-6-luna"
     :name "GPT-6 Luna"
@@ -172,7 +182,8 @@
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
              :supports-tool-search true
-             :supports-additional-tools true}}
+             :supports-additional-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-6-sol"
    {:id "gpt-6-sol"
     :name "GPT-6 Sol"
@@ -197,7 +208,8 @@
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
              :supports-tool-search true
-             :supports-additional-tools true}}
+             :supports-additional-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-6.1-sol"
    {:id "gpt-6.1-sol"
     :name "GPT-6.1 Sol"
@@ -222,4 +234,5 @@
     :max-tokens 128000
     :compat {:supports-openai-grammar-tools true
              :supports-tool-search true
-             :supports-additional-tools true}}}}}
+             :supports-additional-tools true
+             :supports-mid-convo-system-messages true}}}}}

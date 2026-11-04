@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-11-03T18:57:42Z"
+ :generated-at "2026-11-04T11:08:57Z"
  :provider {:id :opencode-go
             :name "OpenCode Go"
             :env-vars ["OPENCODE_API_KEY"]
@@ -295,7 +295,8 @@
     :compat {:supports-store false
              :supports-developer-role false
              :max-tokens-field :max-tokens
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :supports-mid-convo-system-messages true}}
    "kimi-k3"
    {:id "kimi-k3"
     :name "Kimi K3"
@@ -317,7 +318,9 @@
     :compat {:supports-store false
              :supports-developer-role false
              :max-tokens-field :max-tokens
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :supports-mid-convo-system-messages true
+             :supports-mid-convo-tool-additions true}}
    "kimi-k3.1-pro"
    {:id "kimi-k3.1-pro"
     :name "Kimi K3.1 Pro"
@@ -339,7 +342,9 @@
     :compat {:supports-store false
              :supports-developer-role false
              :max-tokens-field :max-tokens
-             :supports-strict-mode true}}
+             :supports-strict-mode true
+             :supports-mid-convo-system-messages true
+             :supports-mid-convo-tool-additions true}}
    "longcat-2.0"
    {:id "longcat-2.0"
     :name "LongCat-2.0"

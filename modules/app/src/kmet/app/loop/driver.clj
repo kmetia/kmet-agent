@@ -61,13 +61,12 @@
    :cwd cwd
    :context-files (context/load-project-context-files
                    (cfg/get-agent-dir) (str (fs/cwd)))
-   :tools (vals (loop-state/declared-tools-for
-                 (loop-state/ctx-tool-table ctx)
-                 (loop-state/ctx-contributed-tools ctx)
-                 {:default-tools default-tools
-                  ;; a resumed session keeps the tools it was sent
-                  :loaded (when session
-                            (loop-state/session-loaded-tools session))}))})
+   :tools (loop-state/declared-tools-for-session
+           ctx session
+           {:default-tools default-tools
+            ;; a resumed session keeps the tools it was sent
+            :loaded (when session
+                      (loop-state/session-loaded-tools session))})})
 
 (defn agent-state
   "The loop's AgentState for CTX from CONFIG and the run's resolved pieces:

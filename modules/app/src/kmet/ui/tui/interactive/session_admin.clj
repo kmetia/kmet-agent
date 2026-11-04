@@ -306,7 +306,7 @@
     (doseq [e entries
             :when (not (contains? #{:session_info :label :model-change
                                     :thinking-level-change :context-edit
-                                    :turn-start} (:role e)))]
+                                    :turn-start :tool-change} (:role e)))]
       (replay-entry! cs e tool-call-ids tool-results-by-id))))
 
 (defn replay-session!

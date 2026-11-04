@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-10-27T10:40:46Z"
+ :generated-at "2026-11-04T11:08:57Z"
  :provider {:id :openai
             :name "OpenAI"
             :env-vars ["OPENAI_API_KEY"]
@@ -287,7 +287,8 @@
     :compat {:supports-strict-mode true
              :supports-openai-grammar-tools true
              :supports-tool-search true
-             :supports-additional-tools true}}
+             :supports-additional-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.4-mini"
    {:id "gpt-5.4-mini"
     :name "GPT-5.4 mini"
@@ -309,7 +310,8 @@
     :compat {:supports-strict-mode true
              :supports-openai-grammar-tools true
              :supports-tool-search true
-             :supports-additional-tools true}}
+             :supports-additional-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.4-nano"
    {:id "gpt-5.4-nano"
     :name "GPT-5.4 nano"
@@ -354,7 +356,8 @@
     :compat {:supports-strict-mode true
              :supports-openai-grammar-tools true
              :supports-tool-search true
-             :supports-additional-tools true}}
+             :supports-additional-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.5"
    {:id "gpt-5.5"
     :name "GPT-5.5"
@@ -380,7 +383,8 @@
     :compat {:supports-strict-mode true
              :supports-openai-grammar-tools true
              :supports-tool-search true
-             :supports-additional-tools true}}
+             :supports-additional-tools true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.5-pro"
    {:id "gpt-5.5-pro"
     :name "GPT-5.5 Pro"
@@ -430,7 +434,8 @@
              :supports-openai-grammar-tools true
              :supports-tool-search true
              :supports-additional-tools true
-             :supports-explicit-prompt-cache-mode true}}
+             :supports-explicit-prompt-cache-mode true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.6-sol"
    {:id "gpt-5.6-sol"
     :name "GPT-5.6 Sol"
@@ -457,7 +462,8 @@
              :supports-openai-grammar-tools true
              :supports-tool-search true
              :supports-additional-tools true
-             :supports-explicit-prompt-cache-mode true}}
+             :supports-explicit-prompt-cache-mode true
+             :supports-mid-convo-system-messages true}}
    "gpt-5.6-terra"
    {:id "gpt-5.6-terra"
     :name "GPT-5.6 Terra"
@@ -484,7 +490,8 @@
              :supports-openai-grammar-tools true
              :supports-tool-search true
              :supports-additional-tools true
-             :supports-explicit-prompt-cache-mode true}}
+             :supports-explicit-prompt-cache-mode true
+             :supports-mid-convo-system-messages true}}
    "gpt-6-astra"
    {:id "gpt-6-astra"
     :name "GPT-6 Astra"
@@ -511,7 +518,8 @@
              :supports-openai-grammar-tools true
              :supports-tool-search true
              :supports-additional-tools true
-             :supports-explicit-prompt-cache-mode true}}
+             :supports-explicit-prompt-cache-mode true
+             :supports-mid-convo-system-messages true}}
    "gpt-6-luna"
    {:id "gpt-6-luna"
     :name "GPT-6 Luna"
@@ -538,7 +546,8 @@
              :supports-openai-grammar-tools true
              :supports-tool-search true
              :supports-additional-tools true
-             :supports-explicit-prompt-cache-mode true}}
+             :supports-explicit-prompt-cache-mode true
+             :supports-mid-convo-system-messages true}}
    "gpt-6-sol"
    {:id "gpt-6-sol"
     :name "GPT-6 Sol"
@@ -565,7 +574,8 @@
              :supports-openai-grammar-tools true
              :supports-tool-search true
              :supports-additional-tools true
-             :supports-explicit-prompt-cache-mode true}}
+             :supports-explicit-prompt-cache-mode true
+             :supports-mid-convo-system-messages true}}
    "gpt-6.1-sol"
    {:id "gpt-6.1-sol"
     :name "GPT-6.1 Sol"
@@ -592,7 +602,8 @@
              :supports-openai-grammar-tools true
              :supports-tool-search true
              :supports-additional-tools true
-             :supports-explicit-prompt-cache-mode true}}
+             :supports-explicit-prompt-cache-mode true
+             :supports-mid-convo-system-messages true}}
    "gpt-6.1-terra"
    {:id "gpt-6.1-terra"
     :name "GPT-6.1 Terra"

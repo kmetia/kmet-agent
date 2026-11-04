@@ -607,7 +607,11 @@
    the promise, its partials snapshot and its cut — only for the timeout
    sentinel, the one outcome whose partials are not in the result map."
   [{:keys [agent text-buf on-text on-thinking]}]
-  (let [;; one read per request: the wire list, the declared set and the
+  (let [;; record any declared-set change the live registry/selection saw since
+        ;; the last entry (an extension mount, a settings reload), so the
+        ;; request's tool list and its transcript delta cannot disagree
+        _ (state/sync-resumed-declarations! agent)
+        ;; one read per request: the wire list, the declared set and the
         ;; dispatch below all resolve against it
         request-tools (state/active-tools agent)
         {:keys [promise] :as call}

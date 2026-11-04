@@ -1,309 +1,28 @@
 # Todo
 
-Three tracks. The order below is the order to take them; only the two tool
-tracks are ordered against each other, because they touch the same selection
-functions and share one ABI document. Landed work — the `github-copilot`
-anthropic auth, the prompt-caching parity pass, the around tool hook, the
-remaining openai-compat keys and **P5** (tool exposure, the declared/callable
-split, the shared ranker and `tool_search`) plus **P5.5** (the declared order
-and the one promotable derivation) — is out of this file; it lives in git
-history. The context and token tracks are dropped too — see § Deferred.
+Two tracks remain. Landed work — the `github-copilot` anthropic auth, the
+prompt-caching parity pass, the around tool hook, the remaining openai-compat
+keys, **P5** (tool exposure, the declared/callable split, the shared ranker and
+`tool_search`), **P5.5** (the declared order and the one promotable
+derivation) and **P6** (mid-conversation tool changes without a full
+re-prefill) — is out of this file; it lives in git history. The context and
+token tracks are dropped too — see § Deferred.
 
 | track | what it fixes | status |
 |---|---|---|
-| **Tool exposure and declared sets** (P5–P6) | a tool-set change re-sends the whole array and is recorded nowhere | **P5 + P5.5 landed**; **P6 → S** |
-| **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | plan; **after** the exposure track |
+| **Tools: cross-session selection** (S) | `/tools` writes only to the session branch and `:default-tools` reaches built-ins only, so "extension tool X stays off in this repo" has no home | plan; **next** |
 | Persistent eval and eval sources | `run_code` throws its context away per call, so a helper the model writes is re-pasted in full on every turn; extensions can contribute tools but not a definition the model can call from code | decisions closed (E1–E16); independent |
 
-Exposure (P5 + P5.5 → P6) → S. That order is a decision about where the
-effort goes, not a dependency: P5 pays on its own — every schema not sent is a
-win, and no provider has to honour anything. Eval lands whenever; it touches
-neither a wire nor the tool registry.
-
-## Tool exposure and declared sets
-
-**P5 landed** (`3d828162`, `a0bd12ec`, `fb09f804`, `dd0b6ddd`), shipped with
-three decisions that differ from the plan below where the code disagreed with
-it; they are recorded here because P6 builds on them:
-
-- The scorer is `kmet.libs.ranking`, not a function in
-  `kmet.app.tools.search`. An extension context may only require the shared
-  layers (`kmet.extension`, `kmet.srce.core`, `kmet.tui.*`, `kmet.libs.*`,
-  `kmet.reakt.*`, `kmet.hikap.*` — `kmet.app.extensions.context`), and the
-  mcp-adapter is sandboxed, so an app namespace could not be shared with it;
-  the lib is also where a generic ranker belongs.
-- A promotion is recorded as a `:custom` session entry of type `:tool-load`
-  (`{:names […]}`), not a new session role: `append-custom-entry!` and
-  `get-custom-entries` already did exactly that, invisibly to the wire.
-- `tool_search` reaches the run through one dynamic var (`search/*run*`,
-  `{:declared f :load! f}`) bound beside `run_code`'s, because a tool body has
-  no other path to the agent's session.
-
-The lookup table is `scripts/live_tool_exposure_check.bb`: `registry/*` and
-`loop.state/declared-tools-for` (the derivation the wire list really comes
-from) drive three live `kmet.ai.llm/send-message` rounds on the
-`:anthropic-messages` wire, and each request's payload is captured with
-`:on-payload`, so the check reads the tools array Anthropic received — the
-plan's "`-message` logging on" is not needed, and nothing has to be parsed out
-of a log file.
-
-Run on 2026-11-04, `claude-haiku-4-5` family, on both anthropic-wire
-credentials this machine holds — first `:commandcode`, then `:github-copilot`
-once that credential authenticated here (leftover 1). The three rounds produce
-the same numbers on either:
-
-| round | tools declared | cache_creation | cache_read |
-|---|---|---|---|
-| 1. deferred source registered, nothing loaded | 3 (`probe_one`, `probe_two`, `tool_search`) | 7,670 | 0 |
-| 2. same prefix, same array | 3, identical | 14 | 7,670 |
-| 3. one tool promoted (`.kmet` load recorded) | 4 (`cat_alpha` + the three) | 7,755 | 0 |
-
-What that shows, and what it leaves: a deferred source contributes **no**
-schema before a load (the two deferred names are absent from round 1's array)
-and `tool_search` is declared because the tool exists to find (gate 1); the
-tools array sits *inside* the cached prefix (round 2 reads all 7,670 written
-tokens), which is the measured reason a tool change is expensive; and a
-promotion re-sends the array and pays a full prefix miss (round 3: read 0,
-re-write 7,755) — the cost P6 exists to remove. Round 2 also proves the
-declaration is byte-stable when nothing changed (gate 3 for the setup the
-rounds ran in).
-
-The composed half is `scripts/live_tool_exposure_composed_check.bb` (leftover
-2): it boots `--profile print` with the same probe installed in a scratch agent
-dir and mounted as the composition row `:ext/p5_probe`, and reads each
-request's tools array from the extension's own `:before-provider-request`
-listener. Run on 2026-11-04 against `:github-copilot`/`claude-haiku-4.5`: round
-1 declared 17 tools with both deferred names absent and `tool_search` present,
-the model's `tool_search` call promoted `cat_alpha` and `cat_beta` into round 2
-(19 tools, every round-1 name still declared), the model called `cat_alpha`
-("cat_alpha ok"), and round 3's array was identical to round 2's item for item.
-The mount rule cost the first attempts: a file in a discovery root is
-discovered, not mounted (`docs/extensions.md` § Where extensions live and what
-loads them), which is why the probe is both installed *and* patched in as a row.
-
-### Leftovers from P5
-
-1. **The github-copilot run itself — closed 2026-11-04.** The landing
-   fixture was replaced by a real credential on this machine (a `ghu_…` refresh
-   token with a `tid=…` access token, ten hours to expiry), so
-   `bb scripts/live_tool_exposure_check.bb` now runs its default
-   `github-copilot`/`claude-haiku-4.5` invocation here and produced the three
-   rows above unchanged. No substitute is needed.
-2. **A composed-app run of the same check — closed 2026-11-04** by
-   `scripts/live_tool_exposure_composed_check.bb`. The other script builds its
-   tool table with `register-tool!` / `register-tool-source!` rather than
-   booting the composition, so it proves the derivation and the wire, not the
-   row mount; this one installs the probe in a scratch agent dir, mounts it as
-   `:ext/p5_probe` through `--patch`, runs `--profile print`, and reads the
-   arrays from the extension's listener. It passes, and it measured the
-   promotion's placement inside the array (see § P5.5).
-3. **The prompt's Available-tools list for a promoted tool — closed with
-   P5.5.** The leading system prompt is never rebuilt for a promotion (by
-   design), so a promoted tool never appears in that list — it appears in the
-   appended source listing and in the declarations. One paragraph now says so
-   in `docs/configuration.md` § Tools and one sentence in
-   `modules/app/src/kmet/extension.md` § Tool sources; S5 keeps the paragraph
-   when it rewrites the Tools section. The composed run shows the other side of
-   it: asked to "Say exactly: mount-test", the model answered from the
-   appended listing — "I see you've mentioned '1 deferred tool source'" —
-   because that listing was the only place the source existed.
-
-The listing is bounded (`session/context.clj`): a description elides past 250
-characters, and past 4096 characters the last sources drop into one `… N more
-sources` line — pi's shape for `mcp_servers`, so an MCP `:deferred` source per
-server cannot grow the message without limit. `tool_search`'s description names
-the tool inline, as pi's does.
-
-### P5.5 — the declared order (landed)
-
-The order P6's acceptance criterion is stated in. An **unchanged** set
-was already byte-stable — round 2 above measured it, because hash order is
-deterministic for one key set — so this was not a live cache bug. It is
-that a *change* moves the entries it does not touch: `get-all-tools`
-merges a deferred source's tools *first*, `registry/select-tools` returns a
-map, and past array-map size the wire order is hash order (the composed
-run put two promoted names at positions 2 and 17 of 19).
-
-Two changes land here; P6 builds on both:
-
-1. **One wire order.** `state/declared-tools-for` now returns a name-sorted
-   map (`(into (sorted-map) …)`) instead of a hash map. `active-tools`'
-   `vals` — the once-per-request capture `loop.clj:612` reads and threads —
-   is therefore name-sorted, and so are the prompt options' tool list and
-   `set-active-tools!`'s rebuild, which read the same derivation. Sorting at
-   the derivation is what makes the order survive: a sort inside
-   `select-tools` would be collapsed by `declared-tools-for`'s `into`, and a
-   sort in `active-tools` alone would leave the prompt's list in hash order.
-   A replay recomputes the wire order from the recorded names, so P6 step 1
-   records no order of its own. Costs one one-time reordering against
-   today's wire, nothing else.
-2. **One answer to "what can search reach".** `registry/promotable-tools`
-   (`[all contributed {:enabled :exclude}]`) is the selection over the
-   `:deferred` table tools and the contributed `:sandbox` catalog, and it is
-   read by both the discovery gate (`declared-record`'s `deferred?` is gone)
-   and `tool_search`'s candidate list (`search.clj`). The tool receives the
-   run's selection through `*run*`'s new `:selection` key, bound by the loop
-   to `state/tool-selection` — the same `selection-opts` the declared surface
-   uses. A deferred tool the selection excludes declares no `tool_search`; a
-   sandbox source alone declares it; and a search cannot promise a tool the
-   wire would not declare. Two decisions taken while landing:
-   - **The gate ignores the loaded set.** It asks whether the catalog can be
-     promoted, not whether anything is still unloaded, so loading the last
-     deferred tool leaves `tool_search` declared — a further search returns
-     "No matching tools found", which is honest — and a promotion is a pure
-     addition, one direction for P6's delta.
-   - **A contributed name the table holds is not promotable.** `from-sandbox`
-     now reads the shared map instead of the raw catalog, so a hand-crafted
-     `:tool-load` naming a shadowed contribution no longer declares the
-     phantom; a search never loaded one anyway.
-
-One interaction S inherits: the bundled `/tools` extension persists a
-*snapshot* of the names that were declared when it last toggled, so a restored
-selection can exclude every promotable tool. The gate then drops `tool_search`
-for that run (nothing a search could reach is selected) — the loss S1's orphan
-warn exists to report and S3's delta selection removes. Before this change the
-same snapshot let a search load a deferred tool that the wire would then not
-declare, which was worse.
-
-Tests in `modules/app/test/kmet/app/test_tool_exposure.clj`:
-`test-the-declared-set-is-name-sorted` (12 tools, past array-map size:
-sorted, stable across two resolutions, and an addition leaves every other
-entry in place),
-`test-a-deferred-tool-the-selection-excludes-declares-no-search` and
-`test-a-contributed-sandbox-tool-can-justify-the-search`.
-`modules/app/test/kmet/app/test_tool_search.clj` adds
-`test-the-selection-narrows-the-candidates` (`with-run` now binds
-`:selection`). The S1 warn is not here — it lands where the selection is
-resolved (`state/tool-selection` runs per request, so the warning is emitted
-once at `loop.driver`), because `:enabled-tools` does not exist yet.
-
-`session/schema.clj`'s `Entry` union stays for P6 step 1: `:custom-message`
-joins with `:tool-change` — same file, same test.
-
-Done when `select-tools`' map is unchanged but one table always produces one
-wire order, a tool nothing can promote declares nothing, and no request
-carries a `tool_search` it cannot use. Gates: `bb test-changed`,
-`bb lint-changed`, `bb format-check-changed` — all green.
-
-### P6 — mid-conversation tool changes without a full re-prefill
-
-Depends on P5 and P5.5: the promotions are what make a mid-session tool change
-ordinary rather than a deliberate user action, both items share the session
-record, and P5.5's name-sorted wire is the order the delta criterion is stated
-in (a recorded declaration list replays to the same array).
-Two reasons, one about the cache and one about fidelity:
-
-- **Cache.** Tools sit at the front of the prefix (Anthropic caches
-  `tools → system → messages`), so *any* change to the declared set invalidates
-  the **whole** prompt, not just the tail.
-- **Fidelity.** kmet computes the tool list per request from the live registry
-  and the live selection (`state/active-tools`, `state.clj:481-491`) and records
-  neither, so a resumed session can advertise a different set than the run it
-  resumes — silently. pi records the change in the transcript, so `/tree`,
-  resume and fork replay what was actually sent.
-
-Files: `session/schema.clj`, `session/context.clj`,
-`ai/api/anthropic_messages.clj`, `ai/api/openai_responses.clj`,
-`ai/api/openai_completions.clj`, `ai/model_gen.clj` + `ai/edn_writer.clj`,
-`loop/state.clj`, `loop/driver.clj`.
-
-1. **Record the advertised set as session state, declarations included.** A
-   `:tool-change` role `{:role :tool-change :added [declared] :removed [names]}`,
-   where a `declared` item is the wire declaration
-   `{:name :description :parameters}` — pi's `SystemMessage.toolsAdded` is
-   `Tool[]`, complete definitions (`packages/ai/src/types.ts:572-575`), and
-   `toolsRemoved` is references. The runtime map (`:execute`, `:streams?`, …)
-   stays in the registry. Appended by the one place that changes the set
-   (`set-active-tools!`, `apply-default-tools!`, a P5 promotion, an extension
-   mount/unmount), projecting to nothing (`context-messages`' default `[]`) and
-   skipped by the chat replay exactly like the `:turn-start` marker. The
-   *current* advertised set is a fold over the branch by name (pi:
-   `getDeclaredTools`, `utils/transcript.ts:170-177`), so a re-added name
-   replaces its earlier definition; the registry can no longer change what a
-   resumed session says it was sent. The `Entry` union gains `:custom-message`
-   beside the new role — with the strict load pass on (`--debug`) every custom
-   message is currently reported and skipped, and the new role would fail the
-   same way; one line plus a test.
-2. **wire — anthropic.** Declare the tools once, on the first request, when the
-   model has both mid-conversation capabilities **and** at least one initial
-   tool (`supportsMidConvoSystemMessages && supportsMidConvoToolChanges &&
-   initialTools.length > 0`, `anthropic-messages.ts:1194-1196`; with no initial
-   tool the current list is sent top-level). Under those conditions put the
-   never-visible placeholder after the last initial tool, which carries the
-   cache breakpoint (`:1259-1265`, definition at `:215-218`), and send the
-   `inline-tools-2026-09-15` beta (`:205`, pushed at `:1149`). Later deltas are
-   `tool_addition` / `tool_removal` **content blocks** carrying the definition
-   by value (`:1354-1393`).
-3. **wire — openai-responses.** pi's ladder in `getResponsesToolSupport`
-   (`openai-responses-shared.ts:167-174`): `"changes" | "additions" | "none"`.
-   `"changes"` (`supportsMidConvoSystemMessages && supportsAdditionalTools`)
-   sends `additional_tools` items and, because a removal cannot be native,
-   announces removals as text and restates the still-unavailable tools before
-   later additions (`renderIncrementalToolsNotice`, `:182-190`). `"additions"`
-   (`supportsToolSearch`) synthesizes a `tool_search_call` +
-   `tool_search_output` pair with `defer_loading: true` (`:257-277`, `:456`,
-   `:469`). `"none"` sends the current list top-level.
-4. **wire — openai-completions (Kimi).** pi's third row: with
-   `supportsMidConvoSystemMessages && supportsMidConvoToolAdditions`, additions
-   ride as a `system` message carrying `tools` (`openai-completions.ts:797-801`,
-   `:1236-1245`); otherwise the current list. kmet's generated catalog already
-   carries `:deferred-tools-mode :kimi` on five rows
-   (`fireworks.edn:425,451,477`, `moonshotai*.edn`) with no consumer — use that
-   key for the mode rather than adding a second spelling.
-5. **compat.** Read the keys instead of hardcoding, and add them where kmet has
-   none today: `:supports-mid-convo-system-messages`,
-   `:supports-mid-convo-tool-changes` (anthropic) and
-   `:supports-mid-convo-tool-additions` (chat completions) enter `model_gen` +
-   `edn_writer` the way `:supports-tool-search` / `:supports-additional-tools`
-   already do (`edn_writer.clj:32`). kmet's catalog carries none of the three
-   mid-convo keys at all.
-6. **The floor, stated.** A provider supporting none of the modes re-declares
-   the array and pays the full miss — today's behaviour everywhere, so it is a
-   fallback rather than a regression, and the record from step 1 still fixes
-   the fidelity half.
-7. **Not adopted: `prepareLoadout`.** pi can also rewrite a declared tool's
-   description and hide declarations of *active* tools while keeping them
-   callable (`ToolLoadoutChanges`, `types.ts:585-598`; `prepareLoadout`,
-   `:658`). That is where pi's core/deferred *presentation* lives. kmet has no
-   such hook and this plan does not add one: `:deferred` is the
-   declaration-level mechanism, and `system_prompt.clj:168` remains the
-   presentation. A samizdat-style summary block would need this hook first.
-
-Done when: a tools toggle or a promotion sends the delta instead of the array,
-the request is byte-identical to the previous one up to the delta point, a
-resumed or forked session replays the recorded declarations rather than the
-current registry, the Kimi wire anchors additions as a `system` message, an
-anthropic request with no initial tool falls back to the top-level list, and an
-unsupported provider degrades to today's full re-declaration.
-
-### Test plan (P6)
-
-- P6, delta: two requests that differ only by a tool change send an unchanged
-  tools array — the delta rides as `tool_addition` / `tool_removal` blocks on
-  anthropic (with `inline-tools-2026-09-15` in `anthropic-beta`), as an
-  `additional_tools` item plus the incremental notice on responses, and as a
-  `system` message carrying `tools` on Kimi completions; the placeholder is
-  present from the first request when the wire supports native changes **and**
-  the initial tool list is non-empty, and absent otherwise.
-- P6, responses modes: `"changes"` restates the still-unavailable tools after
-  an addition and announces removals as text; `"additions"` emits a
-  `tool_search_call` + `tool_search_output` pair with `defer_loading: true`;
-  `"none"` sends the current list top-level.
-- P6, fidelity: `:tool-change` entries project to no wire message and no chat
-  row; folding the branch yields the advertised set, definitions included; a
-  registry schema change after the entry does not alter the replayed request;
-  resume replays it and a fork taken before a change keeps the older set; an
-  unsupported provider re-declares the array, byte-identical to today.
-
-Run: `bb test-changed`, `bb test-ext-changed`, `bb lint-changed`, `bb format-check-changed`.
+Cross-session selection (S) comes next; persistent eval lands whenever — it
+touches neither a wire nor the tool registry.
 
 ## Tools: cross-session selection in both scopes
 
-Depends on § Tool exposure and declared sets — not on its code, on its
-vocabulary: `:enabled-tools` selects over the set that track splits into
-`callable` and `declared`, and a `/tools` row's provenance only means something
-once those are two derivations. Exposure itself stays out of this track: a
-per-tool or per-scope override would make a `:sandbox` tool un-disableable.
+Uses the vocabulary that landed with P5/P6: `:enabled-tools` selects over the
+set those tracks split into `callable` and `declared`, and a `/tools` row's
+provenance only means something once those are two derivations. Exposure itself
+stays out of this track: a per-tool or per-scope override would make a
+`:sandbox` tool un-disableable.
 
 ### Why
 
@@ -330,9 +49,9 @@ already exists, and give `/tools` the discovery plus a scope target.
   `resource_config.clj:231-244`). No tab bar — a scope line with the target
   file plus per-row provenance; Tab switches, same as `kmet config` (`:23`,
   `:700-706`).
-- **Exposure stays out.** It is a source-level property (§ Tool exposure), and
-  a project-scope exposure override would make a `:sandbox` tool un-disableable
-  (`callable = … ∪ sandbox`).
+- **Exposure stays out.** It is a source-level property (P5's `:exposure`),
+  and a project-scope exposure override would make a `:sandbox` tool
+  un-disableable (`callable = … ∪ sandbox`).
 - **`/tools` discovers, `kmet config` reviews.** The config screen never loads
   plugins (`tools/config.clj:58-60`), so it sees only built-ins and names
   already in settings; `/tools` runs with the live registry and is the only
@@ -359,8 +78,9 @@ already exists, and give `/tools` the discovery plus a scope target.
   (`mcp/index.ts:509-520` warns when `tool_search` exists but cannot be
   activated): an explicit selection still wins, it just reports.
 
-Done when a config with no `:enabled-tools` produces a byte-identical request,
-and one with `:enabled-tools` wins over `:default-tools`.
+Done when a config with no `:enabled-tools` declares the same set as before
+(P6's recorded initial declaration aside), and one with `:enabled-tools` wins
+over `:default-tools`.
 
 **S2 — extension ABI (two functions).**
 
@@ -438,9 +158,8 @@ has none), so:
 An extension tool turned off in project scope stays off in a fresh session in
 that repo and on in another; `/tools` shows where each row's state comes from
 and which file Tab will write; a built-in's toggle still writes
-`:default-tools`; a config without `:enabled-tools` sends the same request bytes
-as today; `kmet config` can undo a delta `/tools` wrote without loading a
-plugin.
+`:default-tools`; a config without `:enabled-tools` declares the same set as
+before; `kmet config` can undo a delta `/tools` wrote without loading a plugin.
 
 ## Persistent eval and eval sources
 

@@ -225,6 +225,45 @@
   [session]
   (context-entries (store/get-branch session)))
 
+;; ─── The declared tool set (pi: transcript tool state) ────────────────────
+
+(defn tool-state
+  "The declared tool set along ENTRIES as name -> declaration: every
+   :tool-change entry's removals are deleted first and its additions installed
+   after, so a same-name redefinition wins (pi: getCurrentTools). The result is
+   a sorted map — a replay of the same branch renders the same wire order."
+  [entries]
+  (into (sorted-map)
+        (reduce (fn [state {:keys [role added removed]}]
+                  (if (= :tool-change role)
+                    (into (reduce dissoc state removed)
+                          (map (juxt :name identity)) added)
+                    state))
+                {}
+                entries)))
+
+(defn session-tool-state
+  "The declared tool set along SESSION's active branch (see `tool-state`),
+   or nil when the branch holds no :tool-change entry — an empty map is a
+   recorded empty set, not an absent record."
+  [session]
+  (let [entries (filter #(= :tool-change (:role %)) (store/get-branch session))]
+    (when (seq entries)
+      (tool-state entries))))
+
+(defn tool-state-changes
+  "The delta between two name -> declaration maps, in pi's shape (pi:
+   getToolStateChanges): a changed definition is a removal plus an addition."
+  [previous current]
+  {:added (vec (keep (fn [[name declaration]]
+                       (when (not= declaration (get previous name))
+                         declaration))
+                     current))
+   :removed (vec (keep (fn [[name declaration]]
+                         (when (not= declaration (get current name))
+                           name))
+                       previous))})
+
 (defn context-messages
   "Project a session entry into LLM context messages (pi:
    sessionEntryToContextMessages). Message entries pass through unchanged;
@@ -238,8 +277,11 @@
    :context-edit are metadata/state and excluded (a :context-edit entry's
    effect is applied by build-context-messages, not as a message of its own;
    a :turn-start marker is a log fact for the tree — the model never sees a
-   turn boundary). Excluded :bash entries are kept here and dropped later by
-   the LLM conversion (pi: convertToLlm filters excludeFromContext)."
+   turn boundary). A :tool-change entry projects nothing either: the wire
+   receives its delta as a request option (`loop/state`'s tool-change fold),
+   not as a message the model reads. Excluded :bash entries are kept here and
+   dropped later by the LLM
+   conversion (pi: convertToLlm filters excludeFromContext)."
   [entry]
   (case (:role entry)
     (:compaction :branch-summary) [entry]

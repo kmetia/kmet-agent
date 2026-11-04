@@ -136,6 +136,12 @@
                                   (str "[custom: " (name (:custom-type entry)) "]")
                                   (= (:role entry) :custom-message)
                                   (str "[custom: " (name (:custom-type entry)) "]")
+                                  (= (:role entry) :tool-change)
+                                  (str "[tools: "
+                                       (str/join " "
+                                                 (concat (map #(str "+" (:name %)) (:added entry))
+                                                         (map #(str "-" %) (:removed entry))))
+                                       "]")
                                   ;; context edits carry their effect instead of content
                                   ;; (pi: tree-selector's [context omit|replace: id])
                                   (= (:role entry) :context-edit)

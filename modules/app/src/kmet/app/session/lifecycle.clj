@@ -102,13 +102,19 @@
      (reset! (:compaction-queued engine) [])
      (reset! (:pending-compaction engine) [])
      (reset! (:agent-state engine) new-ag)
+     ;; the incoming session's recorded loadout starts from its own live tools,
+     ;; not the outgoing session's observed set
+     (reset! (:seen-tools new-ag) nil)
      (loop-state/restore-session-context! new-ag)
      (when apply-settings?
        ;; pi: createRuntime builds a fresh session with the config-derived
        ;; tool set — the outgoing session's set-active-tools!/tools-selector
        ;; selection must not carry over (the switch also emits :session-start,
        ;; letting extensions restore their own per-session state).
-       (loop-state/set-active-tools! new-ag nil)
+       ;; loading a session never rewrites it: the incoming branch's own
+       ;; record is its history; the first request reconciles live-only
+       ;; differences (set-active-tools!'s RECORD? false)
+       (loop-state/set-active-tools! new-ag nil false)
        (loop-state/apply-session-settings! new-ag))
      (apply-session-cwd! engine sess)
      sess)))
@@ -307,6 +313,8 @@
         label-target (if summary-entry (:id summary-entry) target-leaf)]
     (when (and label label-target)
       (session/set-label! sess label-target label))
+    ;; a different leaf is a resume of that branch's recorded loadout
+    (reset! (:seen-tools (runtime/agent-state engine)) nil)
     (loop-state/restore-session-context! (runtime/agent-state engine))
     (reset! (:compaction-queued engine) [])
     (reset! (:pending-compaction engine) [])

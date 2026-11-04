@@ -26,7 +26,8 @@
      make-bash-entry plan-session-import project-context project-entries
      record-bash-result! replace-entries! reset-leaf! resolve-session-path
      sanitize-session-name session-cwd session-dir-for-cwd session-entry-text
-     set-label! tool-sources-custom-type tool-usage tool-usage-report
+     session-tool-state set-label! tool-sources-custom-type tool-state
+     tool-state-changes tool-usage tool-usage-report
      usage-breakdown usage-totals})
 
 (deftest facade-loads-the-implementation

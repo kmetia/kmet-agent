@@ -1950,15 +1950,127 @@
     (merge-compat mm {:supports-explicit-prompt-cache-mode true})
     mm))
 
+;; ─── Mid-conversation capability metadata ────────────────────────────────
+
+(defn- strip-model-prefix
+  "pi stripPrefix: lowercase and drop an `anthropic/`-style family prefix so a
+   proxied id matches the direct one."
+  [id]
+  (-> (str/lower-case (str id))
+      (str/replace #"^~?[a-z0-9-]+/" "")))
+
+(defn- claude-mid-convo-system? [id]
+  (let [id (strip-model-prefix id)]
+    (boolean
+     (or (re-matches #"claude-opus-(?:4[.-]8|5(?:[.-]5)?)(?:-\d{8})?" id)
+         (re-matches #"claude-(?:sonnet|haiku)-5[.-]5(?:-\d{8})?" id)
+         (re-matches #"claude-(?:fable|mythos)-5(?:[.-]1)?(?:-\d{8})?" id)))))
+
+(defn- kimi-k3-id? [id]
+  (boolean (re-find #"^kimi-k3(?:\.\d+)?(?:-|$)" id)))
+
+(def ^:private text-only-mid-convo-kimi-ids
+  #{"kimi-k2.6" "kimi-k2.7-code" "kimi-k2.7-code-highspeed"})
+
+(def ^:private openai-mid-convo-model-ids
+  "pi OPENAI_MID_CONVO_MODEL_IDS: Responses models that accept a developer
+   message after the conversation starts (the tool-search set included)."
+  (into #{"gpt-5.4" "gpt-5.4-mini" "gpt-5.4-pro" "gpt-5.5"}
+        openai-tool-search-model-ids))
+
+(def ^:private responses-mid-convo-providers
+  #{:openai :openai-codex :azure-openai-responses :github-copilot
+    :opencode :openrouter})
+
+(defn- apply-openai-mid-convo-metadata
+  "pi enableOpenAiMidConvoSystemMessages: a known Responses model through a
+   proxy or the direct API accepts later developer messages."
+  [mm]
+  (if (and (contains? #{:openai-responses :openai-codex-responses
+                        :azure-openai-responses}
+                      (:api mm))
+           (contains? responses-mid-convo-providers (:provider mm))
+           (contains? openai-mid-convo-model-ids (strip-model-prefix (:id mm))))
+    (merge-compat mm {:supports-mid-convo-system-messages true})
+    mm))
+
+(defn- apply-completions-mid-convo-metadata
+  "pi's chat-completions facts: Kimi K3 (and the rows the catalog already tags
+   `:deferred-tools-mode :kimi`) accepts tool-bearing system messages; Kimi
+   K2.6/K2.7 and DeepSeek V4 Pro accept text only; Azure honours a
+   mid-conversation system message. Copilot's Kimi K3 drops the tool-bearing
+   one, so it gets text only."
+  [mm]
+  (if-not (= :openai-completions (:api mm))
+    mm
+    (let [id (strip-model-prefix (:id mm))
+          compat (:compat mm)
+          provider (:provider mm)
+          kimi-provider? (contains? #{:moonshotai :moonshotai-cn :fireworks
+                                      :opencode :opencode-go :github-copilot}
+                                    provider)
+          ;; the catalog's own marker is the verified fact for the rows it
+          ;; tags; OpenCode/OpenCode Go report the same family without it
+          k3? (or (= :kimi (:deferred-tools-mode compat))
+                  (and (contains? #{:opencode :opencode-go :moonshotai
+                                    :moonshotai-cn :fireworks}
+                                  provider)
+                       (kimi-k3-id? id)))]
+      (cond
+        (and k3? (= :github-copilot provider))
+        (merge-compat mm {:supports-mid-convo-system-messages true})
+
+        k3?
+        (merge-compat mm {:supports-mid-convo-system-messages true
+                          :supports-mid-convo-tool-additions true})
+
+        (and kimi-provider? (contains? text-only-mid-convo-kimi-ids id))
+        (merge-compat mm {:supports-mid-convo-system-messages true})
+
+        (and (= :deepseek provider) (= "deepseek-v4-pro" id))
+        (merge-compat mm {:supports-mid-convo-system-messages true})
+
+        (= :azure-openai-responses provider)
+        (merge-compat mm {:supports-mid-convo-system-messages true})
+
+        :else mm))))
+
+(defn- apply-anthropic-mid-convo-metadata
+  "pi's Anthropic facts: Claude models that accept system messages after the
+   conversation starts, with tool changes only where the host forwards
+   `tool_addition`/`tool_removal` (direct Anthropic); Copilot and OpenCode
+   reject those blocks, so they get text only."
+  [mm]
+  (if (and (= :anthropic-messages (:api mm))
+           (claude-mid-convo-system? (:id mm)))
+    (cond
+      (= :anthropic (:provider mm))
+      (merge-compat mm {:supports-mid-convo-system-messages true
+                        :supports-mid-convo-tool-changes true})
+
+      ;; Copilot and OpenCode forward the system message but reject
+      ;; tool_addition/tool_removal blocks (pi)
+      (contains? #{:github-copilot :opencode} (:provider mm))
+      (merge-compat mm {:supports-mid-convo-system-messages true})
+
+      ;; a proxied or unverified Anthropic endpoint keeps today's top-level
+      ;; list: no key claims a capability the host may reject
+      :else mm)
+    mm))
+
 (defn- apply-compat-metadata
   "The post-processing compat passes (pi order: URL detection, strict tools,
-   grammar tools, tool search, explicit prompt cache)."
+   grammar tools, tool search, explicit prompt cache, then the
+   mid-conversation capability facts)."
   [mm]
   (-> mm apply-openai-completions-compat-metadata
       apply-strict-tool-compat
       apply-openai-grammar-tool-compat
       apply-openai-tool-search-metadata
-      apply-openai-explicit-prompt-cache-metadata))
+      apply-openai-explicit-prompt-cache-metadata
+      apply-openai-mid-convo-metadata
+      apply-completions-mid-convo-metadata
+      apply-anthropic-mid-convo-metadata))
 
 ;; ─── Post-merge overrides (pi generateModels temporary overrides) ──────────
 

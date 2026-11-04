@@ -676,6 +676,80 @@
     (update tools (dec (count tools)) assoc :cache_control cache-control)
     tools))
 
+;; ─── Declared-set changes (pi: utils/transcript.ts tool state) ────────────
+;; The app records a session's advertised tool set as a :tool-change history and
+;; passes it as the request's :tool-changes option. These helpers are the
+;; provider-neutral half: which leading changes a top-level tools array already
+;; holds, and what the folded tool state is after them.
+
+(defn- fold-tool-changes
+  "The declared tool state after the first N changes: removals first, then
+   additions, so a redefinition wins (pi: getCurrentTools). REMOVED carries
+   names."
+  [changes n]
+  (into (sorted-map)
+        (reduce (fn [state {:keys [added removed]}]
+                  (into (reduce dissoc state removed)
+                        (map (juxt :name identity) added)))
+                {}
+                (take n changes))))
+
+(defn- last-non-additive-change
+  "Index of the last change a top-level array cannot express — a removal or a
+   same-name redeclaration (pi: findLastNonAdditiveToolChange); -1 when there
+   is none."
+  [changes]
+  (loop [i 0 declared #{} last -1 cs (seq changes)]
+    (if-let [{:keys [added removed]} (first cs)]
+      (let [non-additive? (or (seq removed)
+                              (some #(contains? declared (:name %)) added))]
+        (recur (inc i)
+               (into declared (map :name) added)
+               (if non-additive? i last)
+               (next cs)))
+      last)))
+
+(defn- resolve-tool-changes
+  "Split a recorded change history between a top-level request tools array
+   and in-place changes (pi: resolveTranscriptTools). CHANGES is the history
+   in transcript order, each {:added [declaration …] :removed [name …]}; the
+   first is the initial declaration. SUPPORT is :none, :additions or
+   :changes. Returns {:request-tools [...] :folded n :anchored [...]}: the
+   first FOLDED changes are already in the top-level array, the ANCHORED ones
+   must be sent in place. A nil or empty history returns FALLBACK-TOOLS as the
+   request list."
+  [changes support fallback-tools]
+  (if (empty? changes)
+    {:request-tools fallback-tools :folded 0 :anchored []}
+    (let [folded (case support
+                   :changes 0
+                   :additions (max 1 (inc (last-non-additive-change changes)))
+                   (count changes))
+          request-tools (vals (fold-tool-changes changes folded))]
+      {:request-tools request-tools
+       :folded folded
+       :anchored (vec (drop folded changes))})))
+
+(defn- tool-change-history
+  "The wire history for the app's recorded TOOL-CHANGES
+   ({:initial [declaration …] :changes [{:added … :removed …}]}): the initial
+   declaration becomes the first entry, so one fold covers both. A nil history
+   (a session that predates the record) falls back to one initial change
+   holding TOOLS."
+  [tool-changes tools]
+  (or (when tool-changes
+        (into [{:added (:initial tool-changes) :removed []}]
+              (:changes tool-changes)))
+      (when (seq tools) [{:added tools :removed []}])))
+
+(defn resolve-request-tools
+  "The request's tool state: `resolve-tool-changes` over the app's recorded
+   TOOL-CHANGES (nil for a legacy session) with TOOLS as the fallback. Returns
+   the same map with :changes included for the wire's head item."
+  [tool-changes support tools]
+  (let [changes (tool-change-history tool-changes tools)]
+    (assoc (resolve-tool-changes changes support tools) :changes changes)))
+
 (defn apply-anthropic-cache-control
   "pi applyAnthropicCacheControl (openai-completions.ts:1074-1103): the
    anthropic-format OpenAI-compatible endpoints (OpenRouter anthropic/*)

@@ -219,25 +219,25 @@
               incoming (session/create-session (str dir "/in"))
               _ (append-message! incoming "imported question")
               cs (import-test-cs outgoing)
-              ag (runtime/agent-state (:engine cs))
-              active-names (fn [] (into #{} (map :name) (loop-state/active-tools ag)))
+              ag (fn [] (runtime/agent-state (:engine cs)))
+              active-names (fn [] (into #{} (map :name) (loop-state/active-tools (ag))))
               prompt-tool-names (fn []
                                   (into #{}
                                         (map :name)
-                                        (get-in @(:system-prompt-opts ag) [:tools])))]
+                                        (get-in @(:system-prompt-opts (ag)) [:tools])))]
           ;; the config-resolved surface at startup (-bash in settings.edn)
-          (reset! (:default-tools ag) (tools/resolve-default-tools ["-bash"]))
+          (reset! (:default-tools (ag)) (tools/resolve-default-tools ["-bash"]))
           (t/is (not (contains? (active-names) "bash"))
                 "the configured surface excludes bash")
           (testing "a /tools selection in the outgoing session enables bash"
-            (loop-state/set-active-tools! ag (conj (vec (active-names)) "bash"))
+            (loop-state/set-active-tools! (ag) (conj (vec (active-names)) "bash"))
             (t/is (contains? (active-names) "bash"))
             (t/is (contains? (prompt-tool-names) "bash")
                   "the system prompt options follow the runtime selection"))
           (with-redefs [tui/tui-request-render (fn [_])
                         tui/tui-set-focus (fn [_ _])]
             (session-admin/restore-session! cs incoming true))
-          (t/is (nil? @(:enabled-tools ag))
+          (t/is (nil? @(:enabled-tools (ag)))
                 "the runtime allowlist does not carry over")
           (t/is (not (contains? (active-names) "bash"))
                 "the configured surface governs the resumed session")

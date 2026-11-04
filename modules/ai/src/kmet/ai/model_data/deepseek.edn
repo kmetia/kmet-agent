@@ -1,5 +1,5 @@
 {:schema-version 1
- :generated-at "2026-09-21T17:19:24Z"
+ :generated-at "2026-11-04T11:08:57Z"
  :provider {:id :deepseek
             :name "DeepSeek"
             :env-vars ["DEEPSEEK_API_KEY"]
@@ -49,4 +49,5 @@
              :requires-reasoning-content-on-assistant-messages true
              :thinking-format :deepseek
              :max-tokens-field :max-tokens
-             :supports-strict-mode true}}}}}
+             :supports-strict-mode true
+             :supports-mid-convo-system-messages true}}}}}
