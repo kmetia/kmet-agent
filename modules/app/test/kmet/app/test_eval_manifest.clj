@@ -186,6 +186,13 @@
       (t/is (some? (state/sync-eval-library-listing! agent)))
       (t/is (= 2 @calls) "a changed library is re-read"))))
 
+(t/deftest an-unreadable-library-root-does-not-break-the-manifest
+  (let [env (support/eval-ctx)]
+    (fs/create-dirs (support/cwd-root env))
+    (with-redefs [fs/glob (fn [& _]
+                            (throw (ex-info "unreadable" {:type :test})))]
+      (t/is (nil? (state/sync-eval-library-listing! (agent-for env)))))))
+
 (t/deftest an-errored-first-eval-still-reports-the-loaded-set
   (let [env (support/eval-ctx)]
     (write-definition! env :cwd "user/saved" "(defn saved [] 1)")

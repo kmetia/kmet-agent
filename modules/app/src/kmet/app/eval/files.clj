@@ -148,20 +148,25 @@
 (defn fingerprint
   "A cheap change fingerprint for ROOTS (`{:global root :cwd root}`): each
    definition file's scope, path, size and modification time, sorted. The
-   prompt manifest cache compares it without reading or parsing file content."
+   prompt manifest cache compares it without reading or parsing file content.
+   An unreadable root keeps an error marker instead of throwing into the
+   prompt; the next successful read changes the fingerprint."
   [roots]
   (vec
    (mapcat (fn [scope]
              (let [root (get roots scope)]
                (when (fs/exists? root)
-                 (map (fn [file]
-                        (let [path (str file)]
-                          (try
-                            [scope path (fs/size file)
-                             (str (fs/last-modified-time file))]
-                            (catch Throwable _
-                              [scope path :unreadable]))))
-                      (sort (map str (fs/glob root "**/*.clj")))))))
+                 (try
+                   (map (fn [file]
+                          (let [path (str file)]
+                            (try
+                              [scope path (fs/size file)
+                               (str (fs/last-modified-time file))]
+                              (catch Throwable _
+                                [scope path :unreadable]))))
+                        (sort (map str (fs/glob root "**/*.clj"))))
+                   (catch Throwable t
+                     [[scope (str root) :error (ex-message t)]])))))
            [:global :cwd])))
 
 (defn- with-move-locks
