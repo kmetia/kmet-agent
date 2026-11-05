@@ -19,10 +19,15 @@
             [kmet.app.config :as cfg]
             [kmet.app.eval.definitions :as defs]
             [kmet.app.eval.files :as eval-files]
+            [kmet.app.eval.sources :as eval-sources]
             [kmet.app.extensions.core :as extensions]
+            [kmet.app.tools.bash :as bash-tool]
+            [kmet.app.tools.edit :as edit-tool]
+            [kmet.app.tools.read :as read-tool]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.script :as script]
             [kmet.app.tools.util :as tool-util]
+            [kmet.app.tools.write :as write-tool]
             [kmet.libs.concurrent :as concurrent]
             [kmet.srce.core :as srce]
             [sci.core :as sci]))
@@ -80,6 +85,237 @@
        (contains? @(:source-keys env) name)
        (contains? @(:unwritten env) name))))
 
+(declare unbind!)
+
+;; ─── Sources ──────────────────────────────────────────────────────────────
+
+(def ^:private source-command-names
+  "The `/eval` verbs a source may not contribute. The command owns them; a
+   source contributing one is refused."
+  #{"list" "search" "drop" "sources" "help" "--help" "-h"})
+
+(defn- bad-source! [id message]
+  (throw (ex-info message {:type :eval/bad-source :source id})))
+
+(defn- source-symbol
+  [id what x]
+  (cond
+    (symbol? x) x
+    (keyword? x) (symbol (name x))
+    (string? x) (let [x (str/trim x)]
+                  (if (str/blank? x)
+                    (bad-source! id (str "eval source " (pr-str id)
+                                         " has a blank " what))
+                    (symbol x)))
+    :else (bad-source! id (str "eval source " (pr-str id) " has a bad "
+                               what ": " (pr-str x)))))
+
+(defn- source-verb [id x]
+  (cond
+    (keyword? x) x
+    (symbol? x) (keyword (name x))
+    (string? x) (keyword x)
+    :else (bad-source! id (str "eval source " (pr-str id)
+                               " has a bad command verb: " (pr-str x)))))
+
+(defn- source-namespace-map
+  [id ns-map what]
+  (when-not (map? ns-map)
+    (bad-source! id (str "eval source " (pr-str id) " :" what
+                         " must be a namespace map")))
+  (into {}
+        (map (fn [[ns-key vars]]
+               (let [ns-name (source-symbol id "namespace" ns-key)]
+                 (when-not (map? vars)
+                   (bad-source! id (str "eval source " (pr-str id)
+                                        " namespace " ns-name " must be a map")))
+                 [ns-name
+                  (into {}
+                        (map (fn [[name value]]
+                               (when (and (= what "macros") (not (fn? value)))
+                                 (bad-source! id (str "eval source " (pr-str id)
+                                                      " macro " ns-name "/" name
+                                                      " must be a function")))
+                               [(source-symbol id "name" name) value]))
+                        vars)])))
+        ns-map))
+
+(defn- source-commands-map
+  [id commands]
+  (when-not (map? commands)
+    (bad-source! id (str "eval source " (pr-str id) " :commands must be a map")))
+  (into {}
+        (map (fn [[verb command]]
+               (let [verb (source-verb id verb)]
+                 (when (contains? source-command-names (name verb))
+                   (bad-source! id (str "eval source " (pr-str id)
+                                        " may not replace /eval " (name verb))))
+                 (when-not (and (map? command) (fn? (:run command)))
+                   (bad-source! id (str "eval source " (pr-str id) " command "
+                                        verb " needs :run")))
+                 (when (and (some? (:description command))
+                            (not (string? (:description command))))
+                   (bad-source! id (str "eval source " (pr-str id) " command "
+                                        verb " :description must be a string")))
+                 [verb (select-keys command [:description :run])])))
+        commands))
+
+(defn- normalize-source
+  "Validate one `sources-fn` return. Returns the source's values, commands
+   and keys, or throws `:eval/bad-source` for a bad shape, a reserved
+   namespace/key, or a reserved command verb."
+  [id value]
+  (let [value (or value {})]
+    (when-not (map? value)
+      (bad-source! id (str "eval source " (pr-str id) " must return a map")))
+    (when (and (some? (:doc value)) (not (string? (:doc value))))
+      (bad-source! id (str "eval source " (pr-str id) " :doc must be a string")))
+    (let [ns-map (source-namespace-map id (or (:ns value) {}) "ns")
+          macros (source-namespace-map id (or (:macros value) {}) "macros")
+          commands (source-commands-map id (or (:commands value) {}))
+          contributed (into #{}
+                            (concat (for [[ns vars] ns-map, name (keys vars)]
+                                      (eval-sources/source-key ns name))
+                                    (for [[ns vars] macros, name (keys vars)]
+                                      (eval-sources/source-key ns name))))
+          _ (when-not (eval-sources/core-source? id)
+              (when-let [ns (some eval-sources/reserved-namespace? (keys ns-map))]
+                (bad-source! id (str "eval source " (pr-str id)
+                                     " may not contribute to " ns)))
+              (when-let [key (some eval-sources/reserved-key? contributed)]
+                (bad-source! id (str "eval source " (pr-str id)
+                                     " may not contribute the built-in key " key))))
+          values (into {}
+                       (concat
+                        (for [[ns vars] ns-map, [name v] vars]
+                          [(eval-sources/source-key ns name) {:value v :macro? false}])
+                        (for [[ns vars] macros, [name v] vars]
+                          [(eval-sources/source-key ns name) {:value v :macro? true}])))]
+      {:id id
+       :doc (eval-sources/source-doc (:doc value))
+       :values values
+       :keys contributed
+       :commands commands})))
+
+(defn- source-registrations [service]
+  (if-let [handle (srce/get (:agent-ctx service) :tools)]
+    (registry/get-eval-sources handle)
+    []))
+
+(defn- source-verbs
+  "The per-call verb table a `sources-fn` receives. The functions are the
+   shared file operations; cwd resolution comes from the dynamic bindings
+   around the eval thread (and around the source call itself)."
+  [signal]
+  {:edit (fn [path old-text new-text]
+           (edit-tool/edit-file path [{:old-text (str old-text)
+                                       :new-text (str new-text)}]
+                                signal))
+   :write-file (fn [path content]
+                 (write-tool/write-file path (str content) signal))})
+
+(defn- call-source
+  [service source cwd signal]
+  (let [args {:cwd cwd
+              :project-dir (str (fs/path cwd ".kmet"))
+              :agent-dir (:agent-dir service)
+              :signal signal
+              :verbs (source-verbs signal)}]
+    (try
+      (binding [tool-util/*cwd* cwd
+                bash-tool/*shell* bash-tool/*shell*
+                bash-tool/*session-env-fn* bash-tool/*session-env-fn*
+                read-tool/*skill-resolver* read-tool/*skill-resolver*]
+        (normalize-source (:id source) ((:sources-fn source) args)))
+      (catch Throwable t
+        {:id (:id source) :error (or (ex-message t) (str t))}))))
+
+(defn- resolve-sources
+  "Read every registered source once for CWD/SIGNAL. Sources are merged in
+   registration order, so a later source wins a shared key. A throwing or
+   invalid source contributes nothing; its error is reported in :info and
+   :errors."
+  [service cwd signal]
+  (let [results (mapv #(call-source service % cwd signal)
+                      (source-registrations service))
+        good (filterv #(contains? % :values) results)
+        errors (mapv #(select-keys % [:id :error])
+                     (filterv #(contains? % :error) results))
+        values (reduce (fn [acc source] (merge acc (:values source))) {} good)
+        commands (reduce (fn [acc source] (merge acc (:commands source))) {} good)]
+    {:values values
+     :keys (set (keys values))
+     :commands commands
+     :info (mapv (fn [result]
+                   (if-let [error (:error result)]
+                     {:id (:id result) :error error}
+                     (select-keys result [:id :doc])))
+                 results)
+     :errors errors}))
+
+(defn- source-var
+  [ns-name name {:keys [value macro?]}]
+  (let [ns (sci/create-ns ns-name)]
+    (sci/new-var name value
+                 (cond-> {:ns ns :name name}
+                   macro? (assoc :macro true)))))
+
+(defn- source-namespaces
+  "The SCI vars for VALUES not excluded by SKIP?. A source value and a fixed
+   namespace (the core `user` helpers) merge in one map."
+  [values skip?]
+  (reduce-kv
+   (fn [acc key entry]
+     (if (skip? key)
+       acc
+       (let [i (str/index-of key "/")
+             ns-name (symbol (subs key 0 i))
+             name (symbol (subs key (inc i)))]
+         (assoc-in acc [ns-name name] (source-var ns-name name entry)))))
+   {}
+   values))
+
+(defn- source-known?
+  "Does the model own NAME in this environment (a library definition, an
+   unwritten live definition, or a live shadow of a source key)? A source
+   never overwrites it."
+  [env name]
+  (or (get @(:library env) name)
+      (contains? @(:unwritten env) name)
+      (contains? @(:model-shadows env) name)))
+
+(defn- seed-source-value!
+  "Restore one source value after a model shadow is dropped. Returns an error
+   string or nil."
+  [env name entry]
+  (try
+    (doseq [[ns-name vars] (source-namespaces {name entry} (constantly false))]
+      (sci/add-namespace! (:sci-ctx env) ns-name vars))
+    nil
+    (catch Throwable t (ex-message t))))
+
+(defn- refresh-sources!
+  "Resolve sources for this call and make the environment's live source layer
+   match them: remove keys a now-unloaded source contributed (unless the model
+   owns them), remember every key ever contributed as non-storable, and build
+   the SCI namespace additions for a new call. Returns the namespaces, info,
+   errors and commands."
+  [service env cwd signal]
+  (let [{:keys [values keys commands info errors]}
+        (resolve-sources service cwd signal)
+        stale (remove keys @(:active-source-keys env))]
+    (doseq [name stale
+            :when (not (source-known? env name))]
+      (unbind! env name nil))
+    (swap! (:source-keys env) into keys)
+    (reset! (:active-source-keys env) keys)
+    (reset! (:source-values env) values)
+    (reset! (:source-info env) info)
+    {:namespaces (source-namespaces values #(source-known? env %))
+     :commands commands
+     :info info
+     :errors errors}))
+
 ;; ─── Library index ────────────────────────────────────────────────────────
 
 (defn- library-entry [record]
@@ -92,6 +328,27 @@
        (map library-entry)
        (sort-by :name)
        vec))
+
+(defn- source-line [source]
+  (if-let [error (:error source)]
+    (str "- " (:id source) ": " error)
+    (str "- " (:id source) (when-let [doc (:doc source)] (str ": " doc)))))
+
+(defn- environment-help
+  "The `(eval/help)` text: sources, the loaded library, and the three lookup
+   forms. Source errors are part of the source list, not hidden."
+  [env]
+  (let [sources @(:source-info env)
+        entries (library-entries env)]
+    (str "Eval sources:\n"
+         (if (seq sources)
+           (str/join "\n" (map source-line sources))
+           "  (none)")
+         "\nLibrary definitions: " (count entries)
+         (when (seq entries)
+           (str " (" (str/join ", " (map :name entries)) ")"))
+         "\nFailures: " (count @(:failures env))
+         "\nUse (eval/library), (eval/sources), (eval/forget 'name).")))
 
 (defn- take-failures!
   "Failures are reported once: return the current list and clear the
@@ -147,10 +404,11 @@
    tool surface is installed so a definition that names a tool var compiles,
    with an inert dispatcher and a discarded emit channel until a real call
    binds its state."
-  [service cwd]
+  [service cwd source-namespaces]
   (let [handle (srce/get (:agent-ctx service) :tools)]
     (script/prepare {:tool "eval"
                      :cwd cwd
+                     :source-namespaces source-namespaces
                      :get-all-tools (if handle
                                       #(registry/get-all-tools handle)
                                       (constantly []))
@@ -194,26 +452,42 @@
              :failures failures
              :library library
              :source-keys (atom #{})
+             :active-source-keys (atom #{})
+             :model-shadows (atom #{})
+             :source-values (atom {})
+             :source-info (atom [])
              :parsed-names (atom #{})
              :unwritten (atom #{})
-             :restore-source (atom nil)
              :forgotten (atom #{})
              :sticky-ns (atom nil)
              :lock (Object.)}
         interrupt (script/interrupt-holder)
         library-fn (fn [] (library-entries env))
         forget-fn (fn [name] (request-forget! env name))
+        sources-fn (fn [] @(:source-info env))
+        help-fn (fn [] (environment-help env))
         sci-ctx (script/context
                   (assoc (script/base-namespaces)
                          'eval {'library library-fn
-                                'forget forget-fn})
+                                'forget forget-fn
+                                'sources sources-fn
+                                'help help-fn})
                   (script/interrupt-fn interrupt "eval")
                   "eval")
-        env (assoc env :sci-ctx sci-ctx :interrupt interrupt)]
-    (script/with-prime-context
-      sci-ctx (prime-state service cwd)
-      (fn []
-        (read-library! env root)))
+        env (assoc env :sci-ctx sci-ctx :interrupt interrupt)
+        sources (refresh-sources! service env cwd nil)]
+    (binding [tool-util/*cwd* cwd
+              bash-tool/*shell* bash-tool/*shell*
+              bash-tool/*session-env-fn* bash-tool/*session-env-fn*
+              read-tool/*skill-resolver* read-tool/*skill-resolver*]
+      (script/with-prime-context
+        sci-ctx (prime-state service cwd (:namespaces sources))
+        (fn []
+          (read-library! env root)
+          (swap! (:model-shadows env)
+                 into
+                 (filter #(contains? @(:source-keys env) %)
+                         (keys @(:library env)))))))
     env))
 
 (defn- ensure-environment!
@@ -306,38 +580,50 @@
 
 (defn- mark-transient!
   "After a failed call, remember parsed definitions that are live but not
-   written, so drop/forget can unbind them."
+   written, so drop/forget can unbind them. A source key's live redefinition
+   is a model shadow instead: it is non-storable and a drop restores the
+   source value."
   [env parsed]
   (doseq [record (defs/collapse (:defs parsed))
           :when (not (get @(:library env) (:name record)))
           :when (interned? env record)]
-    (swap! (:unwritten env) conj (:name record))))
+    (if (contains? @(:source-keys env) (:name record))
+      (swap! (:model-shadows env) conj (:name record))
+      (swap! (:unwritten env) conj (:name record)))))
 
 (defn- drop-one!
   "Delete NAME's library file and unbind its live var. A source-provided key
-   has no file; its source seed is restored when the source layer provides
-   one."
+   has no file: its live value (or the model's shadow of it) is unbound, and
+   the source value is seeded again while that source is active."
   [env name]
   (let [record (get @(:library env) name)
         source? (contains? @(:source-keys env) name)
-        live? (and (not source?) (interned? env (or record {:name name})))
+        shadow? (contains? @(:model-shadows env) name)
+        live? (interned? env (or record {:name name}))
         file (when-not source?
                (eval-files/delete-name! (:root env) name))
-        error (when live? (unbind! env name record))]
+        unbind-error (when (and live? (or (not source?) shadow?))
+                       (unbind! env name record))
+        restore-error (when (and source?
+                                 (contains? @(:active-source-keys env) name))
+                        (when-let [entry (get @(:source-values env) name)]
+                          (seed-source-value! env name entry)))]
     (swap! (:library env) dissoc name)
     (swap! (:unwritten env) disj name)
-    (when source?
-      (when-let [restore @(:restore-source env)] (restore name)))
-    {:name name :file file :error error}))
+    (when source? (swap! (:model-shadows env) disj name))
+    {:name name :file file :error (or unbind-error restore-error)}))
 
 (defn- apply-definition!
   "Write RECORD to the library and index it. A source-provided key stays live
-   but is never written. A failed write is recorded and reported; the live
-   definition remains."
+   but is never written, and is remembered as a model shadow so later source
+   reads do not overwrite it. A failed write is recorded and reported; the
+   live definition remains."
   [env cwd record]
   (let [name (:name record)]
     (if (contains? @(:source-keys env) name)
-      {:line (str "[eval: redefined " name " (source; not stored)]")}
+      (do
+        (swap! (:model-shadows env) conj name)
+        {:line (str "[eval: redefined " name " (source; not stored)]")})
       (try
         (let [path (eval-files/write-definition! (:root env) record)]
           (swap! (:library env) assoc name (assoc record :file path))
@@ -480,7 +766,8 @@
             run-code (fn []
                        (let [handle (or (srce/get (:agent-ctx service) :tools)
                                         (throw (ex-info "the eval service needs the agent's :tools service"
-                                                        {:type :eval/no-tools})))]
+                                                        {:type :eval/no-tools})))
+                             sources (refresh-sources! service env cwd signal)]
                          (script/run {:tool "eval"
                                       :code code
                                       :timeout timeout
@@ -492,6 +779,10 @@
                                       :sci-ctx (:sci-ctx env)
                                       :interrupt (:interrupt env)
                                       :ns-atom (:sticky-ns env)
+                                      :source-namespaces (:namespaces sources)
+                                      :extra-details (cond-> {:sources (:info sources)}
+                                                       (seq (:errors sources))
+                                                       (assoc :source-errors (:errors sources)))
                                       :get-all-tools #(registry/get-all-tools handle)
                                       :get-contributed-tools #(registry/get-contributed-tools handle)
                                       :select-tools registry/select-tools
@@ -593,6 +884,18 @@
   [service]
   (eval-files/index (library-root service)))
 
+(defn- service-sources
+  "The current source report for the `/eval sources` command and the
+   service's `:sources` reader. Invokes each source with CWD and no signal;
+   source errors are part of the report."
+  [service cwd]
+  (:info (resolve-sources service (or cwd (tool-util/cwd)) nil)))
+
+(defn- service-source-commands
+  "The source-contributed `/eval` verbs, read per call."
+  [service cwd]
+  (:commands (resolve-sources service (or cwd (tool-util/cwd)) nil)))
+
 (defn- eval-call! [service opts]
   (when @(:disposed? service)
     (throw (ex-info "the agent's eval service is disposed"
@@ -633,8 +936,12 @@
                (drop-request! service session drop))
       :library #(service-library service)
       :index #(service-index service)
-      :sources (constantly [])
-      :source-commands (constantly {})
+      :sources (fn
+                 ([] (if @disposed? [] (service-sources service (tool-util/cwd))))
+                 ([opts] (if @disposed? [] (service-sources service (:cwd opts)))))
+      :source-commands (fn
+                         ([] (if @disposed? {} (service-source-commands service (tool-util/cwd))))
+                         ([opts] (if @disposed? {} (service-source-commands service (:cwd opts)))))
       :failures #(service-failures service)
       :dispose! (fn []
                   (reset! disposed? true)

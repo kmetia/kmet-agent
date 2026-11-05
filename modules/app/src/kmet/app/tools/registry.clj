@@ -11,7 +11,8 @@
    not compose.
 
    Registrations live in a `kmet.app.registry/Registry` handle under TAG
-   `:kmet/tool` (and `:kmet/tool-source` for contributed catalogs), owned by an
+   `:kmet/tool` (and `:kmet/tool-source` for contributed catalogs,
+   `:kmet/eval-source` for the values an eval source contributes), owned by an
    owner path: visible to every engine, outliving one, and disposed with their
    owner rather than copied into an engine and reset by hand. A tool row's
    registration is its fiber's effect (`mount-tool!`); the extension ABI
@@ -234,6 +235,61 @@
   [reg]
   (mapv #(select-keys % [:id :description])
         (sources-with-exposure reg :deferred)))
+
+;; ─── Eval sources ──────────────────────────────────────────────────────────
+;; An eval source contributes live values to every eval environment: its
+;; `sources-fn` is read per call and returns the current namespaces, macros and
+;; `/eval` verbs. The registration lives on the same `:tools` handle as the
+;; tool sources, so unloading an owner sweeps both. The core source is the row
+;; `:tool/eval` itself; extensions register through their own owner path.
+
+(def eval-sources-owner
+  "The owner `register-eval-source!` registers under when a caller names none."
+  [:app :eval-sources])
+
+(defn- registered-eval-sources
+  "REGISTRY's eval-source registrations in display order, one per id."
+  [reg]
+  (mapv second (registry/effective-entries reg :kmet/eval-source)))
+
+(defn register-eval-source!
+  "Register (or replace) an eval source on REGISTRY. ID identifies the source;
+   SOURCES-FN is a 1-arg fn receiving the call context and returning the
+   current contribution:
+
+     {:doc      \"one line\"
+      :ns       {'license {'add! (fn [path] ...)}}
+      :macros   {'license {'with-license (fn [_form _env & args] ...)}}
+      :commands {:lint {:description \"Lint\" :run (fn [{:keys [args]}] ...)}}}
+
+   The service calls it once per eval call with
+   `{:cwd :project-dir :agent-dir :signal :verbs}`; a throwing source or a
+   bad shape contributes nothing and is reported. OPTS may carry `:owner` —
+   an extension passes its own owner path so unload disposes the source.
+   Returns the deregister fn."
+  ([reg id sources-fn] (register-eval-source! reg id sources-fn nil))
+  ([reg id sources-fn opts]
+   (when-not (fn? sources-fn)
+     (throw (ex-info (str "eval source " (pr-str id) " needs a sources-fn")
+                     {:type :kmet.app/bad-eval-source :source id})))
+   (registry/register! reg :kmet/eval-source id
+                       {:id id :sources-fn sources-fn}
+                       (or (:owner opts) eval-sources-owner))))
+
+(defn unregister-eval-source!
+  "Remove REGISTRY's eval source by ID, from whichever owner registered it,
+   or — with OWNER — only that owner's registration. Returns nil."
+  ([reg id] (unregister-eval-source! reg id nil))
+  ([reg id owner]
+   (registry/deregister! reg :kmet/eval-source id owner)
+   nil))
+
+(defn get-eval-sources
+  "Every eval source registered in REGISTRY, in display order, as
+   `[{:id :sources-fn}]`. The service reads this per call; a source's current
+   values are the ones its fn returns then."
+  [reg]
+  (registered-eval-sources reg))
 
 ;; ─── The model-facing table ────────────────────────────────────────────────
 

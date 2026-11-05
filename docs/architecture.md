@@ -590,7 +590,9 @@ refreshes. Sessions share the library but not the environment. `:drop` and
 `(eval/forget 'name)` delete the file and unbind the live name. The
 engine-portable builtins register `/eval` (`list`, `search`, `drop`, `sources`,
 `help`, plus verbs an eval source contributes), independent of the
-`:tool/eval` row, so removing the row leaves the command and its service. `list` and `search` read the disk index, so they show the
+`:tool/eval` row, so removing the row leaves the command and its service. The
+row also registers the `:core` eval source (the shared `edit`/`write-file` ops
+under `user`), so removing it leaves the command without those verbs. `list` and `search` read the disk index, so they show the
 library rather than one session's cache; `drop` deletes the files directly and
 unbinds the live name only when that session already has an environment, so a
 drop never builds one. The environment build

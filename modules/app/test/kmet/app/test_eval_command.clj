@@ -18,7 +18,7 @@
 
 (defn- eval-env
   ([] (eval-env {}))
-  ([{:keys [service-commands service-sources]}]
+  ([{:keys [service-commands service-sources service-failures]}]
    (let [root (srce/root {:name :test-eval-command})
          cwd (test-tmp/temp-dir! "eval-command-project-")
          agent-dir (test-tmp/temp-dir! "eval-command-agent-")
@@ -26,7 +26,9 @@
                    service-commands
                    (assoc :source-commands (constantly service-commands))
                    service-sources
-                   (assoc :sources (constantly service-sources)))
+                   (assoc :sources (constantly service-sources))
+                   service-failures
+                   (assoc :failures (constantly service-failures)))
          sess (session/create-session (test-tmp/temp-dir! "eval-command-session-")
                                       {:cwd cwd})]
      (srce/provide! root :eval service)
@@ -131,10 +133,12 @@
   (let [env (eval-env)]
     (let [[[level _ content]] (run env "sources")]
       (t/is (= :info level))
-      (t/is (= "No eval sources." content)))
+      (t/is (str/includes? content "No eval sources."))
+      (t/is (str/includes? content "0 definitions loaded")))
     (let [with-source (eval-env {:service-sources [{:id :core :doc "Core verbs"}]})
           [[_ _ content]] (run with-source "sources")]
-      (t/is (= "- core: Core verbs" content)))
+      (t/is (str/includes? content "- core: Core verbs"))
+      (t/is (str/includes? content "0 definitions loaded")))
     (let [[_ _ help] (first (run env "help"))]
       (t/is (str/includes? help "/eval list [pattern]"))
       (t/is (str/includes? help "/eval search <text>"))
@@ -144,6 +148,17 @@
     (let [[level _ content] (first (run env "nonsense"))]
       (t/is (= :warning level))
       (t/is (str/includes? content "Unknown verb: nonsense")))))
+
+(t/deftest sources-reports-definitions-and-failures
+  (let [env (eval-env {:service-failures [{:file "/tmp/broken.clj"
+                                           :error "unreadable"}]})
+        _ (write-def! env {:name "user/report"
+                           :source "(defn report [x] x)"})
+        [[level _ content]] (run env "sources")]
+    (t/is (= :info level))
+    (t/is (str/includes? content "1 definition loaded"))
+    (t/is (str/includes? content "broken.clj"))
+    (t/is (str/includes? content "unreadable"))))
 
 (t/deftest a-source-contributed-verb-dispatches-and-appears-in-help
   (let [called (atom nil)

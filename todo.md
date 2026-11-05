@@ -341,7 +341,7 @@ plus ~150 moved (step 2).
    `/eval` command (`list`, `search`, `drop`, `sources`, `help`), independent
    of the `:tool/eval` row; source-contributed command verbs arrive in step
    5.
-5. **`:kmet/eval-source` and `:core`.** Registry fns
+5. **Step 5 (done): `:kmet/eval-source` and `:core`.** Registry fns
    (`register-eval-source!` / `unregister-` / `get-eval-sources`) in
    `kmet.app.tools.registry`; `registry-tags` + `host-tags`; the service
    resolves sources per call, builds the per-call verb table (`edit`,

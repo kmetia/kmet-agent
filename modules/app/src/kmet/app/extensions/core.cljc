@@ -315,7 +315,8 @@
    handle routes (`kmet.app.registries/registry-tags`); a test holds them to
    it, since a forgotten tag leaks silently."
   [:kmet/hook :kmet/entry-renderer :kmet/message-renderer :kmet/flag
-   :kmet/ui-port :kmet/theme :kmet/tool :kmet/tool-source :kmet/event])
+   :kmet/ui-port :kmet/theme :kmet/tool :kmet/tool-source
+   :kmet/eval-source :kmet/event])
 
 ;; ─── Input / before-agent-start hooks (pi: pi.on('input') / ──────────────
 ;; ─── 'before_agent_start'; applied by modes.interactive + app.loop) ──────

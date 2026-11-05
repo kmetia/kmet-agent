@@ -122,34 +122,49 @@
   (let [id (if (map? s) (:id s) s)]
     (if (keyword? id) (name id) (str id))))
 
-(defn- sources-text [svc]
-  (let [sources ((:sources svc))]
-    (if (seq sources)
-      (str/join "\n"
-                (map (fn [s]
-                       (let [doc (when (map? s) (:doc s))]
-                         (str "- " (source-id s)
-                              (when (seq doc) (str ": " doc)))))
-                     sources))
-      "No eval sources.")))
+(defn- source-report-line [s]
+  (let [id (source-id s)
+        error (when (map? s) (:error s))
+        doc (when (map? s) (:doc s))]
+    (cond
+      (seq error) (str "- " id ": " error)
+      (seq doc) (str "- " id ": " doc)
+      :else (str "- " id))))
 
-(defn- source-commands [svc]
-  (if-let [f (:source-commands svc)] (f) {}))
+(defn- failure-line [failure]
+  (str "  failure: " (or (:file failure) (:name failure) (:source failure) "?")
+       ": " (or (:error failure) "unknown error")))
+
+(defn- sources-text [svc cwd]
+  (let [sources ((:sources svc) {:cwd cwd})
+        entries (:entries ((:index svc)))
+        failures ((:failures svc))
+        n (count entries)]
+    (str/join "\n"
+              (concat
+               (if (seq sources)
+                 (map source-report-line sources)
+                 ["No eval sources."])
+               [(str n " definition" (when (not= 1 n) "s") " loaded")]
+               (map failure-line failures)))))
+
+(defn- source-commands [svc cwd]
+  (if-let [f (:source-commands svc)] (f {:cwd cwd}) {}))
 
 (defn- display-verb [verb]
   (if (namespace verb)
     (str (namespace verb) "/" (name verb))
     (name verb)))
 
-(defn- help-text [svc]
+(defn- help-text [svc cwd]
   (let [verbs ["/eval list [pattern]     List library definitions"
                "/eval search <text>     Search names and source"
                "/eval drop <name>…      Delete files and unbind the live names"
-               "/eval sources           List eval sources"
+               "/eval sources           List eval sources and loaded definitions"
                "/eval help              This help"]
         contributed (map (fn [[verb {:keys [description]}]]
                            (str "/eval " (display-verb verb) "  " (or description "")))
-                         (sort-by key (source-commands svc)))]
+                         (sort-by key (source-commands svc cwd)))]
     (str/join "\n" (concat verbs contributed))))
 
 (defn handle
@@ -186,13 +201,13 @@
                  "Eval" (:content result)))))
 
       (= verb "sources")
-      (out ui :info "Eval" (sources-text svc))
+      (out ui :info "Eval" (sources-text svc cwd))
 
       (contains? #{"help" "--help" "-h"} verb)
-      (out ui :info "Eval" (help-text svc))
+      (out ui :info "Eval" (help-text svc cwd))
 
       :else
-      (if-let [cmd (get (source-commands svc) (keyword verb))]
+      (if-let [cmd (get (source-commands svc cwd) (keyword verb))]
         (try
           (let [output ((:run cmd) {:args arg :session sess :cwd cwd :service svc})]
             (when-not (str/blank? (str output))

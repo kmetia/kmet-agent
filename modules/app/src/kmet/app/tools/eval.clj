@@ -4,8 +4,13 @@
    kept across calls, so a definition from one call is visible to the next.
    Every successful definition is written to the agent home's eval library
    and loaded by every session; a new session or a restart sees it. The
-   fresh-context, output-economy tool stays `run_code`."
+   fresh-context, output-economy tool stays `run_code`.
+
+   The row also registers the `:core` eval source, which puts the shared
+   `edit`/`write-file` operations under `user`; removing the row leaves the
+   `/eval` command and the service, but no core verbs."
   (:require [clojure.string :as str]
+            [kmet.app.eval.sources :as eval-sources]
             [kmet.app.tools.registry :as registry]
             [kmet.app.tools.script :as script]
             [kmet.app.tools.tool :as tool]
@@ -85,4 +90,12 @@
   {:name :tool/eval
    :inject [:tools]
    :apply (fn [ctx config]
-            (registry/mount-tool! ctx definition config))})
+            (registry/mount-tool! ctx definition config)
+            (srce/effect ctx
+                         #(registry/register-eval-source!
+                           (srce/get ctx :tools)
+                           eval-sources/core-source-id
+                           eval-sources/core-source
+                           {:owner registry/eval-sources-owner})
+                         :eval-core-source)
+            nil)})

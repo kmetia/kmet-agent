@@ -806,23 +806,29 @@
    per active tool), the cwd/emit/spawn helpers, and the bare `emit`/`sh`.
    The functions read `*call-state*` at call time, so a kept context's
    definitions follow the current call; `seed!` layers them over
-   `base-namespaces` for the call."
-  [{:keys [surface]}]
+   `base-namespaces` for the call. `:source-namespaces` — the eval source
+   layer's current values — merges into the same namespace maps, so a source
+   value and a built-in `user` helper share one namespace."
+  [{:keys [surface source-namespaces]}]
   (let [process (process-fns)
-        sandbox (sandbox-fns)]
-    (cond-> {'clojure.core (merge {'pmap (deref #'pmap)}
-                                  (core-fns)
-                                  (extra-core-vars-map))
-             ;; kmet.libs.json under its real name and the short `json` alias
-             ;; scripts would otherwise have to require
-             'kmet.libs.json (shared-fns 'kmet.libs.json)
-             'babashka.process process
-             'sandbox sandbox
-             'tools (tools-namespace (or surface {}))
-             'user {'emit emit-with-state
-                    'emit-image emit-image-with-state}}
-      ;; the cwd-defaulting sh is preloaded bare alongside the aliases
-      (contains? process 'sh) (assoc-in ['user 'sh] (get process 'sh)))))
+        sandbox (sandbox-fns)
+        namespaces (cond-> {'clojure.core (merge {'pmap (deref #'pmap)}
+                                                 (core-fns)
+                                                 (extra-core-vars-map))
+                            ;; kmet.libs.json under its real name and the short `json` alias
+                            ;; scripts would otherwise have to require
+                            'kmet.libs.json (shared-fns 'kmet.libs.json)
+                            'babashka.process process
+                            'sandbox sandbox
+                            'tools (tools-namespace (or surface {}))
+                            'user {'emit emit-with-state
+                                   'emit-image emit-image-with-state}}
+                     ;; the cwd-defaulting sh is preloaded bare alongside the aliases
+                     (contains? process 'sh) (assoc-in ['user 'sh] (get process 'sh)))]
+    (reduce-kv (fn [acc ns-name ns-map]
+                 (update acc ns-name #(merge (or % {}) ns-map)))
+               namespaces
+               (or source-namespaces {}))))
 
 (defn context
   "Build an SCI context over NAMESPACES. The per-call namespaces are
@@ -1167,7 +1173,11 @@
         thread (Thread. (fn []
                           (try
                             (let [eval-form (form-evaluator sci-ctx ns-atom)
-                                  v (binding [*call-state* state]
+                                  v (binding [*call-state* state
+                                              tool-util/*cwd* (:cwd state)
+                                              bash-tool/*shell* (get-in state [:bridge :shell])
+                                              bash-tool/*session-env-fn* (get-in state [:bridge :session-env-fn])
+                                              read-tool/*skill-resolver* (get-in state [:bridge :skill-resolver])]
                                       (eval-with-io (:out-w capture) (:err-w capture)
                                                     (fn []
                                                       (when prelude
@@ -1246,7 +1256,8 @@
    the dynamic values the loop bound for this run. CWD defaults to the
    runtime cwd; LIMITS is `resolve-limits`' map (or the default)."
   [{:keys [tool cwd timeout limits signal ctx on-update
-           get-all-tools get-contributed-tools select-tools execute-tool]}]
+           get-all-tools get-contributed-tools select-tools execute-tool
+           source-namespaces]}]
   (require-tool! tool)
   (let [cwd (or cwd (tool-util/cwd))
         timeout-ms (normalize-timeout timeout)
@@ -1296,6 +1307,7 @@
      :ctx ctx
      :on-update on-update
      :surface surface
+     :source-namespaces (or source-namespaces {})
      :abort abort
      :emitted emitted
      :emitted-bytes emitted-bytes
