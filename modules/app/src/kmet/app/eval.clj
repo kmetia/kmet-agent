@@ -30,6 +30,9 @@
             [kmet.app.tools.write :as write-tool]
             [kmet.libs.concurrent :as concurrent]
             [kmet.srce.core :as srce]
+            [rewrite-clj.node :as n]
+            [rewrite-clj.parser :as p]
+            [rewrite-clj.zip :as z]
             [sci.core :as sci]))
 
 ;; ─── Session and root ────────────────────────────────────────────────────
@@ -364,40 +367,129 @@
 (defn- record-failure! [failures failure]
   (swap! failures conj failure))
 
+(defn- eval-content!
+  "Parse and evaluate CONTENT into ENV without indexing it. The original ns
+   form runs first (preserving its requires), then the standard aliases, then
+   the rest of the file. Returns `{:parsed …}` or `{:error …}`; a failed
+   evaluation leaves the caller to decide what to report."
+  [env content]
+  (try
+    (let [parsed (defs/parse content "user")
+          {:keys [ns-form body]} (defs/split-ns content)
+          source (str (or ns-form (str "(ns " (:ns parsed) ")"))
+                      "\n" script/alias-prelude "\n" body)]
+      (rearm-build! env)
+      (let [result (script/eval-source! (:sci-ctx env) source (atom nil))]
+        (if (:error result)
+          {:error (:error result)}
+          {:parsed parsed})))
+    (catch Throwable t
+      {:error (ex-message t)})))
+
 (defn- load-library-file!
-  "Read, parse and evaluate one library file into ENV. The original ns form
-   runs first (preserving its requires), then the standard aliases, then the
-   rest of the file, so aliases are not reset by the ns form. A read, parse or
-   eval failure is recorded and skipped."
-  [env ns-atom {:keys [file content error]}]
+  "Read, parse and evaluate one library file into ENV. A read, parse or eval
+   failure is recorded and skipped."
+  [env {:keys [file content error]}]
   (if error
     (record-failure! (:failures env) {:file file :error error})
-    (let [parsed (try
-                   (defs/parse content "user")
-                   (catch Throwable t
-                     (record-failure! (:failures env)
-                                      {:file file :error (ex-message t)})
-                     nil))]
-      (when parsed
-        (let [{:keys [ns-form body]} (defs/split-ns content)
-              source (str (or ns-form (str "(ns " (:ns parsed) ")"))
-                          "\n" script/alias-prelude "\n" body)]
-          (rearm-build! env)
-          (let [result (script/eval-source! (:sci-ctx env) source ns-atom)]
-            (if (:error result)
-              (record-failure! (:failures env)
-                               {:file file :error (:error result)})
-              (doseq [record (:defs parsed)]
-                (swap! (:library env) assoc (:name record)
-                       (assoc record :file file))))))))))
+    (let [{:keys [parsed error]} (eval-content! env content)]
+      (if error
+        (record-failure! (:failures env) {:file file :error error})
+        (doseq [record (:defs parsed)]
+          (swap! (:library env) assoc (:name record)
+                 (assoc record :file file)))))))
 
 (defn- read-library!
   "Read and evaluate every definition file in ROOT into ENV, sorted by path."
   [env root]
-  (let [ns-atom (atom nil)]
-    (doseq [file (eval-files/scan root)]
-      (load-library-file! env ns-atom file))
-    (reset! ns-atom nil)))
+  (doseq [file (eval-files/scan root)]
+    (load-library-file! env file)))
+
+(defn- find-subform
+  "The first zipper node whose value structurally equals FORM, or nil."
+  [root form]
+  (loop [loc (z/next* root)]
+    (when loc
+      (let [node (z/node loc)
+            match? (try (= form (n/sexpr node))
+                        (catch Throwable _ false))]
+        (cond
+          match? loc
+          (z/end? loc) nil
+          :else (recur (z/next* loc)))))))
+
+(defn- patch-definition!
+  "Replace the first subform structurally equal to OLD with NEW in NAME's
+   library file, re-evaluate the patched file, then write it. The definition
+   name must not change. A source-provided key has no file and is refused; a
+   failed re-evaluation restores the old live definition and writes nothing.
+   Returns the report line."
+  [env cwd raw-name old new]
+  (let [raw-name (->name raw-name)
+        name (when raw-name (qualify-name (env-ns env) raw-name))]
+    (when-not name
+      (bad-request! (str "patch needs a definition name, got " (pr-str raw-name))
+                    {:name raw-name}))
+    (when (contains? @(:source-keys env) name)
+      (bad-request! (str "cannot patch source-provided " name
+                         "; it has no library file")
+                    {:name name :source true}))
+    (let [record (get @(:library env) name)
+          path (or (:file record) (eval-files/path-for-name (:root env) name))]
+      (when-not record
+        (bad-request! (str "no loaded eval library definition named " name)
+                      {:name name}))
+      (when-not (fs/exists? path)
+        (bad-request! (str "the library file for " name " is missing: " path)
+                      {:name name :file path}))
+      (let [content (slurp path)
+            root (try (z/of-string content)
+                      (catch Throwable t
+                        (bad-request! (str "cannot parse " path ": " (ex-message t))
+                                      {:name name :file path})))
+            loc (find-subform root old)]
+        (when-not loc
+          (bad-request! (str "no subform in " name " matches " (pr-str old))
+                        {:name name :form old}))
+        (let [replacement (try (p/parse-string (pr-str new))
+                               (catch Throwable t
+                                 (bad-request! (str "cannot parse replacement: "
+                                                    (ex-message t))
+                                               {:name name :form new})))
+              patched (n/string (z/root (z/replace loc replacement)))
+              parsed (try (defs/parse patched "user")
+                          (catch Throwable t
+                            (bad-request! (str "patched " name " does not parse: "
+                                               (ex-message t))
+                                          {:name name :file path})))
+              patched-record (some #(when (= name (:name %)) %) (:defs parsed))]
+          (when-not patched-record
+            (bad-request! (str "patch changed the definition name of " name)
+                          {:name name :file path}))
+          (when-not (= (:ns record) (:ns patched-record))
+            (bad-request! (str "patch changed the namespace of " name)
+                          {:name name :file path}))
+          (let [eval-record (fn [r]
+                              (rearm-build! env)
+                              (script/eval-source!
+                               (:sci-ctx env) (:source r)
+                               (atom (or (sci/find-ns (:sci-ctx env)
+                                                      (symbol (:ns r)))
+                                         (sci/create-ns (symbol (:ns r)))))))
+                {:keys [error]} (eval-record patched-record)]
+            (if error
+              (do
+                ;; best effort: put the old source back in the live environment;
+                ;; the file was never touched
+                (eval-record record)
+                (bad-request! (str "patch evaluation failed: " error)
+                              {:name name :error error}))
+              (do
+                (eval-files/write-content! (:root env) path patched)
+                (swap! (:library env) assoc name
+                       (assoc patched-record :file path))
+                (str "[eval: patched " name " → "
+                     (eval-files/display-path cwd path) "]")))))))))
 
 (defn- prime-state
   "A prepared state for evaluating library definitions at rebuild: the current
@@ -462,19 +554,23 @@
              :sticky-ns (atom nil)
              :lock (Object.)}
         interrupt (script/interrupt-holder)
-        library-fn (fn [] (library-entries env))
-        forget-fn (fn [name] (request-forget! env name))
-        sources-fn (fn [] @(:source-info env))
-        help-fn (fn [] (environment-help env))
+        env-ref (atom nil)
+        library-fn (fn [] (library-entries @env-ref))
+        forget-fn (fn [name] (request-forget! @env-ref name))
+        sources-fn (fn [] @(:source-info @env-ref))
+        help-fn (fn [] (environment-help @env-ref))
         sci-ctx (script/context
                   (assoc (script/base-namespaces)
                          'eval {'library library-fn
                                 'forget forget-fn
+                                'patch (fn [name old new]
+                                         (patch-definition! @env-ref cwd name old new))
                                 'sources sources-fn
                                 'help help-fn})
                   (script/interrupt-fn interrupt "eval")
                   "eval")
         env (assoc env :sci-ctx sci-ctx :interrupt interrupt)
+        _ (reset! env-ref env)
         sources (refresh-sources! service env cwd nil)]
     (binding [tool-util/*cwd* cwd
               bash-tool/*shell* bash-tool/*shell*

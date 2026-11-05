@@ -371,7 +371,7 @@ plus ~150 moved (step 2).
    static projection for extension-provided eval verbs, e.g. `:meta {:eval
    [{:name "clj/edit-form"}]}`; the live `:kmet/eval-source` registry stays
    authoritative, and the metadata reader lands only when a consumer needs it.
-7. **The eval vocabulary.** `(eval/patch 'name old new)` (structural subform
+7. **Step 7 (done): the eval vocabulary.** `(eval/patch 'name old new)` (structural subform
    replacement through rewrite-clj, re-evaluate, write the library file).
    `(eval/forget 'name)` landed with step 4R. The structural editor gets its
    own review.
@@ -448,6 +448,10 @@ plus ~150 moved (step 2).
   dispatches a source verb; a verb's non-blank return string is printed; an
   unknown verb and a reserved source verb are reported; `/eval sources`
   names sources, loaded definitions and failures.
+- **Step 7:** `(eval/patch 'name old new)` replaces the first structurally
+  equal subform, updates the live definition and the file; an unknown old
+  form, a changed definition name, or a failed re-evaluation leaves the file
+  and the live definition untouched; a source-provided key is refused.
 - **Step 8:** the shared engine's tests; `(clj/edit-form …)` and
   `clojure_edit` on the same fixture produce identical bytes and the same
   bad-form message, with the verb core and the tool present only when

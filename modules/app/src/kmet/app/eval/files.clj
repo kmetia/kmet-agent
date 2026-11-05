@@ -64,6 +64,15 @@
       (kfs/publish! path (file-content record))
       path)))
 
+(defn write-content!
+  "Write CONTENT to PATH under ROOT's file lock, atomically publishing it.
+   Used by the structural editor, which patches the whole reviewable file
+   rather than reconstructing it from one definition. Returns PATH."
+  [root path content]
+  (with-root-lock root
+    (kfs/publish! path content)
+    path))
+
 (defn delete-name!
   "Remove NAME's file under ROOT, returning the deleted path or nil."
   [root name]

@@ -64,6 +64,7 @@
    ["Use eval when a definition should survive the call — a parser, a report fn, a scratch namespace — and run_code for a throwaway script."
     "Every top-level definition is written to the agent's eval library and loaded by every session; a redefinition overwrites its file."
     "drop removes a definition from the library and unbinds it here; a code-less call may carry only drop."
+    "Use (eval/patch 'name old new) to replace one subform in a named definition; it re-evaluates before writing, and the definition name must stay."
     "Report with (emit value) or end on the value you want reported; discover the surface with (all-ns) and (ns-publics), and list loaded definitions with (eval/library)."]
    :parameters {:type "object"
                 :properties
