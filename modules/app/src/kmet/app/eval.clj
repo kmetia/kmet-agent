@@ -182,7 +182,8 @@
                                     (for [[ns vars] macros, name (keys vars)]
                                       (eval-sources/source-key ns name))))
           _ (when-not (eval-sources/core-source? id)
-              (when-let [ns (some eval-sources/reserved-namespace? (keys ns-map))]
+              (when-let [ns (some eval-sources/reserved-namespace?
+                                  (concat (keys ns-map) (keys macros)))]
                 (bad-source! id (str "eval source " (pr-str id)
                                      " may not contribute to " ns)))
               (when-let [key (some eval-sources/reserved-key? contributed)]

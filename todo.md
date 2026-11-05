@@ -434,7 +434,8 @@ plus ~150 moved (step 2).
   `:eval-definitions` entries are ignored; `(eval/library)` matches the loaded
   index; two parallel definitions on one session both survive; the `/eval`
   command lists, searches and drops from the library without building an
-  environment, and its registration follows the `:tool/eval` row.
+  environment, and its registration is engine-portable, independent of the
+  `:tool/eval` row.
 - **Step 5–6:** a source's fns are callable on the next call; a source's
   `:verbs` and the environment's `user/edit` behave identically (assert by
   behaviour — same file bytes — not by identity); unload removes the names on
